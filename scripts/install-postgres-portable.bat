@@ -28,60 +28,67 @@ echo.
 pause
 echo.
 
-if exist "%PGBIN%\psql.exe" goto :already
+if exist "%PGBIN%\psql.exe" goto :hasbin
 
 echo [1/5] Downloading PostgreSQL %PGVER%
 echo.
 if not exist "%TOOLS%" mkdir "%TOOLS%"
-if exist "%ZIPFILE%" del /f /q "%ZIPFILE%"
 
+set "ZIPOK=0"
+if exist "%ZIPFILE%" for %%A in ("%ZIPFILE%") do if %%~zA GTR 300000000 set "ZIPOK=1"
+if "%ZIPOK%"=="1" goto :havezip
+
+if exist "%ZIPFILE%" del /f /q "%ZIPFILE%"
 where curl.exe >nul 2>&1
 if not errorlevel 1 curl.exe -L --fail --output "%ZIPFILE%" "%ZIPURL%"
-
 if not exist "%ZIPFILE%" powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; try { Invoke-WebRequest -Uri '%ZIPURL%' -OutFile '%ZIPFILE%' -UseBasicParsing } catch { }"
-
 if not exist "%ZIPFILE%" goto :nodownload
 for %%A in ("%ZIPFILE%") do echo       downloaded %%~zA bytes
-echo.
+goto :extract
 
+:havezip
+echo       already downloaded earlier - keeping it, no new download
+
+:extract
+echo.
 echo [2/5] Extracting - this is the slow part, be patient
 echo.
 if exist "%TOOLS%\pgsql" rmdir /s /q "%TOOLS%\pgsql"
-
 where tar.exe >nul 2>&1
 if not errorlevel 1 tar.exe -xf "%ZIPFILE%" -C "%TOOLS%"
-
 if not exist "%PGBIN%\psql.exe" powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Expand-Archive -LiteralPath '%ZIPFILE%' -DestinationPath '%TOOLS%' -Force } catch { }"
-
 if not exist "%PGBIN%\psql.exe" goto :noextract
 echo       extracted.
 echo.
 
-echo [3/5] Creating the database folder
-echo.
-if exist "%PGDATA%\PG_VERSION" (
-  echo       already exists, keeping it.
-) else (
-  if exist "%PGDATA%" rmdir /s /q "%PGDATA%"
-  set "PGBINLOCAL=%PGBIN%"
-  "%PGBIN%\initdb.exe" -D "%PGDATA%" -U postgres -A trust -E UTF8 --locale=C >nul 2>&1
-  if not exist "%PGDATA%\PG_VERSION" goto :noinitdb
-  echo       created.
-)
-echo.
-
-echo [4/5] Starting the database server
-echo.
-call "%~dp0start-postgres.bat"
-if errorlevel 1 goto :nostart
-"%PGBIN%\psql.exe" -U postgres -h 127.0.0.1 -t -A -c "select version();" 2>nul
-echo.
-
-echo [5/5] Adding PostgreSQL to your user PATH
+:hasbin
+echo [3/5] Adding PostgreSQL to your user PATH
 echo.
 if not exist "%TOOLS%\PATH-backup.txt" powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=[Environment]::GetEnvironmentVariable('Path','User'); Set-Content -LiteralPath '%TOOLS%\PATH-backup.txt' -Value $p -Encoding UTF8"
-
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$d='%PGBIN%'; $p=[Environment]::GetEnvironmentVariable('Path','User'); if ([string]::IsNullOrEmpty($p)) { $n=$d } elseif ($p -notlike '*'+$d+'*') { $n=$p.TrimEnd(';')+';'+$d } else { $n=$p }; [Environment]::SetEnvironmentVariable('Path',$n,'User'); Write-Host '       user PATH is now set'"
+echo.
+
+echo [4/5] Creating the database folder
+echo.
+if exist "%PGDATA%\PG_VERSION" goto :havepgdata
+if exist "%PGDATA%" rmdir /s /q "%PGDATA%"
+"%PGBIN%\initdb.exe" -D "%PGDATA%" -U postgres -A trust -E UTF8 --locale=C >nul 2>&1
+if not exist "%PGDATA%\PG_VERSION" goto :noinitdb
+echo       created.
+goto :pgdatadone
+
+:havepgdata
+echo       already exists, keeping it
+
+:pgdatadone
+echo.
+
+echo [5/5] Starting the database server
+echo.
+call "%~dp0start-postgres.bat"
+if errorlevel 3 goto :portbusy
+if errorlevel 1 goto :nostart
+"%PGBIN%\psql.exe" -U postgres -h 127.0.0.1 -t -A -c "select version();" 2>nul
 echo.
 
 echo ============================================================
@@ -96,23 +103,12 @@ echo       4. then run:              scripts\setup-windows.bat
 echo.
 echo   When setup-windows.bat asks for the password of the
 echo   "postgres" user, just type:   postgres
-echo   This database accepts only connections from this PC,
-echo   so the password is not used for anything here.
+echo   This database only accepts connections from this PC, so
+echo   that password is not protecting anything.
 echo.
-echo   To start the database again after a reboot, run:
+echo   After a reboot, start the database again with:
 echo       scripts\start-postgres.bat
 echo   pull-and-run.bat does that for you automatically.
-echo.
-pause
-exit /b 0
-
-:already
-echo   PostgreSQL is already installed here:
-echo       %PGBIN%
-echo.
-call "%~dp0start-postgres.bat"
-if errorlevel 1 goto :nostart
-echo   The server is running.
 echo.
 pause
 exit /b 0
@@ -161,8 +157,35 @@ exit /b 1
 echo.
 echo   [X] PostgreSQL is installed but did not start.
 echo.
-echo   Look at the log file for the reason:
+echo   Here are the last lines of its log file, which say why:
+echo   --------------------------------------------------------
+powershell -NoProfile -Command "if (Test-Path '%TOOLS%\postgres.log') { Get-Content '%TOOLS%\postgres.log' -Tail 25 } else { Write-Host 'the log file was never created' }"
+echo   --------------------------------------------------------
+echo.
+echo   The full log is here:
 echo       %TOOLS%\postgres.log
+echo.
+echo   Send that text to whoever is helping you and they will
+echo   tell you the next step.
+echo.
+pause
+exit /b 1
+
+:portbusy
+echo.
+echo   [X] PostgreSQL is installed, but port 5432 is already taken
+echo       by another program on this PC.
+echo.
+echo   What is holding the port:
+echo   --------------------------------------------------------
+netstat -ano | findstr /r /c:":5432 .*LISTENING"
+echo   --------------------------------------------------------
+echo.
+echo   To see which program that is, run:
+echo       Get-Process -Id ^(Get-NetTCPConnection -LocalPort 5432^).OwningProcess
+echo.
+echo   If an older PostgreSQL service is running, stop it from:
+echo       services.msc
 echo.
 pause
 exit /b 1

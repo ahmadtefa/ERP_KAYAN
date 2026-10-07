@@ -1,8 +1,9 @@
 @echo off
 REM ---------------------------------------------------------------------
 REM  Makes sure the portable PostgreSQL server is running.
-REM  Exit codes:  0 = running   2 = not installed   1 = failed to start
-REM  Called by install-postgres-portable.bat and by pull-and-run.bat.
+REM  Exit codes:
+REM     0 = running   1 = failed to start   2 = not installed
+REM     3 = port 5432 is taken by another program
 REM ---------------------------------------------------------------------
 setlocal
 set "TOOLS=%LOCALAPPDATA%\kayan-tools"
@@ -16,5 +17,9 @@ if not exist "%PGDATA%\PG_VERSION" exit /b 2
 if not errorlevel 1 exit /b 0
 
 "%PGBIN%\pg_ctl.exe" start -D "%PGDATA%" -l "%TOOLS%\postgres.log" -w -t 60 >nul 2>&1
-if errorlevel 1 exit /b 1
-exit /b 0
+if not errorlevel 1 exit /b 0
+
+netstat -ano | findstr /r /c:":5432 .*LISTENING" >nul 2>&1
+if not errorlevel 1 exit /b 3
+
+exit /b 1
