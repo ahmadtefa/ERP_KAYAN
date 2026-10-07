@@ -8,6 +8,11 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { AccountingModule } from './modules/accounting/accounting.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
+import { PartiesModule } from './modules/parties/parties.module';
+import { PurchasesModule } from './modules/purchases/purchases.module';
+import { ReportsModule } from './modules/reports/reports.module';
+import { SalesModule } from './modules/sales/sales.module';
 
 @Module({
   imports: [
@@ -18,6 +23,11 @@ import { HealthModule } from './modules/health/health.module';
     AuditModule,
     AuthModule,
     AccountingModule,
+    PartiesModule,
+    InventoryModule,
+    SalesModule,
+    PurchasesModule,
+    ReportsModule,
     HealthModule,
   ],
   providers: [

@@ -25,6 +25,28 @@ const PERMISSIONS: Array<[string, string, string, string]> = [
   ['admin.users.manage', 'Manage users', 'إدارة المستخدمين', 'admin'],
   ['admin.roles.manage', 'Manage roles', 'إدارة الأدوار', 'admin'],
   ['admin.audit.read', 'View audit trail', 'عرض سجل التدقيق', 'admin'],
+
+  ['parties.customers.read', 'View customers', 'عرض العملاء', 'parties'],
+  ['parties.customers.create', 'Add customers', 'إضافة عملاء', 'parties'],
+  ['parties.customers.update', 'Edit customers', 'تعديل العملاء', 'parties'],
+  ['parties.suppliers.read', 'View suppliers', 'عرض الموردين', 'parties'],
+  ['parties.suppliers.create', 'Add suppliers', 'إضافة موردين', 'parties'],
+  ['parties.suppliers.update', 'Edit suppliers', 'تعديل الموردين', 'parties'],
+
+  ['inventory.items.read', 'View items', 'عرض الأصناف', 'inventory'],
+  ['inventory.items.create', 'Add items', 'إضافة أصناف', 'inventory'],
+  ['inventory.items.update', 'Edit items', 'تعديل الأصناف', 'inventory'],
+  ['inventory.stock.read', 'View stock balances', 'عرض أرصدة المخزون', 'inventory'],
+
+  ['sales.invoices.read', 'View sales invoices', 'عرض فواتير البيع', 'sales'],
+  ['sales.invoices.create', 'Create sales invoices', 'إنشاء فواتير البيع', 'sales'],
+  ['sales.invoices.post', 'Post and reverse sales invoices', 'ترحيل وعكس فواتير البيع', 'sales'],
+
+  ['purchases.invoices.read', 'View purchase invoices', 'عرض فواتير الشراء', 'purchases'],
+  ['purchases.invoices.create', 'Create purchase invoices', 'إنشاء فواتير الشراء', 'purchases'],
+  ['purchases.invoices.post', 'Post and reverse purchase invoices', 'ترحيل وعكس فواتير الشراء', 'purchases'],
+
+  ['reports.read', 'View reports', 'عرض التقارير', 'reports'],
 ];
 
 const ACCOUNTS: Array<{
@@ -139,7 +161,8 @@ async function main(): Promise<void> {
       create: { roleId: adminRole.id, permissionId: p.id },
     });
   }
-  for (const p of all.filter((p) => p.module === 'accounting')) {
+  const accountantModules = ['accounting', 'parties', 'inventory', 'reports'];
+  for (const p of all.filter((p) => accountantModules.includes(p.module))) {
     await prisma.rolePermission.upsert({
       where: {
         roleId_permissionId: { roleId: accountantRole.id, permissionId: p.id },
