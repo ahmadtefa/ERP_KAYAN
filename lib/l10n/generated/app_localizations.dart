@@ -1609,6 +1609,342 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No fiscal periods yet'**
   String get noPeriods;
+
+  /// No description provided for @dataTools.
+  ///
+  /// In en, this message translates to:
+  /// **'Data'**
+  String get dataTools;
+
+  /// No description provided for @importData.
+  ///
+  /// In en, this message translates to:
+  /// **'Import from a file'**
+  String get importData;
+
+  /// No description provided for @backupTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup and restore'**
+  String get backupTitle;
+
+  /// No description provided for @exportExcel.
+  ///
+  /// In en, this message translates to:
+  /// **'Excel'**
+  String get exportExcel;
+
+  /// No description provided for @exportCsv.
+  ///
+  /// In en, this message translates to:
+  /// **'CSV'**
+  String get exportCsv;
+
+  /// No description provided for @print.
+  ///
+  /// In en, this message translates to:
+  /// **'Print'**
+  String get print;
+
+  /// No description provided for @chooseAccountFirst.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose an account first'**
+  String get chooseAccountFirst;
+
+  /// No description provided for @startOver.
+  ///
+  /// In en, this message translates to:
+  /// **'Start over'**
+  String get startOver;
+
+  /// No description provided for @whatAreYouImporting.
+  ///
+  /// In en, this message translates to:
+  /// **'What are you importing?'**
+  String get whatAreYouImporting;
+
+  /// No description provided for @templateFirst.
+  ///
+  /// In en, this message translates to:
+  /// **'Start from the template'**
+  String get templateFirst;
+
+  /// No description provided for @templateExplains.
+  ///
+  /// In en, this message translates to:
+  /// **'The template carries the right columns, an example row and a short explanation of each column.'**
+  String get templateExplains;
+
+  /// No description provided for @downloadTemplate.
+  ///
+  /// In en, this message translates to:
+  /// **'Download the template'**
+  String get downloadTemplate;
+
+  /// No description provided for @importStep1.
+  ///
+  /// In en, this message translates to:
+  /// **'Download the template'**
+  String get importStep1;
+
+  /// No description provided for @importStep2.
+  ///
+  /// In en, this message translates to:
+  /// **'Fill it in and save it'**
+  String get importStep2;
+
+  /// No description provided for @importStep3.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose the file and read it'**
+  String get importStep3;
+
+  /// No description provided for @importStep4.
+  ///
+  /// In en, this message translates to:
+  /// **'Import for real once it looks right'**
+  String get importStep4;
+
+  /// No description provided for @chooseFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose the file'**
+  String get chooseFile;
+
+  /// No description provided for @chooseAnotherFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose another file'**
+  String get chooseAnotherFile;
+
+  /// No description provided for @removeFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get removeFile;
+
+  /// No description provided for @fileAcceptHint.
+  ///
+  /// In en, this message translates to:
+  /// **'A .xlsx or .csv file, up to 10 MB.'**
+  String get fileAcceptHint;
+
+  /// No description provided for @readWithoutSaving.
+  ///
+  /// In en, this message translates to:
+  /// **'Read it without saving'**
+  String get readWithoutSaving;
+
+  /// No description provided for @whatAboutExisting.
+  ///
+  /// In en, this message translates to:
+  /// **'What should happen to records that already exist?'**
+  String get whatAboutExisting;
+
+  /// No description provided for @importModeSkip.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave them alone'**
+  String get importModeSkip;
+
+  /// No description provided for @importModeSkipHint.
+  ///
+  /// In en, this message translates to:
+  /// **'A record whose code is already here is skipped and counted. Nothing is changed.'**
+  String get importModeSkipHint;
+
+  /// No description provided for @importModeUpdate.
+  ///
+  /// In en, this message translates to:
+  /// **'Update them'**
+  String get importModeUpdate;
+
+  /// No description provided for @importModeUpdateHint.
+  ///
+  /// In en, this message translates to:
+  /// **'The columns the file carries are written over the record. A blank cell changes nothing.'**
+  String get importModeUpdateHint;
+
+  /// No description provided for @readResult.
+  ///
+  /// In en, this message translates to:
+  /// **'What the file contains'**
+  String get readResult;
+
+  /// No description provided for @importResult.
+  ///
+  /// In en, this message translates to:
+  /// **'What was imported'**
+  String get importResult;
+
+  /// No description provided for @rowsInFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Rows in the file'**
+  String get rowsInFile;
+
+  /// No description provided for @willBeAdded.
+  ///
+  /// In en, this message translates to:
+  /// **'Will be added'**
+  String get willBeAdded;
+
+  /// No description provided for @willBeUpdated.
+  ///
+  /// In en, this message translates to:
+  /// **'Will be updated'**
+  String get willBeUpdated;
+
+  /// No description provided for @willBeSkipped.
+  ///
+  /// In en, this message translates to:
+  /// **'Already exist'**
+  String get willBeSkipped;
+
+  /// No description provided for @columnsNotUnderstood.
+  ///
+  /// In en, this message translates to:
+  /// **'Columns not recognised'**
+  String get columnsNotUnderstood;
+
+  /// No description provided for @rowsWithProblems.
+  ///
+  /// In en, this message translates to:
+  /// **'Rows with problems'**
+  String get rowsWithProblems;
+
+  /// No description provided for @row.
+  ///
+  /// In en, this message translates to:
+  /// **'Row'**
+  String get row;
+
+  /// No description provided for @moreRows.
+  ///
+  /// In en, this message translates to:
+  /// **'more rows'**
+  String get moreRows;
+
+  /// No description provided for @fixErrorsThenRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Fix these rows in the file and upload it again. Nothing was written from them.'**
+  String get fixErrorsThenRetry;
+
+  /// No description provided for @importForReal.
+  ///
+  /// In en, this message translates to:
+  /// **'Import for real'**
+  String get importForReal;
+
+  /// No description provided for @importDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Imported. The lists now hold these records.'**
+  String get importDone;
+
+  /// No description provided for @takeBackup.
+  ///
+  /// In en, this message translates to:
+  /// **'Take a copy of the data'**
+  String get takeBackup;
+
+  /// No description provided for @takeBackupHint.
+  ///
+  /// In en, this message translates to:
+  /// **'One file holding the whole company: accounts, parties, items, invoices, entries and the audit trail. Move it anywhere, restore it any time.'**
+  String get takeBackupHint;
+
+  /// No description provided for @recordsInTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'Records in total'**
+  String get recordsInTotal;
+
+  /// No description provided for @downloadBackup.
+  ///
+  /// In en, this message translates to:
+  /// **'Download the backup'**
+  String get downloadBackup;
+
+  /// No description provided for @restoreBackup.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore from a copy'**
+  String get restoreBackup;
+
+  /// No description provided for @restoreWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Restoring replaces everything this company holds with what is in the file. Anything recorded after the copy was taken is lost.'**
+  String get restoreWarning;
+
+  /// No description provided for @restoreChooseFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a backup file (.json) that was downloaded from this screen.'**
+  String get restoreChooseFile;
+
+  /// No description provided for @chooseBackupFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose the backup file'**
+  String get chooseBackupFile;
+
+  /// No description provided for @inspectBackup.
+  ///
+  /// In en, this message translates to:
+  /// **'Read the file first'**
+  String get inspectBackup;
+
+  /// No description provided for @inBackupFile.
+  ///
+  /// In en, this message translates to:
+  /// **'In the file'**
+  String get inBackupFile;
+
+  /// No description provided for @inTheProgramNow.
+  ///
+  /// In en, this message translates to:
+  /// **'In the program now'**
+  String get inTheProgramNow;
+
+  /// No description provided for @backupTakenAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Taken at'**
+  String get backupTakenAt;
+
+  /// No description provided for @backupOtherCompany.
+  ///
+  /// In en, this message translates to:
+  /// **'This file belongs to another company. It cannot be restored here.'**
+  String get backupOtherCompany;
+
+  /// No description provided for @restoreNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore now'**
+  String get restoreNow;
+
+  /// No description provided for @confirmRestoreTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace everything?'**
+  String get confirmRestoreTitle;
+
+  /// No description provided for @confirmRestoreBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The company\'s data will be replaced with the contents of this file. This cannot be undone. Continue?'**
+  String get confirmRestoreBody;
+
+  /// No description provided for @restoreDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Restored'**
+  String get restoreDone;
 }
 
 class _AppLocalizationsDelegate

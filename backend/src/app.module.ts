@@ -9,6 +9,9 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
 import { AccountingModule } from './modules/accounting/accounting.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { BackupModule } from './modules/backup/backup.module';
+import { ExportModule } from './modules/export/export.module';
+import { ImportModule } from './modules/import/import.module';
 import { HealthModule } from './modules/health/health.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { PartiesModule } from './modules/parties/parties.module';
@@ -31,6 +34,9 @@ import { SalesModule } from './modules/sales/sales.module';
     SalesModule,
     PurchasesModule,
     ReportsModule,
+    ExportModule,
+    ImportModule,
+    BackupModule,
     HealthModule,
   ],
   providers: [

@@ -9,6 +9,8 @@ import '../../features/accounting/presentation/screens/journal_entries_screen.da
 import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
+import '../../features/data/presentation/screens/backup_screen.dart';
+import '../../features/data/presentation/screens/import_screen.dart';
 import '../../features/inventory/presentation/screens/items_screen.dart';
 import '../../features/inventory/presentation/screens/stock_screen.dart';
 import '../../features/invoicing/presentation/providers/invoice_providers.dart';
@@ -44,6 +46,8 @@ class AppRoutes {
   static const salesInvoices = '/sales/invoices';
   static const purchaseInvoices = '/purchases/invoices';
   static const reports = '/reports';
+  static const importData = '/data/import';
+  static const backup = '/data/backup';
   static const administration = '/administration';
   static const settings = '/settings';
 }
@@ -109,6 +113,8 @@ const _shellRoutes = <({String path, Widget child})>[
   ),
   (path: AppRoutes.chartOfAccounts, child: ChartOfAccountsScreen()),
   (path: AppRoutes.reports, child: ReportsScreen()),
+  (path: AppRoutes.importData, child: ImportScreen()),
+  (path: AppRoutes.backup, child: BackupScreen()),
   (path: AppRoutes.administration, child: AdminScreen()),
   (path: AppRoutes.settings, child: SettingsScreen()),
 ];

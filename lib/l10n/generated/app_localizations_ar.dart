@@ -775,4 +775,180 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get noPeriods => 'مفيش فترات مالية لسه';
+
+  @override
+  String get dataTools => 'البيانات';
+
+  @override
+  String get importData => 'رفع بيانات من ملف';
+
+  @override
+  String get backupTitle => 'النسخ الاحتياطي والاسترجاع';
+
+  @override
+  String get exportExcel => 'إكسل';
+
+  @override
+  String get exportCsv => 'CSV';
+
+  @override
+  String get print => 'طباعة';
+
+  @override
+  String get chooseAccountFirst => 'اختر حساباً أولاً';
+
+  @override
+  String get startOver => 'من البداية';
+
+  @override
+  String get whatAreYouImporting => 'بترفع بيانات إيه؟';
+
+  @override
+  String get templateFirst => 'ابدأ من القالب';
+
+  @override
+  String get templateExplains =>
+      'القالب فيه الأعمدة الصحيحة وصف مثال وشرح قصير لكل عمود.';
+
+  @override
+  String get downloadTemplate => 'تنزيل القالب';
+
+  @override
+  String get importStep1 => 'نزّل القالب';
+
+  @override
+  String get importStep2 => 'املأه واحفظه';
+
+  @override
+  String get importStep3 => 'اختر الملف واقرأه';
+
+  @override
+  String get importStep4 => 'نفّذ الاستيراد لما يظبط';
+
+  @override
+  String get chooseFile => 'اختر الملف';
+
+  @override
+  String get chooseAnotherFile => 'اختر ملفاً آخر';
+
+  @override
+  String get removeFile => 'إزالة';
+
+  @override
+  String get fileAcceptHint => 'ملف ‎.xlsx‎ أو ‎.csv‎ بحجم أقصى 10 ميجا.';
+
+  @override
+  String get readWithoutSaving => 'اقرأه من غير ما تحفظ';
+
+  @override
+  String get whatAboutExisting => 'البيانات الموجودة بالفعل يتعمل فيها إيه؟';
+
+  @override
+  String get importModeSkip => 'سيبها زي ما هي';
+
+  @override
+  String get importModeSkipHint =>
+      'أي كود موجود عندك أصلاً بيتخطى وبيتعد، ومفيش أي تغيير.';
+
+  @override
+  String get importModeUpdate => 'حدّثها';
+
+  @override
+  String get importModeUpdateHint =>
+      'الأعمدة اللي في الملف بتتكتب على السجل. الخانة الفاضية مش بتغيّر حاجة.';
+
+  @override
+  String get readResult => 'اللي في الملف';
+
+  @override
+  String get importResult => 'اللي تم استيراده';
+
+  @override
+  String get rowsInFile => 'صفوف في الملف';
+
+  @override
+  String get willBeAdded => 'هيتضاف';
+
+  @override
+  String get willBeUpdated => 'هيتحدّث';
+
+  @override
+  String get willBeSkipped => 'موجود بالفعل';
+
+  @override
+  String get columnsNotUnderstood => 'أعمدة مش مفهومة';
+
+  @override
+  String get rowsWithProblems => 'صفوف فيها مشاكل';
+
+  @override
+  String get row => 'صف';
+
+  @override
+  String get moreRows => 'صفوف أخرى';
+
+  @override
+  String get fixErrorsThenRetry =>
+      'صحّح الصفوف دي في الملف وارفعه تاني. مفيش حاجة اتكتبت منها.';
+
+  @override
+  String get importForReal => 'نفّذ الاستيراد';
+
+  @override
+  String get importDone => 'تم الاستيراد. القوائم فيها السجلات دي دلوقتي.';
+
+  @override
+  String get takeBackup => 'خد نسخة من البيانات';
+
+  @override
+  String get takeBackupHint =>
+      'ملف واحد فيه الشركة كاملة: الحسابات والأطراف والأصناف والفواتير والقيود وسجل التدقيق. انقله في أي مكان واسترجعه في أي وقت.';
+
+  @override
+  String get recordsInTotal => 'إجمالي السجلات';
+
+  @override
+  String get downloadBackup => 'تنزيل النسخة';
+
+  @override
+  String get restoreBackup => 'الاسترجاع من نسخة';
+
+  @override
+  String get restoreWarning =>
+      'الاسترجاع بيستبدل كل اللي في الشركة باللي في الملف. وأي حاجة اتسجلت بعد أخذ النسخة بتضيع.';
+
+  @override
+  String get restoreChooseFile =>
+      'اختر ملف نسخة احتياطية (‎.json‎) نزّلته من الشاشة دي.';
+
+  @override
+  String get chooseBackupFile => 'اختر ملف النسخة';
+
+  @override
+  String get inspectBackup => 'اقرأ الملف الأول';
+
+  @override
+  String get inBackupFile => 'اللي في الملف';
+
+  @override
+  String get inTheProgramNow => 'اللي في البرنامج دلوقتي';
+
+  @override
+  String get backupTakenAt => 'تاريخ النسخة';
+
+  @override
+  String get backupOtherCompany => 'الملف ده لشركة تانية ومش ينفع يترجع هنا.';
+
+  @override
+  String get restoreNow => 'استرجع الآن';
+
+  @override
+  String get confirmRestoreTitle => 'استبدال كل البيانات؟';
+
+  @override
+  String get confirmRestoreBody =>
+      'بيانات الشركة هتتبدل باللي في الملف، ومش هينفع نرجع في الخطوة دي. تحب نكمل؟';
+
+  @override
+  String get restoreDone => 'تم الاسترجاع';
 }

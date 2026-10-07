@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import { ALLOW_QUERY_TOKEN_KEY } from '../decorators/allow-query-token.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { AuthUser } from '../decorators/current-user.decorator';
 
@@ -23,13 +24,33 @@ export class JwtAuthGuard implements CanActivate {
     ]);
     if (isPublic) return true;
 
-    const request = context
-      .switchToHttp()
-      .getRequest<{ headers: Record<string, string>; user?: AuthUser }>();
+    const request = context.switchToHttp().getRequest<{
+      headers: Record<string, string>;
+      query?: Record<string, unknown>;
+      user?: AuthUser;
+    }>();
 
     const header = request.headers['authorization'] ?? '';
-    const [scheme, token] = header.split(' ');
-    if (scheme?.toLowerCase() !== 'bearer' || !token) {
+    const [scheme, headerToken] = header.split(' ');
+
+    let token: string | null =
+      scheme?.toLowerCase() === 'bearer' && headerToken ? headerToken : null;
+
+    // A browser navigation - a download, or a print page opened in a new tab -
+    // cannot send an Authorization header. Those few routes may carry the
+    // token in the query string instead, and they opt in one by one.
+    if (!token) {
+      const allowsQueryToken = this.reflector.getAllAndOverride<boolean>(
+        ALLOW_QUERY_TOKEN_KEY,
+        [context.getHandler(), context.getClass()],
+      );
+      const fromQuery = request.query?.token;
+      if (allowsQueryToken && typeof fromQuery === 'string' && fromQuery) {
+        token = fromQuery;
+      }
+    }
+
+    if (!token) {
       throw new UnauthorizedException('Missing bearer token');
     }
 

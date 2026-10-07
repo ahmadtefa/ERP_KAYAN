@@ -107,6 +107,8 @@ class ErpShell extends ConsumerWidget {
         l10n.chartOfAccounts,
       ),
       _NavItem(AppRoutes.reports, Icons.bar_chart_outlined, l10n.reports),
+      _NavItem(AppRoutes.importData, Icons.upload_file_outlined, l10n.importData),
+      _NavItem(AppRoutes.backup, Icons.verified_user_outlined, l10n.backupTitle),
       _NavItem(
         AppRoutes.administration,
         Icons.admin_panel_settings_outlined,

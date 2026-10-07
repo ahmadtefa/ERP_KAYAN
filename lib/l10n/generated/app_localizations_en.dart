@@ -778,4 +778,182 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get noPeriods => 'No fiscal periods yet';
+
+  @override
+  String get dataTools => 'Data';
+
+  @override
+  String get importData => 'Import from a file';
+
+  @override
+  String get backupTitle => 'Backup and restore';
+
+  @override
+  String get exportExcel => 'Excel';
+
+  @override
+  String get exportCsv => 'CSV';
+
+  @override
+  String get print => 'Print';
+
+  @override
+  String get chooseAccountFirst => 'Choose an account first';
+
+  @override
+  String get startOver => 'Start over';
+
+  @override
+  String get whatAreYouImporting => 'What are you importing?';
+
+  @override
+  String get templateFirst => 'Start from the template';
+
+  @override
+  String get templateExplains =>
+      'The template carries the right columns, an example row and a short explanation of each column.';
+
+  @override
+  String get downloadTemplate => 'Download the template';
+
+  @override
+  String get importStep1 => 'Download the template';
+
+  @override
+  String get importStep2 => 'Fill it in and save it';
+
+  @override
+  String get importStep3 => 'Choose the file and read it';
+
+  @override
+  String get importStep4 => 'Import for real once it looks right';
+
+  @override
+  String get chooseFile => 'Choose the file';
+
+  @override
+  String get chooseAnotherFile => 'Choose another file';
+
+  @override
+  String get removeFile => 'Remove';
+
+  @override
+  String get fileAcceptHint => 'A .xlsx or .csv file, up to 10 MB.';
+
+  @override
+  String get readWithoutSaving => 'Read it without saving';
+
+  @override
+  String get whatAboutExisting =>
+      'What should happen to records that already exist?';
+
+  @override
+  String get importModeSkip => 'Leave them alone';
+
+  @override
+  String get importModeSkipHint =>
+      'A record whose code is already here is skipped and counted. Nothing is changed.';
+
+  @override
+  String get importModeUpdate => 'Update them';
+
+  @override
+  String get importModeUpdateHint =>
+      'The columns the file carries are written over the record. A blank cell changes nothing.';
+
+  @override
+  String get readResult => 'What the file contains';
+
+  @override
+  String get importResult => 'What was imported';
+
+  @override
+  String get rowsInFile => 'Rows in the file';
+
+  @override
+  String get willBeAdded => 'Will be added';
+
+  @override
+  String get willBeUpdated => 'Will be updated';
+
+  @override
+  String get willBeSkipped => 'Already exist';
+
+  @override
+  String get columnsNotUnderstood => 'Columns not recognised';
+
+  @override
+  String get rowsWithProblems => 'Rows with problems';
+
+  @override
+  String get row => 'Row';
+
+  @override
+  String get moreRows => 'more rows';
+
+  @override
+  String get fixErrorsThenRetry =>
+      'Fix these rows in the file and upload it again. Nothing was written from them.';
+
+  @override
+  String get importForReal => 'Import for real';
+
+  @override
+  String get importDone => 'Imported. The lists now hold these records.';
+
+  @override
+  String get takeBackup => 'Take a copy of the data';
+
+  @override
+  String get takeBackupHint =>
+      'One file holding the whole company: accounts, parties, items, invoices, entries and the audit trail. Move it anywhere, restore it any time.';
+
+  @override
+  String get recordsInTotal => 'Records in total';
+
+  @override
+  String get downloadBackup => 'Download the backup';
+
+  @override
+  String get restoreBackup => 'Restore from a copy';
+
+  @override
+  String get restoreWarning =>
+      'Restoring replaces everything this company holds with what is in the file. Anything recorded after the copy was taken is lost.';
+
+  @override
+  String get restoreChooseFile =>
+      'Choose a backup file (.json) that was downloaded from this screen.';
+
+  @override
+  String get chooseBackupFile => 'Choose the backup file';
+
+  @override
+  String get inspectBackup => 'Read the file first';
+
+  @override
+  String get inBackupFile => 'In the file';
+
+  @override
+  String get inTheProgramNow => 'In the program now';
+
+  @override
+  String get backupTakenAt => 'Taken at';
+
+  @override
+  String get backupOtherCompany =>
+      'This file belongs to another company. It cannot be restored here.';
+
+  @override
+  String get restoreNow => 'Restore now';
+
+  @override
+  String get confirmRestoreTitle => 'Replace everything?';
+
+  @override
+  String get confirmRestoreBody =>
+      'The company\'s data will be replaced with the contents of this file. This cannot be undone. Continue?';
+
+  @override
+  String get restoreDone => 'Restored';
 }

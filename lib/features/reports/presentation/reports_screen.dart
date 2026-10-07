@@ -9,6 +9,7 @@ import '../../../shared/widgets/state_views.dart';
 import '../../accounting/presentation/providers/chart_of_accounts_providers.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../common/presentation/screens/module_scaffold.dart';
+import '../../data/presentation/widgets/export_actions.dart';
 
 /// The reporting period every tab shares.
 class Period {
@@ -36,6 +37,22 @@ class _PeriodController extends Notifier<Period> {
 
 final periodProvider = NotifierProvider<_PeriodController, Period>(
   _PeriodController.new,
+);
+
+/// The account the ledger tab is showing.
+///
+/// Held above the tab so the download and print buttons can see it: a ledger
+/// without an account is not a report, and exporting the wrong account's
+/// ledger would be worse than not exporting at all.
+class _LedgerAccountController extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void choose(String? accountId) => state = accountId;
+}
+
+final ledgerAccountProvider = NotifierProvider<_LedgerAccountController, String?>(
+  _LedgerAccountController.new,
 );
 
 /// Reads an endpoint that answers with a `{ rows: [...], totals: {...} }`
@@ -101,6 +118,20 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               Tab(text: l10n.accountLedger),
             ],
           ),
+          // Download and print always reflect the tab that is open and the
+          // period on screen, because they are built from the same values.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: ReportExportActions(
+                report: _reportSlug,
+                from: period.from,
+                to: period.to,
+                accountId: _tabs.index == 4 ? ref.watch(ledgerAccountProvider) : null,
+              ),
+            ),
+          ),
           Expanded(
             child: switch (_tabs.index) {
               0 => const _TrialBalanceTab(),
@@ -114,6 +145,15 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
       ),
     );
   }
+
+  /// The report the open tab shows, in the name the API uses.
+  String get _reportSlug => switch (_tabs.index) {
+        0 => 'trial-balance',
+        1 => 'profit-and-loss',
+        2 => 'customer-balances',
+        3 => 'supplier-balances',
+        _ => 'account-ledger',
+      };
 
   Future<void> _pickPeriod() async {
     final period = ref.read(periodProvider);
@@ -365,11 +405,10 @@ class _AccountLedgerTab extends ConsumerStatefulWidget {
 }
 
 class _AccountLedgerTabState extends ConsumerState<_AccountLedgerTab> {
-  String? _accountId;
-
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final accountId = ref.watch(ledgerAccountProvider);
     final accounts = ref.watch(chartOfAccountsProvider);
     final period = ref.watch(periodProvider);
     // Only postable accounts appear in the ledger; a heading has nothing in it.
@@ -377,7 +416,7 @@ class _AccountLedgerTabState extends ConsumerState<_AccountLedgerTab> {
         .where((account) => account.isPostable)
         .toList(growable: false);
 
-    if (_accountId == null) {
+    if (accountId == null) {
       return Padding(
         padding: const EdgeInsets.all(24),
         child: Center(
@@ -388,7 +427,7 @@ class _AccountLedgerTabState extends ConsumerState<_AccountLedgerTab> {
 
     final async = ref.watch(
       reportProvider(
-        '/reports/account-ledger/$_accountId?from=${period.from}&to=${period.to}',
+        '/reports/account-ledger/$accountId?from=${period.from}&to=${period.to}',
       ),
     );
 
@@ -397,7 +436,7 @@ class _AccountLedgerTabState extends ConsumerState<_AccountLedgerTab> {
         Padding(
           padding: const EdgeInsets.all(16),
           child: DropdownButtonFormField<String>(
-            initialValue: _accountId,
+            initialValue: accountId,
             isExpanded: true,
             decoration: InputDecoration(
               labelText: l10n.account,
@@ -410,7 +449,8 @@ class _AccountLedgerTabState extends ConsumerState<_AccountLedgerTab> {
                   child: Text('${account.code} — ${account.name}'),
                 ),
             ],
-            onChanged: (value) => setState(() => _accountId = value),
+            onChanged: (value) =>
+                ref.read(ledgerAccountProvider.notifier).choose(value),
           ),
         ),
         Expanded(

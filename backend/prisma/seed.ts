@@ -25,6 +25,7 @@ const PERMISSIONS: Array<[string, string, string, string]> = [
   ['admin.users.manage', 'Manage users', 'إدارة المستخدمين', 'admin'],
   ['admin.roles.manage', 'Manage roles', 'إدارة الأدوار', 'admin'],
   ['admin.audit.read', 'View audit trail', 'عرض سجل التدقيق', 'admin'],
+  ['admin.backup', 'Take and restore backups', 'أخذ واسترجاع نسخة احتياطية', 'admin'],
 
   ['parties.customers.read', 'View customers', 'عرض العملاء', 'parties'],
   ['parties.customers.create', 'Add customers', 'إضافة عملاء', 'parties'],
