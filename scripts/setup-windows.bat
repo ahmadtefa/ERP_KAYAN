@@ -48,7 +48,7 @@ set "PATH=%PSQLDIR%;%PATH%"
 
 :psqlfound
 for /f "delims=" %%v in ('psql --version') do echo [OK] %%v
-echo      using psql from: %PSQLDIR%
+if /i not "%PSQLDIR%"=="onpath" echo      using psql from: %PSQLDIR%
 goto :psqldone
 
 :nopsql
