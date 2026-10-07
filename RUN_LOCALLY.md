@@ -27,7 +27,7 @@ VS Code بيفتح **PowerShell** افتراضياً، واللي **بيفرق**
 | --- | --- | --- |
 | **Git** | عشان تنسخ المشروع | https://git-scm.com/download/win |
 | **Node.js 24 LTS** | عشان السيرفر | https://nodejs.org |
-| **PostgreSQL 17** | قاعدة البيانات | https://www.postgresql.org/download/windows/ |
+| **PostgreSQL 17 أو 18** | قاعدة البيانات | https://www.postgresql.org/download/windows/ |
 | **Flutter SDK** | عشان الواجهة | https://docs.flutter.dev/get-started/install/windows |
 | **Google Chrome** | لتشغيل الواجهة في المتصفح | غالباً متثبت عندك |
 
@@ -192,6 +192,17 @@ git pull
 بعدين كمّل من **الخطوة 2** عادي.
 
 > 💡 `start-postgres.bat` بيعرف لوحده إن فيه سيرفر شغال على المنفذ 5432 وبيعدّي من غير ما يعمل حاجة.
+
+**لو `psql` مش شغال من الترمنال** (مش على PATH)، تقدر تستخدمه بمساره الكامل:
+
+```powershell
+$psql = (Get-ChildItem "C:\Program Files\PostgreSQL\*\bin\psql.exe" | Select-Object -First 1).FullName
+& $psql -U postgres -h 127.0.0.1 -c "SELECT version();"
+```
+
+هيسألك على الباسوورد في كل مرة — ده طبيعي.
+
+> ℹ️ `setup-windows.bat` بيلاقي `psql` بنفسه — فمش لازم تضبط الـ PATH قبل ما تشغّله.
 >
 > ⚠️ لما `setup-windows.bat` يسألك على باسوورد `postgres`، اكتب **الباسوورد اللي اخترتها وقت تثبيت PostgreSQL**.
 
