@@ -11,6 +11,7 @@ import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/admin_providers.dart';
+import '../../../data/presentation/widgets/list_export_actions.dart';
 
 /// Administration: the users, the roles, and what the audit trail recorded.
 ///
@@ -203,6 +204,7 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
 
     return ModuleScaffold(
       title: l10n.users,
+      actions: const [ListExportActions(list: 'users')],
       trailing: Row(
         children: [
           SearchField(
@@ -399,6 +401,7 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
 
     return ModuleScaffold(
       title: l10n.roles,
+      actions: const [ListExportActions(list: 'roles')],
       trailing: Row(
         children: [
           IconButton(
@@ -625,6 +628,7 @@ class _AuditTabState extends ConsumerState<_AuditTab> {
 
     return ModuleScaffold(
       title: l10n.auditTrail,
+      actions: [ListExportActions(list: 'audit-trail')],
       trailing: Row(
         children: [
           SizedBox(

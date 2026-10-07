@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 import { PeriodQueryDto } from '../../reports/dto/report-query.dto';
 
@@ -35,4 +35,32 @@ export class ExportQueryDto extends PeriodQueryDto {
   /// @AllowQueryToken() ever look at it.
   @IsOptional() @IsString()
   token?: string;
+
+  /// ── the filters the everyday lists use ──
+  ///
+  /// Declared so the strict validation accepts them. A list uses the ones it
+  /// understands and ignores the rest, which is what lets one query string
+  /// work for every list in the program.
+
+  /// Free text, matched the way the list's own search box matches it.
+  @IsOptional() @IsString() @MaxLength(100)
+  q?: string;
+
+  @IsOptional() @IsIn(['true', 'false'])
+  includeInactive?: string;
+
+  @IsOptional() @IsString() @MaxLength(20)
+  status?: string;
+
+  @IsOptional() @IsUUID()
+  customerId?: string;
+
+  @IsOptional() @IsUUID()
+  supplierId?: string;
+
+  @IsOptional() @IsUUID()
+  itemId?: string;
+
+  @IsOptional() @IsIn(['true', 'false'])
+  includeDeleted?: string;
 }

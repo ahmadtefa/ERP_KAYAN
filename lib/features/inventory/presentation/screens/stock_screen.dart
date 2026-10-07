@@ -10,6 +10,7 @@ import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../../../data/presentation/widgets/list_export_actions.dart';
 
 class StockController extends JsonListController {
   @override
@@ -42,6 +43,7 @@ class _StockScreenState extends ConsumerState<StockScreen> {
 
     return ModuleScaffold(
       title: l10n.stockBalances,
+      actions: const [ListExportActions(list: 'stock')],
       trailing: SearchField(
         hint: l10n.searchItems,
         onChanged: (value) => setState(() => _query = value.trim()),

@@ -11,6 +11,12 @@ export interface TableColumn {
   /// Excel column width in characters. Sensible defaults are computed when
   /// this is left out.
   width?: number;
+  /// A yes/no column. Written as Yes/No in the file rather than true/false,
+  /// which is what a person reading it expects.
+  boolean?: boolean;
+  /// A date. Written in the reader's format, and as a real date in Excel so it
+  /// can be sorted and filtered rather than treated as text.
+  date?: boolean;
 }
 
 export interface TableTotal {

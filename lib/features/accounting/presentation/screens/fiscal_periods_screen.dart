@@ -11,6 +11,7 @@ import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../../../data/presentation/widgets/list_export_actions.dart';
 
 /// The fiscal years of this company.
 ///
@@ -108,6 +109,7 @@ class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
 
     return ModuleScaffold(
       title: l10n.fiscalPeriods,
+      actions: const [ListExportActions(list: 'fiscal-periods')],
       trailing: Row(
         children: [
           IconButton(

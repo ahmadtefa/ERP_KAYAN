@@ -8,6 +8,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../domain/entities/account.dart';
 import '../../domain/entities/account_type.dart';
 import '../providers/chart_of_accounts_providers.dart';
+import '../../../data/presentation/widgets/list_export_actions.dart';
 
 /// Read-only view of the chart of accounts, grouped by account type.
 ///
@@ -26,13 +27,21 @@ class ChartOfAccountsScreen extends ConsumerWidget {
         if (showSampleNotice) const _SampleDataBanner(),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: TextField(
-            decoration: InputDecoration(
-              hintText: context.l10n.searchAccounts,
-              prefixIcon: const Icon(Icons.search),
-            ),
-            onChanged: (value) =>
-                ref.read(accountSearchProvider.notifier).setQuery(value),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: context.l10n.searchAccounts,
+                    prefixIcon: const Icon(Icons.search),
+                  ),
+                  onChanged: (value) =>
+                      ref.read(accountSearchProvider.notifier).setQuery(value),
+                ),
+              ),
+              const SizedBox(width: 12),
+              const ListExportActions(list: 'chart-of-accounts'),
+            ],
           ),
         ),
         Expanded(

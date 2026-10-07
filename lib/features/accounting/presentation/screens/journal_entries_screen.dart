@@ -13,6 +13,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/chart_of_accounts_providers.dart';
+import '../../../data/presentation/widgets/list_export_actions.dart';
 
 class JournalEntriesController extends JsonListController {
   @override
@@ -102,6 +103,7 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
 
     return ModuleScaffold(
       title: l10n.journalEntries,
+      actions: const [ListExportActions(list: 'journal-entries')],
       trailing: FilledButton.icon(
         onPressed: _busy ? null : _openEditor,
         icon: const Icon(Icons.add),

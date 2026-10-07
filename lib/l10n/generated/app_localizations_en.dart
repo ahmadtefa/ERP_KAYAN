@@ -967,4 +967,11 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get printHintWhenNoPdf =>
       'Opens a clean page for paper. In the print window, choose \"Save as PDF\" to keep it as a PDF file.';
+
+  @override
+  String get downloadList => 'Download the list';
+
+  @override
+  String get exportListHint =>
+      'Download this list as it stands: Excel, CSV, PDF, or a page to print.';
 }

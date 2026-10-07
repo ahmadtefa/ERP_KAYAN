@@ -12,6 +12,7 @@ import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../../../data/presentation/widgets/list_export_actions.dart';
 
 class ItemsController extends JsonListController {
   @override
@@ -124,6 +125,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
 
     return ModuleScaffold(
       title: l10n.items,
+      actions: const [ListExportActions(list: 'items')],
       trailing: Row(
         children: [
           SearchField(

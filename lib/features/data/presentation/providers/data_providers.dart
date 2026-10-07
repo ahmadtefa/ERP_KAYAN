@@ -88,6 +88,58 @@ class ReportLinkBuilder {
     return '$_base/exports/$report/print?${_encode(query)}';
   }
 
+  /// ── the everyday lists ──
+  ///
+  /// Same idea as a report, one word different in the path: a list is named
+  /// after the screen it came from, and carries whatever filter that screen
+  /// is currently showing, so the file matches what the person can see.
+
+  /// A list as a spreadsheet or a plain file.
+  Future<String> listFile({
+    required String list,
+    required String format,
+    required String language,
+    Map<String, String> filters = const {},
+  }) async {
+    final query = <String, String>{
+      'format': format,
+      'lang': language,
+      ...filters,
+      'token': await _token(),
+    };
+    return '$_base/exports/lists/$list/download?${_encode(query)}';
+  }
+
+  /// A list as a PDF file, made by the server.
+  Future<String> listPdf({
+    required String list,
+    required String language,
+    Map<String, String> filters = const {},
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      ...filters,
+      'token': await _token(),
+    };
+    return '$_base/exports/lists/$list/pdf?${_encode(query)}';
+  }
+
+  /// A list as a page to print.
+  Future<String> listPrint({
+    required String list,
+    required String language,
+    bool auto = true,
+    Map<String, String> filters = const {},
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      if (auto) 'auto': '1',
+      ...filters,
+      'token': await _token(),
+    };
+    return '$_base/exports/lists/$list/print?${_encode(query)}';
+  }
+
   /// A blank spreadsheet to fill in, for one kind of import.
   Future<String> importTemplate({required String kind, required String language}) async {
     final query = <String, String>{'lang': language, 'token': await _token()};

@@ -961,4 +961,11 @@ class AppLocalizationsAr extends AppLocalizations {
   @override
   String get printHintWhenNoPdf =>
       'بيفتح صفحة نضيفة للورق. من نافذة الطباعة اختار «حفظ كـ PDF» عشان تحفظها ملف PDF.';
+
+  @override
+  String get downloadList => 'تنزيل الملف';
+
+  @override
+  String get exportListHint =>
+      'نزّل القائمة زي ما هي على الشاشة: إكسل أو CSV أو PDF أو ورقة للطباعة.';
 }

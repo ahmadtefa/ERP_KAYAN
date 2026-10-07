@@ -12,6 +12,7 @@ import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../../../data/presentation/widgets/list_export_actions.dart';
 
 /// Which of the two party lists a screen is showing.
 enum PartyKind { customer, supplier }
@@ -152,6 +153,9 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
 
     return ModuleScaffold(
       title: title,
+      actions: [
+        ListExportActions(list: _isCustomer ? 'customers' : 'suppliers'),
+      ],
       trailing: Row(
         children: [
           SearchField(

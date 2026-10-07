@@ -71,12 +71,23 @@ export async function toXlsx(
   for (const row of table.rows) {
     sheet.addRow(
       table.columns.map((column) => {
-        const value = textOf(row[column.key]);
-        if (column.numeric) {
-          const parsed = Number(value);
-          return Number.isFinite(parsed) && value.trim() !== '' ? parsed : value;
+        const raw = row[column.key];
+
+        // A date goes in as a date, so Excel can sort and filter it; a yes/no
+        // flag goes in as Yes/No, which is what a person reads.
+        if (column.date) {
+          const day = dateOf(raw);
+          if (day) return day;
         }
-        return value;
+        if (column.boolean) {
+          const flag = flagOf(raw);
+          if (flag !== null) return flag ? 'Yes' : 'No';
+        }
+        if (column.numeric) {
+          const parsed = numberOf(raw);
+          if (parsed !== null) return parsed;
+        }
+        return textOf(raw);
       }),
     );
   }
@@ -102,6 +113,14 @@ export async function toXlsx(
     }
   }
 
+  // Dates are shown the way a person writes them, and flags are centred.
+  const dateColumns = table.columns
+    .map((column, index) => ({ column, index: index + 1 }))
+    .filter((entry) => entry.column.date);
+  for (const entry of dateColumns) {
+    sheet.getColumn(entry.index).numFmt = 'yyyy-mm-dd';
+  }
+
   // Column widths, and the number format on every numeric column.
   table.columns.forEach((column, index) => {
     const letter = sheet.getColumn(index + 1).letter;
@@ -123,11 +142,61 @@ const MONEY_FORMAT = '#,##0.00;-#,##0.00';
 
 /// A cell value as text. A number keeps its own digits; anything absent, null
 /// or not printable becomes an empty cell rather than the word "null".
+/// Turns whatever a record holds into what a cell should say.
+///
+/// The lists carry three kinds of value the reports never had: a date, a
+/// yes/no flag and a number that arrived as a Decimal. Each of them has one
+/// obvious reading, and writing the raw object instead would put
+/// "[object Object]" in a customer's spreadsheet.
 function textOf(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'number') return String(value);
+  if (value instanceof Date) return isoDay(value);
+  if (typeof value === 'object') {
+    // Prisma returns Decimal objects; they carry their exact value in
+    // toString, which is why the amount is never turned into a float.
+    const maybe = value as { toString?: () => string; toFixed?: (n: number) => string };
+    if (typeof maybe.toString === 'function') {
+      const text = maybe.toString();
+      return text === '[object Object]' ? '' : text;
+    }
+  }
   return '';
+}
+
+/// A date as a person writes it, in the reader's own convention.
+function isoDay(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+/// Whether a cell holds a date, so Excel can treat it as one rather than as
+/// text that only looks like a date.
+function dateOf(value: unknown): Date | null {
+  if (value instanceof Date) return value;
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}(T|$)/.test(value)) {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}
+
+/// Whether a cell holds a yes/no flag, and which way it fell.
+function flagOf(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  return null;
+}
+
+/// Whether text reads as a number, so a column can stay numeric in Excel even
+/// when the value arrived as a string to protect its precision.
+function numberOf(value: unknown): number | null {
+  if (typeof value === 'number') return value;
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (text === '' || !/^-?\d+(\.\d+)?$/.test(text)) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 /// Excel rejects a sheet name longer than 31 characters and some punctuation.

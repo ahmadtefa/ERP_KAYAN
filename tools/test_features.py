@@ -550,6 +550,125 @@ else:
 status, bad = upload("/backup/restore?replace=true", token, "junk.json", b'{"hello":"world"}')
 check("ملف ليس نسخة احتياطية يُرفض", status == 400, f"status={status}")
 
+# ─────────────────────────────── every list as a file
+print("\n[7] تنزيل كل قائمة في البرنامج كملف")
+
+LIST_CHECKS = [
+    ("customers", "/parties/customers?pageSize=200", "العملاء"),
+    ("suppliers", "/parties/suppliers?pageSize=200", "الموردون"),
+    ("items", "/inventory/items?pageSize=200", "الأصناف"),
+    ("stock", "/inventory/stock", "أرصدة المخزون"),
+    ("sales-invoices", "/sales/invoices?pageSize=200", "فواتير البيع"),
+    ("purchase-invoices", "/purchases/invoices?pageSize=200", "فواتير الشراء"),
+    ("journal-entries", "/accounting/journal-entries?pageSize=200", "القيود اليومية"),
+    ("chart-of-accounts", "/accounting/chart-of-accounts?pageSize=500", "شجرة الحسابات"),
+    ("fiscal-periods", "/accounting/fiscal-periods", "السنوات المالية"),
+    ("users", "/admin/users", "المستخدمون"),
+    ("roles", "/admin/roles", "الأدوار"),
+    ("audit-trail", "/admin/audit-logs?pageSize=200", "سجل الحركات"),
+]
+
+status, catalogue, _ = request("GET", "/exports/lists", token)
+check("قائمة الملفات المتاحة تعمل", status == 200, f"status={status}")
+slugs = [item["slug"] for item in (catalogue or {}).get("items", [])]
+check(
+    f"كل القوائم معروضة في الكتالوج ({len(slugs)})",
+    len(slugs) >= 12,
+    f"slugs={slugs}",
+)
+check(
+    "لكل قائمة صلاحية محددة",
+    all(item.get("permission") for item in (catalogue or {}).get("items", [])),
+    "قائمة بدون صلاحية",
+)
+
+
+def sheet_rows(blob):
+    """How many rows the file says it holds, the sheet's own count and its text.
+
+    The file states its row count at the top ("Rows | 8"), which is the number
+    a person checks against the screen; the raw row count also includes the
+    title block and the footnote.
+    """
+    import re
+
+    archive = zipfile.ZipFile(io.BytesIO(blob))
+    sheet = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    words = []
+    if "xl/sharedStrings.xml" in archive.namelist():
+        words = re.findall(
+            r"<t[^>]*>(.*?)</t>", archive.read("xl/sharedStrings.xml").decode("utf-8"), re.S
+        )
+    declared = None
+    for index, word in enumerate(words):
+        if word == "Rows" and index + 1 < len(words) and words[index + 1].isdigit():
+            declared = int(words[index + 1])
+            break
+    return sheet.count("<row "), words, declared
+
+
+for slug, screen_path, label in LIST_CHECKS:
+    status, blob, head = request("GET", f"/exports/lists/{slug}/download?format=xlsx", token, raw=True)
+    ok = status == 200 and blob[:2] == b"PK"
+    rows, words, declared = (0, [], None)
+    if ok:
+        try:
+            rows, words, declared = sheet_rows(blob)
+        except Exception as error:  # a file that cannot be opened is a failure
+            ok = False
+            check(f"ملف Excel لقائمة {label} يفتح", False, str(error))
+            continue
+    check(f"قائمة {label} تنزل Excel", ok and declared is not None, f"status={status}")
+
+    # the file must carry the same rows the screen shows
+    status, page, _ = request("GET", screen_path, token)
+    if status == 200 and ok:
+        # some screens answer with a bare list, others with a page object
+        if isinstance(page, list):
+            records = page
+        else:
+            records = page.get("items") or page.get("data") or []
+            if isinstance(records, dict):
+                records = records.get("items", [])
+        expected = len(records)
+        # the audit trail grows while it is being read - every export is itself
+        # recorded - so it may hold a few rows more than the screen just showed
+        same = declared >= expected if slug == "audit-trail" else declared == expected
+        check(
+            f"صفوف {label} في الملف تساوي صفوف الشاشة ({expected})",
+            same,
+            f"الملف={declared} الشاشة={expected}",
+        )
+
+    status, blob, _ = request("GET", f"/exports/lists/{slug}/download?format=csv", token, raw=True)
+    check(
+        f"قائمة {label} تنزل CSV بترميز عربي",
+        status == 200 and blob.startswith(b"\xef\xbb\xbf"),
+        f"status={status}",
+    )
+
+    status, blob, _ = request("GET", f"/exports/lists/{slug}/pdf", token, raw=True)
+    check(
+        f"قائمة {label} تنزل PDF",
+        status == 200 and blob[:4] == b"%PDF",
+        f"status={status}",
+    )
+
+    status, blob, _ = request("GET", f"/exports/lists/{slug}/print", token, raw=True)
+    check(
+        f"صفحة طباعة {label} تُفتح",
+        status == 200 and b"<table" in blob,
+        f"status={status}",
+    )
+
+check("الملف ينزل بالعربي من الرابط (كما يفعل المتصفح)",
+      request("GET", f"/exports/lists/customers/print?lang=ar&token={token}", None, raw=True)[0] == 200)
+
+check("قائمة غير معروفة تُرفض",
+      request("GET", "/exports/lists/whatever/download", token, raw=True)[0] == 400)
+check("قائمة بدون تسجيل دخول لا تنزل",
+      request("GET", "/exports/lists/customers/download", None, raw=True)[0] in (401, 403))
+
 # ─────────────────────────────── access control
 print("\n[6] الحماية والصلاحيات")
 status, content, _ = request("GET", "/backup/download", None, raw=True)

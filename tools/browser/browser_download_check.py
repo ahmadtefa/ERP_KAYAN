@@ -157,9 +157,11 @@ click(95, 524)          # Reports in the rail
 time.sleep(7)
 shot("20-reports-ready")
 
+# المواقع دي بتتحرك لو الصف طال أو قصُر (مثلاً زرار المدة الزمنية).
+# لو فحص فشل، خد لقطة شاشة وقيس من جديد.
 print("\n[1] زرار Excel")
 opened.clear()
-click(1066, 197)        # the Excel button
+click(1212, 190)        # the Excel button
 time.sleep(7)
 xlsx_urls = [url for url in opened if "format=xlsx" in url]
 check("زرار Excel ندى نداء فتح للملف", len(xlsx_urls) > 0, str(opened[-3:]))
@@ -186,7 +188,7 @@ if xlsx:
 
 print("\n[2] زرار CSV")
 opened.clear()
-click(1167, 197)        # the CSV button
+click(1308, 190)        # the CSV button
 time.sleep(7)
 csv_urls = [url for url in opened if "format=csv" in url]
 check("زرار CSV ندى نداء فتح للملف", len(csv_urls) > 0, str(opened[-3:]))
@@ -204,7 +206,7 @@ if csv:
 
 print("\n[3] زرار PDF")
 opened.clear()
-click(1272, 197)        # the PDF button
+click(1411, 190)        # the PDF button
 time.sleep(14)
 pdf_urls = [url for url in opened if "/pdf" in url]
 check("زرار PDF ندى نداء فتح للملف", len(pdf_urls) > 0, str(opened[-3:]))
@@ -218,7 +220,7 @@ if pdf_urls:
 print("\n[4] زرار الطباعة")
 requests.clear()
 before = len(json.load(urllib.request.urlopen(f"{DEVTOOLS}/json/list")))
-click(1373, 197)        # the Print button
+click(1512, 190)        # the Print button
 time.sleep(9)
 tabs = json.load(urllib.request.urlopen(f"{DEVTOOLS}/json/list"))
 after = len(tabs)
@@ -240,6 +242,72 @@ if shots:
             text = message.get("result", {}).get("result", {}).get("value", "")
             break
     check("صفحة الطباعة فيها أرقام التقرير", "Trial balance" in text or "ميزان" in text, text[:120])
+
+def download_menu(choice_y, wait=7):
+    """يفتح قائمة « تنزيل الملف » ويختار منها بند.
+
+    التاب الجديد اللي بيفتح لما ننزّل ملف بياخد التركيز، وفلاتر بتوقف
+    الرسم وهي في الخلفية، فالقائمة مش هتفتح. لازم نرجّع التاب للمقدمة.
+    """
+    send("Page.bringToFront")
+    time.sleep(1)
+    click(1450, 93)
+    time.sleep(2)
+    click(1400, choice_y)
+    time.sleep(wait)
+
+
+print("\n[6] تنزيل قائمة كاملة (الأصناف) من الشاشة")
+# نرجع للبرنامج الأول: قسم الطباعة ساب التاب على صفحة الطباعة
+send("Page.navigate", url=f"{BASE}/#/items")
+time.sleep(11)
+click(95, 310)          # Items في الشريط الجانبي (لو لسه محتاج)
+time.sleep(5)
+shot("35-items-again")
+
+opened.clear()
+send("Page.bringToFront")
+time.sleep(1)
+click(1450, 93)         # زرار « تنزيل الملف »
+time.sleep(2)
+shot("list-menu-open")
+click(1400, 103)        # Excel من القائمة
+time.sleep(7)
+list_urls = [url for url in opened if "/exports/lists/items/download" in url]
+check("زرار تنزيل القائمة بيفتح ملف الأصناف", len(list_urls) > 0, str(opened[-3:]))
+
+if list_urls:
+    ok = js("(async () => { const r = await fetch('%s'.replace(/^.*?(\\/api\\/v1.*)$/, '$1')); "
+            "const b = await r.arrayBuffer(); const u = new Uint8Array(b); "
+            "return r.status + ':' + u[0] + ',' + u[1] + ':' + b.byteLength; })()" % list_urls[0])
+    check("ملف القائمة Excel حقيقي (PK)", str(ok).startswith("200:80,75"), str(ok))
+    body = js("(async () => { const r = await fetch('%s'.replace(/^.*?(\\/api\\/v1.*)$/, '$1')); "
+              "return (await r.text()).slice(0, 20); })()" % list_urls[0])
+    check("الملف فيه بيانات الشاشة", ":error" not in str(body)[:8], str(body)[:40])
+
+opened.clear()
+download_menu(151)      # CSV
+csv_list = [url for url in opened if "/exports/lists/items/download" in url and "format=csv" in url]
+check("CSV القائمة كمان بينزل", len(csv_list) > 0, str(opened[-3:]))
+
+opened.clear()
+download_menu(199, wait=14)      # PDF
+pdf_list = [url for url in opened if "/exports/lists/items/pdf" in url]
+check("PDF القائمة بينزل", len(pdf_list) > 0, str(opened[-3:]))
+if pdf_list:
+    ok = js("(async () => { const r = await fetch('%s'.replace(/^.*?(\\/api\\/v1.*)$/, '$1')); "
+            "const b = new Uint8Array(await r.arrayBuffer()); "
+            "const sig = String.fromCharCode(b[0],b[1],b[2],b[3]); "
+            "return r.status + ':' + sig + ':' + b.length; })()" % pdf_list[0])
+    check("ملف القائمة PDF حقيقي (%PDF)", str(ok).startswith("200:%PDF"), str(ok))
+
+opened.clear()
+requests.clear()
+download_menu(263, wait=9)      # Print
+tabs = json.load(urllib.request.urlopen(f"{DEVTOOLS}/json/list"))
+list_print = [t for t in tabs if "/exports/lists/" in t.get("url", "")]
+check("صفحة طباعة القائمة اتفتحت", len(list_print) > 0,
+      str([t.get("url", "")[:80] for t in tabs][-2:]))
 
 print("\n[5] أخطاء الـ console")
 check("مفيش أخطاء في console", len(errors) == 0, "; ".join(errors[:3]))

@@ -1963,6 +1963,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Opens a clean page for paper. In the print window, choose \"Save as PDF\" to keep it as a PDF file.'**
   String get printHintWhenNoPdf;
+
+  /// No description provided for @downloadList.
+  ///
+  /// In en, this message translates to:
+  /// **'Download the list'**
+  String get downloadList;
+
+  /// No description provided for @exportListHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Download this list as it stands: Excel, CSV, PDF, or a page to print.'**
+  String get exportListHint;
 }
 
 class _AppLocalizationsDelegate

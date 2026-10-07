@@ -14,6 +14,7 @@ import '../invoice_status.dart';
 import '../providers/invoice_providers.dart';
 import 'invoice_detail_dialog.dart';
 import 'invoice_editor_screen.dart';
+import '../../../data/presentation/widgets/list_export_actions.dart';
 
 /// Sales and purchase invoices: the list, and the post/reverse actions.
 ///
@@ -108,6 +109,12 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
 
     return ModuleScaffold(
       title: isSales ? l10n.salesInvoices : l10n.purchaseInvoices,
+      actions: [
+        ListExportActions(
+          list: isSales ? 'sales-invoices' : 'purchase-invoices',
+          filters: {'status': ?(_status.isEmpty ? null : _status)},
+        ),
+      ],
       trailing: Row(
         children: [
           DropdownButton<String>(

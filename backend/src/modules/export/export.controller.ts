@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   Query,
@@ -13,6 +14,7 @@ import { AuthUser, CurrentUser } from '../../common/decorators/current-user.deco
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ExportQueryDto } from './dto/export-query.dto';
+import { ListTablesService } from './list-tables.service';
 import {
   EXPORTABLE_REPORTS,
   ExportableReport,
@@ -37,6 +39,7 @@ export class ExportController {
     private readonly tables: ReportTablesService,
     private readonly prisma: PrismaService,
     private readonly pdf: PdfService,
+    private readonly lists: ListTablesService,
   ) {}
 
   /// What this installation can produce, so the screen only offers buttons
@@ -52,6 +55,108 @@ export class ExportController {
       formats: this.pdf.available ? ['xlsx', 'csv', 'pdf'] : ['xlsx', 'csv'],
       pdfOnTheServer: this.pdf.available,
     };
+  }
+
+/// ───────────────────────────────── the everyday lists, as files
+
+  /// Which lists can be downloaded, so the client can build a menu without
+  /// hardcoding names that might change.
+  @Get('lists')
+  catalogue() {
+    return { items: this.lists.catalogue() };
+  }
+
+  /// A list as a file: .xlsx by default, .csv on request.
+  @Get('lists/:list/download')
+  @AllowQueryToken()
+  async listFile(
+    @CurrentUser() user: AuthUser,
+    @Param('list') list: string,
+    @Query() query: ExportQueryDto & Record<string, string>,
+    @Res() response: Response,
+  ): Promise<void> {
+    const spec = this.lists.known(list);
+    this.allowed(user, spec.permission);
+
+    const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
+    const table = await this.lists.build(list, user.companyId, query);
+    const companyName = await this.companyName(user.companyId);
+    const stamp = this.stamp();
+
+    if (query.format === 'csv') {
+      this.send(
+        response,
+        toCsv(table, lang, companyName),
+        'text/csv; charset=utf-8',
+        `${list}-${stamp}.csv`,
+      );
+      return;
+    }
+    if (query.format && query.format !== 'xlsx') {
+      throw new BadRequestException(
+        `Unknown format "${query.format}". Use format=xlsx or format=csv.`,
+      );
+    }
+
+    this.send(
+      response,
+      await toXlsx(table, lang, companyName),
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      `${list}-${stamp}.xlsx`,
+    );
+  }
+
+  /// A list as a PDF, downloaded straight away.
+  @Get('lists/:list/pdf')
+  @AllowQueryToken()
+  async listPdf(
+    @CurrentUser() user: AuthUser,
+    @Param('list') list: string,
+    @Query() query: ExportQueryDto & Record<string, string>,
+    @Res() response: Response,
+  ): Promise<void> {
+    const spec = this.lists.known(list);
+    this.allowed(user, spec.permission);
+
+    const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
+    const table = await this.lists.build(list, user.companyId, query);
+    const companyName = await this.companyName(user.companyId);
+
+    const html = toPrintHtml(table, lang, companyName, { autoPrint: false });
+    this.send(response, await this.pdf.render(html), 'application/pdf', `${list}-${this.stamp()}.pdf`);
+  }
+
+  /// A list as a page to print.
+  @Get('lists/:list/print')
+  @AllowQueryToken()
+  async listPrint(
+    @CurrentUser() user: AuthUser,
+    @Param('list') list: string,
+    @Query() query: ExportQueryDto & Record<string, string>,
+    @Res() response: Response,
+  ): Promise<void> {
+    const spec = this.lists.known(list);
+    this.allowed(user, spec.permission);
+
+    const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
+    const table = await this.lists.build(list, user.companyId, query);
+    const companyName = await this.companyName(user.companyId);
+
+    const html = toPrintHtml(table, lang, companyName, {
+      autoPrint: query.auto === '1' || query.auto === 'true',
+    });
+    response.type('text/html; charset=utf-8');
+    response.setHeader('Cache-Control', 'no-store');
+    response.send(html);
+  }
+
+  /// The permission a list needs is the one its own screen already requires.
+  /// The controller checks it here because the list is chosen from the path.
+  private allowed(user: AuthUser, permission: string): void {
+    if (user.isSuperAdmin) return;
+    if (!user.permissions.includes(permission)) {
+      throw new ForbiddenException(`Missing permission: ${permission}`);
+    }
   }
 
   /// The spreadsheet: a real .xlsx that opens in Excel and in Google Sheets.
