@@ -27,6 +27,8 @@ echo   here but was reported missing above, the program is
 echo   installed but Windows does not know where it is.
 echo.
 
+call :probe "%LOCALAPPDATA%\kayan-tools\node\node.exe"                  "Node.js (portable)"
+call :probe "%LOCALAPPDATA%\kayan-tools\pgsql\bin\psql.exe"             "PostgreSQL (portable)"
 call :probe "C:\Program Files\nodejs\node.exe"                          "Node.js"
 call :probe "C:\Program Files\nodejs\npm.cmd"                           "npm"
 call :probe "C:\Program Files\PostgreSQL"                               "PostgreSQL folder"

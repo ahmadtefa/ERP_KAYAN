@@ -9,11 +9,11 @@ echo ============================================================
 echo.
 
 REM ---------------------------------------------- 1. pull from GitHub
-echo [1/4] Pulling the latest changes from GitHub...
+echo [1/5] Pulling the latest changes from GitHub...
 git pull --ff-only
 if errorlevel 1 (
   echo.
-  echo [!] Pull failed. The usual cause is local edits that conflict
+  echo [WARNING] Pull failed. The usual cause is local edits that conflict
   echo     with the incoming changes.
   echo.
   echo     To keep your edits for later:
@@ -31,8 +31,16 @@ if errorlevel 1 (
 for /f "delims=" %%v in ('git rev-parse --short HEAD') do echo       now at %%v
 echo.
 
-REM ---------------------------------------------- 2. is the API running?
-echo [2/4] Checking the API server...
+REM ---------------------------------------------- 2. is the database running?
+echo [2/5] Checking the database...
+call "%~dp0start-postgres.bat"
+if errorlevel 2 goto :nopg
+if errorlevel 1 goto :pgnostart
+echo       database is running.
+echo.
+
+REM ---------------------------------------------- 3. is the API running?
+echo [3/5] Checking the API server...
 curl -s -o nul -w "" --max-time 3 http://localhost:3000/api/v1/health 2>nul
 if errorlevel 1 (
   echo       API is not running - starting it in a new window...
@@ -49,7 +57,7 @@ if errorlevel 1 (
   call :waitforapi
   if errorlevel 1 (
     echo.
-    echo [!] The API did not respond within a minute.
+    echo [WARNING] The API did not respond within a minute.
     echo     Look at the "KAYAN ERP API" window for the actual error.
     echo.
     pause
@@ -62,7 +70,7 @@ if errorlevel 1 (
 echo.
 
 REM ---------------------------------------------- 3. packages
-echo [3/4] Getting Flutter packages...
+echo [4/5] Getting Flutter packages...
 call flutter pub get
 if errorlevel 1 (
   echo [X] flutter pub get failed. Is Flutter on PATH?
@@ -72,7 +80,7 @@ if errorlevel 1 (
 echo.
 
 REM ---------------------------------------------- 4. run
-echo [4/4] Starting the client in Chrome...
+echo [5/5] Starting the client in Chrome...
 echo.
 echo ------------------------------------------------------------
 echo   Sign in with:   admin  /  Admin@12345
@@ -97,4 +105,25 @@ curl -s -o nul --max-time 3 http://localhost:3000/api/v1/health 2>nul
 if not errorlevel 1 exit /b 0
 set /a WAITED+=3
 if %WAITED% lss 60 goto waitloop
+exit /b 1
+
+REM ---------------------------------------------------------------------
+REM  Database problems
+REM ---------------------------------------------------------------------
+:nopg
+echo.
+echo [X] PostgreSQL is not installed yet.
+echo     Run this once, then try again:
+echo         scripts\install-postgres-portable.bat
+echo.
+pause
+exit /b 1
+
+:pgnostart
+echo.
+echo [WARNING] PostgreSQL is installed but did not start.
+echo     Look at this file for the reason:
+echo         %LOCALAPPDATA%\kayan-tools\postgres.log
+echo.
+pause
 exit /b 1
