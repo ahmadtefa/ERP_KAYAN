@@ -112,7 +112,8 @@ sample data is in use.
 >
 > **On Windows?** A full step-by-step guide is in
 > [`RUN_LOCALLY.md`](RUN_LOCALLY.md) (Arabic), with helper scripts in
-> `scripts/`.
+> `scripts/`. Git commands are collected in
+> [`GIT_CHEATSHEET.md`](GIT_CHEATSHEET.md).
 
 The client needs the API running. Full Windows instructions are in
 [`backend/README.md`](backend/README.md); in short:
