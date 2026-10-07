@@ -629,4 +629,153 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get status => 'Status';
+
+  @override
+  String get users => 'Users';
+
+  @override
+  String get administration => 'Administration';
+
+  @override
+  String get auditTrail => 'Audit trail';
+
+  @override
+  String get newUser => 'New user';
+
+  @override
+  String get editUser => 'Edit user';
+
+  @override
+  String get usernameHelper =>
+      'This is the name used to sign in. \"admin\" is reserved.';
+
+  @override
+  String get fullNameEn => 'Name in English';
+
+  @override
+  String get fullNameAr => 'Name in Arabic';
+
+  @override
+  String get passwordHelper => 'At least 12 characters.';
+
+  @override
+  String get changePassword => 'Change password';
+
+  @override
+  String get passwordChanged =>
+      'Password changed, and the old sessions were ended.';
+
+  @override
+  String get confirmDeactivateUser =>
+      'This user will no longer be able to sign in. Continue?';
+
+  @override
+  String get searchUsers => 'Search users…';
+
+  @override
+  String get noUsers => 'No users';
+
+  @override
+  String get lastLogin => 'Last sign-in';
+
+  @override
+  String get never => 'Never signed in';
+
+  @override
+  String get superAdmin => 'Super administrator';
+
+  @override
+  String get roles => 'Roles';
+
+  @override
+  String get newRole => 'New role';
+
+  @override
+  String get editRole => 'Edit role';
+
+  @override
+  String get roleCode => 'Code';
+
+  @override
+  String get noRoles => 'No roles';
+
+  @override
+  String get systemRole => 'Built-in';
+
+  @override
+  String get customRole => 'Custom';
+
+  @override
+  String get deleteRole => 'Delete role';
+
+  @override
+  String get confirmDeleteRole => 'This role will be removed. Continue?';
+
+  @override
+  String get permissions => 'Permissions';
+
+  @override
+  String get setPermissions => 'Edit permissions';
+
+  @override
+  String get permissionsNote =>
+      'A built-in role: its permissions can be changed, but it cannot be renamed or removed.';
+
+  @override
+  String get action => 'Action';
+
+  @override
+  String get entity => 'Entity';
+
+  @override
+  String get when => 'When';
+
+  @override
+  String get by => 'By';
+
+  @override
+  String get noAuditLogs => 'Nothing has been recorded yet';
+
+  @override
+  String get refresh => 'Refresh';
+
+  @override
+  String get fiscalPeriods => 'Fiscal periods';
+
+  @override
+  String get newPeriod => 'New period';
+
+  @override
+  String get editPeriod => 'Edit period';
+
+  @override
+  String get periodCode => 'Code';
+
+  @override
+  String get startDate => 'Start date';
+
+  @override
+  String get endDate => 'End date';
+
+  @override
+  String get open => 'Open';
+
+  @override
+  String get closed => 'Closed';
+
+  @override
+  String get closedOn => 'Closed on';
+
+  @override
+  String get closePeriod => 'Close the period';
+
+  @override
+  String get confirmClosePeriod =>
+      'After closing, nothing can be posted inside this period — not an invoice and not a manual entry. Continue?';
+
+  @override
+  String get periodClosed => 'The period was closed';
+
+  @override
+  String get noPeriods => 'No fiscal periods yet';
 }

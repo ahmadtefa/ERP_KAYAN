@@ -1321,6 +1321,294 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Status'**
   String get status;
+
+  /// No description provided for @users.
+  ///
+  /// In en, this message translates to:
+  /// **'Users'**
+  String get users;
+
+  /// No description provided for @administration.
+  ///
+  /// In en, this message translates to:
+  /// **'Administration'**
+  String get administration;
+
+  /// No description provided for @auditTrail.
+  ///
+  /// In en, this message translates to:
+  /// **'Audit trail'**
+  String get auditTrail;
+
+  /// No description provided for @newUser.
+  ///
+  /// In en, this message translates to:
+  /// **'New user'**
+  String get newUser;
+
+  /// No description provided for @editUser.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit user'**
+  String get editUser;
+
+  /// No description provided for @usernameHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'This is the name used to sign in. \"admin\" is reserved.'**
+  String get usernameHelper;
+
+  /// No description provided for @fullNameEn.
+  ///
+  /// In en, this message translates to:
+  /// **'Name in English'**
+  String get fullNameEn;
+
+  /// No description provided for @fullNameAr.
+  ///
+  /// In en, this message translates to:
+  /// **'Name in Arabic'**
+  String get fullNameAr;
+
+  /// No description provided for @passwordHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'At least 12 characters.'**
+  String get passwordHelper;
+
+  /// No description provided for @changePassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Change password'**
+  String get changePassword;
+
+  /// No description provided for @passwordChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'Password changed, and the old sessions were ended.'**
+  String get passwordChanged;
+
+  /// No description provided for @confirmDeactivateUser.
+  ///
+  /// In en, this message translates to:
+  /// **'This user will no longer be able to sign in. Continue?'**
+  String get confirmDeactivateUser;
+
+  /// No description provided for @searchUsers.
+  ///
+  /// In en, this message translates to:
+  /// **'Search users…'**
+  String get searchUsers;
+
+  /// No description provided for @noUsers.
+  ///
+  /// In en, this message translates to:
+  /// **'No users'**
+  String get noUsers;
+
+  /// No description provided for @lastLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Last sign-in'**
+  String get lastLogin;
+
+  /// No description provided for @never.
+  ///
+  /// In en, this message translates to:
+  /// **'Never signed in'**
+  String get never;
+
+  /// No description provided for @superAdmin.
+  ///
+  /// In en, this message translates to:
+  /// **'Super administrator'**
+  String get superAdmin;
+
+  /// No description provided for @roles.
+  ///
+  /// In en, this message translates to:
+  /// **'Roles'**
+  String get roles;
+
+  /// No description provided for @newRole.
+  ///
+  /// In en, this message translates to:
+  /// **'New role'**
+  String get newRole;
+
+  /// No description provided for @editRole.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit role'**
+  String get editRole;
+
+  /// No description provided for @roleCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Code'**
+  String get roleCode;
+
+  /// No description provided for @noRoles.
+  ///
+  /// In en, this message translates to:
+  /// **'No roles'**
+  String get noRoles;
+
+  /// No description provided for @systemRole.
+  ///
+  /// In en, this message translates to:
+  /// **'Built-in'**
+  String get systemRole;
+
+  /// No description provided for @customRole.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom'**
+  String get customRole;
+
+  /// No description provided for @deleteRole.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete role'**
+  String get deleteRole;
+
+  /// No description provided for @confirmDeleteRole.
+  ///
+  /// In en, this message translates to:
+  /// **'This role will be removed. Continue?'**
+  String get confirmDeleteRole;
+
+  /// No description provided for @permissions.
+  ///
+  /// In en, this message translates to:
+  /// **'Permissions'**
+  String get permissions;
+
+  /// No description provided for @setPermissions.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit permissions'**
+  String get setPermissions;
+
+  /// No description provided for @permissionsNote.
+  ///
+  /// In en, this message translates to:
+  /// **'A built-in role: its permissions can be changed, but it cannot be renamed or removed.'**
+  String get permissionsNote;
+
+  /// No description provided for @action.
+  ///
+  /// In en, this message translates to:
+  /// **'Action'**
+  String get action;
+
+  /// No description provided for @entity.
+  ///
+  /// In en, this message translates to:
+  /// **'Entity'**
+  String get entity;
+
+  /// No description provided for @when.
+  ///
+  /// In en, this message translates to:
+  /// **'When'**
+  String get when;
+
+  /// No description provided for @by.
+  ///
+  /// In en, this message translates to:
+  /// **'By'**
+  String get by;
+
+  /// No description provided for @noAuditLogs.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing has been recorded yet'**
+  String get noAuditLogs;
+
+  /// No description provided for @refresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh'**
+  String get refresh;
+
+  /// No description provided for @fiscalPeriods.
+  ///
+  /// In en, this message translates to:
+  /// **'Fiscal periods'**
+  String get fiscalPeriods;
+
+  /// No description provided for @newPeriod.
+  ///
+  /// In en, this message translates to:
+  /// **'New period'**
+  String get newPeriod;
+
+  /// No description provided for @editPeriod.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit period'**
+  String get editPeriod;
+
+  /// No description provided for @periodCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Code'**
+  String get periodCode;
+
+  /// No description provided for @startDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Start date'**
+  String get startDate;
+
+  /// No description provided for @endDate.
+  ///
+  /// In en, this message translates to:
+  /// **'End date'**
+  String get endDate;
+
+  /// No description provided for @open.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get open;
+
+  /// No description provided for @closed.
+  ///
+  /// In en, this message translates to:
+  /// **'Closed'**
+  String get closed;
+
+  /// No description provided for @closedOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Closed on'**
+  String get closedOn;
+
+  /// No description provided for @closePeriod.
+  ///
+  /// In en, this message translates to:
+  /// **'Close the period'**
+  String get closePeriod;
+
+  /// No description provided for @confirmClosePeriod.
+  ///
+  /// In en, this message translates to:
+  /// **'After closing, nothing can be posted inside this period — not an invoice and not a manual entry. Continue?'**
+  String get confirmClosePeriod;
+
+  /// No description provided for @periodClosed.
+  ///
+  /// In en, this message translates to:
+  /// **'The period was closed'**
+  String get periodClosed;
+
+  /// No description provided for @noPeriods.
+  ///
+  /// In en, this message translates to:
+  /// **'No fiscal periods yet'**
+  String get noPeriods;
 }
 
 class _AppLocalizationsDelegate

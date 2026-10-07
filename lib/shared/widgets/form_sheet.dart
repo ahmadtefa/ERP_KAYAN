@@ -4,7 +4,7 @@ import '../../core/json/json_utils.dart';
 import '../extensions/l10n_extension.dart';
 
 /// What kind of input a field collects.
-enum FieldKind { text, multiline, decimal, integer, date, toggle, select }
+enum FieldKind { text, multiline, decimal, integer, date, toggle, select, multiSelect }
 
 /// One choice in a [FieldKind.select] field.
 class FieldOption {
@@ -87,6 +87,7 @@ class _FormSheetState extends State<_FormSheet> {
   final _controllers = <String, TextEditingController>{};
   final _toggles = <String, bool>{};
   final _selections = <String, String?>{};
+  final _multiSelections = <String, Set<String>>{};
 
   @override
   void initState() {
@@ -98,6 +99,10 @@ class _FormSheetState extends State<_FormSheet> {
           _toggles[field.key] = raw is bool ? raw : false;
         case FieldKind.select:
           _selections[field.key] = raw?.toString();
+        case FieldKind.multiSelect:
+          _multiSelections[field.key] = raw is List
+              ? raw.map((value) => value.toString()).toSet()
+              : <String>{};
         case FieldKind.date:
           _controllers[field.key] = TextEditingController(
             text: raw?.toString().split('T').first ?? '',
@@ -167,6 +172,11 @@ class _FormSheetState extends State<_FormSheet> {
         case FieldKind.select:
           final value = _selections[field.key];
           if (value != null && value.isNotEmpty) result[field.key] = value;
+        case FieldKind.multiSelect:
+          // Sent even when empty, because clearing every choice is a
+          // meaningful edit: a user with no roles, a role with no rights.
+          result[field.key] = (_multiSelections[field.key] ?? <String>{})
+              .toList(growable: false);
         default:
           final text = _controllers[field.key]!.text.trim();
           if (text.isNotEmpty) result[field.key] = text;
@@ -249,6 +259,44 @@ class _FormSheetState extends State<_FormSheet> {
                 : (value) => setState(() => _selections[field.key] = value),
           ),
         );
+      case FieldKind.multiSelect:
+      return Padding(
+        padding: padding,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(field.label, style: Theme.of(context).textTheme.labelLarge),
+            if (field.helper != null)
+              Text(field.helper!, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                for (final option in field.options)
+                  FilterChip(
+                    label: Text(option.label),
+                    selected:
+                        _multiSelections[field.key]?.contains(option.value) ??
+                        false,
+                    onSelected: widget.readOnly
+                        ? null
+                        : (selected) => setState(() {
+                            final chosen =
+                                _multiSelections[field.key] ?? <String>{};
+                            if (selected) {
+                              chosen.add(option.value);
+                            } else {
+                              chosen.remove(option.value);
+                            }
+                            _multiSelections[field.key] = chosen;
+                          }),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      );
       case FieldKind.date:
         return Padding(
           padding: padding,

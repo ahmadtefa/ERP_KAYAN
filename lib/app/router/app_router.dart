@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/accounting/presentation/screens/chart_of_accounts_screen.dart';
+import '../../features/accounting/presentation/screens/fiscal_periods_screen.dart';
+import '../../features/admin/presentation/screens/admin_screen.dart';
 import '../../features/accounting/presentation/screens/journal_entries_screen.dart';
 import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
@@ -34,6 +36,7 @@ class AppRoutes {
   static const dashboard = '/dashboard';
   static const chartOfAccounts = '/accounting/chart-of-accounts';
   static const journalEntries = '/accounting/journal-entries';
+  static const fiscalPeriods = '/accounting/fiscal-periods';
   static const customers = '/parties/customers';
   static const suppliers = '/parties/suppliers';
   static const items = '/inventory/items';
@@ -41,6 +44,7 @@ class AppRoutes {
   static const salesInvoices = '/sales/invoices';
   static const purchaseInvoices = '/purchases/invoices';
   static const reports = '/reports';
+  static const administration = '/administration';
   static const settings = '/settings';
 }
 
@@ -84,6 +88,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.dashboard, child: DashboardScreen()),
   (path: AppRoutes.journalEntries, child: JournalEntriesScreen()),
+  (path: AppRoutes.fiscalPeriods, child: FiscalPeriodsScreen()),
   (
     path: AppRoutes.customers,
     child: PartiesScreen(kind: PartyKind.customer),
@@ -104,5 +109,6 @@ const _shellRoutes = <({String path, Widget child})>[
   ),
   (path: AppRoutes.chartOfAccounts, child: ChartOfAccountsScreen()),
   (path: AppRoutes.reports, child: ReportsScreen()),
+  (path: AppRoutes.administration, child: AdminScreen()),
   (path: AppRoutes.settings, child: SettingsScreen()),
 ];

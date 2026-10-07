@@ -628,4 +628,151 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get status => 'الحالة';
+
+  @override
+  String get users => 'المستخدمون';
+
+  @override
+  String get administration => 'الإدارة';
+
+  @override
+  String get auditTrail => 'سجل التدقيق';
+
+  @override
+  String get newUser => 'مستخدم جديد';
+
+  @override
+  String get editUser => 'تعديل مستخدم';
+
+  @override
+  String get usernameHelper => 'ده اسم الدخول. الاسم admin محجوز للنظام.';
+
+  @override
+  String get fullNameEn => 'الاسم بالإنجليزية';
+
+  @override
+  String get fullNameAr => 'الاسم بالعربية';
+
+  @override
+  String get passwordHelper => '١٢ حرفاً على الأقل.';
+
+  @override
+  String get changePassword => 'تغيير كلمة المرور';
+
+  @override
+  String get passwordChanged => 'تم تغيير كلمة المرور وإنهاء الجلسات القديمة.';
+
+  @override
+  String get confirmDeactivateUser =>
+      'المستخدم ده مش هينفع يدخل تاني. تحب نكمل؟';
+
+  @override
+  String get searchUsers => 'ابحث عن مستخدم…';
+
+  @override
+  String get noUsers => 'مفيش مستخدمين';
+
+  @override
+  String get lastLogin => 'آخر دخول';
+
+  @override
+  String get never => 'لم يدخل بعد';
+
+  @override
+  String get superAdmin => 'مدير عام';
+
+  @override
+  String get roles => 'الأدوار';
+
+  @override
+  String get newRole => 'دور جديد';
+
+  @override
+  String get editRole => 'تعديل دور';
+
+  @override
+  String get roleCode => 'الكود';
+
+  @override
+  String get noRoles => 'مفيش أدوار';
+
+  @override
+  String get systemRole => 'نظامي';
+
+  @override
+  String get customRole => 'مخصص';
+
+  @override
+  String get deleteRole => 'حذف الدور';
+
+  @override
+  String get confirmDeleteRole => 'الدور ده هيتحذف نهائياً. تحب نكمل؟';
+
+  @override
+  String get permissions => 'الصلاحيات';
+
+  @override
+  String get setPermissions => 'تعديل الصلاحيات';
+
+  @override
+  String get permissionsNote =>
+      'دور نظامي: تقدر تعدّل صلاحياته، لكن مش ينفع تسمّيه من جديد ولا تحذفه.';
+
+  @override
+  String get action => 'الإجراء';
+
+  @override
+  String get entity => 'الكيان';
+
+  @override
+  String get when => 'الوقت';
+
+  @override
+  String get by => 'بواسطة';
+
+  @override
+  String get noAuditLogs => 'مفيش تسجيلات لسه';
+
+  @override
+  String get refresh => 'تحديث';
+
+  @override
+  String get fiscalPeriods => 'الفترات المالية';
+
+  @override
+  String get newPeriod => 'فترة جديدة';
+
+  @override
+  String get editPeriod => 'تعديل فترة';
+
+  @override
+  String get periodCode => 'الكود';
+
+  @override
+  String get startDate => 'من تاريخ';
+
+  @override
+  String get endDate => 'إلى تاريخ';
+
+  @override
+  String get open => 'مفتوحة';
+
+  @override
+  String get closed => 'مقفلة';
+
+  @override
+  String get closedOn => 'تاريخ الإقفال';
+
+  @override
+  String get closePeriod => 'إقفال الفترة';
+
+  @override
+  String get confirmClosePeriod =>
+      'بعد الإقفال مش هينفع أي ترحيل جوه الفترة دي، لا فواتير ولا قيود يدوية. تحب نكمل؟';
+
+  @override
+  String get periodClosed => 'تم إقفال الفترة';
+
+  @override
+  String get noPeriods => 'مفيش فترات مالية لسه';
 }

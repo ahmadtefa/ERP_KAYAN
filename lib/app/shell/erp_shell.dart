@@ -82,6 +82,11 @@ class ErpShell extends ConsumerWidget {
         Icons.menu_book_outlined,
         l10n.journalEntries,
       ),
+      _NavItem(
+        AppRoutes.fiscalPeriods,
+        Icons.event_available_outlined,
+        l10n.fiscalPeriods,
+      ),
       _NavItem(AppRoutes.customers, Icons.people_outline, l10n.customers),
       _NavItem(AppRoutes.suppliers, Icons.local_shipping_outlined, l10n.suppliers),
       _NavItem(AppRoutes.items, Icons.category_outlined, l10n.items),
@@ -102,6 +107,11 @@ class ErpShell extends ConsumerWidget {
         l10n.chartOfAccounts,
       ),
       _NavItem(AppRoutes.reports, Icons.bar_chart_outlined, l10n.reports),
+      _NavItem(
+        AppRoutes.administration,
+        Icons.admin_panel_settings_outlined,
+        l10n.administration,
+      ),
       _NavItem(AppRoutes.settings, Icons.settings_outlined, l10n.settings),
     ];
   }

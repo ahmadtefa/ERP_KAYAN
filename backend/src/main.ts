@@ -1,10 +1,16 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { ProblemDetailsFilter } from './common/filters/problem-details.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+  });
   const logger = new Logger('Bootstrap');
 
   app.setGlobalPrefix('api/v1');
@@ -49,6 +55,34 @@ async function bootstrap() {
     },
     credentials: true,
   });
+
+  // If a built copy of the web client sits next to the API, serve it from the
+  // same address. One origin means no CORS, no second port to remember, and the
+  // browser address is the address of the program itself.
+  //
+  //   cd backend && npm run build        (or: flutter build web first)
+  //
+  // The folder is optional: without it the API behaves exactly as before and
+  // the client is served by its own dev server.
+  const webRoot = join(process.cwd(), '..', 'build', 'web');
+  if (existsSync(join(webRoot, 'index.html'))) {
+    app.useStaticAssets(webRoot);
+    // Any other path that is not part of the API belongs to the client's own
+    // routing, so hand back the page and let the client route it.
+    const server = app.getHttpAdapter().getInstance();
+    server.get(
+      /^\/(?!api\/).*/,
+      (
+        _request: unknown,
+        response: { sendFile: (path: string) => void },
+      ) => response.sendFile(join(webRoot, 'index.html')),
+    );
+    logger.log(`Serving the web client from ${webRoot}`);
+  } else {
+    logger.log(
+      'No web build found; the client is served by its own dev server',
+    );
+  }
 
   // Listen on all interfaces so the API is reachable from other devices on
   // the local network (phones/tablets), not only from localhost.
