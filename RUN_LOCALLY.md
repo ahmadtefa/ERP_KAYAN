@@ -4,6 +4,23 @@
 
 ---
 
+## ⚠️ مهم جداً: إنت شغال على أي ترمنال؟
+
+VS Code بيفتح **PowerShell** افتراضياً، واللي **بيفرق** في طريقة كتابة الأمر:
+
+| الترمنال | اكتب الأمر إزاي |
+| --- | --- |
+| **PowerShell** (اللي بيبدأ بـ `PS`) | ``.\`scripts\setup-windows.bat`` — **لازم نقطة وشخط** |
+| **Command Prompt** (CMD) | `scripts\setup-windows.bat` |
+
+> **عايز تبسّطها؟** خلي الترمنال الافتراضي Command Prompt:
+> اضغط `Ctrl + Shift + P` ← اكتب `Terminal: Select Default Profile` ← اختار **Command Prompt**
+> وبعدين اقفل الترمنال وافتحه تاني.
+
+**العلامة:** لو شايف `PS` في أول السطر يبقى PowerShell → استخدم `.\scripts\...`
+
+---
+
 ## قبل ما تبدأ — إيه اللي محتاجه؟
 
 | البرنامج | ليه؟ | منين |
@@ -52,8 +69,9 @@ git log --oneline -3
 
 في مجلد `ERP_KAYAN` افتح مجلد **`scripts`** وشغّل:
 
-```cmd
-scripts\setup-windows.bat
+```powershell
+.\scripts\setup-windows.bat      # PowerShell
+scripts\setup-windows.bat        # Command Prompt
 ```
 
 اضغط عليه بالماوس: **كليك يمين ← Run as administrator** (أو دبل كليك عادي).
@@ -123,8 +141,9 @@ npx ts-node prisma/seed.ts
 
 لو المشروع عندك على الجهاز خلاص وتيجي كل مرة تسحب آخر التعديلات وتشغّل:
 
-```cmd
-scripts\pull-and-run.bat
+```powershell
+.\scripts\pull-and-run.bat       # PowerShell
+scripts\pull-and-run.bat         # Command Prompt
 ```
 
 بيعمل كل حاجة:
@@ -137,8 +156,9 @@ scripts\pull-and-run.bat
 
 ## الخطوة 3: شغّل السيرفر
 
-```cmd
-scripts\start-backend.bat
+```powershell
+.\scripts\start-backend.bat      # PowerShell
+scripts\start-backend.bat        # Command Prompt
 ```
 
 أو يدوياً:
