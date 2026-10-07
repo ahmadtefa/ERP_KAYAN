@@ -18,6 +18,7 @@ import {
   ExportableReport,
   ReportTablesService,
 } from './report-tables.service';
+import { PdfService } from './pdf.service';
 import { Lang, toCsv, toPrintHtml, toXlsx } from './writers';
 
 /// Downloadable files and a printable page for every report.
@@ -35,7 +36,23 @@ export class ExportController {
   constructor(
     private readonly tables: ReportTablesService,
     private readonly prisma: PrismaService,
+    private readonly pdf: PdfService,
   ) {}
+
+  /// What this installation can produce, so the screen only offers buttons
+  /// that work.
+  ///
+  /// xlsx and csv are written by the program itself and are always available.
+  /// A PDF needs a browser on the machine to lay out Arabic; when there is
+  /// none, the print button still works and saves the same file from the
+  /// browser's own print dialogue.
+  @Get('capabilities')
+  async capabilities() {
+    return {
+      formats: this.pdf.available ? ['xlsx', 'csv', 'pdf'] : ['xlsx', 'csv'],
+      pdfOnTheServer: this.pdf.available,
+    };
+  }
 
   /// The spreadsheet: a real .xlsx that opens in Excel and in Google Sheets.
   @Get(':report/download')
@@ -73,6 +90,30 @@ export class ExportController {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       `${slug}-${this.stamp()}.xlsx`,
     );
+  }
+
+  /// The report as a PDF file, downloaded straight away.
+  ///
+  /// The same page the print button opens, handed to a browser on the server
+  /// and saved as a PDF. One click, no dialogue.
+  @Get(':report/pdf')
+  @AllowQueryToken()
+  @RequirePermissions('reports.read')
+  async pdfFile(
+    @CurrentUser() user: AuthUser,
+    @Param('report') report: string,
+    @Query() query: ExportQueryDto,
+    @Res() response: Response,
+  ): Promise<void> {
+    const slug = this.known(report);
+    const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
+    const table = await this.tables.build(slug, user.companyId, query, lang);
+    const companyName = await this.companyName(user.companyId);
+
+    const html = toPrintHtml(table, lang, companyName, { autoPrint: false });
+    const body = await this.pdf.render(html);
+
+    this.send(response, body, 'application/pdf', `${slug}-${this.stamp()}.pdf`);
   }
 
   /// The printable page: opens in a tab, and the browser turns it into a PDF.

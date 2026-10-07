@@ -50,6 +50,24 @@ class ReportLinkBuilder {
     return '$_base/exports/$report/download?${_encode(query)}';
   }
 
+  /// The report as a PDF file, made by the server.
+  Future<String> pdf({
+    required String report,
+    required String language,
+    String? from,
+    String? to,
+    String? accountId,
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      'from': ?from,
+      'to': ?to,
+      'accountId': ?accountId,
+      'token': await _token(),
+    };
+    return '$_base/exports/$report/pdf?${_encode(query)}';
+  }
+
   /// The print page. `auto` opens the print dialogue by itself.
   Future<String> print({
     required String report,
@@ -305,6 +323,50 @@ String describeApiError(Object error) {
   }
   return error.toString();
 }
+
+/// What this installation can produce.
+///
+/// A PDF needs a browser on the server to lay out Arabic. Where there is none,
+/// the PDF button is not shown at all rather than shown and then failing - and
+/// the print button, which always works, says how to get the same file.
+class ExportCapabilities {
+  const ExportCapabilities({
+    required this.formats,
+    required this.pdfOnTheServer,
+  });
+
+  final List<String> formats;
+  final bool pdfOnTheServer;
+
+  static const ExportCapabilities unknown = ExportCapabilities(
+    formats: ['xlsx', 'csv'],
+    pdfOnTheServer: false,
+  );
+
+  factory ExportCapabilities.from(Map<String, dynamic> data) {
+    return ExportCapabilities(
+      formats: (data['formats'] as List? ?? const ['xlsx', 'csv'])
+          .map((value) => '$value')
+          .toList(),
+      pdfOnTheServer: data['pdfOnTheServer'] == true,
+    );
+  }
+}
+
+/// Asked once when the app starts; the answer does not change while it runs.
+final exportCapabilitiesProvider = FutureProvider<ExportCapabilities>((ref) async {
+  try {
+    final response = await ref.read(apiClientProvider).raw.get<Map<String, dynamic>>(
+          '/exports/capabilities',
+        );
+    return ExportCapabilities.from(
+      Map<String, dynamic>.from(response.data ?? const {}),
+    );
+  } catch (_) {
+    // A server that cannot answer is a server that cannot make a PDF.
+    return ExportCapabilities.unknown;
+  }
+});
 
 /// What the company holds right now, for the backup screen's summary.
 final backupSummaryProvider = FutureProvider<Map<String, dynamic>>(

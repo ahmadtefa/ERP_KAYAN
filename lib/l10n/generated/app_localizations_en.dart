@@ -795,7 +795,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get exportCsv => 'CSV';
 
   @override
-  String get print => 'Print / PDF';
+  String get print => 'Print';
 
   @override
   String get chooseAccountFirst => 'Choose an account first';
@@ -959,5 +959,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get printPdfHint =>
+      'Opens a clean page for paper, ready for any printer.';
+
+  @override
+  String get exportPdf => 'PDF';
+
+  @override
+  String get printHintWhenNoPdf =>
       'Opens a clean page for paper. In the print window, choose \"Save as PDF\" to keep it as a PDF file.';
 }

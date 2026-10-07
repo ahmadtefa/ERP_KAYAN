@@ -1643,7 +1643,7 @@ abstract class AppLocalizations {
   /// No description provided for @print.
   ///
   /// In en, this message translates to:
-  /// **'Print / PDF'**
+  /// **'Print'**
   String get print;
 
   /// No description provided for @chooseAccountFirst.
@@ -1949,8 +1949,20 @@ abstract class AppLocalizations {
   /// No description provided for @printPdfHint.
   ///
   /// In en, this message translates to:
-  /// **'Opens a clean page for paper. In the print window, choose \"Save as PDF\" to keep it as a PDF file.'**
+  /// **'Opens a clean page for paper, ready for any printer.'**
   String get printPdfHint;
+
+  /// No description provided for @exportPdf.
+  ///
+  /// In en, this message translates to:
+  /// **'PDF'**
+  String get exportPdf;
+
+  /// No description provided for @printHintWhenNoPdf.
+  ///
+  /// In en, this message translates to:
+  /// **'Opens a clean page for paper. In the print window, choose \"Save as PDF\" to keep it as a PDF file.'**
+  String get printHintWhenNoPdf;
 }
 
 class _AppLocalizationsDelegate

@@ -159,7 +159,7 @@ shot("20-reports-ready")
 
 print("\n[1] زرار Excel")
 opened.clear()
-click(1161, 197)        # the Excel button
+click(1066, 197)        # the Excel button
 time.sleep(7)
 xlsx_urls = [url for url in opened if "format=xlsx" in url]
 check("زرار Excel ندى نداء فتح للملف", len(xlsx_urls) > 0, str(opened[-3:]))
@@ -186,7 +186,7 @@ if xlsx:
 
 print("\n[2] زرار CSV")
 opened.clear()
-click(1261, 197)        # the CSV button
+click(1167, 197)        # the CSV button
 time.sleep(7)
 csv_urls = [url for url in opened if "format=csv" in url]
 check("زرار CSV ندى نداء فتح للملف", len(csv_urls) > 0, str(opened[-3:]))
@@ -202,10 +202,23 @@ if csv:
         head = handle.read(3)
     check("ملف CSV فيه علامة BOM للعربي", head == b"\xef\xbb\xbf", str(head))
 
-print("\n[3] زرار الطباعة")
+print("\n[3] زرار PDF")
+opened.clear()
+click(1272, 197)        # the PDF button
+time.sleep(14)
+pdf_urls = [url for url in opened if "/pdf" in url]
+check("زرار PDF ندى نداء فتح للملف", len(pdf_urls) > 0, str(opened[-3:]))
+if pdf_urls:
+    ok = js("(async () => { const r = await fetch('%s'.replace(/^.*?(\\/api\\/v1.*)$/, '$1')); "
+            "const b = new Uint8Array(await r.arrayBuffer()); "
+            "const sig = String.fromCharCode(b[0],b[1],b[2],b[3]); "
+            "return r.status + ':' + sig + ':' + b.length; })()" % pdf_urls[0])
+    check("الرد ملف PDF حقيقي (%PDF)", str(ok).startswith("200:%PDF"), str(ok))
+
+print("\n[4] زرار الطباعة")
 requests.clear()
 before = len(json.load(urllib.request.urlopen(f"{DEVTOOLS}/json/list")))
-click(1368, 197)        # the Print button
+click(1373, 197)        # the Print button
 time.sleep(9)
 tabs = json.load(urllib.request.urlopen(f"{DEVTOOLS}/json/list"))
 after = len(tabs)
@@ -228,7 +241,7 @@ if shots:
             break
     check("صفحة الطباعة فيها أرقام التقرير", "Trial balance" in text or "ميزان" in text, text[:120])
 
-print("\n[4] أخطاء الـ console")
+print("\n[5] أخطاء الـ console")
 check("مفيش أخطاء في console", len(errors) == 0, "; ".join(errors[:3]))
 
 print("\n  حالات التنزيل:", [item for item in downloads_started if "." in item or item in ("completed","canceled","inProgress")][-6:])

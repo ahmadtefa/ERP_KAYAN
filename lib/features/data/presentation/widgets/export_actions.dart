@@ -5,14 +5,14 @@ import '../../../../core/platform/browser_actions.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../providers/data_providers.dart';
 
-/// The download and print buttons that sit above a report.
+/// The ways out of a report: a spreadsheet, a plain file, a PDF, or paper.
 ///
-/// One place, used by every report, so the three ways out of a report - a
-/// spreadsheet, a CSV, or paper - always look and behave the same.
+/// One place, used by every report, so all four always look and behave the
+/// same and always describe the period and the account currently on screen.
 ///
-/// The link carries the access token, because the browser fetches it in a new
+/// The links carry the access token, because the browser fetches them in a new
 /// tab and a tab cannot send an Authorization header. The server accepts a
-/// token in the address on these two routes and nowhere else.
+/// token in the address on these routes and nowhere else.
 class ReportExportActions extends ConsumerWidget {
   const ReportExportActions({
     super.key,
@@ -40,6 +40,12 @@ class ReportExportActions extends ConsumerWidget {
     final language = Localizations.localeOf(context).languageCode;
     final links = ref.read(reportLinkProvider);
     final ready = !_needsAccount || (accountId?.isNotEmpty ?? false);
+
+    // Whether this installation can make a PDF by itself. Until the answer
+    // arrives the PDF button is not offered - a button that appears and then
+    // fails is worse than one that was never there.
+    final capabilities = ref.watch(exportCapabilitiesProvider);
+    final pdfReady = capabilities.asData?.value.pdfOnTheServer ?? false;
 
     Future<void> go(Future<String> link) async {
       final url = await link;
@@ -83,9 +89,27 @@ class ReportExportActions extends ConsumerWidget {
           icon: const Icon(Icons.description_outlined, size: 18),
           label: Text(l10n.exportCsv),
         ),
+        if (pdfReady)
+          FilledButton.tonalIcon(
+            onPressed: ready
+                ? () => go(
+                      links.pdf(
+                        report: report,
+                        language: language,
+                        from: from,
+                        to: to,
+                        accountId: accountId,
+                      ),
+                    )
+                : null,
+            icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+            label: Text(l10n.exportPdf),
+          ),
         Tooltip(
-          message: l10n.printPdfHint,
-          child: FilledButton.tonalIcon(
+          // Where the server cannot make a PDF, this button is the way to get
+          // one, so the tooltip says which dialogue option saves the file.
+          message: pdfReady ? l10n.printPdfHint : l10n.printHintWhenNoPdf,
+          child: OutlinedButton.icon(
             onPressed: ready
                 ? () => go(
                       links.print(
@@ -97,7 +121,7 @@ class ReportExportActions extends ConsumerWidget {
                       ),
                     )
                 : null,
-            icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+            icon: const Icon(Icons.print_outlined, size: 18),
             label: Text(l10n.print),
           ),
         ),
