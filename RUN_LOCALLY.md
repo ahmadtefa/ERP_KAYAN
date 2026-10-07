@@ -385,6 +385,29 @@ flutter run --dart-define=API_BASE_URL=http://192.168.1.5:3000/api/v1
 
 ---
 
+## ⚠️ النوافذ اللي لازم تفضل مفتوحة
+
+النظام محتاج **نافذتين** يشتغلوا مع بعض:
+
+| النافذة | وظيفتها | تقفلها؟ |
+| --- | --- | --- |
+| `KAYAN ERP API` | 🖥️ السيرفر (backend) | ❌ **لأ** |
+| نافذة `pull-and-run` | 🎨 الواجهة (Flutter) | ❌ **لأ** |
+
+**لو قفلت نافذة السيرفر** → البرنامج هيكتب `cannot reach the server check your connection or the api adress`
+
+**الحل في الحالة دي:**
+
+```powershell
+.\scripts\start-backend.bat
+```
+
+استنى لحد ما تشوف `API listening on http://localhost:3000/api/v1`، وبعدين اضغط `F5` في البرنامج.
+
+> 💡 لو عايز تقفل كل حاجة، اقفل الاتنين مع بعض — وبعدين تشغّل `pull-and-run.bat` تاني عادي.
+
+---
+
 ## إيقاف النظام
 
 - **السيرفر:** روح على نافذته واضغط `Ctrl + C`

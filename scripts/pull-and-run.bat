@@ -52,7 +52,7 @@ if errorlevel 1 (
     pause
     exit /b 1
   )
-  start "KAYAN ERP API" cmd /k "cd /d ""%~dp0..\backend"" && npm run start:dev"
+  start "KAYAN ERP API" cmd /k call "%~dp0run-api.bat"
   echo       waiting for the API to come up...
   call :waitforapi
   if errorlevel 1 (
@@ -85,6 +85,10 @@ echo.
 echo ------------------------------------------------------------
 echo   Sign in with:   admin  /  Admin@12345
 echo ------------------------------------------------------------
+echo.
+echo   A window called "KAYAN ERP API" is running the server.
+echo   KEEP IT OPEN. Closing it stops the server and the client
+echo   will stop working until you start it again.
 echo.
 call flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:3000/api/v1
 
