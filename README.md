@@ -3,18 +3,38 @@
 Cross-platform enterprise resource planning client (Flutter), targeting **Android,
 iOS, Windows, macOS, Linux and Web** from a single codebase.
 
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| `lib/` | Flutter client (Android, iOS, Windows, macOS, Linux, Web) |
+| `backend/` | NestJS API server — the only component that talks to the database |
+| `docker-compose.yml` | Local / on-premise deployment of PostgreSQL + API |
+
 ## Status
 
-Early foundation. The architecture, core services, localization and the
-accounting domain are in place; the interface currently covers authentication,
-the dashboard, the chart of accounts and settings. All other ERP modules are
-deliberately not implemented yet — see "Pending business decisions".
+**Backend:** working. Authentication (Argon2id + JWT access/refresh), company
+and branch scoping, chart of accounts, and journal entries with server-side
+double-entry validation, server-generated document numbers, posting, reversal
+and an append-only audit trail. PostgreSQL schema with 14 tables and versioned
+migrations.
+
+**Client:** authentication, dashboard, chart of accounts (now reading from the
+real API) and settings are wired. All other ERP modules are deliberately not
+implemented — see "Pending business decisions".
 
 ## Architecture
 
 Feature-first layout with an inner clean-architecture split per feature:
 
 ```
+backend/                       # NestJS API server
+├── prisma/schema.prisma       # 14 tables; money is numeric(19,4)
+├── prisma/seed.ts             # development seed (company, admin, chart)
+└── src/
+    ├── common/                # guards, filters, decorators, audit, prisma
+    └── modules/               # auth, accounting, health
+
 lib/
 ├── main.dart                  # bootstrap: logging, ProviderScope
 ├── app/                       # application shell
@@ -45,7 +65,9 @@ Rules the codebase follows:
 - `domain` never imports `data` or `presentation`.
 - Only `app/` composes features; features do not import each other's internals.
 - The client never talks to a database. All data goes through the HTTP API.
-- Money is never a `double`.
+- Money is never a `double` — client uses `Decimal`, server uses `numeric(19,4)`.
+- The server enforces accounting rules; the client may hide UI but is never
+  the control.
 
 ## Accounting core
 
@@ -84,11 +106,29 @@ sample data is in use.
 
 ## Getting started
 
+The client needs the API running. Full Windows instructions are in
+[`backend/README.md`](backend/README.md); in short:
+
 ```bash
+# terminal 1 — database and API
+cd backend
+npm install
+npx prisma generate
+npx prisma migrate deploy
+npx ts-node prisma/seed.ts
+npm run start:dev            # http://localhost:3000/api/v1
+
+# terminal 2 — client
+cd ..
 flutter pub get
-flutter gen-l10n          # regenerate translations after editing .arb files
-flutter run -d chrome     # or: -d windows | -d macos | -d linux
+flutter gen-l10n             # regenerate translations after editing .arb files
+flutter run -d chrome        # or: -d windows | -d macos | -d linux
 ```
+
+Development sign-in: `admin` / `Admin@12345` — **change it before real use**.
+
+The client never connects to PostgreSQL. Every read and write goes through the
+API, which is the single source of truth.
 
 ## Quality gates
 
@@ -107,7 +147,7 @@ The following are intentionally not decided in code:
 
 | Area | Question |
 | --- | --- |
-| Backend technology | The API server has not been selected. The client is written against a REST contract; no server is assumed. |
+| Backend technology | **Decided:** NestJS + Prisma + PostgreSQL |
 | Tax / VAT rules | Rate source, rounding and the treatment of returns. |
 | Inventory costing | FIFO vs weighted average, and when COGS is recognised. |
 | Fiscal calendar | Fiscal-year start and period-locking policy. |
@@ -115,5 +155,6 @@ The following are intentionally not decided in code:
 | Permissions model | Role catalogue and whether approval workflows are required. |
 | Reporting | Required statutory reports and their layouts. |
 
-Sample data exists solely so the interface can be exercised before a backend
-is chosen. It is not persisted and is never a system of record.
+The API can now serve real data, so the development sample source is only
+used when no backend is reachable and only in development builds; the UI shows
+a banner whenever it is active. It is never a system of record.
