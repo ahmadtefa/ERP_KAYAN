@@ -20,9 +20,12 @@ echo.
 echo   Make sure start-backend.bat is already running in another
 echo   window, otherwise sign-in will fail.
 echo.
+echo   The client always opens at this address:
+echo       http://localhost:8080
+echo.
 echo ------------------------------------------------------------
 echo.
 
 call flutter pub get
-call flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:3000/api/v1
+call flutter run -d chrome --web-port=8080 --dart-define=API_BASE_URL=http://localhost:3000/api/v1
 pause

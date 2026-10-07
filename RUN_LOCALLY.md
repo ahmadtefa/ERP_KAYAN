@@ -394,6 +394,27 @@ flutter run --dart-define=API_BASE_URL=http://192.168.1.5:3000/api/v1
 | `KAYAN ERP API` | 🖥️ السيرفر (backend) | ❌ **لأ** |
 | نافذة `pull-and-run` | 🎨 الواجهة (Flutter) | ❌ **لأ** |
 
+### 🔗 عنوان البرنامج ثابت
+
+البرنامج بيفتح دايماً على العنوان ده:
+
+```
+http://localhost:8080
+```
+
+**اعمله Bookmark** — لو تاب المتصفح اتقفل، افتحه تاني عادي طول ما نافذة `pull-and-run` مفتوحة.
+
+> ℹ️ **مهم:** نافذة `pull-and-run` (اللي فيها `flutter run`) هي اللي بتخدم الصفحة دي.
+> لو قفلتها، العنوان مش هيفتح تاني.
+
+**عنوان فحص السيرفر:**
+```
+http://localhost:3000/api/v1/health
+```
+لو طلع `{"status":"ok","database":"up"}` يبقى السيرفر تمام.
+
+---
+
 **لو قفلت نافذة السيرفر** → البرنامج هيكتب `cannot reach the server check your connection or the api adress`
 
 **الحل في الحالة دي:**

@@ -90,7 +90,12 @@ echo   A window called "KAYAN ERP API" is running the server.
 echo   KEEP IT OPEN. Closing it stops the server and the client
 echo   will stop working until you start it again.
 echo.
-call flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:3000/api/v1
+echo   The client always opens at this address:
+echo       http://localhost:8080
+echo   Bookmark it. If the browser tab gets closed, just open it
+echo   again - as long as this window keeps running.
+echo.
+call flutter run -d chrome --web-port=8080 --dart-define=API_BASE_URL=http://localhost:3000/api/v1
 
 echo.
 echo Client stopped.
