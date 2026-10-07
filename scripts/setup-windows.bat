@@ -31,23 +31,46 @@ if errorlevel 1 (
 )
 for /f "delims=" %%v in ('node --version') do echo [OK] Node.js %%v
 
+REM  Find psql. It is normally on PATH, but a PostgreSQL that was
+REM  installed as a Windows service often is not, so look in the
+REM  usual install folders before giving up.
+set "PSQLDIR=onpath"
 where psql >nul 2>&1
-if errorlevel 1 (
-  echo [X] PostgreSQL was not found on PATH.
-  echo.
-  echo     Install PostgreSQL 17 from:
-  echo       https://www.postgresql.org/download/windows/
-  echo     During setup, remember the password you choose for the
-  echo     'postgres' superuser - you will need it in a moment.
-  echo.
-  echo     If PostgreSQL is installed but psql is still not found,
-  echo     add its bin folder to PATH, for example:
-  echo       C:\Program Files\PostgreSQL\17\bin
-  echo.
-  pause
-  exit /b 1
-)
-echo [OK] PostgreSQL client found
+if not errorlevel 1 goto :psqlfound
+
+set "PSQLDIR="
+for /f "delims=" %%d in ('dir /b /ad /o-n "C:\Program Files\PostgreSQL" 2^>nul') do if not defined PSQLDIR if exist "C:\Program Files\PostgreSQL\%%d\bin\psql.exe" set "PSQLDIR=C:\Program Files\PostgreSQL\%%d\bin"
+for /f "delims=" %%d in ('dir /b /ad /o-n "C:\Program Files (x86)\PostgreSQL" 2^>nul') do if not defined PSQLDIR if exist "C:\Program Files (x86)\PostgreSQL\%%d\bin\psql.exe" set "PSQLDIR=C:\Program Files (x86)\PostgreSQL\%%d\bin"
+if not defined PSQLDIR if exist "%LOCALAPPDATA%\kayan-tools\pgsql\bin\psql.exe" set "PSQLDIR=%LOCALAPPDATA%\kayan-tools\pgsql\bin"
+
+if not defined PSQLDIR goto :nopsql
+set "PATH=%PSQLDIR%;%PATH%"
+
+:psqlfound
+for /f "delims=" %%v in ('psql --version') do echo [OK] %%v
+echo      using psql from: %PSQLDIR%
+goto :psqldone
+
+:nopsql
+echo [X] PostgreSQL was not found.
+echo.
+echo     Check whether it is installed as a Windows service:
+echo       Get-Service *postgres*
+echo.
+echo     If a service is listed, it is installed and you do not need
+echo     to install anything - the client is just not on your PATH.
+echo     Tell whoever is helping you and they will point the scripts
+echo     at the right folder.
+echo.
+echo     If no service is listed, install PostgreSQL from:
+echo       https://www.postgresql.org/download/windows/
+echo     During setup, remember the password you choose for the
+echo     'postgres' superuser - you will need it in a moment.
+echo.
+pause
+exit /b 1
+
+:psqldone
 
 echo.
 echo ------------------------------------------------------------
