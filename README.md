@@ -106,6 +106,14 @@ sample data is in use.
 
 ## Getting started
 
+> **على ويندوز؟** فيه دليل عربي كامل خطوة بخطوة في
+> [`RUN_LOCALLY.md`](RUN_LOCALLY.md) — بشرح تنصيب البرامج وتشغيل كل حاجة.
+> وفيه سكربتات جاهزة في مجلد `scripts/` بتعمل الإعداد لوحدها.
+>
+> **On Windows?** A full step-by-step guide is in
+> [`RUN_LOCALLY.md`](RUN_LOCALLY.md) (Arabic), with helper scripts in
+> `scripts/`.
+
 The client needs the API running. Full Windows instructions are in
 [`backend/README.md`](backend/README.md); in short:
 
