@@ -85,7 +85,7 @@ echo.
 
 echo [5/5] Starting the database server
 echo.
-call "%~dp0start-postgres.bat"
+call "%~dp0start-postgres.bat" strict
 if errorlevel 3 goto :portbusy
 if errorlevel 1 goto :nostart
 "%PGBIN%\psql.exe" -U postgres -h 127.0.0.1 -t -A -c "select version();" 2>nul
