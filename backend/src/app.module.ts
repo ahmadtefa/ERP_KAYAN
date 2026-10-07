@@ -5,7 +5,9 @@ import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { AuditModule } from './common/audit/audit.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { RateLimitGuard } from './common/guards/rate-limit.guard';
 import { AccountingModule } from './modules/accounting/accounting.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
@@ -23,6 +25,7 @@ import { SalesModule } from './modules/sales/sales.module';
     AuditModule,
     AuthModule,
     AccountingModule,
+    AdminModule,
     PartiesModule,
     InventoryModule,
     SalesModule,
@@ -31,6 +34,9 @@ import { SalesModule } from './modules/sales/sales.module';
     HealthModule,
   ],
   providers: [
+    // Order matters. The rate limit runs before authentication, so a flood of
+    // password guesses is turned away before any hashing work happens.
+    { provide: APP_GUARD, useClass: RateLimitGuard },
     // Authentication is required everywhere unless a route is marked @Public().
     { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],

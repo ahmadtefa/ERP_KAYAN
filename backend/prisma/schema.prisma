@@ -51,6 +51,7 @@ model Company {
   stockMovements   StockMovement[]
   salesInvoices    SalesInvoice[]
   purchaseInvoices PurchaseInvoice[]
+  fiscalPeriods FiscalPeriod[]
 
   @@map("companies")
 }
@@ -417,6 +418,34 @@ model Supplier {
 
 /// A stock-keeping unit. Services are items with isStockTracked = false and
 /// never touch the inventory account.
+/// An accounting period. Everything posts inside one.
+///
+/// REQUIRES BUSINESS DECISION: the Egyptian fiscal year commonly follows the
+/// calendar year, but a company may be incorporated mid-year and use a
+/// different start. This model stores whatever the company actually uses; the
+/// seed creates the calendar year as the starting default.
+model FiscalPeriod {
+  id        String       @id @default(uuid()) @db.Uuid
+  companyId String       @db.Uuid
+  code      String       @db.VarChar(20)
+  nameEn    String
+  nameAr    String
+  startDate DateTime     @db.Date
+  endDate   DateTime     @db.Date
+  status    PeriodStatus @default(OPEN)
+
+  closedAt  DateTime?
+  closedBy  String?      @db.Uuid
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, code])
+  @@index([companyId, startDate, endDate])
+  @@map("fiscal_periods")
+}
+
 model Item {
   id       String  @id @default(uuid()) @db.Uuid
   companyId String @db.Uuid
@@ -514,6 +543,13 @@ model StockMovement {
 }
 
 // ═══════════════════════════════════════════════════════ sales & purchases
+
+/// A fiscal period can only be closed once its figures are final. Closing is
+/// what makes a year unchangeable, so it is a deliberate act, never automatic.
+enum PeriodStatus {
+  OPEN
+  CLOSED
+}
 
 enum InvoiceStatus {
   DRAFT

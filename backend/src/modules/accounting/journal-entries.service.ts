@@ -8,6 +8,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { DocumentNumberService } from './document-number.service';
 import { CreateJournalEntryDto, JournalLineDto } from './dto/create-journal-entry.dto';
+import { FiscalPeriodsService } from './fiscal-periods.service';
 
 const MONEY_SCALE = 4;
 
@@ -26,6 +27,7 @@ export class JournalEntriesService {
     private readonly prisma: PrismaService,
     private readonly numbers: DocumentNumberService,
     private readonly audit: AuditService,
+    private readonly periods: FiscalPeriodsService,
   ) {}
 
   async findAll(companyId: string, page = 1, pageSize = 50) {
@@ -200,6 +202,22 @@ export class JournalEntriesService {
 
     if (!entry.totalDebit.equals(entry.totalCredit)) {
       throw new BadRequestException('Journal entry is not balanced');
+    }
+
+    // A manual entry goes straight to the ledger, so it has to respect the
+    // same closed-period rule the documents do. Without this check a closed
+    // year could still be written to by hand.
+    const period = await this.periods.periodFor(
+      this.prisma,
+      companyId,
+      entry.entryDate,
+    );
+    if (period && period.status === 'CLOSED') {
+      throw new BadRequestException(
+        `Period ${period.code} is closed, so nothing can be posted on ${entry.entryDate
+          .toISOString()
+          .slice(0, 10)}`,
+      );
     }
 
     const updated = await this.prisma.journalEntry.update({

@@ -47,6 +47,10 @@ const PERMISSIONS: Array<[string, string, string, string]> = [
   ['purchases.invoices.post', 'Post and reverse purchase invoices', 'ترحيل وعكس فواتير الشراء', 'purchases'],
 
   ['reports.read', 'View reports', 'عرض التقارير', 'reports'],
+
+  ['accounting.periods.read', 'View fiscal periods', 'عرض الفترات المالية', 'accounting'],
+  ['accounting.periods.manage', 'Manage fiscal periods', 'إدارة الفترات المالية', 'accounting'],
+
 ];
 
 const ACCOUNTS: Array<{
@@ -161,8 +165,19 @@ async function main(): Promise<void> {
       create: { roleId: adminRole.id, permissionId: p.id },
     });
   }
+  // REQUIRES BUSINESS DECISION: the matrix below is a starting point, not a
+  // company rule. It is editable at any time from the roles screen, where the
+  // owner decides who may do what.
+  //
+  // The accountant keeps the books: the ledger, the parties, the stock and the
+  // reports. Sales and purchase invoices are added read-only, because
+  // reconciling receivables and payables needs to see them — raising and
+  // posting invoices belongs to whoever runs sales and purchasing.
   const accountantModules = ['accounting', 'parties', 'inventory', 'reports'];
-  for (const p of all.filter((p) => accountantModules.includes(p.module))) {
+  const accountantReadOnly = ['sales.invoices.read', 'purchases.invoices.read'];
+  for (const p of all.filter(
+    (p) => accountantModules.includes(p.module) || accountantReadOnly.includes(p.code),
+  )) {
     await prisma.rolePermission.upsert({
       where: {
         roleId_permissionId: { roleId: accountantRole.id, permissionId: p.id },
@@ -228,10 +243,28 @@ async function main(): Promise<void> {
     idByCode.set(a.code, account.id);
   }
 
+  // REQUIRES BUSINESS DECISION: the fiscal year below follows the calendar
+  // year, which is the usual Egyptian default. A company whose year starts in
+  // July closes this period and creates the one it actually uses.
+  const year = new Date().getUTCFullYear();
+  const period = await prisma.fiscalPeriod.upsert({
+    where: { companyId_code: { companyId: company.id, code: `FY${year}` } },
+    update: {},
+    create: {
+      companyId: company.id,
+      code: `FY${year}`,
+      nameEn: `Fiscal year ${year}`,
+      nameAr: `السنة المالية ${year}`,
+      startDate: new Date(Date.UTC(year, 0, 1)),
+      endDate: new Date(Date.UTC(year, 11, 31)),
+    },
+  });
+
   console.log('---------------------------------------------');
   console.log(' company  : %s (%s)', company.nameEn, company.code);
   console.log(' branch   : %s (%s)', branch.nameEn, branch.code);
   console.log(' accounts : %d', idByCode.size);
+  console.log(' period   : %s (%s)', period.code, period.status);
   console.log(' users    : admin / %s', devPassword);
   console.log('---------------------------------------------');
   console.log('Change this password before any real use.');

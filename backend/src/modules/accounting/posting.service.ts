@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { JournalStatus, Prisma } from '@prisma/client';
 import { DocumentNumberService } from './document-number.service';
+import { FiscalPeriodsService } from './fiscal-periods.service';
 
 const MONEY_SCALE = 4;
 
@@ -34,7 +35,10 @@ export interface PostingRequest {
  */
 @Injectable()
 export class PostingService {
-  constructor(private readonly numbers: DocumentNumberService) {}
+  constructor(
+    private readonly numbers: DocumentNumberService,
+    private readonly periods: FiscalPeriodsService,
+  ) {}
 
   async post(
     tx: Prisma.TransactionClient,
@@ -92,6 +96,17 @@ export class PostingService {
         `Accounts cannot receive postings: ${invalid.map((a) => a.code).join(', ')}`,
       );
     }
+    // A closed period is a finished year. Nothing may be added to it.
+    const entryDate = request.entryDate;
+    const period = await this.periods.periodFor(tx, request.companyId, entryDate);
+    if (period && period.status === 'CLOSED') {
+      throw new BadRequestException(
+        `Period ${period.code} is closed, so nothing can be posted on ${entryDate
+          .toISOString()
+          .slice(0, 10)}`,
+      );
+    }
+
 
     const entryNumber = await this.numbers.next(
       tx,
