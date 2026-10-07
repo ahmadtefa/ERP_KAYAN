@@ -1,0 +1,100 @@
+@echo off
+chcp 65001 >nul
+setlocal enabledelayedexpansion
+cd /d "%~dp0\.."
+
+echo ============================================================
+echo   KAYAN ERP  -  pull latest and run
+echo ============================================================
+echo.
+
+REM ---------------------------------------------- 1. pull from GitHub
+echo [1/4] Pulling the latest changes from GitHub...
+git pull --ff-only
+if errorlevel 1 (
+  echo.
+  echo [!] Pull failed. The usual cause is local edits that conflict
+  echo     with the incoming changes.
+  echo.
+  echo     To keep your edits for later:
+  echo         git stash
+  echo         git pull
+  echo         git stash pop
+  echo.
+  echo     To discard your local edits and match GitHub exactly:
+  echo         git fetch origin
+  echo         git reset --hard origin/main
+  echo.
+  pause
+  exit /b 1
+)
+for /f "delims=" %%v in ('git rev-parse --short HEAD') do echo       now at %%v
+echo.
+
+REM ---------------------------------------------- 2. is the API running?
+echo [2/4] Checking the API server...
+curl -s -o nul -w "" --max-time 3 http://localhost:3000/api/v1/health 2>nul
+if errorlevel 1 (
+  echo       API is not running - starting it in a new window...
+  if not exist "backend\.env" (
+    echo.
+    echo [X] backend\.env is missing, so the API cannot start.
+    echo     Run scripts\setup-windows.bat once, then try again.
+    echo.
+    pause
+    exit /b 1
+  )
+  start "KAYAN ERP API" cmd /k "cd /d ""%~dp0..\backend"" && npm run start:dev"
+  echo       waiting for the API to come up...
+  call :waitforapi
+  if errorlevel 1 (
+    echo.
+    echo [!] The API did not respond within a minute.
+    echo     Look at the "KAYAN ERP API" window for the actual error.
+    echo.
+    pause
+    exit /b 1
+  )
+  echo       API is up.
+) else (
+  echo       API is already running.
+)
+echo.
+
+REM ---------------------------------------------- 3. packages
+echo [3/4] Getting Flutter packages...
+call flutter pub get
+if errorlevel 1 (
+  echo [X] flutter pub get failed. Is Flutter on PATH?
+  pause
+  exit /b 1
+)
+echo.
+
+REM ---------------------------------------------- 4. run
+echo [4/4] Starting the client in Chrome...
+echo.
+echo ------------------------------------------------------------
+echo   Sign in with:   admin  /  Admin@12345
+echo ------------------------------------------------------------
+echo.
+call flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:3000/api/v1
+
+echo.
+echo Client stopped.
+pause
+exit /b 0
+
+REM ---------------------------------------------------------------------
+REM  Waits until the API answers, up to ~60 seconds. Runs as a subroutine
+REM  so no label sits inside an if block, which batch handles unreliably.
+REM ---------------------------------------------------------------------
+:waitforapi
+set /a WAITED=0
+:waitloop
+timeout /t 3 /nobreak >nul
+curl -s -o nul --max-time 3 http://localhost:3000/api/v1/health 2>nul
+if not errorlevel 1 exit /b 0
+set /a WAITED+=3
+if %WAITED% lss 60 goto waitloop
+exit /b 1
