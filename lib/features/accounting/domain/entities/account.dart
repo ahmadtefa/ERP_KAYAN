@@ -30,16 +30,16 @@ class Account {
   bool get isLeaf => isPostable;
 
   Account copyWith({String? name, bool? isActive, bool? isPostable}) => Account(
-        id: id,
-        companyId: companyId,
-        code: code,
-        name: name ?? this.name,
-        type: type,
-        parentId: parentId,
-        isPostable: isPostable ?? this.isPostable,
-        isActive: isActive ?? this.isActive,
-        currency: currency,
-      );
+    id: id,
+    companyId: companyId,
+    code: code,
+    name: name ?? this.name,
+    type: type,
+    parentId: parentId,
+    isPostable: isPostable ?? this.isPostable,
+    isActive: isActive ?? this.isActive,
+    currency: currency,
+  );
 
   @override
   String toString() => 'Account($code $name, $type)';

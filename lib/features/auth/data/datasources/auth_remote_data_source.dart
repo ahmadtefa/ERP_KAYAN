@@ -26,10 +26,10 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     required String username,
     required String password,
   }) {
-    return _client.post(_login, body: {
-      'username': username,
-      'password': password,
-    });
+    return _client.post(
+      _login,
+      body: {'username': username, 'password': password},
+    );
   }
 
   @override

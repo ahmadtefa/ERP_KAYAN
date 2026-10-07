@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Tokens are never written to shared preferences or to logs.
 class TokenStore {
   TokenStore({FlutterSecureStorage? secureStorage})
-      : _secure = secureStorage ?? const FlutterSecureStorage();
+    : _secure = secureStorage ?? const FlutterSecureStorage();
 
   final FlutterSecureStorage _secure;
 

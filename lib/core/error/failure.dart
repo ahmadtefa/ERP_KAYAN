@@ -20,7 +20,7 @@ sealed class Failure implements Exception {
 /// The device could not reach the server (offline, DNS, TLS, timeout).
 class NetworkFailure extends Failure {
   const NetworkFailure([super.message = 'Network unavailable', Object? cause])
-      : super(cause: cause);
+    : super(cause: cause);
 }
 
 /// The server rejected the request (4xx) with a business-level reason.
@@ -33,13 +33,13 @@ class ApiFailure extends Failure {
 /// Authentication is missing, expired or rejected.
 class AuthFailure extends Failure {
   const AuthFailure([super.message = 'Unauthorized', Object? cause])
-      : super(cause: cause);
+    : super(cause: cause);
 }
 
 /// The server failed (5xx) or returned a malformed payload.
 class ServerFailure extends Failure {
   const ServerFailure([super.message = 'Server error', Object? cause])
-      : super(cause: cause);
+    : super(cause: cause);
 }
 
 /// Input validation failed before any network call was attempted.

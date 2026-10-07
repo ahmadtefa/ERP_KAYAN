@@ -11,16 +11,15 @@ import '../../domain/repositories/auth_repository.dart';
 import '../../domain/usecases/sign_in_usecase.dart';
 
 /// Composition root for the authentication feature.
-final appConfigProvider =
-    Provider<AppConfig>((ref) => AppConfig.fromEnvironment());
+final appConfigProvider = Provider<AppConfig>(
+  (ref) => AppConfig.fromEnvironment(),
+);
 
 final tokenStoreProvider = Provider<TokenStore>((ref) => TokenStore());
 
 final apiClientProvider = Provider<ApiClient>(
-  (ref) => ApiClient(
-    ref.watch(appConfigProvider),
-    ref.watch(tokenStoreProvider),
-  ),
+  (ref) =>
+      ApiClient(ref.watch(appConfigProvider), ref.watch(tokenStoreProvider)),
 );
 
 final authRemoteDataSourceProvider = Provider<AuthRemoteDataSource>(
@@ -53,8 +52,10 @@ class AuthController extends AsyncNotifier<AppUser?> {
     required String password,
   }) async {
     state = const AsyncValue.loading();
-    final result =
-        await ref.read(signInUseCaseProvider)(username: username, password: password);
+    final result = await ref.read(signInUseCaseProvider)(
+      username: username,
+      password: password,
+    );
     state = AsyncValue.data(result.valueOrNull);
     return result;
   }
@@ -66,8 +67,9 @@ class AuthController extends AsyncNotifier<AppUser?> {
   }
 }
 
-final authControllerProvider =
-    AsyncNotifierProvider<AuthController, AppUser?>(AuthController.new);
+final authControllerProvider = AsyncNotifierProvider<AuthController, AppUser?>(
+  AuthController.new,
+);
 
 /// Convenience selector for the signed-in user, if any.
 final currentUserProvider = Provider<AppUser?>(

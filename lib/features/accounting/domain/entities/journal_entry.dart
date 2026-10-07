@@ -14,8 +14,8 @@ class JournalLine {
     Money? credit,
     this.description,
     this.costCenterId,
-  })  : debit = debit ?? Money.zero(_currencyOf(debit, credit)),
-        credit = credit ?? Money.zero(_currencyOf(debit, credit)) {
+  }) : debit = debit ?? Money.zero(_currencyOf(debit, credit)),
+       credit = credit ?? Money.zero(_currencyOf(debit, credit)) {
     if (this.debit.isNegative || this.credit.isNegative) {
       throw const ValidationFailure('Journal line amounts cannot be negative');
     }
@@ -39,8 +39,7 @@ class JournalLine {
   bool get isCredit => credit.isPositive;
 
   /// The line amount expressed with its natural sign, used for netting.
-  Money get signedAmount =>
-      isDebit ? debit : (isCredit ? -credit : debit);
+  Money get signedAmount => isDebit ? debit : (isCredit ? -credit : debit);
 
   static String _currencyOf(Money? a, Money? b) {
     final currency = a?.currency ?? b?.currency;

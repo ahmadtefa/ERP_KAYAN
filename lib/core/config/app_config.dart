@@ -15,6 +15,7 @@ class AppConfig {
     required this.connectTimeout,
     required this.receiveTimeout,
     this.enableLogging = false,
+    this.useSeedData = false,
   });
 
   final AppEnvironment environment;
@@ -23,14 +24,26 @@ class AppConfig {
   final Duration receiveTimeout;
   final bool enableLogging;
 
-  static const String _envName =
-      String.fromEnvironment('APP_ENV', defaultValue: 'development');
+  /// When true the client may fall back to locally generated seed records so
+  /// the UI can be exercised before a backend is available.
+  ///
+  /// REQUIRES BUSINESS DECISION: the real backend for this ERP has not been
+  /// selected yet, so seed data exists purely as a development aid. It is
+  /// never persisted and never treated as a system of record.
+  final bool useSeedData;
+
+  static const String _envName = String.fromEnvironment(
+    'APP_ENV',
+    defaultValue: 'development',
+  );
   static const String _baseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'http://localhost:8080/api/v1',
   );
-  static const bool _logging =
-      bool.fromEnvironment('ENABLE_LOGGING', defaultValue: true);
+  static const bool _logging = bool.fromEnvironment(
+    'ENABLE_LOGGING',
+    defaultValue: true,
+  );
 
   /// Builds the runtime configuration from compile-time dart-defines.
   factory AppConfig.fromEnvironment() {
@@ -47,6 +60,9 @@ class AppConfig {
       connectTimeout: const Duration(seconds: 20),
       receiveTimeout: const Duration(seconds: 30),
       enableLogging: _logging && env != AppEnvironment.production,
+      // Seed data is permitted in development only. Staging, production and
+      // on-premise builds must talk to a real API.
+      useSeedData: env == AppEnvironment.development,
     );
   }
 

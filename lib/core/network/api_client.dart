@@ -12,23 +12,21 @@ import '../storage/token_store.dart';
 ///  * translate transport errors into typed [Failure]s
 ///  * never log credentials, tokens or financial payloads
 class ApiClient {
-  ApiClient(
-    this._config,
-    this._tokenStore, {
-    Dio? dio,
-  })  : _dio = dio ??
-            Dio(
-              BaseOptions(
-                baseUrl: _config.apiBaseUrl,
-                connectTimeout: _config.connectTimeout,
-                receiveTimeout: _config.receiveTimeout,
-                contentType: Headers.jsonContentType,
-                responseType: ResponseType.json,
-                // Let the client handle non-2xx explicitly so we can map
-                // status codes to typed failures.
-                validateStatus: (status) => status != null && status < 500,
-              ),
-            ) {
+  ApiClient(this._config, this._tokenStore, {Dio? dio})
+    : _dio =
+          dio ??
+          Dio(
+            BaseOptions(
+              baseUrl: _config.apiBaseUrl,
+              connectTimeout: _config.connectTimeout,
+              receiveTimeout: _config.receiveTimeout,
+              contentType: Headers.jsonContentType,
+              responseType: ResponseType.json,
+              // Let the client handle non-2xx explicitly so we can map
+              // status codes to typed failures.
+              validateStatus: (status) => status != null && status < 500,
+            ),
+          ) {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
@@ -113,7 +111,8 @@ class ApiClient {
         return const NetworkFailure('Request cancelled');
       case DioExceptionType.badResponse:
         final status = e.response?.statusCode ?? 0;
-        final message = _extractMessage(e.response?.data) ??
+        final message =
+            _extractMessage(e.response?.data) ??
             'Request failed with status $status';
         if (status == 401 || status == 403) {
           return AuthFailure(message);

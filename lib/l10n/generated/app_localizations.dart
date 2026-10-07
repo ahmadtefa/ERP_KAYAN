@@ -140,6 +140,42 @@ abstract class AppLocalizations {
   /// **'Password is required'**
   String get passwordRequired;
 
+  /// No description provided for @invalidCredentials.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid username or password'**
+  String get invalidCredentials;
+
+  /// No description provided for @unexpectedError.
+  ///
+  /// In en, this message translates to:
+  /// **'An unexpected error occurred'**
+  String get unexpectedError;
+
+  /// No description provided for @networkError.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot reach the server. Check your connection or the API address.'**
+  String get networkError;
+
+  /// No description provided for @loading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading…'**
+  String get loading;
+
+  /// No description provided for @retry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get retry;
+
+  /// No description provided for @noData.
+  ///
+  /// In en, this message translates to:
+  /// **'No data to display'**
+  String get noData;
+
   /// No description provided for @welcomeBack.
   ///
   /// In en, this message translates to:
@@ -212,41 +248,173 @@ abstract class AppLocalizations {
   /// **'English'**
   String get english;
 
-  /// No description provided for @invalidCredentials.
+  /// No description provided for @systemDefault.
   ///
   /// In en, this message translates to:
-  /// **'Invalid username or password'**
-  String get invalidCredentials;
+  /// **'System default'**
+  String get systemDefault;
 
-  /// No description provided for @unexpectedError.
+  /// No description provided for @appearance.
   ///
   /// In en, this message translates to:
-  /// **'An unexpected error occurred'**
-  String get unexpectedError;
+  /// **'Appearance'**
+  String get appearance;
 
-  /// No description provided for @networkError.
+  /// No description provided for @signedInAs.
   ///
   /// In en, this message translates to:
-  /// **'Network error. Please check your connection.'**
-  String get networkError;
+  /// **'Signed in as'**
+  String get signedInAs;
 
-  /// No description provided for @loading.
+  /// No description provided for @company.
   ///
   /// In en, this message translates to:
-  /// **'Loading...'**
-  String get loading;
+  /// **'Company'**
+  String get company;
 
-  /// No description provided for @retry.
+  /// No description provided for @branch.
   ///
   /// In en, this message translates to:
-  /// **'Retry'**
-  String get retry;
+  /// **'Branch'**
+  String get branch;
+
+  /// No description provided for @notAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Not set'**
+  String get notAvailable;
+
+  /// No description provided for @version.
+  ///
+  /// In en, this message translates to:
+  /// **'Version'**
+  String get version;
+
+  /// No description provided for @about.
+  ///
+  /// In en, this message translates to:
+  /// **'About'**
+  String get about;
+
+  /// No description provided for @aboutDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'KAYAN ERP — cross-platform enterprise resource planning client.'**
+  String get aboutDescription;
+
+  /// No description provided for @quickAccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick access'**
+  String get quickAccess;
+
+  /// No description provided for @moduleComingSoon.
+  ///
+  /// In en, this message translates to:
+  /// **'This module is not available yet.'**
+  String get moduleComingSoon;
+
+  /// No description provided for @accountsTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'Accounts'**
+  String get accountsTotal;
+
+  /// No description provided for @accountCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Code'**
+  String get accountCode;
+
+  /// No description provided for @accountName.
+  ///
+  /// In en, this message translates to:
+  /// **'Account name'**
+  String get accountName;
+
+  /// No description provided for @accountType.
+  ///
+  /// In en, this message translates to:
+  /// **'Type'**
+  String get accountType;
+
+  /// No description provided for @typeAsset.
+  ///
+  /// In en, this message translates to:
+  /// **'Assets'**
+  String get typeAsset;
+
+  /// No description provided for @typeLiability.
+  ///
+  /// In en, this message translates to:
+  /// **'Liabilities'**
+  String get typeLiability;
+
+  /// No description provided for @typeEquity.
+  ///
+  /// In en, this message translates to:
+  /// **'Equity'**
+  String get typeEquity;
+
+  /// No description provided for @typeRevenue.
+  ///
+  /// In en, this message translates to:
+  /// **'Revenue'**
+  String get typeRevenue;
+
+  /// No description provided for @typeExpense.
+  ///
+  /// In en, this message translates to:
+  /// **'Expenses'**
+  String get typeExpense;
+
+  /// No description provided for @searchAccounts.
+  ///
+  /// In en, this message translates to:
+  /// **'Search by code or name'**
+  String get searchAccounts;
+
+  /// No description provided for @noAccounts.
+  ///
+  /// In en, this message translates to:
+  /// **'No accounts found'**
+  String get noAccounts;
+
+  /// No description provided for @postable.
+  ///
+  /// In en, this message translates to:
+  /// **'Postable'**
+  String get postable;
+
+  /// No description provided for @grouping.
+  ///
+  /// In en, this message translates to:
+  /// **'Group'**
+  String get grouping;
 
   /// No description provided for @unbalancedEntry.
   ///
   /// In en, this message translates to:
   /// **'Journal entry is not balanced (debits must equal credits)'**
   String get unbalancedEntry;
+
+  /// No description provided for @sampleDataNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'Development sample data — no backend is connected yet.'**
+  String get sampleDataNotice;
+
+  /// No description provided for @sampleDataDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'These records are generated locally for interface development. They are not stored and are not a system of record.'**
+  String get sampleDataDetail;
+
+  /// No description provided for @pendingDecisions.
+  ///
+  /// In en, this message translates to:
+  /// **'Pending business decisions'**
+  String get pendingDecisions;
 }
 
 class _AppLocalizationsDelegate

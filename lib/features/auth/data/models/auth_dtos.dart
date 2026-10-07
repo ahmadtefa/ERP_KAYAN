@@ -7,10 +7,7 @@ class LoginRequestDto {
   final String username;
   final String password;
 
-  Map<String, dynamic> toJson() => {
-        'username': username,
-        'password': password,
-      };
+  Map<String, dynamic> toJson() => {'username': username, 'password': password};
 }
 
 /// Token payload returned by the API.
@@ -21,15 +18,15 @@ class TokenPairDto {
   const TokenPairDto({required this.accessToken, this.refreshToken});
 
   factory TokenPairDto.fromJson(Map<String, dynamic> json) {
-    final access = (json['accessToken'] ?? json['access_token'] ?? json['token'])
-        as String?;
+    final access =
+        (json['accessToken'] ?? json['access_token'] ?? json['token'])
+            as String?;
     if (access == null || access.isEmpty) {
       throw const FormatException('Response did not contain an access token');
     }
     return TokenPairDto(
       accessToken: access,
-      refreshToken:
-          (json['refreshToken'] ?? json['refresh_token']) as String?,
+      refreshToken: (json['refreshToken'] ?? json['refresh_token']) as String?,
     );
   }
 
