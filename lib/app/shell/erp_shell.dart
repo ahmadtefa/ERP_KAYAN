@@ -7,11 +7,20 @@ import '../../features/settings/presentation/providers/locale_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
 import '../router/app_router.dart';
 
+/// One entry in the navigation.
+class _NavItem {
+  const _NavItem(this.path, this.icon, this.label);
+
+  final String path;
+  final IconData icon;
+  final String label;
+}
+
 /// Adaptive chrome around every authenticated screen.
 ///
 /// Breakpoints:
-///  * < 900 px  — bottom navigation bar (phones, small tablets)
-///  * >= 900 px — permanent navigation rail (tablets landscape, desktops)
+///  * < 900 px  — a drawer, because a bottom bar cannot hold a full ERP
+///  * >= 900 px — permanent navigation rail
 ///  * >= 1280 px — the rail is extended and shows labels next to icons
 ///
 /// This is deliberately not a stretched desktop layout: the navigation model
@@ -39,6 +48,7 @@ class ErpShell extends ConsumerWidget {
         title: Text(items[selectedIndex].label),
         actions: const [_LanguageMenu(), _SignOutButton()],
       ),
+      drawer: isWide ? null : _ModuleDrawer(items: items, current: currentPath),
       body: isWide
           ? Row(
               children: [
@@ -60,19 +70,6 @@ class ErpShell extends ConsumerWidget {
               ],
             )
           : child,
-      bottomNavigationBar: isWide
-          ? null
-          : NavigationBar(
-              selectedIndex: selectedIndex,
-              onDestinationSelected: (index) => context.go(items[index].path),
-              destinations: [
-                for (final item in items)
-                  NavigationDestination(
-                    icon: Icon(item.icon),
-                    label: item.label,
-                  ),
-              ],
-            ),
     );
   }
 
@@ -81,21 +78,62 @@ class ErpShell extends ConsumerWidget {
     return [
       _NavItem(AppRoutes.dashboard, Icons.dashboard_outlined, l10n.dashboard),
       _NavItem(
+        AppRoutes.journalEntries,
+        Icons.menu_book_outlined,
+        l10n.journalEntries,
+      ),
+      _NavItem(AppRoutes.customers, Icons.people_outline, l10n.customers),
+      _NavItem(AppRoutes.suppliers, Icons.local_shipping_outlined, l10n.suppliers),
+      _NavItem(AppRoutes.items, Icons.category_outlined, l10n.items),
+      _NavItem(AppRoutes.stock, Icons.inventory_2_outlined, l10n.stock),
+      _NavItem(
+        AppRoutes.salesInvoices,
+        Icons.point_of_sale_outlined,
+        l10n.salesInvoices,
+      ),
+      _NavItem(
+        AppRoutes.purchaseInvoices,
+        Icons.shopping_cart_outlined,
+        l10n.purchaseInvoices,
+      ),
+      _NavItem(
         AppRoutes.chartOfAccounts,
         Icons.account_tree_outlined,
         l10n.chartOfAccounts,
       ),
+      _NavItem(AppRoutes.reports, Icons.bar_chart_outlined, l10n.reports),
       _NavItem(AppRoutes.settings, Icons.settings_outlined, l10n.settings),
     ];
   }
 }
 
-class _NavItem {
-  const _NavItem(this.path, this.icon, this.label);
+class _ModuleDrawer extends StatelessWidget {
+  const _ModuleDrawer({required this.items, required this.current});
 
-  final String path;
-  final IconData icon;
-  final String label;
+  final List<_NavItem> items;
+  final String current;
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      child: SafeArea(
+        child: ListView(
+          children: [
+            for (final item in items)
+              ListTile(
+                leading: Icon(item.icon),
+                title: Text(item.label),
+                selected: item.path == current,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  context.go(item.path);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _LanguageMenu extends ConsumerWidget {

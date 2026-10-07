@@ -1,11 +1,18 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/accounting/presentation/screens/chart_of_accounts_screen.dart';
+import '../../features/accounting/presentation/screens/journal_entries_screen.dart';
 import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
+import '../../features/inventory/presentation/screens/items_screen.dart';
+import '../../features/inventory/presentation/screens/stock_screen.dart';
+import '../../features/invoicing/presentation/providers/invoice_providers.dart';
+import '../../features/invoicing/presentation/screens/invoice_list_screen.dart';
+import '../../features/parties/presentation/screens/parties_screen.dart';
+import '../../features/reports/presentation/reports_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
 import '../shell/erp_shell.dart';
 
@@ -26,6 +33,14 @@ class AppRoutes {
   static const login = '/login';
   static const dashboard = '/dashboard';
   static const chartOfAccounts = '/accounting/chart-of-accounts';
+  static const journalEntries = '/accounting/journal-entries';
+  static const customers = '/parties/customers';
+  static const suppliers = '/parties/suppliers';
+  static const items = '/inventory/items';
+  static const stock = '/inventory/stock';
+  static const salesInvoices = '/sales/invoices';
+  static const purchaseInvoices = '/purchases/invoices';
+  static const reports = '/reports';
   static const settings = '/settings';
 }
 
@@ -55,27 +70,39 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.login,
         builder: (context, state) => const LoginScreen(),
       ),
-      GoRoute(
-        path: AppRoutes.dashboard,
-        builder: (context, state) => const ErpShell(
-          currentPath: AppRoutes.dashboard,
-          child: DashboardScreen(),
+      for (final route in _shellRoutes)
+        GoRoute(
+          path: route.path,
+          builder: (context, state) =>
+              ErpShell(currentPath: route.path, child: route.child),
         ),
-      ),
-      GoRoute(
-        path: AppRoutes.chartOfAccounts,
-        builder: (context, state) => const ErpShell(
-          currentPath: AppRoutes.chartOfAccounts,
-          child: ChartOfAccountsScreen(),
-        ),
-      ),
-      GoRoute(
-        path: AppRoutes.settings,
-        builder: (context, state) => const ErpShell(
-          currentPath: AppRoutes.settings,
-          child: SettingsScreen(),
-        ),
-      ),
     ],
   );
 });
+
+/// Every authenticated screen, in the order the navigation shows them.
+const _shellRoutes = <({String path, Widget child})>[
+  (path: AppRoutes.dashboard, child: DashboardScreen()),
+  (path: AppRoutes.journalEntries, child: JournalEntriesScreen()),
+  (
+    path: AppRoutes.customers,
+    child: PartiesScreen(kind: PartyKind.customer),
+  ),
+  (
+    path: AppRoutes.suppliers,
+    child: PartiesScreen(kind: PartyKind.supplier),
+  ),
+  (path: AppRoutes.items, child: ItemsScreen()),
+  (path: AppRoutes.stock, child: StockScreen()),
+  (
+    path: AppRoutes.salesInvoices,
+    child: InvoiceListScreen(kind: InvoiceKind.sales),
+  ),
+  (
+    path: AppRoutes.purchaseInvoices,
+    child: InvoiceListScreen(kind: InvoiceKind.purchase),
+  ),
+  (path: AppRoutes.chartOfAccounts, child: ChartOfAccountsScreen()),
+  (path: AppRoutes.reports, child: ReportsScreen()),
+  (path: AppRoutes.settings, child: SettingsScreen()),
+];

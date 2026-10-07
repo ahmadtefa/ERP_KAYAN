@@ -22,9 +22,10 @@ class ApiClient {
               receiveTimeout: _config.receiveTimeout,
               contentType: Headers.jsonContentType,
               responseType: ResponseType.json,
-              // Let the client handle non-2xx explicitly so we can map
-              // status codes to typed failures.
-              validateStatus: (status) => status != null && status < 500,
+              // Anything that is not a success is turned into a typed
+              // failure below, so a 400 "not enough stock" can never be
+              // mistaken for a successful response.
+              validateStatus: (status) => status != null && status < 400,
             ),
           ) {
     _dio.interceptors.add(
@@ -61,6 +62,10 @@ class ApiClient {
     return _send(() => _dio.get<dynamic>(path, queryParameters: query));
   }
 
+  Future<Map<String, dynamic>> patch(String path, {Object? body}) async {
+    return _send(() => _dio.patch<dynamic>(path, data: body));
+  }
+
   Future<Map<String, dynamic>> post(
     String path, {
     Object? body,
@@ -77,6 +82,49 @@ class ApiClient {
         ),
       ),
     );
+  }
+
+  /// Reads an endpoint that returns a collection.
+  ///
+  /// The API answers either with `{ items: [...], total: n }` for paginated
+  /// resources or with a bare array for reports, and callers should not have
+  /// to care which.
+  Future<List<Map<String, dynamic>>> getList(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    final Response<dynamic> response;
+    try {
+      response = await _dio.get<dynamic>(path, queryParameters: query);
+    } on DioException catch (e) {
+      throw _mapDioException(e);
+    }
+    final data = response.data;
+    final raw = data is Map && data['items'] is List
+        ? data['items'] as List
+        : data is List
+        ? data
+        : const [];
+    return raw
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList(growable: false);
+  }
+
+  /// Reads an endpoint whose body is an object with several fields.
+  Future<Map<String, dynamic>> getObject(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    final Response<dynamic> response;
+    try {
+      response = await _dio.get<dynamic>(path, queryParameters: query);
+    } on DioException catch (e) {
+      throw _mapDioException(e);
+    }
+    final data = response.data;
+    if (data is Map) return Map<String, dynamic>.from(data);
+    return <String, dynamic>{};
   }
 
   Future<Map<String, dynamic>> _send(
