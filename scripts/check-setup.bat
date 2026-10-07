@@ -49,11 +49,34 @@ echo ============================================================
 echo.
 echo   Next step depends on what you saw above:
 echo.
-echo     * If Node.js appears under "Installed but NOT on PATH",
+echo     * If a program appears under "Installed but NOT on PATH",
 echo       close EVERY VS Code window and open VS Code again.
 echo.
-echo     * If Node.js does not appear anywhere, it is not
-echo       installed. Install it, then restart the computer.
+echo     * If a program appears in neither place, it is not
+echo       installed. Use the commands below, then RESTART the PC.
+echo.
+echo ============================================================
+echo   Copy-paste install commands
+echo ============================================================
+echo.
+echo   Node.js  (also installs npm):
+echo.
+echo       winget install OpenJS.NodeJS.LTS
+echo.
+echo   PostgreSQL:
+echo.
+echo       winget install PostgreSQL.PostgreSQL.17
+echo.
+echo   If winget is unavailable, download the installers from:
+echo       https://nodejs.org
+echo       https://www.postgresql.org/download/windows/
+echo.
+echo   When installing PostgreSQL you are asked to choose a
+echo   password for the "postgres" user. WRITE IT DOWN - the
+echo   setup script asks for it later.
+echo.
+echo   After installing, RESTART the computer, then run:
+echo       scripts\setup-windows.bat
 echo.
 pause
 exit /b 0
