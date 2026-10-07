@@ -21,12 +21,32 @@ async function bootstrap() {
 
   app.useGlobalFilters(new ProblemDetailsFilter());
 
-  const origins = (process.env.CORS_ORIGINS ?? '')
+  // A browser only lets a page call this API when the reply carries an
+  // Access-Control-Allow-Origin header naming that page's origin. The Flutter
+  // web dev server chooses the port it serves the client on, so a hard list of
+  // ports breaks sign-in with a misleading "cannot reach the server" error.
+  // Outside production every localhost origin is therefore accepted; in
+  // production only the origins listed in CORS_ORIGINS are.
+  const configuredOrigins = (process.env.CORS_ORIGINS ?? '')
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean);
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isLocalOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
   app.enableCors({
-    origin: origins.length > 0 ? origins : false,
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
+      // Requests without an Origin header come from clients that CORS does not
+      // apply to: native apps, curl, the mobile build.
+      if (!origin) return callback(null, true);
+      if (configuredOrigins.includes(origin)) return callback(null, true);
+      if (!isProduction && isLocalOrigin.test(origin)) return callback(null, true);
+      logger.warn(`Blocked CORS request from origin: ${origin}`);
+      return callback(null, false);
+    },
     credentials: true,
   });
 

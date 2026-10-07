@@ -367,6 +367,7 @@ flutter run --dart-define=API_BASE_URL=http://192.168.1.5:3000/api/v1
 | المشكلة | الحل |
 | --- | --- |
 | `scripts\x.bat: The module 'scripts' could not be loaded` | إنت على PowerShell — اكتب `.\scripts\x.bat` أو غيّر الترمنال لـ Command Prompt |
+| البرنامج بيقول `cannot reach the server` | (1) شوف `http://localhost:3000/api/v1/health` — لو مش فاتح يبقى السيرفر مقفول: شغّل `scripts\start-backend.bat` (2) لو فاتح، اعمل `git pull` وشغّل `pull-and-run.bat` تاني — كان فيه مشكلة في السماح للمتصفح بالاتصال بالسيرفر واتصلحت |
 | `node is not recognized` بعد التثبيت | اقفل **كل** نوافذ VS Code وافتحه تاني (أو اعمل restart للكمبيوتر) |
 | `winget ... failed with exit code: 1603` | استخدم النسخة المحمولة — شوف [قسم winget فشل](#️-لو-winget-فشل--تثبيت-بدون-صلاحيات-أدمن) |
 | السيرفر طلع `Can't reach database server` | قاعدة البيانات مش شغالة → `scripts\start-postgres.bat` |

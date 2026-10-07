@@ -135,7 +135,7 @@ echo  Writing backend\.env ...
 >> "backend\.env" echo JWT_REFRESH_SECRET="!JWT2!"
 >> "backend\.env" echo JWT_ACCESS_TTL=900
 >> "backend\.env" echo JWT_REFRESH_TTL=604800
->> "backend\.env" echo CORS_ORIGINS="http://localhost:8081,http://localhost:5173,http://localhost:3000"
+>> "backend\.env" echo CORS_ORIGINS="http://localhost:8080,http://localhost:3000"
 echo [OK] backend\.env written
 
 REM ---------------------------------------------- 4. packages, schema, data
