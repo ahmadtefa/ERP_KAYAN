@@ -38,6 +38,28 @@ call :probe "C:\src\flutter\bin\flutter.bat"                            "Flutter
 call :probe "%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"        "VS Code"
 
 echo.
+echo --- Installed as a Windows service? -----------------------
+echo.
+echo   (a PostgreSQL service works fine even when psql is not
+echo    on your PATH, so check here before installing anything)
+echo.
+sc query state= all 2>nul | findstr /i "postgres" >nul 2>&1
+if errorlevel 1 (
+  echo   [ not found ]  no PostgreSQL service is registered
+) else (
+  for /f "tokens=2 delims=:" %%n in ('sc query state^= all ^| findstr /i "SERVICE_NAME.*postgres"') do (
+    for /f "tokens=*" %%s in ("%%n") do echo   [  SERVICE  ]  %%s
+  )
+)
+echo.
+netstat -ano | findstr /r /c:":5432 .*LISTENING" >nul 2>&1
+if errorlevel 1 (
+  echo   [ not found ]  nothing is listening on port 5432
+) else (
+  echo   [ LISTENING ]  something IS listening on port 5432
+  echo                  a PostgreSQL database is already running
+)
+echo.
 echo --- Project files -----------------------------------------
 echo.
 call :file "backend\package.json" "backend folder"
