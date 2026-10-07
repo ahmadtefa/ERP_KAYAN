@@ -28,8 +28,10 @@ void main() {
       const InvoiceListScreen(kind: InvoiceKind.purchase),
       const JournalEntriesScreen(),
       const ReportsScreen(),
+        const FiscalPeriodsScreen(),
+        const AdminScreen(),
     ];
-    expect(screens, hasLength(8));
+    expect(screens, hasLength(10));
   });
 
   test('invoice paths follow from the kind', () {
@@ -80,9 +82,11 @@ void main() {
       AppRoutes.salesInvoices,
       AppRoutes.purchaseInvoices,
       AppRoutes.chartOfAccounts,
+        AppRoutes.fiscalPeriods,
       AppRoutes.reports,
+        AppRoutes.administration,
       AppRoutes.settings,
     ];
-    expect(paths.toSet(), hasLength(11));
+    expect(paths.toSet(), hasLength(13));
   });
 }
