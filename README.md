@@ -155,6 +155,13 @@ The following are intentionally not decided in code:
 | Permissions model | Role catalogue and whether approval workflows are required. |
 | Reporting | Required statutory reports and their layouts. |
 
-The API can now serve real data, so the development sample source is only
-used when no backend is reachable and only in development builds; the UI shows
-a banner whenever it is active. It is never a system of record.
+The API is now the source of data. A local sample source still exists for
+working on the interface without a server, but it is **opt-in and disabled by
+default**; enable it only for development:
+
+```bash
+flutter run -d chrome --dart-define=USE_SEED_DATA=true
+```
+
+It is refused outside development builds, and the UI shows a banner whenever
+it is active. It is never a system of record.

@@ -45,6 +45,14 @@ class AppConfig {
     defaultValue: true,
   );
 
+  /// Sample data is opt-in. The API server now exists, so the default is to
+  /// read real records; the seeded source stays available for developing the
+  /// interface when no server is reachable.
+  static const bool _useSeedData = bool.fromEnvironment(
+    'USE_SEED_DATA',
+    defaultValue: false,
+  );
+
   /// Builds the runtime configuration from compile-time dart-defines.
   factory AppConfig.fromEnvironment() {
     final env = switch (_envName.toLowerCase()) {
@@ -60,9 +68,9 @@ class AppConfig {
       connectTimeout: const Duration(seconds: 20),
       receiveTimeout: const Duration(seconds: 30),
       enableLogging: _logging && env != AppEnvironment.production,
-      // Seed data is permitted in development only. Staging, production and
-      // on-premise builds must talk to a real API.
-      useSeedData: env == AppEnvironment.development,
+      // Even when requested, sample data is refused outside development:
+      // staging, production and on-premise builds must talk to a real API.
+      useSeedData: _useSeedData && env == AppEnvironment.development,
     );
   }
 
