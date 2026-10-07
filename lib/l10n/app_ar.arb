@@ -257,7 +257,7 @@
   "backupTitle": "النسخ الاحتياطي والاسترجاع",
   "exportExcel": "إكسل",
   "exportCsv": "CSV",
-  "print": "طباعة",
+  "print": "طباعة / PDF",
   "chooseAccountFirst": "اختر حساباً أولاً",
   "startOver": "من البداية",
   "whatAreYouImporting": "بترفع بيانات إيه؟",
@@ -307,5 +307,6 @@
   "restoreNow": "استرجع الآن",
   "confirmRestoreTitle": "استبدال كل البيانات؟",
   "confirmRestoreBody": "بيانات الشركة هتتبدل باللي في الملف، ومش هينفع نرجع في الخطوة دي. تحب نكمل؟",
-  "restoreDone": "تم الاسترجاع"
+  "restoreDone": "تم الاسترجاع",
+  "printPdfHint": "بيفتح صفحة نضيفة للورق. من نافذة الطباعة اختار «حفظ كـ PDF» عشان تحفظها ملف PDF."
 }

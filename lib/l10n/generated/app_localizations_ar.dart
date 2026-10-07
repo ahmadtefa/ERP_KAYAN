@@ -792,7 +792,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get exportCsv => 'CSV';
 
   @override
-  String get print => 'طباعة';
+  String get print => 'طباعة / PDF';
 
   @override
   String get chooseAccountFirst => 'اختر حساباً أولاً';
@@ -951,4 +951,8 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get restoreDone => 'تم الاسترجاع';
+
+  @override
+  String get printPdfHint =>
+      'بيفتح صفحة نضيفة للورق. من نافذة الطباعة اختار «حفظ كـ PDF» عشان تحفظها ملف PDF.';
 }

@@ -83,20 +83,23 @@ class ReportExportActions extends ConsumerWidget {
           icon: const Icon(Icons.description_outlined, size: 18),
           label: Text(l10n.exportCsv),
         ),
-        FilledButton.tonalIcon(
-          onPressed: ready
-              ? () => go(
-                    links.print(
-                      report: report,
-                      language: language,
-                      from: from,
-                      to: to,
-                      accountId: accountId,
-                    ),
-                  )
-              : null,
-          icon: const Icon(Icons.print_outlined, size: 18),
-          label: Text(l10n.print),
+        Tooltip(
+          message: l10n.printPdfHint,
+          child: FilledButton.tonalIcon(
+            onPressed: ready
+                ? () => go(
+                      links.print(
+                        report: report,
+                        language: language,
+                        from: from,
+                        to: to,
+                        accountId: accountId,
+                      ),
+                    )
+                : null,
+            icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+            label: Text(l10n.print),
+          ),
         ),
       ],
     );

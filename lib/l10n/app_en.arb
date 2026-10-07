@@ -257,7 +257,7 @@
   "backupTitle": "Backup and restore",
   "exportExcel": "Excel",
   "exportCsv": "CSV",
-  "print": "Print",
+  "print": "Print / PDF",
   "chooseAccountFirst": "Choose an account first",
   "startOver": "Start over",
   "whatAreYouImporting": "What are you importing?",
@@ -307,5 +307,6 @@
   "restoreNow": "Restore now",
   "confirmRestoreTitle": "Replace everything?",
   "confirmRestoreBody": "The company's data will be replaced with the contents of this file. This cannot be undone. Continue?",
-  "restoreDone": "Restored"
+  "restoreDone": "Restored",
+  "printPdfHint": "Opens a clean page for paper. In the print window, choose \"Save as PDF\" to keep it as a PDF file."
 }
