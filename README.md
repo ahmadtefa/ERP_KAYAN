@@ -10,6 +10,9 @@ iOS, Windows, macOS, Linux and Web** from a single codebase.
 | `lib/` | Flutter client (Android, iOS, Windows, macOS, Linux, Web) |
 | `backend/` | NestJS API server — the only component that talks to the database |
 | `docker-compose.yml` | Local / on-premise deployment of PostgreSQL + API |
+| `DESIGN.md` | The design rules of the program, for Google Stitch and any designer |
+| `docs/STITCH.md` | How a design made in Google Stitch reaches the program (Arabic) |
+| `design/incoming/` | Drop exports from Stitch here |
 
 ## Status
 
