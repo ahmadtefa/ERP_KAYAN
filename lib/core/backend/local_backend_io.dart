@@ -116,6 +116,11 @@ class LocalBackend {
     }
 
     final log = await layout.openLog();
+    // Who is running what, at the top of every log: the first thing a person
+    // needs when reading a log from another machine.
+    log.writeln('[shell] program: ${Platform.resolvedExecutable}');
+    log.writeln('[shell] node: ${layout.nodeExecutable}');
+    log.writeln('[shell] server: ${layout.entryPoint}');
     final settings = await RuntimeSettings.load(layout, port);
 
     // 2. Prepare the database first. On a machine that has never run the

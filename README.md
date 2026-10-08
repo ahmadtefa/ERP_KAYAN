@@ -15,6 +15,7 @@ iOS, Windows, macOS, Linux and Web** from a single codebase.
 | `design/incoming/` | Drop exports from Stitch here |
 | `docs/DESKTOP_WINDOWS.md` | The Windows copy that starts its own server (Arabic) |
 | `scripts/build-desktop-windows.ps1` | Builds that copy: one folder that runs by itself |
+| `scripts/installer-windows.iss` | Turns that folder into one Setup .exe a customer runs (Inno Setup) |
 
 ## Status
 

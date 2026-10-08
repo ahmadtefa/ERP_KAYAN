@@ -149,11 +149,20 @@ Future<void> main() async {
     check('فيه DATABASE_URL', text.contains('DATABASE_URL='));
     check('فيه مفاتيح توقيع متولّدة على الجهاز', text.contains('JWT_ACCESS_SECRET="'));
     check('المفاتيح مش فاضية', !text.contains('JWT_ACCESS_SECRET=""'));
+  // The value the shell uses is the value written in the machine's own file -
+  // whatever that is on this machine. Comparing against the file is what proves
+  // the shell reads it, without assuming a password.
+  final onDisk = (await settings.readAsString())
+      .split('\n')
+      .firstWhere((line) => line.startsWith('DATABASE_URL='), orElse: () => '');
+  final written = onDisk
+      .substring('DATABASE_URL='.length)
+      .replaceAll('"', '')
+      .trim();
   final seeded = await RuntimeSettings.load(layout, 3000);
-  check('المشغّل بيقرا الإعدادات اللي على الجهاز',
-      seeded.databaseUrl == 'postgresql://erp_app:erp_app_pass@127.0.0.1:5432'
-          '/erp_kayan?schema=public',
-      '${seeded.databaseUrl}');
+  check('المشغّل بيقرا الإعدادات اللي مكتوبة في ملف الجهاز',
+      seeded.databaseUrl == written && (seeded.databaseUrl ?? '').contains('erp_kayan'),
+      '${seeded.databaseUrl}  vs  $written');
   }
   check('باسورد تطوير مش متسجّل في ملف الإعدادات',
       !(await settings.readAsString()).contains('Admin@12345'));

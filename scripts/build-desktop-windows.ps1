@@ -15,6 +15,11 @@
         backend\scripts\              database preparation
         backend\node\node.exe         a Node runtime that ships with the app
 
+  Beside the folder it also produces KAYAN-ERP-windows.zip, and - when Inno
+  Setup is installed on this machine - KAYAN-ERP-Setup-<version>.exe, the single
+  file a customer double-clicks. Only the build machine needs Flutter, Node and
+  (optionally) Inno Setup.
+
   Run this from the repository root, on a Windows machine, with Flutter and
   Node installed for *building* (the end user needs neither).
 
@@ -70,7 +75,7 @@ $backendFolder = Join-Path $appFolder "backend"
 $backendSource = Join-Path $root "backend"
 
 # ---------------------------------------------------------------- 1. server
-Step "1/6" "Building the API server"
+Step "1/7" "Building the API server"
 Push-Location $backendSource
 try {
   npm install --no-audit --no-fund
@@ -86,7 +91,7 @@ try {
 }
 
 # --------------------------------------------------------------- 2. staging
-Step "2/6" "Assembling the program folder"
+Step "2/7" "Assembling the program folder"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force -Path $backendFolder | Out-Null
 
@@ -103,7 +108,7 @@ Copy-Item (Join-Path $backendSource ".env.production.example") $backendFolder
 # folder on first run. See docs/DESKTOP_WINDOWS.md.
 
 # ------------------------------------------------- 3. production libraries
-Step "3/6" "Installing the server's libraries (production only)"
+Step "3/7" "Installing the server's libraries (production only)"
 Push-Location $backendFolder
 try {
   npm ci --omit=dev --no-audit --no-fund
@@ -117,7 +122,7 @@ try {
 }
 
 # --------------------------------------------------------- 4. Node runtime
-Step "4/6" "Adding the Node runtime the program ships with"
+Step "4/7" "Adding the Node runtime the program ships with"
 $toolsFolder = Join-Path $env:LOCALAPPDATA "kayan-tools"
 $portableNode = Join-Path $toolsFolder "node\node.exe"
 $zipUrl = "https://nodejs.org/dist/v$NodeVersion/node-v$NodeVersion-win-x64.zip"
@@ -150,7 +155,7 @@ if (Test-Path $license) { Copy-Item $license $runtimeFolder -Force }
 Write-Host "      node.exe copied into the program folder"
 
 # ------------------------------------------------------------- 5. client
-Step "5/6" "Building the client (Flutter, Windows, release)"
+Step "5/7" "Building the client (Flutter, Windows, release)"
 flutter build windows --release --dart-define=APP_ENV=production
 if ($LASTEXITCODE -ne 0) { Fail "flutter build windows failed." }
 
@@ -161,7 +166,7 @@ if (-not (Test-Path (Join-Path $release "erp_kayan.exe"))) {
 Copy-Item (Join-Path $release "*") $appFolder -Recurse -Force
 
 # ------------------------------------------------------------- 6. notes
-Step "6/6" "Writing the note that travels with the program"
+Step "6/7" "Writing the note that travels with the program"
 $note = @"
 KAYAN ERP - Windows desktop copy
 ================================
@@ -214,6 +219,30 @@ if (-not $SkipZip) {
   Compress-Archive -Path (Join-Path $appFolder "*") -DestinationPath $zipPath
 }
 
+# ------------------------------------------------------- 7. installer (optional)
+Step "7/7" "Making the installer a customer can run"
+$installer = $null
+$iscc = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
+if (-not $iscc) {
+  foreach ($probe in @(
+      "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe",
+      "$env:ProgramFiles\Inno Setup 6\ISCC.exe")) {
+    if (Test-Path $probe) { $iscc = @{ Source = $probe }; break }
+  }
+}
+if ($iscc) {
+  & $iscc.Source "/DSourceDir=$appFolder" "/DOutputDir=$stage" `
+                 (Join-Path $root "scripts\installer-windows.iss")
+  if ($LASTEXITCODE -ne 0) { Fail "Inno Setup ran but did not produce the installer." }
+  $installer = Join-Path $stage "KAYAN-ERP-Setup-1.0.0.exe"
+  Write-Host "      installer written"
+} else {
+  Write-Host "      Inno Setup is not on this machine, so no .exe installer was made."
+  Write-Host "      The folder and the .zip above are complete and can be copied as they are."
+  Write-Host "      For a one-file installer: install Inno Setup 6 from https://jrsoftware.org/isdl.php"
+  Write-Host "      and run this script again."
+}
+
 $size = (Get-ChildItem $appFolder -Recurse -Force | Measure-Object -Property Length -Sum).Sum
 Write-Host ""
 Write-Host "============================================================"
@@ -224,6 +253,9 @@ Write-Host "  Program folder : $appFolder"
 Write-Host "  Total size     : $([math]::Round($size / 1MB, 1)) MB"
 if (-not $SkipZip) {
   Write-Host "  Zip            : $(Join-Path $stage 'KAYAN-ERP-windows.zip')"
+}
+if ($installer) {
+  Write-Host "  Installer      : $installer   <- the file a customer runs" -ForegroundColor Green
 }
 Write-Host ""
 Write-Host "  Try it now:"
