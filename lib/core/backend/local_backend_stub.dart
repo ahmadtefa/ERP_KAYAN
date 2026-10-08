@@ -14,6 +14,10 @@ class LocalBackendStatus {
   final String? logPath = null;
   final bool databaseProblem = false;
 
+  /// A browser build never starts a server, so it never meets an empty database
+  /// either - the pages it loads come from a server that is already set up.
+  final bool needsFirstAdministrator = false;
+
   /// A browser build is never the one that starts a server, so it is never
   /// "ready" either - the program treats this as "carry on as you were".
   bool get isReady => false;
@@ -32,4 +36,13 @@ class LocalBackend {
       const LocalBackendStatus.unsupported();
 
   static Future<void> shutdown() async {}
+
+  /// Nothing to create on the web: the server that delivered this page is
+  /// already somebody's running installation.
+  static Future<LocalBackendStatus> createFirstAdministrator({
+    required String username,
+    required String password,
+    required String appDisplayName,
+  }) async =>
+      const LocalBackendStatus.unsupported();
 }

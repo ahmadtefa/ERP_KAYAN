@@ -188,17 +188,24 @@ async function main(): Promise<void> {
     });
   }
 
-  // The password is printed for local development convenience only. It is
-  // never hardcoded in application source.
-  const devPassword = process.env.SEED_ADMIN_PASSWORD ?? 'Admin@12345';
-  const passwordHash = await argon2.hash(devPassword);
+  // Who the administrator is, and with what password.
+  //
+  // On a developer's machine these are the familiar defaults. A packaged
+  // installation never uses them: the program asks whoever is setting the
+  // company up to choose a username and a password, and passes them here
+  // through the environment. No password is ever hardcoded in application
+  // source, and none ships inside the program.
+  const adminUsername = process.env.KAYAN_ADMIN_USERNAME?.trim() || 'admin';
+  const adminPassword = process.env.KAYAN_ADMIN_PASSWORD || 'Admin@12345';
+  const isDevelopmentDefault = adminUsername === 'admin' && adminPassword === 'Admin@12345';
+  const passwordHash = await argon2.hash(adminPassword);
 
   const admin = await prisma.user.upsert({
-    where: { username: 'admin' },
+    where: { username: adminUsername },
     update: {},
     create: {
       companyId: company.id,
-      username: 'admin',
+      username: adminUsername,
       fullNameEn: 'System Administrator',
       fullNameAr: 'مدير النظام',
       passwordHash,
@@ -266,9 +273,17 @@ async function main(): Promise<void> {
   console.log(' branch   : %s (%s)', branch.nameEn, branch.code);
   console.log(' accounts : %d', idByCode.size);
   console.log(' period   : %s (%s)', period.code, period.status);
-  console.log(' users    : admin / %s', devPassword);
+  console.log(' users    : %s', adminUsername);
   console.log('---------------------------------------------');
-  console.log('Change this password before any real use.');
+  if (isDevelopmentDefault) {
+    // Printed for local development convenience only.
+    console.log(' password : %s   (development default)', adminPassword);
+    console.log('Change this password before any real use.');
+  } else {
+    // The password came from whoever ran this, so it is not echoed back into a
+    // log file that other people can read.
+    console.log(' password : the one that was just entered');
+  }
 }
 
 main()

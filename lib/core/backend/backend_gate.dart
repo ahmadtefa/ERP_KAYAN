@@ -87,6 +87,15 @@ class _BackendGateState extends State<BackendGate> {
       return _working ? const _Waiting() : widget.child;
     }
 
+    if (status.needsFirstAdministrator) {
+      // The database is ready and has nobody in it yet: this is a fresh
+      // installation. Whoever is setting the company up chooses the first
+      // administrator here, and then the program continues normally.
+      return _FirstAdministrator(onCreated: _start, onStatus: (next) {
+        setState(() => _status = next);
+      });
+    }
+
     if (status.isReady) {
       // The program runs against the server this machine just started. The
       // address is injected here so no screen needs to know where it came from.
@@ -135,6 +144,166 @@ class _Waiting extends StatelessWidget {
               SizedBox(height: 6),
               Text('Starting KAYAN ERP…', style: TextStyle(fontSize: 13, color: Colors.grey)),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The first run on a machine whose database is empty.
+///
+/// The program creates the company's structure and its first administrator, but
+/// it will not invent the credentials: they are chosen here. Nothing is
+/// published, nothing is default, and no password travels inside the program.
+class _FirstAdministrator extends StatefulWidget {
+  const _FirstAdministrator({required this.onCreated, required this.onStatus});
+
+  /// Runs the ordinary start again, which is what makes the program usable.
+  final Future<void> Function() onCreated;
+
+  /// Reports a failure without leaving this screen.
+  final void Function(LocalBackendStatus) onStatus;
+
+  @override
+  State<_FirstAdministrator> createState() => _FirstAdministratorState();
+}
+
+class _FirstAdministratorState extends State<_FirstAdministrator> {
+  final _username = TextEditingController();
+  final _password = TextEditingController();
+  final _again = TextEditingController();
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _username.dispose();
+    _password.dispose();
+    _again.dispose();
+    super.dispose();
+  }
+
+  Future<void> _create() async {
+    final username = _username.text.trim();
+    final password = _password.text;
+    if (username.length < 3) {
+      setState(() => _error = 'اسم المستخدم لازم ٣ حروف على الأقل');
+      return;
+    }
+    if (password.length < 8) {
+      setState(() => _error = 'كلمة السر لازم ٨ حروف على الأقل');
+      return;
+    }
+    if (password != _again.text) {
+      setState(() => _error = 'كلمة السر والتأكيد مش زي بعض');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final status = await LocalBackend.createFirstAdministrator(
+      username: username,
+      password: password,
+      appDisplayName: 'KAYAN ERP',
+    );
+    if (!mounted) return;
+    if (status.isReady) {
+      setState(() => _busy = false);
+      await widget.onCreated();
+      return;
+    }
+    setState(() {
+      _busy = false;
+      _error = status.problem ?? 'مقدرتش أعمل الحساب';
+    });
+    widget.onStatus(status);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light(),
+      home: Directionality(
+        textDirection: TextDirection.rtl,
+        child: Scaffold(
+          body: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'أول تشغيل على الجهاز ده',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'First run on this machine',
+                      style: TextStyle(fontSize: 13, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'قاعدة البيانات جاهزة ومفيهاش أي مستخدم لسه. اكتب اسم '
+                      'المستخدم وكلمة السر لحساب المدير بتاع الشركة. '
+                      'مفيش أي كلمة سر جاهزة جوّه البرنامج.',
+                      style: TextStyle(fontSize: 14, height: 1.6),
+                    ),
+                    const SizedBox(height: 24),
+                    TextField(
+                      controller: _username,
+                      enabled: !_busy,
+                      decoration: const InputDecoration(
+                        labelText: 'اسم المستخدم / Username',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _password,
+                      enabled: !_busy,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'كلمة السر / Password',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _again,
+                      enabled: !_busy,
+                      obscureText: true,
+                      onSubmitted: (_) => _busy ? null : _create(),
+                      decoration: const InputDecoration(
+                        labelText: 'تأكيد كلمة السر / Confirm',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    if (_error != null) ...[
+                      const SizedBox(height: 12),
+                      Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    ],
+                    const SizedBox(height: 20),
+                    FilledButton.icon(
+                      onPressed: _busy ? null : _create,
+                      icon: _busy
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.check),
+                      label: const Text('إنشاء الحساب والبدء'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       ),

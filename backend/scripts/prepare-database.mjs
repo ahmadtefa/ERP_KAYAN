@@ -9,6 +9,14 @@
 //      the one in the configuration
 //   3. create the application database if it is missing
 //   4. apply every migration (a no-op once the database is up to date)
+//   5. say whether the database is empty or ready, so the desktop shell knows
+//      whether this machine still needs its first administrator
+//   6. if it is empty AND a username and password were handed in for that first
+//      administrator, create them (company, branch, roles, chart of accounts)
+//
+// Step 6 is what makes a fresh installation usable without a terminal. The
+// credentials come from the environment, are chosen by the person setting the
+// company up, and are never written into this file, the program, or the log.
 //
 // Every step is idempotent: running it twice changes nothing, and running it
 // against a database that is already correct is a couple of seconds of work.
@@ -113,6 +121,54 @@ function migrate() {
   });
 }
 
+/// True when the database has no users yet, which is the state of a database
+/// that has just been created: migrations make tables, not people.
+///
+/// Returns null when the question cannot be answered (the client is missing,
+/// or the schema is not there yet), so a failure here never blocks startup.
+async function isEmptyDatabase() {
+  let client = null;
+  try {
+    client = new PrismaClient();
+    const users = await client.user.count();
+    return users === 0;
+  } catch {
+    return null;
+  } finally {
+    await client?.$disconnect().catch(() => {});
+  }
+}
+
+/// Creates the company's first administrator, reusing the same seeding program
+/// a developer runs - so there is one definition of what a new company starts
+/// with, not two.
+function seedFirstAdministrator(username, password) {
+  const seed = join(backendDir, 'dist', 'prisma', 'seed.js');
+  if (!existsSync(seed)) {
+    console.log('  first administrator: the seeding program is not in this build');
+    return Promise.resolve(1);
+  }
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [seed], {
+      cwd: backendDir,
+      env: {
+        ...process.env,
+        KAYAN_ADMIN_USERNAME: username,
+        KAYAN_ADMIN_PASSWORD: password,
+      },
+      stdio: ['ignore', 'inherit', 'inherit'],
+    });
+    child.on('exit', (code) => resolve(code ?? 1));
+    child.on('error', () => resolve(1));
+  });
+}
+
+/// The line the desktop shell reads. Keep it in step with
+/// `LocalBackend` in lib/core/backend/local_backend_io.dart.
+function announce(state) {
+  console.log(`KAYAN-DB-STATE=${state}`);
+}
+
 async function main() {
   if (!appUrl) {
     console.error('  database: DATABASE_URL is not set');
@@ -150,6 +206,36 @@ async function main() {
     process.exit(code);
   }
   console.log('  migrations: up to date');
+
+  // Is this database still empty, and if so were we handed the credentials for
+  // its first administrator?
+  const empty = await isEmptyDatabase();
+  if (empty === null) {
+    // Could not tell - the server's own error, if any, is more precise.
+    announce('unknown');
+    return;
+  }
+  if (!empty) {
+    announce('ready');
+    return;
+  }
+
+  const username = process.env.KAYAN_ADMIN_USERNAME?.trim();
+  const password = process.env.KAYAN_ADMIN_PASSWORD;
+  if (!username || !password) {
+    // Normal on a fresh machine: the program will ask for them.
+    console.log('  the database is empty: no company or administrator yet');
+    announce('empty');
+    return;
+  }
+
+  console.log(`  creating the first administrator: ${username}`);
+  const seeded = await seedFirstAdministrator(username, password);
+  if (seeded !== 0) {
+    console.error('  the first administrator could not be created');
+    process.exit(seeded || 1);
+  }
+  announce('ready');
 }
 
 await main();

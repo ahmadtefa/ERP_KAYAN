@@ -36,12 +36,16 @@ void check(String name, bool condition, [String detail = '']) {
 /// Signs in through the address the launcher returned, which proves that
 /// address really is a working API and not merely something that says "hello"
 /// on a port.
-Future<(int, Map<String, dynamic>)> signIn(String baseUrl) async {
+Future<(int, Map<String, dynamic>)> signIn(
+  String baseUrl, [
+  String username = 'admin',
+  String password = 'Admin@12345',
+]) async {
   final client = HttpClient();
   try {
     final request = await client.postUrl(Uri.parse('$baseUrl/auth/login'));
     request.headers.contentType = ContentType.json;
-    request.write(jsonEncode({'username': 'admin', 'password': 'Admin@12345'}));
+    request.write(jsonEncode({'username': username, 'password': password}));
     final response = await request.close();
     final body = await response.transform(utf8.decoder).join();
     return (response.statusCode, jsonDecode(body) as Map<String, dynamic>);
@@ -76,7 +80,82 @@ Future<bool> portFree(int port) async {
 
 int countOf(String text, String needle) => needle.allMatches(text).length;
 
+/// The first run on a machine whose database is empty: the program must say so,
+/// take the credentials somebody chooses, create the company and its first
+/// administrator, and then start normally - all without a terminal.
+///
+/// Used by tools/first_run_check.sh, which prepares an empty database and the
+/// settings file that points at it, and passes the credentials to use.
+Future<void> firstRun() async {
+  final username = Platform.environment['KAYAN_FIRST_ADMIN_USERNAME'] ?? 'owner';
+  final password = Platform.environment['KAYAN_FIRST_ADMIN_PASSWORD'];
+  if (password == null || password.length < 8) {
+    stdout.writeln('  KAYAN_FIRST_ADMIN_PASSWORD must be set (8 characters or more)');
+    exit(2);
+  }
+
+  stdout.writeln('=' * 70);
+  stdout.writeln('  KAYAN  -  أول تشغيل على جهاز قاعدة بياناته فاضية');
+  stdout.writeln('=' * 70);
+
+  final layout = BackendLayout.discover();
+  stdout.writeln('\n[1] إعدادات الجهاز');
+  stdout.writeln('      ${layout.settingsFile.path}');
+  check('المشغّل بياخد الإعدادات من الملف اللي اتحدد له',
+      layout.settingsFile.path.isNotEmpty);
+
+  stdout.writeln('\n[2] البرنامج بيكتشف إن القاعدة فاضية');
+  final before = await LocalBackend.ensureRunning(appDisplayName: 'KAYAN ERP');
+  check('قال إن فيه أول مدير مطلوب', before.needsFirstAdministrator,
+      '${before.problem}');
+  check('وماقالش إن فيه مشكلة', before.problem == null);
+  check('ومافتحش أي عنوان للسيرفر', before.baseUrl == null, '${before.baseUrl}');
+
+  stdout.writeln('\n[3] إنشاء أول مدير بالبيانات اللي اختارها المستخدم');
+  final created = await LocalBackend.createFirstAdministrator(
+    username: username,
+    password: password,
+    appDisplayName: 'KAYAN ERP',
+  );
+  check('الحساب اتcreated والبرنامج بقى جاهز', created.isReady,
+      '${created.problem}');
+  if (!created.isReady) {
+    stdout.writeln(await layout.logTail(lines: 25));
+    stdout.writeln('\n  نجح: $passed    فشل: $failed');
+    exit(1);
+  }
+
+  stdout.writeln('\n[4] الدخول بالحساب الجديد نفسه');
+  final (code, body) = await signIn(created.baseUrl!, username, password);
+  check('الدخول نجح بالاسم وكلمة السر اللي اتكتبوا', code == 200 || code == 201,
+      'status=$code body=${body.keys.join(',')}');
+  check('رجع توكن حقيقي', (body['accessToken'] as String?)?.isNotEmpty ?? false);
+
+  stdout.writeln('\n[5] وكلمة سر مش موجودة جوه البرنامج');
+  // The log carries every run that used this machine, so the whole of it is
+  // searched, not just the newest lines.
+  final log = await layout.logTail(lines: 10000);
+  check('كلمة السر مش مكتوبة في السجل', !log.contains(password));
+  check('السجل بيقول إن القاعدة كانت فاضية',
+      log.contains('the database is empty'));
+
+  stdout.writeln('\n[6] إغلاق نظيف');
+  await LocalBackend.shutdown();
+  await Future<void>.delayed(const Duration(seconds: 2));
+  final port = Uri.parse(created.baseUrl!).port;
+  check('المنفذ $port بقى مقفول', !await portAnswers(port));
+
+  stdout.writeln('\n${'=' * 70}');
+  stdout.writeln('  نجح: $passed    فشل: $failed');
+  stdout.writeln('=' * 70);
+  exit(failed == 0 ? 0 : 1);
+}
+
 Future<void> main() async {
+  if (Platform.environment['KAYAN_CHECK'] == 'first-run') {
+    await firstRun();
+    return;
+  }
   stdout.writeln('=' * 70);
   stdout.writeln('  KAYAN  -  التشغيل على ويندوز: المشغّل اللي بيشغّل السيرفر مع البرنامج');
   stdout.writeln('=' * 70);

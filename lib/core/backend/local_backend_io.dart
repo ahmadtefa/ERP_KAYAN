@@ -20,9 +20,22 @@ class LocalBackendStatus {
   const LocalBackendStatus.ready(this.baseUrl)
       : problem = null,
         logPath = null,
-        databaseProblem = false;
+        databaseProblem = false,
+        needsFirstAdministrator = false;
   const LocalBackendStatus.failed(this.problem, {this.logPath, this.databaseProblem = false})
-      : baseUrl = null;
+      : baseUrl = null,
+        needsFirstAdministrator = false;
+
+  /// The database answered and is up to date, but has no company and no user in
+  /// it yet - a machine where the program has never been set up. Nothing is
+  /// wrong: somebody has to say who the first administrator is, and that is a
+  /// question for the screen, not for a log file.
+  const LocalBackendStatus.needsFirstAdministrator()
+      : baseUrl = null,
+        problem = null,
+        logPath = null,
+        databaseProblem = false,
+        needsFirstAdministrator = true;
 
   /// e.g. `http://127.0.0.1:3000/api/v1` - already the value the client wants.
   final String? baseUrl;
@@ -37,6 +50,10 @@ class LocalBackendStatus {
   /// True when the server is running but cannot reach the database, which is
   /// the one failure with an obvious fix worth spelling out.
   final bool databaseProblem;
+
+  /// True when this machine still needs its first administrator - see
+  /// [LocalBackendStatus.needsFirstAdministrator].
+  final bool needsFirstAdministrator;
 
   bool get isReady => baseUrl != null;
 }
@@ -126,7 +143,18 @@ class LocalBackend {
     // 2. Prepare the database first. On a machine that has never run the
     //    program this creates the database and applies the schema; on any
     //    other machine it is a couple of seconds of checking.
-    await _runPreparation(layout, settings, log);
+    //
+    //    It also says whether the database is still empty. If it is, this
+    //    machine has no company and no user in it yet, and there is nothing to
+    //    start a server for until somebody says who the first administrator is.
+    final state = await _runPreparation(layout, settings, log);
+    if (state == 'empty') {
+      log.writeln('[shell] the database is empty: asking who the first '
+          'administrator is');
+      await log.flush();
+      await log.close();
+      return const LocalBackendStatus.needsFirstAdministrator();
+    }
 
     // 3. Start the server and wait until it answers.
     final process = await _spawn(layout, settings, log, port);
@@ -267,16 +295,25 @@ class LocalBackend {
   }
 
   /// Creates the database and applies the schema, before the API starts.
-  static Future<void> _runPreparation(
+  /// Runs the step that makes this machine's database correct, and returns what
+  /// it says about the database: `ready`, `empty`, `unknown`, or null when the
+  /// question could not be put (no script, or the step fell over).
+  ///
+  /// [firstAdministrator] is only passed when a person has just chosen the
+  /// company's first username and password on the screen. It travels in the
+  /// environment of the child process, never on a command line, so it is not
+  /// readable by other users on the machine.
+  static Future<String?> _runPreparation(
     BackendLayout layout,
     RuntimeSettings settings,
-    IOSink? log,
-  ) async {
+    IOSink? log, {
+    ({String username, String password})? firstAdministrator,
+  }) async {
     final script = File('${layout.backendDirectory}${Platform.pathSeparator}scripts'
         '${Platform.pathSeparator}prepare-database.mjs');
     if (!script.existsSync()) {
       log?.writeln('[shell] no database preparation script in this build');
-      return;
+      return null;
     }
     try {
       log?.writeln('[shell] preparing the database');
@@ -284,18 +321,76 @@ class LocalBackend {
         layout.nodeExecutable,
         [script.path],
         workingDirectory: layout.backendDirectory,
-        environment: settings.asEnvironment(settings.port),
+        environment: {
+          ...settings.asEnvironment(settings.port),
+          if (firstAdministrator != null) ...{
+            'KAYAN_ADMIN_USERNAME': firstAdministrator.username,
+            'KAYAN_ADMIN_PASSWORD': firstAdministrator.password,
+          },
+        },
         includeParentEnvironment: true,
       );
-      log?.writeln('[prep] ${result.stdout}'.trimRight());
+      // The credentials are in the environment, but a child process may echo
+      // them; the log is a file other people can read, so it is written
+      // without them.
+      final output = '${result.stdout}'
+          .replaceAll(RegExp(r'KAYAN_ADMIN_PASSWORD=(\S+)'), 'KAYAN_ADMIN_PASSWORD=***');
+      log?.writeln('[prep] ${output.trimRight()}');
       if ('${result.stderr}'.trim().isNotEmpty) {
         log?.writeln('[prep-err] ${result.stderr}'.trimRight());
       }
+      final match = RegExp(r'KAYAN-DB-STATE=(\w+)').firstMatch(output);
+      final state = match?.group(1);
+      log?.writeln('[shell] database state: ${state ?? 'not reported'} '
+          '(exit ${result.exitCode})');
+      return state;
     } on Object catch (error) {
       // Not fatal: the server reports the same problem more precisely when it
       // tries to connect.
       log?.writeln('[shell] database preparation failed: $error');
+      return null;
     }
+  }
+
+  /// Creates the company's first administrator, with the credentials somebody
+  /// chose on the screen, then leaves the machine ready to start.
+  ///
+  /// The work itself belongs to the server's own seeding program (see
+  /// backend/scripts/prepare-database.mjs); this only carries the answer.
+  static Future<LocalBackendStatus> createFirstAdministrator({
+    required String username,
+    required String password,
+    required String appDisplayName,
+  }) async {
+    if (username.trim().length < 3) {
+      return const LocalBackendStatus.failed('اسم المستخدم قصير جدًا');
+    }
+    if (password.length < 8) {
+      return const LocalBackendStatus.failed('كلمة السر قصيرة جدًا');
+    }
+    final layout = BackendLayout.discover();
+    final missing = layout.problem;
+    if (missing != null) return LocalBackendStatus.failed(missing);
+
+    final log = await layout.openLog();
+    final settings = await RuntimeSettings.load(layout, 3000);
+    log.writeln('[shell] creating the first administrator: ${username.trim()}');
+    final state = await _runPreparation(
+      layout,
+      settings,
+      log,
+      firstAdministrator: (username: username.trim(), password: password),
+    );
+    await log.flush();
+    await log.close();
+    if (state != 'ready') {
+      return LocalBackendStatus.failed(
+        'مقدرتش أعمل حساب المدير',
+        logPath: layout.logPath,
+        databaseProblem: state == null || state == 'unknown',
+      );
+    }
+    return ensureRunning(appDisplayName: appDisplayName);
   }
 
   // ─────────────────────────────────────────────────────────────── shutting down
@@ -357,7 +452,16 @@ class BackendLayout {
   final String? problem;
 
   File get logFile => File(logPath);
-  File get settingsFile => File('${dataDirectory.path}${Platform.pathSeparator}kayan.env');
+
+  /// Where this machine's settings live. `KAYAN_DESKTOP_SETTINGS` overrides it,
+  /// which support uses to point a machine at another file, and which the
+  /// checks use to try a first run without disturbing the installation that is
+  /// already on this machine.
+  File get settingsFile {
+    final override = Platform.environment['KAYAN_DESKTOP_SETTINGS'];
+    if (override != null && override.isNotEmpty) return File(override);
+    return File('${dataDirectory.path}${Platform.pathSeparator}kayan.env');
+  }
 
   Future<IOSink> openLog() async {
     final file = logFile;
