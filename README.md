@@ -13,6 +13,8 @@ iOS, Windows, macOS, Linux and Web** from a single codebase.
 | `DESIGN.md` | The design rules of the program, for Google Stitch and any designer |
 | `docs/STITCH.md` | How a design made in Google Stitch reaches the program (Arabic) |
 | `design/incoming/` | Drop exports from Stitch here |
+| `docs/DESKTOP_WINDOWS.md` | The Windows copy that starts its own server (Arabic) |
+| `scripts/build-desktop-windows.ps1` | Builds that copy: one folder that runs by itself |
 
 ## Status
 

@@ -84,10 +84,18 @@ async function bootstrap() {
     );
   }
 
-  // Listen on all interfaces so the API is reachable from other devices on
-  // the local network (phones/tablets), not only from localhost.
+  // Where the API listens.
+  //
+  // The default is every interface, so a server installation is reachable from
+  // the other devices on the same network (phones, tablets, a second desk).
+  // A desktop installation sets HOST=127.0.0.1: there the API is a private
+  // part of one program on one machine, and nothing else should be able to
+  // reach it.
   const port = Number(process.env.PORT ?? 3000);
-  await app.listen(port, '0.0.0.0');
-  logger.log(`API listening on http://localhost:${port}/api/v1`);
+  const host = process.env.HOST ?? '0.0.0.0';
+  await app.listen(port, host);
+  logger.log(`API listening on http://${host}:${port}/api/v1`);
+  // A line the desktop shell can wait for, in addition to the health route.
+  logger.log(`KAYAN-API-READY port=${port} host=${host}`);
 }
 void bootstrap();

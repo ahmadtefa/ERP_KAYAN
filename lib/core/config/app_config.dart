@@ -53,6 +53,20 @@ class AppConfig {
     defaultValue: false,
   );
 
+  /// The configuration for a desktop copy that starts its own server.
+  ///
+  /// The address is not a build-time value here: the shell picks a free port
+  /// when it starts the server and passes the finished address in. Everything
+  /// else - timeouts, logging, sample data - is the production setting.
+  factory AppConfig.forLocalServer(String baseUrl) => AppConfig(
+        environment: AppEnvironment.onPremise,
+        apiBaseUrl: baseUrl,
+        connectTimeout: const Duration(seconds: 20),
+        receiveTimeout: const Duration(seconds: 30),
+        enableLogging: false,
+        useSeedData: false,
+      );
+
   /// Builds the runtime configuration from compile-time dart-defines.
   factory AppConfig.fromEnvironment() {
     final env = switch (_envName.toLowerCase()) {

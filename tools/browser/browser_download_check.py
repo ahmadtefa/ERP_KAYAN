@@ -134,6 +134,25 @@ browser_ws.send(json.dumps({"id": 1, "method": "Browser.setDownloadBehavior",
                                        "eventsEnabled": True}}))
 BROWSER = browser_ws
 
+def press_in_row(markers, x, y, offsets=(0, -46, 46, -92, 92, -138, 138), wait=6):
+    """Clicks a button that sits in a row of buttons.
+
+    We look for the request it starts. When the expected request does not
+    arrive, the neighbouring positions are tried: buttons drift by a few tens
+    of pixels when the system font metrics change, and this browser cannot look
+    a widget up by its label.
+    """
+    for offset in offsets:
+        opened.clear()
+        send("Page.bringToFront")
+        time.sleep(0.6)
+        click(x + offset, y)
+        time.sleep(wait)
+        if any(any(marker in url for marker in markers) for url in opened):
+            return x + offset
+    return None
+
+
 print("=" * 66)
 print("  KAYAN - أزرار التنزيل والطباعة في المتصفح")
 print("=" * 66)
@@ -160,9 +179,7 @@ shot("20-reports-ready")
 # المواقع دي بتتحرك لو الصف طال أو قصُر (مثلاً زرار المدة الزمنية).
 # لو فحص فشل، خد لقطة شاشة وقيس من جديد.
 print("\n[1] زرار Excel")
-opened.clear()
-click(1212, 190)        # the Excel button
-time.sleep(7)
+press_in_row(["format=xlsx"], 1071, 198)
 xlsx_urls = [url for url in opened if "format=xlsx" in url]
 check("زرار Excel ندى نداء فتح للملف", len(xlsx_urls) > 0, str(opened[-3:]))
 check("الرابط فيه التوكن", any("token=" in url for url in xlsx_urls), xlsx_urls[0][:110] if xlsx_urls else "")
@@ -187,9 +204,7 @@ if xlsx:
     check("الملف ملف Excel حقيقي", signature == b"PK", str(signature))
 
 print("\n[2] زرار CSV")
-opened.clear()
-click(1308, 190)        # the CSV button
-time.sleep(7)
+press_in_row(["format=csv"], 1170, 198)
 csv_urls = [url for url in opened if "format=csv" in url]
 check("زرار CSV ندى نداء فتح للملف", len(csv_urls) > 0, str(opened[-3:]))
 if csv_urls:
@@ -205,9 +220,7 @@ if csv:
     check("ملف CSV فيه علامة BOM للعربي", head == b"\xef\xbb\xbf", str(head))
 
 print("\n[3] زرار PDF")
-opened.clear()
-click(1411, 190)        # the PDF button
-time.sleep(14)
+press_in_row(["trial-balance/pdf"], 1273, 198, wait=9)
 pdf_urls = [url for url in opened if "/pdf" in url]
 check("زرار PDF ندى نداء فتح للملف", len(pdf_urls) > 0, str(opened[-3:]))
 if pdf_urls:
@@ -220,7 +233,7 @@ if pdf_urls:
 print("\n[4] زرار الطباعة")
 requests.clear()
 before = len(json.load(urllib.request.urlopen(f"{DEVTOOLS}/json/list")))
-click(1512, 190)        # the Print button
+press_in_row(["trial-balance/print"], 1368, 198, wait=8)
 time.sleep(9)
 tabs = json.load(urllib.request.urlopen(f"{DEVTOOLS}/json/list"))
 after = len(tabs)
@@ -249,12 +262,15 @@ def download_menu(choice_y, wait=7):
     التاب الجديد اللي بيفتح لما ننزّل ملف بياخد التركيز، وفلاتر بتوقف
     الرسم وهي في الخلفية، فالقائمة مش هتفتح. لازم نرجّع التاب للمقدمة.
     """
-    send("Page.bringToFront")
-    time.sleep(1)
-    click(1450, 93)
-    time.sleep(2)
-    click(1400, choice_y)
-    time.sleep(wait)
+    for attempt in range(3):
+        send("Page.bringToFront")
+        time.sleep(1)
+        click(1325, 98)             # the «Download the list» button
+        time.sleep(2)
+        click(1250, choice_y + attempt * 8)
+        time.sleep(wait)
+        if opened:
+            return
 
 
 print("\n[6] تنزيل قائمة كاملة (الأصناف) من الشاشة")
@@ -268,10 +284,10 @@ shot("35-items-again")
 opened.clear()
 send("Page.bringToFront")
 time.sleep(1)
-click(1450, 93)         # زرار « تنزيل الملف »
+click(1325, 98)         # زرار « تنزيل القائمة »
 time.sleep(2)
 shot("list-menu-open")
-click(1400, 103)        # Excel من القائمة
+click(1250, 110)        # Excel من القائمة
 time.sleep(7)
 list_urls = [url for url in opened if "/exports/lists/items/download" in url]
 check("زرار تنزيل القائمة بيفتح ملف الأصناف", len(list_urls) > 0, str(opened[-3:]))
@@ -286,12 +302,12 @@ if list_urls:
     check("الملف فيه بيانات الشاشة", ":error" not in str(body)[:8], str(body)[:40])
 
 opened.clear()
-download_menu(151)      # CSV
+download_menu(157)      # CSV
 csv_list = [url for url in opened if "/exports/lists/items/download" in url and "format=csv" in url]
 check("CSV القائمة كمان بينزل", len(csv_list) > 0, str(opened[-3:]))
 
 opened.clear()
-download_menu(199, wait=14)      # PDF
+download_menu(205, wait=14)      # PDF
 pdf_list = [url for url in opened if "/exports/lists/items/pdf" in url]
 check("PDF القائمة بينزل", len(pdf_list) > 0, str(opened[-3:]))
 if pdf_list:
@@ -303,7 +319,7 @@ if pdf_list:
 
 opened.clear()
 requests.clear()
-download_menu(263, wait=9)      # Print
+download_menu(254, wait=9)      # Print
 tabs = json.load(urllib.request.urlopen(f"{DEVTOOLS}/json/list"))
 list_print = [t for t in tabs if "/exports/lists/" in t.get("url", "")]
 check("صفحة طباعة القائمة اتفتحت", len(list_print) > 0,
