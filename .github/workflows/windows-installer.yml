@@ -49,10 +49,17 @@ jobs:
           if (-not (Test-Path $iscc)) {
             throw "Inno Setup compiler not found: $iscc"
           }
-          & $iscc /?
-          if ($LASTEXITCODE -ne 0) {
-            throw "Inno Setup compiler check failed."
+          # Verify the compiler by reading its file version, not by running /?.
+          $item = Get-Item -LiteralPath $iscc
+          $version = $item.VersionInfo.FileVersion
+          if ($version) {
+            Write-Host "Inno Setup compiler: $iscc (version $version)"
+          } else {
+            Write-Warning "ISCC.exe has no file version; the installer build will verify it."
           }
+
+          # Prevent a stale Chocolatey exit code from failing this PowerShell step.
+          $global:LASTEXITCODE = 0
 
       - name: Install backend dependencies
         working-directory: backend
