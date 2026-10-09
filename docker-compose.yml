@@ -1,0 +1,54 @@
+# Local and on-premise deployment.
+#
+# Usage:
+#   docker compose up -d          # start PostgreSQL + API
+#   docker compose logs -f api    # follow API logs
+#
+# The database port is bound to 127.0.0.1 only: it is reachable from the host
+# for maintenance, but never from the network. Only the API is exposed.
+#
+# Before running, create a .env file next to this one with strong values for
+# POSTGRES_PASSWORD, JWT_ACCESS_SECRET and JWT_REFRESH_SECRET. See
+# backend/.env.example for the full list.
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: erp_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: erp_kayan
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      # Loopback only — the database must never be reachable from the network.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp_app -d erp_kayan"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://erp_app:${POSTGRES_PASSWORD}@db:5432/erp_kayan?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-900}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-604800}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8081}
+    ports:
+      - "3000:3000"
+    command: sh -c "npx prisma migrate deploy && node dist/main"
+
+volumes:
+  db_data:

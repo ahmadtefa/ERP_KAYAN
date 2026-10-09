@@ -1,0 +1,691 @@
+// KAYAN ERP — database schema
+//
+// Design rules enforced here:
+//  * Money is DECIMAL(19,4) — never floating point.
+//  * Every business row carries company_id so data can never leak across
+//    companies; branch_id is an analytical dimension where relevant.
+//  * Posted journal entries are append-only: corrections happen by inserting
+//    a reversal, never by editing or deleting.
+//  * Every table has created/updated audit fields and a soft-delete marker.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- tenancy
+
+model Company {
+  id       String @id @default(uuid()) @db.Uuid
+  code     String @unique
+  nameEn   String
+  nameAr   String
+  taxId    String? // Egyptian Tax Registration Number
+  currency String @default("EGP") @db.VarChar(3)
+  timezone String @default("Africa/Cairo")
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  branches      Branch[]
+  users         User[]
+  accounts      Account[]
+  journalEntry  JournalEntry[]
+  roles         Role[]
+  userRoles     UserRole[]
+  auditLogs     AuditLog[]
+
+  customers        Customer[]
+  suppliers        Supplier[]
+  items            Item[]
+  stockBalances    StockBalance[]
+  stockMovements   StockMovement[]
+  salesInvoices    SalesInvoice[]
+  purchaseInvoices PurchaseInvoice[]
+  fiscalPeriods FiscalPeriod[]
+
+  @@map("companies")
+}
+
+model Branch {
+  id        String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+  code      String
+  nameEn    String
+  nameAr    String
+  isActive  Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  company      Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  userBranches UserBranch[]
+  journalEntry JournalEntry[]
+
+  stockBalances    StockBalance[]
+  stockMovements   StockMovement[]
+  salesInvoices    SalesInvoice[]
+  purchaseInvoices PurchaseInvoice[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@map("branches")
+}
+
+// ------------------------------------------------------- users & security
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  companyId    String    @db.Uuid
+  username     String    @unique
+  email        String?   @unique
+  fullNameEn   String
+  fullNameAr   String
+  passwordHash String // Argon2id. Never stores a plain or reversible value.
+  isActive     Boolean   @default(true)
+  isSuperAdmin Boolean   @default(false)
+
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+  lastLoginAt      DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  company      Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  userRoles    UserRole[]
+  branches     UserBranch[]
+  refreshToken RefreshToken[]
+  auditLogs    AuditLog[]
+  journalEntry JournalEntry[]   @relation("JournalCreatedBy")
+
+  @@index([companyId])
+  @@map("users")
+}
+
+model Role {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String? @db.Uuid // null = system role available to all companies
+  code      String
+  nameEn    String
+  nameAr    String
+  isSystem  Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  company         Company?          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+
+  @@unique([companyId, code])
+  @@map("roles")
+}
+
+model Permission {
+  id       String @id @default(uuid()) @db.Uuid
+  code     String @unique // e.g. "accounting.journal.post"
+  nameEn   String
+  nameAr   String
+  module   String
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @db.Uuid
+  permissionId String @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId    String  @db.Uuid
+  roleId    String  @db.Uuid
+  companyId String  @db.Uuid
+  branchId  String? @db.Uuid
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role    Role    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId, companyId])
+  @@index([userId])
+  @@map("user_roles")
+}
+
+model UserBranch {
+  userId   String @db.Uuid
+  branchId String @db.Uuid
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([userId, branchId])
+  @@map("user_branches")
+}
+
+/// Refresh tokens are stored hashed so a database leak cannot be replayed.
+model RefreshToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ------------------------------------------------------------- accounting
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+model Account {
+  id          String      @id @default(uuid()) @db.Uuid
+  companyId   String      @db.Uuid
+  code        String
+  nameEn      String
+  nameAr      String
+  type        AccountType
+  parentId    String?     @db.Uuid
+  isPostable  Boolean     @default(true)
+  isActive    Boolean     @default(true)
+  currency    String?     @db.VarChar(3)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  parent   Account? @relation("AccountTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children Account[] @relation("AccountTree")
+  lines    JournalLine[]
+
+  @@unique([companyId, code])
+  @@index([companyId, type])
+  @@index([parentId])
+  @@map("accounts")
+}
+
+enum JournalStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+model JournalEntry {
+  id          String        @id @default(uuid()) @db.Uuid
+  companyId   String        @db.Uuid
+  branchId    String        @db.Uuid
+  entryNumber String
+  entryDate   DateTime      @db.Date
+  description String?
+  status      JournalStatus @default(DRAFT)
+  currency    String        @default("EGP") @db.VarChar(3)
+
+  /// Total debits and credits are stored denormalised so reports never have
+  /// to re-aggregate the lines, and a database constraint can assert balance.
+  totalDebit  Decimal       @db.Decimal(19, 4)
+  totalCredit Decimal       @db.Decimal(19, 4)
+
+  reversalOfId String?   @db.Uuid
+  postedAt     DateTime?
+  postedBy     String?   @db.Uuid
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+
+  company    Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch     Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  createdByUser User?       @relation("JournalCreatedBy", fields: [createdBy], references: [id])
+  reversalOf JournalEntry?  @relation("Reversal", fields: [reversalOfId], references: [id])
+  reversals  JournalEntry[] @relation("Reversal")
+  lines      JournalLine[]
+
+  @@unique([companyId, entryNumber])
+  @@index([companyId, entryDate])
+  @@index([companyId, status])
+  @@map("journal_entries")
+}
+
+model JournalLine {
+  id             String  @id @default(uuid()) @db.Uuid
+  journalEntryId String  @db.Uuid
+  lineNumber     Int
+  accountId      String  @db.Uuid
+  debit          Decimal @default(0) @db.Decimal(19, 4)
+  credit         Decimal @default(0) @db.Decimal(19, 4)
+  description    String?
+  costCenterId   String? @db.Uuid
+
+  entry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@unique([journalEntryId, lineNumber])
+  @@index([accountId])
+  @@map("journal_lines")
+}
+
+// ------------------------------------------------------- document numbering
+
+/// Authoritative document numbering.
+///
+/// Numbers are allocated by the server inside the same transaction that
+/// creates the document, so two users can never receive the same number.
+/// Allocation takes a row lock on the counter, which serialises concurrent
+/// requests for the same company and document type.
+///
+/// REQUIRES BUSINESS DECISION: whether numbering must be gapless (a legal
+/// requirement in some jurisdictions), and whether it restarts each fiscal
+/// year. The current implementation increments per company without gaps in
+/// normal operation, but a rolled-back transaction still consumes a number.
+model DocumentSequence {
+  companyId String @db.Uuid
+  key       String @db.VarChar(40) // e.g. JOURNAL
+  prefix    String @db.VarChar(10) @default("DOC")
+  nextValue Int    @default(1)
+
+  updatedAt DateTime @updatedAt
+
+  @@id([companyId, key])
+  @@map("document_sequences")
+}
+
+// ------------------------------------------------------------- audit trail
+
+/// Append-only. Rows are never updated or deleted by application code.
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  companyId  String?  @db.Uuid
+  userId     String?  @db.Uuid
+  action     String // CREATE / UPDATE / POST / LOGIN / LOGIN_FAILED ...
+  entity     String // table or aggregate name
+  entityId   String?
+  beforeJson Json?
+  afterJson  Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
+
+// ═══════════════════════════════════════════════════════ parties
+//
+// Trading partners of the company. They are master data: an invoice
+// references a customer or a supplier, never a free-text name, so a report
+// can group by partner reliably.
+
+model Customer {
+  id          String  @id @default(uuid()) @db.Uuid
+  companyId   String  @db.Uuid
+  code        String
+  nameEn      String
+  nameAr      String
+  phone       String?
+  email       String?
+  taxNumber   String?
+  address     String?
+
+  /// Informational until credit checking is implemented.
+  /// REQUIRES BUSINESS DECISION: whether a sale may exceed this limit.
+  creditLimit Decimal @default(0) @db.Decimal(19, 4)
+
+  isActive Boolean @default(true)
+  notes    String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  updatedBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  salesInvoices SalesInvoice[]
+
+  @@unique([companyId, code])
+  @@index([companyId, nameEn])
+  @@map("customers")
+}
+
+model Supplier {
+  id          String  @id @default(uuid()) @db.Uuid
+  companyId   String  @db.Uuid
+  code        String
+  nameEn      String
+  nameAr      String
+  phone       String?
+  email       String?
+  taxNumber   String?
+  address     String?
+  isActive    Boolean @default(true)
+  notes       String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  updatedBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  purchaseInvoices PurchaseInvoice[]
+
+  @@unique([companyId, code])
+  @@index([companyId, nameEn])
+  @@map("suppliers")
+}
+
+// ═══════════════════════════════════════════════════════ inventory
+
+/// A stock-keeping unit. Services are items with isStockTracked = false and
+/// never touch the inventory account.
+/// An accounting period. Everything posts inside one.
+///
+/// REQUIRES BUSINESS DECISION: the Egyptian fiscal year commonly follows the
+/// calendar year, but a company may be incorporated mid-year and use a
+/// different start. This model stores whatever the company actually uses; the
+/// seed creates the calendar year as the starting default.
+model FiscalPeriod {
+  id        String       @id @default(uuid()) @db.Uuid
+  companyId String       @db.Uuid
+  code      String       @db.VarChar(20)
+  nameEn    String
+  nameAr    String
+  startDate DateTime     @db.Date
+  endDate   DateTime     @db.Date
+  status    PeriodStatus @default(OPEN)
+
+  closedAt  DateTime?
+  closedBy  String?      @db.Uuid
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, code])
+  @@index([companyId, startDate, endDate])
+  @@map("fiscal_periods")
+}
+
+model Item {
+  id       String  @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+  code     String
+  nameEn   String
+  nameAr   String
+  unit     String  @default("unit")
+  barcode  String?
+
+  /// Default selling price. The invoice line may override it.
+  salePrice Decimal @default(0) @db.Decimal(19, 4)
+
+  /// Default tax rate in percent, e.g. 14 means 14%.
+  /// REQUIRES BUSINESS DECISION: the statutory rate. Stored per item so a
+  /// change of policy does not require a schema change.
+  taxRate   Decimal @default(0) @db.Decimal(9, 4)
+
+  isStockTracked Boolean @default(true)
+  isActive       Boolean @default(true)
+  notes          String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  updatedBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company        Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  stockBalances  StockBalance[]
+  stockMovements StockMovement[]
+  salesLines     SalesInvoiceLine[]
+  purchaseLines  PurchaseInvoiceLine[]
+
+  @@unique([companyId, code])
+  @@index([companyId, nameEn])
+  @@map("items")
+}
+
+/// Current quantity and value per item, per branch.
+///
+/// This is a running balance kept in step with stock_movements inside the same
+/// transaction. Movements are the audit trail; this table is the fast answer.
+model StockBalance {
+  companyId String @db.Uuid
+  branchId  String @db.Uuid
+  itemId    String @db.Uuid
+
+  quantity Decimal @default(0) @db.Decimal(19, 4)
+  value    Decimal @default(0) @db.Decimal(19, 4)
+
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  item    Item    @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@id([companyId, branchId, itemId])
+  @@index([companyId, itemId])
+  @@map("stock_balances")
+}
+
+enum StockDirection {
+  IN
+  OUT
+}
+
+/// Append-only stock ledger. Exactly like journal entries, a movement is never
+/// edited or deleted - a correction is a new opposite movement.
+model StockMovement {
+  id           String         @id @default(uuid()) @db.Uuid
+  companyId    String         @db.Uuid
+  branchId     String         @db.Uuid
+  itemId       String         @db.Uuid
+  movementDate DateTime       @db.Date
+  direction    StockDirection
+  quantity     Decimal        @db.Decimal(19, 4)
+  unitCost     Decimal        @db.Decimal(19, 4)
+  totalCost    Decimal        @db.Decimal(19, 4)
+
+  referenceType   String  @db.VarChar(32)
+  referenceId     String? @db.Uuid
+  referenceNumber String?
+  notes           String?
+
+  createdAt DateTime @default(now())
+  createdBy String?  @db.Uuid
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  item    Item    @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, itemId, movementDate])
+  @@index([companyId, referenceType, referenceId])
+  @@map("stock_movements")
+}
+
+// ═══════════════════════════════════════════════════════ sales & purchases
+
+/// A fiscal period can only be closed once its figures are final. Closing is
+/// what makes a year unchangeable, so it is a deliberate act, never automatic.
+enum PeriodStatus {
+  OPEN
+  CLOSED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+/// A sales invoice to a customer.
+///
+/// Posting it does two things in one transaction: it writes a journal entry
+/// and it issues the stock movements. Draft invoices affect neither.
+model SalesInvoice {
+  id            String        @id @default(uuid()) @db.Uuid
+  companyId     String        @db.Uuid
+  branchId      String        @db.Uuid
+  invoiceNumber String
+  invoiceDate   DateTime      @db.Date
+  dueDate       DateTime?     @db.Date
+  customerId    String        @db.Uuid
+  status        InvoiceStatus @default(DRAFT)
+  currency      String        @default("EGP") @db.VarChar(3)
+
+  subTotal     Decimal @default(0) @db.Decimal(19, 4)
+  taxAmount    Decimal @default(0) @db.Decimal(19, 4)
+  totalAmount  Decimal @default(0) @db.Decimal(19, 4)
+  paidAmount   Decimal @default(0) @db.Decimal(19, 4)
+
+  /// Cost of the goods sold, captured at posting time from the stock ledger.
+  /// Storing it keeps the gross profit of a posted invoice stable even after
+  /// later purchases change the average cost.
+  costOfGoods Decimal @default(0) @db.Decimal(19, 4)
+
+  notes          String?
+  journalEntryId String?   @db.Uuid
+  postedAt       DateTime?
+  postedBy       String?   @db.Uuid
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch   Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  lines    SalesInvoiceLine[]
+
+  @@unique([companyId, invoiceNumber])
+  @@index([companyId, invoiceDate])
+  @@index([companyId, status])
+  @@map("sales_invoices")
+}
+
+model SalesInvoiceLine {
+  id        String @id @default(uuid()) @db.Uuid
+  invoiceId String @db.Uuid
+  lineNumber Int
+  itemId    String? @db.Uuid
+
+  description String
+  quantity    Decimal @db.Decimal(19, 4)
+  unitPrice   Decimal @db.Decimal(19, 4)
+  taxRate     Decimal @default(0) @db.Decimal(9, 4)
+  taxAmount   Decimal @default(0) @db.Decimal(19, 4)
+  lineTotal   Decimal @db.Decimal(19, 4)
+
+  unitCost  Decimal @default(0) @db.Decimal(19, 4)
+  costTotal Decimal @default(0) @db.Decimal(19, 4)
+
+  invoice SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  item    Item?        @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([invoiceId, lineNumber])
+  @@index([itemId])
+  @@map("sales_invoice_lines")
+}
+
+/// A purchase invoice from a supplier.
+model PurchaseInvoice {
+  id            String        @id @default(uuid()) @db.Uuid
+  companyId     String        @db.Uuid
+  branchId      String        @db.Uuid
+  invoiceNumber String
+
+  /// The supplier's own document number, kept for reconciliation.
+  supplierReference String?
+
+  invoiceDate DateTime      @db.Date
+  dueDate     DateTime?     @db.Date
+  supplierId  String        @db.Uuid
+  status      InvoiceStatus @default(DRAFT)
+  currency    String        @default("EGP") @db.VarChar(3)
+
+  subTotal    Decimal @default(0) @db.Decimal(19, 4)
+  taxAmount   Decimal @default(0) @db.Decimal(19, 4)
+  totalAmount Decimal @default(0) @db.Decimal(19, 4)
+  paidAmount  Decimal @default(0) @db.Decimal(19, 4)
+
+  notes          String?
+  journalEntryId String?   @db.Uuid
+  postedAt       DateTime?
+  postedBy       String?   @db.Uuid
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company  Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch   Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  supplier Supplier         @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  lines    PurchaseInvoiceLine[]
+
+  @@unique([companyId, invoiceNumber])
+  @@index([companyId, invoiceDate])
+  @@index([companyId, status])
+  @@map("purchase_invoices")
+}
+
+model PurchaseInvoiceLine {
+  id        String @id @default(uuid()) @db.Uuid
+  invoiceId String @db.Uuid
+  lineNumber Int
+  itemId    String? @db.Uuid
+
+  description String
+  quantity    Decimal @db.Decimal(19, 4)
+  unitPrice   Decimal @db.Decimal(19, 4)
+  taxRate     Decimal @default(0) @db.Decimal(9, 4)
+  taxAmount   Decimal @default(0) @db.Decimal(19, 4)
+  lineTotal   Decimal @db.Decimal(19, 4)
+
+  invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  item    Item?           @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([invoiceId, lineNumber])
+  @@index([itemId])
+  @@map("purchase_invoice_lines")
+}
