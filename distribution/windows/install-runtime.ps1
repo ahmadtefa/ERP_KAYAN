@@ -28,7 +28,14 @@ $probe = [Net.Sockets.TcpClient]::new()
 try {
   $connect = $probe.BeginConnect('127.0.0.1',5432,$null,$null)
   if ($connect.AsyncWaitHandle.WaitOne(500)) {
-    try { $probe.EndConnect($connect); if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) { throw 'Port 5432 is already occupied by another service. Stop that service or choose an isolated machine before installing bundled KAYAN PostgreSQL.' } } catch [System.Net.Sockets.SocketException] { }
+    $connected = $false
+    try { $probe.EndConnect($connect); $connected = $true } catch [System.Net.Sockets.SocketException] { }
+    if ($connected) {
+      $occupant = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+      if (-not $occupant -or $occupant.Status -eq 'Stopped') {
+        throw 'Port 5432 is already in use by another service. Stop that service or choose an isolated machine before installing bundled KAYAN PostgreSQL; nothing was changed.'
+      }
+    }
   }
 } finally { $probe.Dispose() }
 
@@ -66,6 +73,28 @@ function Set-PrivateAcl([string]$Path, [string]$Principal) {
   & icacls.exe $Path '/inheritance:r' '/grant:r' "$Principal`:(OI)(CI)F" 'SYSTEM:(OI)(CI)F' 'BUILTIN\Administrators:(OI)(CI)F' | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Could not secure ACLs on '$Path'." }
 }
+# A running Windows service is not the same thing as a PostgreSQL that accepts
+# connections. Ask the server itself before anything (Prisma included) touches
+# the database, so a slow start is waited out and a real failure is reported.
+function Wait-PgReady {
+  $ready = Join-Path $pgBin 'pg_isready.exe'
+  if (-not (Test-Path $ready)) { throw 'Bundled PostgreSQL readiness tool is missing.' }
+  $deadline = (Get-Date).AddSeconds(60)
+  while ((Get-Date) -lt $deadline) {
+    & $ready -h 127.0.0.1 -p 5432 -U postgres *> $null
+    if ($LASTEXITCODE -eq 0) { return }
+    Start-Sleep -Seconds 1
+  }
+  throw 'PostgreSQL did not accept connections before the 60 second deadline. Existing data was not changed; see the PostgreSQL log.'
+}
+function Start-PgService {
+  $current = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+  if ($current -and $current.Status -ne 'Running') {
+    Start-Service -Name $serviceName
+    (Get-Service -Name $serviceName).WaitForStatus('Running',[TimeSpan]::FromSeconds(60))
+  }
+  Wait-PgReady
+}
 function New-Secret {
   $bytes = New-Object byte[] 32
   $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -102,6 +131,9 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
     if (Get-ChildItem -LiteralPath $pgData -Force -ErrorAction SilentlyContinue | Select-Object -First 1) {
       throw 'The PostgreSQL data directory exists but is not initialized. Refusing to remove or overwrite it.'
     }
+  }
+  if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
+    throw "A KAYAN PostgreSQL service is registered but its data directory is missing. The service was left untouched and no data was changed. Remove the leftover '$serviceName' service manually, or restore the database directory, before reinstalling."
   }
   if ($settingsExists) {
     if (-not (Test-Path -LiteralPath $bootstrapMarker)) {
@@ -153,8 +185,7 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   Invoke-Pg $pgCtl @('register','-N',$serviceName,'-U','NT AUTHORITY\LocalService','-D',$pgData,'-S','auto')
   Set-PrivateAcl $pgData 'NT AUTHORITY\LOCAL SERVICE'
   Set-PrivateAcl (Split-Path -Parent $pgLog) 'NT AUTHORITY\LOCAL SERVICE'
-  Start-Service -Name $serviceName
-  (Get-Service -Name $serviceName).WaitForStatus('Running',[TimeSpan]::FromSeconds(60))
+  Start-PgService
   Remove-Item Env:DATABASE_URL,Env:ADMIN_DATABASE_URL -ErrorAction SilentlyContinue
 } else {
   $version = (Get-Content (Join-Path $pgData 'PG_VERSION') -Raw).Trim()
@@ -164,7 +195,7 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   }
   Set-PrivateAcl $pgData 'NT AUTHORITY\LOCAL SERVICE'
   Set-PrivateAcl (Split-Path -Parent $pgLog) 'NT AUTHORITY\LOCAL SERVICE'
-  Start-Service -Name $serviceName
+  Start-PgService
 }
 
 if (-not (Test-Path -LiteralPath $UserSettingsPath)) { throw 'Per-user runtime settings were not created.' }
