@@ -71,11 +71,24 @@ final filteredAccountsProvider = Provider<List<Account>>((ref) {
       ref.watch(chartOfAccountsProvider).value ?? const <Account>[];
   final query = ref.watch(accountSearchProvider).trim().toLowerCase();
   if (query.isEmpty) return accounts;
-  return accounts
+  final matching = accounts
       .where(
         (a) =>
             a.code.toLowerCase().contains(query) ||
-            a.name.toLowerCase().contains(query),
+            a.name.toLowerCase().contains(query) ||
+            (a.nameAr?.toLowerCase().contains(query) ?? false),
       )
+      .toList(growable: false);
+  // Keep parent groups visible while searching for a nested subaccount.
+  final visibleIds = matching.map((account) => account.id).toSet();
+  final byId = {for (final account in accounts) account.id: account};
+  for (final account in matching) {
+    var parentId = account.parentId;
+    while (parentId != null && visibleIds.add(parentId)) {
+      parentId = byId[parentId]?.parentId;
+    }
+  }
+  return accounts
+      .where((account) => visibleIds.contains(account.id))
       .toList(growable: false);
 });

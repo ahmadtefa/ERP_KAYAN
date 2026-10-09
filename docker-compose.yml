@@ -48,7 +48,10 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8081}
     ports:
       - "3000:3000"
+    volumes:
+      - company_uploads:/app/uploads
     command: sh -c "npx prisma migrate deploy && node dist/main"
 
 volumes:
   db_data:
+  company_uploads:

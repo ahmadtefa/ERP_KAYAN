@@ -312,5 +312,15 @@
   "exportPdf": "PDF",
   "printHintWhenNoPdf": "بيفتح صفحة نضيفة للورق. من نافذة الطباعة اختار «حفظ كـ PDF» عشان تحفظها ملف PDF.",
   "downloadList": "تنزيل الملف",
-  "exportListHint": "نزّل القائمة زي ما هي على الشاشة: إكسل أو CSV أو PDF أو ورقة للطباعة."
+  "exportListHint": "نزّل القائمة زي ما هي على الشاشة: إكسل أو CSV أو PDF أو ورقة للطباعة.",
+  "rememberLogin": "تذكر بيانات الدخول",
+  "rememberWebUsernameOnly": "سيتم حفظ اسم المستخدم فقط في المتصفح.",
+  "rememberNativeSecure": "تُحفظ كلمة المرور في مخزن النظام الآمن.",
+  "newExpenseAccount": "حساب مصروفات جديد",
+  "editExpenseAccount": "تعديل حساب مصروفات",
+  "parentAccount": "الحساب الأب",
+  "noParentAccount": "بدون حساب أب",
+  "accountCanPost": "قابل لاستقبال قيود يومية",
+  "activateAccount": "تفعيل الحساب",
+  "deactivateAccount": "تعطيل الحساب"
 }

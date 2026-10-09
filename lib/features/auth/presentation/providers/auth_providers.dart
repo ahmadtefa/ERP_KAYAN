@@ -22,6 +22,19 @@ final apiClientProvider = Provider<ApiClient>(
       ApiClient(ref.watch(appConfigProvider), ref.watch(tokenStoreProvider)),
 );
 
+final companyBrandingProvider = FutureProvider<Map<String, dynamic>?>((
+  ref,
+) async {
+  try {
+    final user = ref.watch(currentUserProvider);
+    return await ref
+        .watch(apiClientProvider)
+        .get(user == null ? '/companies/branding' : '/companies/my-branding');
+  } catch (_) {
+    return null;
+  }
+});
+
 final authRemoteDataSourceProvider = Provider<AuthRemoteDataSource>(
   (ref) => AuthRemoteDataSourceImpl(ref.watch(apiClientProvider)),
 );
@@ -50,12 +63,22 @@ class AuthController extends AsyncNotifier<AppUser?> {
   Future<Result<AppUser>> signIn({
     required String username,
     required String password,
+    bool rememberLogin = false,
   }) async {
     state = const AsyncValue.loading();
     final result = await ref.read(signInUseCaseProvider)(
       username: username,
       password: password,
     );
+    if (result.isSuccess && rememberLogin) {
+      try {
+        await ref
+            .read(tokenStoreProvider)
+            .saveRememberedLogin(username: username.trim(), password: password);
+      } catch (_) {
+        // Remembering is optional; secure-storage failure must not block login.
+      }
+    }
     state = AsyncValue.data(result.valueOrNull);
     return result;
   }

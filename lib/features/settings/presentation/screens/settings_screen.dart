@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../providers/locale_provider.dart';
+import '../widgets/company_management_panel.dart';
 
 /// Application settings.
 ///
@@ -48,6 +49,8 @@ class SettingsScreen extends ConsumerWidget {
             ],
           ),
         ),
+        const SizedBox(height: 16),
+        const CompanyManagementPanel(),
         const SizedBox(height: 16),
         Card(
           child: Padding(

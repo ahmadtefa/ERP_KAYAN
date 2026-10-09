@@ -14,6 +14,7 @@ class FakeTokenStore extends TokenStore {
   String? accessToken;
   String? refreshToken;
   String? locale;
+  bool rememberLogin = false;
 
   @override
   Future<String?> readAccessToken() async => accessToken;
@@ -41,6 +42,37 @@ class FakeTokenStore extends TokenStore {
 
   @override
   Future<void> saveLocale(String languageCode) async => locale = languageCode;
+
+  @override
+  Future<bool> rememberLoginEnabled() async => rememberLogin;
+
+  @override
+  Future<String?> readRememberedUsername() async =>
+      rememberLogin ? username : null;
+
+  @override
+  Future<String?> readRememberedPassword() async =>
+      rememberLogin ? password : null;
+
+  String? username;
+  String? password;
+
+  @override
+  Future<void> saveRememberedLogin({
+    required String username,
+    required String password,
+  }) async {
+    rememberLogin = true;
+    this.username = username;
+    this.password = password;
+  }
+
+  @override
+  Future<void> clearRememberedLogin() async {
+    rememberLogin = false;
+    username = null;
+    password = null;
+  }
 }
 
 const testUser = AppUser(

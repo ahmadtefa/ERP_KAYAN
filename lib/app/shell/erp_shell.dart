@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/providers/auth_providers.dart';
+import '../../shared/widgets/company_logo.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
 import '../router/app_router.dart';
@@ -42,9 +43,18 @@ class ErpShell extends ConsumerWidget {
     final selectedIndex = items
         .indexWhere((item) => item.path == currentPath)
         .clamp(0, items.length - 1);
+    final branding = ref.watch(companyBrandingProvider).value;
+    final logoPath = branding?['logoUrl'] as String?;
+    final logoUrl = logoPath == null
+        ? null
+        : '${ref.watch(appConfigProvider).apiBaseUrl.replaceFirst(RegExp(r'/+$'), '')}$logoPath';
 
     return Scaffold(
       appBar: AppBar(
+        leading: Padding(
+          padding: const EdgeInsets.all(8),
+          child: CompanyLogo(url: logoUrl, size: 32),
+        ),
         title: Text(items[selectedIndex].label),
         actions: const [_LanguageMenu(), _SignOutButton()],
       ),
@@ -88,7 +98,11 @@ class ErpShell extends ConsumerWidget {
         l10n.fiscalPeriods,
       ),
       _NavItem(AppRoutes.customers, Icons.people_outline, l10n.customers),
-      _NavItem(AppRoutes.suppliers, Icons.local_shipping_outlined, l10n.suppliers),
+      _NavItem(
+        AppRoutes.suppliers,
+        Icons.local_shipping_outlined,
+        l10n.suppliers,
+      ),
       _NavItem(AppRoutes.items, Icons.category_outlined, l10n.items),
       _NavItem(AppRoutes.stock, Icons.inventory_2_outlined, l10n.stock),
       _NavItem(
@@ -107,8 +121,16 @@ class ErpShell extends ConsumerWidget {
         l10n.chartOfAccounts,
       ),
       _NavItem(AppRoutes.reports, Icons.bar_chart_outlined, l10n.reports),
-      _NavItem(AppRoutes.importData, Icons.upload_file_outlined, l10n.importData),
-      _NavItem(AppRoutes.backup, Icons.verified_user_outlined, l10n.backupTitle),
+      _NavItem(
+        AppRoutes.importData,
+        Icons.upload_file_outlined,
+        l10n.importData,
+      ),
+      _NavItem(
+        AppRoutes.backup,
+        Icons.verified_user_outlined,
+        l10n.backupTitle,
+      ),
       _NavItem(
         AppRoutes.administration,
         Icons.admin_panel_settings_outlined,

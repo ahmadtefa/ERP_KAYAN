@@ -974,4 +974,36 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get exportListHint =>
       'Download this list as it stands: Excel, CSV, PDF, or a page to print.';
+
+  @override
+  String get rememberLogin => 'Remember sign-in details';
+
+  @override
+  String get rememberWebUsernameOnly =>
+      'Only the username is saved in this browser.';
+
+  @override
+  String get rememberNativeSecure =>
+      'Password is stored in device secure storage.';
+
+  @override
+  String get newExpenseAccount => 'New expense account';
+
+  @override
+  String get editExpenseAccount => 'Edit expense account';
+
+  @override
+  String get parentAccount => 'Parent account';
+
+  @override
+  String get noParentAccount => 'No parent';
+
+  @override
+  String get accountCanPost => 'Can receive journal postings';
+
+  @override
+  String get activateAccount => 'Activate account';
+
+  @override
+  String get deactivateAccount => 'Deactivate account';
 }

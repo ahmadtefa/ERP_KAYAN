@@ -15,6 +15,8 @@ class Account {
     this.isPostable = true,
     this.isActive = true,
     this.currency,
+    this.nameAr,
+    this.description,
   });
 
   final String id;
@@ -26,6 +28,8 @@ class Account {
   final bool isPostable;
   final bool isActive;
   final String? currency;
+  final String? nameAr;
+  final String? description;
 
   bool get isLeaf => isPostable;
 
@@ -39,6 +43,8 @@ class Account {
     isPostable: isPostable ?? this.isPostable,
     isActive: isActive ?? this.isActive,
     currency: currency,
+    nameAr: nameAr,
+    description: description,
   );
 
   @override

@@ -84,7 +84,6 @@ export class JournalEntriesService {
         'The signed-in user is not assigned to a branch',
       );
     }
-
     const lines = dto.lines.map((l) => this.normaliseLine(l));
 
     const totalDebit = lines.reduce(
@@ -204,6 +203,20 @@ export class JournalEntriesService {
       throw new BadRequestException('Journal entry is not balanced');
     }
 
+    const postingAccountIds = [...new Set(entry.lines.map((line) => line.accountId))];
+    const validAccounts = await this.prisma.account.findMany({
+      where: {
+        id: { in: postingAccountIds },
+        companyId,
+        isActive: true,
+        isPostable: true,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (validAccounts.length !== postingAccountIds.length) {
+      throw new BadRequestException('One or more accounts are no longer active and postable');
+    }
     // A manual entry goes straight to the ledger, so it has to respect the
     // same closed-period rule the documents do. Without this check a closed
     // year could still be written to by hand.

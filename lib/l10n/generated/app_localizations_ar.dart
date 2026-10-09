@@ -968,4 +968,34 @@ class AppLocalizationsAr extends AppLocalizations {
   @override
   String get exportListHint =>
       'نزّل القائمة زي ما هي على الشاشة: إكسل أو CSV أو PDF أو ورقة للطباعة.';
+
+  @override
+  String get rememberLogin => 'تذكر بيانات الدخول';
+
+  @override
+  String get rememberWebUsernameOnly => 'سيتم حفظ اسم المستخدم فقط في المتصفح.';
+
+  @override
+  String get rememberNativeSecure => 'تُحفظ كلمة المرور في مخزن النظام الآمن.';
+
+  @override
+  String get newExpenseAccount => 'حساب مصروفات جديد';
+
+  @override
+  String get editExpenseAccount => 'تعديل حساب مصروفات';
+
+  @override
+  String get parentAccount => 'الحساب الأب';
+
+  @override
+  String get noParentAccount => 'بدون حساب أب';
+
+  @override
+  String get accountCanPost => 'قابل لاستقبال قيود يومية';
+
+  @override
+  String get activateAccount => 'تفعيل الحساب';
+
+  @override
+  String get deactivateAccount => 'تعطيل الحساب';
 }

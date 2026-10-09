@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/error_messages.dart';
+import '../../../../shared/widgets/company_logo.dart';
 import '../providers/auth_providers.dart';
 
 /// Sign-in screen.
@@ -22,8 +24,30 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _password = TextEditingController();
 
   bool _obscure = true;
+  bool _rememberLogin = false;
+  bool _rememberLoaded = false;
   bool _busy = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreRememberedLogin();
+  }
+
+  Future<void> _restoreRememberedLogin() async {
+    final store = ref.read(tokenStoreProvider);
+    final enabled = await store.rememberLoginEnabled();
+    final username = enabled ? await store.readRememberedUsername() : null;
+    final password = enabled ? await store.readRememberedPassword() : null;
+    if (!mounted) return;
+    setState(() {
+      _rememberLogin = enabled;
+      _rememberLoaded = true;
+      _username.text = username ?? '';
+      _password.text = password ?? '';
+    });
+  }
 
   @override
   void dispose() {
@@ -41,7 +65,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() => _busy = true);
     final result = await ref
         .read(authControllerProvider.notifier)
-        .signIn(username: _username.text, password: _password.text);
+        .signIn(
+          username: _username.text,
+          password: _password.text,
+          rememberLogin: _rememberLogin,
+        );
     if (!mounted) return;
 
     setState(() {
@@ -57,6 +85,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
+    final branding = ref.watch(companyBrandingProvider).value;
+    final logoPath = branding?['logoUrl'] as String?;
+    final localizedCompanyName = branding == null
+        ? null
+        : (Localizations.localeOf(context).languageCode == 'ar'
+                  ? branding['nameAr']
+                  : branding['nameEn'])
+              ?.toString();
+    final logoUrl = logoPath == null
+        ? null
+        : '${ref.watch(appConfigProvider).apiBaseUrl.replaceFirst(RegExp(r'/+$'), '')}$logoPath';
 
     return Scaffold(
       body: Center(
@@ -73,14 +112,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Icon(
-                        Icons.account_balance,
-                        size: 48,
-                        color: theme.colorScheme.primary,
-                      ),
+                      Center(child: CompanyLogo(url: logoUrl, size: 56)),
                       const SizedBox(height: 12),
                       Text(
-                        l10n.appTitle,
+                        localizedCompanyName?.trim().isNotEmpty == true
+                            ? localizedCompanyName!
+                            : l10n.appTitle,
                         textAlign: TextAlign.center,
                         style: theme.textTheme.headlineSmall,
                       ),
@@ -130,11 +167,33 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ? l10n.passwordRequired
                             : null,
                       ),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: _rememberLogin,
+                        onChanged: !_rememberLoaded || _busy
+                            ? null
+                            : (value) async {
+                                final enabled = value ?? false;
+                                setState(() => _rememberLogin = enabled);
+                                if (!enabled) {
+                                  await ref
+                                      .read(tokenStoreProvider)
+                                      .clearRememberedLogin();
+                                }
+                              },
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: Text(l10n.rememberLogin),
+                        subtitle: Text(
+                          kIsWeb
+                              ? l10n.rememberWebUsernameOnly
+                              : l10n.rememberNativeSecure,
+                        ),
+                      ),
                       if (_error != null) ...[
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 12),
                         _ErrorBanner(message: _error!),
                       ],
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 8),
                       FilledButton(
                         onPressed: _busy ? null : _submit,
                         child: _busy

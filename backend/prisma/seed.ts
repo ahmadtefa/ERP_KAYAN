@@ -19,6 +19,8 @@ const prisma = new PrismaClient();
 
 const PERMISSIONS: Array<[string, string, string, string]> = [
   ['accounting.accounts.read', 'View chart of accounts', 'عرض دليل الحسابات', 'accounting'],
+  ['accounting.accounts.create', 'Create expense accounts', 'إنشاء حسابات مصروفات', 'accounting'],
+  ['accounting.accounts.update', 'Update expense accounts', 'تعديل حسابات المصروفات', 'accounting'],
   ['accounting.journal.read', 'View journal entries', 'عرض القيود اليومية', 'accounting'],
   ['accounting.journal.create', 'Create journal entries', 'إنشاء قيود يومية', 'accounting'],
   ['accounting.journal.post', 'Post and reverse entries', 'ترحيل وعكس القيود', 'accounting'],
@@ -26,6 +28,7 @@ const PERMISSIONS: Array<[string, string, string, string]> = [
   ['admin.roles.manage', 'Manage roles', 'إدارة الأدوار', 'admin'],
   ['admin.audit.read', 'View audit trail', 'عرض سجل التدقيق', 'admin'],
   ['admin.backup', 'Take and restore backups', 'أخذ واسترجاع نسخة احتياطية', 'admin'],
+  ['company.profile.manage', 'Manage company profile', 'إدارة بيانات الشركة', 'admin'],
 
   ['parties.customers.read', 'View customers', 'عرض العملاء', 'parties'],
   ['parties.customers.create', 'Add customers', 'إضافة عملاء', 'parties'],

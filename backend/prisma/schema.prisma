@@ -25,6 +25,12 @@ model Company {
   nameEn   String
   nameAr   String
   taxId    String? // Egyptian Tax Registration Number
+  commercialRegistration String?
+  addressEn String?
+  addressAr String?
+  phone String?
+  email String?
+  logoPath String?
   currency String @default("EGP") @db.VarChar(3)
   timezone String @default("Africa/Cairo")
 
@@ -222,6 +228,7 @@ model Account {
   isPostable  Boolean     @default(true)
   isActive    Boolean     @default(true)
   currency    String?     @db.VarChar(3)
+  description String?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

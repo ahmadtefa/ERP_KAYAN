@@ -26,6 +26,7 @@ void main() {
         overrides: [
           tokenStoreProvider.overrideWithValue(tokenStore),
           authRepositoryProvider.overrideWithValue(repository),
+          companyBrandingProvider.overrideWith((ref) async => null),
         ],
         child: wrapWithApp(child: const LoginScreen(), locale: locale),
       ),
@@ -89,6 +90,51 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('remembering saves login details only after successful sign-in', (
+    tester,
+  ) async {
+    await pumpLogin(tester);
+    await tester.enterText(find.byType(TextFormField).first, 'accountant');
+    await tester.enterText(find.byType(TextFormField).last, 'secret123');
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.tap(find.widgetWithText(FilledButton, 'Sign In'));
+    await tester.pumpAndSettle();
+
+    expect(tokenStore.rememberLogin, isTrue);
+    expect(tokenStore.username, 'accountant');
+    expect(tokenStore.password, 'secret123');
+  });
+
+  testWidgets('remembered values are restored and cleared when unchecked', (
+    tester,
+  ) async {
+    tokenStore.rememberLogin = true;
+    tokenStore.username = 'accountant';
+    tokenStore.password = 'secret123';
+    await pumpLogin(tester);
+
+    expect(
+      tester
+          .widget<TextFormField>(find.byType(TextFormField).first)
+          .controller
+          ?.text,
+      'accountant',
+    );
+    expect(
+      tester
+          .widget<TextFormField>(find.byType(TextFormField).last)
+          .controller
+          ?.text,
+      'secret123',
+    );
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.pumpAndSettle();
+
+    expect(tokenStore.rememberLogin, isFalse);
+    expect(tokenStore.username, isNull);
+    expect(tokenStore.password, isNull);
   });
 
   testWidgets('the password is obscured until the toggle is pressed', (

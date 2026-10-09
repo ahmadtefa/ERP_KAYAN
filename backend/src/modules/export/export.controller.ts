@@ -8,6 +8,8 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { readFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 
 import { AllowQueryToken } from '../../common/decorators/allow-query-token.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -122,7 +124,7 @@ export class ExportController {
     const table = await this.lists.build(list, user.companyId, query);
     const companyName = await this.companyName(user.companyId);
 
-    const html = toPrintHtml(table, lang, companyName, { autoPrint: false });
+    const html = toPrintHtml(table, lang, companyName, { autoPrint: false, logoUrl: await this.companyLogoUrl(user.companyId) });
     this.send(response, await this.pdf.render(html), 'application/pdf', `${list}-${this.stamp()}.pdf`);
   }
 
@@ -144,6 +146,7 @@ export class ExportController {
 
     const html = toPrintHtml(table, lang, companyName, {
       autoPrint: query.auto === '1' || query.auto === 'true',
+      logoUrl: await this.companyLogoUrl(user.companyId),
     });
     response.type('text/html; charset=utf-8');
     response.setHeader('Cache-Control', 'no-store');
@@ -215,7 +218,7 @@ export class ExportController {
     const table = await this.tables.build(slug, user.companyId, query, lang);
     const companyName = await this.companyName(user.companyId);
 
-    const html = toPrintHtml(table, lang, companyName, { autoPrint: false });
+    const html = toPrintHtml(table, lang, companyName, { autoPrint: false, logoUrl: await this.companyLogoUrl(user.companyId) });
     const body = await this.pdf.render(html);
 
     this.send(response, body, 'application/pdf', `${slug}-${this.stamp()}.pdf`);
@@ -241,6 +244,7 @@ export class ExportController {
 
     const html = toPrintHtml(table, lang, companyName, {
       autoPrint: query.auto === '1' || query.auto === 'true',
+      logoUrl: await this.companyLogoUrl(user.companyId),
     });
 
     response.type('text/html; charset=utf-8');
@@ -264,6 +268,23 @@ export class ExportController {
       select: { nameEn: true, nameAr: true },
     });
     return company?.nameAr ?? company?.nameEn ?? 'KAYAN';
+  }
+
+  private async companyLogoUrl(companyId: string): Promise<string | undefined> {
+    const company = await this.prisma.company.findUnique({ where: { id: companyId }, select: { logoPath: true } });
+    if (!company?.logoPath) return undefined;
+    const mime = ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp' } as const)[
+      basename(company.logoPath).slice(basename(company.logoPath).lastIndexOf('.')).toLowerCase() as '.png' | '.jpg' | '.webp'
+    ];
+    if (!mime) return undefined;
+    try {
+      const directory = process.env.KAYAN_UPLOAD_DIR ?? join(process.cwd(), 'uploads');
+      const bytes = await readFile(join(directory, basename(company.logoPath)));
+      if (bytes.length > 2 * 1024 * 1024) return undefined;
+      return `data:${mime};base64,${bytes.toString('base64')}`;
+    } catch {
+      return undefined;
+    }
   }
 
   private send(

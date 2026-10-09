@@ -312,5 +312,15 @@
   "exportPdf": "PDF",
   "printHintWhenNoPdf": "Opens a clean page for paper. In the print window, choose \"Save as PDF\" to keep it as a PDF file.",
   "downloadList": "Download the list",
-  "exportListHint": "Download this list as it stands: Excel, CSV, PDF, or a page to print."
+  "exportListHint": "Download this list as it stands: Excel, CSV, PDF, or a page to print.",
+  "rememberLogin": "Remember sign-in details",
+  "rememberWebUsernameOnly": "Only the username is saved in this browser.",
+  "rememberNativeSecure": "Password is stored in device secure storage.",
+  "newExpenseAccount": "New expense account",
+  "editExpenseAccount": "Edit expense account",
+  "parentAccount": "Parent account",
+  "noParentAccount": "No parent",
+  "accountCanPost": "Can receive journal postings",
+  "activateAccount": "Activate account",
+  "deactivateAccount": "Deactivate account"
 }

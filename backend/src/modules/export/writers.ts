@@ -268,7 +268,7 @@ export function toPrintHtml(
   table: ReportTable,
   lang: Lang,
   companyName: string,
-  options: { autoPrint?: boolean; generatedAt?: Date } = {},
+  options: { autoPrint?: boolean; generatedAt?: Date; logoUrl?: string } = {},
 ): string {
   const rtl = lang === 'ar';
   const title = rtl ? table.titleAr : table.titleEn;
@@ -339,6 +339,8 @@ export function toPrintHtml(
   }
   h1 { font-size: 20px; margin: 0 0 4px; }
   .company { font-size: 14px; color: #444; margin-bottom: 12px; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .brand img { width: 56px; height: 56px; object-fit: contain; }
   .meta { display: flex; flex-wrap: wrap; gap: 6px 24px; font-size: 13px; color: #333;
           border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; padding: 8px 0; margin-bottom: 14px; }
   .meta .label { color: #666; }
@@ -374,8 +376,9 @@ export function toPrintHtml(
     <button onclick="window.close()">${rtl ? 'إغلاق' : 'Close'}</button>
   </div>
   <div class="sheet">
-    <h1>${escapeHtml(title)}</h1>
+    <div class="brand">${options.logoUrl ? `<img src="${escapeHtml(options.logoUrl)}" alt="">` : ''}<div><h1>${escapeHtml(title)}</h1>
     <div class="company">${escapeHtml(companyName)}</div>
+    </div></div>
     <div class="meta">${meta}</div>
     <table>
       <thead><tr>${head}</tr></thead>

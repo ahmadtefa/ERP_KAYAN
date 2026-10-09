@@ -1975,6 +1975,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Download this list as it stands: Excel, CSV, PDF, or a page to print.'**
   String get exportListHint;
+
+  /// No description provided for @rememberLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Remember sign-in details'**
+  String get rememberLogin;
+
+  /// No description provided for @rememberWebUsernameOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Only the username is saved in this browser.'**
+  String get rememberWebUsernameOnly;
+
+  /// No description provided for @rememberNativeSecure.
+  ///
+  /// In en, this message translates to:
+  /// **'Password is stored in device secure storage.'**
+  String get rememberNativeSecure;
+
+  /// No description provided for @newExpenseAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'New expense account'**
+  String get newExpenseAccount;
+
+  /// No description provided for @editExpenseAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit expense account'**
+  String get editExpenseAccount;
+
+  /// No description provided for @parentAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent account'**
+  String get parentAccount;
+
+  /// No description provided for @noParentAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'No parent'**
+  String get noParentAccount;
+
+  /// No description provided for @accountCanPost.
+  ///
+  /// In en, this message translates to:
+  /// **'Can receive journal postings'**
+  String get accountCanPost;
+
+  /// No description provided for @activateAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Activate account'**
+  String get activateAccount;
+
+  /// No description provided for @deactivateAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Deactivate account'**
+  String get deactivateAccount;
 }
 
 class _AppLocalizationsDelegate

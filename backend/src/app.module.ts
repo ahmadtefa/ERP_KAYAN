@@ -18,6 +18,7 @@ import { PartiesModule } from './modules/parties/parties.module';
 import { PurchasesModule } from './modules/purchases/purchases.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SalesModule } from './modules/sales/sales.module';
+import { CompanyModule } from './modules/company/company.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { SalesModule } from './modules/sales/sales.module';
     PartiesModule,
     InventoryModule,
     SalesModule,
+    CompanyModule,
     PurchasesModule,
     ReportsModule,
     ExportModule,
