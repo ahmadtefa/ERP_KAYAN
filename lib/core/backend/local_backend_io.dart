@@ -140,6 +140,20 @@ class LocalBackend {
     log.writeln('[shell] server: ${layout.entryPoint}');
     final settings = await RuntimeSettings.load(layout, port);
 
+    // Packaged Windows installs ship a local PostgreSQL service. The service
+    // manager's Running state does not mean PostgreSQL accepts connections yet;
+    // wait on its own readiness utility before asking Prisma to migrate.
+    final databaseReady = await _waitForBundledPostgres(layout, settings, log);
+    if (!databaseReady) {
+      await log.flush();
+      await log.close();
+      return LocalBackendStatus.failed(
+        'The local database is not ready. Start KAYAN PostgreSQL and try again.',
+        logPath: layout.logPath,
+        databaseProblem: true,
+      );
+    }
+
     // 2. Prepare the database first. On a machine that has never run the
     //    program this creates the database and applies the schema; on any
     //    other machine it is a couple of seconds of checking.
@@ -217,6 +231,50 @@ class LocalBackend {
     return null;
   }
 
+  static Future<bool> _waitForBundledPostgres(
+    BackendLayout layout,
+    RuntimeSettings settings,
+    IOSink? log,
+  ) async {
+    final url = Uri.tryParse(settings.databaseUrl ?? '');
+    if (url == null || !{'127.0.0.1', 'localhost', '::1'}.contains(url.host)) {
+      return true;
+    }
+    final executable = File(
+      '${layout.backendDirectory}${Platform.pathSeparator}postgres'
+      '${Platform.pathSeparator}bin${Platform.pathSeparator}pg_isready.exe',
+    );
+    // Developer-installed PostgreSQL and non-Windows desktop builds keep their
+    // existing path; only the installer ships this executable.
+    if (!await executable.exists()) return true;
+    final port = int.tryParse(url.port.toString()) ?? 5432;
+    final deadline = DateTime.now().add(const Duration(seconds: 60));
+    while (DateTime.now().isBefore(deadline)) {
+      try {
+        final result = await Process.run(executable.path, [
+          '-h',
+          '127.0.0.1',
+          '-p',
+          '$port',
+          '-U',
+          'postgres',
+        ], runInShell: false);
+        if (result.exitCode == 0) {
+          log?.writeln('[shell] bundled PostgreSQL is accepting connections');
+          return true;
+        }
+      } on Object catch (error) {
+        log?.writeln('[shell] PostgreSQL readiness probe failed: $error');
+        return false;
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    log?.writeln(
+      '[shell] PostgreSQL did not become ready before the 60 second deadline',
+    );
+    return false;
+  }
+
   /// Starts the server as a child process with no window of its own.
   ///
   /// `ProcessStartMode.normal` keeps the pipes open, which is what lets the
@@ -236,6 +294,8 @@ class LocalBackend {
         workingDirectory: layout.backendDirectory,
         environment: {
           ...settings.asEnvironment(port),
+          'KAYAN_UPLOAD_DIR':
+              '${layout.dataDirectory.path}${Platform.pathSeparator}uploads',
           // The desktop server is private to this machine.
           'HOST': '127.0.0.1',
           'NODE_ENV': 'production',

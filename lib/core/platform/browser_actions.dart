@@ -5,9 +5,10 @@
 /// to go through the platform, so this picks the right implementation when the
 /// program is compiled.
 ///
-/// The web build is the real one. On any other target the calls report that
-/// they need a browser rather than failing silently.
+/// Web uses browser APIs; native desktop builds use platform file pickers and
+/// the user's default browser.
 library;
 
 export 'browser_actions_stub.dart'
-    if (dart.library.html) 'browser_actions_web.dart';
+    if (dart.library.html) 'browser_actions_web.dart'
+    if (dart.library.io) 'browser_actions_io.dart';
