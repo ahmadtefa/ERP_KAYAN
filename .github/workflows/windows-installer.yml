@@ -65,15 +65,17 @@ jobs:
         working-directory: backend
         run: npm ci
 
+      - name: Generate Prisma Client
+        working-directory: backend
+        run: npm run prisma:generate
+
       - name: Test backend
         working-directory: backend
         run: npm test -- --runInBand
 
       - name: Clean build backend
         working-directory: backend
-        run: |
-          npm run prisma:generate
-          npm run build
+        run: npm run build
 
       - name: Verify clean backend build outputs
         shell: powershell
