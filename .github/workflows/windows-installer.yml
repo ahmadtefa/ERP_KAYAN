@@ -1,0 +1,122 @@
+name: Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-installer-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build KAYAN ERP for Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable Flutter Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Install Inno Setup 6
+        shell: powershell
+        run: |
+          choco install innosetup --no-progress -y
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) {
+            throw "Inno Setup compiler not found: $iscc"
+          }
+          & $iscc /?
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup compiler check failed."
+          }
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Test backend
+        working-directory: backend
+        run: npm test -- --runInBand
+
+      - name: Clean build backend
+        working-directory: backend
+        run: |
+          npm run prisma:generate
+          npm run build
+
+      - name: Verify clean backend build outputs
+        shell: powershell
+        run: |
+          $required = @('backend\dist\src\main.js', 'backend\dist\prisma\seed.js')
+          foreach ($item in $required) {
+            if (-not (Test-Path $item)) {
+              throw "Required clean build output missing: $item"
+            }
+          }
+          Write-Host "Verified backend build outputs: $($required -join ', ')"
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Analyze Flutter
+        run: flutter analyze
+
+      - name: Test Flutter
+        run: flutter test
+
+      - name: Build Windows installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\distribution\windows\build-installer.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows installer build failed."
+          }
+
+      - name: Verify installer artifact
+        shell: powershell
+        run: |
+          $setupCanonical = ".\build\windows-installer\KAYAN-ERP-Setup.exe"
+          if (-not (Test-Path $setupCanonical)) {
+            throw "Expected canonical installer EXE not found: $setupCanonical"
+          }
+          $files = @(Get-ChildItem .\build\windows-installer\KAYAN-ERP-Setup-*-x64.exe -File)
+          if ($files.Count -lt 1) {
+            throw "Expected at least one versioned installer EXE; found $($files.Count)."
+          }
+          Get-FileHash $setupCanonical, $files[0].FullName -Algorithm SHA256 |
+            Format-List Algorithm, Hash, Path
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAYAN-ERP-Windows-x64-Installer
+          path: |
+            build/windows-installer/KAYAN-ERP-Setup.exe
+            build/windows-installer/KAYAN-ERP-Setup-*-x64.exe
+          if-no-files-found: error
+          retention-days: 14

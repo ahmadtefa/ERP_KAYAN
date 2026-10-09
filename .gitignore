@@ -54,3 +54,6 @@ backend/.env
 backend/.env.*
 !backend/.env.example
 *.tsbuildinfo
+
+# Local environment secrets
+.env

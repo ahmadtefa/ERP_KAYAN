@@ -96,6 +96,9 @@ Run-Native 'node.exe' @((Join-Path $app 'backend\node_modules\prisma\build\index
 Write-Host '[3/8] Build Flutter Windows x64 and production Web'
 Run-Native $flutterCommand @('build','windows','--release','--dart-define=APP_ENV=production') $root
 $release = Join-Path $root 'build\windows\x64\runner\Release'
+if (-not (Test-Path (Join-Path $release 'erp_kayan.exe'))) {
+  $release = Join-Path $root 'build\windows\runner\Release'
+}
 if (-not (Test-Path (Join-Path $release 'erp_kayan.exe'))) { throw 'Flutter Windows x64 release output is missing erp_kayan.exe.' }
 Copy-Item (Join-Path $release '*') $app -Recurse -Force
 Run-Native $flutterCommand @('build','web','--release','--base-href=/','--dart-define=APP_ENV=production','--dart-define=API_BASE_URL=/api/v1') $root
@@ -128,7 +131,7 @@ Copy-Item (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') $app
 Copy-Item (Join-Path $PSScriptRoot 'installer.iss') (Join-Path $stage 'installer.iss')
 
 Write-Host '[6/8] Verify staged runtime essentials and absence of development .env'
-$required = @('erp_kayan.exe','backend\dist\src\main.js','backend\scripts\prepare-database.mjs','backend\node\node.exe','backend\postgres\bin\pg_ctl.exe','backend\postgres\bin\pg_isready.exe','build\web\index.html','install-runtime.ps1','remove-runtime.ps1','database-control.ps1','prerequisites\vc_redist.x64.exe')
+$required = @('erp_kayan.exe','backend\dist\src\main.js','backend\dist\prisma\seed.js','backend\scripts\prepare-database.mjs','backend\node\node.exe','backend\postgres\bin\pg_ctl.exe','backend\postgres\bin\pg_isready.exe','build\web\index.html','install-runtime.ps1','remove-runtime.ps1','database-control.ps1','prerequisites\vc_redist.x64.exe')
 foreach ($item in $required) { if (-not (Test-Path (Join-Path $app $item))) { throw "Staged package is missing $item" } }
 $secretEnvironmentFiles = Get-ChildItem -LiteralPath $app -Force -File -Recurse | Where-Object { $_.Name -eq '.env' -or $_.Name -like '.env.*' }
 if ($secretEnvironmentFiles) { throw 'Environment files are forbidden in the installer package.' }
@@ -141,7 +144,15 @@ if (-not $SkipInstaller) {
   Write-Host '[8/8] Compile standalone Inno Setup installer'
   & $iscc.Source "/DSourceDir=$app" "/DOutputDir=$outputPath" "/DAppVersion=$appVersion" (Join-Path $stage 'installer.iss')
   if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed ($LASTEXITCODE)." }
+  $versionedSetup = Join-Path $outputPath "KAYAN-ERP-Setup-$appVersion-x64.exe"
+  $canonicalSetup = Join-Path $outputPath "KAYAN-ERP-Setup.exe"
+  if (Test-Path $versionedSetup) {
+    Copy-Item -LiteralPath $versionedSetup -Destination $canonicalSetup -Force
+  }
 }
 Write-Host "Build staging: $app"
-if (-not $SkipInstaller) { Write-Host "Installer: $(Join-Path $outputPath "KAYAN-ERP-Setup-$appVersion-x64.exe")" }
+if (-not $SkipInstaller) {
+  Write-Host "Installer: $(Join-Path $outputPath "KAYAN-ERP-Setup-$appVersion-x64.exe")"
+  Write-Host "Canonical Installer: $(Join-Path $outputPath "KAYAN-ERP-Setup.exe")"
+}
 Write-Host 'A native Windows install/service test is still required; build host does not prove runtime behavior.'

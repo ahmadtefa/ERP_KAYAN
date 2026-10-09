@@ -69,9 +69,71 @@ function Invoke-PsqlInput([string]$Exe, [string[]]$Args, [string]$Sql) {
   $process.WaitForExit()
   if ($process.ExitCode -ne 0) { throw "PostgreSQL initialization SQL failed ($($process.ExitCode)); details are in the PostgreSQL log." }
 }
-function Set-PrivateAcl([string]$Path, [string]$Principal) {
-  & icacls.exe $Path '/inheritance:r' '/grant:r' "$Principal`:(OI)(CI)F" 'SYSTEM:(OI)(CI)F' 'BUILTIN\Administrators:(OI)(CI)F' | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "Could not secure ACLs on '$Path'." }
+function Set-PrivateAcl([string]$Path, [string[]]$Principals) {
+  # Strict least-privilege: SYSTEM, Administrators, and explicitly authorized user(s).
+  # NEVER grant BUILTIN\Users or Everyone access to database passwords or signing secrets.
+  $aclCommands = @('/inheritance:r', '/grant:r', 'SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F')
+  foreach ($p in $Principals) {
+    if ($p) { $aclCommands += "$p`:(OI)(CI)F" }
+  }
+  & icacls.exe $Path @aclCommands | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    # Non-English Windows fallback using well-known SIDs:
+    # S-1-5-18 = SYSTEM, S-1-5-32-544 = Administrators
+    $sidCommands = @('/inheritance:r', '/grant:r', '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
+    foreach ($p in $Principals) {
+      if ($p) {
+        if ($p -match '^S-1-') { $sidCommands += "*$p`:(OI)(CI)F" }
+        else {
+          try {
+            $s = (New-Object Security.Principal.NTAccount($p)).Translate([Security.Principal.SecurityIdentifier]).Value
+            $sidCommands += "*$s`:(OI)(CI)F"
+          } catch { $sidCommands += "$p`:(OI)(CI)F" }
+        }
+      }
+    }
+    & icacls.exe $Path @sidCommands | Out-Null
+  }
+}
+
+function Get-ActiveDesktopUserContext {
+  $userName = $null
+  try {
+    $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue
+    if ($cs -and $cs.UserName) { $userName = $cs.UserName }
+  } catch { }
+
+  if (-not $userName) {
+    try {
+      $explorer = Get-CimInstance Win32_Process -Filter "Name = 'explorer.exe'" -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($explorer) {
+        $owner = Invoke-CimMethod -InputObject $explorer -MethodName GetOwner -ErrorAction SilentlyContinue
+        if ($owner -and $owner.User) {
+          $userName = if ($owner.Domain) { "$($owner.Domain)\$($owner.User)" } else { $owner.User }
+        }
+      }
+    } catch { }
+  }
+
+  if (-not $userName) {
+    $userName = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+  }
+
+  $sid = $null
+  $profilePath = $null
+  try {
+    $account = New-Object Security.Principal.NTAccount($userName)
+    $sidObj = $account.Translate([Security.Principal.SecurityIdentifier])
+    $sid = $sidObj.Value
+    $profileRecord = Get-CimInstance Win32_UserProfile -ErrorAction SilentlyContinue | Where-Object { $_.SID -eq $sid } | Select-Object -First 1
+    if ($profileRecord) { $profilePath = $profileRecord.LocalPath }
+  } catch { }
+
+  return [PSCustomObject]@{
+    UserName = $userName
+    Sid = $sid
+    ProfilePath = $profilePath
+  }
 }
 # A running Windows service is not the same thing as a PostgreSQL that accepts
 # connections. Ask the server itself before anything (Prisma included) touches
@@ -106,25 +168,54 @@ function New-Secret {
 
 if (-not (Test-Path (Join-Path $pgBin 'initdb.exe'))) { throw 'Bundled PostgreSQL runtime is incomplete.' }
 if (-not (Test-Path (Join-Path $PSScriptRoot 'backend\node\node.exe'))) { throw 'Bundled Node runtime is missing.' }
-New-Item -ItemType Directory -Force -Path $ProgramDataRoot, (Split-Path -Parent $pgData), (Split-Path -Parent $pgLog), (Split-Path -Parent $UserSettingsPath) | Out-Null
-
-function Save-UserSettings([hashtable]$Values) {
-  $profilePath = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $UserSettingsPath)))
-  $profileRecord = Get-CimInstance Win32_UserProfile | Where-Object { $_.LocalPath -ieq $profilePath } | Select-Object -First 1
-  if (-not $profileRecord) { throw 'Could not resolve the installing user profile to set private settings ACLs.' }
-  $identity = ([Security.Principal.SecurityIdentifier]::new([string]$profileRecord.SID)).Translate([Security.Principal.NTAccount]).Value
-  $body = @('# KAYAN ERP machine-local runtime configuration; do not share this file.') + @($Values.GetEnumerator() | Sort-Object Key | ForEach-Object { '{0}="{1}"' -f $_.Key,$_.Value })
-  Set-Content -LiteralPath $UserSettingsPath -Value $body -Encoding ASCII
-  Set-PrivateAcl (Split-Path -Parent $UserSettingsPath) $identity
+New-Item -ItemType Directory -Force -Path $ProgramDataRoot, (Split-Path -Parent $pgData), (Split-Path -Parent $pgLog) | Out-Null
+if ($UserSettingsPath) {
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $UserSettingsPath) | Out-Null
 }
 
-$settingsExists = Test-Path -LiteralPath $UserSettingsPath
+function Save-UserSettings([hashtable]$Values) {
+  $activeContext = Get-ActiveDesktopUserContext
+  $body = @('# KAYAN ERP machine-local runtime configuration; do not share this file.') + @($Values.GetEnumerator() | Sort-Object Key | ForEach-Object { '{0}="{1}"' -f $_.Key,$_.Value })
+
+  $authorizedPrincipals = @()
+  if ($activeContext.Sid) { $authorizedPrincipals += $activeContext.Sid }
+  if ($activeContext.UserName) { $authorizedPrincipals += $activeContext.UserName }
+
+  # 1. Save to the designated user settings path (caller profile)
+  if ($UserSettingsPath) {
+    Set-Content -LiteralPath $UserSettingsPath -Value $body -Encoding ASCII
+    Set-PrivateAcl (Split-Path -Parent $UserSettingsPath) $authorizedPrincipals
+  }
+
+  # 2. If the active desktop user is a standard user whose profile differs from caller,
+  # securely provision their private AppData settings so they can run the ERP immediately
+  if ($activeContext.ProfilePath) {
+    $activeUserKayanDir = Join-Path $activeContext.ProfilePath 'AppData\Roaming\KAYAN-ERP'
+    $activeUserKayanEnv = Join-Path $activeUserKayanDir 'kayan.env'
+    if ($activeUserKayanEnv -ne $UserSettingsPath) {
+      New-Item -ItemType Directory -Force -Path $activeUserKayanDir | Out-Null
+      Set-Content -LiteralPath $activeUserKayanEnv -Value $body -Encoding ASCII
+      Set-PrivateAcl $activeUserKayanDir $authorizedPrincipals
+    }
+  }
+
+  # 3. Secure machine-level fallback in ProgramData:
+  # Strictly restricted to SYSTEM, Administrators, and the active authorized user.
+  # BUILTIN\Users has NO ACCESS.
+  $machineConfig = Join-Path $ProgramDataRoot 'kayan.env'
+  Set-Content -LiteralPath $machineConfig -Value $body -Encoding ASCII
+  Set-PrivateAcl $machineConfig $authorizedPrincipals
+}
+
+$machineSettingsPath = Join-Path $ProgramDataRoot 'kayan.env'
+$settingsSource = if (Test-Path -LiteralPath $UserSettingsPath) { $UserSettingsPath } elseif (Test-Path -LiteralPath $machineSettingsPath) { $machineSettingsPath } else { $null }
 $settings = @{}
-if ($settingsExists) {
-  foreach ($line in Get-Content -LiteralPath $UserSettingsPath) {
+if ($settingsSource) {
+  foreach ($line in Get-Content -LiteralPath $settingsSource) {
     if ($line -match '^\s*([A-Z_]+)="?(.*?)"?\s*$') { $settings[$matches[1]] = $matches[2].Trim('"') }
   }
 }
+$settingsExists = $settings.Count -gt 0
 
 if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   if (Test-Path $pgData) {
@@ -176,13 +267,15 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   $pgCtl = Join-Path $pgBin 'pg_ctl.exe'
   Invoke-Pg $pgCtl @('start','-D',$pgData,'-l',$pgLog,'-w','-t','60')
   try {
-    Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "CREATE ROLE erp_app WITH LOGIN PASSWORD '$dbPassword';"
-    Invoke-Pg (Join-Path $pgBin 'createdb.exe') @('-h','127.0.0.1','-U','postgres','-O','erp_app','erp_kayan')
+    Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "DO `$`$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'erp_app') THEN CREATE ROLE erp_app WITH LOGIN PASSWORD '$dbPassword'; ELSE ALTER ROLE erp_app WITH LOGIN PASSWORD '$dbPassword'; END IF; END `$`$;"
+    Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "SELECT 'CREATE DATABASE erp_kayan OWNER erp_app' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'erp_kayan')\gexec"
     } finally {
       Invoke-Pg $pgCtl @('stop','-D',$pgData,'-m','fast','-w')
       Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
     }
-  Invoke-Pg $pgCtl @('register','-N',$serviceName,'-U','NT AUTHORITY\LocalService','-D',$pgData,'-S','auto')
+  if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
+    Invoke-Pg $pgCtl @('register','-N',$serviceName,'-U','NT AUTHORITY\LocalService','-D',$pgData,'-S','auto')
+  }
   Set-PrivateAcl $pgData 'NT AUTHORITY\LOCAL SERVICE'
   Set-PrivateAcl (Split-Path -Parent $pgLog) 'NT AUTHORITY\LOCAL SERVICE'
   Start-PgService

@@ -56,9 +56,6 @@ class _BackendGateState extends State<BackendGate> {
 
     if (ownsItsBackend) {
       _start();
-    } else {
-      // Development, and every web build: nothing to start.
-      _status = const LocalBackendStatus.unsupported();
     }
   }
 

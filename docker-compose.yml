@@ -50,7 +50,7 @@ services:
       - "3000:3000"
     volumes:
       - company_uploads:/app/uploads
-    command: sh -c "npx prisma migrate deploy && node dist/main"
+    command: sh -c "npx prisma migrate deploy && node dist/src/main.js"
 
 volumes:
   db_data:
