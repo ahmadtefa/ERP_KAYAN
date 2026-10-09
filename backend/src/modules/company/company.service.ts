@@ -79,4 +79,5 @@ export class CompanyService {
     const { logoPath, ...profile } = company;
     return { ...profile, logoUrl: logoPath ? `/companies/logo/${company.id}?v=${encodeURIComponent(logoPath)}` : null };
   }
+}
 

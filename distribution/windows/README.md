@@ -11,7 +11,7 @@ The installer contains the Flutter Windows release client, a production Flutter 
 
 ## Build (Windows build host)
 
-Requirements on the build machine only: Windows x64, Flutter stable SDK, Node.js/npm, Git, network access to the pinned vendor downloads, at least 5 GB free staging space, and Inno Setup 6. The customer does not install Flutter, Node, PostgreSQL, or Docker. A registered browser is used for print/export pages, not for the core program.
+Requirements on the build machine only: Windows x64, Flutter stable SDK, Node.js/npm, Git, network access to the pinned vendor downloads, at least 5 GB free staging space, and Inno Setup 6.3 or newer (the script uses the `x64compatible` architecture identifiers added in 6.3). The customer does not install Flutter, Node, PostgreSQL, or Docker. A registered browser is used for print/export pages, not for the core program.
 
 From the repository root, run PowerShell without interactive package prompts:
 
@@ -47,4 +47,4 @@ The first install needs enough disk for the bundled installer plus a PostgreSQL 
 
 ## Verification boundary
 
-The build pipeline validates artifact hashes, staged entry points, required dependencies, absence of development `.env`, and emits a runtime manifest. This repository's current execution environment is Linux and has no Windows, PowerShell, Inno Setup compiler, Wine, or Docker. Consequently, a real `.exe` installer compile, Windows service lifecycle, UAC behavior, shortcut validation, update-over-existing-data run, and uninstall retention test must be performed on a Windows x64 machine before distributing the installer. Build success alone is not proof of those behaviors.
+The build pipeline validates artifact hashes, staged entry points, required dependencies, absence of development `.env`, and emits a runtime manifest. On the Linux development environment the packaging sources were additionally validated as far as that platform allows: all four PowerShell scripts were machine-parsed (tree-sitter PowerShell grammar) and structurally balance-checked, `installer.iss` was cross-checked against the staging contract (every define, constant, and referenced file), and the backend `npm ci` / Prisma generate / `nest build` steps plus the Jest suite were executed successfully (the compiler fix in `backend/src/modules/company/company.service.ts` came out of that run). A real `.exe` installer compile, Windows service lifecycle, UAC behavior, shortcut validation, update-over-existing-data run, and uninstall retention test must still be performed on a Windows x64 machine before distributing the installer; build success alone is not proof of those behaviors.

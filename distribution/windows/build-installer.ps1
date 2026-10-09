@@ -143,5 +143,5 @@ if (-not $SkipInstaller) {
   if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed ($LASTEXITCODE)." }
 }
 Write-Host "Build staging: $app"
-if (-not $SkipInstaller) { Write-Host "Installer: $(Join-Path $outputPath "KAYAN-ERP-Setup-$appVersion.exe")" }
+if (-not $SkipInstaller) { Write-Host "Installer: $(Join-Path $outputPath "KAYAN-ERP-Setup-$appVersion-x64.exe")" }
 Write-Host 'A native Windows install/service test is still required; build host does not prove runtime behavior.'

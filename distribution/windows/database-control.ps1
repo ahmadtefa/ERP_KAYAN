@@ -4,7 +4,13 @@ $ErrorActionPreference = 'Stop'
 $name = 'KayanERPPostgreSQL'
 function Control-Service([string]$Verb) {
   $s = Get-Service -Name $name -ErrorAction SilentlyContinue
-  if (-not $s) { throw 'KAYAN PostgreSQL is not installed. Repair or reinstall KAYAN ERP.' }
+  if (-not $s) {
+    # Stopping a service that is not there is a successful no-op. This is also
+    # the command the installer runs before an upgrade, and an upgrade must
+    # never be blocked because the service is already gone.
+    if ($Verb -eq 'stop') { Write-Output 'KAYAN PostgreSQL is not installed; nothing to stop.'; return }
+    throw 'KAYAN PostgreSQL is not installed. Repair or reinstall KAYAN ERP.'
+  }
   switch ($Verb) {
     'start' { if ($s.Status -ne 'Running') { Start-Service $name; (Get-Service $name).WaitForStatus('Running',[TimeSpan]::FromSeconds(60)) } }
     'stop' { if ($s.Status -ne 'Stopped') { Stop-Service $name -Force; (Get-Service $name).WaitForStatus('Stopped',[TimeSpan]::FromSeconds(60)) } }
