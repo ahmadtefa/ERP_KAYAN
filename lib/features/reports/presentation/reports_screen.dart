@@ -207,7 +207,7 @@ class _TrialBalanceTab extends ConsumerWidget {
                 rows: rows,
                 columns: [
                   ColumnSpec(l10n.accountCode, value: (r) => text(r, 'code'), emphasise: true),
-                  ColumnSpec(l10n.accountName, value: (r) => text(r, 'nameEn')),
+                  ColumnSpec(l10n.accountName, value: (r) => ('    ' * ((r['depth'] as num?)?.toInt() ?? 0)) + text(r, 'nameEn')),
                   ColumnSpec(l10n.opening, numeric: true, value: (r) => formatAmount(asString(r['opening']))),
                   ColumnSpec(l10n.debit, numeric: true, value: (r) => formatAmount(asString(r['debit']))),
                   ColumnSpec(l10n.credit, numeric: true, value: (r) => formatAmount(asString(r['credit']))),
@@ -336,7 +336,7 @@ class _SheetSection extends StatelessWidget {
                 child: Row(
                   children: [
                     SizedBox(width: 70, child: Text(text(row, 'code'))),
-                    Expanded(child: Text(text(row, 'nameEn'))),
+                    Expanded(child: Text(('    ' * ((row['depth'] as num?)?.toInt() ?? 0)) + text(row, 'nameEn'), style: TextStyle(fontWeight: (row['isPostable'] == false) ? FontWeight.w600 : null))),
                     Text(formatAmount(asString(row['amount']))),
                   ],
                 ),
