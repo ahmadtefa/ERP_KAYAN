@@ -123,11 +123,14 @@ export class ReportTablesService {
     const revenueLabel = lang === 'ar' ? 'إيراد' : 'Revenue';
     const expenseLabel = lang === 'ar' ? 'مصروف' : 'Expense';
     const rows = [
-      ...data.revenue.map((r: Record<string, string>) => ({
+      // The rows keep whatever the report produced (amounts as text, but also
+      // parentId, which may be null), so the value type is unknown rather than
+      // string; the writer stringifies each cell on the way out.
+      ...data.revenue.map((r: Record<string, unknown>) => ({
         ...r,
         group: revenueLabel,
       })),
-      ...data.expenses.map((r: Record<string, string>) => ({
+      ...data.expenses.map((r: Record<string, unknown>) => ({
         ...r,
         group: expenseLabel,
       })),
