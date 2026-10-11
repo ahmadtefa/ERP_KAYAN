@@ -14,6 +14,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
+
+import 'company_setup_data.dart';
 
 /// What the shell needs to know after a start attempt.
 class LocalBackendStatus {
@@ -125,6 +128,10 @@ class KayanDatabaseConfig {
     return 'PostgreSQL is not reachable on $host:$port.';
   }
 }
+
+/// The temporary logo file for the current preparation call, if any. Written
+/// just before the child process runs and cleared right after.
+File? _logoFile;
 
 /// A running server, or the reason there is not one.
 class LocalBackend {
@@ -426,6 +433,7 @@ class LocalBackend {
     RuntimeSettings settings,
     IOSink? log, {
     ({String username, String password})? firstAdministrator,
+    CompanySetupData? company,
   }) async {
     final script = File(
       '${layout.backendDirectory}${Platform.pathSeparator}scripts'
@@ -447,6 +455,8 @@ class LocalBackend {
             'KAYAN_ADMIN_USERNAME': firstAdministrator.username,
             'KAYAN_ADMIN_PASSWORD': firstAdministrator.password,
           },
+          if (company != null) ...company.environment,
+          if (_logoFile != null) 'KAYAN_COMPANY_LOGO_FILE': _logoFile!.path,
         },
         includeParentEnvironment: true,
       );
@@ -499,6 +509,7 @@ class LocalBackend {
     required String username,
     required String password,
     required String appDisplayName,
+    CompanySetupData? company,
   }) async {
     if (username.trim().length < 3) {
       return const LocalBackendStatus.failed('اسم المستخدم قصير جدًا');
@@ -513,12 +524,41 @@ class LocalBackend {
     final log = await layout.openLog();
     final settings = await RuntimeSettings.load(layout, 3000);
     log.writeln('[shell] creating the first administrator: ${username.trim()}');
-    final preparation = await _runPreparation(
-      layout,
-      settings,
-      log,
-      firstAdministrator: (username: username.trim(), password: password),
-    );
+    // The logo travels as a file the shell writes to a temporary folder: an
+    // image does not belong in an environment variable. The file lives only
+    // for the length of the preparation call.
+    final bytes = company?.logoBytes;
+    if (company != null && bytes != null && bytes.isNotEmpty) {
+      final suffix = switch ((company.logoMime ?? '').toLowerCase()) {
+        'image/jpeg' => '.jpg',
+        'image/webp' => '.webp',
+        _ => '.png',
+      };
+      final temp = File(
+        '${Directory.systemTemp.path}${Platform.pathSeparator}'
+        'kayan-setup-logo-${DateTime.now().millisecondsSinceEpoch}$suffix',
+      );
+      await temp.writeAsBytes(bytes, flush: true);
+      _logoFile = temp;
+    }
+    ({String? state, int exitCode, String output})? preparation;
+    try {
+      preparation = await _runPreparation(
+        layout,
+        settings,
+        log,
+        firstAdministrator: (username: username.trim(), password: password),
+        company: company,
+      );
+    } finally {
+      final logoFile = _logoFile;
+      _logoFile = null;
+      if (logoFile != null) {
+        try {
+          await logoFile.delete();
+        } catch (_) {}
+      }
+    }
     await log.flush();
     await log.close();
     if (preparation?.exitCode != 0 || preparation?.state != 'ready') {

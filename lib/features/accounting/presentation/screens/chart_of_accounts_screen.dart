@@ -3,17 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../shared/extensions/account_type_labels.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/utils/account_name.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../data/presentation/widgets/list_export_actions.dart';
+import '../../data/datasources/chart_of_accounts_data_source.dart';
 import '../../domain/entities/account.dart';
 import '../../domain/entities/account_type.dart';
 import '../providers/chart_of_accounts_providers.dart';
-import '../../../data/presentation/widgets/list_export_actions.dart';
 
-/// Read-only view of the chart of accounts, grouped by account type.
-///
-/// Accounts are created and edited on the server; this screen intentionally
-/// offers no local mutation so the ledger can never diverge from the API.
+/// The chart of accounts as a tree: every depth, expandable, searchable, and
+/// editable — with every rule still enforced on the server, never here.
 class ChartOfAccountsScreen extends ConsumerWidget {
   const ChartOfAccountsScreen({super.key});
 
@@ -21,6 +21,7 @@ class ChartOfAccountsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final accounts = ref.watch(chartOfAccountsProvider);
     final showSampleNotice = ref.watch(appConfigProvider).useSeedData;
+    final l10n = context.l10n;
 
     return Column(
       children: [
@@ -32,7 +33,7 @@ class ChartOfAccountsScreen extends ConsumerWidget {
               Expanded(
                 child: TextField(
                   decoration: InputDecoration(
-                    hintText: context.l10n.searchAccounts,
+                    hintText: l10n.searchAccounts,
                     prefixIcon: const Icon(Icons.search),
                   ),
                   onChanged: (value) =>
@@ -40,7 +41,15 @@ class ChartOfAccountsScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(width: 12),
+              _TypeFilter(ref: ref),
+              const SizedBox(width: 12),
               const ListExportActions(list: 'chart-of-accounts'),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: () => _editAccount(context, ref, null),
+                icon: const Icon(Icons.add),
+                label: Text(l10n.newAccount),
+              ),
             ],
           ),
         ),
@@ -48,9 +57,9 @@ class ChartOfAccountsScreen extends ConsumerWidget {
           child: AsyncStateView<List<Account>>(
             value: accounts,
             onRetry: () => ref.read(chartOfAccountsProvider.notifier).refresh(),
-            emptyMessage: context.l10n.noAccounts,
+            emptyMessage: l10n.noAccounts,
             isEmpty: (list) => list.isEmpty,
-            data: (list) => _AccountList(accounts: list),
+            data: (_) => const _AccountTree(),
           ),
         ),
       ],
@@ -58,91 +67,365 @@ class ChartOfAccountsScreen extends ConsumerWidget {
   }
 }
 
-class _AccountList extends ConsumerWidget {
-  const _AccountList({required this.accounts});
+class _TypeFilter extends StatelessWidget {
+  const _TypeFilter({required this.ref});
 
-  final List<Account> accounts;
+  final WidgetRef ref;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = ref.watch(accountTypeFilterProvider);
+    return DropdownButton<AccountType?>(
+      value: current,
+      hint: Text(context.l10n.accountType),
+      onChanged: (value) =>
+          ref.read(accountTypeFilterProvider.notifier).setType(value),
+      items: [
+        DropdownMenuItem<AccountType?>(
+          value: null,
+          child: Text(context.l10n.allTypes),
+        ),
+        for (final type in AccountType.values)
+          DropdownMenuItem<AccountType?>(
+            value: type,
+            child: Text(context.l10n.accountTypeLabel(type)),
+          ),
+      ],
+    );
+  }
+}
+
+class _AccountTree extends ConsumerWidget {
+  const _AccountTree();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final all = ref.watch(filteredAccountsProvider);
-    if (all.isEmpty) {
-      return EmptyView(
-        message: context.l10n.noAccounts,
-        icon: Icons.search_off,
-      );
+    final nodes = ref.watch(accountTreeProvider);
+    final l10n = context.l10n;
+    if (nodes.isEmpty) {
+      return EmptyView(message: l10n.noAccounts, icon: Icons.search_off);
     }
-
-    // Group by account type; the enum order is the canonical report order.
-    final grouped = <AccountType, List<Account>>{};
-    for (final account in all) {
-      grouped.putIfAbsent(account.type, () => []).add(account);
-    }
-
-    final types = AccountType.values
-        .where((type) => grouped.containsKey(type))
-        .toList(growable: false);
 
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 24),
-      itemCount: types.length,
+      itemCount: nodes.length,
       itemBuilder: (context, index) {
-        final type = types[index];
-        final items = grouped[type]!;
-        return ExpansionTile(
-          initiallyExpanded: true,
-          leading: Icon(_iconFor(type)),
-          title: Text(context.l10n.accountTypeLabel(type)),
-          subtitle: Text('${items.length}'),
-          children: [
-            for (final account in items) _AccountTile(account: account),
-          ],
+        final node = nodes[index];
+        return _AccountTile(
+          key: ValueKey(node.account.id),
+          node: node,
+          hasChildren: nodes.length > index + 1 &&
+              nodes[index + 1].depth > node.depth,
         );
       },
     );
   }
-
-  IconData _iconFor(AccountType type) => switch (type) {
-    AccountType.asset => Icons.account_balance_wallet_outlined,
-    AccountType.liability => Icons.trending_down,
-    AccountType.equity => Icons.pie_chart_outline,
-    AccountType.revenue => Icons.trending_up,
-    AccountType.expense => Icons.receipt_long_outlined,
-  };
 }
 
-class _AccountTile extends StatelessWidget {
-  const _AccountTile({required this.account});
+class _AccountTile extends ConsumerStatefulWidget {
+  const _AccountTile({super.key, required this.node, required this.hasChildren});
 
-  final Account account;
+  final AccountNode node;
+  final bool hasChildren;
+
+  @override
+  ConsumerState<_AccountTile> createState() => _AccountTileState();
+}
+
+class _AccountTileState extends ConsumerState<_AccountTile> {
+  bool _expanded = true;
 
   @override
   Widget build(BuildContext context) {
+    final account = widget.node.account;
     final l10n = context.l10n;
+    final theme = Theme.of(context);
+    final lang = Localizations.localeOf(context).languageCode;
+    final indent = 8.0 + widget.node.depth * 20.0;
+
+    final nameStyle = TextStyle(
+      fontWeight: account.isPostable ? FontWeight.w400 : FontWeight.w600,
+      color: account.isActive ? null : theme.disabledColor,
+    );
+
     return ListTile(
       dense: true,
-      // Leading indent encodes hierarchy without a heavy tree widget.
-      contentPadding: EdgeInsetsDirectional.only(
-        start: 24 + (account.parentId == null ? 0 : 16),
-        end: 16,
-      ),
+      contentPadding: EdgeInsetsDirectional.only(start: indent, end: 8),
+      leading: widget.hasChildren
+          ? IconButton(
+              icon: Icon(_expanded ? Icons.expand_more : Icons.chevron_right),
+              onPressed: () => setState(() => _expanded = !_expanded),
+            )
+          : const SizedBox(width: 24),
       title: Text(
-        '${account.code}  ${account.name}',
-        style: TextStyle(
-          fontWeight: account.isPostable ? FontWeight.w400 : FontWeight.w600,
-        ),
+        '${account.code}  ${accountName(account, lang)}',
+        style: nameStyle,
       ),
       subtitle: Text(
-        account.isPostable ? l10n.postable : l10n.grouping,
-        style: Theme.of(context).textTheme.bodySmall,
+        [
+          l10n.accountTypeLabel(account.type),
+          account.isPostable ? l10n.postable : l10n.grouping,
+          if (!account.isActive) l10n.inactiveLabel,
+        ].join(' · '),
+        style: theme.textTheme.bodySmall,
       ),
-      trailing: account.isActive
-          ? null
-          : Icon(
-              Icons.block,
-              size: 18,
-              color: Theme.of(context).colorScheme.error,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!account.isActive)
+            Icon(Icons.block, size: 18, color: theme.colorScheme.error),
+          IconButton(
+            tooltip: l10n.editAccount,
+            icon: const Icon(Icons.edit_outlined, size: 20),
+            onPressed: () => _editAccount(context, ref, account),
+          ),
+          IconButton(
+            tooltip: l10n.deleteAccount,
+            icon: const Icon(Icons.delete_outline, size: 20),
+            onPressed: () => _deleteAccount(context, ref, account),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Opens the create/edit form. `null` means a new account.
+Future<void> _editAccount(
+  BuildContext context,
+  WidgetRef ref,
+  Account? existing,
+) async {
+  final l10n = context.l10n;
+  final all = ref.read(chartOfAccountsProvider).value ?? const <Account>[];
+
+  // Parents: every account of the same type, except the account being edited
+  // and anything under it — the server refuses those anyway, so they are not
+  // offered.
+  final excluded = <String>{};
+  if (existing != null) {
+    excluded.add(existing.id);
+    bool changed = true;
+    while (changed) {
+      changed = false;
+      for (final a in all) {
+        if (a.parentId != null &&
+            excluded.contains(a.parentId) &&
+            excluded.add(a.id)) {
+          changed = true;
+        }
+      }
+    }
+  }
+
+  final parents = all
+      .where(
+        (a) =>
+            !excluded.contains(a.id) &&
+            (existing == null || a.type == existing.type),
+      )
+      .toList(growable: false);
+
+  String? selectedParent = existing?.parentId;
+  var selectedType = existing?.type ?? AccountType.asset;
+  var isPostable = existing?.isPostable ?? true;
+  var isActive = existing?.isActive ?? true;
+
+  final codeController = TextEditingController(text: existing?.code ?? '');
+  final nameArController = TextEditingController(text: existing?.nameAr ?? '');
+  final nameEnController = TextEditingController(text: existing?.nameEn ?? '');
+
+  // The suggested code follows the chart's own numbering as soon as a parent
+  // is chosen and the field is still untouched.
+  if (existing == null) {
+    final suggestion = await ref
+        .read(chartOfAccountsRepositoryProvider)
+        .suggestCode(parentId: selectedParent);
+    codeController.text = suggestion.valueOrNull ?? '';
+  }
+
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) {
+        final dialogL10n = dialogContext.l10n;
+        return AlertDialog(
+          title: Text(existing == null ? dialogL10n.newAccount : dialogL10n.editAccount),
+          content: SizedBox(
+            width: 520,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: codeController,
+                    decoration: InputDecoration(
+                      labelText: dialogL10n.accountCode,
+                      helperText: dialogL10n.accountCodeHelper,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nameArController,
+                    decoration: InputDecoration(
+                      labelText: '${dialogL10n.nameArabic} *',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nameEnController,
+                    decoration: InputDecoration(
+                      labelText: '${dialogL10n.nameEnglish} *',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<AccountType>(
+                    value: selectedType,
+                    decoration: InputDecoration(labelText: dialogL10n.accountType),
+                    items: [
+                      for (final type in AccountType.values)
+                        DropdownMenuItem(
+                          value: type,
+                          child: Text(dialogL10n.accountTypeLabel(type)),
+                        ),
+                    ],
+                    onChanged: existing == null
+                        ? (value) => setDialogState(
+                              () => selectedType = value ?? selectedType,
+                            )
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String?>(
+                    value: selectedParent,
+                    decoration: InputDecoration(
+                      labelText: dialogL10n.parentAccount,
+                      helperText: dialogL10n.parentAccountHelper,
+                    ),
+                    items: [
+                      DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text(dialogL10n.noParent),
+                      ),
+                      for (final parent in parents)
+                        DropdownMenuItem<String?>(
+                          value: parent.id,
+                          child: Text(accountLabel(parent, dialogL10n.localeName)),
+                        ),
+                    ],
+                    onChanged: (value) async {
+                      setDialogState(() => selectedParent = value);
+                      if (existing == null &&
+                          codeController.text.trim().isEmpty) {
+                        final suggestion = await ref
+                            .read(chartOfAccountsRepositoryProvider)
+                            .suggestCode(parentId: value);
+                        if (suggestion.valueOrNull != null) {
+                          setDialogState(
+                            () => codeController.text = suggestion.valueOrNull!,
+                          );
+                        }
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(dialogL10n.postable),
+                    subtitle: Text(dialogL10n.postableHelper),
+                    value: isPostable,
+                    onChanged: (value) =>
+                        setDialogState(() => isPostable = value),
+                  ),
+                  if (existing != null)
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(dialogL10n.activeAccount),
+                      value: isActive,
+                      onChanged: (value) =>
+                          setDialogState(() => isActive = value),
+                    ),
+                ],
+              ),
             ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(dialogL10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(dialogL10n.save),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+
+  if (result != true) return;
+
+  final input = AccountInput(
+    code: codeController.text.trim().isEmpty ? null : codeController.text.trim(),
+    nameAr: nameArController.text.trim(),
+    nameEn: nameEnController.text.trim(),
+    type: selectedType,
+    parentId: selectedParent,
+    isPostable: isPostable,
+    isActive: isActive,
+  );
+
+  final controller = ref.read(chartOfAccountsProvider.notifier);
+  final error = existing == null
+      ? await controller.create(input)
+      : await controller.update(existing.id, input);
+
+  if (context.mounted && error != null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(error)),
+    );
+  }
+}
+
+Future<void> _deleteAccount(
+  BuildContext context,
+  WidgetRef ref,
+  Account account,
+) async {
+  final l10n = context.l10n;
+  final lang = Localizations.localeOf(context).languageCode;
+
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(l10n.deleteAccount),
+      content: Text(
+        l10n.deleteAccountConfirm(accountName(account, lang)),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: Text(l10n.deleteAccount),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
+
+  // The server refuses when the account has movements or children and says
+  // why; that message is shown as-is, and the screen offers deactivation as
+  // the alternative in the edit form.
+  final error = await ref
+      .read(chartOfAccountsProvider.notifier)
+      .remove(account.id);
+  if (context.mounted && error != null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(error)),
     );
   }
 }

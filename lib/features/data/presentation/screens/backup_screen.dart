@@ -6,6 +6,7 @@ import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/data_providers.dart';
+import '../widgets/full_backup_section.dart';
 
 /// Copying the company's books out, and putting a copy back.
 ///
@@ -51,6 +52,9 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // The disaster-recovery half: the whole PostgreSQL database.
+          const FullBackupSection(),
+          const SizedBox(height: 16),
           _TakingCopy(summary: summary, onDownload: _download),
           const SizedBox(height: 16),
           _Restoring(

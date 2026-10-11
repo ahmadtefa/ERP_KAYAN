@@ -9,7 +9,9 @@
 //  * Every table has created/updated audit fields and a soft-delete marker.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["queryCompiler", "driverAdapters"]
+  engineType        = "client"
 }
 
 datasource db {
@@ -27,6 +29,18 @@ model Company {
   taxId    String? // Egyptian Tax Registration Number
   currency String @default("EGP") @db.VarChar(3)
   timezone String @default("Africa/Cairo")
+
+  // Company profile: contact details shown on reports and documents.
+  phone   String?
+  email   String?
+  address String?
+
+  // The company logo, stored in the database so a full backup carries it and
+  // no file permissions on the server can lose it. Optional at all times:
+  // every screen and report works without it. Kept small by the upload
+  // endpoint (type and size are validated before it ever gets here).
+  logoData Bytes?
+  logoMime String? @db.VarChar(64)
 
   isActive Boolean @default(true)
 
@@ -56,6 +70,11 @@ model Company {
   @@map("companies")
 }
 
+enum BranchKind {
+  HEADQUARTERS
+  BRANCH
+}
+
 model Branch {
   id        String @id @default(uuid()) @db.Uuid
   companyId String @db.Uuid
@@ -64,6 +83,12 @@ model Branch {
   nameAr    String
   isActive  Boolean @default(true)
 
+  /// A unit is either the company's headquarters or a branch of it. A branch
+  /// points at its parent unit (usually the headquarters), so the tree can be
+  /// walked without guessing.
+  kind           BranchKind @default(BRANCH)
+  parentBranchId String?    @db.Uuid
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   createdBy String?
@@ -71,6 +96,8 @@ model Branch {
   deletedAt DateTime?
 
   company      Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  parentBranch Branch?        @relation("BranchTree", fields: [parentBranchId], references: [id], onDelete: Restrict)
+  subBranches  Branch[]       @relation("BranchTree")
   userBranches UserBranch[]
   journalEntry JournalEntry[]
 
@@ -81,6 +108,7 @@ model Branch {
 
   @@unique([companyId, code])
   @@index([companyId])
+  @@index([parentBranchId])
   @@map("branches")
 }
 

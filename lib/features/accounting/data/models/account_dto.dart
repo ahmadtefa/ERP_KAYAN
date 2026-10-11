@@ -32,6 +32,8 @@ class AccountDto {
       companyId: (json['companyId'] ?? json['company_id'] ?? '').toString(),
       code: code,
       name: name,
+      nameEn: json['nameEn']?.toString(),
+      nameAr: json['nameAr']?.toString(),
       type: parseType((json['type'] ?? json['accountType'])?.toString()),
       parentId: (json['parentId'] ?? json['parent_id'])?.toString(),
       isPostable:

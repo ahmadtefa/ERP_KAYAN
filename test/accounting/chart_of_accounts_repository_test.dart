@@ -12,6 +12,20 @@ class _StubSource implements ChartOfAccountsDataSource {
 
   @override
   Future<List<Account>> fetchAccounts() => _result();
+
+  @override
+  Future<String> suggestCode({String? parentId}) async => '';
+
+  @override
+  Future<Account> createAccount(AccountInput input) =>
+      throw UnsupportedError('stub');
+
+  @override
+  Future<Account> updateAccount(String id, AccountInput input) =>
+      throw UnsupportedError('stub');
+
+  @override
+  Future<void> deleteAccount(String id) => throw UnsupportedError('stub');
 }
 
 Account account(String code, {AccountType type = AccountType.asset}) => Account(

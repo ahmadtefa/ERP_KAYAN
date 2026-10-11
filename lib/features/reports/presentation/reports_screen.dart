@@ -446,7 +446,12 @@ class _AccountLedgerTabState extends ConsumerState<_AccountLedgerTab> {
               for (final account in postable)
                 DropdownMenuItem(
                   value: account.id,
-                  child: Text('${account.code} — ${account.name}'),
+                  child: Text(
+                    accountLabel(
+                      account,
+                      Localizations.localeOf(context).languageCode,
+                    ),
+                  ),
                 ),
             ],
             onChanged: (value) =>

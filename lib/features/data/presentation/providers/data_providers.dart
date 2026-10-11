@@ -151,6 +151,12 @@ class ReportLinkBuilder {
     return '$_base/backup/download?token=${await _token()}';
   }
 
+  /// One full-database backup file, sitting on the server.
+  Future<String> fullBackupDownload(String name) async {
+    return '$_base/backup/full/${Uri.encodeComponent(name)}/download'
+        '?token=${await _token()}';
+  }
+
   String _encode(Map<String, String> query) => query.entries
       .map((entry) => '${entry.key}=${Uri.encodeQueryComponent(entry.value)}')
       .join('&');
@@ -347,6 +353,65 @@ class DataService {
 
 final dataServiceProvider = Provider<DataService>(
   (ref) => DataService(ref.read(apiClientProvider).raw),
+);
+
+/// Full-database backups: the whole PostgreSQL archive, for disasters.
+class FullBackupService {
+  FullBackupService(this._dio);
+
+  final Dio _dio;
+
+  static const _path = '/backup/full';
+
+  /// What this machine can do, and whether a restore is running right now.
+  Future<Map<String, dynamic>> capabilities() async {
+    final response = await _dio.get<Map<String, dynamic>>('$_path/capabilities');
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  Future<List<Map<String, dynamic>>> list() async {
+    final response = await _dio.get<List<dynamic>>('$_path');
+    return (response.data ?? const [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList(growable: false);
+  }
+
+  Future<Map<String, dynamic>> create() async {
+    final response = await _dio.post<Map<String, dynamic>>('$_path');
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  Future<void> delete(String name) =>
+      _dio.delete<dynamic>('$_path/${Uri.encodeComponent(name)}');
+
+  /// Restores the whole database from a file on the server or an upload.
+  ///
+  /// [confirm] must be true — the screen makes the person type the
+  /// confirmation before it sends this.
+  Future<Map<String, dynamic>> restore({
+    PickedFile? file,
+    String? fileName,
+    required bool confirm,
+  }) async {
+    final form = FormData.fromMap({
+      if (file != null)
+        'file': MultipartFile.fromBytes(file.bytes, filename: file.name),
+      if (fileName != null) 'fileName': fileName,
+      'confirm': confirm,
+    });
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_path/restore',
+      data: form,
+      queryParameters: {'confirm': confirm},
+      options: Options(contentType: 'multipart/form-data'),
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+}
+
+final fullBackupServiceProvider = Provider<FullBackupService>(
+  (ref) => FullBackupService(ref.read(apiClientProvider).raw),
 );
 
 /// Turns whatever was thrown into something worth reading.

@@ -974,4 +974,209 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get exportListHint =>
       'Download this list as it stands: Excel, CSV, PDF, or a page to print.';
+
+
+  @override
+  String get newAccount => 'New account';
+
+  @override
+  String get editAccount => 'Edit account';
+
+  @override
+  String get deleteAccount => 'Delete account';
+
+  @override
+  String deleteAccountConfirm(Object account) {
+    return 'The account “${account}” will be deleted, as long as it has no movements or sub-accounts. Continue?';
+  }
+
+  @override
+  String get allTypes => 'All types';
+
+  @override
+  String get inactiveLabel => 'Inactive';
+
+  @override
+  String get accountCodeHelper => 'Leave empty to suggest the next code using the chart’s own numbering';
+
+  @override
+  String get nameArabic => 'Name in Arabic';
+
+  @override
+  String get nameEnglish => 'Name in English';
+
+  @override
+  String get parentAccount => 'Parent account';
+
+  @override
+  String get parentAccountHelper => 'A sub-account takes its parent’s type';
+
+  @override
+  String get noParent => 'No parent (top-level)';
+
+  @override
+  String get postableHelper => 'A grouping account cannot receive postings; a final account can';
+
+  @override
+  String get activeAccount => 'Active';
+
+  @override
+  String get rememberMe => 'Remember me';
+
+  @override
+  String get rememberMeHint => 'On the web only the username is kept';
+
+  @override
+  String get clearSavedCredentials => 'Clear saved sign-in';
+
+  @override
+  String get savedCredentialsCleared => 'Saved sign-in details cleared';
+
+  @override
+  String get companySettings => 'Company settings';
+
+  @override
+  String get companyProfile => 'Company profile';
+
+  @override
+  String get companyCode => 'Company code';
+
+  @override
+  String get taxId => 'Tax ID';
+
+  @override
+  String get companyLogo => 'Company logo';
+
+  @override
+  String get uploadLogo => 'Upload logo';
+
+  @override
+  String get removeLogo => 'Remove logo';
+
+  @override
+  String get logoHint => 'Optional — PNG, JPEG or WebP up to 2 MB';
+
+  @override
+  String get logoUpdated => 'Logo updated';
+
+  @override
+  String get logoRemoved => 'Logo removed';
+
+  @override
+  String get noLogo => 'No logo';
+
+  @override
+  String get branches => 'Branches and units';
+
+  @override
+  String get newBranch => 'New unit';
+
+  @override
+  String get editBranch => 'Edit unit';
+
+  @override
+  String get branchCode => 'Unit code';
+
+  @override
+  String get branchKind => 'Unit type';
+
+  @override
+  String get headquarters => 'Headquarters';
+
+  @override
+  String get branchUnit => 'Branch';
+
+  @override
+  String get parentUnit => 'Parent unit';
+
+  @override
+  String get parentUnitRequired => 'Choose the headquarters or parent unit';
+
+  @override
+  String get deleteBranch => 'Delete unit';
+
+  @override
+  String deleteBranchConfirm(Object unit) {
+    return 'The unit “${unit}” will be deleted. Units with movements cannot be deleted.';
+  }
+
+  @override
+  String get branchSaved => 'Unit saved';
+
+  @override
+  String get profileSaved => 'Company details saved';
+
+  @override
+  String get unitType => 'Kind';
+
+  @override
+  String get fullBackupTitle => 'Full database backup';
+
+  @override
+  String get fullBackupDescription => 'A complete copy of the whole database (every company and user) in PostgreSQL format. It is made on the server that hosts the database.';
+
+  @override
+  String get createFullBackup => 'Create full backup';
+
+  @override
+  String get backupInProgress => 'Creating the backup…';
+
+  @override
+  String get backupFiles => 'Backups on the server';
+
+  @override
+  String get deleteBackup => 'Delete backup';
+
+  @override
+  String deleteBackupConfirm(Object file) {
+    return 'The file “${file}” will be permanently removed from the server.';
+  }
+
+  @override
+  String get restoreFullDatabase => 'Restore the whole database';
+
+  @override
+  String get restoreFullWarning => 'A full restore replaces everything currently in the database. A safety backup is taken automatically first.';
+
+  @override
+  String get uploadDumpFile => 'Upload a backup file (.dump)';
+
+  @override
+  String get orChooseServerBackup => 'Or choose a backup on the server';
+
+  @override
+  String get confirmFullRestoreTitle => 'Full restore — explicit confirmation';
+
+  @override
+  String get confirmFullRestoreBody => 'Type RESTORE to confirm. Everything currently in the database will be replaced by the contents of the backup.';
+
+  @override
+  String get restoreFullDone => 'Restore completed';
+
+  @override
+  String get restoreFullFailed => 'Restore failed';
+
+  @override
+  String get fullBackupUnavailable => 'PostgreSQL tools (pg_dump / pg_restore) were not found on this server';
+
+  @override
+  String get maintenanceActive => 'The system is under maintenance — a restore is in progress';
+
+  @override
+  String get safetyBackup => 'Safety backup';
+
+  @override
+  String get fullBackupKind => 'Full backup';
+
+  @override
+  String get createdAtLabel => 'Created';
+
+  @override
+  String get sizeLabel => 'Size';
+
+  @override
+  String get refreshStatus => 'Refresh status';
+
+  @override
+  String get companySettingsHint => 'Name, logo, contact details and branches';
 }

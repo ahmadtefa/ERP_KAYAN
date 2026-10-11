@@ -5,12 +5,23 @@ import {
 } from '@nestjs/common';
 import { JournalStatus, Prisma } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
+import { accountName } from '../../common/localization/account-name';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { DocumentNumberService } from './document-number.service';
 import { CreateJournalEntryDto, JournalLineDto } from './dto/create-journal-entry.dto';
 import { FiscalPeriodsService } from './fiscal-periods.service';
 
 const MONEY_SCALE = 4;
+
+/// Every read of journal lines brings the account's names along, so a line can
+/// be shown in either language without a second query — and without the client
+/// joining the chart of accounts by hand.
+const LINES_WITH_ACCOUNT = {
+  orderBy: { lineNumber: 'asc' },
+  include: {
+    account: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+  },
+} as const;
 
 /** A line reduced to a single signed amount for netting. */
 interface NormalisedLine {
@@ -39,7 +50,7 @@ export class JournalEntriesService {
         skip: (page - 1) * safeSize,
         take: safeSize,
         include: {
-          lines: { orderBy: { lineNumber: 'asc' } },
+          lines: LINES_WITH_ACCOUNT,
           branch: { select: { code: true, nameEn: true, nameAr: true } },
         },
       }),
@@ -58,7 +69,7 @@ export class JournalEntriesService {
     const entry = await this.prisma.journalEntry.findFirst({
       where: { id, companyId },
       include: {
-        lines: { orderBy: { lineNumber: 'asc' } },
+        lines: LINES_WITH_ACCOUNT,
         branch: { select: { code: true, nameEn: true, nameAr: true } },
       },
     });
@@ -164,7 +175,7 @@ export class JournalEntriesService {
             })),
           },
         },
-        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+        include: { lines: LINES_WITH_ACCOUNT },
       });
     });
 
@@ -227,7 +238,7 @@ export class JournalEntriesService {
         postedAt: new Date(),
         postedBy: userId,
       },
-      include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      include: { lines: LINES_WITH_ACCOUNT },
     });
 
     await this.audit.record({
@@ -384,6 +395,12 @@ export class JournalEntriesService {
       credit: Prisma.Decimal;
       description: string | null;
       costCenterId: string | null;
+      account?: {
+        id: string;
+        code: string;
+        nameEn: string | null;
+        nameAr: string | null;
+      } | null;
     }>;
   }) {
     return {
@@ -406,6 +423,15 @@ export class JournalEntriesService {
           id: l.id,
           lineNumber: l.lineNumber,
           accountId: l.accountId,
+          // Both names travel with the line, and `accountName` is the
+          // server-side default (English with the documented fallbacks).
+          // The client re-picks with the same rule for the language on screen.
+          accountCode: l.account?.code ?? null,
+          accountNameEn: l.account?.nameEn ?? null,
+          accountNameAr: l.account?.nameAr ?? null,
+          accountName: l.account
+            ? accountName(l.account, 'en')
+            : null,
           debit: l.debit.toFixed(MONEY_SCALE),
           credit: l.credit.toFixed(MONEY_SCALE),
           description: l.description,

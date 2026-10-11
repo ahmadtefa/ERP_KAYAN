@@ -1,8 +1,19 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
+import { accountLabel } from '../../common/localization/account-name';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ReportTable, TableColumn, TableMeta } from './report-table';
+
+/// A branch is shown in the language the file was asked for, falling back to
+/// whatever name it has — never a blank cell.
+function branchName(
+  branch: { nameEn: string; nameAr: string | null },
+  lang?: string,
+): string {
+  const preferred = lang === 'ar' ? branch.nameAr : branch.nameEn;
+  return (preferred && preferred.trim()) || branch.nameEn || '';
+}
 
 /// Every list in the program, as a file.
 ///
@@ -345,9 +356,40 @@ export class ListTablesService {
             }
           : {}),
       },
-      include: { branch: true },
+      include: {
+        branch: true,
+        lines: { include: { account: true }, orderBy: { lineNumber: 'asc' } },
+      },
       orderBy: [{ entryDate: 'desc' }, { entryNumber: 'desc' }],
     });
+
+    // The file goes down to the lines: every entry expands into its account
+    // rows, each with the account's code and its name in the language the
+    // file was asked for, and the file closes on the grand totals the books
+    // balance on.
+    const expanded: Array<Record<string, unknown>> = [];
+    let grandDebit = new Prisma.Decimal(0);
+    let grandCredit = new Prisma.Decimal(0);
+
+    for (const row of rows) {
+      for (const line of row.lines) {
+        grandDebit = grandDebit.plus(new Prisma.Decimal(line.debit ?? 0));
+        grandCredit = grandCredit.plus(new Prisma.Decimal(line.credit ?? 0));
+        expanded.push({
+          entryNumber: row.entryNumber,
+          entryDate: row.entryDate,
+          description: row.description ?? '',
+          branch: row.branch ? branchName(row.branch, query.lang) : '',
+          accountCode: line.account?.code ?? '',
+          accountName: line.account
+            ? accountLabel(line.account, query.lang === 'ar' ? 'ar' : 'en')
+            : '',
+          lineDescription: line.description ?? '',
+          debit: new Prisma.Decimal(line.debit ?? 0).toFixed(4),
+          credit: new Prisma.Decimal(line.credit ?? 0).toFixed(4),
+        });
+      }
+    }
 
     return this.table({
       slug: 'journal-entries',
@@ -357,23 +399,29 @@ export class ListTablesService {
       columns: [
         { key: 'entryNumber', labelEn: 'Number', labelAr: 'الرقم', width: 16 },
         { key: 'entryDate', labelEn: 'Date', labelAr: 'التاريخ', width: 13, date: true },
-        { key: 'description', labelEn: 'Description', labelAr: 'البيان', width: 40 },
+        { key: 'description', labelEn: 'Entry description', labelAr: 'بيان القيد', width: 36 },
         { key: 'branch', labelEn: 'Branch', labelAr: 'الفرع', width: 16 },
-        { key: 'status', labelEn: 'Status', labelAr: 'الحالة', width: 12 },
+        { key: 'accountCode', labelEn: 'Account code', labelAr: 'كود الحساب', width: 12 },
+        { key: 'accountName', labelEn: 'Account name', labelAr: 'اسم الحساب', width: 34 },
+        { key: 'lineDescription', labelEn: 'Line description', labelAr: 'بيان السطر', width: 28 },
         { key: 'debit', labelEn: 'Debit', labelAr: 'مدين', numeric: true, width: 16 },
         { key: 'credit', labelEn: 'Credit', labelAr: 'دائن', numeric: true, width: 16 },
       ],
-      rows: rows.map((row) => ({
-        entryNumber: row.entryNumber,
-        entryDate: row.entryDate,
-        description: row.description ?? '',
-        branch: row.branch?.nameEn ?? '',
-        status: row.status,
-        // The entry carries its own totals, and they are the ones the books
-        // balance on, so they are what the file reports.
-        debit: new Prisma.Decimal(row.totalDebit ?? 0).toFixed(4),
-        credit: new Prisma.Decimal(row.totalCredit ?? 0).toFixed(4),
-      })),
+      rows: expanded,
+      totals: [
+        {
+          labelEn: 'Grand total',
+          labelAr: 'الإجمالي',
+          value: `${grandDebit.toFixed(4)} / ${grandCredit.toFixed(4)}`,
+          stretch: 7,
+        },
+      ],
+      notes: [
+        {
+          en: 'One row per journal line. Totals show debit / credit.',
+          ar: 'سطر لكل حركة قيد. الإجماليات بالمدين / الدائن.',
+        },
+      ],
     });
   }
 
@@ -381,6 +429,7 @@ export class ListTablesService {
     const rows = await this.prisma.account.findMany({
       where: {
         companyId,
+        deletedAt: null,
         ...(query.includeInactive === 'true' ? {} : { isActive: true }),
       },
       orderBy: { code: 'asc' },
@@ -395,20 +444,57 @@ export class ListTablesService {
         )
       : rows;
 
+    // The file keeps the tree: accounts come out parents before children, and
+    // each row carries its level and its parent, so the hierarchy survives the
+    // trip into a spreadsheet.
+    const byId = new Map(filtered.map((row) => [row.id, row]));
+    const childrenOf = new Map<string | null, typeof filtered>();
+    for (const row of filtered) {
+      // A parent filtered out by the search still shows through the parent
+      // column; the row itself hangs at the top so nothing disappears.
+      const parentKey =
+        row.parentId && byId.has(row.parentId) ? row.parentId : null;
+      const bucket = childrenOf.get(parentKey) ?? [];
+      bucket.push(row);
+      childrenOf.set(parentKey, bucket);
+    }
+
+    const ordered: Array<(typeof filtered)[number] & { level: number }> = [];
+    const walk = (parentId: string | null, level: number): void => {
+      for (const row of childrenOf.get(parentId) ?? []) {
+        ordered.push({ ...row, level });
+        walk(row.id, level + 1);
+      }
+    };
+    walk(null, 0);
+
     return this.table({
       slug: 'chart-of-accounts',
       titleEn: 'Chart of accounts',
       titleAr: 'شجرة الحسابات',
-      meta: [this.count(filtered.length)],
+      meta: [this.count(ordered.length)],
       columns: [
+        { key: 'level', labelEn: 'Level', labelAr: 'المستوى', numeric: true, width: 8 },
         { key: 'code', labelEn: 'Code', labelAr: 'الكود', width: 14 },
         { key: 'nameEn', labelEn: 'Name (English)', labelAr: 'الاسم (إنجليزي)', width: 30 },
         { key: 'nameAr', labelEn: 'Name (Arabic)', labelAr: 'الاسم (عربي)', width: 30 },
+        { key: 'parent', labelEn: 'Parent account', labelAr: 'الحساب الأب', width: 22 },
         { key: 'type', labelEn: 'Type', labelAr: 'النوع', width: 14 },
         { key: 'isPostable', labelEn: 'Postable', labelAr: 'يقبل الترحيل', boolean: true, width: 12 },
         { key: 'isActive', labelEn: 'Active', labelAr: 'نشط', boolean: true, width: 10 },
       ],
-      rows: filtered as unknown as Array<Record<string, unknown>>,
+      rows: ordered.map((row) => {
+        const parent = row.parentId ? byId.get(row.parentId) : null;
+        const indent = '\u00A0'.repeat(row.level * 2);
+        return {
+          ...row,
+          level: row.level,
+          code: row.code,
+          nameEn: indent + row.nameEn,
+          nameAr: indent + row.nameAr,
+          parent: parent ? `${parent.code} ${parent.nameEn}` : '',
+        };
+      }),
     });
   }
 
@@ -585,6 +671,7 @@ export class ListTablesService {
     columns: TableColumn[];
     rows: Array<Record<string, unknown>>;
     meta?: TableMeta[];
+    totals?: Array<{ labelEn: string; labelAr: string; value: string; stretch?: number }>;
     notes?: Array<{ en: string; ar: string }>;
   }): ReportTable {
     return {
@@ -601,7 +688,7 @@ export class ListTablesService {
       ],
       columns: input.columns,
       rows: input.rows,
-      totals: [],
+      totals: input.totals ?? [],
       notes: input.notes ?? [],
     };
   }

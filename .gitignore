@@ -54,3 +54,4 @@ backend/.env
 backend/.env.*
 !backend/.env.example
 *.tsbuildinfo
+backend/backups/
