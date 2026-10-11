@@ -61,6 +61,20 @@ function Need($command, $hint) {
   }
 }
 
+function Get-PeMachine([string]$path) {
+  $stream = [System.IO.File]::OpenRead($path)
+  $reader = [System.IO.BinaryReader]::new($stream)
+  try {
+    if ($reader.ReadUInt16() -ne 0x5A4D) { return $null }
+    $stream.Position = 0x3c
+    $stream.Position = $reader.ReadInt32()
+    if ($reader.ReadUInt32() -ne 0x00004550) { return $null }
+    return $reader.ReadUInt16()
+  } finally {
+    $reader.Dispose()
+  }
+}
+
 Write-Host "============================================================"
 Write-Host "  KAYAN ERP  -  building the Windows desktop program"
 Write-Host "============================================================"
@@ -68,6 +82,9 @@ Write-Host "============================================================"
 Need flutter "Install it from https://docs.flutter.dev/get-started/install/windows"
 Need node    "Install it from https://nodejs.org (only for building, not for the user)."
 Need npm     "Install Node.js from https://nodejs.org (only for building)."
+if ((node -p "process.arch").Trim() -ne "x64") {
+  Fail "The build-time Node.js must be x64 so native npm dependencies are built for Windows x64."
+}
 
 $stage = Join-Path $root $Output
 $appFolder = Join-Path $stage "KAYAN-ERP"
@@ -152,6 +169,11 @@ $toolsFolder = Join-Path $env:LOCALAPPDATA "kayan-tools"
 $portableNode = Join-Path $toolsFolder "node\node.exe"
 $zipUrl = "https://nodejs.org/dist/v$NodeVersion/node-v$NodeVersion-win-x64.zip"
 
+if ((Test-Path $portableNode) -and (Get-PeMachine $portableNode) -ne 0x8664) {
+  Write-Host "      cached node.exe is not x64; replacing it"
+  Remove-Item -Recurse -Force (Split-Path -Parent $portableNode)
+}
+
 if (-not (Test-Path $portableNode)) {
   Write-Host "      downloading Node $NodeVersion (about 36 MB)"
   $zipFile = Join-Path $env:TEMP "kayan-node-$NodeVersion.zip"
@@ -170,6 +192,9 @@ if (-not (Test-Path $portableNode)) {
   }
   if (-not (Test-Path $portableNode)) { Fail "Node was downloaded but node.exe was not found." }
 }
+if ((Get-PeMachine $portableNode) -ne 0x8664) {
+  Fail "The bundled node.exe is not a Windows x64 (AMD64) binary."
+}
 
 $runtimeFolder = Join-Path $backendFolder "node"
 New-Item -ItemType Directory -Force -Path $runtimeFolder | Out-Null
@@ -181,6 +206,8 @@ Write-Host "      node.exe copied into the program folder"
 
 # ------------------------------------------------------------- 5. client
 Step "5/7" "Building the client (Flutter, Windows, release)"
+# Flutter's Windows build target is x64 (the Flutter tool generates CMake with
+# the x64 platform); the output path below and the PE check enforce the result.
 flutter build windows --release --dart-define=APP_ENV=production
 if ($LASTEXITCODE -ne 0) { Fail "flutter build windows failed." }
 
@@ -189,6 +216,24 @@ if (-not (Test-Path (Join-Path $release "erp_kayan.exe"))) {
   Fail "The client build finished but erp_kayan.exe is not in $release ."
 }
 Copy-Item (Join-Path $release "*") $appFolder -Recurse -Force
+
+# Reject any x86, ARM64, malformed, or non-PE Windows native binary before
+# creating distributable artifacts.
+$nativeFiles = Get-ChildItem -Path $appFolder -Recurse -File |
+  Where-Object { $_.Extension -in @(".exe", ".dll", ".node") }
+$windowsNativeCount = 0
+foreach ($file in $nativeFiles) {
+  $machine = Get-PeMachine $file.FullName
+  if ($null -eq $machine) {
+    if ($file.Extension -eq ".node") { continue }
+    Fail "Expected a Windows PE binary but found an invalid file: $($file.FullName)"
+  }
+  if ($machine -ne 0x8664) {
+    Fail "Native dependency is not Windows x64 (AMD64): $($file.FullName)"
+  }
+  $windowsNativeCount++
+}
+Write-Host "      verified $windowsNativeCount Windows native binaries: all x64 (AMD64)"
 
 # ------------------------------------------------------------- 6. notes
 Step "6/7" "Writing the note that travels with the program"
@@ -208,8 +253,12 @@ What this copy needs on the machine
        %APPDATA%\KAYAN-ERP\kayan.env
    That file is created automatically the first time the program runs, with
    fresh random signing keys. Edit it only if the database is somewhere else
-   or uses a different password, then close the program completely and open
-   it again.
+   or uses different credentials. Keep DATABASE_URL and ADMIN_DATABASE_URL on
+   the same PostgreSQL host and port (the Windows setup scripts use 127.0.0.1:5432).
+   The administrator URL is used to create/update the erp_app password before
+   migrations. If PostgreSQL reports Prisma P1000, correct both URLs and
+   restart the program. The settings file contains database credentials; keep
+   the Windows user account and that file protected.
 
 2. That is all. Node.js, Flutter and Git are NOT needed on this machine.
 

@@ -44,9 +44,10 @@ OutputBaseFilename=KAYAN-ERP-Setup-{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-; The client is a 64-bit Flutter build and the server ships a 64-bit node.exe.
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+; The client and bundled native dependencies target Windows x64 (AMD64).
+UseSetupLdr=x64
+ArchitecturesAllowed=x64
+ArchitecturesInstallIn64BitMode=x64
 ; The program itself needs no administrator rights to run; installing under
 ; Program Files is what needs them. Everything the program writes at run time
 ; goes to %APPDATA%, so the installation folder stays read-only and safe.
