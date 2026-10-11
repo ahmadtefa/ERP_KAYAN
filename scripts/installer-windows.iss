@@ -41,6 +41,11 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
 OutputBaseFilename=KAYAN-ERP-Setup-{#AppVersion}
+; The KAYAN logo (Kayan.png at the repository root, rendered by
+; tools\generate_icons.py) is the icon of the Setup file itself — the first
+; thing a customer sees. The path is relative to this script, so it works on
+; any machine that has the repository.
+SetupIconFile=..\windows\runner\resources\app_icon.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -70,13 +75,18 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 ; The whole assembled folder: program, client runtime, server, libraries,
-; portable node.exe, README.txt. Nothing is left out and nothing is fetched.
+; portable node.exe, the KAYAN icon files, README.txt. Nothing is left out and
+; nothing is fetched.
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
+; The shortcuts carry the KAYAN icon explicitly (the copy that travels inside
+; the package, icons\app_icon.ico), so they keep it even where Windows would
+; otherwise fall back to a generic one. The program's own window and taskbar
+; icon come from the same artwork, embedded into erp_kayan.exe at build time.
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\icons\app_icon.ico"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\icons\app_icon.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent

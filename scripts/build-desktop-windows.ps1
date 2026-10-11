@@ -75,7 +75,7 @@ $backendFolder = Join-Path $appFolder "backend"
 $backendSource = Join-Path $root "backend"
 
 # ---------------------------------------------------------------- 1. server
-Step "1/7" "Building the API server"
+Step "1/8" "Building the API server"
 Push-Location $backendSource
 try {
   npm install --no-audit --no-fund
@@ -91,7 +91,7 @@ try {
 }
 
 # --------------------------------------------------------------- 2. staging
-Step "2/7" "Assembling the program folder"
+Step "2/8" "Assembling the program folder"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force -Path $backendFolder | Out-Null
 
@@ -132,8 +132,17 @@ if (Test-Path $seedSource) {
   Write-Host "      left the server's TypeScript source out of the package"
 }
 
+# The KAYAN icon travels with the program: the same app_icon.ico the exe was
+# built from (the installer points the shortcuts at this copy), and Kayan.png
+# itself — the one source every icon was rendered from.
+$iconsFolder = Join-Path $appFolder "icons"
+New-Item -ItemType Directory -Force -Path $iconsFolder | Out-Null
+Copy-Item (Join-Path $root "windows\runner\resources\app_icon.ico") $iconsFolder -Force
+Copy-Item (Join-Path $root "Kayan.png") $iconsFolder -Force
+Write-Host "      KAYAN icon files copied into the package (icons\)"
+
 # ------------------------------------------------- 3. production libraries
-Step "3/7" "Installing the server's libraries (production only)"
+Step "3/8" "Installing the server's libraries (production only)"
 Push-Location $backendFolder
 try {
   npm ci --omit=dev --no-audit --no-fund
@@ -147,7 +156,7 @@ try {
 }
 
 # --------------------------------------------------------- 4. Node runtime
-Step "4/7" "Adding the Node runtime the program ships with"
+Step "4/8" "Adding the Node runtime the program ships with"
 $toolsFolder = Join-Path $env:LOCALAPPDATA "kayan-tools"
 $portableNode = Join-Path $toolsFolder "node\node.exe"
 $zipUrl = "https://nodejs.org/dist/v$NodeVersion/node-v$NodeVersion-win-x64.zip"
@@ -179,8 +188,76 @@ $license = Join-Path (Split-Path -Parent $portableNode) "LICENSE"
 if (Test-Path $license) { Copy-Item $license $runtimeFolder -Force }
 Write-Host "      node.exe copied into the program folder"
 
-# ------------------------------------------------------------- 5. client
-Step "5/7" "Building the client (Flutter, Windows, release)"
+# --------------------------------------------------- 5. PostgreSQL tools
+Step "5/8" "Bundling the PostgreSQL backup tools (pg_dump / pg_restore)"
+# The backup screen needs pg_dump and pg_restore. They travel inside the
+# program folder (backend\pg) so the machine that runs it does not have to
+# guess an installation, and so the tools match a PostgreSQL this project
+# supports. The copy is made from, in order of preference:
+#   1. the portable PostgreSQL that scripts\install-postgres-portable.bat
+#      provisions (the same one the program's own database runs on);
+#   2. a PostgreSQL installed on this build machine, newest first.
+# Only the two programs and the DLLs they need are copied. Nothing is
+# installed, nothing existing is replaced, and no PostgreSQL setting is read
+# or changed. PostgreSQL's licence allows distributing these binaries with
+# an application.
+$pgBin = $null
+$portablePg = Join-Path $env:LOCALAPPDATA "kayan-tools\pgsql\bin"
+if (Test-Path (Join-Path $portablePg "pg_dump.exe")) {
+  $pgBin = $portablePg
+  Write-Host "      using the portable PostgreSQL toolchain at $portablePg"
+}
+if (-not $pgBin) {
+  $candidates = @()
+  foreach ($root in @("${env:ProgramFiles}\PostgreSQL", "${env:ProgramFiles(x86)}\PostgreSQL")) {
+    if ($root -and (Test-Path $root)) {
+      foreach ($versionDir in (Get-ChildItem $root -Directory -ErrorAction SilentlyContinue)) {
+        $bin = Join-Path $versionDir.FullName "bin"
+        if (Test-Path (Join-Path $bin "pg_dump.exe")) { $candidates += $bin }
+      }
+    }
+  }
+  # Newest version first: a newer pg_dump reads older servers, the reverse
+  # is not true.
+  $candidates = $candidates | Sort-Object -Descending
+  if ($candidates.Count -gt 0) { $pgBin = $candidates[0] }
+}
+if (-not $pgBin) {
+  Fail ("No pg_dump/pg_restore found to bundle. Run scripts\install-postgres-portable.bat " +
+        "once (it downloads the portable PostgreSQL this project uses), or install " +
+        "PostgreSQL on this machine, then run this script again.")
+}
+$pgFolder = Join-Path $backendFolder "pg"
+New-Item -ItemType Directory -Force -Path $pgFolder | Out-Null
+foreach ($tool in @("pg_dump.exe", "pg_restore.exe")) {
+  Copy-Item (Join-Path $pgBin $tool) $pgFolder -Force
+}
+# The two programs load libpq and its neighbours from their own folder.
+Get-ChildItem $pgBin -Filter "*.dll" | Copy-Item -Destination $pgFolder -Force
+
+# The copy is only real if it runs from where it now sits.
+foreach ($tool in @("pg_dump.exe", "pg_restore.exe")) {
+  $probe = Join-Path $pgFolder $tool
+  $line = & $probe --version 2>&1
+  if ($LASTEXITCODE -ne 0 -or -not ("$line" -match [regex]::Escape($tool.Replace(".exe", "")))) {
+    Fail "The bundled $tool did not answer --version from $pgFolder. The package is not shippable."
+  }
+  Write-Host "      bundled $($line | Select-Object -First 1)"
+}
+
+# ------------------------------------------------------------- 6. client
+Step "6/8" "Building the client (Flutter, Windows, release)"
+# erp_kayan.exe takes its icon (window and taskbar too) from the Windows
+# resource compiled into it: windows\runner\resources\app_icon.ico, which
+# tools\generate_icons.py renders from Kayan.png at the repository root. The
+# build stops early if that file is missing, rather than shipping a program
+# with a blank icon.
+$windowIcon = Join-Path $root "windows\runner\resources\app_icon.ico"
+if (-not (Test-Path $windowIcon)) {
+  Fail ("windows\runner\resources\app_icon.ico is missing, so the program would " +
+        "build without the KAYAN icon. Restore it (python tools\generate_icons.py " +
+        "regenerates it from Kayan.png) and run this script again.")
+}
 flutter build windows --release --dart-define=APP_ENV=production
 if ($LASTEXITCODE -ne 0) { Fail "flutter build windows failed." }
 
@@ -191,7 +268,7 @@ if (-not (Test-Path (Join-Path $release "erp_kayan.exe"))) {
 Copy-Item (Join-Path $release "*") $appFolder -Recurse -Force
 
 # ------------------------------------------------------------- 6. notes
-Step "6/7" "Writing the note that travels with the program"
+Step "7/8" "Writing the note that travels with the program"
 $note = @"
 KAYAN ERP - Windows desktop copy
 ================================
@@ -229,6 +306,9 @@ backend\node_modules\  the server's libraries
 backend\prisma\        the database schema and its migrations
 backend\scripts\       the step that prepares the database
 backend\node\node.exe  the Node runtime the server runs on
+backend\pg\            pg_dump and pg_restore for full database backups
+icons\                  the KAYAN logo: app_icon.ico (the icon of the program
+                        and of its shortcuts) and Kayan.png (the source)
 
 Nothing in this folder is a secret. The settings and the signing keys live in
 %APPDATA%\KAYAN-ERP\ on the machine that runs it.
@@ -245,7 +325,7 @@ if (-not $SkipZip) {
 }
 
 # ------------------------------------------------------- 7. installer (optional)
-Step "7/7" "Making the installer a customer can run"
+Step "8/8" "Making the installer a customer can run"
 $installer = $null
 $iscc = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
 if (-not $iscc) {
