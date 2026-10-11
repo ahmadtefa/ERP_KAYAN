@@ -29,6 +29,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -65,8 +66,9 @@ function literal(text) {
 /// administrator URL to use.
 function adminClient() {
   if (!adminUrl) return null;
-  const target = parseUrl(adminUrl);
-  return new PrismaClient({ datasources: { db: { url: adminUrl } } });
+  return new PrismaClient({
+    adapter: new PrismaPg({ connectionString: adminUrl }),
+  });
 }
 
 async function ensureRole(admin, target) {
@@ -129,7 +131,9 @@ function migrate() {
 async function isEmptyDatabase() {
   let client = null;
   try {
-    client = new PrismaClient();
+    client = new PrismaClient({
+      adapter: new PrismaPg({ connectionString: appUrl }),
+    });
     const users = await client.user.count();
     return users === 0;
   } catch {
@@ -155,6 +159,20 @@ function seedFirstAdministrator(username, password) {
         ...process.env,
         KAYAN_ADMIN_USERNAME: username,
         KAYAN_ADMIN_PASSWORD: password,
+        // Optional company profile the setup dialog collected; the seed
+        // uses what is there and leaves the rest at its defaults.
+        KAYAN_COMPANY_CODE: process.env.KAYAN_COMPANY_CODE ?? '',
+        KAYAN_COMPANY_NAME_AR: process.env.KAYAN_COMPANY_NAME_AR ?? '',
+        KAYAN_COMPANY_NAME_EN: process.env.KAYAN_COMPANY_NAME_EN ?? '',
+        KAYAN_COMPANY_PHONE: process.env.KAYAN_COMPANY_PHONE ?? '',
+        KAYAN_COMPANY_EMAIL: process.env.KAYAN_COMPANY_EMAIL ?? '',
+        KAYAN_COMPANY_ADDRESS: process.env.KAYAN_COMPANY_ADDRESS ?? '',
+        // The headquarters the dialog named, and the logo file the shell
+        // wrote to a temporary folder.
+        KAYAN_HQ_CODE: process.env.KAYAN_HQ_CODE ?? '',
+        KAYAN_HQ_NAME_AR: process.env.KAYAN_HQ_NAME_AR ?? '',
+        KAYAN_HQ_NAME_EN: process.env.KAYAN_HQ_NAME_EN ?? '',
+        KAYAN_COMPANY_LOGO_FILE: process.env.KAYAN_COMPANY_LOGO_FILE ?? '',
       },
       stdio: ['ignore', 'inherit', 'inherit'],
     });
