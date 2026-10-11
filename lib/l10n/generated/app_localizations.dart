@@ -1975,7 +1975,73 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Download this list as it stands: Excel, CSV, PDF, or a page to print.'**
   String get exportListHint;
-}
+
+  String get newAccount;
+  String get editAccount;
+  String get deleteAccount;
+  String deleteAccountConfirm(Object account);
+  String get allTypes;
+  String get inactiveLabel;
+  String get accountCodeHelper;
+  String get nameArabic;
+  String get nameEnglish;
+  String get parentAccount;
+  String get parentAccountHelper;
+  String get noParent;
+  String get postableHelper;
+  String get activeAccount;
+  String get rememberMe;
+  String get rememberMeHint;
+  String get clearSavedCredentials;
+  String get savedCredentialsCleared;
+  String get companySettings;
+  String get companyProfile;
+  String get companyCode;
+  String get taxId;
+  String get companyLogo;
+  String get uploadLogo;
+  String get removeLogo;
+  String get logoHint;
+  String get logoUpdated;
+  String get logoRemoved;
+  String get noLogo;
+  String get branches;
+  String get newBranch;
+  String get editBranch;
+  String get branchCode;
+  String get branchKind;
+  String get headquarters;
+  String get branchUnit;
+  String get parentUnit;
+  String get parentUnitRequired;
+  String get deleteBranch;
+  String deleteBranchConfirm(Object unit);
+  String get branchSaved;
+  String get profileSaved;
+  String get unitType;
+  String get fullBackupTitle;
+  String get fullBackupDescription;
+  String get createFullBackup;
+  String get backupInProgress;
+  String get backupFiles;
+  String get deleteBackup;
+  String deleteBackupConfirm(Object file);
+  String get restoreFullDatabase;
+  String get restoreFullWarning;
+  String get uploadDumpFile;
+  String get orChooseServerBackup;
+  String get confirmFullRestoreTitle;
+  String get confirmFullRestoreBody;
+  String get restoreFullDone;
+  String get restoreFullFailed;
+  String get fullBackupUnavailable;
+  String get maintenanceActive;
+  String get safetyBackup;
+  String get fullBackupKind;
+  String get createdAtLabel;
+  String get sizeLabel;
+  String get refreshStatus;
+  String get companySettingsHint;}
 
 class _AppLocalizationsDelegate
     extends LocalizationsDelegate<AppLocalizations> {

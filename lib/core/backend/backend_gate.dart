@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/app_theme.dart';
+import '../../shared/widgets/company_setup_form.dart';
 import '../config/app_config.dart';
 import '../../features/data/presentation/providers/data_providers.dart';
+import 'company_setup_data.dart';
 import 'local_backend.dart';
 
 /// Whether this copy of the program owns its API server.
@@ -170,43 +172,19 @@ class _FirstAdministrator extends StatefulWidget {
 }
 
 class _FirstAdministratorState extends State<_FirstAdministrator> {
-  final _username = TextEditingController();
-  final _password = TextEditingController();
-  final _again = TextEditingController();
   bool _busy = false;
   String? _error;
 
-  @override
-  void dispose() {
-    _username.dispose();
-    _password.dispose();
-    _again.dispose();
-    super.dispose();
-  }
-
-  Future<void> _create() async {
-    final username = _username.text.trim();
-    final password = _password.text;
-    if (username.length < 3) {
-      setState(() => _error = 'اسم المستخدم لازم ٣ حروف على الأقل');
-      return;
-    }
-    if (password.length < 8) {
-      setState(() => _error = 'كلمة السر لازم ٨ حروف على الأقل');
-      return;
-    }
-    if (password != _again.text) {
-      setState(() => _error = 'كلمة السر والتأكيد مش زي بعض');
-      return;
-    }
+  Future<void> _create(CompanySetupData data) async {
     setState(() {
       _busy = true;
       _error = null;
     });
     final status = await LocalBackend.createFirstAdministrator(
-      username: username,
-      password: password,
+      username: data.adminUsername,
+      password: data.adminPassword,
       appDisplayName: 'KAYAN ERP',
+      company: data,
     );
     if (!mounted) return;
     if (status.isReady) {
@@ -216,7 +194,7 @@ class _FirstAdministratorState extends State<_FirstAdministrator> {
     }
     setState(() {
       _busy = false;
-      _error = status.problem ?? 'مقدرتش أعمل الحساب';
+      _error = status.problem ?? 'مقدرتش أعمل الحساب / Could not create the account';
     });
     widget.onStatus(status);
   }
@@ -231,11 +209,10 @@ class _FirstAdministratorState extends State<_FirstAdministrator> {
         child: Scaffold(
           body: Center(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: Padding(
+              constraints: const BoxConstraints(maxWidth: 640),
+              child: SingleChildScrollView(
                 padding: const EdgeInsets.all(32),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Text(
@@ -247,58 +224,19 @@ class _FirstAdministratorState extends State<_FirstAdministrator> {
                       'First run on this machine',
                       style: TextStyle(fontSize: 13, color: Colors.grey),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     const Text(
-                      'قاعدة البيانات جاهزة ومفيهاش أي مستخدم لسه. اكتب اسم '
-                      'المستخدم وكلمة السر لحساب المدير بتاع الشركة. '
-                      'مفيش أي كلمة سر جاهزة جوّه البرنامج.',
+                      'قاعدة البيانات جاهزة ومفيهاش أي بيانات لسه. اكتب بيانات '
+                      'الشركة والمقر الرئيسي، وحساب المدير الأول. لو البرنامج '
+                      'اتقفل قبل الانتهاء، البيانات اللي كتبتها هتفضل محفوظة '
+                      'وتكمل من هنا. مفيش أي كلمة سر جاهزة جوّه البرنامج.',
                       style: TextStyle(fontSize: 14, height: 1.6),
                     ),
                     const SizedBox(height: 24),
-                    TextField(
-                      controller: _username,
-                      enabled: !_busy,
-                      decoration: const InputDecoration(
-                        labelText: 'اسم المستخدم / Username',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _password,
-                      enabled: !_busy,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'كلمة السر / Password',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _again,
-                      enabled: !_busy,
-                      obscureText: true,
-                      onSubmitted: (_) => _busy ? null : _create(),
-                      decoration: const InputDecoration(
-                        labelText: 'تأكيد كلمة السر / Confirm',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    if (_error != null) ...[
-                      const SizedBox(height: 12),
-                      Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                    ],
-                    const SizedBox(height: 20),
-                    FilledButton.icon(
-                      onPressed: _busy ? null : _create,
-                      icon: _busy
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.check),
-                      label: const Text('إنشاء الحساب والبدء'),
+                    CompanySetupForm(
+                      onSubmit: _create,
+                      busy: _busy,
+                      error: _error,
                     ),
                   ],
                 ),

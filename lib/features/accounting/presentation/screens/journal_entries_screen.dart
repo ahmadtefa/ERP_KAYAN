@@ -6,6 +6,7 @@ import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/utils/account_name.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
@@ -365,7 +366,12 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                                   DropdownMenuItem(
                                     value: account.id,
                                     child: Text(
-                                      '${account.code} — ${account.name}',
+                                      accountLabel(
+                                        account,
+                                        Localizations.localeOf(
+                                          context,
+                                        ).languageCode,
+                                      ),
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),

@@ -14,6 +14,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
+
+import 'company_setup_data.dart';
 
 /// What the shell needs to know after a start attempt.
 class LocalBackendStatus {
@@ -325,6 +328,7 @@ class LocalBackend {
     RuntimeSettings settings,
     IOSink? log, {
     ({String username, String password})? firstAdministrator,
+    CompanySetupData? company,
   }) async {
     final script = File('${layout.backendDirectory}${Platform.pathSeparator}scripts'
         '${Platform.pathSeparator}prepare-database.mjs');
@@ -334,19 +338,43 @@ class LocalBackend {
     }
     try {
       log?.writeln('[shell] preparing the database');
-      final result = await Process.run(
-        layout.nodeExecutable,
-        [script.path],
-        workingDirectory: layout.backendDirectory,
-        environment: {
-          ...settings.asEnvironment(settings.port),
-          if (firstAdministrator != null) ...{
-            'KAYAN_ADMIN_USERNAME': firstAdministrator.username,
-            'KAYAN_ADMIN_PASSWORD': firstAdministrator.password,
+      // The logo travels as a file the shell writes to a temporary folder:
+      // an image does not belong in an environment variable. The file lives
+      // only for the length of this call.
+      final File? logoFile;
+      final Uint8List? logoBytes = company?.logoBytes;
+      if (company != null && logoBytes != null && logoBytes.isNotEmpty) {
+        final suffix = switch ((company.logoMime ?? '').toLowerCase()) {
+          'image/jpeg' => '.jpg',
+          'image/webp' => '.webp',
+          _ => '.png',
+        };
+        final temp = File(
+          '${Directory.systemTemp.path}${Platform.pathSeparator}'
+          'kayan-setup-logo-${DateTime.now().millisecondsSinceEpoch}$suffix',
+        );
+        await temp.writeAsBytes(logoBytes, flush: true);
+        logoFile = temp;
+      } else {
+        logoFile = null;
+      }
+      try {
+        final result = await Process.run(
+          layout.nodeExecutable,
+          [script.path],
+          workingDirectory: layout.backendDirectory,
+          environment: {
+            ...settings.asEnvironment(settings.port),
+            if (firstAdministrator != null) ...{
+              'KAYAN_ADMIN_USERNAME': firstAdministrator.username,
+              'KAYAN_ADMIN_PASSWORD': firstAdministrator.password,
+            },
+            if (company != null) ...company.environment,
+            if (logoFile != null)
+              'KAYAN_COMPANY_LOGO_FILE': logoFile.path,
           },
-        },
-        includeParentEnvironment: true,
-      );
+          includeParentEnvironment: true,
+        );
       // The credentials are in the environment, but a child process may echo
       // them; the log is a file other people can read, so it is written
       // without them.
@@ -361,7 +389,14 @@ class LocalBackend {
       log?.writeln('[shell] database state: ${state ?? 'not reported'} '
           '(exit ${result.exitCode})');
       return state;
-    } on Object catch (error) {
+      } finally {
+        if (logoFile != null) {
+          try {
+            await logoFile.delete();
+          } catch (_) {}
+        }
+      }
+      } on Object catch (error) {
       // Not fatal: the server reports the same problem more precisely when it
       // tries to connect.
       log?.writeln('[shell] database preparation failed: $error');
@@ -378,6 +413,7 @@ class LocalBackend {
     required String username,
     required String password,
     required String appDisplayName,
+    CompanySetupData? company,
   }) async {
     if (username.trim().length < 3) {
       return const LocalBackendStatus.failed('اسم المستخدم قصير جدًا');
@@ -397,6 +433,7 @@ class LocalBackend {
       settings,
       log,
       firstAdministrator: (username: username.trim(), password: password),
+      company: company,
     );
     await log.flush();
     await log.close();
