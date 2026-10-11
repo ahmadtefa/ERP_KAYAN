@@ -20,42 +20,34 @@ import 'company_setup_data.dart';
 
 /// What the shell needs to know after a start attempt.
 class LocalBackendStatus {
-  /// This copy of the program does not own a server, so there is nothing to
-  /// start and nothing to wait for: a debug run on a desktop, where the
-  /// developer starts the API themselves and the program talks to it exactly as
-  /// it always has. The gate reads this as "carry on" and shows the normal
-  /// screens.
-  ///
-  /// It has to exist here as well as in the web stub, because the gate is
-  /// compiled against this file on every desktop build - and `flutter analyze`
-  /// resolves the conditional export to the stub, so it never checks that
-  /// pairing. tools/backend_shape_check.dart does.
   const LocalBackendStatus.unsupported()
-      : baseUrl = null,
-        problem = null,
-        logPath = null,
-        databaseProblem = false,
-        needsFirstAdministrator = false;
-
+    : baseUrl = null,
+      problem = null,
+      logPath = null,
+      databaseProblem = false,
+      needsFirstAdministrator = false;
   const LocalBackendStatus.ready(this.baseUrl)
-      : problem = null,
-        logPath = null,
-        databaseProblem = false,
-        needsFirstAdministrator = false;
-  const LocalBackendStatus.failed(this.problem, {this.logPath, this.databaseProblem = false})
-      : baseUrl = null,
-        needsFirstAdministrator = false;
+    : problem = null,
+      logPath = null,
+      databaseProblem = false,
+      needsFirstAdministrator = false;
+  const LocalBackendStatus.failed(
+    this.problem, {
+    this.logPath,
+    this.databaseProblem = false,
+  }) : baseUrl = null,
+       needsFirstAdministrator = false;
 
   /// The database answered and is up to date, but has no company and no user in
   /// it yet - a machine where the program has never been set up. Nothing is
   /// wrong: somebody has to say who the first administrator is, and that is a
   /// question for the screen, not for a log file.
   const LocalBackendStatus.needsFirstAdministrator()
-      : baseUrl = null,
-        problem = null,
-        logPath = null,
-        databaseProblem = false,
-        needsFirstAdministrator = true;
+    : baseUrl = null,
+      problem = null,
+      logPath = null,
+      databaseProblem = false,
+      needsFirstAdministrator = true;
 
   /// e.g. `http://127.0.0.1:3000/api/v1` - already the value the client wants.
   final String? baseUrl;
@@ -77,6 +69,69 @@ class LocalBackendStatus {
 
   bool get isReady => baseUrl != null;
 }
+
+class KayanDatabaseConfig {
+  const KayanDatabaseConfig._();
+
+  static const String host = '127.0.0.1';
+  static const int port = 5432;
+  static const String databaseName = 'erp_kayan';
+  static const String username = 'erp_app';
+  static const String adminUsername = 'postgres';
+  static const String adminDatabaseName = 'postgres';
+
+  static bool isLocalDatabaseUrl(String? url) {
+    if (url == null || url.isEmpty) return false;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return false;
+    return uri.host == host &&
+        uri.port == port &&
+        uri.pathSegments.isNotEmpty &&
+        uri.pathSegments.first == databaseName;
+  }
+
+  static String buildDatabaseUrl({
+    required String username,
+    required String password,
+    String host = host,
+    int portNumber = port,
+    String database = databaseName,
+  }) {
+    final safeUsername = Uri.encodeComponent(username);
+    final safePassword = Uri.encodeComponent(password);
+    return 'postgresql://$safeUsername:$safePassword@$host:$portNumber/$database?schema=public';
+  }
+
+  static String buildAdminDatabaseUrl({
+    required String password,
+    String host = host,
+    int portNumber = port,
+    String database = adminDatabaseName,
+  }) =>
+      'postgresql://$adminUsername:${Uri.encodeComponent(password)}@$host:$portNumber/$database';
+
+  static String startupFailureMessage({
+    required bool serviceExists,
+    required bool authenticationOk,
+    String? settingsPath,
+    String? errorCode,
+  }) {
+    if (!serviceExists) {
+      return 'PostgreSQL is not running on $host:$port. Start the configured PostgreSQL service before starting the app.';
+    }
+    if (!authenticationOk) {
+      final code = errorCode == null ? '' : ' ($errorCode)';
+      final path = settingsPath ?? 'the desktop settings file';
+      return 'PostgreSQL rejected the saved credentials$code. Check '
+          'DATABASE_URL and ADMIN_DATABASE_URL in $path, then restart the app.';
+    }
+    return 'PostgreSQL is not reachable on $host:$port.';
+  }
+}
+
+/// The temporary logo file for the current preparation call, if any. Written
+/// just before the child process runs and cleared right after.
+File? _logoFile;
 
 /// A running server, or the reason there is not one.
 class LocalBackend {
@@ -118,7 +173,9 @@ class LocalBackend {
     }
   }
 
-  static Future<LocalBackendStatus> _ensureRunning(String appDisplayName) async {
+  static Future<LocalBackendStatus> _ensureRunning(
+    String appDisplayName,
+  ) async {
     // 1. Is a KAYAN API already answering? Then this copy does not need to
     //    start a second one, which is what keeps two windows of the program
     //    from fighting over the database.
@@ -167,10 +224,31 @@ class LocalBackend {
     //    It also says whether the database is still empty. If it is, this
     //    machine has no company and no user in it yet, and there is nothing to
     //    start a server for until somebody says who the first administrator is.
-    final state = await _runPreparation(layout, settings, log);
-    if (state == 'empty') {
-      log.writeln('[shell] the database is empty: asking who the first '
-          'administrator is');
+    final preparation = await _runPreparation(layout, settings, log);
+    if (preparation != null && preparation.exitCode != 0) {
+      await log.flush();
+      await log.close();
+      final authenticationProblem = _isDatabaseAuthenticationFailure(
+        preparation.output,
+      );
+      return LocalBackendStatus.failed(
+        authenticationProblem
+            ? KayanDatabaseConfig.startupFailureMessage(
+                serviceExists: true,
+                authenticationOk: false,
+                settingsPath: layout.settingsFile.path,
+                errorCode: 'Prisma P1000',
+              )
+            : 'Database preparation failed. See the backend log for details.',
+        logPath: layout.logPath,
+        databaseProblem: true,
+      );
+    }
+    if (preparation?.state == 'empty') {
+      log.writeln(
+        '[shell] the database is empty: asking who the first '
+        'administrator is',
+      );
       await log.flush();
       await log.close();
       return const LocalBackendStatus.needsFirstAdministrator();
@@ -179,6 +257,8 @@ class LocalBackend {
     // 3. Start the server and wait until it answers.
     final process = await _spawn(layout, settings, log, port);
     if (process == null) {
+      await log.flush();
+      await log.close();
       return LocalBackendStatus.failed(
         'The server would not start.',
         logPath: layout.logPath,
@@ -193,12 +273,16 @@ class LocalBackend {
 
     final tail = await layout.logTail();
     await _stop(process, log);
-    final databaseProblem = tail.contains('DATABASE') ||
-        tail.contains('database') ||
-        tail.contains('P1001') ||
-        tail.contains('ECONNREFUSED');
+    final databaseProblem = _isDatabaseProblem(tail);
     return LocalBackendStatus.failed(
-      databaseProblem
+      _isDatabaseAuthenticationFailure(tail)
+          ? KayanDatabaseConfig.startupFailureMessage(
+              serviceExists: true,
+              authenticationOk: false,
+              settingsPath: layout.settingsFile.path,
+              errorCode: 'Prisma P1000',
+            )
+          : databaseProblem
           ? 'The server started but the database did not answer.'
           : 'The server did not become ready in time.',
       logPath: layout.logPath,
@@ -206,15 +290,29 @@ class LocalBackend {
     );
   }
 
+  static bool _isDatabaseAuthenticationFailure(String text) =>
+      text.contains('P1000') ||
+      text.toLowerCase().contains('password authentication failed');
+
+  static bool _isDatabaseProblem(String text) =>
+      text.contains('DATABASE') ||
+      text.toLowerCase().contains('database') ||
+      text.contains('P1000') ||
+      text.contains('P1001') ||
+      text.contains('ECONNREFUSED');
+
   /// True when something at this port answers the health route the way this
   /// program's own API does.
   static Future<bool> _isKayanApi(int port) async {
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 2);
       final request = await client
           .getUrl(Uri.parse('http://127.0.0.1:$port/api/v1/health'))
           .timeout(const Duration(seconds: 3));
-      final response = await request.close().timeout(const Duration(seconds: 3));
+      final response = await request.close().timeout(
+        const Duration(seconds: 3),
+      );
       final body = await response.transform(utf8.decoder).join();
       client.close(force: true);
       return response.statusCode == 200 && body.contains('"status"');
@@ -227,7 +325,10 @@ class LocalBackend {
   static Future<int?> _firstFreePort() async {
     for (final port in candidatePorts) {
       try {
-        final probe = await ServerSocket.bind(InternetAddress.loopbackIPv4, port);
+        final probe = await ServerSocket.bind(
+          InternetAddress.loopbackIPv4,
+          port,
+        );
         await probe.close();
         return port;
       } on SocketException {
@@ -270,14 +371,14 @@ class LocalBackend {
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
-        log?.writeln('[out] ${_plain(line)}');
-      });
+            log?.writeln('[out] ${_plain(line)}');
+          });
       process.stderr
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
-        log?.writeln('[err] ${_plain(line)}');
-      });
+            log?.writeln('[err] ${_plain(line)}');
+          });
       return process;
     } on Object catch (error) {
       log?.writeln('[shell] could not start the server: $error');
@@ -292,7 +393,11 @@ class LocalBackend {
   /// Waits for a real answer from the health route, rather than guessing with
   /// a fixed delay. Gives up early if the process dies, so a broken install
   /// fails in seconds instead of after a minute and a half.
-  static Future<bool> _waitForHealth(Process process, int port, IOSink? log) async {
+  static Future<bool> _waitForHealth(
+    Process process,
+    int port,
+    IOSink? log,
+  ) async {
     var exited = false;
     final exit = process.exitCode.then((code) {
       exited = true;
@@ -315,94 +420,85 @@ class LocalBackend {
   }
 
   /// Creates the database and applies the schema, before the API starts.
-  /// Runs the step that makes this machine's database correct, and returns what
-  /// it says about the database: `ready`, `empty`, `unknown`, or null when the
-  /// question could not be put (no script, or the step fell over).
+  /// Returns the script's reported state, exit code and output. A missing
+  /// script remains null so older packaged builds can still start the API.
   ///
   /// [firstAdministrator] is only passed when a person has just chosen the
   /// company's first username and password on the screen. It travels in the
   /// environment of the child process, never on a command line, so it is not
   /// readable by other users on the machine.
-  static Future<String?> _runPreparation(
+  static Future<({String? state, int exitCode, String output})?>
+  _runPreparation(
     BackendLayout layout,
     RuntimeSettings settings,
     IOSink? log, {
     ({String username, String password})? firstAdministrator,
     CompanySetupData? company,
   }) async {
-    final script = File('${layout.backendDirectory}${Platform.pathSeparator}scripts'
-        '${Platform.pathSeparator}prepare-database.mjs');
+    final script = File(
+      '${layout.backendDirectory}${Platform.pathSeparator}scripts'
+      '${Platform.pathSeparator}prepare-database.mjs',
+    );
     if (!script.existsSync()) {
       log?.writeln('[shell] no database preparation script in this build');
       return null;
     }
     try {
       log?.writeln('[shell] preparing the database');
-      // The logo travels as a file the shell writes to a temporary folder:
-      // an image does not belong in an environment variable. The file lives
-      // only for the length of this call.
-      final File? logoFile;
-      final Uint8List? logoBytes = company?.logoBytes;
-      if (company != null && logoBytes != null && logoBytes.isNotEmpty) {
-        final suffix = switch ((company.logoMime ?? '').toLowerCase()) {
-          'image/jpeg' => '.jpg',
-          'image/webp' => '.webp',
-          _ => '.png',
-        };
-        final temp = File(
-          '${Directory.systemTemp.path}${Platform.pathSeparator}'
-          'kayan-setup-logo-${DateTime.now().millisecondsSinceEpoch}$suffix',
-        );
-        await temp.writeAsBytes(logoBytes, flush: true);
-        logoFile = temp;
-      } else {
-        logoFile = null;
-      }
-      try {
-        final result = await Process.run(
-          layout.nodeExecutable,
-          [script.path],
-          workingDirectory: layout.backendDirectory,
-          environment: {
-            ...settings.asEnvironment(settings.port),
-            if (firstAdministrator != null) ...{
-              'KAYAN_ADMIN_USERNAME': firstAdministrator.username,
-              'KAYAN_ADMIN_PASSWORD': firstAdministrator.password,
-            },
-            if (company != null) ...company.environment,
-            if (logoFile != null)
-              'KAYAN_COMPANY_LOGO_FILE': logoFile.path,
+      final result = await Process.run(
+        layout.nodeExecutable,
+        [script.path],
+        workingDirectory: layout.backendDirectory,
+        environment: {
+          ...settings.asEnvironment(settings.port),
+          if (firstAdministrator != null) ...{
+            'KAYAN_ADMIN_USERNAME': firstAdministrator.username,
+            'KAYAN_ADMIN_PASSWORD': firstAdministrator.password,
           },
-          includeParentEnvironment: true,
-        );
+          if (company != null) ...company.environment,
+          if (_logoFile != null) 'KAYAN_COMPANY_LOGO_FILE': _logoFile!.path,
+        },
+        includeParentEnvironment: true,
+      );
       // The credentials are in the environment, but a child process may echo
       // them; the log is a file other people can read, so it is written
       // without them.
-      final output = '${result.stdout}'
-          .replaceAll(RegExp(r'KAYAN_ADMIN_PASSWORD=(\S+)'), 'KAYAN_ADMIN_PASSWORD=***');
+      final output = _redactSecrets('${result.stdout}');
+      final errorOutput = _redactSecrets('${result.stderr}');
       log?.writeln('[prep] ${output.trimRight()}');
-      if ('${result.stderr}'.trim().isNotEmpty) {
-        log?.writeln('[prep-err] ${result.stderr}'.trimRight());
+      if (errorOutput.trim().isNotEmpty) {
+        log?.writeln('[prep-err] ${errorOutput.trimRight()}');
       }
       final match = RegExp(r'KAYAN-DB-STATE=(\w+)').firstMatch(output);
       final state = match?.group(1);
-      log?.writeln('[shell] database state: ${state ?? 'not reported'} '
-          '(exit ${result.exitCode})');
-      return state;
-      } finally {
-        if (logoFile != null) {
-          try {
-            await logoFile.delete();
-          } catch (_) {}
-        }
-      }
-      } on Object catch (error) {
-      // Not fatal: the server reports the same problem more precisely when it
-      // tries to connect.
+      log?.writeln(
+        '[shell] database state: ${state ?? 'not reported'} '
+        '(exit ${result.exitCode})',
+      );
+      return (
+        state: state,
+        exitCode: result.exitCode,
+        output: '$output\n$errorOutput',
+      );
+    } on Object catch (error) {
       log?.writeln('[shell] database preparation failed: $error');
-      return null;
+      return (state: null, exitCode: 1, output: '$error');
     }
   }
+
+  static String _redactSecrets(String text) => text
+      .replaceAll(
+        RegExp(
+          r'(postgres(?:ql)?://[^:/@\s]+:)[^@\s]*(@)',
+          caseSensitive: false,
+        ),
+        r'$1***$2',
+      )
+      .replaceAll(RegExp(r'(KAYAN_ADMIN_PASSWORD=)\S+'), r'$1***')
+      .replaceAll(
+        RegExp(r'((?:DATABASE_URL|ADMIN_DATABASE_URL)=)\S+'),
+        r'$1***',
+      );
 
   /// Creates the company's first administrator, with the credentials somebody
   /// chose on the screen, then leaves the machine ready to start.
@@ -428,20 +524,61 @@ class LocalBackend {
     final log = await layout.openLog();
     final settings = await RuntimeSettings.load(layout, 3000);
     log.writeln('[shell] creating the first administrator: ${username.trim()}');
-    final state = await _runPreparation(
-      layout,
-      settings,
-      log,
-      firstAdministrator: (username: username.trim(), password: password),
-      company: company,
-    );
+    // The logo travels as a file the shell writes to a temporary folder: an
+    // image does not belong in an environment variable. The file lives only
+    // for the length of the preparation call.
+    final bytes = company?.logoBytes;
+    if (company != null && bytes != null && bytes.isNotEmpty) {
+      final suffix = switch ((company.logoMime ?? '').toLowerCase()) {
+        'image/jpeg' => '.jpg',
+        'image/webp' => '.webp',
+        _ => '.png',
+      };
+      final temp = File(
+        '${Directory.systemTemp.path}${Platform.pathSeparator}'
+        'kayan-setup-logo-${DateTime.now().millisecondsSinceEpoch}$suffix',
+      );
+      await temp.writeAsBytes(bytes, flush: true);
+      _logoFile = temp;
+    }
+    ({String? state, int exitCode, String output})? preparation;
+    try {
+      preparation = await _runPreparation(
+        layout,
+        settings,
+        log,
+        firstAdministrator: (username: username.trim(), password: password),
+        company: company,
+      );
+    } finally {
+      final logoFile = _logoFile;
+      _logoFile = null;
+      if (logoFile != null) {
+        try {
+          await logoFile.delete();
+        } catch (_) {}
+      }
+    }
     await log.flush();
     await log.close();
-    if (state != 'ready') {
+    if (preparation?.exitCode != 0 || preparation?.state != 'ready') {
+      final authenticationProblem = _isDatabaseAuthenticationFailure(
+        preparation?.output ?? '',
+      );
       return LocalBackendStatus.failed(
-        'مقدرتش أعمل حساب المدير',
+        authenticationProblem
+            ? KayanDatabaseConfig.startupFailureMessage(
+                serviceExists: true,
+                authenticationOk: false,
+                settingsPath: layout.settingsFile.path,
+                errorCode: 'Prisma P1000',
+              )
+            : 'مقدرتش أعمل حساب المدير',
         logPath: layout.logPath,
-        databaseProblem: state == null || state == 'unknown',
+        databaseProblem:
+            preparation?.exitCode != 0 ||
+            preparation?.state == null ||
+            preparation?.state == 'unknown',
       );
     }
     return ensureRunning(appDisplayName: appDisplayName);
@@ -533,7 +670,9 @@ class BackendLayout {
     if (!await file.exists()) return '';
     final text = await file.readAsString();
     final all = text.split('\n');
-    return all.length <= lines ? text : all.sublist(all.length - lines).join('\n');
+    return all.length <= lines
+        ? text
+        : all.sublist(all.length - lines).join('\n');
   }
 
   /// Finds the pieces, or says which one is missing.
@@ -542,12 +681,16 @@ class BackendLayout {
     final programDirectory = _programDirectory();
     final dataDirectory = _dataDirectory();
 
-    final backendDirectory = Platform.environment['KAYAN_DESKTOP_BACKEND_DIR'] ??
+    final backendDirectory =
+        Platform.environment['KAYAN_DESKTOP_BACKEND_DIR'] ??
         '$programDirectory${separator}backend';
-    final node = Platform.environment['KAYAN_DESKTOP_NODE'] ?? _findNode(backendDirectory);
+    final node =
+        Platform.environment['KAYAN_DESKTOP_NODE'] ??
+        _findNode(backendDirectory);
     // `nest build` writes the compiled server under dist/src, because the
     // TypeScript project also covers prisma/ and scripts/.
-    final entry = '$backendDirectory${separator}dist${separator}src${separator}main.js';
+    final entry =
+        '$backendDirectory${separator}dist${separator}src${separator}main.js';
 
     final layout = BackendLayout(
       backendDirectory: backendDirectory,
@@ -588,7 +731,8 @@ class BackendLayout {
   static String _programDirectory() {
     final executable = Platform.resolvedExecutable;
     final directory = File(executable).parent.path;
-    if (Platform.isMacOS && directory.contains('.app${Platform.pathSeparator}Contents')) {
+    if (Platform.isMacOS &&
+        directory.contains('.app${Platform.pathSeparator}Contents')) {
       return '$directory${Platform.pathSeparator}Resources';
     }
     return directory;
@@ -597,17 +741,25 @@ class BackendLayout {
   /// The machine's own folder for this program, following each platform's rule.
   static Directory _dataDirectory() {
     final environment = Platform.environment;
-    final home = environment['USERPROFILE'] ?? environment['HOME'] ?? Directory.current.path;
+    final home =
+        environment['USERPROFILE'] ??
+        environment['HOME'] ??
+        Directory.current.path;
     final separator = Platform.pathSeparator;
     if (Platform.isWindows) {
-      final appData = environment['APPDATA'] ?? '$home${separator}AppData${separator}Roaming';
+      final appData =
+          environment['APPDATA'] ??
+          '$home${separator}AppData${separator}Roaming';
       return Directory('$appData${separator}KAYAN-ERP');
     }
     if (Platform.isMacOS) {
-      return Directory('$home${separator}Library${separator}Application Support'
-          '${separator}KAYAN-ERP');
+      return Directory(
+        '$home${separator}Library${separator}Application Support'
+        '${separator}KAYAN-ERP',
+      );
     }
-    final xdg = environment['XDG_DATA_HOME'] ??
+    final xdg =
+        environment['XDG_DATA_HOME'] ??
         [home, '.local', 'share'].join(separator);
     return Directory('$xdg${separator}KAYAN-ERP');
   }
@@ -619,10 +771,12 @@ class BackendLayout {
     final separator = Platform.pathSeparator;
     final name = Platform.isWindows ? 'node.exe' : 'node';
     final candidates = <String>[
-      '$backendDirectory$separator' 'node$separator$name',
+      '$backendDirectory$separator'
+          'node$separator$name',
       if (Platform.isWindows)
         '${Platform.environment['LOCALAPPDATA'] ?? ''}${separator}kayan-tools'
-            '$separator' 'node$separator$name',
+            '$separator'
+            'node$separator$name',
     ];
     for (final candidate in candidates) {
       if (File(candidate).existsSync()) return candidate;
@@ -633,17 +787,19 @@ class BackendLayout {
   static bool _onPath(String executable) {
     final separator = Platform.isWindows ? ';' : ':';
     final extensions = Platform.isWindows ? ['.exe', '.cmd', '.bat', ''] : [''];
-    for (final directory in (Platform.environment['PATH'] ?? '').split(separator)) {
+    for (final directory in (Platform.environment['PATH'] ?? '').split(
+      separator,
+    )) {
       if (directory.isEmpty) continue;
       for (final extension in extensions) {
-        if (File('$directory${Platform.pathSeparator}$executable$extension').existsSync()) {
+        if (File('$directory${Platform.pathSeparator}$executable$extension')
+            .existsSync()) {
           return true;
         }
       }
     }
     return false;
   }
-
 }
 
 /// The settings the desktop server runs with, kept in the machine's own folder.
@@ -665,7 +821,8 @@ class RuntimeSettings {
     'JWT_REFRESH_TTL': '1209600',
     'DATABASE_URL':
         'postgresql://erp_app:postgres@127.0.0.1:5432/erp_kayan?schema=public',
-    'ADMIN_DATABASE_URL': 'postgresql://postgres:postgres@127.0.0.1:5432/postgres',
+    'ADMIN_DATABASE_URL':
+        'postgresql://postgres:postgres@127.0.0.1:5432/postgres',
   };
 
   static Future<RuntimeSettings> load(BackendLayout layout, int port) async {
@@ -693,7 +850,8 @@ class RuntimeSettings {
   /// The settings for a desktop installation, written once.
   static String _firstRunFile() {
     final random = Random.secure();
-    String secret() => base64Url.encode(List<int>.generate(48, (_) => random.nextInt(256)));
+    String secret() =>
+        base64Url.encode(List<int>.generate(48, (_) => random.nextInt(256)));
     return '''
 # KAYAN ERP - the settings this installation runs with.
 #
@@ -718,10 +876,10 @@ JWT_REFRESH_TTL=1209600
   /// The environment for the child process. The port always comes from the
   /// shell, because the shell is what picked a free one.
   Map<String, String> asEnvironment(int chosenPort) => {
-        ..._values,
-        'PORT': '$chosenPort',
-        'HOST': _values['HOST'] ?? '127.0.0.1',
-      };
+    ..._values,
+    'PORT': '$chosenPort',
+    'HOST': _values['HOST'] ?? '127.0.0.1',
+  };
 
   String? get databaseUrl => _values['DATABASE_URL'];
 }

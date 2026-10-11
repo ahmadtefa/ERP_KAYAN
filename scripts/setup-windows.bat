@@ -40,7 +40,6 @@ if not errorlevel 1 goto :psqlfound
 
 set "PSQLDIR="
 for /f "delims=" %%d in ('dir /b /ad /o-n "C:\Program Files\PostgreSQL" 2^>nul') do if not defined PSQLDIR if exist "C:\Program Files\PostgreSQL\%%d\bin\psql.exe" set "PSQLDIR=C:\Program Files\PostgreSQL\%%d\bin"
-for /f "delims=" %%d in ('dir /b /ad /o-n "C:\Program Files (x86)\PostgreSQL" 2^>nul') do if not defined PSQLDIR if exist "C:\Program Files (x86)\PostgreSQL\%%d\bin\psql.exe" set "PSQLDIR=C:\Program Files (x86)\PostgreSQL\%%d\bin"
 if not defined PSQLDIR if exist "%LOCALAPPDATA%\kayan-tools\pgsql\bin\psql.exe" set "PSQLDIR=%LOCALAPPDATA%\kayan-tools\pgsql\bin"
 
 if not defined PSQLDIR goto :nopsql
