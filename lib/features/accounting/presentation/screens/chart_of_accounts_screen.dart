@@ -291,9 +291,13 @@ Future<void> _editAccount(
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<AccountType>(
+                    key: ValueKey(selectedType),
                     initialValue: selectedType,
                     decoration: InputDecoration(
                       labelText: dialogL10n.accountType,
+                      helperText: selectedParent != null
+                          ? 'يطابق نوع الحساب الأب / Matches parent account type'
+                          : null,
                     ),
                     items: [
                       for (final type in AccountType.values)
@@ -302,7 +306,7 @@ Future<void> _editAccount(
                           child: Text(dialogL10n.accountTypeLabel(type)),
                         ),
                     ],
-                    onChanged: existing == null
+                    onChanged: existing == null && selectedParent == null
                         ? (value) => setDialogState(
                             () => selectedType = value ?? selectedType,
                           )
@@ -329,7 +333,17 @@ Future<void> _editAccount(
                         ),
                     ],
                     onChanged: (value) async {
-                      setDialogState(() => selectedParent = value);
+                      setDialogState(() {
+                        selectedParent = value;
+                        if (value != null) {
+                          for (final p in parents) {
+                            if (p.id == value) {
+                              selectedType = p.type;
+                              break;
+                            }
+                          }
+                        }
+                      });
                       if (existing == null &&
                           codeController.text.trim().isEmpty) {
                         final suggestion = await ref

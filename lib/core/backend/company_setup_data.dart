@@ -9,6 +9,7 @@ class CompanySetupData {
     required this.companyCode,
     required this.companyNameAr,
     required this.companyNameEn,
+    this.facilityKind = 'HEADQUARTERS',
     this.phone,
     this.email,
     this.address,
@@ -24,11 +25,12 @@ class CompanySetupData {
   final String companyCode;
   final String companyNameAr;
   final String companyNameEn;
+  final String facilityKind;
   final String? phone;
   final String? email;
   final String? address;
 
-  /// The headquarters unit. Left empty, the defaults are used.
+  /// The initial unit (headquarters or branch). Left empty, defaults are used.
   final String? hqCode;
   final String? hqNameAr;
   final String? hqNameEn;
@@ -49,6 +51,7 @@ class CompanySetupData {
     'KAYAN_COMPANY_CODE': companyCode,
     'KAYAN_COMPANY_NAME_AR': companyNameAr,
     'KAYAN_COMPANY_NAME_EN': companyNameEn,
+    'KAYAN_FACILITY_KIND': facilityKind,
     if (phone != null && phone!.isNotEmpty) 'KAYAN_COMPANY_PHONE': phone!,
     if (email != null && email!.isNotEmpty) 'KAYAN_COMPANY_EMAIL': email!,
     if (address != null && address!.isNotEmpty)

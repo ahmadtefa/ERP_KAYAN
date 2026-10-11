@@ -55,3 +55,6 @@ backend/.env.*
 !backend/.env.example
 *.tsbuildinfo
 backend/backups/
+
+# Maven (accidentally created, not part of this project)
+.mvn/

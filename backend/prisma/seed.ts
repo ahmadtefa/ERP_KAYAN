@@ -148,20 +148,23 @@ async function main(): Promise<void> {
     },
   });
 
-  // The headquarters the setup dialog named (desktop first-run passes these
-  // through the environment), or the familiar defaults.
-  const hqCode = process.env.KAYAN_HQ_CODE?.trim() || 'MAIN';
+  // The initial unit (headquarters or branch) the setup dialog named
+  // (desktop first-run passes these through the environment), or the familiar defaults.
+  const facilityKind = process.env.KAYAN_FACILITY_KIND?.trim() === 'BRANCH' ? 'BRANCH' : 'HEADQUARTERS';
+  const defaultUnitCode = facilityKind === 'BRANCH' ? 'BR01' : 'MAIN';
+  const defaultUnitNameEn = facilityKind === 'BRANCH' ? 'Branch' : 'Head Office';
+  const defaultUnitNameAr = facilityKind === 'BRANCH' ? 'الفرع' : 'المركز الرئيسي';
+
+  const hqCode = (process.env.KAYAN_UNIT_CODE || process.env.KAYAN_HQ_CODE)?.trim() || defaultUnitCode;
   const branch = await prisma.branch.upsert({
     where: { companyId_code: { companyId: company.id, code: hqCode } },
-    // The seeded unit is the company's headquarters; if an earlier seed left
-    // it without a kind, say so now.
-    update: { kind: 'HEADQUARTERS' },
+    update: { kind: facilityKind },
     create: {
       companyId: company.id,
       code: hqCode,
-      nameEn: process.env.KAYAN_HQ_NAME_EN?.trim() || 'Head Office',
-      nameAr: process.env.KAYAN_HQ_NAME_AR?.trim() || 'المركز الرئيسي',
-      kind: 'HEADQUARTERS',
+      nameEn: (process.env.KAYAN_UNIT_NAME_EN || process.env.KAYAN_HQ_NAME_EN)?.trim() || defaultUnitNameEn,
+      nameAr: (process.env.KAYAN_UNIT_NAME_AR || process.env.KAYAN_HQ_NAME_AR)?.trim() || defaultUnitNameAr,
+      kind: facilityKind,
     },
   });
 

@@ -15,6 +15,7 @@
 ///  * Everything can be cleared in one tap from the sign-in screen.
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -80,9 +81,7 @@ class CredentialsStore {
   /// The web cannot: a browser has no keystore a page may use for this, and
   /// local storage is open to any script. Everywhere the app runs natively,
   /// `flutter_secure_storage` is backed by the operating system's own vault.
-  bool get canStorePassword =>
-      _canStorePassword ??
-      const bool.fromEnvironment('dart.library.js_interop') == false;
+  bool get canStorePassword => _canStorePassword ?? !kIsWeb;
 
   Future<bool> isRemembered() async {
     try {

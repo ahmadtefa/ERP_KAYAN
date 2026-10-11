@@ -77,6 +77,15 @@ export class InitialSetupDto {
   @IsOptional() @IsEmail() @MaxLength(200) email?: string;
   @IsOptional() @IsString() @MaxLength(500) address?: string;
 
+  /// "HEADQUARTERS" or "BRANCH". Defaults to "HEADQUARTERS".
+  @IsOptional() @IsIn(['HEADQUARTERS', 'BRANCH'])
+  facilityKind?: 'HEADQUARTERS' | 'BRANCH';
+
+  @IsOptional() @IsString() @MaxLength(20) @Matches(CODE_PATTERN)
+  unitCode?: string;
+  @IsOptional() @IsString() @MaxLength(200) unitNameEn?: string;
+  @IsOptional() @IsString() @MaxLength(200) unitNameAr?: string;
+
   @IsOptional() @IsString() @MaxLength(20) @Matches(CODE_PATTERN)
   hqCode?: string;
   @IsOptional() @IsString() @MaxLength(200) hqNameEn?: string;
@@ -89,7 +98,7 @@ export class InitialSetupDto {
   @IsOptional() @IsString() @MaxLength(64) logoMime?: string;
 
   @IsString() @MinLength(3) @MaxLength(60) adminUsername!: string;
-  @IsString() @MinLength(12) @MaxLength(200) adminPassword!: string;
+  @IsString() @MinLength(8) @MaxLength(200) adminPassword!: string;
   @IsOptional() @IsString() @MaxLength(200) adminFullNameEn?: string;
   @IsOptional() @IsString() @MaxLength(200) adminFullNameAr?: string;
 

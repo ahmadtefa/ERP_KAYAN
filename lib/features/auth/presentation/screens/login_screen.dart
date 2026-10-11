@@ -78,12 +78,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               'companyCode': data.companyCode,
               'companyNameAr': data.companyNameAr,
               'companyNameEn': data.companyNameEn,
+              'facilityKind': data.facilityKind,
               if ((data.phone ?? '').isNotEmpty) 'phone': data.phone,
               if ((data.email ?? '').isNotEmpty) 'email': data.email,
               if ((data.address ?? '').isNotEmpty) 'address': data.address,
-              if ((data.hqCode ?? '').isNotEmpty) 'hqCode': data.hqCode,
-              if ((data.hqNameAr ?? '').isNotEmpty) 'hqNameAr': data.hqNameAr,
-              if ((data.hqNameEn ?? '').isNotEmpty) 'hqNameEn': data.hqNameEn,
+              if ((data.hqCode ?? '').isNotEmpty) ...{
+                'hqCode': data.hqCode,
+                'unitCode': data.hqCode,
+              },
+              if ((data.hqNameAr ?? '').isNotEmpty) ...{
+                'hqNameAr': data.hqNameAr,
+                'unitNameAr': data.hqNameAr,
+              },
+              if ((data.hqNameEn ?? '').isNotEmpty) ...{
+                'hqNameEn': data.hqNameEn,
+                'unitNameEn': data.hqNameEn,
+              },
               if (data.logoBytes != null && data.logoBytes!.isNotEmpty)
                 'logoBase64': base64Encode(data.logoBytes!),
               if (data.logoMime != null) 'logoMime': data.logoMime,

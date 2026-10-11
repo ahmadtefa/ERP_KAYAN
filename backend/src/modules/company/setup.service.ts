@@ -86,13 +86,19 @@ export class SetupService {
         },
       });
 
+      const isBranch = dto.facilityKind === 'BRANCH';
+      const unitKind = isBranch ? BranchKind.BRANCH : BranchKind.HEADQUARTERS;
+      const unitCode = dto.unitCode ?? dto.hqCode ?? (isBranch ? 'BR01' : 'MAIN');
+      const unitNameEn = dto.unitNameEn ?? dto.hqNameEn ?? (isBranch ? 'Branch' : 'Head Office');
+      const unitNameAr = dto.unitNameAr ?? dto.hqNameAr ?? (isBranch ? 'الفرع' : 'المركز الرئيسي');
+
       const hq = await tx.branch.create({
         data: {
           companyId: company.id,
-          code: dto.hqCode ?? 'MAIN',
-          nameEn: dto.hqNameEn ?? 'Head Office',
-          nameAr: dto.hqNameAr ?? 'المركز الرئيسي',
-          kind: BranchKind.HEADQUARTERS,
+          code: unitCode,
+          nameEn: unitNameEn,
+          nameAr: unitNameAr,
+          kind: unitKind,
         },
       });
 

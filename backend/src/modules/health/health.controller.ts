@@ -11,14 +11,22 @@ export class HealthController {
   @Get()
   async check() {
     let database = 'up';
+    let needsSetup = false;
     try {
       await this.prisma.$queryRaw`SELECT 1`;
+      const companyCount = await this.prisma.company.count({
+        where: { deletedAt: null },
+      });
+      needsSetup = companyCount === 0;
     } catch {
       database = 'down';
     }
     return {
       status: database === 'up' ? 'ok' : 'degraded',
       database,
+      needsSetup,
+      mode: process.env.NODE_ENV ?? 'development',
+      uptimeSeconds: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
     };
   }

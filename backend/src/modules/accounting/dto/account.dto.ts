@@ -10,12 +10,12 @@ import {
   MinLength,
 } from 'class-validator';
 
-const CODE_PATTERN = /^[A-Za-z0-9_.-]{1,20}$/;
+const CODE_PATTERN = /^[A-Za-z0-9_.-]{1,50}$/;
 
 export class CreateAccountDto {
   /// Left empty, the server suggests the next code under the chosen parent.
-  @IsOptional() @IsString() @MaxLength(20) @Matches(CODE_PATTERN, {
-    message: 'code must be 1-20 characters: letters, digits, dash, dot or underscore',
+  @IsOptional() @IsString() @MaxLength(50) @Matches(CODE_PATTERN, {
+    message: 'code must be 1-50 characters: letters, digits, dash, dot or underscore',
   })
   code?: string;
 
@@ -37,7 +37,7 @@ export class CreateAccountDto {
 export class UpdateAccountDto {
   /// The code only changes while the account has no movements — renumbering a
   /// account someone already posted against would rewrite history's labels.
-  @IsOptional() @IsString() @MaxLength(20) @Matches(CODE_PATTERN)
+  @IsOptional() @IsString() @MaxLength(50) @Matches(CODE_PATTERN)
   code?: string;
 
   @IsOptional() @IsString() @MinLength(1) @MaxLength(200) nameEn?: string;

@@ -57,6 +57,7 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
   final _adminAgain = TextEditingController();
 
   PickedFile? _logo;
+  String _facilityKind = 'HEADQUARTERS';
   bool _obscure = true;
   String? _localError;
 
@@ -107,6 +108,10 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
       fill(_hqNameAr, 'hqNameAr');
       fill(_hqNameEn, 'hqNameEn');
       fill(_adminUsername, 'adminUsername');
+      final kind = draft['facilityKind'];
+      if (kind is String && (kind == 'HEADQUARTERS' || kind == 'BRANCH')) {
+        _facilityKind = kind;
+      }
       if (mounted) setState(() {});
     } catch (_) {
       // A damaged draft is not a reason to block the setup.
@@ -122,6 +127,7 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
           'companyCode': _companyCode.text,
           'companyNameAr': _companyNameAr.text,
           'companyNameEn': _companyNameEn.text,
+          'facilityKind': _facilityKind,
           'phone': _phone.text,
           'email': _email.text,
           'address': _address.text,
@@ -186,6 +192,7 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
         companyCode: code,
         companyNameAr: nameAr,
         companyNameEn: nameEn,
+        facilityKind: _facilityKind,
         phone: _phone.text.trim(),
         email: _email.text.trim(),
         address: _address.text.trim(),
@@ -276,15 +283,44 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
         ),
         const SizedBox(height: 20),
         const Text(
-          'المقر الرئيسي / Headquarters',
+          'نوع المنشأة / Facility kind',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
-        const SizedBox(height: 6),
-        const Text(
-          'الوحدة الأولى هي المقر الرئيسي للشركة. الفروع بتتضاف بعدين من '
-          '«بيانات الشركة». / The first unit is the headquarters. Branches are '
-          'added later from Company settings.',
-          style: TextStyle(fontSize: 12, color: Colors.grey),
+        const SizedBox(height: 8),
+        SegmentedButton<String>(
+          segments: const [
+            ButtonSegment(
+              value: 'HEADQUARTERS',
+              label: Text('مقر رئيسي / Headquarters'),
+              icon: Icon(Icons.account_balance),
+            ),
+            ButtonSegment(
+              value: 'BRANCH',
+              label: Text('فرع / Branch'),
+              icon: Icon(Icons.storefront_outlined),
+            ),
+          ],
+          selected: {_facilityKind},
+          onSelectionChanged: busy
+              ? null
+              : (set) {
+                  setState(() {
+                    _facilityKind = set.first;
+                    if (_hqCode.text.trim().isEmpty ||
+                        _hqCode.text == 'MAIN' ||
+                        _hqCode.text == 'BR01') {
+                      _hqCode.text =
+                          _facilityKind == 'HEADQUARTERS' ? 'MAIN' : 'BR01';
+                    }
+                  });
+                },
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _facilityKind == 'HEADQUARTERS'
+              ? 'الوحدة الأولى هي المقر الرئيسي للشركة. الفروع يمكن إضافتها لاحقًا. / The first unit is the headquarters.'
+              : 'هذه المنشأة فرع تابع للشركة. / This facility is a branch of the company.',
+          style: const TextStyle(fontSize: 12, color: Colors.grey),
         ),
         const SizedBox(height: 12),
         Row(
@@ -293,9 +329,11 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
               child: TextField(
                 controller: _hqCode,
                 enabled: !busy,
-                decoration: const InputDecoration(
-                  labelText: 'كود المقر / Unit code (MAIN)',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: _facilityKind == 'HEADQUARTERS'
+                      ? 'كود المقر / Unit code (MAIN)'
+                      : 'كود الفرع / Branch code (BR01)',
+                  border: const OutlineInputBorder(),
                 ),
               ),
             ),
@@ -304,9 +342,11 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
               child: TextField(
                 controller: _hqNameAr,
                 enabled: !busy,
-                decoration: const InputDecoration(
-                  labelText: 'اسم المقر بالعربية / HQ name (Arabic)',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: _facilityKind == 'HEADQUARTERS'
+                      ? 'اسم المقر بالعربية / HQ name (Arabic)'
+                      : 'اسم الفرع بالعربية / Branch name (Arabic)',
+                  border: const OutlineInputBorder(),
                 ),
               ),
             ),
@@ -315,9 +355,11 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
               child: TextField(
                 controller: _hqNameEn,
                 enabled: !busy,
-                decoration: const InputDecoration(
-                  labelText: 'اسم المقر بالإنجليزية / HQ name (English)',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: _facilityKind == 'HEADQUARTERS'
+                      ? 'اسم المقر بالإنجليزية / HQ name (English)'
+                      : 'اسم الفرع بالإنجليزية / Branch name (English)',
+                  border: const OutlineInputBorder(),
                 ),
               ),
             ),

@@ -62,3 +62,66 @@ describe('validateLogo', () => {
     expect(() => validateLogo(fake, 'image/webp')).toThrow(BadRequestException);
   });
 });
+
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { InitialSetupDto } from './dto/company.dto';
+
+describe('InitialSetupDto', () => {
+  function makeValidDto(): Record<string, unknown> {
+    return {
+      companyCode: 'ACME',
+      companyNameAr: 'شركة أكمي',
+      companyNameEn: 'Acme Corp',
+      adminUsername: 'admin',
+      adminPassword: 'password123',
+    };
+  }
+
+  it('accepts valid setup with default (or no) facilityKind', async () => {
+    const dto = plainToInstance(InitialSetupDto, makeValidDto());
+    const errors = await validate(dto);
+    expect(errors.length).toBe(0);
+  });
+
+  it('accepts facilityKind as HEADQUARTERS or BRANCH', async () => {
+    const hq = plainToInstance(InitialSetupDto, {
+      ...makeValidDto(),
+      facilityKind: 'HEADQUARTERS',
+      unitCode: 'MAIN',
+    });
+    expect((await validate(hq)).length).toBe(0);
+
+    const branch = plainToInstance(InitialSetupDto, {
+      ...makeValidDto(),
+      facilityKind: 'BRANCH',
+      unitCode: 'BR01',
+    });
+    expect((await validate(branch)).length).toBe(0);
+  });
+
+  it('rejects an invalid facilityKind', async () => {
+    const invalid = plainToInstance(InitialSetupDto, {
+      ...makeValidDto(),
+      facilityKind: 'WAREHOUSE',
+    });
+    const errors = await validate(invalid);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.some((e) => e.property === 'facilityKind')).toBe(true);
+  });
+
+  it('accepts password of 8 characters and rejects shorter', async () => {
+    const validPass = plainToInstance(InitialSetupDto, {
+      ...makeValidDto(),
+      adminPassword: '12345678',
+    });
+    expect((await validate(validPass)).length).toBe(0);
+
+    const shortPass = plainToInstance(InitialSetupDto, {
+      ...makeValidDto(),
+      adminPassword: '1234567',
+    });
+    const errors = await validate(shortPass);
+    expect(errors.some((e) => e.property === 'adminPassword')).toBe(true);
+  });
+});
