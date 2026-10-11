@@ -1,6 +1,6 @@
 # جرد المتطلبات — Requirements Audit
 
-آخر تحديث: 2026-10-11 (بعد الدمج مع `main` عند `f6fe528`).
+آخر تحديث: 2026-10-11 (بعد الدمج مع `main` عند `6794a3e` والتحقق المحلي).
 الحالة من أربعة قيم: ✅ منفذ ومختبَر فعلياً · 🟡 منفذ جزئياً · 🔵 موجود لكن غير مختبَر · ❌ غير منفذ.
 كل اختبار مذكور هنا **شُغّل فعلاً**؛ وما لم يُشغَّل مكتوب صراحةً مع السبب.
 
@@ -21,7 +21,7 @@
 
 | البند | الحالة | الإثبات | الاختبار |
 |---|---|---|---|
-| حفظ اسم المستخدم (وكلمة المرور حيث التخزين الآمن متاح) | ✅ | `lib/core/storage/credentials_store.dart` + `login_screen.dart` (checkbox متوقف افتراضياً + زر مسح) | اختبارات وحدة مكتوبة (`test/core/credentials_store_test.dart` — 6 حالات) — **لم تُشغَّل** (لا Flutter SDK هنا؛ شغّل `flutter test`) |
+| حفظ اسم المستخدم (وكلمة المرور حيث التخزين الآمن متاح) | ✅ | `lib/core/storage/credentials_store.dart` + `login_screen.dart` (checkbox متوقف افتراضياً + زر مسح) | `flutter test`: حالات `credentials_store_test.dart` الست نجحت |
 | لا نص صريح لكلمة المرور في تخزين غير آمن | ✅ | كلمة المرور في `FlutterSecureStorage` فقط؛ الويب لا يحفظها إطلاقاً؛ مسودة الإعداد تستثنيها | فحص الكود + الاختبارات أعلاه تفحص `prefs.getString('login.password') == null` |
 | لا كشف في السجلات | ✅ | `local_backend_io.dart` يبدّل `KAYAN_ADMIN_PASSWORD=***` قبل كتابة اللوج؛ سجلات الـAPI لا تطبع كلمات مرور | فحص الكود (بدون أسرار في diff — انظر التقرير) |
 | آلية المصادقة الفعلية | ✅ | JWT (access/refresh) في تخزين آمن؛ الرموز تُخزَّن hashed في `refresh_tokens`؛ لا تغيير في نظام المصادقة | حي: login/refresh عبر API في هذه الجلسة |
@@ -43,8 +43,8 @@
 |---|---|---|---|
 | واجهات وبيانات وتقارير باللغتين | ✅ | `app_ar.arb`/`app_en.arb` (379 مفتاحاً)، `accountName()` مركزي للبيانات | حي: قيد بأسماء عربية في السطور؛ xlsx عربي |
 | RTL للعربية / LTR للإنجليزية | ✅ | `Directionality` من locale؛ print HTML `dir="rtl"/"ltr"` | حي: HTML الطباعة `lang="ar" dir="rtl"` |
-| بحث بالاسمين والكود + لا نصوص غير مترجمة | ✅ | فلتر البحث يقرأ nameAr/nameEn/code؛ فحص اتساق ARB↔المولّد نظيف (379/379) | فحص آلي مُشغَّل؛ `flutter analyze` **لم يُشغَّل** |
-| آلية ترجمة مركزية + معالجة الناقص | ✅ | `account-name.ts` / `account_name.dart` (المفضّل ← الآخر ← الكود، أبداً فارغ) | jest + اختبارات Dart مكتوبة (غير مشغّلة) |
+| بحث بالاسمين والكود + لا نصوص غير مترجمة | ✅ | فلتر البحث يقرأ nameAr/nameEn/code؛ فحص اتساق ARB↔المولّد نظيف (379/379) | `flutter analyze` بلا ملاحظات؛ اختبارات Flutter شملت RTL والعربية |
+| آلية ترجمة مركزية + معالجة الناقص | ✅ | `account-name.ts` / `account_name.dart` (المفضّل ← الآخر ← الكود، أبداً فارغ) | Jest وFlutter tests نجحت |
 
 ## 5. تصدير Excel وPDF
 
@@ -71,9 +71,9 @@
 | البند | الحالة | الإثبات | الاختبار |
 |---|---|---|---|
 | الواجهة والـBackend والاتصال بقاعدة البيانات | ✅ | API كامل يعمل على PG 16.2 حقيقية | حي: health/login/COA/journal/exports/backup كلها 2xx |
-| بناء نسخة الويب | ❌ غير مُشغَّل | — | **تعذّر فعلياً**: لا Flutter SDK في البيئة ومصدره محجوب. شغّل `flutter build web` محلياً |
-| توافق Windows | ❌ غير مُشغَّل | — | يتطلب Windows + Visual Studio. شغّل `scripts\build-desktop-windows.ps1` |
-| تجهيزات Setup ومحتوياته | 🔵 منفَّذ غير مُبنَّر | `build-desktop-windows.ps1` (8 خطوات: backend+node+pg tools+icons+x64 checks)، `installer-windows.iss` (أيقونة + x64) | لم يُبنَ Setup هنا؛ `verify-package.ps1` جاهز للفحص بعد البناء |
+| بناء نسخة الويب | ✅ | Flutter Web Release | `flutter build web --release` اكتمل؛ تحذير غير مانع بشأن خط CupertinoIcons |
+| توافق Windows | ✅ | Windows x64 + Visual Studio؛ 38 ملفاً تنفيذياً أصلياً داخل الحزمة | `scripts\build-desktop-windows.ps1` بنجاح؛ بُني `erp_kayan.exe` |
+| تجهيزات Setup ومحتوياته | 🟡 | بُني `build\desktop\KAYAN-ERP-Setup-1.0.0.exe` بحجم 112,008,392 بايت (106.82 MiB)؛ الحزمة تتضمن التطبيق وNode.js وpg_dump/pg_restore | ISCC: Successful compile؛ `verify-package.ps1`: 40 فحصاً ناجحاً. هذا ليس Setup مستقلاً: لا يضمّن PostgreSQL Server أو خدمة KAYAN؛ يتطلب PostgreSQL خارجية، ولم يُختبر تثبيت/تشغيل/إزالة على جهاز نظيف |
 | لا تغيير بنية أو حذف ضروري | ✅ | الحفاظ على كل الملفات؛ الدمج مع main حافظ على جانبيه | git log/diff |
 
 ---
@@ -81,15 +81,18 @@
 ## نتائج التشغيل الفعلية (2026-10-11)
 
 - `npx tsc --noEmit` → نظيف
-- `npm run build` → ناجح
-- `npx jest` → **47/47** (6 مجموعات)
+- `npm run build` → ناجح؛ `npx jest --runInBand` → **47/47** (6 مجموعات)
+- `flutter analyze` → بلا ملاحظات؛ `flutter test` → **89 اختباراً ناجحاً**؛ حالتا اختبار رفع الملفات الحيتان تخطّتا عدم وجود API يعمل على المنفذ 3000
+- `dart run tools/backend_shape_check.dart` → **16/16**
+- `flutter build web --release` → ناجح
+- `scripts/build-desktop-windows.ps1` → بناء Windows x64 وملف Setup اكتمل؛ `verify-package.ps1` → **40/40**
 - API حي على PostgreSQL 16.2: تسجيل دخول، setup/status، company profile+logo، شجرة 30 حساباً، كود مكرر 409، اقتراح كود، قيد عربي بأسماء عربية، xlsx (PK/65KB/شعار)، نسخة كاملة 137KB، capabilities (server 16.2 بلا تحذير)
 - **تدفق الإعداد الأول كاملاً** على `kayan_test` فارغة: needsSetup:true → setup/initial (اسم عربي/إنجليزي/كود/اتصال/مقر CAIRO/شعار) → needsSetup:false → دخول المدير الجديد → الملف والمقر والشعار والدليل (30 حساباً) → استدعاء ثانٍ مرفوض 409 → payload ناقص مرفوض 400
 - فحص علامات التعارض: صفر · فحص الأسرار: صفر أسرار حقيقية
 
 ## غير مُنفَّذ/غير مُختبَر — والسبب
 
-1. `flutter analyze` / `flutter test` / `flutter build web` / بناء Windows / ISCC — بلا Flutter SDK أو Windows في بيئة التنفيذ (المصادر المحجوبة). الأوامر الدقيقة موثّقة أعلاه.
-2. اختبار PDF البصري — يتطلب Chrome/Chromium على الخادم.
-3. اختبار «تذكرني» على ويندوز/ويب فعلياً — منطقه مغطى باختبارات الوحدات المكتوبة؛ التشغيل على المنصتين يحتاج أجهزتها.
-4. واجهة الإعداد الأول (Dart) مراجَعة ومتوازنة بنيوياً لكن غير مُختبَرة بـ widget tests — اشغّل `flutter test` (توجد اختبارات Dart للمنطق المقابل).
+1. اختبار PDF المرئي/إنشاء PDF فعلي والتنزيل في متصفح أو Windows — لم يُنفّذ في هذه الجولة.
+2. لا يحتوي Setup الحالي PostgreSQL Server ولا ينشئ خدمة/مجلد بيانات KAYAN مستقلاً؛ يعتمد على PostgreSQL موجودة مسبقاً على `127.0.0.1:5432`. لذلك لا يحقق بعد شرط التثبيت المستقل على جهاز Windows نظيف، ولا يُعد إصداراً نهائياً لهذا الهدف.
+3. لم يُختبر تثبيت Inno Setup أو تشغيل التطبيق أو إزالته على جهاز نظيف؛ جلسة التنفيذ غير مرتفعة الصلاحية، وتشغيل التطبيق على قاعدة 5432 الموجودة قد يغيّر بياناتها، لذلك لم يُشغّل.
+4. نصّ `scripts/install-postgres-portable.bat` الحالي يحذف مجلدات PostgreSQL/PGDATA الموجودة ويهيّئ المصادقة بـ`trust`؛ لم يُشغّل ولم يُستخدم لإعداد قاعدة البيانات.

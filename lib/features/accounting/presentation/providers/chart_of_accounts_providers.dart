@@ -18,7 +18,7 @@ final chartOfAccountsDataSourceProvider = Provider<ChartOfAccountsDataSource>((
   final config = ref.watch(appConfigProvider);
   if (config.useSeedData) return const SeedChartOfAccountsDataSource();
   return RemoteChartOfAccountsDataSource(ref.watch(apiClientProvider));
-}));
+});
 
 final chartOfAccountsRepositoryProvider = Provider<ChartOfAccountsRepository>(
   (ref) => ChartOfAccountsRepositoryImpl(
@@ -62,7 +62,7 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
     );
   }
 
-  Future<String?> update(String id, AccountInput input) async {
+  Future<String?> updateAccount(String id, AccountInput input) async {
     final result = await ref
         .read(chartOfAccountsRepositoryProvider)
         .updateAccount(id, input);
@@ -140,17 +140,19 @@ final filteredAccountsProvider = Provider<List<Account>>((ref) {
   final type = ref.watch(accountTypeFilterProvider);
   final includeInactive = ref.watch(accountInactiveFilterProvider);
 
-  return accounts.where((a) {
-    if (type != null && a.type != type) return false;
-    if (!includeInactive && !a.isActive) return false;
-    if (query.isEmpty) return true;
-    // The search reads both names and the code, whichever language the
-    // person at the keyboard is typing in.
-    return a.code.toLowerCase().contains(query) ||
-        (a.nameEn ?? '').toLowerCase().contains(query) ||
-        (a.nameAr ?? '').contains(query) ||
-        a.name.toLowerCase().contains(query);
-  }).toList(growable: false);
+  return accounts
+      .where((a) {
+        if (type != null && a.type != type) return false;
+        if (!includeInactive && !a.isActive) return false;
+        if (query.isEmpty) return true;
+        // The search reads both names and the code, whichever language the
+        // person at the keyboard is typing in.
+        return a.code.toLowerCase().contains(query) ||
+            (a.nameEn ?? '').toLowerCase().contains(query) ||
+            (a.nameAr ?? '').contains(query) ||
+            a.name.toLowerCase().contains(query);
+      })
+      .toList(growable: false);
 });
 
 /// One row of the tree: an account plus the depth it sits at.

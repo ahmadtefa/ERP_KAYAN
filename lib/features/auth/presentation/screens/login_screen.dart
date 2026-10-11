@@ -70,25 +70,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _setupError = null;
     });
     try {
-      await ref.read(apiClientProvider).post(
-        '/setup/initial',
-        body: {
-          'companyCode': data.companyCode,
-          'companyNameAr': data.companyNameAr,
-          'companyNameEn': data.companyNameEn,
-          if ((data.phone ?? '').isNotEmpty) 'phone': data.phone,
-          if ((data.email ?? '').isNotEmpty) 'email': data.email,
-          if ((data.address ?? '').isNotEmpty) 'address': data.address,
-          if ((data.hqCode ?? '').isNotEmpty) 'hqCode': data.hqCode,
-          if ((data.hqNameAr ?? '').isNotEmpty) 'hqNameAr': data.hqNameAr,
-          if ((data.hqNameEn ?? '').isNotEmpty) 'hqNameEn': data.hqNameEn,
-          if (data.logoBytes != null && data.logoBytes!.isNotEmpty)
-            'logoBase64': base64Encode(data.logoBytes!),
-          if (data.logoMime != null) 'logoMime': data.logoMime,
-          'adminUsername': data.adminUsername,
-          'adminPassword': data.adminPassword,
-        },
-      );
+      await ref
+          .read(apiClientProvider)
+          .post(
+            '/setup/initial',
+            body: {
+              'companyCode': data.companyCode,
+              'companyNameAr': data.companyNameAr,
+              'companyNameEn': data.companyNameEn,
+              if ((data.phone ?? '').isNotEmpty) 'phone': data.phone,
+              if ((data.email ?? '').isNotEmpty) 'email': data.email,
+              if ((data.address ?? '').isNotEmpty) 'address': data.address,
+              if ((data.hqCode ?? '').isNotEmpty) 'hqCode': data.hqCode,
+              if ((data.hqNameAr ?? '').isNotEmpty) 'hqNameAr': data.hqNameAr,
+              if ((data.hqNameEn ?? '').isNotEmpty) 'hqNameEn': data.hqNameEn,
+              if (data.logoBytes != null && data.logoBytes!.isNotEmpty)
+                'logoBase64': base64Encode(data.logoBytes!),
+              if (data.logoMime != null) 'logoMime': data.logoMime,
+              'adminUsername': data.adminUsername,
+              'adminPassword': data.adminPassword,
+            },
+          );
       if (!mounted) return;
       setState(() {
         _setupBusy = false;
@@ -96,9 +98,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         _username.text = data.adminUsername;
         _error = null;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.createdSuccessfully)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.createdSuccessfully)));
     } on Failure catch (failure) {
       if (!mounted) return;
       setState(() {
@@ -300,22 +302,30 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       const SizedBox(height: 4),
                       // "Remember me": optional, off until asked for.
-                      Row(
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Checkbox(
-                            value: _remember,
-                            onChanged: _busy
-                                ? null
-                                : (value) =>
-                                      setState(() => _remember = value ?? false),
-                          ),
-                          Expanded(
-                            child: InkWell(
-                              onTap: _busy
-                                  ? null
-                                  : () => setState(() => _remember = !_remember),
-                              child: Text(l10n.rememberMe),
-                            ),
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: _remember,
+                                onChanged: _busy
+                                    ? null
+                                    : (value) => setState(
+                                        () => _remember = value ?? false,
+                                      ),
+                              ),
+                              Expanded(
+                                child: InkWell(
+                                  onTap: _busy
+                                      ? null
+                                      : () => setState(
+                                          () => _remember = !_remember,
+                                        ),
+                                  child: Text(l10n.rememberMe),
+                                ),
+                              ),
+                            ],
                           ),
                           TextButton.icon(
                             onPressed: _busy ? _clearSaved : null,

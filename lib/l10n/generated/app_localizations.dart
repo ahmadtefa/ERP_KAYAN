@@ -1976,72 +1976,402 @@ abstract class AppLocalizations {
   /// **'Download this list as it stands: Excel, CSV, PDF, or a page to print.'**
   String get exportListHint;
 
+  /// No description provided for @newAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'New account'**
   String get newAccount;
+
+  /// No description provided for @editAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit account'**
   String get editAccount;
+
+  /// No description provided for @deleteAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete account'**
   String get deleteAccount;
+
+  /// No description provided for @deleteAccountConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'The account “{account}” will be deleted, as long as it has no movements or sub-accounts. Continue?'**
   String deleteAccountConfirm(Object account);
+
+  /// No description provided for @allTypes.
+  ///
+  /// In en, this message translates to:
+  /// **'All types'**
   String get allTypes;
+
+  /// No description provided for @inactiveLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Inactive'**
   String get inactiveLabel;
+
+  /// No description provided for @accountCodeHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave empty to suggest the next code using the chart’s own numbering'**
   String get accountCodeHelper;
+
+  /// No description provided for @nameArabic.
+  ///
+  /// In en, this message translates to:
+  /// **'Name in Arabic'**
   String get nameArabic;
+
+  /// No description provided for @nameEnglish.
+  ///
+  /// In en, this message translates to:
+  /// **'Name in English'**
   String get nameEnglish;
+
+  /// No description provided for @parentAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent account'**
   String get parentAccount;
+
+  /// No description provided for @parentAccountHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'A sub-account takes its parent’s type'**
   String get parentAccountHelper;
+
+  /// No description provided for @noParent.
+  ///
+  /// In en, this message translates to:
+  /// **'No parent (top-level)'**
   String get noParent;
+
+  /// No description provided for @postableHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'A grouping account cannot receive postings; a final account can'**
   String get postableHelper;
+
+  /// No description provided for @activeAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
   String get activeAccount;
+
+  /// No description provided for @rememberMe.
+  ///
+  /// In en, this message translates to:
+  /// **'Remember me'**
   String get rememberMe;
+
+  /// No description provided for @rememberMeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'On the web only the username is kept'**
   String get rememberMeHint;
+
+  /// No description provided for @clearSavedCredentials.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear saved sign-in'**
   String get clearSavedCredentials;
+
+  /// No description provided for @savedCredentialsCleared.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved sign-in details cleared'**
   String get savedCredentialsCleared;
+
+  /// No description provided for @companySettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Company settings'**
   String get companySettings;
+
+  /// No description provided for @companyProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Company profile'**
   String get companyProfile;
+
+  /// No description provided for @companyCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Company code'**
   String get companyCode;
+
+  /// No description provided for @taxId.
+  ///
+  /// In en, this message translates to:
+  /// **'Tax ID'**
   String get taxId;
+
+  /// No description provided for @companyLogo.
+  ///
+  /// In en, this message translates to:
+  /// **'Company logo'**
   String get companyLogo;
+
+  /// No description provided for @uploadLogo.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload logo'**
   String get uploadLogo;
+
+  /// No description provided for @removeLogo.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove logo'**
   String get removeLogo;
+
+  /// No description provided for @logoHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional — PNG, JPEG or WebP up to 2 MB'**
   String get logoHint;
+
+  /// No description provided for @logoUpdated.
+  ///
+  /// In en, this message translates to:
+  /// **'Logo updated'**
   String get logoUpdated;
+
+  /// No description provided for @logoRemoved.
+  ///
+  /// In en, this message translates to:
+  /// **'Logo removed'**
   String get logoRemoved;
+
+  /// No description provided for @noLogo.
+  ///
+  /// In en, this message translates to:
+  /// **'No logo'**
   String get noLogo;
+
+  /// No description provided for @branches.
+  ///
+  /// In en, this message translates to:
+  /// **'Branches and units'**
   String get branches;
+
+  /// No description provided for @newBranch.
+  ///
+  /// In en, this message translates to:
+  /// **'New unit'**
   String get newBranch;
+
+  /// No description provided for @editBranch.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit unit'**
   String get editBranch;
+
+  /// No description provided for @branchCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Unit code'**
   String get branchCode;
+
+  /// No description provided for @branchKind.
+  ///
+  /// In en, this message translates to:
+  /// **'Unit type'**
   String get branchKind;
+
+  /// No description provided for @headquarters.
+  ///
+  /// In en, this message translates to:
+  /// **'Headquarters'**
   String get headquarters;
+
+  /// No description provided for @branchUnit.
+  ///
+  /// In en, this message translates to:
+  /// **'Branch'**
   String get branchUnit;
+
+  /// No description provided for @parentUnit.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent unit'**
   String get parentUnit;
+
+  /// No description provided for @parentUnitRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose the headquarters or parent unit'**
   String get parentUnitRequired;
+
+  /// No description provided for @deleteBranch.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete unit'**
   String get deleteBranch;
+
+  /// No description provided for @deleteBranchConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'The unit “{unit}” will be deleted. Units with movements cannot be deleted.'**
   String deleteBranchConfirm(Object unit);
+
+  /// No description provided for @branchSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Unit saved'**
   String get branchSaved;
+
+  /// No description provided for @profileSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Company details saved'**
   String get profileSaved;
+
+  /// No description provided for @unitType.
+  ///
+  /// In en, this message translates to:
+  /// **'Kind'**
   String get unitType;
+
+  /// No description provided for @fullBackupTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Full database backup'**
   String get fullBackupTitle;
+
+  /// No description provided for @fullBackupDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'A complete copy of the whole database (every company and user) in PostgreSQL format. It is made on the server that hosts the database.'**
   String get fullBackupDescription;
+
+  /// No description provided for @createFullBackup.
+  ///
+  /// In en, this message translates to:
+  /// **'Create full backup'**
   String get createFullBackup;
+
+  /// No description provided for @backupInProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'Creating the backup…'**
   String get backupInProgress;
+
+  /// No description provided for @backupFiles.
+  ///
+  /// In en, this message translates to:
+  /// **'Backups on the server'**
   String get backupFiles;
+
+  /// No description provided for @deleteBackup.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete backup'**
   String get deleteBackup;
+
+  /// No description provided for @deleteBackupConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'The file “{file}” will be permanently removed from the server.'**
   String deleteBackupConfirm(Object file);
+
+  /// No description provided for @restoreFullDatabase.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore the whole database'**
   String get restoreFullDatabase;
+
+  /// No description provided for @restoreFullWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'A full restore replaces everything currently in the database. A safety backup is taken automatically first.'**
   String get restoreFullWarning;
+
+  /// No description provided for @uploadDumpFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload a backup file (.dump)'**
   String get uploadDumpFile;
+
+  /// No description provided for @orChooseServerBackup.
+  ///
+  /// In en, this message translates to:
+  /// **'Or choose a backup on the server'**
   String get orChooseServerBackup;
+
+  /// No description provided for @confirmFullRestoreTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Full restore — explicit confirmation'**
   String get confirmFullRestoreTitle;
+
+  /// No description provided for @confirmFullRestoreBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Type RESTORE to confirm. Everything currently in the database will be replaced by the contents of the backup.'**
   String get confirmFullRestoreBody;
+
+  /// No description provided for @restoreFullDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore completed'**
   String get restoreFullDone;
+
+  /// No description provided for @restoreFullFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore failed'**
   String get restoreFullFailed;
+
+  /// No description provided for @fullBackupUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'PostgreSQL tools (pg_dump / pg_restore) were not found on this server'**
   String get fullBackupUnavailable;
+
+  /// No description provided for @maintenanceActive.
+  ///
+  /// In en, this message translates to:
+  /// **'The system is under maintenance — a restore is in progress'**
   String get maintenanceActive;
+
+  /// No description provided for @safetyBackup.
+  ///
+  /// In en, this message translates to:
+  /// **'Safety backup'**
   String get safetyBackup;
+
+  /// No description provided for @fullBackupKind.
+  ///
+  /// In en, this message translates to:
+  /// **'Full backup'**
   String get fullBackupKind;
+
+  /// No description provided for @createdAtLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Created'**
   String get createdAtLabel;
+
+  /// No description provided for @sizeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Size'**
   String get sizeLabel;
+
+  /// No description provided for @refreshStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh status'**
   String get refreshStatus;
-  String get companySettingsHint;}
+
+  /// No description provided for @companySettingsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Name, logo, contact details and branches'**
+  String get companySettingsHint;
+}
 
 class _AppLocalizationsDelegate
     extends LocalizationsDelegate<AppLocalizations> {

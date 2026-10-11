@@ -2,11 +2,7 @@ import 'package:erp_kayan/shared/utils/account_name.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _Names implements AccountNames {
-  const _Names({
-    required this.code,
-    this.nameEn,
-    this.nameAr,
-  });
+  const _Names({required this.code, this.nameEn, this.nameAr});
 
   @override
   final String code;
@@ -34,12 +30,19 @@ void main() {
       expect(accountName(account, 'en'), 'Cash on hand');
     });
 
-    test('falls back to the other language when the preferred one is missing', () {
-      const missingAr = _Names(code: '1101', nameEn: 'Cash on hand', nameAr: '');
-      const missingEn = _Names(code: '1101', nameAr: 'النقدية بالصندوق');
-      expect(accountName(missingAr, 'ar'), 'Cash on hand');
-      expect(accountName(missingEn, 'en'), 'النقدية بالصندوق');
-    });
+    test(
+      'falls back to the other language when the preferred one is missing',
+      () {
+        const missingAr = _Names(
+          code: '1101',
+          nameEn: 'Cash on hand',
+          nameAr: '',
+        );
+        const missingEn = _Names(code: '1101', nameAr: 'النقدية بالصندوق');
+        expect(accountName(missingAr, 'ar'), 'Cash on hand');
+        expect(accountName(missingEn, 'en'), 'النقدية بالصندوق');
+      },
+    );
 
     test('falls back to the code when both names are missing', () {
       const nameless = _Names(code: '9999', nameEn: '  ', nameAr: null);

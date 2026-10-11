@@ -975,7 +975,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get exportListHint =>
       'Download this list as it stands: Excel, CSV, PDF, or a page to print.';
 
-
   @override
   String get newAccount => 'New account';
 
@@ -987,7 +986,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String deleteAccountConfirm(Object account) {
-    return 'The account “${account}” will be deleted, as long as it has no movements or sub-accounts. Continue?';
+    return 'The account “$account” will be deleted, as long as it has no movements or sub-accounts. Continue?';
   }
 
   @override
@@ -997,7 +996,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get inactiveLabel => 'Inactive';
 
   @override
-  String get accountCodeHelper => 'Leave empty to suggest the next code using the chart’s own numbering';
+  String get accountCodeHelper =>
+      'Leave empty to suggest the next code using the chart’s own numbering';
 
   @override
   String get nameArabic => 'Name in Arabic';
@@ -1015,7 +1015,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get noParent => 'No parent (top-level)';
 
   @override
-  String get postableHelper => 'A grouping account cannot receive postings; a final account can';
+  String get postableHelper =>
+      'A grouping account cannot receive postings; a final account can';
 
   @override
   String get activeAccount => 'Active';
@@ -1097,7 +1098,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String deleteBranchConfirm(Object unit) {
-    return 'The unit “${unit}” will be deleted. Units with movements cannot be deleted.';
+    return 'The unit “$unit” will be deleted. Units with movements cannot be deleted.';
   }
 
   @override
@@ -1113,7 +1114,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get fullBackupTitle => 'Full database backup';
 
   @override
-  String get fullBackupDescription => 'A complete copy of the whole database (every company and user) in PostgreSQL format. It is made on the server that hosts the database.';
+  String get fullBackupDescription =>
+      'A complete copy of the whole database (every company and user) in PostgreSQL format. It is made on the server that hosts the database.';
 
   @override
   String get createFullBackup => 'Create full backup';
@@ -1129,14 +1131,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String deleteBackupConfirm(Object file) {
-    return 'The file “${file}” will be permanently removed from the server.';
+    return 'The file “$file” will be permanently removed from the server.';
   }
 
   @override
   String get restoreFullDatabase => 'Restore the whole database';
 
   @override
-  String get restoreFullWarning => 'A full restore replaces everything currently in the database. A safety backup is taken automatically first.';
+  String get restoreFullWarning =>
+      'A full restore replaces everything currently in the database. A safety backup is taken automatically first.';
 
   @override
   String get uploadDumpFile => 'Upload a backup file (.dump)';
@@ -1148,7 +1151,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get confirmFullRestoreTitle => 'Full restore — explicit confirmation';
 
   @override
-  String get confirmFullRestoreBody => 'Type RESTORE to confirm. Everything currently in the database will be replaced by the contents of the backup.';
+  String get confirmFullRestoreBody =>
+      'Type RESTORE to confirm. Everything currently in the database will be replaced by the contents of the backup.';
 
   @override
   String get restoreFullDone => 'Restore completed';
@@ -1157,10 +1161,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get restoreFullFailed => 'Restore failed';
 
   @override
-  String get fullBackupUnavailable => 'PostgreSQL tools (pg_dump / pg_restore) were not found on this server';
+  String get fullBackupUnavailable =>
+      'PostgreSQL tools (pg_dump / pg_restore) were not found on this server';
 
   @override
-  String get maintenanceActive => 'The system is under maintenance — a restore is in progress';
+  String get maintenanceActive =>
+      'The system is under maintenance — a restore is in progress';
 
   @override
   String get safetyBackup => 'Safety backup';

@@ -65,7 +65,7 @@ class RemoteChartOfAccountsDataSource implements ChartOfAccountsDataSource {
   Future<String> suggestCode({String? parentId}) async {
     final json = await _client.get(
       '$_path/suggest-code',
-      query: {if (parentId != null) 'parentId': parentId},
+      query: {'parentId': ?parentId},
     );
     final code = json['code']?.toString();
     if (code == null) {

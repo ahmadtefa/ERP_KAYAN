@@ -94,13 +94,14 @@ Check "its screens and translations travel with it (data\)" (Has "data")
 Check "no build leftovers from the developer's machine" (-not (Has "CMakeFiles"))
 
 # The KAYAN icon: the copy the shortcuts point at, and the source it was
-# rendered from. A real .ico starts with the two-byte icon marker 00 01.
+# rendered from. An ICO has a zero reserved word and a type word of 1.
 $iconFile = Join-Path $folder "icons\app_icon.ico"
 Check "the KAYAN icon travels with the program (icons\app_icon.ico)" (Test-Path $iconFile)
 Check "the source logo travels with it (icons\Kayan.png)" (Has "icons\Kayan.png")
 if (Test-Path $iconFile) {
   $head = [System.IO.File]::ReadAllBytes($iconFile)[0..5]
-  $isIco = ($head[0] -eq 0 -and $head[1] -eq 1)
+  $isIco = ($head[0] -eq 0 -and $head[1] -eq 0 -and
+            $head[2] -eq 1 -and $head[3] -eq 0)
   $entries = [BitConverter]::ToUInt16($head, 4)
   Check "app_icon.ico is a real multi-size icon" ($isIco -and $entries -ge 1) ("entries=$entries")
 }

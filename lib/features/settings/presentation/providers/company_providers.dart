@@ -9,8 +9,7 @@ final companyDataSourceProvider = Provider<CompanyDataSource>(
 );
 
 /// The company profile: names, code, contact details, logo flag.
-class CompanyProfileController
-    extends AsyncNotifier<Map<String, dynamic>> {
+class CompanyProfileController extends AsyncNotifier<Map<String, dynamic>> {
   @override
   Future<Map<String, dynamic>> build() {
     return ref.read(companyDataSourceProvider).fetchProfile();
@@ -24,7 +23,7 @@ class CompanyProfileController
   }
 
   /// Returns an error message, or null on success.
-  Future<String?> update(Map<String, dynamic> patch) async {
+  Future<String?> updateProfile(Map<String, dynamic> patch) async {
     try {
       final updated = await ref
           .read(companyDataSourceProvider)
@@ -58,20 +57,16 @@ class BranchesController extends AsyncNotifier<List<Map<String, dynamic>>> {
     );
   }
 
-  Future<String?> create(Map<String, dynamic> body) => _mutate(
-    () => ref.read(companyDataSourceProvider).createBranch(body),
-  );
+  Future<String?> create(Map<String, dynamic> body) =>
+      _mutate(() => ref.read(companyDataSourceProvider).createBranch(body));
 
-  Future<String?> update(String id, Map<String, dynamic> body) => _mutate(
-    () => ref.read(companyDataSourceProvider).updateBranch(id, body),
-  );
+  Future<String?> updateBranch(String id, Map<String, dynamic> body) =>
+      _mutate(() => ref.read(companyDataSourceProvider).updateBranch(id, body));
 
-  Future<String?> remove(String id) => _mutate(
-    () async {
-      await ref.read(companyDataSourceProvider).deleteBranch(id);
-      return <String, dynamic>{};
-    },
-  );
+  Future<String?> remove(String id) => _mutate(() async {
+    await ref.read(companyDataSourceProvider).deleteBranch(id);
+    return <String, dynamic>{};
+  });
 
   Future<String?> _mutate(
     Future<Map<String, dynamic>> Function() action,

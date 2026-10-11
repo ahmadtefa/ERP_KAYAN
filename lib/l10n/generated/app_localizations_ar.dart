@@ -969,7 +969,6 @@ class AppLocalizationsAr extends AppLocalizations {
   String get exportListHint =>
       'نزّل القائمة زي ما هي على الشاشة: إكسل أو CSV أو PDF أو ورقة للطباعة.';
 
-
   @override
   String get newAccount => 'حساب جديد';
 
@@ -981,7 +980,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String deleteAccountConfirm(Object account) {
-    return 'سيتم حذف الحساب «${account}» نهائياً إن لم يكن له حركات أو حسابات فرعية. متابعة؟';
+    return 'سيتم حذف الحساب «$account» نهائياً إن لم يكن له حركات أو حسابات فرعية. متابعة؟';
   }
 
   @override
@@ -991,7 +990,8 @@ class AppLocalizationsAr extends AppLocalizations {
   String get inactiveLabel => 'معطل';
 
   @override
-  String get accountCodeHelper => 'اتركه فارغاً ليتم اقتراح الكود تلقائياً وفق ترقيم الدليل';
+  String get accountCodeHelper =>
+      'اتركه فارغاً ليتم اقتراح الكود تلقائياً وفق ترقيم الدليل';
 
   @override
   String get nameArabic => 'الاسم بالعربية';
@@ -1009,7 +1009,8 @@ class AppLocalizationsAr extends AppLocalizations {
   String get noParent => 'بدون أب (حساب رئيسي)';
 
   @override
-  String get postableHelper => 'الحساب التجميعي لا يقبل قيوداً؛ الحساب النهائي هو ما تُرحَّل إليه';
+  String get postableHelper =>
+      'الحساب التجميعي لا يقبل قيوداً؛ الحساب النهائي هو ما تُرحَّل إليه';
 
   @override
   String get activeAccount => 'نشط';
@@ -1091,7 +1092,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String deleteBranchConfirm(Object unit) {
-    return 'سيتم حذف الوحدة «${unit}». الوحدات ذات الحركات لا يمكن حذفها.';
+    return 'سيتم حذف الوحدة «$unit». الوحدات ذات الحركات لا يمكن حذفها.';
   }
 
   @override
@@ -1107,7 +1108,8 @@ class AppLocalizationsAr extends AppLocalizations {
   String get fullBackupTitle => 'النسخ الاحتياطي الكامل لقاعدة البيانات';
 
   @override
-  String get fullBackupDescription => 'نسخة كاملة لكل قاعدة البيانات (جميع الشركات والمستخدمين) بصيغة PostgreSQL. تعمل على الخادم نفسه الذي تستضيف القاعدة.';
+  String get fullBackupDescription =>
+      'نسخة كاملة لكل قاعدة البيانات (جميع الشركات والمستخدمين) بصيغة PostgreSQL. تعمل على الخادم نفسه الذي تستضيف القاعدة.';
 
   @override
   String get createFullBackup => 'إنشاء نسخة كاملة';
@@ -1123,14 +1125,15 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String deleteBackupConfirm(Object file) {
-    return 'سيتم حذف الملف «${file}» من الخادم نهائياً.';
+    return 'سيتم حذف الملف «$file» من الخادم نهائياً.';
   }
 
   @override
   String get restoreFullDatabase => 'استعادة قاعدة البيانات كاملة';
 
   @override
-  String get restoreFullWarning => 'الاستعادة الكاملة تستبدل كل البيانات الحالية. سيتم أخذ نسخة أمان تلقائياً قبل التنفيذ.';
+  String get restoreFullWarning =>
+      'الاستعادة الكاملة تستبدل كل البيانات الحالية. سيتم أخذ نسخة أمان تلقائياً قبل التنفيذ.';
 
   @override
   String get uploadDumpFile => 'رفع ملف نسخة (.dump)';
@@ -1142,7 +1145,8 @@ class AppLocalizationsAr extends AppLocalizations {
   String get confirmFullRestoreTitle => 'استعادة كاملة — تأكيد صريح';
 
   @override
-  String get confirmFullRestoreBody => 'اكتب كلمة RESTORE للتأكيد. سيتم استبدال كل البيانات الحالية بالبيانات الموجودة في النسخة.';
+  String get confirmFullRestoreBody =>
+      'اكتب كلمة RESTORE للتأكيد. سيتم استبدال كل البيانات الحالية بالبيانات الموجودة في النسخة.';
 
   @override
   String get restoreFullDone => 'تمت الاستعادة بنجاح';
@@ -1151,10 +1155,12 @@ class AppLocalizationsAr extends AppLocalizations {
   String get restoreFullFailed => 'فشلت الاستعادة';
 
   @override
-  String get fullBackupUnavailable => 'أدوات PostgreSQL (pg_dump / pg_restore) غير موجودة على هذا الخادم';
+  String get fullBackupUnavailable =>
+      'أدوات PostgreSQL (pg_dump / pg_restore) غير موجودة على هذا الخادم';
 
   @override
-  String get maintenanceActive => 'النظام في وضع الصيانة — تتم استعادة قاعدة البيانات الآن';
+  String get maintenanceActive =>
+      'النظام في وضع الصيانة — تتم استعادة قاعدة البيانات الآن';
 
   @override
   String get safetyBackup => 'نسخة أمان';

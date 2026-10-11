@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/platform/browser_actions.dart';
-import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../providers/company_providers.dart';
@@ -87,21 +86,22 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
 
   Future<void> _save() async {
     setState(() => _saving = true);
-    final error = await ref.read(companyProfileProvider.notifier).update({
-      'code': _code.text.trim(),
-      'nameAr': _nameAr.text.trim(),
-      'nameEn': _nameEn.text.trim(),
-      'taxId': _taxId.text.trim(),
-      'phone': _phone.text.trim(),
-      'email': _email.text.trim(),
-      'address': _address.text.trim(),
-    });
+    final error = await ref.read(companyProfileProvider.notifier).updateProfile(
+      {
+        'code': _code.text.trim(),
+        'nameAr': _nameAr.text.trim(),
+        'nameEn': _nameEn.text.trim(),
+        'taxId': _taxId.text.trim(),
+        'phone': _phone.text.trim(),
+        'email': _email.text.trim(),
+        'address': _address.text.trim(),
+      },
+    );
     if (!mounted) return;
     setState(() => _saving = false);
     final l10n = context.l10n;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error ?? l10n.profileSaved)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(error ?? l10n.profileSaved)));
   }
 
   @override
@@ -200,7 +200,9 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
 
   Future<void> _upload() async {
     final l10n = context.l10n;
-    final picked = await pickFile(extensions: ['.png', '.jpg', '.jpeg', '.webp']);
+    final picked = await pickFile(
+      extensions: ['.png', '.jpg', '.jpeg', '.webp'],
+    );
     if (picked == null || !mounted) return;
     setState(() => _busy = true);
     String message;
@@ -213,9 +215,8 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
     if (!mounted) return;
     setState(() => _busy = false);
     ref.read(companyProfileProvider.notifier).refresh();
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _remove() async {
@@ -231,9 +232,8 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
     if (!mounted) return;
     setState(() => _busy = false);
     ref.read(companyProfileProvider.notifier).refresh();
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -243,7 +243,9 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
       children: [
         CircleAvatar(
           radius: 28,
-          backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+          backgroundColor: Theme.of(context)
+              .colorScheme
+              .surfaceContainerHighest,
           child: widget.hasLogo
               ? const Icon(Icons.business, size: 28)
               : const Icon(Icons.business_outlined, size: 28),
@@ -257,10 +259,7 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
                 widget.hasLogo ? l10n.companyLogo : l10n.noLogo,
                 style: Theme.of(context).textTheme.titleSmall,
               ),
-              Text(
-                l10n.logoHint,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+              Text(l10n.logoHint, style: Theme.of(context).textTheme.bodySmall),
             ],
           ),
         ),
@@ -335,11 +334,8 @@ class _BranchesCard extends ConsumerWidget {
                           IconButton(
                             tooltip: l10n.deleteBranch,
                             icon: const Icon(Icons.delete_outline, size: 20),
-                            onPressed: () => _deleteBranch(
-                              context,
-                              ref,
-                              branch,
-                            ),
+                            onPressed: () =>
+                                _deleteBranch(context, ref, branch),
                           ),
                         ],
                       ),
@@ -402,7 +398,7 @@ Future<void> _editBranch(
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: kind,
+                  initialValue: kind,
                   decoration: InputDecoration(labelText: l10n.branchKind),
                   items: [
                     DropdownMenuItem(
@@ -420,7 +416,7 @@ Future<void> _editBranch(
                 if (kind == 'BRANCH') ...[
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String?>(
-                    value: parent,
+                    initialValue: parent,
                     decoration: InputDecoration(labelText: l10n.parentUnit),
                     items: [
                       DropdownMenuItem<String?>(
@@ -467,16 +463,12 @@ Future<void> _editBranch(
 
   final controller = ref.read(branchesProvider.notifier);
   final error = existing == null
-      ? await controller.create({
-          'code': codeController.text.trim(),
-          ...body,
-        })
-      : await controller.update('${existing['id']}', body);
+      ? await controller.create({'code': codeController.text.trim(), ...body})
+      : await controller.updateBranch('${existing['id']}', body);
 
   if (context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error ?? l10n.branchSaved)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(error ?? l10n.branchSaved)));
   }
 }
 
@@ -510,8 +502,6 @@ Future<void> _deleteBranch(
       .read(branchesProvider.notifier)
       .remove('${branch['id']}');
   if (context.mounted && error != null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error)),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
   }
 }

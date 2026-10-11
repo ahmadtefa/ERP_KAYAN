@@ -114,8 +114,8 @@ class _AccountTree extends ConsumerWidget {
         return _AccountTile(
           key: ValueKey(node.account.id),
           node: node,
-          hasChildren: nodes.length > index + 1 &&
-              nodes[index + 1].depth > node.depth,
+          hasChildren:
+              nodes.length > index + 1 && nodes[index + 1].depth > node.depth,
         );
       },
     );
@@ -123,7 +123,11 @@ class _AccountTree extends ConsumerWidget {
 }
 
 class _AccountTile extends ConsumerStatefulWidget {
-  const _AccountTile({super.key, required this.node, required this.hasChildren});
+  const _AccountTile({
+    super.key,
+    required this.node,
+    required this.hasChildren,
+  });
 
   final AccountNode node;
   final bool hasChildren;
@@ -196,7 +200,6 @@ Future<void> _editAccount(
   WidgetRef ref,
   Account? existing,
 ) async {
-  final l10n = context.l10n;
   final all = ref.read(chartOfAccountsProvider).value ?? const <Account>[];
 
   // Parents: every account of the same type, except the account being edited
@@ -242,6 +245,12 @@ Future<void> _editAccount(
         .read(chartOfAccountsRepositoryProvider)
         .suggestCode(parentId: selectedParent);
     codeController.text = suggestion.valueOrNull ?? '';
+    if (!context.mounted) {
+      codeController.dispose();
+      nameArController.dispose();
+      nameEnController.dispose();
+      return;
+    }
   }
 
   final result = await showDialog<bool>(
@@ -250,7 +259,9 @@ Future<void> _editAccount(
       builder: (dialogContext, setDialogState) {
         final dialogL10n = dialogContext.l10n;
         return AlertDialog(
-          title: Text(existing == null ? dialogL10n.newAccount : dialogL10n.editAccount),
+          title: Text(
+            existing == null ? dialogL10n.newAccount : dialogL10n.editAccount,
+          ),
           content: SizedBox(
             width: 520,
             child: SingleChildScrollView(
@@ -280,8 +291,10 @@ Future<void> _editAccount(
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<AccountType>(
-                    value: selectedType,
-                    decoration: InputDecoration(labelText: dialogL10n.accountType),
+                    initialValue: selectedType,
+                    decoration: InputDecoration(
+                      labelText: dialogL10n.accountType,
+                    ),
                     items: [
                       for (final type in AccountType.values)
                         DropdownMenuItem(
@@ -291,13 +304,13 @@ Future<void> _editAccount(
                     ],
                     onChanged: existing == null
                         ? (value) => setDialogState(
-                              () => selectedType = value ?? selectedType,
-                            )
+                            () => selectedType = value ?? selectedType,
+                          )
                         : null,
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String?>(
-                    value: selectedParent,
+                    initialValue: selectedParent,
                     decoration: InputDecoration(
                       labelText: dialogL10n.parentAccount,
                       helperText: dialogL10n.parentAccountHelper,
@@ -310,7 +323,9 @@ Future<void> _editAccount(
                       for (final parent in parents)
                         DropdownMenuItem<String?>(
                           value: parent.id,
-                          child: Text(accountLabel(parent, dialogL10n.localeName)),
+                          child: Text(
+                            accountLabel(parent, dialogL10n.localeName),
+                          ),
                         ),
                     ],
                     onChanged: (value) async {
@@ -367,7 +382,9 @@ Future<void> _editAccount(
   if (result != true) return;
 
   final input = AccountInput(
-    code: codeController.text.trim().isEmpty ? null : codeController.text.trim(),
+    code: codeController.text.trim().isEmpty
+        ? null
+        : codeController.text.trim(),
     nameAr: nameArController.text.trim(),
     nameEn: nameEnController.text.trim(),
     type: selectedType,
@@ -379,12 +396,10 @@ Future<void> _editAccount(
   final controller = ref.read(chartOfAccountsProvider.notifier);
   final error = existing == null
       ? await controller.create(input)
-      : await controller.update(existing.id, input);
+      : await controller.updateAccount(existing.id, input);
 
   if (context.mounted && error != null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error)),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
   }
 }
 
@@ -400,9 +415,7 @@ Future<void> _deleteAccount(
     context: context,
     builder: (dialogContext) => AlertDialog(
       title: Text(l10n.deleteAccount),
-      content: Text(
-        l10n.deleteAccountConfirm(accountName(account, lang)),
-      ),
+      content: Text(l10n.deleteAccountConfirm(accountName(account, lang))),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -424,9 +437,7 @@ Future<void> _deleteAccount(
       .read(chartOfAccountsProvider.notifier)
       .remove(account.id);
   if (context.mounted && error != null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error)),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
   }
 }
 

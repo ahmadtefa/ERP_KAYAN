@@ -1,6 +1,3 @@
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
 /// Remembers the signer-in's username (and, where the platform can keep a
 /// secret safely, the password) so the next sign-in can be quick.
 ///
@@ -18,6 +15,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 ///  * Everything can be cleared in one tap from the sign-in screen.
 library;
 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 /// The three things the store needs from a keystore, as plain callbacks —
 /// so the rules can be tested without one.
 typedef SecretRead = Future<String?> Function(String key);
@@ -30,10 +30,14 @@ class CredentialsStore {
     SecretWrite? writeSecret,
     SecretDelete? deleteSecret,
     bool? canStorePassword,
-  }) : _readSecret = readSecret,
-       _writeSecret = writeSecret,
-       _deleteSecret = deleteSecret,
-       _canStorePassword = canStorePassword;
+  }) : this._(readSecret, writeSecret, deleteSecret, canStorePassword);
+
+  CredentialsStore._(
+    this._readSecret,
+    this._writeSecret,
+    this._deleteSecret,
+    this._canStorePassword,
+  );
 
   /// The platform keystore, used only through these three callbacks.
   final SecretRead? _readSecret;
