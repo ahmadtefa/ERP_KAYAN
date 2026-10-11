@@ -1,0 +1,74 @@
+name: Flutter Web & Backend CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'arena/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  backend-test-and-build:
+    name: Backend Tests & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          npm install
+
+      - name: Generate Prisma Client
+        run: |
+          cd backend
+          touch /tmp/schema-engine-stub /tmp/libquery_engine_stub.so.node
+          chmod +x /tmp/schema-engine-stub
+          PRISMA_SCHEMA_ENGINE_BINARY=/tmp/schema-engine-stub PRISMA_QUERY_ENGINE_LIBRARY=/tmp/libquery_engine_stub.so.node npx prisma generate
+
+      - name: Run Backend Tests
+        run: |
+          cd backend
+          npm test
+
+      - name: Build Backend Production
+        run: |
+          cd backend
+          npm run build
+
+  flutter-web-build:
+    name: Flutter Web Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.24.5"
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Analyze Flutter code
+        run: flutter analyze
+
+      - name: Run Flutter tests
+        run: flutter test
+
+      - name: Build Flutter Web (Release)
+        run: flutter build web --release
