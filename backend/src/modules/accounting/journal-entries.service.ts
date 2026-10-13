@@ -292,6 +292,20 @@ export class JournalEntriesService {
     }
 
     const reversal = await this.prisma.$transaction(async (tx) => {
+      // Claim the posted row inside the transaction. A pre-transaction check
+      // alone lets two concurrent requests create duplicate reversals.
+      const claim = await tx.journalEntry.updateMany({
+        where: {
+          id: original.id,
+          companyId,
+          status: JournalStatus.POSTED,
+        },
+        data: { status: JournalStatus.REVERSED },
+      });
+      if (claim.count !== 1) {
+        throw new BadRequestException('This entry has already been reversed');
+      }
+
       const entryNumber = await this.numbers.next(
         tx,
         companyId,
@@ -326,11 +340,6 @@ export class JournalEntriesService {
             })),
           },
         },
-      });
-
-      await tx.journalEntry.update({
-        where: { id: original.id },
-        data: { status: JournalStatus.REVERSED },
       });
 
       return created;
