@@ -174,14 +174,21 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
+    const user = stored.user;
+    if (user.deletedAt !== null || !user.isActive) {
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw new UnauthorizedException('Account is inactive');
+    }
+
     // Rotation: the presented token is revoked and a new one issued, so a
     // stolen token is usable at most once.
     await this.prisma.refreshToken.update({
       where: { id: stored.id },
       data: { revokedAt: new Date() },
     });
-
-    const user = stored.user;
     const permissions = [
       ...new Set(
         user.userRoles.flatMap((ur) =>
