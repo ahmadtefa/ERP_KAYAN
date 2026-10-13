@@ -102,4 +102,40 @@ describe('permission escalation protections', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('revokes all active refresh sessions when a user is disabled through update', async () => {
+    const userRecord = {
+      id: 'target-user',
+      companyId,
+      username: 'target',
+      email: null,
+      fullNameEn: 'Target User',
+      fullNameAr: 'مستخدم',
+      isActive: true,
+      isSuperAdmin: false,
+      lastLoginAt: null,
+      lockedUntil: null,
+      createdAt: new Date(),
+      userRoles: [],
+      branches: [],
+      deletedAt: null,
+    };
+    const revokeSessions = jest.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      user: { update: jest.fn().mockResolvedValue(userRecord) },
+      refreshToken: { updateMany: revokeSessions },
+    };
+    const prisma = {
+      user: { findFirst: jest.fn().mockResolvedValue(userRecord) },
+      $transaction: jest.fn(async (callback: (tx: any) => Promise<unknown>) => callback(tx)),
+    };
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
+
+    await service.update(companyId, actorId, 'target-user', { isActive: false }, [], false);
+
+    expect(revokeSessions).toHaveBeenCalledWith({
+      where: { userId: 'target-user', revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
 });
