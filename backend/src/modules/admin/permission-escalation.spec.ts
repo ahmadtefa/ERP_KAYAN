@@ -1,5 +1,4 @@
 import { ForbiddenException } from '@nestjs/common';
-import { NotFoundException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { RolesService } from './roles.service';
 
