@@ -56,7 +56,6 @@ describe('invoice posting concurrency guards', () => {
       status: 'POSTED',
       lines: [],
     };
-    const findFirst = jest.fn().mockResolvedValueOnce(invoice).mockResolvedValueOnce(original);
     const updateMany = jest.fn().mockResolvedValue({ count: 0 });
     const stockCreate = jest.fn();
     const prisma = {
