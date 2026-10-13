@@ -203,6 +203,16 @@ export class PurchaseInvoicesService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // Claim the draft inside the posting transaction. Concurrent requests
+      // must not receive stock twice or create duplicate journal entries.
+      const claimed = await tx.purchaseInvoice.updateMany({
+        where: { id: invoice.id, companyId, status: InvoiceStatus.DRAFT, deletedAt: null },
+        data: { status: InvoiceStatus.POSTED },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException('This invoice is no longer a draft');
+      }
+
       const accounts = await this.accounts.resolve(tx, companyId, [
         'accountsPayable',
         'inventory',
@@ -339,12 +349,38 @@ export class PurchaseInvoicesService {
     }
 
     const reversal = await this.prisma.$transaction(async (tx) => {
+      // Claim both records atomically before stock is removed. A concurrent
+      // reversal cannot duplicate stock movements or journal entries.
+      const claimedInvoice = await tx.purchaseInvoice.updateMany({
+        where: { id: invoice.id, companyId, status: InvoiceStatus.POSTED, deletedAt: null },
+        data: { status: InvoiceStatus.REVERSED },
+      });
+      if (claimedInvoice.count !== 1) {
+        throw new BadRequestException('This invoice has already been reversed');
+      }
+      const claimedJournal = await tx.journalEntry.updateMany({
+        where: { id: original.id, companyId, status: JournalStatus.POSTED },
+        data: { status: JournalStatus.REVERSED },
+      });
+      if (claimedJournal.count !== 1) {
+        throw new BadRequestException('The original journal entry has already been reversed');
+      }
+
       for (const line of invoice.lines) {
         if (!line.itemId) {
           throw new BadRequestException(
             'A purchase invoice line has no item, so its stock cannot be returned',
           );
         }
+        // Serialize this stock check with sales posting and other stock
+        // changes so a stale quantity cannot permit a negative balance.
+        await tx.$queryRaw(
+          Prisma.sql`SELECT "companyId" FROM "stock_balances"
+            WHERE "companyId" = ${companyId}::uuid
+              AND "branchId" = ${invoice.branchId}::uuid
+              AND "itemId" = ${line.itemId}::uuid
+            FOR UPDATE`,
+        );
         const balance = await tx.stockBalance.findUnique({
           where: {
             companyId_branchId_itemId: {
@@ -423,16 +459,6 @@ export class PurchaseInvoicesService {
           },
         },
         select: { id: true, entryNumber: true },
-      });
-
-      await tx.journalEntry.update({
-        where: { id: original.id },
-        data: { status: JournalStatus.REVERSED },
-      });
-
-      await tx.purchaseInvoice.update({
-        where: { id: invoice.id },
-        data: { status: InvoiceStatus.REVERSED },
       });
 
       return mirror;
