@@ -7,6 +7,7 @@ import { AuditModule } from './common/audit/audit.module';
 import { MaintenanceModule } from './common/maintenance/maintenance.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
+import { validateEnvironment } from './common/config/validate-environment';
 import { AccountingModule } from './modules/accounting/accounting.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -23,7 +24,7 @@ import { SalesModule } from './modules/sales/sales.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnvironment }),
     // Global so the authentication guard can inject JwtService anywhere.
     JwtModule.register({ global: true }),
     PrismaModule,
