@@ -32,9 +32,12 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         detail = body;
       } else if (typeof body === 'object' && body !== null) {
         const b = body as Record<string, unknown>;
-        detail = Array.isArray(b.message)
-          ? (b.message as string[]).join('; ')
-          : String(b.message ?? detail);
+        detail =
+          typeof b.detail === 'string'
+            ? b.detail
+            : Array.isArray(b.message)
+              ? (b.message as string[]).join('; ')
+              : String(b.message ?? detail);
         if (b.errors) extra = { errors: b.errors };
       }
     } else {
