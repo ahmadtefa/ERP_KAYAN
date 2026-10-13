@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import * as childProcess from 'child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -226,6 +226,24 @@ describe('FullBackupService guards', () => {
   });
 
   describe('restore', () => {
+    it('rejects concurrent full restores before starting a second restore', async () => {
+      const service = serviceWithEnv(temporaryDir('kayan-backups-'));
+      let finish!: (value: { restored: boolean }) => void;
+      jest.spyOn(service as any, 'restoreOnce').mockImplementation(
+        () => new Promise((resolvePromise) => { finish = resolvePromise; }),
+      );
+
+      const first = service.restore({ confirm: true }, 'u1');
+      await Promise.resolve();
+
+      await expect(
+        service.restore({ confirm: true }, 'u2'),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      finish({ restored: true });
+      await expect(first).resolves.toEqual({ restored: true });
+    });
+
     it('refuses to run without an explicit confirmation', async () => {
       const service = serviceWithEnv(temporaryDir('kayan-backups-'));
       await expect(
