@@ -78,6 +78,6 @@ export class UsersController {
 
   @Post(':id/deactivate')
   deactivate(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.users.deactivate(user.companyId, user.userId, id);
+    return this.users.deactivate(user.companyId, user.userId, id, user.isSuperAdmin);
   }
 }
