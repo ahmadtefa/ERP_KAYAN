@@ -354,7 +354,7 @@ export class FullBackupService {
    * before production data is touched — every step of it is deliberate.
    */
   async restore(options: RestoreOptions, userId: string) {
-    if (this.restoreInProgress || this.maintenance.isActive) {
+    if (this.restoreInProgress) {
       throw new ServiceUnavailableException(
         'A full database restore is already in progress. Wait for it to finish before starting another operation.',
       );
