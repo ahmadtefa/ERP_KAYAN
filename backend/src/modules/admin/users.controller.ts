@@ -67,7 +67,13 @@ export class UsersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ChangePasswordDto,
   ) {
-    return this.users.changePassword(user.companyId, user.userId, id, dto.password);
+    return this.users.changePassword(
+      user.companyId,
+      user.userId,
+      id,
+      dto.password,
+      user.isSuperAdmin,
+    );
   }
 
   @Post(':id/deactivate')
