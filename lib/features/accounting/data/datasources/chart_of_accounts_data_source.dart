@@ -3,11 +3,52 @@ import '../../domain/entities/account.dart';
 import '../../domain/entities/account_type.dart';
 import '../models/account_dto.dart';
 
-abstract class ChartOfAccountsDataSource {
-  Future<List<Account>> fetchAccounts();
+/// What the server needs to create or change an account. Every rule is
+/// enforced there as well — the client sends intent, the server decides.
+class AccountInput {
+  const AccountInput({
+    this.code,
+    required this.nameEn,
+    required this.nameAr,
+    required this.type,
+    this.parentId,
+    this.isPostable,
+    this.isActive,
+    this.description,
+  });
+
+  final String? code;
+  final String nameEn;
+  final String nameAr;
+  final AccountType type;
+  final String? parentId;
+  final bool? isPostable;
+  final bool? isActive;
+  final String? description;
+
+  Map<String, dynamic> toJson() => {
+    if (code != null && code!.isNotEmpty) 'code': code,
+    'nameEn': nameEn,
+    // An empty Arabic name is left out, so an update does not overwrite the
+    // stored name with blank text (the server requires at least one character).
+    if (nameAr.isNotEmpty) 'nameAr': nameAr,
+    'type': type.name.toUpperCase(),
+    if (parentId != null) 'parentId': parentId,
+    if (isPostable != null) 'isPostable': isPostable,
+    if (isActive != null) 'isActive': isActive,
+    if (description != null) 'description': description,
+  };
 }
 
-/// Reads the chart of accounts from the ERP API.
+abstract class ChartOfAccountsDataSource {
+  Future<List<Account>> fetchAccounts();
+  Future<String> suggestCode({String? parentId});
+  Future<Account> createAccount(AccountInput input);
+  Future<Account> updateAccount(String id, AccountInput input);
+  Future<void> deleteAccount(String id);
+}
+
+/// Reads and maintains the chart of accounts through the ERP API.
 class RemoteChartOfAccountsDataSource implements ChartOfAccountsDataSource {
   const RemoteChartOfAccountsDataSource(this._client);
 
@@ -17,20 +58,49 @@ class RemoteChartOfAccountsDataSource implements ChartOfAccountsDataSource {
 
   @override
   Future<List<Account>> fetchAccounts() async {
-    final json = await _client.get(_path);
+    final json = await _client.get(_path, query: {'includeInactive': 'true'});
     final items = json['items'] ?? json['data'];
     if (items is! List) {
       throw const FormatException('Unexpected chart-of-accounts payload');
     }
     return AccountDto.listFrom(items);
   }
+
+  @override
+  Future<String> suggestCode({String? parentId}) async {
+    final json = await _client.get(
+      '$_path/suggest-code',
+      query: {'parentId': ?parentId},
+    );
+    final code = json['code']?.toString();
+    if (code == null) {
+      throw const FormatException('No suggested code came back');
+    }
+    return code;
+  }
+
+  @override
+  Future<Account> createAccount(AccountInput input) async {
+    final json = await _client.post(_path, body: input.toJson());
+    return AccountDto(json).toDomain();
+  }
+
+  @override
+  Future<Account> updateAccount(String id, AccountInput input) async {
+    final json = await _client.patch('$_path/$id', body: input.toJson());
+    return AccountDto(json).toDomain();
+  }
+
+  @override
+  Future<void> deleteAccount(String id) async {
+    await _client.delete('$_path/$id');
+  }
 }
 
 /// Development-only sample chart of accounts.
 ///
-/// REQUIRES BUSINESS DECISION: the production backend has not been selected
-/// yet. This source exists so the interface can be exercised without one.
-/// It keeps nothing in memory between calls and is never a system of record.
+/// It keeps nothing in memory between calls and is never a system of record,
+/// so it cannot pretend to accept changes either.
 class SeedChartOfAccountsDataSource implements ChartOfAccountsDataSource {
   const SeedChartOfAccountsDataSource();
 
@@ -67,6 +137,21 @@ class SeedChartOfAccountsDataSource implements ChartOfAccountsDataSource {
     _leaf('5103', 'Rent', AccountType.expense, parent: '5'),
     _leaf('5104', 'Utilities', AccountType.expense, parent: '5'),
   ];
+
+  @override
+  Future<String> suggestCode({String? parentId}) async => '';
+
+  @override
+  Future<Account> createAccount(AccountInput input) =>
+      throw UnsupportedError('The sample chart cannot be edited');
+
+  @override
+  Future<Account> updateAccount(String id, AccountInput input) =>
+      throw UnsupportedError('The sample chart cannot be edited');
+
+  @override
+  Future<void> deleteAccount(String id) =>
+      throw UnsupportedError('The sample chart cannot be edited');
 }
 
 Account _group(String code, String name, AccountType type, {String? parent}) =>
@@ -75,6 +160,8 @@ Account _group(String code, String name, AccountType type, {String? parent}) =>
       companyId: 'seed-company',
       code: code,
       name: name,
+      nameEn: name,
+      nameAr: name,
       type: type,
       parentId: parent == null ? null : 'seed-$parent',
       isPostable: false,
@@ -90,6 +177,8 @@ Account _leaf(
   companyId: 'seed-company',
   code: code,
   name: name,
+  nameEn: name,
+  nameAr: name,
   type: type,
   parentId: 'seed-$parent',
   isPostable: true,

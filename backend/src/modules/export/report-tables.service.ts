@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 
+import { accountLabel } from '../../common/localization/account-name';
 import { ReportsService } from '../reports/reports.service';
 import { PeriodQueryDto } from '../reports/dto/report-query.dto';
 import { ReportTable, TableMeta, TableTotal } from './report-table';
@@ -249,9 +250,11 @@ export class ReportTablesService {
       query.accountId,
       query,
     );
-    const account = data.account as Record<string, string>;
-    // The account name is shown in the reader's language, not both.
-    const accountName = lang === 'ar' ? account.nameAr : account.nameEn;
+    const account = data.account as {
+      code: string;
+      nameEn: string | null;
+      nameAr: string | null;
+    };
     // A movement may carry no description of its own, in which case the entry's
     // description is used; if both are empty the cell stays empty rather than
     // printing "null".
@@ -264,13 +267,13 @@ export class ReportTablesService {
 
     return this.table({
       slug: 'account-ledger',
-      titleEn: `Account ledger — ${account.code} ${account.nameEn}`,
-      titleAr: `كشف حساب — ${account.code} ${account.nameAr}`,
+      titleEn: `Account ledger — ${accountLabel(account, 'en')}`,
+      titleAr: `كشف حساب — ${accountLabel(account, 'ar')}`,
       meta: [
         {
           labelEn: 'Account',
           labelAr: 'الحساب',
-          value: `${account.code} — ${accountName}`,
+          value: accountLabel(account, lang),
         },
         ...this.periodMeta(data.from, data.to),
         { labelEn: 'Opening balance', labelAr: 'رصيد افتتاحي', value: data.opening },

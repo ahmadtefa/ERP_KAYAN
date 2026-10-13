@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/json/amount_format.dart';
 import '../../../core/json/json_utils.dart';
 import '../../../shared/extensions/l10n_extension.dart';
+import '../../../shared/utils/account_name.dart';
 import '../../../shared/widgets/records_table.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../../accounting/presentation/providers/chart_of_accounts_providers.dart';
@@ -51,9 +52,10 @@ class _LedgerAccountController extends Notifier<String?> {
   void choose(String? accountId) => state = accountId;
 }
 
-final ledgerAccountProvider = NotifierProvider<_LedgerAccountController, String?>(
-  _LedgerAccountController.new,
-);
+final ledgerAccountProvider =
+    NotifierProvider<_LedgerAccountController, String?>(
+      _LedgerAccountController.new,
+    );
 
 /// Reads an endpoint that answers with a `{ rows: [...], totals: {...} }`
 /// object.
@@ -128,7 +130,9 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
                 report: _reportSlug,
                 from: period.from,
                 to: period.to,
-                accountId: _tabs.index == 4 ? ref.watch(ledgerAccountProvider) : null,
+                accountId: _tabs.index == 4
+                    ? ref.watch(ledgerAccountProvider)
+                    : null,
               ),
             ),
           ),
@@ -136,8 +140,14 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
             child: switch (_tabs.index) {
               0 => const _TrialBalanceTab(),
               1 => const _ProfitAndLossTab(),
-              2 => const _BalancesTab(path: '/reports/customer-balances', isCustomer: true),
-              3 => const _BalancesTab(path: '/reports/supplier-balances', isCustomer: false),
+              2 => const _BalancesTab(
+                path: '/reports/customer-balances',
+                isCustomer: true,
+              ),
+              3 => const _BalancesTab(
+                path: '/reports/supplier-balances',
+                isCustomer: false,
+              ),
               _ => const _AccountLedgerTab(),
             },
           ),
@@ -148,12 +158,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
 
   /// The report the open tab shows, in the name the API uses.
   String get _reportSlug => switch (_tabs.index) {
-        0 => 'trial-balance',
-        1 => 'profit-and-loss',
-        2 => 'customer-balances',
-        3 => 'supplier-balances',
-        _ => 'account-ledger',
-      };
+    0 => 'trial-balance',
+    1 => 'profit-and-loss',
+    2 => 'customer-balances',
+    3 => 'supplier-balances',
+    _ => 'account-ledger',
+  };
 
   Future<void> _pickPeriod() async {
     final period = ref.read(periodProvider);
@@ -206,12 +216,38 @@ class _TrialBalanceTab extends ConsumerWidget {
               child: RecordsTable(
                 rows: rows,
                 columns: [
-                  ColumnSpec(l10n.accountCode, value: (r) => text(r, 'code'), emphasise: true),
-                  ColumnSpec(l10n.accountName, value: (r) => ('    ' * ((r['depth'] as num?)?.toInt() ?? 0)) + text(r, 'nameEn')),
-                  ColumnSpec(l10n.opening, numeric: true, value: (r) => formatAmount(asString(r['opening']))),
-                  ColumnSpec(l10n.debit, numeric: true, value: (r) => formatAmount(asString(r['debit']))),
-                  ColumnSpec(l10n.credit, numeric: true, value: (r) => formatAmount(asString(r['credit']))),
-                  ColumnSpec(l10n.closing, numeric: true, value: (r) => formatAmount(asString(r['closing'])), emphasise: true),
+                  ColumnSpec(
+                    l10n.accountCode,
+                    value: (r) => text(r, 'code'),
+                    emphasise: true,
+                  ),
+                  ColumnSpec(
+                    l10n.accountName,
+                    value: (r) =>
+                        ('    ' * ((r['depth'] as num?)?.toInt() ?? 0)) +
+                        text(r, 'nameEn'),
+                  ),
+                  ColumnSpec(
+                    l10n.opening,
+                    numeric: true,
+                    value: (r) => formatAmount(asString(r['opening'])),
+                  ),
+                  ColumnSpec(
+                    l10n.debit,
+                    numeric: true,
+                    value: (r) => formatAmount(asString(r['debit'])),
+                  ),
+                  ColumnSpec(
+                    l10n.credit,
+                    numeric: true,
+                    value: (r) => formatAmount(asString(r['credit'])),
+                  ),
+                  ColumnSpec(
+                    l10n.closing,
+                    numeric: true,
+                    value: (r) => formatAmount(asString(r['closing'])),
+                    emphasise: true,
+                  ),
                 ],
               ),
             ),
@@ -246,11 +282,17 @@ class _TotalsBar extends StatelessWidget {
             const SizedBox(width: 8),
             Text(balanced ? l10n.balanced : l10n.outOfBalance),
             const Spacer(),
-            Text('${l10n.debit}: ${formatAmount(asString(totals['closingDebit']))}'),
+            Text(
+              '${l10n.debit}: ${formatAmount(asString(totals['closingDebit']))}',
+            ),
             const SizedBox(width: 20),
-            Text('${l10n.credit}: ${formatAmount(asString(totals['closingCredit']))}'),
+            Text(
+              '${l10n.credit}: ${formatAmount(asString(totals['closingCredit']))}',
+            ),
             const SizedBox(width: 20),
-            Text('${l10n.difference}: ${formatAmount(asString(totals['difference']))}'),
+            Text(
+              '${l10n.difference}: ${formatAmount(asString(totals['difference']))}',
+            ),
           ],
         ),
       ),
@@ -287,13 +329,24 @@ class _ProfitAndLossTab extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _SheetSection(title: l10n.revenue, rows: revenue, total: asString(totals['revenue'])),
+                _SheetSection(
+                  title: l10n.revenue,
+                  rows: revenue,
+                  total: asString(totals['revenue']),
+                ),
                 const SizedBox(height: 16),
-                _SheetSection(title: l10n.expenses, rows: expenses, total: asString(totals['expenses'])),
+                _SheetSection(
+                  title: l10n.expenses,
+                  rows: expenses,
+                  total: asString(totals['expenses']),
+                ),
                 const Divider(height: 32),
                 Row(
                   children: [
-                    Text(l10n.netProfit, style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      l10n.netProfit,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     const Spacer(),
                     Text(
                       formatAmount(asString(totals['netProfit'])),
@@ -336,7 +389,17 @@ class _SheetSection extends StatelessWidget {
                 child: Row(
                   children: [
                     SizedBox(width: 70, child: Text(text(row, 'code'))),
-                    Expanded(child: Text(('    ' * ((row['depth'] as num?)?.toInt() ?? 0)) + text(row, 'nameEn'), style: TextStyle(fontWeight: (row['isPostable'] == false) ? FontWeight.w600 : null))),
+                    Expanded(
+                      child: Text(
+                        ('    ' * ((row['depth'] as num?)?.toInt() ?? 0)) +
+                            text(row, 'nameEn'),
+                        style: TextStyle(
+                          fontWeight: (row['isPostable'] == false)
+                              ? FontWeight.w600
+                              : null,
+                        ),
+                      ),
+                    ),
                     Text(formatAmount(asString(row['amount']))),
                   ],
                 ),
@@ -346,10 +409,7 @@ class _SheetSection extends StatelessWidget {
               Row(
                 children: [
                   const Spacer(),
-                  Text(
-                    formatAmount(total),
-                    style: theme.textTheme.titleSmall,
-                  ),
+                  Text(formatAmount(total), style: theme.textTheme.titleSmall),
                 ],
               ),
             ],
@@ -383,13 +443,22 @@ class _BalancesTab extends ConsumerWidget {
         return RecordsTable(
           rows: rows,
           columns: [
-            ColumnSpec(l10n.accountCode, value: (r) => text(r, 'code'), emphasise: true),
+            ColumnSpec(
+              l10n.accountCode,
+              value: (r) => text(r, 'code'),
+              emphasise: true,
+            ),
             ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
             ColumnSpec(
               isCustomer ? l10n.customer : l10n.supplier,
               value: (r) => text(r, 'nameAr'),
             ),
-            ColumnSpec(l10n.balance, numeric: true, value: (r) => formatAmount(asString(r['balance'])), emphasise: true),
+            ColumnSpec(
+              l10n.balance,
+              numeric: true,
+              value: (r) => formatAmount(asString(r['balance'])),
+              emphasise: true,
+            ),
           ],
         );
       },
@@ -419,9 +488,7 @@ class _AccountLedgerTabState extends ConsumerState<_AccountLedgerTab> {
     if (accountId == null) {
       return Padding(
         padding: const EdgeInsets.all(24),
-        child: Center(
-          child: Text(l10n.accountRequired),
-        ),
+        child: Center(child: Text(l10n.accountRequired)),
       );
     }
 
@@ -446,7 +513,12 @@ class _AccountLedgerTabState extends ConsumerState<_AccountLedgerTab> {
               for (final account in postable)
                 DropdownMenuItem(
                   value: account.id,
-                  child: Text('${account.code} — ${account.name}'),
+                  child: Text(
+                    accountLabel(
+                      account,
+                      Localizations.localeOf(context).languageCode,
+                    ),
+                  ),
                 ),
             ],
             onChanged: (value) =>
@@ -465,9 +537,13 @@ class _AccountLedgerTabState extends ConsumerState<_AccountLedgerTab> {
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Row(
                       children: [
-                        Text('${l10n.opening}: ${formatAmount(asString(data['opening']))}'),
+                        Text(
+                          '${l10n.opening}: ${formatAmount(asString(data['opening']))}',
+                        ),
                         const Spacer(),
-                        Text('${l10n.closing}: ${formatAmount(asString(data['closing']))}'),
+                        Text(
+                          '${l10n.closing}: ${formatAmount(asString(data['closing']))}',
+                        ),
                       ],
                     ),
                   ),
@@ -477,12 +553,37 @@ class _AccountLedgerTabState extends ConsumerState<_AccountLedgerTab> {
                         : RecordsTable(
                             rows: movements,
                             columns: [
-                              ColumnSpec(l10n.invoiceNumber, value: (r) => text(r, 'entryNumber'), emphasise: true),
-                              ColumnSpec(l10n.invoiceDate, value: (r) => text(r, 'entryDate')),
-                              ColumnSpec(l10n.description, value: (r) => text(r, 'description')),
-                              ColumnSpec(l10n.debit, numeric: true, value: (r) => formatAmount(asString(r['debit']))),
-                              ColumnSpec(l10n.credit, numeric: true, value: (r) => formatAmount(asString(r['credit']))),
-                              ColumnSpec(l10n.runningBalance, numeric: true, value: (r) => formatAmount(asString(r['runningBalance']))),
+                              ColumnSpec(
+                                l10n.invoiceNumber,
+                                value: (r) => text(r, 'entryNumber'),
+                                emphasise: true,
+                              ),
+                              ColumnSpec(
+                                l10n.invoiceDate,
+                                value: (r) => text(r, 'entryDate'),
+                              ),
+                              ColumnSpec(
+                                l10n.description,
+                                value: (r) => text(r, 'description'),
+                              ),
+                              ColumnSpec(
+                                l10n.debit,
+                                numeric: true,
+                                value: (r) =>
+                                    formatAmount(asString(r['debit'])),
+                              ),
+                              ColumnSpec(
+                                l10n.credit,
+                                numeric: true,
+                                value: (r) =>
+                                    formatAmount(asString(r['credit'])),
+                              ),
+                              ColumnSpec(
+                                l10n.runningBalance,
+                                numeric: true,
+                                value: (r) =>
+                                    formatAmount(asString(r['runningBalance'])),
+                              ),
                             ],
                           ),
                   ),

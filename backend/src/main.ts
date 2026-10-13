@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 
 import { ValidationPipe, Logger } from '@nestjs/common';
@@ -6,6 +7,7 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { ProblemDetailsFilter } from './common/filters/problem-details.filter';
+import { isCorsOriginAllowed } from './common/security/cors-origin';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -27,29 +29,23 @@ async function bootstrap() {
 
   app.useGlobalFilters(new ProblemDetailsFilter());
 
-  // A browser only lets a page call this API when the reply carries an
-  // Access-Control-Allow-Origin header naming that page's origin. The Flutter
-  // web dev server chooses the port it serves the client on, so a hard list of
-  // ports breaks sign-in with a misleading "cannot reach the server" error.
-  // Outside production every localhost origin is therefore accepted; in
-  // production only the origins listed in CORS_ORIGINS are.
+  // Development is permissive so Flutter's changing local dev-server port
+  // does not break sign-in. Production accepts only explicit CORS_ORIGINS
+  // entries; LAN and .local origins are not implicitly trusted.
   const configuredOrigins = (process.env.CORS_ORIGINS ?? '')
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean);
   const isProduction = process.env.NODE_ENV === 'production';
-  const isLocalOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
   app.enableCors({
     origin: (
       origin: string | undefined,
       callback: (err: Error | null, allow?: boolean) => void,
     ) => {
-      // Requests without an Origin header come from clients that CORS does not
-      // apply to: native apps, curl, the mobile build.
-      if (!origin) return callback(null, true);
-      if (configuredOrigins.includes(origin)) return callback(null, true);
-      if (!isProduction && isLocalOrigin.test(origin)) return callback(null, true);
+      if (isCorsOriginAllowed(origin, configuredOrigins, isProduction)) {
+        return callback(null, true);
+      }
       logger.warn(`Blocked CORS request from origin: ${origin}`);
       return callback(null, false);
     },
@@ -60,12 +56,20 @@ async function bootstrap() {
   // same address. One origin means no CORS, no second port to remember, and the
   // browser address is the address of the program itself.
   //
-  //   cd backend && npm run build        (or: flutter build web first)
-  //
-  // The folder is optional: without it the API behaves exactly as before and
-  // the client is served by its own dev server.
-  const webRoot = join(process.cwd(), '..', 'build', 'web');
-  if (existsSync(join(webRoot, 'index.html'))) {
+  // Checked in order: explicit env var -> relative to backend -> repo root -> dist bundle.
+  const candidateWebRoots = [
+    process.env.KAYAN_WEB_ROOT,
+    join(process.cwd(), '..', 'build', 'web'),
+    join(process.cwd(), 'build', 'web'),
+    join(__dirname, '..', '..', 'build', 'web'),
+    join(__dirname, '..', 'web'),
+  ].filter(Boolean) as string[];
+
+  const webRoot = candidateWebRoots.find((dir) =>
+    existsSync(join(dir, 'index.html')),
+  );
+
+  if (webRoot) {
     app.useStaticAssets(webRoot);
     // Any other path that is not part of the API belongs to the client's own
     // routing, so hand back the page and let the client route it.
@@ -95,6 +99,17 @@ async function bootstrap() {
   const host = process.env.HOST ?? '0.0.0.0';
   await app.listen(port, host);
   logger.log(`API listening on http://${host}:${port}/api/v1`);
+  logger.log(`Local web access: http://localhost:${port}`);
+  if (host === '0.0.0.0') {
+    const interfaces = networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+      for (const net of interfaces[name] ?? []) {
+        if (net.family === 'IPv4' && !net.internal) {
+          logger.log(`Network LAN access (${name}): http://${net.address}:${port}`);
+        }
+      }
+    }
+  }
   // A line the desktop shell can wait for, in addition to the health route.
   logger.log(`KAYAN-API-READY port=${port} host=${host}`);
 }

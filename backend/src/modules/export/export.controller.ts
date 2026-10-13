@@ -8,13 +8,12 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { readFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
 
 import { AllowQueryToken } from '../../common/decorators/allow-query-token.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { CompanyService } from '../company/company.service';
 import { ExportQueryDto } from './dto/export-query.dto';
 import { ListTablesService } from './list-tables.service';
 import {
@@ -42,7 +41,23 @@ export class ExportController {
     private readonly prisma: PrismaService,
     private readonly pdf: PdfService,
     private readonly lists: ListTablesService,
+    private readonly company: CompanyService,
   ) {}
+
+  /// The company's name and logo for the file header. The logo is optional and
+  /// only fetched when the company has one.
+  private async companyHeader(companyId: string): Promise<{
+    name: string;
+    logo: { data: Buffer; mime: string } | null;
+  }> {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { nameEn: true, nameAr: true },
+    });
+    const name = company?.nameAr ?? company?.nameEn ?? 'KAYAN';
+    const logo = await this.company.getLogo(companyId);
+    return { name, logo };
+  }
 
   /// What this installation can produce, so the screen only offers buttons
   /// that work.
@@ -82,13 +97,13 @@ export class ExportController {
 
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.lists.build(list, user.companyId, query);
-    const companyName = await this.companyName(user.companyId);
+    const header = await this.companyHeader(user.companyId);
     const stamp = this.stamp();
 
     if (query.format === 'csv') {
       this.send(
         response,
-        toCsv(table, lang, companyName),
+        toCsv(table, lang, header.name),
         'text/csv; charset=utf-8',
         `${list}-${stamp}.csv`,
       );
@@ -102,7 +117,7 @@ export class ExportController {
 
     this.send(
       response,
-      await toXlsx(table, lang, companyName),
+      await toXlsx(table, lang, header.name, { logo: header.logo }),
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       `${list}-${stamp}.xlsx`,
     );
@@ -122,9 +137,12 @@ export class ExportController {
 
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.lists.build(list, user.companyId, query);
-    const companyName = await this.companyName(user.companyId);
+    const header = await this.companyHeader(user.companyId);
 
-    const html = toPrintHtml(table, lang, companyName, { autoPrint: false, logoUrl: await this.companyLogoUrl(user.companyId) });
+    const html = toPrintHtml(table, lang, header.name, {
+      autoPrint: false,
+      logo: header.logo,
+    });
     this.send(response, await this.pdf.render(html), 'application/pdf', `${list}-${this.stamp()}.pdf`);
   }
 
@@ -142,11 +160,11 @@ export class ExportController {
 
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.lists.build(list, user.companyId, query);
-    const companyName = await this.companyName(user.companyId);
+    const header = await this.companyHeader(user.companyId);
 
-    const html = toPrintHtml(table, lang, companyName, {
+    const html = toPrintHtml(table, lang, header.name, {
       autoPrint: query.auto === '1' || query.auto === 'true',
-      logoUrl: await this.companyLogoUrl(user.companyId),
+      logo: header.logo,
     });
     response.type('text/html; charset=utf-8');
     response.setHeader('Cache-Control', 'no-store');
@@ -177,10 +195,10 @@ export class ExportController {
     const wanted = (query as { format?: string }).format ?? 'xlsx';
 
     const table = await this.tables.build(slug, user.companyId, query, lang);
-    const companyName = await this.companyName(user.companyId);
+    const header = await this.companyHeader(user.companyId);
 
     if (wanted === 'csv') {
-      const body = toCsv(table, lang, companyName);
+      const body = toCsv(table, lang, header.name);
       this.send(response, body, 'text/csv; charset=utf-8', `${slug}-${this.stamp()}.csv`);
       return;
     }
@@ -191,7 +209,7 @@ export class ExportController {
       );
     }
 
-    const body = await toXlsx(table, lang, companyName);
+    const body = await toXlsx(table, lang, header.name, { logo: header.logo });
     this.send(
       response,
       body,
@@ -216,9 +234,12 @@ export class ExportController {
     const slug = this.known(report);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.tables.build(slug, user.companyId, query, lang);
-    const companyName = await this.companyName(user.companyId);
+    const header = await this.companyHeader(user.companyId);
 
-    const html = toPrintHtml(table, lang, companyName, { autoPrint: false, logoUrl: await this.companyLogoUrl(user.companyId) });
+    const html = toPrintHtml(table, lang, header.name, {
+      autoPrint: false,
+      logo: header.logo,
+    });
     const body = await this.pdf.render(html);
 
     this.send(response, body, 'application/pdf', `${slug}-${this.stamp()}.pdf`);
@@ -240,11 +261,11 @@ export class ExportController {
     const slug = this.known(report);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.tables.build(slug, user.companyId, query, lang);
-    const companyName = await this.companyName(user.companyId);
+    const header = await this.companyHeader(user.companyId);
 
-    const html = toPrintHtml(table, lang, companyName, {
+    const html = toPrintHtml(table, lang, header.name, {
       autoPrint: query.auto === '1' || query.auto === 'true',
-      logoUrl: await this.companyLogoUrl(user.companyId),
+      logo: header.logo,
     });
 
     response.type('text/html; charset=utf-8');
@@ -260,31 +281,6 @@ export class ExportController {
       );
     }
     return report as ExportableReport;
-  }
-
-  private async companyName(companyId: string): Promise<string> {
-    const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: { nameEn: true, nameAr: true },
-    });
-    return company?.nameAr ?? company?.nameEn ?? 'KAYAN';
-  }
-
-  private async companyLogoUrl(companyId: string): Promise<string | undefined> {
-    const company = await this.prisma.company.findUnique({ where: { id: companyId }, select: { logoPath: true } });
-    if (!company?.logoPath) return undefined;
-    const mime = ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp' } as const)[
-      basename(company.logoPath).slice(basename(company.logoPath).lastIndexOf('.')).toLowerCase() as '.png' | '.jpg' | '.webp'
-    ];
-    if (!mime) return undefined;
-    try {
-      const directory = process.env.KAYAN_UPLOAD_DIR ?? join(process.cwd(), 'uploads');
-      const bytes = await readFile(join(directory, basename(company.logoPath)));
-      if (bytes.length > 2 * 1024 * 1024) return undefined;
-      return `data:${mime};base64,${bytes.toString('base64')}`;
-    } catch {
-      return undefined;
-    }
   }
 
   private send(

@@ -1,4 +1,4 @@
-import { ExecutionContext, HttpStatus } from '@nestjs/common';
+import { ExecutionContext, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { RateLimitGuard } from './rate-limit.guard';
@@ -60,10 +60,15 @@ describe('RateLimitGuard', () => {
     guard.canActivate(context('/inventory/items').context);
     guard.canActivate(context('/inventory/items').context);
     const { context: ctx, status } = context('/inventory/items');
-    expect(guard.canActivate(ctx)).toBe(false);
-    expect(status.code).toBe(HttpStatus.TOO_MANY_REQUESTS);
+    expect(() => guard.canActivate(ctx)).toThrow(
+      expect.objectContaining({
+        status: HttpStatus.TOO_MANY_REQUESTS,
+      }),
+    );
+    // The guard sets Retry-After, then Nest's exception filter sends one reply.
+    expect(status.code).toBeUndefined();
+    expect(status.body).toBeUndefined();
     expect(status.headers['Retry-After']).toBeDefined();
-    expect((status.body as { title: string }).title).toBe('TOO_MANY_REQUESTS');
   });
 
   it('gives sign-in its own, much tighter allowance', () => {
@@ -73,7 +78,7 @@ describe('RateLimitGuard', () => {
     for (let i = 0; i < 2; i += 1) {
       expect(guard.canActivate(context('/api/v1/auth/login').context)).toBe(true);
     }
-    expect(guard.canActivate(context('/api/v1/auth/login').context)).toBe(false);
+    expect(() => guard.canActivate(context('/api/v1/auth/login').context)).toThrow(HttpException);
     // A different route on the same address is untouched.
     expect(guard.canActivate(context('/api/v1/inventory/items').context)).toBe(true);
   });
@@ -82,7 +87,7 @@ describe('RateLimitGuard', () => {
     const guard = guardFor({ RATE_LIMIT_MAX: 1 });
     expect(guard.canActivate(context('/x', '10.0.0.1').context)).toBe(true);
     expect(guard.canActivate(context('/x', '10.0.0.2').context)).toBe(true);
-    expect(guard.canActivate(context('/x', '10.0.0.1').context)).toBe(false);
+    expect(() => guard.canActivate(context('/x', '10.0.0.1').context)).toThrow(HttpException);
   });
 
   it('ignores a forwarded address unless a proxy is trusted', () => {
@@ -91,7 +96,7 @@ describe('RateLimitGuard', () => {
     // Without TRUST_PROXY the header is not believed: a caller cannot reset
     // its own counter by inventing one.
     expect(guard.canActivate(context('/x', '10.0.0.1', headers).context)).toBe(true);
-    expect(guard.canActivate(context('/x', '10.0.0.1', headers).context)).toBe(false);
+    expect(() => guard.canActivate(context('/x', '10.0.0.1', headers).context)).toThrow(HttpException);
   });
 
   it('believes the forwarded address when a proxy is trusted', () => {
@@ -102,7 +107,7 @@ describe('RateLimitGuard', () => {
     const other = { 'x-forwarded-for': '203.0.113.10, 10.0.0.1' };
     expect(guard.canActivate(context('/x', '10.0.0.1', other).context)).toBe(true);
     // The first client is now over.
-    expect(guard.canActivate(context('/x', '10.0.0.1', headers).context)).toBe(false);
+    expect(() => guard.canActivate(context('/x', '10.0.0.1', headers).context)).toThrow(HttpException);
   });
 
   it('can be switched off by configuration', () => {

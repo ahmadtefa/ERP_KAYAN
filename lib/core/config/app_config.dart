@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 /// Environment-based configuration.
 ///
 /// Values are injected at build time via `--dart-define` so that no
@@ -76,9 +78,27 @@ class AppConfig {
       _ => AppEnvironment.development,
     };
 
+    String resolvedBaseUrl = _baseUrl;
+    if (kIsWeb) {
+      // When running on the web, if no explicit API_BASE_URL was passed at compile time,
+      // derive the API URL dynamically from the browser's origin so that access via LAN IP
+      // or domain hits the right server.
+      const hasCustomUrl = bool.hasEnvironment('API_BASE_URL');
+      if (!hasCustomUrl) {
+        if (Uri.base.scheme.startsWith('http')) {
+          final origin = Uri.base.origin;
+          if (Uri.base.host != 'localhost' && Uri.base.host != '127.0.0.1') {
+            resolvedBaseUrl = '$origin/api/v1';
+          } else if (Uri.base.port == 3000) {
+            resolvedBaseUrl = '$origin/api/v1';
+          }
+        }
+      }
+    }
+
     return AppConfig(
       environment: env,
-      apiBaseUrl: _baseUrl,
+      apiBaseUrl: resolvedBaseUrl,
       connectTimeout: const Duration(seconds: 20),
       receiveTimeout: const Duration(seconds: 30),
       enableLogging: _logging && env != AppEnvironment.production,

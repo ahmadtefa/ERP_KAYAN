@@ -73,17 +73,21 @@ export class AuthService {
 
     const passwordOk = await argon2.verify(user.passwordHash, password);
     if (!passwordOk) {
-      const attempts = user.failedLoginCount + 1;
-      await this.prisma.user.update({
+      // Increment in the database so simultaneous failed logins cannot
+      // overwrite one another's counters with the same stale value.
+      const updated = await this.prisma.user.update({
         where: { id: user.id },
-        data: {
-          failedLoginCount: attempts,
-          lockedUntil:
-            attempts >= MAX_FAILED_ATTEMPTS
-              ? new Date(Date.now() + LOCK_MINUTES * 60_000)
-              : null,
-        },
+        data: { failedLoginCount: { increment: 1 } },
+        select: { failedLoginCount: true },
       });
+      if (updated.failedLoginCount >= MAX_FAILED_ATTEMPTS) {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            lockedUntil: new Date(Date.now() + LOCK_MINUTES * 60_000),
+          },
+        });
+      }
       await this.audit.record({
         companyId: user.companyId,
         userId: user.id,
@@ -174,14 +178,26 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
+    const user = stored.user;
+    if (user.deletedAt !== null || !user.isActive) {
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw new UnauthorizedException('Account is inactive');
+    }
+
     // Rotation: the presented token is revoked and a new one issued, so a
     // stolen token is usable at most once.
-    await this.prisma.refreshToken.update({
-      where: { id: stored.id },
+    // Compare-and-set the token's revocation state. Two simultaneous refresh
+    // requests may both have read the same live token; only one may rotate it.
+    const rotation = await this.prisma.refreshToken.updateMany({
+      where: { id: stored.id, revokedAt: null },
       data: { revokedAt: new Date() },
     });
-
-    const user = stored.user;
+    if (rotation.count !== 1) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
     const permissions = [
       ...new Set(
         user.userRoles.flatMap((ur) =>

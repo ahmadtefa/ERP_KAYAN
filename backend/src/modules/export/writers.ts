@@ -1,5 +1,8 @@
 import { Workbook, Worksheet } from 'exceljs';
 
+/// exceljs accepts a Buffer for an image; the type says ArrayBufferView.
+type ExcelBuffer = Parameters<Workbook['addImage']>[0]['buffer'];
+
 import { ReportTable } from './report-table';
 
 export type Lang = 'ar' | 'en';
@@ -17,6 +20,7 @@ export async function toXlsx(
   table: ReportTable,
   lang: Lang,
   companyName: string,
+  options: { logo?: { data: Buffer; mime: string } | null } = {},
 ): Promise<Buffer> {
   const workbook = new Workbook();
   workbook.creator = 'KAYAN ERP';
@@ -44,6 +48,23 @@ export async function toXlsx(
   sheet.mergeCells(titleRow.number, 1, titleRow.number, columnCount);
 
   sheet.addRow([companyName]).font = { bold: true, size: 11 };
+
+  // The company's logo, when it has one, sits by the title. It is decoration
+  // with a job: the printed sheet has to say whose numbers these are.
+  if (options.logo?.data?.length) {
+    const extension = options.logo.mime === 'image/png' ? 'png' : 'jpeg';
+    const imageId = workbook.addImage({
+      buffer: options.logo.data as unknown as ExcelBuffer,
+      extension,
+    });
+    // Top-left three rows, out of the way of the merged title cell.
+    sheet.addImage(imageId, {
+      tl: { col: 0, row: 0 },
+      ext: { width: 90, height: 42 },
+    });
+    // The title moves clear of the logo.
+    sheet.getRow(1).height = 30;
+  }
 
   // Metadata: period, as-at date, account.
   for (const meta of table.meta) {
@@ -268,11 +289,19 @@ export function toPrintHtml(
   table: ReportTable,
   lang: Lang,
   companyName: string,
-  options: { autoPrint?: boolean; generatedAt?: Date; logoUrl?: string } = {},
+  options: {
+    autoPrint?: boolean;
+    generatedAt?: Date;
+    logo?: { data: Buffer; mime: string } | null;
+  } = {},
 ): string {
   const rtl = lang === 'ar';
   const title = rtl ? table.titleAr : table.titleEn;
   const generatedAt = options.generatedAt ?? new Date();
+  const logo =
+    options.logo?.data?.length
+      ? `data:${options.logo.mime};base64,${options.logo.data.toString('base64')}`
+      : null;
 
   const head = table.columns
     .map(
@@ -339,8 +368,10 @@ export function toPrintHtml(
   }
   h1 { font-size: 20px; margin: 0 0 4px; }
   .company { font-size: 14px; color: #444; margin-bottom: 12px; }
-  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-  .brand img { width: 56px; height: 56px; object-fit: contain; }
+  .head { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+  .head .logo { height: 52px; width: auto; }
+  .head h1 { margin: 0 0 2px; }
+  .head .company { margin: 0; }
   .meta { display: flex; flex-wrap: wrap; gap: 6px 24px; font-size: 13px; color: #333;
           border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; padding: 8px 0; margin-bottom: 14px; }
   .meta .label { color: #666; }
@@ -363,9 +394,14 @@ export function toPrintHtml(
     body { background: #fff; padding: 0; }
     .sheet { box-shadow: none; padding: 0; max-width: none; }
     .toolbar { display: none; }
+    /* The header row repeats at the top of every page, the identity line at
+       the bottom of every page, so no printed page is ever orphaned. */
     thead { display: table-header-group; }
+    tfoot { display: table-row-group; }
     tr { page-break-inside: avoid; }
+    .print-foot { display: block; position: fixed; bottom: 0; inset-inline: 0; }
   }
+  .print-foot { display: none; font-size: 10px; color: #888; margin-top: 10px; }
 </style>
 </head>
 <body>
@@ -376,9 +412,13 @@ export function toPrintHtml(
     <button onclick="window.close()">${rtl ? 'إغلاق' : 'Close'}</button>
   </div>
   <div class="sheet">
-    <div class="brand">${options.logoUrl ? `<img src="${escapeHtml(options.logoUrl)}" alt="">` : ''}<div><h1>${escapeHtml(title)}</h1>
-    <div class="company">${escapeHtml(companyName)}</div>
-    </div></div>
+    <div class="head">
+      ${logo ? `<img class="logo" src="${logo}" alt="">` : ''}
+      <div>
+        <h1>${escapeHtml(title)}</h1>
+        <div class="company">${escapeHtml(companyName)}</div>
+      </div>
+    </div>
     <div class="meta">${meta}</div>
     <table>
       <thead><tr>${head}</tr></thead>
@@ -389,6 +429,7 @@ export function toPrintHtml(
     </table>
     ${notes ? `<div class="notes"><ul>${notes}</ul></div>` : ''}
     <div class="stamp">${rtl ? 'أُنشئ في' : 'Generated'} ${stamp}</div>
+    <div class="print-foot">${escapeHtml(companyName)} — ${escapeHtml(title)} — ${stamp}</div>
   </div>
   ${options.autoPrint ? '<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),300));</script>' : ''}
 </body>

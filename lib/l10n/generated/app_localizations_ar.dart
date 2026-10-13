@@ -998,4 +998,213 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get deactivateAccount => 'تعطيل الحساب';
+
+  @override
+  String get newAccount => 'حساب جديد';
+
+  @override
+  String get editAccount => 'تعديل الحساب';
+
+  @override
+  String get deleteAccount => 'حذف الحساب';
+
+  @override
+  String deleteAccountConfirm(Object account) {
+    return 'سيتم حذف الحساب «$account» نهائياً إن لم يكن له حركات أو حسابات فرعية. متابعة؟';
+  }
+
+  @override
+  String get allTypes => 'كل الأنواع';
+
+  @override
+  String get inactiveLabel => 'معطل';
+
+  @override
+  String get accountCodeHelper =>
+      'اتركه فارغاً ليتم اقتراح الكود تلقائياً وفق ترقيم الدليل';
+
+  @override
+  String get nameArabic => 'الاسم بالعربية';
+
+  @override
+  String get nameEnglish => 'الاسم بالإنجليزية';
+
+  @override
+  String get parentAccountHelper => 'الحسابات الفرعية تأخذ نفس نوع الأب';
+
+  @override
+  String get noParent => 'بدون أب (حساب رئيسي)';
+
+  @override
+  String get postableHelper =>
+      'الحساب التجميعي لا يقبل قيوداً؛ الحساب النهائي هو ما تُرحَّل إليه';
+
+  @override
+  String get activeAccount => 'نشط';
+
+  @override
+  String get rememberMe => 'تذكرني';
+
+  @override
+  String get rememberMeHint => 'يُحفظ اسم المستخدم فقط على الويب';
+
+  @override
+  String get clearSavedCredentials => 'مسح البيانات المحفوظة';
+
+  @override
+  String get savedCredentialsCleared => 'تم مسح البيانات المحفوظة';
+
+  @override
+  String get companySettings => 'بيانات الشركة';
+
+  @override
+  String get companyProfile => 'بيانات الشركة';
+
+  @override
+  String get companyCode => 'كود الشركة';
+
+  @override
+  String get taxId => 'الرقم الضريبي';
+
+  @override
+  String get companyLogo => 'شعار الشركة';
+
+  @override
+  String get uploadLogo => 'رفع الشعار';
+
+  @override
+  String get removeLogo => 'إزالة الشعار';
+
+  @override
+  String get logoHint => 'اختياري — PNG أو JPEG أو WebP حتى 2 ميجابايت';
+
+  @override
+  String get logoUpdated => 'تم تحديث الشعار';
+
+  @override
+  String get logoRemoved => 'تمت إزالة الشعار';
+
+  @override
+  String get noLogo => 'لا يوجد شعار';
+
+  @override
+  String get branches => 'الفروع والوحدات';
+
+  @override
+  String get newBranch => 'وحدة جديدة';
+
+  @override
+  String get editBranch => 'تعديل الوحدة';
+
+  @override
+  String get branchCode => 'كود الوحدة';
+
+  @override
+  String get branchKind => 'نوع الوحدة';
+
+  @override
+  String get headquarters => 'مقر رئيسي';
+
+  @override
+  String get branchUnit => 'فرع';
+
+  @override
+  String get parentUnit => 'الوحدة الأب';
+
+  @override
+  String get parentUnitRequired => 'اختر المقر الرئيسي أو الوحدة الأب';
+
+  @override
+  String get deleteBranch => 'حذف الوحدة';
+
+  @override
+  String deleteBranchConfirm(Object unit) {
+    return 'سيتم حذف الوحدة «$unit». الوحدات ذات الحركات لا يمكن حذفها.';
+  }
+
+  @override
+  String get branchSaved => 'تم حفظ الوحدة';
+
+  @override
+  String get profileSaved => 'تم حفظ بيانات الشركة';
+
+  @override
+  String get unitType => 'النوع';
+
+  @override
+  String get fullBackupTitle => 'النسخ الاحتياطي الكامل لقاعدة البيانات';
+
+  @override
+  String get fullBackupDescription =>
+      'نسخة كاملة لكل قاعدة البيانات (جميع الشركات والمستخدمين) بصيغة PostgreSQL. تعمل على الخادم نفسه الذي تستضيف القاعدة.';
+
+  @override
+  String get createFullBackup => 'إنشاء نسخة كاملة';
+
+  @override
+  String get backupInProgress => 'جارٍ إنشاء النسخة…';
+
+  @override
+  String get backupFiles => 'النسخ المحفوظة على الخادم';
+
+  @override
+  String get deleteBackup => 'حذف النسخة';
+
+  @override
+  String deleteBackupConfirm(Object file) {
+    return 'سيتم حذف الملف «$file» من الخادم نهائياً.';
+  }
+
+  @override
+  String get restoreFullDatabase => 'استعادة قاعدة البيانات كاملة';
+
+  @override
+  String get restoreFullWarning =>
+      'الاستعادة الكاملة تستبدل كل البيانات الحالية. سيتم أخذ نسخة أمان تلقائياً قبل التنفيذ.';
+
+  @override
+  String get uploadDumpFile => 'رفع ملف نسخة (.dump)';
+
+  @override
+  String get orChooseServerBackup => 'أو اختر نسخة من الخادم';
+
+  @override
+  String get confirmFullRestoreTitle => 'استعادة كاملة — تأكيد صريح';
+
+  @override
+  String get confirmFullRestoreBody =>
+      'اكتب كلمة RESTORE للتأكيد. سيتم استبدال كل البيانات الحالية بالبيانات الموجودة في النسخة.';
+
+  @override
+  String get restoreFullDone => 'تمت الاستعادة بنجاح';
+
+  @override
+  String get restoreFullFailed => 'فشلت الاستعادة';
+
+  @override
+  String get fullBackupUnavailable =>
+      'أدوات PostgreSQL (pg_dump / pg_restore) غير موجودة على هذا الخادم';
+
+  @override
+  String get maintenanceActive =>
+      'النظام في وضع الصيانة — تتم استعادة قاعدة البيانات الآن';
+
+  @override
+  String get safetyBackup => 'نسخة أمان';
+
+  @override
+  String get fullBackupKind => 'نسخة كاملة';
+
+  @override
+  String get createdAtLabel => 'تاريخ الإنشاء';
+
+  @override
+  String get sizeLabel => 'الحجم';
+
+  @override
+  String get refreshStatus => 'تحديث الحالة';
+
+  @override
+  String get companySettingsHint => 'الاسم والشعار والتواصل والفروع';
+
 }

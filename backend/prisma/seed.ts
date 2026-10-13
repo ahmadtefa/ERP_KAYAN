@@ -12,15 +12,21 @@
  *
  * Never run this against a production database.
  */
+import { PrismaPg } from '@prisma/adapter-pg';
 import { AccountType, PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 
-const prisma = new PrismaClient();
+// The client runs on the plain `pg` driver (engine-less Prisma runtime), so
+// the seed opens its connection the same way the server does.
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+});
 
 const PERMISSIONS: Array<[string, string, string, string]> = [
   ['accounting.accounts.read', 'View chart of accounts', 'عرض دليل الحسابات', 'accounting'],
-  ['accounting.accounts.create', 'Create expense accounts', 'إنشاء حسابات مصروفات', 'accounting'],
-  ['accounting.accounts.update', 'Update expense accounts', 'تعديل حسابات المصروفات', 'accounting'],
+  ['accounting.accounts.create', 'Add accounts to the chart', 'إضافة حسابات للدليل', 'accounting'],
+  ['accounting.accounts.update', 'Edit accounts', 'تعديل الحسابات', 'accounting'],
+  ['accounting.accounts.delete', 'Delete accounts', 'حذف الحسابات', 'accounting'],
   ['accounting.journal.read', 'View journal entries', 'عرض القيود اليومية', 'accounting'],
   ['accounting.journal.create', 'Create journal entries', 'إنشاء قيود يومية', 'accounting'],
   ['accounting.journal.post', 'Post and reverse entries', 'ترحيل وعكس القيود', 'accounting'],
@@ -28,6 +34,9 @@ const PERMISSIONS: Array<[string, string, string, string]> = [
   ['admin.roles.manage', 'Manage roles', 'إدارة الأدوار', 'admin'],
   ['admin.audit.read', 'View audit trail', 'عرض سجل التدقيق', 'admin'],
   ['admin.backup', 'Take and restore backups', 'أخذ واسترجاع نسخة احتياطية', 'admin'],
+  ['admin.company.manage', 'Manage company profile and branches', 'إدارة بيانات الشركة والفروع', 'admin'],
+  // Kept for the desktop profile endpoints (/companies/profile); granted with
+  // admin.company.manage so an existing administrator keeps both.
   ['company.profile.manage', 'Manage company profile', 'إدارة بيانات الشركة', 'admin'],
 
   ['parties.customers.read', 'View customers', 'عرض العملاء', 'parties'],
@@ -101,31 +110,88 @@ const ACCOUNTS: Array<{
   { code: '5106', nameEn: 'Professional fees', nameAr: 'أتعاب مهنية', type: AccountType.EXPENSE, parent: '5', postable: true },
 ];
 
+/// What kind of image these bytes really are — the same rule the logo
+/// endpoint enforces: the content decides, never the file name.
+function sniffImage(bytes: Buffer): string | null {
+  if (bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return 'image/png';
+  }
+  if (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (
+    bytes.length > 12 &&
+    bytes.toString('latin1', 0, 4) === 'RIFF' &&
+    bytes.toString('latin1', 8, 12) === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+  return null;
+}
+
 async function main(): Promise<void> {
   console.log('Seeding development data…');
 
+  // The company comes from the environment when a setup dialog collected it
+  // (the desktop installer passes these through); otherwise the familiar
+  // development defaults.
+  const companyCode = process.env.KAYAN_COMPANY_CODE?.trim() || 'KAYAN';
   const company = await prisma.company.upsert({
-    where: { code: 'KAYAN' },
+    where: { code: companyCode },
     update: {},
     create: {
-      code: 'KAYAN',
-      nameEn: 'Kayan Company',
-      nameAr: 'شركة كيان',
+      code: companyCode,
+      nameEn: process.env.KAYAN_COMPANY_NAME_EN?.trim() || 'Kayan Company',
+      nameAr: process.env.KAYAN_COMPANY_NAME_AR?.trim() || 'شركة كيان',
+      phone: process.env.KAYAN_COMPANY_PHONE?.trim() || null,
+      email: process.env.KAYAN_COMPANY_EMAIL?.trim() || null,
+      addressEn: process.env.KAYAN_COMPANY_ADDRESS?.trim() || null,
       currency: 'EGP',
       timezone: 'Africa/Cairo',
     },
   });
 
+  // The initial unit (headquarters or branch) the setup dialog named
+  // (desktop first-run passes these through the environment), or the familiar defaults.
+  const facilityKind = process.env.KAYAN_FACILITY_KIND?.trim() === 'BRANCH' ? 'BRANCH' : 'HEADQUARTERS';
+  const defaultUnitCode = facilityKind === 'BRANCH' ? 'BR01' : 'MAIN';
+  const defaultUnitNameEn = facilityKind === 'BRANCH' ? 'Branch' : 'Head Office';
+  const defaultUnitNameAr = facilityKind === 'BRANCH' ? 'الفرع' : 'المركز الرئيسي';
+
+  const hqCode = (process.env.KAYAN_UNIT_CODE || process.env.KAYAN_HQ_CODE)?.trim() || defaultUnitCode;
   const branch = await prisma.branch.upsert({
-    where: { companyId_code: { companyId: company.id, code: 'MAIN' } },
-    update: {},
+    where: { companyId_code: { companyId: company.id, code: hqCode } },
+    update: { kind: facilityKind },
     create: {
       companyId: company.id,
-      code: 'MAIN',
-      nameEn: 'Head Office',
-      nameAr: 'المركز الرئيسي',
+      code: hqCode,
+      nameEn: (process.env.KAYAN_UNIT_NAME_EN || process.env.KAYAN_HQ_NAME_EN)?.trim() || defaultUnitNameEn,
+      nameAr: (process.env.KAYAN_UNIT_NAME_AR || process.env.KAYAN_HQ_NAME_AR)?.trim() || defaultUnitNameAr,
+      kind: facilityKind,
     },
   });
+
+  // The company logo, when the setup dialog picked one: it travels as a file
+  // the shell wrote to a temporary folder (an image does not belong in an
+  // environment variable), and the same content rules apply as on the logo
+  // endpoint: real PNG/JPEG/WebP bytes, magic numbers checked, 2 MB maximum.
+  const logoFile = process.env.KAYAN_COMPANY_LOGO_FILE?.trim();
+  if (logoFile) {
+    const { existsSync, readFileSync, statSync } = await import('node:fs');
+    if (existsSync(logoFile) && statSync(logoFile).size <= 2 * 1024 * 1024) {
+      const bytes = readFileSync(logoFile);
+      const mime = sniffImage(bytes);
+      if (mime) {
+        await prisma.company.update({
+          where: { id: company.id },
+          data: { logoData: bytes, logoMime: mime },
+        });
+        console.log('Company logo stored from the setup dialog.');
+      } else {
+        console.warn('The chosen logo is not a real PNG/JPEG/WebP image; skipped.');
+      }
+    }
+  }
 
   for (const [code, nameEn, nameAr, module] of PERMISSIONS) {
     await prisma.permission.upsert({

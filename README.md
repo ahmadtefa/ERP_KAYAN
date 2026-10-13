@@ -16,18 +16,30 @@ iOS, Windows, macOS, Linux and Web** from a single codebase.
 | `docs/DESKTOP_WINDOWS.md` | The Windows copy that starts its own server (Arabic) |
 | `scripts/build-desktop-windows.ps1` | Builds that copy: one folder that runs by itself |
 | `scripts/installer-windows.iss` | Turns that folder into one Setup .exe a customer runs (Inno Setup) |
+| `scripts/verify-package.ps1` | Asks whether a built copy is really shippable - no database needed |
+| `.github/workflows/windows-package.yml` | Builds it on a real Windows machine and publishes the result |
+| `tools/backend_shape_check.dart` | Proves the desktop and the web backend layer still agree |
+
+The built Windows copy is published as a release, so nobody has to build it to
+run it: <https://github.com/mohamedkamel78/ERP_KAYAN/releases>. The installer is
+`KAYAN-ERP-Setup-1.0.0.exe`; the machine it lands on needs PostgreSQL and
+nothing else. `docs/DESKTOP_WINDOWS.md` says what happens when it is opened.
 
 ## Status
 
-**Backend:** working. Authentication (Argon2id + JWT access/refresh), company
-and branch scoping, chart of accounts, and journal entries with server-side
-double-entry validation, server-generated document numbers, posting, reversal
-and an append-only audit trail. PostgreSQL schema with 14 tables and versioned
-migrations.
+**Backend:** the NestJS API includes authentication (Argon2id + JWT access/refresh),
+company-scoped business data, accounting and journal posting/reversal, user and
+role administration, company profile, inventory, parties, sales, purchases,
+reports, import/export, backups, health checks, and an append-only audit trail.
+The Prisma schema and versioned migrations are the source of truth for the
+database structure. Feature presence does not mean every workflow is production-
+ready; verify each module's acceptance criteria before deploying it to a business.
 
-**Client:** authentication, dashboard, chart of accounts (now reading from the
-real API) and settings are wired. All other ERP modules are deliberately not
-implemented — see "Pending business decisions".
+**Client:** Flutter feature areas include authentication, dashboard, accounting,
+administration, inventory, invoicing, and settings, with Arabic/English
+localization and cross-platform targets. Some screens and API workflows are
+more complete than others. Treat CI results as code-quality checks, not as proof
+that every business process has been accepted end to end.
 
 ## Architecture
 
@@ -35,11 +47,13 @@ Feature-first layout with an inner clean-architecture split per feature:
 
 ```
 backend/                       # NestJS API server
-├── prisma/schema.prisma       # 14 tables; money is numeric(19,4)
+├── prisma/schema.prisma       # database schema; money uses numeric(19,4)
 ├── prisma/seed.ts             # development seed (company, admin, chart)
 └── src/
-    ├── common/                # guards, filters, decorators, audit, prisma
-    └── modules/               # auth, accounting, health
+    ├── common/                # auth/rate-limit/permission guards, filters, audit, Prisma
+    └── modules/               # auth, admin, company, accounting, inventory,
+                               # parties, sales, purchases, reports, import/export,
+                               # backup, health, maintenance
 
 lib/
 ├── main.dart                  # bootstrap: logging, ProviderScope
@@ -59,8 +73,11 @@ lib/
 │   └── utils/                 # pure validators
 ├── features/
 │   ├── accounting/            # domain / data / presentation
+│   ├── admin/
 │   ├── auth/                  # domain / data / presentation
 │   ├── dashboard/
+│   ├── inventory/
+│   ├── invoicing/
 │   └── settings/
 ├── shared/                    # widgets, extensions, error localization
 └── l10n/                      # en + ar ARB sources and generated code
@@ -154,7 +171,11 @@ flutter test
 flutter build web --release
 ```
 
-All four currently pass: `flutter analyze` reports no issues and 60 tests pass.
+Run these gates in the same environment and commit you intend to release. GitHub
+Actions also runs backend type-checking/tests/build, Prisma validation and
+isolated PostgreSQL smoke tests, Flutter analysis/tests, and the web build.
+A green CI run validates those automated checks only; it does not replace
+business acceptance testing or a production deployment rehearsal.
 
 ## Pending business decisions
 
@@ -180,3 +201,20 @@ flutter run -d chrome --dart-define=USE_SEED_DATA=true
 
 It is refused outside development builds, and the UI shows a banner whenever
 it is active. It is never a system of record.
+
+---
+
+## التحديثات الأخيرة (أكتوبر 2026) — Latest additions
+
+- **بيانات الشركة والفروع**: شاشة «بيانات الشركة» (الاسم العربي والإنجليزي، الكود، الهاتف/البريد/العنوان، الرقم الضريبي، الشعار، المقر الرئيسي والفروع) مع ربط فرعي وتحقق من الربط الدائري، وواجهة إعداد أول تشغيل آمنة (`/setup/*`). راجع `PROJECT_KNOWLEDGE.md`.
+- **«تذكرني» في تسجيل الدخول**: اختياري ومتوقف افتراضياً — يحفظ اسم المستخدم فقط على الويب، وكلمة المرور في مخزن نظام التشغيل الآمن (وليس في تخزين نصي) على سطح المكتب، مع زر مسح البيانات المحفوظة.
+- **دليل الحسابات متعدد المستويات**: شجرة قابلة للطي، إنشاء/تعديل/حذف بصلاحية `accounting.accounts.*`، أكواد فريدة مع اقتراح تلقائي، منع الترحيل للحسابات التجميعية، ومنع الحذف الآمن (`docs/BACKUP_RESTORE.md`).
+- **التصدير المحسّن**: ملفات `.xlsx` حقيقية (أنواع خلايا، عرض أعمدة، إجماليات، شعار واسم الشركة)، تصدير دليل الحسابات بترتيب الشجرة، وتصدير القيود على مستوى السطر (كود الحساب واسمه بالعربية/الإنجليزية، مدين/دائن، الإجماليات). PDF عبر Chrome مع أرقام صفحات، وصفحة طباعة RTL بترويسات متكررة.
+- **النسخ الاحتياطي الكامل والاستعادة**: `pg_dump` بصيغة Custom مع نسخة أمان تلقائية، تجربة الاستعادة على قاعدة مؤقتة، وقفل الكتابة أثناء الاستعادة، وتحقق سليم بعد الاستعادة. التفاصيل في [`docs/BACKUP_RESTORE.md`](./docs/BACKUP_RESTORE.md).
+- **قاعدة المعرفة**: أُضيف [`PROJECT_KNOWLEDGE.md`](./PROJECT_KNOWLEDGE.md) (كان مفقوداً) — البنية، قواعد Prisma، القواعد المحاسبية، والحدود المعروفة.
+- **الأيقونة الرسمية**: `Kayan.png` (جذر المستودع) هي مصدر كل أيقونات البرنامج — أيقونة `erp_kayan.exe` والنافذة، وأيقونة المتصفح وملفات PWA، وأيقونة المثبّت والاختصارات. تُولَّد جميعها بأمر `python tools/generate_icons.py` وتُضمَّن تلقائياً في حزمة التوزيع.
+
+### الاختبارات — Tests
+
+- الخادم: `cd backend && npx jest` (قواعد دليل الحسابات، قواعد الشعار، حمايات النسخ الاحتياطي، كتّاب التصدير).
+- Flutter: `flutter test` (تذكرني، قواعد أسماء الحسابات، الاختبارات السابقة). تمت كتابة الاختبارات في بيئة بدون Flutter SDK — يجب تشغيلها محلياً.

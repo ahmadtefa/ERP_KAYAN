@@ -1,0 +1,120 @@
+name: ERP KAYAN CI
+
+on:
+  pull_request:
+    branches: [main, 'arena/**']
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (real Prisma and PostgreSQL smoke test)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: erp_kayan
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d erp_kayan"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan?schema=public
+      JWT_ACCESS_SECRET: ci-only-access-secret-not-for-real-use-0123456789
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-real-use-9876543210
+      JWT_ACCESS_TTL: 900
+      JWT_REFRESH_TTL: 604800
+      KAYAN_ADMIN_USERNAME: ci-admin
+      KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
+      PORT: 3000
+      NODE_ENV: test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate
+      - name: Validate Prisma schema
+        run: npx prisma validate
+      - name: Type-check
+        run: npx tsc --noEmit
+      - name: Run unit tests
+        run: npm test -- --runInBand
+      - name: Build API
+        run: npm run build
+      - name: Apply migrations to ephemeral PostgreSQL
+        run: npx prisma migrate deploy
+      - name: Seed an isolated test company and administrator
+        run: npx ts-node prisma/seed.ts
+      - name: Start API and smoke-test database plus login
+        run: |
+          npm run start:prod > /tmp/kayan-api.log 2>&1 &
+          API_PID=$!
+          trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json; then
+              break
+            fi
+            sleep 2
+          done
+          if [ ! -s /tmp/kayan-health.json ]; then
+            cat /tmp/kayan-api.log
+            exit 1
+          fi
+          cat /tmp/kayan-health.json
+          node -e 'const h=JSON.parse(require("fs").readFileSync("/tmp/kayan-health.json","utf8")); if(h.status!=="ok" || h.database!=="up" || h.needsSetup) process.exit(1)'
+          curl -fsS -X POST http://127.0.0.1:3000/api/v1/auth/login -H 'Content-Type: application/json' -d '{"username":"ci-admin","password":"CI-only-Admin-Password-12345"}' > /tmp/kayan-login.json
+          node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/kayan-login.json","utf8")); if(typeof r.accessToken!=="string" || !r.accessToken || typeof r.refreshToken!=="string" || !r.user) process.exit(1); console.log("Login smoke test passed for",r.user.username)'
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+
+  flutter:
+    name: Flutter Web (analyze, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install Flutter dependencies
+        run: flutter pub get
+      - name: Analyze
+        run: flutter analyze
+      - name: Run tests
+        run: flutter test
+      - name: Build web
+        run: flutter build web --release
+      - name: Upload web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: erp-kayan-web
+          path: build/web/
+          if-no-files-found: error
+          retention-days: 14

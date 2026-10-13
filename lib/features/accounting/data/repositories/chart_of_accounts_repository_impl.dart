@@ -25,4 +25,49 @@ class ChartOfAccountsRepositoryImpl implements ChartOfAccountsRepository {
       );
     }
   }
+
+  @override
+  Future<Result<String>> suggestCode({String? parentId}) async {
+    try {
+      return Success(await _source.suggestCode(parentId: parentId));
+    } on Failure catch (failure) {
+      return ResultFailure(failure);
+    } catch (e) {
+      return ResultFailure(ServerFailure('Could not suggest a code', e));
+    }
+  }
+
+  @override
+  Future<Result<Account>> createAccount(AccountInput input) async {
+    try {
+      return Success(await _source.createAccount(input));
+    } on Failure catch (failure) {
+      return ResultFailure(failure);
+    } catch (e) {
+      return ResultFailure(ServerFailure('Could not create the account', e));
+    }
+  }
+
+  @override
+  Future<Result<Account>> updateAccount(String id, AccountInput input) async {
+    try {
+      return Success(await _source.updateAccount(id, input));
+    } on Failure catch (failure) {
+      return ResultFailure(failure);
+    } catch (e) {
+      return ResultFailure(ServerFailure('Could not update the account', e));
+    }
+  }
+
+  @override
+  Future<Result<void>> deleteAccount(String id) async {
+    try {
+      await _source.deleteAccount(id);
+      return Success<void>(null);
+    } on Failure catch (failure) {
+      return ResultFailure(failure);
+    } catch (e) {
+      return ResultFailure(ServerFailure('Could not delete the account', e));
+    }
+  }
 }

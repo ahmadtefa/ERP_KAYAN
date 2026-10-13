@@ -1,16 +1,23 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/backend/company_setup_data.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/error_messages.dart';
 import '../../../../shared/widgets/company_logo.dart';
+import '../../../../shared/widgets/company_setup_form.dart';
 import '../providers/auth_providers.dart';
 
 /// Sign-in screen.
 ///
 /// The form performs local validation only; authentication itself is always
-/// decided by the API. No credentials are stored on the device.
+/// decided by the API. "Remember me" is opt-in and stored through [TokenStore]
+/// (the password only in secure storage). On a brand-new installation with no
+/// company yet, the company setup form is shown before the sign-in form.
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
@@ -29,11 +36,30 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _busy = false;
   String? _error;
 
+  /// A brand-new installation has a database but no company and nobody who
+  /// can sign in. The setup form answers that before the sign-in form.
+  bool? _setupNeeded;
+  bool _setupBusy = false;
+  String? _setupError;
+
   @override
   void initState() {
     super.initState();
     _restoreRememberedLogin();
+    _checkSetup();
   }
+
+  Future<void> _checkSetup() async {
+    try {
+      final status = await ref.read(apiClientProvider).get('/setup/status');
+      if (!mounted) return;
+      setState(() => _setupNeeded = status['needsSetup'] == true);
+    } catch (_) {
+      // Server unreachable is reported by the sign-in form itself.
+      if (mounted) setState(() => _setupNeeded = false);
+    }
+  }
+
 
   Future<void> _restoreRememberedLogin() async {
     final store = ref.read(tokenStoreProvider);
@@ -47,6 +73,68 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _username.text = username ?? '';
       _password.text = password ?? '';
     });
+  }
+
+  Future<void> _runSetup(CompanySetupData data) async {
+    setState(() {
+      _setupBusy = true;
+      _setupError = null;
+    });
+    try {
+      await ref
+          .read(apiClientProvider)
+          .post(
+            '/setup/initial',
+            body: {
+              'companyCode': data.companyCode,
+              'companyNameAr': data.companyNameAr,
+              'companyNameEn': data.companyNameEn,
+              'facilityKind': data.facilityKind,
+              if ((data.phone ?? '').isNotEmpty) 'phone': data.phone,
+              if ((data.email ?? '').isNotEmpty) 'email': data.email,
+              if ((data.address ?? '').isNotEmpty) 'address': data.address,
+              if ((data.hqCode ?? '').isNotEmpty) ...{
+                'hqCode': data.hqCode,
+                'unitCode': data.hqCode,
+              },
+              if ((data.hqNameAr ?? '').isNotEmpty) ...{
+                'hqNameAr': data.hqNameAr,
+                'unitNameAr': data.hqNameAr,
+              },
+              if ((data.hqNameEn ?? '').isNotEmpty) ...{
+                'hqNameEn': data.hqNameEn,
+                'unitNameEn': data.hqNameEn,
+              },
+              if (data.logoBytes != null && data.logoBytes!.isNotEmpty)
+                'logoBase64': base64Encode(data.logoBytes!),
+              if (data.logoMime != null) 'logoMime': data.logoMime,
+              'adminUsername': data.adminUsername,
+              'adminPassword': data.adminPassword,
+            },
+          );
+      if (!mounted) return;
+      setState(() {
+        _setupBusy = false;
+        _setupNeeded = false;
+        _username.text = data.adminUsername;
+        _error = null;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.createdSuccessfully)));
+    } on Failure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _setupBusy = false;
+        _setupError = failure.message;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _setupBusy = false;
+        _setupError = '$error';
+      });
+    }
   }
 
   @override
@@ -96,6 +184,47 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final logoUrl = logoPath == null
         ? null
         : '${ref.watch(appConfigProvider).apiBaseUrl.replaceFirst(RegExp(r'/+$'), '')}$logoPath';
+
+    if (_setupNeeded == true) {
+      // First run on this installation: the company is set up here, before
+      // anybody can sign in — and the form keeps a draft, so an interrupted
+      // setup continues where it stopped.
+      return Scaffold(
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 640),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        l10n.companySettings,
+                        style: theme.textTheme.headlineSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        l10n.companySettingsHint,
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 20),
+                      CompanySetupForm(
+                        onSubmit: _runSetup,
+                        busy: _setupBusy,
+                        error: _setupError,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       body: Center(

@@ -9,7 +9,9 @@
 //  * Every table has created/updated audit fields and a soft-delete marker.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["queryCompiler", "driverAdapters"]
+  engineType        = "client"
 }
 
 datasource db {
@@ -31,6 +33,9 @@ model Company {
   phone String?
   email String?
   logoPath String?
+  // Logo stored in the database so a full backup carries it (source feature).
+  logoData Bytes?
+  logoMime String? @db.VarChar(64)
   currency String @default("EGP") @db.VarChar(3)
   timezone String @default("Africa/Cairo")
 
@@ -62,6 +67,11 @@ model Company {
   @@map("companies")
 }
 
+enum BranchKind {
+  HEADQUARTERS
+  BRANCH
+}
+
 model Branch {
   id        String @id @default(uuid()) @db.Uuid
   companyId String @db.Uuid
@@ -70,6 +80,10 @@ model Branch {
   nameAr    String
   isActive  Boolean @default(true)
 
+  /// A unit is either the company headquarters or a branch of it (source feature).
+  kind           BranchKind @default(BRANCH)
+  parentBranchId String?    @db.Uuid
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   createdBy String?
@@ -77,6 +91,8 @@ model Branch {
   deletedAt DateTime?
 
   company      Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  parentBranch Branch?        @relation("BranchTree", fields: [parentBranchId], references: [id], onDelete: Restrict)
+  subBranches  Branch[]       @relation("BranchTree")
   userBranches UserBranch[]
   journalEntry JournalEntry[]
 
@@ -87,6 +103,7 @@ model Branch {
 
   @@unique([companyId, code])
   @@index([companyId])
+  @@index([parentBranchId])
   @@map("branches")
 }
 

@@ -1,18 +1,42 @@
 import 'package:erp_kayan/core/error/failure.dart';
+import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/core/result/result.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/auth/presentation/screens/login_screen.dart';
+import 'package:erp_kayan/shared/widgets/company_setup_form.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'test_harness.dart';
+
+/// Answers the one request the sign-in screen makes on its own: the setup
+/// status. Everything else on [ApiClient] is unreachable from these tests.
+class _FakeApiClient implements ApiClient {
+  _FakeApiClient({this.needsSetup = false});
+
+  final bool needsSetup;
+
+  @override
+  Future<Map<String, dynamic>> get(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    if (path == '/setup/status') return {'needsSetup': needsSetup};
+    throw StateError('unexpected GET $path in a login widget test');
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 void main() {
   late FakeTokenStore tokenStore;
   late FakeAuthRepository repository;
 
   setUp(() {
+    SharedPreferences.setMockInitialValues({});
     tokenStore = FakeTokenStore();
     repository = FakeAuthRepository();
   });
@@ -20,11 +44,15 @@ void main() {
   Future<void> pumpLogin(
     WidgetTester tester, {
     Locale locale = const Locale('en'),
+    bool needsSetup = false,
   }) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           tokenStoreProvider.overrideWithValue(tokenStore),
+          apiClientProvider.overrideWithValue(
+            _FakeApiClient(needsSetup: needsSetup),
+          ),
           authRepositoryProvider.overrideWithValue(repository),
           companyBrandingProvider.overrideWith((ref) async => null),
         ],
@@ -33,6 +61,15 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('a brand-new installation shows company setup first', (
+    tester,
+  ) async {
+    await pumpLogin(tester, needsSetup: true);
+
+    expect(find.byType(CompanySetupForm), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Sign In'), findsNothing);
+  });
 
   testWidgets('renders the credential fields and the sign-in action', (
     tester,

@@ -40,24 +40,39 @@ echo       database is running.
 echo.
 
 REM ---------------------------------------------- 3. database schema
-echo [3/6] Applying database changes...
-if not exist "backend\node_modules" (
-  echo       first run on this machine - getting the server packages.
-  echo       This takes a few minutes and only happens once.
-  pushd backend
-  call npm install --no-audit --no-fund
-  if errorlevel 1 (
-    echo.
-    echo [X] npm install failed. Scroll up for the reason.
-    popd
-    pause
-    exit /b 1
-  )
-  popd
+if not exist "backend\.env" (
+  echo.
+  echo [X] backend\.env is missing, so the server cannot start.
+  echo     Run scripts\setup-windows.bat once, then try again.
+  echo.
+  pause
+  exit /b 1
 )
+echo [3/6] Preparing packages and applying database changes...
 pushd backend
-echo       checking for server package updates...
-call npm install --no-audit --no-fund >nul 2>&1
+if not exist "node_modules" (
+  echo       first run on this machine - installing locked packages.
+  call npm ci --no-audit --no-fund
+) else (
+  echo       checking for server package updates...
+  call npm install --no-audit --no-fund
+)
+if errorlevel 1 (
+  echo.
+  echo [X] Backend package installation failed. Scroll up for the reason.
+  popd
+  pause
+  exit /b 1
+)
+echo       generating the Prisma client...
+call npx prisma generate
+if errorlevel 1 (
+  echo.
+  echo [X] Prisma client generation failed. The API will not be started.
+  popd
+  pause
+  exit /b 1
+)
 echo       applying database changes...
 call npx prisma migrate deploy
 if errorlevel 1 (
@@ -70,33 +85,30 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-call npx prisma generate >nul 2>&1
 echo       adding any new permissions...
-call npx ts-node prisma\seed.ts >nul 2>&1
+call npx ts-node prisma\seed.ts
+if errorlevel 1 (
+  echo.
+  echo [X] Starter-data/permission setup failed. The API will not be started.
+  popd
+  pause
+  exit /b 1
+)
 popd
 echo       database is up to date.
 echo.
 
 REM ---------------------------------------------- 4. API server
-echo [4/6] Restarting the API server...
-REM The pull may have changed the server's code, and an old server keeps
-REM answering with the old behaviour. So we always stop it and start fresh.
-set FOUND=0
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:":3000 .*LISTENING"') do (
-  if not "%%p"=="0" (
-    taskkill /f /pid %%p >nul 2>&1
-    set FOUND=1
-  )
-)
-if "%FOUND%"=="0" (
-  echo       no server was running.
-) else (
-  echo       stopped the previous server.
-)
-if not exist "backend\.env" (
+echo [4/6] Checking API port...
+REM Never kill an arbitrary process just because it owns port 3000.
+set "PORTPID="
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:":3000 .*LISTENING"') do if not defined PORTPID set "PORTPID=%%p"
+if defined PORTPID (
   echo.
-  echo [X] backend\.env is missing, so the server cannot start.
-  echo     Run scripts\setup-windows.bat once, then try again.
+  echo [X] Port 3000 is already in use by process ID %PORTPID%.
+  echo     For safety, this script will not terminate that process.
+  echo     If it is an old KAYAN ERP API window, close that window and retry.
+  echo     Otherwise identify the process before stopping it manually.
   echo.
   pause
   exit /b 1
