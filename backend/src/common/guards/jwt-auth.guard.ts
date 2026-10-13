@@ -60,9 +60,6 @@ export class JwtAuthGuard implements CanActivate {
       sub: string;
       username: string;
       companyId: string;
-      branchId: string | null;
-      isSuperAdmin: boolean;
-      permissions: string[];
     };
     try {
       payload = await this.jwt.verifyAsync<typeof payload>(token, {
@@ -73,11 +70,32 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or expired token');
     }
 
-    // Access tokens are short-lived, but account deactivation and deletion must
-    // take effect immediately rather than leaving a 15-minute access window.
+    // Resolve authorization claims from the database on every request. Roles,
+    // permissions, branch assignments and super-admin status can change while
+    // an access token is still alive; stale JWT claims must not preserve access.
     const principal = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, companyId: true, isActive: true, deletedAt: true },
+      select: {
+        id: true,
+        username: true,
+        companyId: true,
+        isActive: true,
+        isSuperAdmin: true,
+        deletedAt: true,
+        userRoles: {
+          where: { companyId: payload.companyId },
+          select: {
+            role: {
+              select: {
+                rolePermissions: {
+                  select: { permission: { select: { code: true } } },
+                },
+              },
+            },
+          },
+        },
+        branches: { select: { branchId: true } },
+      },
     });
     if (
       !principal ||
@@ -88,13 +106,23 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Account is inactive or unavailable');
     }
 
+    const permissions = [
+      ...new Set(
+        principal.userRoles.flatMap((userRole) =>
+          userRole.role.rolePermissions.map((rolePermission) =>
+            rolePermission.permission.code,
+          ),
+        ),
+      ),
+    ];
+
     request.user = {
-      userId: payload.sub,
-      username: payload.username,
-      companyId: payload.companyId,
-      branchId: payload.branchId,
-      isSuperAdmin: payload.isSuperAdmin,
-      permissions: payload.permissions ?? [],
+      userId: principal.id,
+      username: principal.username,
+      companyId: principal.companyId,
+      branchId: principal.branches[0]?.branchId ?? null,
+      isSuperAdmin: principal.isSuperAdmin,
+      permissions,
     };
     return true;
   }
