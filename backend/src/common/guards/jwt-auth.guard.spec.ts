@@ -50,8 +50,12 @@ function makeContext(authorization = 'Bearer access-token') {
   return { context, request };
 }
 
+type TestPrincipal = Omit<typeof activePrincipal, 'deletedAt'> & {
+  deletedAt: Date | null;
+};
+
 function makeGuard(options?: {
-  principal?: typeof activePrincipal | null;
+  principal?: TestPrincipal | null;
   tokenPayload?: typeof payload;
   verifyError?: Error;
 }) {
