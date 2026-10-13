@@ -292,6 +292,23 @@ export class JournalEntriesService {
     }
 
     const reversal = await this.prisma.$transaction(async (tx) => {
+      // Claim the original atomically. Two requests can both pass the checks
+      // above, so only one may transition POSTED -> REVERSED and create a
+      // reversal. The conditional update also serializes concurrent requests.
+      const claimed = await tx.journalEntry.updateMany({
+        where: {
+          id: original.id,
+          companyId,
+          status: JournalStatus.POSTED,
+        },
+        data: { status: JournalStatus.REVERSED },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException(
+          'This entry has already been reversed or is no longer posted',
+        );
+      }
+
       const entryNumber = await this.numbers.next(
         tx,
         companyId,
@@ -326,11 +343,6 @@ export class JournalEntriesService {
             })),
           },
         },
-      });
-
-      await tx.journalEntry.update({
-        where: { id: original.id },
-        data: { status: JournalStatus.REVERSED },
       });
 
       return created;
