@@ -71,8 +71,11 @@ export class MaintenanceInterceptor implements NestInterceptor {
     const isRead = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
 
     // The in-flight restore continues in its already-admitted request.
-    // New write requests, including backup and restore operations, must wait.
-    if (isRead) return next.handle();
+    // Only the full-restore endpoint may start a recovery attempt while
+    // maintenance is active; FullBackupService serializes those requests.
+    const isRestoreRequest =
+      method === 'POST' && /\/backup\/full\/restore\/?$/.test(request.path);
+    if (isRead || isRestoreRequest) return next.handle();
 
     throw new ServiceUnavailableException(
       'The database is being restored right now. ' +
