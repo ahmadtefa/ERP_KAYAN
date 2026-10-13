@@ -1,0 +1,176 @@
+import { BadRequestException } from '@nestjs/common';
+import { PurchaseInvoicesService } from '../purchases/purchase-invoices.service';
+import { SalesInvoicesService } from '../sales/sales-invoices.service';
+
+describe('invoice posting concurrency guards', () => {
+  it('does not post a sales invoice when another request already claimed the draft', async () => {
+    const invoice = {
+      id: 'sales-1',
+      companyId: 'company-1',
+      status: 'DRAFT',
+    };
+    const updateMany = jest.fn().mockResolvedValue({ count: 0 });
+    const prisma = {
+      salesInvoice: { findFirst: jest.fn().mockResolvedValue(invoice) },
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) =>
+        callback({ salesInvoice: { updateMany } }),
+      ),
+    };
+    const resolve = jest.fn();
+    const service = new SalesInvoicesService(
+      prisma as any,
+      {} as any,
+      {} as any,
+      { resolve } as any,
+      {} as any,
+    );
+
+    await expect(service.post('company-1', 'user-1', 'sales-1')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'sales-1',
+        companyId: 'company-1',
+        status: 'DRAFT',
+        deletedAt: null,
+      },
+      data: { status: 'POSTED' },
+    });
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('does not reverse a sales invoice when another request already claimed it', async () => {
+    const invoice = {
+      id: 'sales-1',
+      companyId: 'company-1',
+      branchId: 'branch-1',
+      status: 'POSTED',
+      journalEntryId: 'journal-1',
+      lines: [],
+    };
+    const original = {
+      id: 'journal-1',
+      companyId: 'company-1',
+      branchId: 'branch-1',
+      status: 'POSTED',
+      lines: [],
+    };
+    const updateMany = jest.fn().mockResolvedValue({ count: 0 });
+    const stockCreate = jest.fn();
+    const prisma = {
+      salesInvoice: { findFirst: jest.fn().mockResolvedValue(invoice) },
+      journalEntry: { findFirst: jest.fn().mockResolvedValue(original) },
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) =>
+        callback({
+          salesInvoice: { updateMany },
+          journalEntry: { updateMany: jest.fn() },
+          stockMovement: { create: stockCreate },
+        }),
+      ),
+    };
+    const service = new SalesInvoicesService(
+      prisma as any, {} as any, {} as any, {} as any, {} as any,
+    );
+
+    await expect(service.reverse('company-1', 'user-1', 'sales-1')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'sales-1',
+        companyId: 'company-1',
+        status: 'POSTED',
+        deletedAt: null,
+      },
+      data: { status: 'REVERSED' },
+    });
+    expect(stockCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not reverse a purchase invoice when another request already claimed it', async () => {
+    const invoice = {
+      id: 'purchase-1',
+      companyId: 'company-1',
+      branchId: 'branch-1',
+      status: 'POSTED',
+      journalEntryId: 'journal-1',
+      lines: [],
+    };
+    const original = {
+      id: 'journal-1',
+      companyId: 'company-1',
+      branchId: 'branch-1',
+      status: 'POSTED',
+      lines: [],
+    };
+    const findFirst = jest.fn().mockResolvedValueOnce(invoice).mockResolvedValueOnce(original);
+    const updateMany = jest.fn().mockResolvedValue({ count: 0 });
+    const stockCreate = jest.fn();
+    const prisma = {
+      purchaseInvoice: { findFirst },
+      journalEntry: { findFirst: jest.fn().mockResolvedValue(original) },
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) =>
+        callback({
+          purchaseInvoice: { updateMany },
+          journalEntry: { updateMany: jest.fn() },
+          stockMovement: { create: stockCreate },
+        }),
+      ),
+    };
+    const service = new PurchaseInvoicesService(
+      prisma as any, {} as any, {} as any, {} as any, {} as any,
+    );
+
+    await expect(
+      service.reverse('company-1', 'user-1', 'purchase-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'purchase-1',
+        companyId: 'company-1',
+        status: 'POSTED',
+        deletedAt: null,
+      },
+      data: { status: 'REVERSED' },
+    });
+    expect(stockCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not post a purchase invoice when another request already claimed the draft', async () => {
+    const invoice = {
+      id: 'purchase-1',
+      companyId: 'company-1',
+      status: 'DRAFT',
+    };
+    const updateMany = jest.fn().mockResolvedValue({ count: 0 });
+    const prisma = {
+      purchaseInvoice: { findFirst: jest.fn().mockResolvedValue(invoice) },
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) =>
+        callback({ purchaseInvoice: { updateMany } }),
+      ),
+    };
+    const resolve = jest.fn();
+    const service = new PurchaseInvoicesService(
+      prisma as any,
+      {} as any,
+      {} as any,
+      { resolve } as any,
+      {} as any,
+    );
+
+    await expect(
+      service.post('company-1', 'user-1', 'purchase-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'purchase-1',
+        companyId: 'company-1',
+        status: 'DRAFT',
+        deletedAt: null,
+      },
+      data: { status: 'POSTED' },
+    });
+    expect(resolve).not.toHaveBeenCalled();
+  });
+});

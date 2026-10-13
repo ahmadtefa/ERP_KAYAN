@@ -6,6 +6,7 @@ import { PrismaModule } from './common/prisma/prisma.module';
 import { AuditModule } from './common/audit/audit.module';
 import { MaintenanceModule } from './common/maintenance/maintenance.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { PermissionsGuard } from './common/guards/permissions.guard';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
 import { validateEnvironment } from './common/config/validate-environment';
 import { AccountingModule } from './modules/accounting/accounting.module';
@@ -48,8 +49,10 @@ import { SalesModule } from './modules/sales/sales.module';
     // Order matters. The rate limit runs before authentication, so a flood of
     // password guesses is turned away before any hashing work happens.
     { provide: APP_GUARD, useClass: RateLimitGuard },
-    // Authentication is required everywhere unless a route is marked @Public().
+    // Authentication must populate request.user before permission checks run.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // Enforce every @RequirePermissions declaration server-side.
+    { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
 export class AppModule {}

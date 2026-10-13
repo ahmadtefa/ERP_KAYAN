@@ -8,6 +8,99 @@ jest.mock('argon2', () => ({
 import { AuthService } from './auth.service';
 
 describe('refresh session security', () => {
+  it('only returns active roles and branches belonging to the user company', async () => {
+    const verify = jest.mocked(argon2.verify);
+    verify.mockResolvedValue(true);
+    const user = {
+      id: 'user-1',
+      username: 'employee',
+      fullNameEn: 'Employee',
+      fullNameAr: 'موظف',
+      passwordHash: 'hash',
+      companyId: 'company-1',
+      isActive: true,
+      isSuperAdmin: false,
+      deletedAt: null,
+      lockedUntil: null,
+      failedLoginCount: 0,
+      userRoles: [
+        {
+          companyId: 'company-1',
+          role: {
+            companyId: 'company-1',
+            deletedAt: null,
+            code: 'ACCOUNTANT',
+            rolePermissions: [{ permission: { code: 'reports.read' } }],
+          },
+        },
+        {
+          companyId: 'company-1',
+          role: {
+            companyId: null,
+            deletedAt: null,
+            code: 'SYSTEM_VIEWER',
+            rolePermissions: [{ permission: { code: 'inventory.items.read' } }],
+          },
+        },
+        {
+          companyId: 'company-2',
+          role: {
+            companyId: 'company-2',
+            deletedAt: null,
+            code: 'FOREIGN_ADMIN',
+            rolePermissions: [{ permission: { code: 'admin.backup' } }],
+          },
+        },
+        {
+          companyId: 'company-1',
+          role: {
+            companyId: 'company-1',
+            deletedAt: new Date(),
+            code: 'DELETED_ROLE',
+            rolePermissions: [{ permission: { code: 'admin.users.manage' } }],
+          },
+        },
+      ],
+    };
+    const userBranchFindMany = jest.fn().mockResolvedValue([{ branchId: 'branch-1' }]);
+    const jwt = { signAsync: jest.fn().mockResolvedValue('access-token') };
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue(user),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      userBranch: { findMany: userBranchFindMany },
+      refreshToken: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const service = new AuthService(
+      prisma as any,
+      jwt as any,
+      { record: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+
+    try {
+      const result = await service.login('employee', 'correct-password');
+
+      expect(result.user.roles).toEqual(['ACCOUNTANT', 'SYSTEM_VIEWER']);
+      expect(result.user.permissions).toEqual(['reports.read', 'inventory.items.read']);
+      expect(result.user.branchId).toBe('branch-1');
+      expect(userBranchFindMany).toHaveBeenCalledWith({
+        where: {
+          userId: 'user-1',
+          branch: {
+            companyId: 'company-1',
+            isActive: true,
+            deletedAt: null,
+          },
+        },
+        select: { branchId: true },
+        orderBy: { branchId: 'asc' },
+      });
+    } finally {
+      verify.mockReset();
+    }
+  });
+
   it('increments failed-login counters atomically and locks at the threshold', async () => {
     const verify = jest.mocked(argon2.verify);
     verify.mockResolvedValue(false);
