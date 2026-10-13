@@ -27,15 +27,19 @@ nothing else. `docs/DESKTOP_WINDOWS.md` says what happens when it is opened.
 
 ## Status
 
-**Backend:** working. Authentication (Argon2id + JWT access/refresh), company
-and branch scoping, chart of accounts, and journal entries with server-side
-double-entry validation, server-generated document numbers, posting, reversal
-and an append-only audit trail. PostgreSQL schema with 14 tables and versioned
-migrations.
+**Backend:** the NestJS API includes authentication (Argon2id + JWT access/refresh),
+company-scoped business data, accounting and journal posting/reversal, user and
+role administration, company profile, inventory, parties, sales, purchases,
+reports, import/export, backups, health checks, and an append-only audit trail.
+The Prisma schema and versioned migrations are the source of truth for the
+database structure. Feature presence does not mean every workflow is production-
+ready; verify each module's acceptance criteria before deploying it to a business.
 
-**Client:** authentication, dashboard, chart of accounts (now reading from the
-real API) and settings are wired. All other ERP modules are deliberately not
-implemented — see "Pending business decisions".
+**Client:** Flutter feature areas include authentication, dashboard, accounting,
+administration, inventory, invoicing, and settings, with Arabic/English
+localization and cross-platform targets. Some screens and API workflows are
+more complete than others. Treat CI results as code-quality checks, not as proof
+that every business process has been accepted end to end.
 
 ## Architecture
 
@@ -43,11 +47,13 @@ Feature-first layout with an inner clean-architecture split per feature:
 
 ```
 backend/                       # NestJS API server
-├── prisma/schema.prisma       # 14 tables; money is numeric(19,4)
+├── prisma/schema.prisma       # database schema; money uses numeric(19,4)
 ├── prisma/seed.ts             # development seed (company, admin, chart)
 └── src/
-    ├── common/                # guards, filters, decorators, audit, prisma
-    └── modules/               # auth, accounting, health
+    ├── common/                # auth/rate-limit/permission guards, filters, audit, Prisma
+    └── modules/               # auth, admin, company, accounting, inventory,
+                               # parties, sales, purchases, reports, import/export,
+                               # backup, health, maintenance
 
 lib/
 ├── main.dart                  # bootstrap: logging, ProviderScope
@@ -67,8 +73,11 @@ lib/
 │   └── utils/                 # pure validators
 ├── features/
 │   ├── accounting/            # domain / data / presentation
+│   ├── admin/
 │   ├── auth/                  # domain / data / presentation
 │   ├── dashboard/
+│   ├── inventory/
+│   ├── invoicing/
 │   └── settings/
 ├── shared/                    # widgets, extensions, error localization
 └── l10n/                      # en + ar ARB sources and generated code
@@ -162,7 +171,11 @@ flutter test
 flutter build web --release
 ```
 
-All four currently pass: `flutter analyze` reports no issues and 60 tests pass.
+Run these gates in the same environment and commit you intend to release. GitHub
+Actions also runs backend type-checking/tests/build, Prisma validation and
+isolated PostgreSQL smoke tests, Flutter analysis/tests, and the web build.
+A green CI run validates those automated checks only; it does not replace
+business acceptance testing or a production deployment rehearsal.
 
 ## Pending business decisions
 
