@@ -7,6 +7,7 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { ProblemDetailsFilter } from './common/filters/problem-details.filter';
+import { isCorsOriginAllowed } from './common/security/cors-origin';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -28,31 +29,23 @@ async function bootstrap() {
 
   app.useGlobalFilters(new ProblemDetailsFilter());
 
-  // A browser only lets a page call this API when the reply carries an
-  // Access-Control-Allow-Origin header naming that page's origin. The Flutter
-  // web dev server chooses the port it serves the client on, so a hard list of
-  // ports breaks sign-in with a misleading "cannot reach the server" error.
-  // Outside production every localhost origin is therefore accepted; in
-  // production only the origins listed in CORS_ORIGINS are.
+  // Development is permissive so Flutter's changing local dev-server port
+  // does not break sign-in. Production accepts only explicit CORS_ORIGINS
+  // entries; LAN and .local origins are not implicitly trusted.
   const configuredOrigins = (process.env.CORS_ORIGINS ?? '')
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean);
   const isProduction = process.env.NODE_ENV === 'production';
-  const isLanOrLocalOrigin =
-    /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|[a-zA-Z0-9-]+\.local)(:\d+)?$/;
 
   app.enableCors({
     origin: (
       origin: string | undefined,
       callback: (err: Error | null, allow?: boolean) => void,
     ) => {
-      // Requests without an Origin header come from clients that CORS does not
-      // apply to: native apps, curl, the mobile build.
-      if (!origin) return callback(null, true);
-      if (configuredOrigins.includes(origin)) return callback(null, true);
-      if (isLanOrLocalOrigin.test(origin)) return callback(null, true);
-      if (!isProduction) return callback(null, true);
+      if (isCorsOriginAllowed(origin, configuredOrigins, isProduction)) {
+        return callback(null, true);
+      }
       logger.warn(`Blocked CORS request from origin: ${origin}`);
       return callback(null, false);
     },
