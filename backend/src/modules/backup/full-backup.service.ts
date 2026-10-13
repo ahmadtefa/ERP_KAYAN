@@ -440,10 +440,13 @@ export class FullBackupService {
         // The database may be half-replaced. Put the safety copy back.
         const recovered = await this.recoverFrom(safety.name, tools.pgRestore as string);
         if (!recovered) keepMaintenanceActive = true;
+        const recoveryStatus = recovered
+          ? `The safety backup (${safety.name}) was restored automatically.`
+          : `Automatic recovery from ${safety.name} also failed. The system remains in maintenance mode; restore manually from the backup folder.`;
         throw new ServiceUnavailableException(
-          'The restore failed part way through. The safety backup taken just ' +
-            `before (${safety.name}) was restored back automatically. ` +
-            `Details: ${String((error as Error).message ?? error).slice(0, 300)}`,
+          'The restore failed part way through. ' +
+            recoveryStatus +
+            ` Details: ${String((error as Error).message ?? error).slice(0, 300)}`,
         );
       }
 
@@ -454,10 +457,14 @@ export class FullBackupService {
           this.logger.error(`Post-restore check failed: ${check.detail}`);
           const recovered = await this.recoverFrom(safety.name, tools.pgRestore as string);
           if (!recovered) keepMaintenanceActive = true;
+          const recoveryStatus = recovered
+            ? 'The safety backup was restored automatically.'
+            : 'Automatic recovery also failed. The system remains in maintenance mode; restore manually from the backup folder.';
           throw new ServiceUnavailableException(
             'The restore finished but the data did not pass the checks that ' +
-              'follow one. The safety backup was restored back automatically. ' +
-              `Details: ${check.detail}`,
+              'follow one. ' +
+              recoveryStatus +
+              ` Details: ${check.detail}`,
           );
         }
       }
