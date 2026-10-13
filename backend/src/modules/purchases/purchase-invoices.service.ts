@@ -372,6 +372,15 @@ export class PurchaseInvoicesService {
             'A purchase invoice line has no item, so its stock cannot be returned',
           );
         }
+        // Serialize this stock check with sales posting and other stock
+        // changes so a stale quantity cannot permit a negative balance.
+        await tx.$queryRaw(
+          Prisma.sql`SELECT "companyId" FROM "stock_balances"
+            WHERE "companyId" = ${companyId}::uuid
+              AND "branchId" = ${invoice.branchId}::uuid
+              AND "itemId" = ${line.itemId}::uuid
+            FOR UPDATE`,
+        );
         const balance = await tx.stockBalance.findUnique({
           where: {
             companyId_branchId_itemId: {
