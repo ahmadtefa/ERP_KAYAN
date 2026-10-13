@@ -46,7 +46,7 @@ describe('BackupService restore reference validation', () => {
   });
 
   it('rejects stock balances that reference a branch outside the backup', async () => {
-    const { service, prisma } = service();
+    const { service: backupService, prisma } = makeService();
     const file = backup({
       branch: [],
       item: [{ id: 'item-1' }],
@@ -55,7 +55,7 @@ describe('BackupService restore reference validation', () => {
       ],
     });
 
-    await expect(service.restore(file, companyId, { replace: true })).rejects.toBeInstanceOf(
+    await expect(backupService.restore(file, companyId, { replace: true })).rejects.toBeInstanceOf(
       BadRequestException,
     );
     expect(prisma.$transaction).not.toHaveBeenCalled();
