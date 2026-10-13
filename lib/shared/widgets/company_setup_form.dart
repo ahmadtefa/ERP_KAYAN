@@ -207,6 +207,37 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
     ).then((_) => _clearDraft());
   }
 
+  /// Below this width the fields stack in one column; above it they sit side
+  /// by side. Three fixed `Expanded` fields in a plain Row were what overflowed
+  /// on narrow screens.
+  static const double _stackBreakpoint = 560;
+
+  Widget _fieldRow(List<Widget> fields) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < _stackBreakpoint) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < fields.length; i++) ...[
+                if (i > 0) const SizedBox(height: 12),
+                fields[i],
+              ],
+            ],
+          );
+        }
+        return Row(
+          children: [
+            for (var i = 0; i < fields.length; i++) ...[
+              if (i > 0) const SizedBox(width: 12),
+              Expanded(child: fields[i]),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final busy = widget.busy;
@@ -238,31 +269,24 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
           ),
         ),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _companyCode,
-                enabled: !busy,
-                decoration: const InputDecoration(
-                  labelText: 'كود الشركة * / Code *',
-                  border: OutlineInputBorder(),
-                ),
-              ),
+        _fieldRow([
+          TextField(
+            controller: _companyCode,
+            enabled: !busy,
+            decoration: const InputDecoration(
+              labelText: 'كود الشركة * / Code *',
+              border: OutlineInputBorder(),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextField(
-                controller: _phone,
-                enabled: !busy,
-                decoration: const InputDecoration(
-                  labelText: 'الهاتف / Phone',
-                  border: OutlineInputBorder(),
-                ),
-              ),
+          ),
+          TextField(
+            controller: _phone,
+            enabled: !busy,
+            decoration: const InputDecoration(
+              labelText: 'الهاتف / Phone',
+              border: OutlineInputBorder(),
             ),
-          ],
-        ),
+          ),
+        ]),
         const SizedBox(height: 12),
         TextField(
           controller: _email,
@@ -323,64 +347,63 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
           style: const TextStyle(fontSize: 12, color: Colors.grey),
         ),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _hqCode,
-                enabled: !busy,
-                decoration: InputDecoration(
-                  labelText: _facilityKind == 'HEADQUARTERS'
-                      ? 'كود المقر / Unit code (MAIN)'
-                      : 'كود الفرع / Branch code (BR01)',
-                  border: const OutlineInputBorder(),
-                ),
-              ),
+        _fieldRow([
+          TextField(
+            controller: _hqCode,
+            enabled: !busy,
+            decoration: InputDecoration(
+              labelText: _facilityKind == 'HEADQUARTERS'
+                  ? 'كود المقر / Unit code (MAIN)'
+                  : 'كود الفرع / Branch code (BR01)',
+              border: const OutlineInputBorder(),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextField(
-                controller: _hqNameAr,
-                enabled: !busy,
-                decoration: InputDecoration(
-                  labelText: _facilityKind == 'HEADQUARTERS'
-                      ? 'اسم المقر بالعربية / HQ name (Arabic)'
-                      : 'اسم الفرع بالعربية / Branch name (Arabic)',
-                  border: const OutlineInputBorder(),
-                ),
-              ),
+          ),
+          TextField(
+            controller: _hqNameAr,
+            enabled: !busy,
+            decoration: InputDecoration(
+              labelText: _facilityKind == 'HEADQUARTERS'
+                  ? 'اسم المقر بالعربية / HQ name (Arabic)'
+                  : 'اسم الفرع بالعربية / Branch name (Arabic)',
+              border: const OutlineInputBorder(),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextField(
-                controller: _hqNameEn,
-                enabled: !busy,
-                decoration: InputDecoration(
-                  labelText: _facilityKind == 'HEADQUARTERS'
-                      ? 'اسم المقر بالإنجليزية / HQ name (English)'
-                      : 'اسم الفرع بالإنجليزية / Branch name (English)',
-                  border: const OutlineInputBorder(),
-                ),
-              ),
+          ),
+          TextField(
+            controller: _hqNameEn,
+            enabled: !busy,
+            decoration: InputDecoration(
+              labelText: _facilityKind == 'HEADQUARTERS'
+                  ? 'اسم المقر بالإنجليزية / HQ name (English)'
+                  : 'اسم الفرع بالإنجليزية / Branch name (English)',
+              border: const OutlineInputBorder(),
             ),
-          ],
-        ),
+          ),
+        ]),
         const SizedBox(height: 20),
-        Row(
+        const Text(
+          'شعار الشركة (اختياري) / Company logo (optional)',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        // Wraps instead of overflowing: on a narrow form the picker, the
+        // preview and the remove button move onto a second line.
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            const Text(
-              'شعار الشركة (اختياري) / Company logo (optional)',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(width: 16),
             OutlinedButton.icon(
               onPressed: busy ? null : _pickLogo,
               icon: const Icon(Icons.image_outlined, size: 18),
               label: const Text('اختيار صورة / Choose image'),
             ),
             if (_logo != null) ...[
-              const SizedBox(width: 8),
-              Image.memory(_logo!.bytes, width: 40, height: 40, fit: BoxFit.contain),
+              Image.memory(
+                _logo!.bytes,
+                width: 40,
+                height: 40,
+                fit: BoxFit.contain,
+              ),
               IconButton(
                 tooltip: 'إزالة / Remove',
                 onPressed: busy ? null : () => setState(() => _logo = null),

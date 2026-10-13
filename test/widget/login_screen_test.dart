@@ -7,6 +7,7 @@ import 'package:erp_kayan/shared/widgets/company_setup_form.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'test_harness.dart';
 
@@ -35,6 +36,7 @@ void main() {
   late FakeAuthRepository repository;
 
   setUp(() {
+    SharedPreferences.setMockInitialValues({});
     tokenStore = FakeTokenStore();
     repository = FakeAuthRepository();
   });
