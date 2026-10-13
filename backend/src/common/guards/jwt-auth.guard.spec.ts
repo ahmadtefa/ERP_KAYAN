@@ -8,6 +8,9 @@ const payload = {
   sub: 'user-1',
   username: 'stale-token-name',
   companyId: 'company-1',
+  branchId: 'branch-old',
+  isSuperAdmin: true,
+  permissions: ['admin.users.manage', 'inventory.items.read', 'reports.read'],
 };
 
 const activePrincipal = {
@@ -66,7 +69,7 @@ function makeGuard(options?: {
 }
 
 describe('JwtAuthGuard account status and live authorization', () => {
-  it('uses current database identity, permissions, super-admin status, and branch', async () => {
+  it('ignores stale token permissions, identity, super-admin status, and branch', async () => {
     const { guard, prisma } = makeGuard();
     const { context, request } = makeContext();
 
