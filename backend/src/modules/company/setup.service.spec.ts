@@ -1,6 +1,30 @@
 import { SetupService } from './setup.service';
 
 describe('SetupService seedRoles', () => {
+  it('seeds the company profile permission needed by profile-management routes', async () => {
+    const permissionUpsert = jest.fn().mockResolvedValue({});
+    const service = new SetupService({} as any, {} as any);
+
+    await (service as any).seedPermissions({
+      permission: { upsert: permissionUpsert },
+    });
+
+    expect(permissionUpsert).toHaveBeenCalledWith({
+      where: { code: 'company.profile.manage' },
+      update: {
+        nameEn: 'Manage company profile',
+        nameAr: 'إدارة بيانات الشركة',
+        module: 'admin',
+      },
+      create: {
+        code: 'company.profile.manage',
+        nameEn: 'Manage company profile',
+        nameAr: 'إدارة بيانات الشركة',
+        module: 'admin',
+      },
+    });
+  });
+
   it('grants accountants their working permissions and read-only invoice access', async () => {
     const permissions = [
       { id: 'accounting-read', code: 'accounting.accounts.read', module: 'accounting' },
