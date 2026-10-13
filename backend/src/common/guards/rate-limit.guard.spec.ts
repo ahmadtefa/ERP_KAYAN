@@ -1,4 +1,4 @@
-import { ExecutionContext, HttpStatus } from '@nestjs/common';
+import { ExecutionContext, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { RateLimitGuard } from './rate-limit.guard';
@@ -78,7 +78,7 @@ describe('RateLimitGuard', () => {
     for (let i = 0; i < 2; i += 1) {
       expect(guard.canActivate(context('/api/v1/auth/login').context)).toBe(true);
     }
-    expect(guard.canActivate(context('/api/v1/auth/login').context)).toBe(false);
+    expect(() => guard.canActivate(context('/api/v1/auth/login').context)).toThrow(HttpException);
     // A different route on the same address is untouched.
     expect(guard.canActivate(context('/api/v1/inventory/items').context)).toBe(true);
   });
@@ -87,7 +87,7 @@ describe('RateLimitGuard', () => {
     const guard = guardFor({ RATE_LIMIT_MAX: 1 });
     expect(guard.canActivate(context('/x', '10.0.0.1').context)).toBe(true);
     expect(guard.canActivate(context('/x', '10.0.0.2').context)).toBe(true);
-    expect(guard.canActivate(context('/x', '10.0.0.1').context)).toBe(false);
+    expect(() => guard.canActivate(context('/x', '10.0.0.1').context)).toThrow(HttpException);
   });
 
   it('ignores a forwarded address unless a proxy is trusted', () => {
@@ -96,7 +96,7 @@ describe('RateLimitGuard', () => {
     // Without TRUST_PROXY the header is not believed: a caller cannot reset
     // its own counter by inventing one.
     expect(guard.canActivate(context('/x', '10.0.0.1', headers).context)).toBe(true);
-    expect(guard.canActivate(context('/x', '10.0.0.1', headers).context)).toBe(false);
+    expect(() => guard.canActivate(context('/x', '10.0.0.1', headers).context)).toThrow(HttpException);
   });
 
   it('believes the forwarded address when a proxy is trusted', () => {
@@ -107,7 +107,7 @@ describe('RateLimitGuard', () => {
     const other = { 'x-forwarded-for': '203.0.113.10, 10.0.0.1' };
     expect(guard.canActivate(context('/x', '10.0.0.1', other).context)).toBe(true);
     // The first client is now over.
-    expect(guard.canActivate(context('/x', '10.0.0.1', headers).context)).toBe(false);
+    expect(() => guard.canActivate(context('/x', '10.0.0.1', headers).context)).toThrow(HttpException);
   });
 
   it('can be switched off by configuration', () => {
