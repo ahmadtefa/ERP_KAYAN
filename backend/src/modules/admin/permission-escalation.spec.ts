@@ -1,4 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { RolesService } from './roles.service';
 
@@ -35,6 +36,24 @@ describe('permission escalation protections', () => {
         ['admin.users.manage'],
         false,
       ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('does not let a regular user manager reset a super administrator password', async () => {
+    const prisma = {
+      user: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'super-admin-id',
+          companyId,
+          isSuperAdmin: true,
+          deletedAt: null,
+        }),
+      },
+    };
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
+
+    await expect(
+      service.changePassword(companyId, actorId, 'super-admin-id', 'new-test-password', false),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
