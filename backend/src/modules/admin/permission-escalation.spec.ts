@@ -14,7 +14,7 @@ describe('permission escalation protections', () => {
         findMany: jest.fn().mockResolvedValue([
           {
             id: 'role-id',
-            rolePermissions: [{ permission: { code: elevatedPermission } }],
+            rolePermissions: [{ permission: { code: 'admin.roles.manage' } }],
           },
         ]),
       },
