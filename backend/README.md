@@ -13,7 +13,10 @@ database; the Flutter client never connects to PostgreSQL directly.
 
 ## Current API surface
 
-All routes are prefixed with `/api/v1`.
+All routes are prefixed with `/api/v1`. This table highlights representative
+health, authentication, and accounting routes; it is **not** a complete API
+catalogue. For the authoritative route list and permissions, inspect the
+controllers and guards in `src/modules`.
 
 | Method | Path | Permission required |
 | --- | --- | --- |
@@ -29,6 +32,21 @@ All routes are prefixed with `/api/v1`.
 | POST | `/accounting/journal-entries/:id/post` | `accounting.journal.post` |
 | POST | `/accounting/journal-entries/:id/reverse` | `accounting.journal.post` |
 
+## Implemented backend areas
+
+The backend source currently includes modules for:
+
+- Authentication and health checks.
+- Company setup/profile and administration.
+- Chart of accounts, journal entries, and accounting reports.
+- Customers and suppliers (parties).
+- Inventory, sales invoices, and purchase invoices.
+- Data import/export and backup functionality.
+
+Module presence does not mean every possible business workflow is complete.
+Check each controller, service, DTO, permission, and test before relying on a
+specific endpoint in production.
+
 ## Accounting rules enforced by the server
 
 These are **not** UI conveniences — the API rejects violations:
@@ -38,13 +56,13 @@ These are **not** UI conveniences — the API rejects violations:
 2. **A line is a debit or a credit, never both, never negative.**
 3. **Only postable, active accounts accept postings.** Grouping accounts are
    rejected by code (e.g. `Accounts cannot receive postings: 11`).
-4. **Document numbers are server-generated** (`JV-000001`). Allocation takes a
-   row lock inside the same transaction that creates the document, so two
+4. **Document numbers are server-generated** (e.g. `JV-000001`). Allocation
+   takes a row lock inside the same transaction that creates the document, so
    concurrent requests cannot receive the same number.
 5. **Posted entries are immutable.** Corrections are made by reversal, which
    creates a mirror entry and marks the original `REVERSED`.
 6. **Company scoping comes from the verified token**, never from a request
-   parameter, so one company cannot read another's data.
+   parameter, so one company cannot read another company's data.
 
 ## Running locally (Windows)
 
@@ -116,8 +134,8 @@ Expected:
 | Username | `admin` |
 | Password | `Admin@12345` |
 
-**Change this password before any real use.** Override it during seeding with
-the `SEED_ADMIN_PASSWORD` environment variable.
+**Development only:** change this password before any real use. Override it
+during seeding with the `SEED_ADMIN_PASSWORD` environment variable.
 
 ## Connecting the Flutter client
 
@@ -143,19 +161,21 @@ The default already points at port 3000 for development.
 - Login, failed login, create, post and reverse operations are written to the
   append-only `audit_logs` table.
 
-## Not yet implemented
+## Remaining work to verify
 
-Honest list — these are deliberately absent, not forgotten:
+This is a **follow-up checklist**, not a claim that the listed features are
+entirely absent. Confirm the current implementation and tests before planning
+or deploying any of these areas:
 
-- Companies/branches/users/roles CRUD endpoints (data exists; no API yet)
-- Customers, suppliers, items, warehouses, sales, purchases, treasury
-- Financial reports (trial balance, P&L, balance sheet)
-- Fiscal periods and period locking
-- Rate limiting, 2FA, password reset
-- Automated tests for the backend
-- HTTP-only refresh-cookie flow for the web build
+- Cash/bank and treasury workflows, including reconciliation.
+- Fiscal-period closing and controlled reopening.
+- Two-factor authentication and password recovery.
+- Production web refresh-token handling with secure HTTP-only cookies.
+- Production deployment hardening, backup/restore drills, and monitoring.
+- End-to-end tests for full sales/purchase posting, reversals, and concurrent
+  inventory movements against PostgreSQL.
 
-## Pending business decisions
+## Open accounting decisions
 
 | Topic | Question |
 | --- | --- |
