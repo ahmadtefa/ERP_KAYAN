@@ -215,6 +215,30 @@ export class SetupService {
         create: { roleId: adminRole.id, permissionId: p.id },
       });
     }
+
+    // Keep first-run web setup aligned with prisma/seed.ts. Accountants need
+    // the books, parties, stock, and reports, plus read-only invoice access
+    // for reconciliation; invoice creation/posting and administration remain
+    // with the roles chosen by the company owner.
+    const accountantModules = ['accounting', 'parties', 'inventory', 'reports'];
+    const accountantReadOnly = ['sales.invoices.read', 'purchases.invoices.read'];
+    for (const p of all.filter(
+      (permission) =>
+        accountantModules.includes(permission.module) ||
+        accountantReadOnly.includes(permission.code),
+    )) {
+      await tx.rolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: accountantRole.id,
+            permissionId: p.id,
+          },
+        },
+        update: {},
+        create: { roleId: accountantRole.id, permissionId: p.id },
+      });
+    }
+
     return { admin: adminRole.id, accountant: accountantRole.id };
   }
 
