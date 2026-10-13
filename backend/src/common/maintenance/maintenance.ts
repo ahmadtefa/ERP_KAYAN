@@ -16,9 +16,9 @@ import { Observable } from 'rxjs';
  * being let loose on a database that is mid-replacement.
  *
  * The flag lives in memory of the process doing the restore. That is exactly
- * where it belongs: the restore is local work by the server on its own
- * database, and a second copy of the API (if one ever exists) has its own
- * connection and its own answer.
+ * where it belongs for the supported single-server deployment. The in-flight
+ * restore request is already admitted before maintenance starts; while it runs,
+ * new write requests (including new backup/restore operations) are blocked.
  */
 @Injectable()
 export class MaintenanceService {
@@ -70,11 +70,9 @@ export class MaintenanceInterceptor implements NestInterceptor {
     const method = request.method.toUpperCase();
     const isRead = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
 
-    // The backup routes stay open: that is how the restore itself talks to
-    // the program, and how the screen asks how the restore is going.
-    const isBackupRoute = request.path.includes('/backup');
-
-    if (isRead || isBackupRoute) return next.handle();
+    // The in-flight restore continues in its already-admitted request.
+    // New write requests, including backup and restore operations, must wait.
+    if (isRead) return next.handle();
 
     throw new ServiceUnavailableException(
       'The database is being restored right now. ' +
