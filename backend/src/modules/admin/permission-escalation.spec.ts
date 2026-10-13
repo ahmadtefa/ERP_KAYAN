@@ -102,6 +102,31 @@ describe('permission escalation protections', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('prevents company role managers from changing global system role permissions', async () => {
+    const prisma = {
+      role: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'global-accountant',
+          companyId: null,
+          isSystem: true,
+          deletedAt: null,
+        }),
+      },
+    };
+    const service = new RolesService(prisma as any, { record: jest.fn() } as any);
+
+    await expect(
+      service.setPermissions(
+        companyId,
+        actorId,
+        'global-accountant',
+        ['accounting.journals.read'],
+        ['admin.roles.manage', 'accounting.journals.read'],
+        false,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
   it('revokes all active refresh sessions when a user is disabled through update', async () => {
     const userRecord = {
       id: 'target-user',
