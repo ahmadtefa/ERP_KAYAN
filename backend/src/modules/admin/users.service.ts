@@ -126,6 +126,9 @@ export class UsersService {
       where: { id, companyId, deletedAt: null },
     });
     if (!before) throw new NotFoundException('User not found');
+    if (before.isSuperAdmin && !isSuperAdmin) {
+      throw new ForbiddenException('Only a super administrator can modify a super administrator account');
+    }
     if (before.username === SYSTEM_USERNAME && dto.isActive === false) {
       throw new BadRequestException('The system administrator cannot be deactivated');
     }
@@ -219,13 +222,21 @@ export class UsersService {
     return { id, sessionsRevoked: true };
   }
 
-  async deactivate(companyId: string, actorId: string, id: string) {
+  async deactivate(
+    companyId: string,
+    actorId: string,
+    id: string,
+    actorIsSuperAdmin: boolean,
+  ) {
     const user = await this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
     });
     if (!user) throw new NotFoundException('User not found');
     if (user.id === actorId) {
       throw new BadRequestException('You cannot deactivate your own account');
+    }
+    if (user.isSuperAdmin && !actorIsSuperAdmin) {
+      throw new ForbiddenException('Only a super administrator can deactivate a super administrator account');
     }
     if (user.username === SYSTEM_USERNAME) {
       throw new BadRequestException('The system administrator cannot be deactivated');
