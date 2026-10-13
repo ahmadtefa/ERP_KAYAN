@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -59,7 +60,13 @@ export class UsersService {
     return this.toResponse(user);
   }
 
-  async create(companyId: string, actorId: string, dto: CreateUserDto) {
+  async create(
+    companyId: string,
+    actorId: string,
+    dto: CreateUserDto,
+    actorPermissions: string[],
+    isSuperAdmin: boolean,
+  ) {
     const username = dto.username.trim().toLowerCase();
     if (username === SYSTEM_USERNAME) {
       throw new ConflictException('That username is reserved');
@@ -67,7 +74,12 @@ export class UsersService {
     const existing = await this.prisma.user.findUnique({ where: { username } });
     if (existing) throw new ConflictException('That username is already taken');
 
-    await this.assertRolesBelongToCompany(companyId, dto.roleIds);
+    await this.assertRolesAssignable(
+      companyId,
+      dto.roleIds,
+      actorPermissions,
+      isSuperAdmin,
+    );
     await this.assertBranchesBelongToCompany(companyId, dto.branchIds);
 
     const passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
@@ -102,7 +114,14 @@ export class UsersService {
     return this.findOne(companyId, created.id);
   }
 
-  async update(companyId: string, actorId: string, id: string, dto: UpdateUserDto) {
+  async update(
+    companyId: string,
+    actorId: string,
+    id: string,
+    dto: UpdateUserDto,
+    actorPermissions: string[],
+    isSuperAdmin: boolean,
+  ) {
     const before = await this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
     });
@@ -111,7 +130,12 @@ export class UsersService {
       throw new BadRequestException('The system administrator cannot be deactivated');
     }
 
-    await this.assertRolesBelongToCompany(companyId, dto.roleIds);
+    await this.assertRolesAssignable(
+      companyId,
+      dto.roleIds,
+      actorPermissions,
+      isSuperAdmin,
+    );
     await this.assertBranchesBelongToCompany(companyId, dto.branchIds);
 
     await this.prisma.$transaction(async (tx) => {
@@ -242,19 +266,43 @@ export class UsersService {
     }
   }
 
-  /// A company must never be able to grant a role that belongs to another
-  /// company, so the ids are checked rather than trusted.
-  private async assertRolesBelongToCompany(companyId: string, roleIds?: string[]) {
+  /// Prevents a user administrator from assigning a role with permissions
+  /// they do not personally hold. System super-admins may assign any role.
+  private async assertRolesAssignable(
+    companyId: string,
+    roleIds: string[] | undefined,
+    actorPermissions: string[],
+    isSuperAdmin: boolean,
+  ) {
     if (!roleIds?.length) return;
-    const found = await this.prisma.role.count({
+    const roles = await this.prisma.role.findMany({
       where: {
         id: { in: roleIds },
         deletedAt: null,
         OR: [{ companyId }, { companyId: null }],
       },
+      include: {
+        rolePermissions: { include: { permission: { select: { code: true } } } },
+      },
     });
-    if (found !== roleIds.length) {
+    if (roles.length !== roleIds.length) {
       throw new BadRequestException('One of the roles does not exist in this company');
+    }
+    if (isSuperAdmin) return;
+
+    const forbidden = [
+      ...new Set(
+        roles.flatMap((role) =>
+          role.rolePermissions
+            .map((rp) => rp.permission.code)
+            .filter((code) => !actorPermissions.includes(code)),
+        ),
+      ),
+    ];
+    if (forbidden.length) {
+      throw new ForbiddenException(
+        `You cannot assign permissions you do not hold: ${forbidden.join(', ')}`,
+      );
     }
   }
 

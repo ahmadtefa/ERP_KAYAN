@@ -36,7 +36,13 @@ export class UsersController {
 
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateUserDto) {
-    return this.users.create(user.companyId, user.userId, dto);
+    return this.users.create(
+      user.companyId,
+      user.userId,
+      dto,
+      user.permissions,
+      user.isSuperAdmin,
+    );
   }
 
   @Patch(':id')
@@ -45,7 +51,14 @@ export class UsersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateUserDto,
   ) {
-    return this.users.update(user.companyId, user.userId, id, dto);
+    return this.users.update(
+      user.companyId,
+      user.userId,
+      id,
+      dto,
+      user.permissions,
+      user.isSuperAdmin,
+    );
   }
 
   @Post(':id/password')
