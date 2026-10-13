@@ -18,24 +18,26 @@ export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
 
   private parseDate(value: string, field: string): Date {
+    // Accept date-only values and ISO timestamps, but validate the calendar
+    // date before Date parses it (JavaScript normalizes dates such as Feb 31).
+    const datePrefix = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/.exec(value);
+    if (!datePrefix) {
+      throw new BadRequestException(`"${field}" must be an ISO date or timestamp`);
+    }
+
+    const [, year, month, day] = datePrefix;
+    const normalized = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+    if (
+      normalized.getUTCFullYear() !== Number(year) ||
+      normalized.getUTCMonth() !== Number(month) - 1 ||
+      normalized.getUTCDate() !== Number(day)
+    ) {
+      throw new BadRequestException(`"${field}" must be a valid calendar date`);
+    }
+
     const parsed = new Date(value);
     if (!Number.isFinite(parsed.getTime())) {
       throw new BadRequestException(`"${field}" must be a valid date`);
-    }
-
-    // Reject impossible calendar dates such as 2026-02-31, which JavaScript
-    // otherwise normalizes into a date in the following month.
-    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-    if (dateOnly) {
-      const [, year, month, day] = dateOnly;
-      const normalized = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
-      if (
-        normalized.getUTCFullYear() !== Number(year) ||
-        normalized.getUTCMonth() !== Number(month) - 1 ||
-        normalized.getUTCDate() !== Number(day)
-      ) {
-        throw new BadRequestException(`"${field}" must be a valid calendar date`);
-      }
     }
     return parsed;
   }
