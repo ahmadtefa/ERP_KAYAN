@@ -6,15 +6,18 @@ import '../../../../core/platform/picked_file.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 
 /// Where the server is, so a download link can be built.
-final appConfigProvider = Provider<AppConfig>((ref) => AppConfig.fromEnvironment());
+final appConfigProvider = Provider<AppConfig>(
+  (ref) => AppConfig.fromEnvironment(),
+);
 
 /// Builds the URL of a report file or a print page.
 ///
 /// The token travels in the address because the browser opens these links
 /// itself - a new tab cannot carry an Authorization header. The server accepts
 /// a query token on these two routes only.
-final reportLinkProvider =
-    Provider<ReportLinkBuilder>((ref) => ReportLinkBuilder(ref));
+final reportLinkProvider = Provider<ReportLinkBuilder>(
+  (ref) => ReportLinkBuilder(ref),
+);
 
 class ReportLinkBuilder {
   ReportLinkBuilder(this._ref);
@@ -141,7 +144,10 @@ class ReportLinkBuilder {
   }
 
   /// A blank spreadsheet to fill in, for one kind of import.
-  Future<String> importTemplate({required String kind, required String language}) async {
+  Future<String> importTemplate({
+    required String kind,
+    required String language,
+  }) async {
     final query = <String, String>{'lang': language, 'token': await _token()};
     return '$_base/import/templates/$kind?${_encode(query)}';
   }
@@ -149,6 +155,12 @@ class ReportLinkBuilder {
   /// The whole company, as one file.
   Future<String> backup() async {
     return '$_base/backup/download?token=${await _token()}';
+  }
+
+  /// One full-database backup file, sitting on the server.
+  Future<String> fullBackupDownload(String name) async {
+    return '$_base/backup/full/${Uri.encodeComponent(name)}/download'
+        '?token=${await _token()}';
   }
 
   String _encode(Map<String, String> query) => query.entries
@@ -164,10 +176,10 @@ enum ImportKind {
 
   /// The name the API uses.
   String get slug => switch (this) {
-        ImportKind.customers => 'customers',
-        ImportKind.suppliers => 'suppliers',
-        ImportKind.items => 'items',
-      };
+    ImportKind.customers => 'customers',
+    ImportKind.suppliers => 'suppliers',
+    ImportKind.items => 'items',
+  };
 }
 
 /// What happens to a record the file carries that already exists.
@@ -193,14 +205,21 @@ class ImportReport {
   int get updated => _int('updated');
   int get skipped => _int('skipped');
 
-  List<Map<String, dynamic>> get errors =>
-      (raw['errors'] as List? ?? const []).whereType<Map>().map(Map<String, dynamic>.from).toList();
+  List<Map<String, dynamic>> get errors => (raw['errors'] as List? ?? const [])
+      .whereType<Map>()
+      .map(Map<String, dynamic>.from)
+      .toList();
 
   List<Map<String, dynamic>> get preview =>
-      (raw['preview'] as List? ?? const []).whereType<Map>().map(Map<String, dynamic>.from).toList();
+      (raw['preview'] as List? ?? const [])
+          .whereType<Map>()
+          .map(Map<String, dynamic>.from)
+          .toList();
 
   List<String> get unknownColumns =>
-      (raw['unknownColumns'] as List? ?? const []).map((value) => '$value').toList();
+      (raw['unknownColumns'] as List? ?? const [])
+          .map((value) => '$value')
+          .toList();
 
   bool get hasErrors => errors.isNotEmpty;
 
@@ -220,8 +239,12 @@ class ImportController extends Notifier<ImportState> {
 
   void chooseMode(ImportMode mode) => state = state.copyWith(mode: mode);
 
-  void chooseFile(PickedFile? file) =>
-      state = state.copyWith(file: file, report: null, failure: null, clearFile: file == null);
+  void chooseFile(PickedFile? file) => state = state.copyWith(
+    file: file,
+    report: null,
+    failure: null,
+    clearFile: file == null,
+  );
 
   void beginning() =>
       state = state.copyWith(busy: true, failure: null, report: null);
@@ -257,7 +280,10 @@ class ImportState {
   /// Whether the last run was a dry run that found something to write. Only
   /// then does the "import for real" button make sense.
   bool get readyToCommit =>
-      report != null && report!.dryRun && !report!.hasErrors && (report!.created + report!.updated) > 0;
+      report != null &&
+      report!.dryRun &&
+      !report!.hasErrors &&
+      (report!.created + report!.updated) > 0;
 
   ImportState copyWith({
     ImportKind? kind,
@@ -279,9 +305,8 @@ class ImportState {
   }
 }
 
-final importControllerProvider = NotifierProvider<ImportController, ImportState>(
-  ImportController.new,
-);
+final importControllerProvider =
+    NotifierProvider<ImportController, ImportState>(ImportController.new);
 
 /// Talks to the import and backup routes.
 class DataService {
@@ -349,6 +374,67 @@ final dataServiceProvider = Provider<DataService>(
   (ref) => DataService(ref.read(apiClientProvider).raw),
 );
 
+/// Full-database backups: the whole PostgreSQL archive, for disasters.
+class FullBackupService {
+  FullBackupService(this._dio);
+
+  final Dio _dio;
+
+  static const _path = '/backup/full';
+
+  /// What this machine can do, and whether a restore is running right now.
+  Future<Map<String, dynamic>> capabilities() async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '$_path/capabilities',
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  Future<List<Map<String, dynamic>>> list() async {
+    final response = await _dio.get<List<dynamic>>(_path);
+    return (response.data ?? const [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList(growable: false);
+  }
+
+  Future<Map<String, dynamic>> create() async {
+    final response = await _dio.post<Map<String, dynamic>>(_path);
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+
+  Future<void> delete(String name) =>
+      _dio.delete<dynamic>('$_path/${Uri.encodeComponent(name)}');
+
+  /// Restores the whole database from a file on the server or an upload.
+  ///
+  /// [confirm] must be true — the screen makes the person type the
+  /// confirmation before it sends this.
+  Future<Map<String, dynamic>> restore({
+    PickedFile? file,
+    String? fileName,
+    required bool confirm,
+  }) async {
+    final form = FormData.fromMap({
+      if (file != null)
+        'file': MultipartFile.fromBytes(file.bytes, filename: file.name),
+      'fileName': ?fileName,
+      'confirm': confirm,
+    });
+    final response = await _dio.post<Map<String, dynamic>>(
+      '$_path/restore',
+      data: form,
+      queryParameters: {'confirm': confirm},
+      options: Options(contentType: 'multipart/form-data'),
+    );
+    return Map<String, dynamic>.from(response.data ?? const {});
+  }
+}
+
+final fullBackupServiceProvider = Provider<FullBackupService>(
+  (ref) => FullBackupService(ref.read(apiClientProvider).raw),
+);
+
 /// Turns whatever was thrown into something worth reading.
 ///
 /// The API answers errors as Problem Details - a title and a `detail` written
@@ -406,11 +492,14 @@ class ExportCapabilities {
 }
 
 /// Asked once when the app starts; the answer does not change while it runs.
-final exportCapabilitiesProvider = FutureProvider<ExportCapabilities>((ref) async {
+final exportCapabilitiesProvider = FutureProvider<ExportCapabilities>((
+  ref,
+) async {
   try {
-    final response = await ref.read(apiClientProvider).raw.get<Map<String, dynamic>>(
-          '/exports/capabilities',
-        );
+    final response = await ref
+        .read(apiClientProvider)
+        .raw
+        .get<Map<String, dynamic>>('/exports/capabilities');
     return ExportCapabilities.from(
       Map<String, dynamic>.from(response.data ?? const {}),
     );

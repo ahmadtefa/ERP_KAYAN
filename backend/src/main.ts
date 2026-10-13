@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 
 import { ValidationPipe, Logger } from '@nestjs/common';
@@ -38,7 +39,8 @@ async function bootstrap() {
     .map((o) => o.trim())
     .filter(Boolean);
   const isProduction = process.env.NODE_ENV === 'production';
-  const isLocalOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+  const isLanOrLocalOrigin =
+    /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|[a-zA-Z0-9-]+\.local)(:\d+)?$/;
 
   app.enableCors({
     origin: (
@@ -49,7 +51,8 @@ async function bootstrap() {
       // apply to: native apps, curl, the mobile build.
       if (!origin) return callback(null, true);
       if (configuredOrigins.includes(origin)) return callback(null, true);
-      if (!isProduction && isLocalOrigin.test(origin)) return callback(null, true);
+      if (isLanOrLocalOrigin.test(origin)) return callback(null, true);
+      if (!isProduction) return callback(null, true);
       logger.warn(`Blocked CORS request from origin: ${origin}`);
       return callback(null, false);
     },
@@ -60,12 +63,20 @@ async function bootstrap() {
   // same address. One origin means no CORS, no second port to remember, and the
   // browser address is the address of the program itself.
   //
-  //   cd backend && npm run build        (or: flutter build web first)
-  //
-  // The folder is optional: without it the API behaves exactly as before and
-  // the client is served by its own dev server.
-  const webRoot = join(process.cwd(), '..', 'build', 'web');
-  if (existsSync(join(webRoot, 'index.html'))) {
+  // Checked in order: explicit env var -> relative to backend -> repo root -> dist bundle.
+  const candidateWebRoots = [
+    process.env.KAYAN_WEB_ROOT,
+    join(process.cwd(), '..', 'build', 'web'),
+    join(process.cwd(), 'build', 'web'),
+    join(__dirname, '..', '..', 'build', 'web'),
+    join(__dirname, '..', 'web'),
+  ].filter(Boolean) as string[];
+
+  const webRoot = candidateWebRoots.find((dir) =>
+    existsSync(join(dir, 'index.html')),
+  );
+
+  if (webRoot) {
     app.useStaticAssets(webRoot);
     // Any other path that is not part of the API belongs to the client's own
     // routing, so hand back the page and let the client route it.
@@ -95,6 +106,17 @@ async function bootstrap() {
   const host = process.env.HOST ?? '0.0.0.0';
   await app.listen(port, host);
   logger.log(`API listening on http://${host}:${port}/api/v1`);
+  logger.log(`Local web access: http://localhost:${port}`);
+  if (host === '0.0.0.0') {
+    const interfaces = networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+      for (const net of interfaces[name] ?? []) {
+        if (net.family === 'IPv4' && !net.internal) {
+          logger.log(`Network LAN access (${name}): http://${net.address}:${port}`);
+        }
+      }
+    }
+  }
   // A line the desktop shell can wait for, in addition to the health route.
   logger.log(`KAYAN-API-READY port=${port} host=${host}`);
 }

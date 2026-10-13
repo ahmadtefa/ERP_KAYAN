@@ -136,6 +136,11 @@ class ErpShell extends ConsumerWidget {
         Icons.admin_panel_settings_outlined,
         l10n.administration,
       ),
+      _NavItem(
+        AppRoutes.companySettings,
+        Icons.business_outlined,
+        l10n.companySettings,
+      ),
       _NavItem(AppRoutes.settings, Icons.settings_outlined, l10n.settings),
     ];
   }

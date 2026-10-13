@@ -17,6 +17,7 @@ import '../../features/invoicing/presentation/providers/invoice_providers.dart';
 import '../../features/invoicing/presentation/screens/invoice_list_screen.dart';
 import '../../features/parties/presentation/screens/parties_screen.dart';
 import '../../features/reports/presentation/reports_screen.dart';
+import '../../features/settings/presentation/screens/company_settings_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
 import '../shell/erp_shell.dart';
 
@@ -49,6 +50,7 @@ class AppRoutes {
   static const importData = '/data/import';
   static const backup = '/data/backup';
   static const administration = '/administration';
+  static const companySettings = '/settings/company';
   static const settings = '/settings';
 }
 
@@ -116,5 +118,6 @@ const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.importData, child: ImportScreen()),
   (path: AppRoutes.backup, child: BackupScreen()),
   (path: AppRoutes.administration, child: AdminScreen()),
+  (path: AppRoutes.companySettings, child: CompanySettingsScreen()),
   (path: AppRoutes.settings, child: SettingsScreen()),
 ];

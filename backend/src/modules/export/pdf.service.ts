@@ -1,4 +1,5 @@
 import { Injectable, Logger, UnprocessableEntityException } from '@nestjs/common';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { existsSync } from 'fs';
 import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
@@ -79,7 +80,10 @@ export class PdfService {
         throw new Error('the browser produced something that is not a PDF');
       }
 
-      return pdf;
+      // Page numbers, stamped across the whole document: a report printed on
+      // paper has to be able to say "page 3 of 7". The digits are Western in
+      // both languages, the same as everywhere else in the program.
+      return await stampPageNumbers(pdf);
     } catch (error) {
       this.logger.error(
         `PDF rendering failed: ${(error as Error).message}`,
@@ -159,6 +163,31 @@ export class PdfService {
   get pageSetup() {
     return this.paper;
   }
+}
+
+/// Adds "n / total" at the bottom of every page.
+async function stampPageNumbers(pdf: Buffer): Promise<Buffer> {
+  const document = await PDFDocument.load(pdf);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const pages = document.getPages();
+  const total = pages.length;
+  const size = 9;
+
+  pages.forEach((page, index) => {
+    const { width } = page.getSize();
+    const label = `${index + 1} / ${total}`;
+    const textWidth = font.widthOfTextAtSize(label, size);
+    page.drawText(label, {
+      x: (width - textWidth) / 2,
+      // In the bottom margin the browser leaves free, below the report body.
+      y: 12,
+      size,
+      font,
+      color: rgb(0.45, 0.45, 0.45),
+    });
+  });
+
+  return Buffer.from(await document.save());
 }
 
 /// Runs a command and resolves when it exits cleanly.

@@ -5,6 +5,8 @@
 /// reports `unsupported`, and the program goes straight to its normal screens.
 library;
 
+import 'company_setup_data.dart';
+
 /// The outcome of asking a build to start its own server.
 class LocalBackendStatus {
   const LocalBackendStatus.unsupported();
@@ -43,6 +45,7 @@ class LocalBackend {
     required String username,
     required String password,
     required String appDisplayName,
+    CompanySetupData? company,
   }) async =>
       const LocalBackendStatus.unsupported();
 }

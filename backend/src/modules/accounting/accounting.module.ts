@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { AuditModule } from '../../common/audit/audit.module';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { AccountMapService } from './account-map.service';
 import { ChartOfAccountsController } from './chart-of-accounts.controller';
@@ -12,6 +13,7 @@ import { JournalEntriesService } from './journal-entries.service';
 import { PostingService } from './posting.service';
 
 @Module({
+  imports: [AuditModule],
   controllers: [
       ChartOfAccountsController,
       JournalEntriesController,

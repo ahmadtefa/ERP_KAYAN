@@ -41,12 +41,18 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
 OutputBaseFilename=KAYAN-ERP-Setup-{#AppVersion}
+; The KAYAN logo (Kayan.png at the repository root, rendered by
+; tools\generate_icons.py) is the icon of the Setup file itself — the first
+; thing a customer sees. The path is relative to this script, so it works on
+; any machine that has the repository.
+SetupIconFile=..\windows\runner\resources\app_icon.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-; The client is a 64-bit Flutter build and the server ships a 64-bit node.exe.
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+; The client and bundled native dependencies target Windows x64 (AMD64).
+UseSetupLdr=x64
+ArchitecturesAllowed=x64
+ArchitecturesInstallIn64BitMode=x64
 ; The program itself needs no administrator rights to run; installing under
 ; Program Files is what needs them. Everything the program writes at run time
 ; goes to %APPDATA%, so the installation folder stays read-only and safe.
@@ -56,20 +62,32 @@ PrivilegesRequired=admin
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+; Arabic ships as an *unofficial* Inno Setup translation, so a standard
+; installation does not have it. Asking for a file that is not there makes
+; ISCC fail outright, which would take the whole installer down with it: the
+; language is offered when this machine has it, and the installer is still
+; perfectly usable in English when it does not.
+#if FileExists(AddBackslash(CompilerPath) + "Languages\Arabic.isl")
 Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl"
+#endif
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 
 [Files]
 ; The whole assembled folder: program, client runtime, server, libraries,
-; portable node.exe, README.txt. Nothing is left out and nothing is fetched.
+; portable node.exe, the KAYAN icon files, README.txt. Nothing is left out and
+; nothing is fetched.
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
+; The shortcuts carry the KAYAN icon explicitly (the copy that travels inside
+; the package, icons\app_icon.ico), so they keep it even where Windows would
+; otherwise fall back to a generic one. The program's own window and taskbar
+; icon come from the same artwork, embedded into erp_kayan.exe at build time.
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\icons\app_icon.ico"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\icons\app_icon.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent

@@ -57,3 +57,7 @@ backend/.env.*
 
 # Local environment secrets
 .env
+backend/backups/
+
+# Maven (accidentally created, not part of this project)
+.mvn/
