@@ -88,7 +88,13 @@ describe('JwtAuthGuard account status and live authorization', () => {
         isSuperAdmin: true,
         deletedAt: true,
         userRoles: {
-          where: { companyId: payload.companyId },
+          where: {
+            companyId: payload.companyId,
+            role: {
+              deletedAt: null,
+              OR: [{ companyId: payload.companyId }, { companyId: null }],
+            },
+          },
           select: {
             role: {
               select: {
