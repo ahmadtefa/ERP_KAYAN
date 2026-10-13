@@ -185,10 +185,15 @@ export class AuthService {
 
     // Rotation: the presented token is revoked and a new one issued, so a
     // stolen token is usable at most once.
-    await this.prisma.refreshToken.update({
-      where: { id: stored.id },
+    // Compare-and-set the token's revocation state. Two simultaneous refresh
+    // requests may both have read the same live token; only one may rotate it.
+    const rotation = await this.prisma.refreshToken.updateMany({
+      where: { id: stored.id, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    if (rotation.count !== 1) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
     const permissions = [
       ...new Set(
         user.userRoles.flatMap((ur) =>
