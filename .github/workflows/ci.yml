@@ -18,6 +18,8 @@ jobs:
   backend:
     name: Backend (real Prisma engines)
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan?schema=public
     defaults:
       run:
         working-directory: backend
@@ -36,8 +38,6 @@ jobs:
         run: npx prisma generate
       - name: Validate Prisma schema
         run: npx prisma validate
-        env:
-          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan?schema=public
       - name: Type-check
         run: npx tsc --noEmit
       - name: Run unit tests
