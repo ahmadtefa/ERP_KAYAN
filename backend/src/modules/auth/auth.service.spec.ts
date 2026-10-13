@@ -1,10 +1,16 @@
 import { UnauthorizedException } from '@nestjs/common';
 import * as argon2 from 'argon2';
+
+jest.mock('argon2', () => ({
+  ...jest.requireActual('argon2'),
+  verify: jest.fn(),
+}));
 import { AuthService } from './auth.service';
 
 describe('refresh session security', () => {
   it('increments failed-login counters atomically and locks at the threshold', async () => {
-    const verify = jest.spyOn(argon2, 'verify').mockResolvedValue(false);
+    const verify = jest.mocked(argon2.verify);
+    verify.mockResolvedValue(false);
     const update = jest.fn()
       .mockResolvedValueOnce({ failedLoginCount: 5 })
       .mockResolvedValueOnce({});
@@ -44,7 +50,7 @@ describe('refresh session security', () => {
         data: { lockedUntil: expect.any(Date) },
       });
     } finally {
-      verify.mockRestore();
+      verify.mockReset();
     }
   });
 
