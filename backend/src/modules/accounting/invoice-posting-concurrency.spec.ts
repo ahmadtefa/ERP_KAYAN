@@ -59,7 +59,7 @@ describe('invoice posting concurrency guards', () => {
     const updateMany = jest.fn().mockResolvedValue({ count: 0 });
     const stockCreate = jest.fn();
     const prisma = {
-      salesInvoice: { findFirst },
+      salesInvoice: { findFirst: jest.fn().mockResolvedValue(invoice) },
       journalEntry: { findFirst: jest.fn().mockResolvedValue(original) },
       $transaction: jest.fn(async (callback: (tx: any) => unknown) =>
         callback({
