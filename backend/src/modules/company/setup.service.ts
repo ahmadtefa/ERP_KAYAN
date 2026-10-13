@@ -286,6 +286,7 @@ const SETUP_PERMISSIONS: Array<[string, string, string, string]> = [
   ['admin.audit.read', 'View audit trail', 'عرض سجل التدقيق', 'admin'],
   ['admin.backup', 'Take and restore backups', 'أخذ واسترجاع نسخة احتياطية', 'admin'],
   ['admin.company.manage', 'Manage company profile and branches', 'إدارة بيانات الشركة والفروع', 'admin'],
+  ['company.profile.manage', 'Manage company profile', 'إدارة بيانات الشركة', 'admin'],
   ['parties.customers.read', 'View customers', 'عرض العملاء', 'parties'],
   ['parties.customers.create', 'Add customers', 'إضافة عملاء', 'parties'],
   ['parties.customers.update', 'Edit customers', 'تعديل العملاء', 'parties'],
