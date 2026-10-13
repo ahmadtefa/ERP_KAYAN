@@ -176,6 +176,55 @@ describe('FullBackupService guards', () => {
     });
   });
 
+  describe('recovery safety', () => {
+    it('keeps maintenance active when restoring the safety backup also fails', async () => {
+      const state: { active: boolean; detail: string | null } = {
+        active: false,
+        detail: null,
+      };
+      const maintenance = {
+        get isActive() {
+          return state.active;
+        },
+        get status() {
+          return { maintenance: state.active, detail: state.detail, since: null };
+        },
+        begin(detail: string) {
+          state.active = true;
+          state.detail = detail;
+        },
+        end() {
+          state.active = false;
+          state.detail = null;
+        },
+      };
+      const service = new FullBackupService(
+        {} as any,
+        { record: async () => {} } as any,
+        maintenance as any,
+      );
+      jest.spyOn(service as any, 'safePath').mockReturnValue('/tmp/kayan-safety.dump');
+      jest.spyOn(service as any, 'connectionArgs').mockReturnValue([]);
+      jest.mocked(childProcess.execFile).mockImplementation(
+        ((_, __, ___, callback) => {
+          const complete = callback as (
+            error: Error | null,
+            stdout: string,
+            stderr: string,
+          ) => void;
+          complete(new Error('restore failed'), '', 'restore failed');
+          return {} as childProcess.ChildProcess;
+        }) as typeof childProcess.execFile,
+      );
+
+      await expect(
+        (service as any).recoverFrom('kayan-safety-2026-01-01.dump', 'pg_restore'),
+      ).resolves.toBe(false);
+      expect(maintenance.isActive).toBe(true);
+      expect(maintenance.status.detail).toContain('ATTENTION');
+    });
+  });
+
   describe('restore', () => {
     it('refuses to run without an explicit confirmation', async () => {
       const service = serviceWithEnv(temporaryDir('kayan-backups-'));
