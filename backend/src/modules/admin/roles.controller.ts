@@ -43,7 +43,13 @@ export class RolesController {
   @Post('roles')
   @RequirePermissions('admin.roles.manage')
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateRoleDto) {
-    return this.roles.create(user.companyId, user.userId, dto);
+    return this.roles.create(
+      user.companyId,
+      user.userId,
+      dto,
+      user.permissions,
+      user.isSuperAdmin,
+    );
   }
 
   @Patch('roles/:id')
@@ -63,7 +69,14 @@ export class RolesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SetRolePermissionsDto,
   ) {
-    return this.roles.setPermissions(user.companyId, user.userId, id, dto.permissions);
+    return this.roles.setPermissions(
+      user.companyId,
+      user.userId,
+      id,
+      dto.permissions,
+      user.permissions,
+      user.isSuperAdmin,
+    );
   }
 
   @Delete('roles/:id')
