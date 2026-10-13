@@ -93,17 +93,21 @@ export class RateLimitGuard implements CanActivate {
     },
     retryAfter: number,
     sensitive: boolean,
-  ): boolean {
+  ): never {
     response.setHeader('Retry-After', String(retryAfter));
-    response.status(HttpStatus.TOO_MANY_REQUESTS).json({
-      type: 'about:blank',
-      title: 'TOO_MANY_REQUESTS',
-      status: HttpStatus.TOO_MANY_REQUESTS,
-      detail: sensitive
-        ? `Too many attempts. Try again in ${retryAfter} second(s).`
-        : `Too many requests. Try again in ${retryAfter} second(s).`,
-    });
-    return false;
+    // Let Nest's exception filter send the response exactly once. Returning
+    // false after writing here would make Nest attempt a second 403 response.
+    throw new HttpException(
+      {
+        type: 'about:blank',
+        title: 'TOO_MANY_REQUESTS',
+        status: HttpStatus.TOO_MANY_REQUESTS,
+        detail: sensitive
+          ? `Too many attempts. Try again in ${retryAfter} second(s).`
+          : `Too many requests. Try again in ${retryAfter} second(s).`,
+      },
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
   }
 
   private get enabled(): boolean {
