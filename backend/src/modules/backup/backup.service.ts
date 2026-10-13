@@ -190,6 +190,8 @@ export class BackupService {
       );
     }
 
+    await this.validateReferences(file);
+
     const existing = await this.countExisting(file.companyId);
     const hasData = Object.values(existing).some((count) => count > 0);
 
@@ -265,6 +267,123 @@ export class BackupService {
     if (!file.tables || typeof file.tables !== 'object') {
       throw new BadRequestException('The backup file has no tables in it.');
     }
+  }
+
+  /// Rejects crafted backup files that point a row at another company's
+  /// records. A backup is untrusted input: the companyId check alone is not
+  /// enough because child rows and foreign keys can still name other tenants.
+  private async validateReferences(file: BackupFile): Promise<void> {
+    const rowsByTable = new Map<string, Array<Record<string, unknown>>>();
+    for (const spec of TABLES) {
+      const value = file.tables[spec.model];
+      if (value === undefined) {
+        rowsByTable.set(spec.model, []);
+        continue;
+      }
+      if (!Array.isArray(value) || value.some((row) => !isRow(row))) {
+        throw new BadRequestException(
+          `Backup table "${spec.model}" must contain an array of records.`,
+        );
+      }
+      rowsByTable.set(spec.model, value as Array<Record<string, unknown>>);
+    }
+
+    const rows = (table: string) => rowsByTable.get(table) ?? [];
+    const ids = (table: string) =>
+      new Set(rows(table).map((row) => row.id).filter((id): id is string => typeof id === 'string'));
+
+    const check = (
+      source: string,
+      field: string,
+      target: string,
+      optional = false,
+    ) => {
+      const targetIds = ids(target);
+      for (const row of rows(source)) {
+        const value = row[field];
+        if (optional && (value === null || value === undefined || value === '')) continue;
+        if (typeof value !== 'string' || !targetIds.has(value)) {
+          throw new BadRequestException(
+            `Backup record in "${source}" has a ${field} reference outside this company's backup.`,
+          );
+        }
+      }
+    };
+
+    // Relationships that must resolve inside the same company's restored data.
+    check('branch', 'parentBranchId', 'branch', true);
+    check('rolePermission', 'roleId', 'role');
+    check('userRole', 'userId', 'user');
+    check('userBranch', 'userId', 'user');
+    check('userBranch', 'branchId', 'branch');
+    check('account', 'parentId', 'account', true);
+    check('journalEntry', 'branchId', 'branch');
+    check('journalEntry', 'reversalOfId', 'journalEntry', true);
+    check('journalLine', 'journalEntryId', 'journalEntry');
+    check('journalLine', 'accountId', 'account');
+    check('stockBalance', 'branchId', 'branch');
+    check('stockBalance', 'itemId', 'item');
+    check('stockMovement', 'branchId', 'branch');
+    check('stockMovement', 'itemId', 'item');
+    check('salesInvoice', 'branchId', 'branch');
+    check('salesInvoice', 'customerId', 'customer');
+    check('salesInvoice', 'journalEntryId', 'journalEntry', true);
+    check('salesInvoiceLine', 'invoiceId', 'salesInvoice');
+    check('salesInvoiceLine', 'itemId', 'item', true);
+    check('purchaseInvoice', 'branchId', 'branch');
+    check('purchaseInvoice', 'supplierId', 'supplier');
+    check('purchaseInvoice', 'journalEntryId', 'journalEntry', true);
+    check('purchaseInvoiceLine', 'invoiceId', 'purchaseInvoice');
+    check('purchaseInvoiceLine', 'itemId', 'item', true);
+
+    // Company users may use shared system roles, but never another company's
+    // private role. Those shared role IDs are deliberately absent from backups.
+    const roleIds = ids('role');
+    const externalRoleIds = [
+      ...new Set(
+        rows('userRole')
+          .map((row) => row.roleId)
+          .filter((id): id is string => typeof id === 'string' && !roleIds.has(id)),
+      ),
+    ];
+    if (externalRoleIds.length > 0) {
+      const globalRoles = await this.prisma.role.findMany({
+        where: { id: { in: externalRoleIds }, companyId: null },
+        select: { id: true },
+      });
+      const globalRoleIds = new Set(globalRoles.map((role) => role.id));
+      if (externalRoleIds.some((id) => !globalRoleIds.has(id))) {
+        throw new BadRequestException(
+          'Backup contains a role reference that does not belong to this company.',
+        );
+      }
+    }
+
+    // Permission definitions are application-wide and intentionally omitted
+    // from the backup, so every role-permission reference must exist here.
+    const permissionIds = [
+      ...new Set(
+        rows('rolePermission')
+          .map((row) => row.permissionId)
+          .filter((id): id is string => typeof id === 'string'),
+      ),
+    ];
+    if (permissionIds.length > 0) {
+      const permissions = await this.prisma.permission.findMany({
+        where: { id: { in: permissionIds } },
+        select: { id: true },
+      });
+      const knownPermissionIds = new Set(permissions.map((permission) => permission.id));
+      if (permissionIds.some((id) => !knownPermissionIds.has(id))) {
+        throw new BadRequestException(
+          'Backup contains permission references that are not available on this installation.',
+        );
+      }
+    }
+
+    // A user's assigned branch is stored on UserRole rather than a relation in
+    // the schema, so validate it explicitly as well.
+    check('userRole', 'branchId', 'branch', true);
   }
 
   private async countExisting(companyId: string): Promise<Record<string, number>> {
