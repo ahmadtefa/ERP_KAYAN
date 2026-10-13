@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { Response } from 'express';
 
 /**
@@ -18,15 +19,23 @@ export class ProblemDetailsFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const response = host.switchToHttp().getResponse<Response>();
-    const status =
-      exception instanceof HttpException
+
+    const isUniqueConstraint =
+      exception instanceof Prisma.PrismaClientKnownRequestError &&
+      exception.code === 'P2002';
+
+    const status = isUniqueConstraint
+      ? HttpStatus.CONFLICT
+      : exception instanceof HttpException
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
     let detail = 'Unexpected server error';
     let extra: Record<string, unknown> = {};
 
-    if (exception instanceof HttpException) {
+    if (isUniqueConstraint) {
+      detail = 'A record with the same unique value already exists';
+    } else if (exception instanceof HttpException) {
       const body = exception.getResponse();
       if (typeof body === 'string') {
         detail = body;
