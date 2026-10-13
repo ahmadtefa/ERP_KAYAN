@@ -4,7 +4,7 @@ import { BackupService, BACKUP_FORMAT, BACKUP_VERSION, BackupFile } from './back
 describe('BackupService restore reference validation', () => {
   const companyId = 'company-1';
 
-  function service() {
+  function makeService() {
     const prisma = {
       company: { findUnique: jest.fn().mockResolvedValue({ id: companyId }) },
       role: { findMany: jest.fn().mockResolvedValue([]) },
@@ -31,7 +31,7 @@ describe('BackupService restore reference validation', () => {
   }
 
   it('rejects child rows that reference a parent outside the backup before writing anything', async () => {
-    const { service, prisma } = service();
+    const { service: backupService, prisma } = makeService();
     const file = backup({
       journalEntry: [],
       journalLine: [
@@ -39,7 +39,7 @@ describe('BackupService restore reference validation', () => {
       ],
     });
 
-    await expect(service.restore(file, companyId, { replace: true })).rejects.toBeInstanceOf(
+    await expect(backupService.restore(file, companyId, { replace: true })).rejects.toBeInstanceOf(
       BadRequestException,
     );
     expect(prisma.$transaction).not.toHaveBeenCalled();
