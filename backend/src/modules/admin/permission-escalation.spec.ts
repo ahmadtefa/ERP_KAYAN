@@ -138,4 +138,25 @@ describe('permission escalation protections', () => {
     });
   });
 
+  it('prevents a regular user manager from modifying or deactivating a super administrator', async () => {
+    const superAdmin = {
+      id: 'super-admin-id',
+      companyId,
+      username: 'privileged-admin',
+      isSuperAdmin: true,
+      deletedAt: null,
+    };
+    const prisma = {
+      user: { findFirst: jest.fn().mockResolvedValue(superAdmin) },
+    };
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
+
+    await expect(
+      service.update(companyId, actorId, superAdmin.id, { fullNameEn: 'Changed' }, [], false),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.deactivate(companyId, actorId, superAdmin.id, false),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
 });
