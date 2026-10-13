@@ -60,10 +60,15 @@ describe('RateLimitGuard', () => {
     guard.canActivate(context('/inventory/items').context);
     guard.canActivate(context('/inventory/items').context);
     const { context: ctx, status } = context('/inventory/items');
-    expect(guard.canActivate(ctx)).toBe(false);
-    expect(status.code).toBe(HttpStatus.TOO_MANY_REQUESTS);
+    expect(() => guard.canActivate(ctx)).toThrow(
+      expect.objectContaining({
+        status: HttpStatus.TOO_MANY_REQUESTS,
+      }),
+    );
+    // The guard sets Retry-After, then Nest's exception filter sends one reply.
+    expect(status.code).toBeUndefined();
+    expect(status.body).toBeUndefined();
     expect(status.headers['Retry-After']).toBeDefined();
-    expect((status.body as { title: string }).title).toBe('TOO_MANY_REQUESTS');
   });
 
   it('gives sign-in its own, much tighter allowance', () => {
