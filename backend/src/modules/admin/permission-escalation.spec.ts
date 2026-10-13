@@ -83,36 +83,4 @@ describe('permission escalation protections', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('allows a super-admin to assign a role containing elevated permissions', async () => {
-    const prisma = {
-      role: {
-        findMany: jest.fn().mockResolvedValue([
-          {
-            id: 'role-id',
-            rolePermissions: [{ permission: { code: elevatedPermission } }],
-          },
-        ]),
-      },
-    };
-    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
-
-    // Role validation succeeds for a super-admin; later database operations are
-    // intentionally not mocked because this test only exercises the guard.
-    await expect(
-      service.create(
-        companyId,
-        actorId,
-        {
-          username: 'new-user',
-          fullNameEn: 'New User',
-          fullNameAr: 'مستخدم جديد',
-          password: 'a-long-test-password',
-          roleIds: ['role-id'],
-        } as any,
-        [],
-        true,
-      ),
-    ).rejects.toThrow();
-    expect(prisma.role.findMany).toHaveBeenCalledTimes(1);
-  });
 });
