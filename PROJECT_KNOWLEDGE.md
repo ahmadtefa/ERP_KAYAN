@@ -202,8 +202,10 @@ never deletes grants):
   journal entries;
 * `admin.company.manage` → roles that already manage users (admin roles only).
 
-Permissions are copied into the JWT at login, so a new grant takes effect on
-the user's next sign-in.
+The access token carries permission claims for session compatibility, but the API
+rebuilds permissions from active, tenant-scoped database roles on every request.
+Role/permission changes therefore take effect immediately without waiting for the
+next sign-in; deleted roles and cross-company role assignments are ignored.
 
 ### Backup tools on Windows
 The packaged program carries `pg_dump`/`pg_restore` (+ their DLLs) inside
