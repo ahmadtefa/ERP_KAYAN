@@ -3,5 +3,5 @@
 -- index makes the invariant race-safe across concurrent setup requests and
 -- across multiple API processes.
 CREATE UNIQUE INDEX "Company_one_active_company_idx"
-ON "Company" ((1))
+ON companies ((1))
 WHERE "deletedAt" IS NULL;
