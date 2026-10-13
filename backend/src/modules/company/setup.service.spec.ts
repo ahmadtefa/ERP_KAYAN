@@ -25,6 +25,30 @@ describe('SetupService seedRoles', () => {
     });
   });
 
+  it('creates the current open fiscal year during first-run setup', async () => {
+    const upsert = jest.fn().mockResolvedValue({});
+    const service = new SetupService({} as any, {} as any);
+    const year = new Date().getUTCFullYear();
+
+    await (service as any).seedFiscalPeriod(
+      { fiscalPeriod: { upsert } },
+      'company-1',
+    );
+
+    expect(upsert).toHaveBeenCalledWith({
+      where: { companyId_code: { companyId: 'company-1', code: `FY${year}` } },
+      update: {},
+      create: {
+        companyId: 'company-1',
+        code: `FY${year}`,
+        nameEn: `Fiscal year ${year}`,
+        nameAr: `السنة المالية ${year}`,
+        startDate: new Date(Date.UTC(year, 0, 1)),
+        endDate: new Date(Date.UTC(year, 11, 31)),
+      },
+    });
+  });
+
   it('grants accountants their working permissions and read-only invoice access', async () => {
     const permissions = [
       { id: 'accounting-read', code: 'accounting.accounts.read', module: 'accounting' },
