@@ -70,9 +70,8 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or expired token');
     }
 
-    // Resolve authorization claims from the database on every request. Roles,
-    // permissions, branch assignments and super-admin status can change while
-    // an access token is still alive; stale JWT claims must not preserve access.
+    // Authorization data is loaded from the database on every request so
+    // revocations and account/branch changes take effect immediately.
     const principal = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       select: {
@@ -83,7 +82,13 @@ export class JwtAuthGuard implements CanActivate {
         isSuperAdmin: true,
         deletedAt: true,
         userRoles: {
-          where: { companyId: payload.companyId },
+          where: {
+            companyId: payload.companyId,
+            role: {
+              deletedAt: null,
+              OR: [{ companyId: payload.companyId }, { companyId: null }],
+            },
+          },
           select: {
             role: {
               select: {
@@ -94,8 +99,8 @@ export class JwtAuthGuard implements CanActivate {
             },
           },
         },
-        // A stale or malformed UserBranch row must never grant a branch from
-        // another tenant, nor a branch that has been disabled or deleted.
+        // Do not let a stale/malformed assignment expose another tenant's
+        // branch or a branch that is inactive or soft-deleted.
         branches: {
           where: {
             branch: {
