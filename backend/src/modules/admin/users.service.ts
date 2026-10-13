@@ -169,11 +169,20 @@ export class UsersService {
   ///
   /// A password change that leaves old refresh tokens alive keeps an attacker
   /// signed in, so the sessions are cut here.
-  async changePassword(companyId: string, actorId: string, id: string, password: string) {
+  async changePassword(
+    companyId: string,
+    actorId: string,
+    id: string,
+    password: string,
+    actorIsSuperAdmin: boolean,
+  ) {
     const user = await this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
     });
     if (!user) throw new NotFoundException('User not found');
+    if (user.isSuperAdmin && !actorIsSuperAdmin) {
+      throw new ForbiddenException('Only a super administrator can reset a super administrator password');
+    }
 
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
     await this.prisma.$transaction([
