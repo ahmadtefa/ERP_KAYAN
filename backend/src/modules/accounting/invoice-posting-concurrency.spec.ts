@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
-import { PurchaseInvoicesService } from './purchase-invoices.service';
-import { SalesInvoicesService } from './sales-invoices.service';
+import { PurchaseInvoicesService } from '../purchases/purchase-invoices.service';
+import { SalesInvoicesService } from '../sales/sales-invoices.service';
 
 describe('invoice posting concurrency guards', () => {
   it('does not post a sales invoice when another request already claimed the draft', async () => {
