@@ -79,6 +79,7 @@ export class FullBackupService {
   /// Tool paths are found once and remembered: the search walks the disk.
   private toolsCache: { pgDump: string | null; pgRestore: string | null } | null =
     null;
+  private restoreInProgress = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -353,6 +354,23 @@ export class FullBackupService {
    * before production data is touched — every step of it is deliberate.
    */
   async restore(options: RestoreOptions, userId: string) {
+    if (this.restoreInProgress) {
+      throw new ServiceUnavailableException(
+        'A full database restore is already in progress. Wait for it to finish before starting another operation.',
+      );
+    }
+
+    // Lock before even validating/staging the upload: otherwise two requests
+    // can both pass preflight and race to replace the same database.
+    this.restoreInProgress = true;
+    try {
+      return await this.restoreOnce(options, userId);
+    } finally {
+      this.restoreInProgress = false;
+    }
+  }
+
+  private async restoreOnce(options: RestoreOptions, userId: string) {
     if (!options.confirm) {
       throw new BadRequestException(
         'A full restore replaces the whole database. Send confirm=true to say ' +
