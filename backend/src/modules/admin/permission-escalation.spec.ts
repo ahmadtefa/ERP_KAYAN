@@ -9,6 +9,7 @@ describe('permission escalation protections', () => {
 
   it('does not let a user manager assign a role with permissions they lack', async () => {
     const prisma = {
+      user: { findUnique: jest.fn().mockResolvedValue(null) },
       role: {
         findMany: jest.fn().mockResolvedValue([
           {
