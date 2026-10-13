@@ -29,7 +29,9 @@ class AccountInput {
   Map<String, dynamic> toJson() => {
     if (code != null && code!.isNotEmpty) 'code': code,
     'nameEn': nameEn,
-    'nameAr': nameAr,
+    // An empty Arabic name is left out, so an update does not overwrite the
+    // stored name with blank text (the server requires at least one character).
+    if (nameAr.isNotEmpty) 'nameAr': nameAr,
     'type': type.name.toUpperCase(),
     if (parentId != null) 'parentId': parentId,
     if (isPostable != null) 'isPostable': isPostable,

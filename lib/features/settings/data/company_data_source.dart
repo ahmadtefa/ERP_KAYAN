@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 
-import '../../../../core/network/api_client.dart';
-import '../../../../core/platform/picked_file.dart';
+import '../../../core/network/api_client.dart';
+import '../../../core/platform/picked_file.dart';
 
 /// Company profile, logo and units (headquarters and branches).
 ///
