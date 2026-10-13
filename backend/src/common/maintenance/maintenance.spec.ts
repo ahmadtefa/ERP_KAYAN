@@ -11,16 +11,29 @@ describe('MaintenanceInterceptor', () => {
     } as unknown as ExecutionContext;
   }
 
-  it('blocks new write operations on backup routes while maintenance is active', () => {
+  it('blocks new backup writes other than a controlled restore recovery', () => {
     const maintenance = new MaintenanceService();
     maintenance.begin('Restoring database');
     const interceptor = new MaintenanceInterceptor(maintenance);
     const next = { handle: jest.fn(() => of('ok')) };
 
     expect(() =>
-      interceptor.intercept(context('POST', '/api/v1/backup/full/restore'), next as any),
+      interceptor.intercept(context('POST', '/api/v1/backup/full'), next as any),
     ).toThrow(ServiceUnavailableException);
     expect(next.handle).not.toHaveBeenCalled();
+  });
+
+  it('allows the full-restore endpoint to attempt recovery during maintenance', () => {
+    const maintenance = new MaintenanceService();
+    maintenance.begin('ATTENTION: automatic recovery failed');
+    const interceptor = new MaintenanceInterceptor(maintenance);
+    const stream = of('restore');
+    const next = { handle: jest.fn(() => stream) };
+
+    expect(
+      interceptor.intercept(context('POST', '/api/v1/backup/full/restore'), next as any),
+    ).toBe(stream);
+    expect(next.handle).toHaveBeenCalledTimes(1);
   });
 
   it('keeps GET status requests available while maintenance is active', () => {
