@@ -73,17 +73,21 @@ export class AuthService {
 
     const passwordOk = await argon2.verify(user.passwordHash, password);
     if (!passwordOk) {
-      const attempts = user.failedLoginCount + 1;
-      await this.prisma.user.update({
+      // Increment in the database so simultaneous failed logins cannot
+      // overwrite one another's counters with the same stale value.
+      const updated = await this.prisma.user.update({
         where: { id: user.id },
-        data: {
-          failedLoginCount: attempts,
-          lockedUntil:
-            attempts >= MAX_FAILED_ATTEMPTS
-              ? new Date(Date.now() + LOCK_MINUTES * 60_000)
-              : null,
-        },
+        data: { failedLoginCount: { increment: 1 } },
+        select: { failedLoginCount: true },
       });
+      if (updated.failedLoginCount >= MAX_FAILED_ATTEMPTS) {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            lockedUntil: new Date(Date.now() + LOCK_MINUTES * 60_000),
+          },
+        });
+      }
       await this.audit.record({
         companyId: user.companyId,
         userId: user.id,
