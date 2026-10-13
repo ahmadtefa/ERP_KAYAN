@@ -401,6 +401,32 @@ export class SalesInvoicesService {
     }
 
     const journal = await this.prisma.$transaction(async (tx) => {
+      // Atomically claim both source documents before touching stock. This
+      // prevents concurrent requests from reversing the same invoice twice.
+      const invoiceClaim = await tx.salesInvoice.updateMany({
+        where: {
+          id: invoice.id,
+          companyId,
+          deletedAt: null,
+          status: InvoiceStatus.POSTED,
+        },
+        data: { status: InvoiceStatus.REVERSED },
+      });
+      if (invoiceClaim.count !== 1) {
+        throw new BadRequestException('This invoice has already been reversed');
+      }
+      const journalClaim = await tx.journalEntry.updateMany({
+        where: {
+          id: original.id,
+          companyId,
+          status: JournalStatus.POSTED,
+        },
+        data: { status: JournalStatus.REVERSED },
+      });
+      if (journalClaim.count !== 1) {
+        throw new BadRequestException('The original journal entry has already been reversed');
+      }
+
       for (const line of invoice.lines) {
         if (!line.itemId || line.costTotal.isZero()) continue;
 
@@ -472,16 +498,6 @@ export class SalesInvoicesService {
           },
         },
         select: { id: true, entryNumber: true },
-      });
-
-      await tx.journalEntry.update({
-        where: { id: original.id },
-        data: { status: JournalStatus.REVERSED },
-      });
-
-      await tx.salesInvoice.update({
-        where: { id: invoice.id },
-        data: { status: InvoiceStatus.REVERSED },
       });
 
       return reversal;
