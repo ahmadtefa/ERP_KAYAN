@@ -133,6 +133,9 @@ export class SetupService {
       if (dto.seedChartOfAccounts !== false) {
         await this.seedChartOfAccounts(tx, company.id);
       }
+      // A newly configured company needs an open fiscal period before it can
+      // post its first journal entry or invoice.
+      await this.seedFiscalPeriod(tx, company.id);
 
       return { company, hq, admin };
     });
@@ -240,6 +243,26 @@ export class SetupService {
     }
 
     return { admin: adminRole.id, accountant: accountantRole.id };
+  }
+
+  /// The same default fiscal year the development seed installs.
+  private async seedFiscalPeriod(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+  ): Promise<void> {
+    const year = new Date().getUTCFullYear();
+    await tx.fiscalPeriod.upsert({
+      where: { companyId_code: { companyId, code: `FY${year}` } },
+      update: {},
+      create: {
+        companyId,
+        code: `FY${year}`,
+        nameEn: `Fiscal year ${year}`,
+        nameAr: `السنة المالية ${year}`,
+        startDate: new Date(Date.UTC(year, 0, 1)),
+        endDate: new Date(Date.UTC(year, 11, 31)),
+      },
+    });
   }
 
   /// The same conventional starter chart the seed installs. It is a template
