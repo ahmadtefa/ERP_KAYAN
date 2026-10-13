@@ -384,6 +384,7 @@ export class FullBackupService {
     const dir = await this.ensureBackupDir();
     const staging = join(dir, `.restore-staging-${Date.now()}.dump`);
     await writeFile(staging, buffer);
+    let keepMaintenanceActive = false;
 
     try {
       // 2. A scratch database: the file must restore cleanly somewhere before
@@ -437,7 +438,8 @@ export class FullBackupService {
       } catch (error) {
         this.logger.error(`pg_restore failed: ${(error as Error).message}`);
         // The database may be half-replaced. Put the safety copy back.
-        await this.recoverFrom(safety.name, tools.pgRestore as string);
+        const recovered = await this.recoverFrom(safety.name, tools.pgRestore as string);
+        if (!recovered) keepMaintenanceActive = true;
         throw new ServiceUnavailableException(
           'The restore failed part way through. The safety backup taken just ' +
             `before (${safety.name}) was restored back automatically. ` +
@@ -450,7 +452,8 @@ export class FullBackupService {
         const check = await this.postRestoreCheck();
         if (!check.ok) {
           this.logger.error(`Post-restore check failed: ${check.detail}`);
-          await this.recoverFrom(safety.name, tools.pgRestore as string);
+          const recovered = await this.recoverFrom(safety.name, tools.pgRestore as string);
+          if (!recovered) keepMaintenanceActive = true;
           throw new ServiceUnavailableException(
             'The restore finished but the data did not pass the checks that ' +
               'follow one. The safety backup was restored back automatically. ' +
@@ -479,7 +482,9 @@ export class FullBackupService {
       };
     } finally {
       await unlink(staging).catch(() => {});
-      this.maintenance.end();
+      // If automatic recovery also failed, keep writes blocked. Ending
+      // maintenance here would expose a potentially half-restored database.
+      if (!keepMaintenanceActive) this.maintenance.end();
     }
   }
 
@@ -488,7 +493,7 @@ export class FullBackupService {
    * program stays in maintenance mode — a database nobody can trust must not
    * pretend to be open for business.
    */
-  private async recoverFrom(name: string, pgRestore: string): Promise<void> {
+  private async recoverFrom(name: string, pgRestore: string): Promise<boolean> {
     this.logger.warn(`Recovering from safety backup ${name}`);
     try {
       const path = this.safePath(name);
@@ -504,6 +509,7 @@ export class FullBackupService {
       const check = await this.postRestoreCheck();
       if (!check.ok) throw new Error(check.detail);
       this.maintenance.end();
+      return true;
     } catch (error) {
       this.maintenance.begin(
         'ATTENTION: a database restore failed and the automatic recovery ' +
@@ -513,6 +519,7 @@ export class FullBackupService {
       this.logger.error(
         `Recovery from ${name} failed: ${(error as Error).message}`,
       );
+      return false;
     }
   }
 
