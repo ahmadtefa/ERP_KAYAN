@@ -34,7 +34,11 @@ const activePrincipal = {
 };
 
 function makeContext(authorization = 'Bearer access-token') {
-  const request: { headers: Record<string, string>; query: Record<string, unknown>; user?: unknown } = {
+  const request: {
+    headers: Record<string, string>;
+    query: Record<string, unknown>;
+    user?: unknown;
+  } = {
     headers: { authorization },
     query: {},
   };
@@ -95,7 +99,17 @@ describe('JwtAuthGuard account status and live authorization', () => {
             },
           },
         },
-        branches: { select: { branchId: true } },
+        branches: {
+          where: {
+            branch: {
+              companyId: payload.companyId,
+              isActive: true,
+              deletedAt: null,
+            },
+          },
+          select: { branchId: true },
+          orderBy: { branchId: 'asc' },
+        },
       },
     });
     expect(request.user).toEqual({
