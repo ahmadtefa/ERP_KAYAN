@@ -1,7 +1,6 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthUser } from '../decorators/current-user.decorator';
-import { PERMISSIONS_KEY } from '../decorators/require-permissions.decorator';
 import { PermissionsGuard } from './permissions.guard';
 
 function makeContext(user?: Partial<AuthUser>) {
@@ -55,6 +54,8 @@ describe('PermissionsGuard', () => {
 
   it('allows the designated super administrator', () => {
     const user = { ...baseUser, isSuperAdmin: true };
-    expect(makeGuard(['reports.read']).canActivate(makeContext(user)).toBe(true);
+    expect(
+      makeGuard(['reports.read']).canActivate(makeContext(user)),
+    ).toBe(true);
   });
 });
