@@ -159,6 +159,13 @@ export class RolesService {
       where: { id, deletedAt: null, OR: [{ companyId }, { companyId: null }] },
     });
     if (!role) throw new NotFoundException('Role not found');
+    // Global roles are shared across companies. Letting a company role manager
+    // edit one would change permissions for users in every tenant.
+    if ((role.isSystem || role.companyId === null) && !isSuperAdmin) {
+      throw new ForbiddenException(
+        'Only a super administrator can change permissions on a global system role',
+      );
+    }
 
     this.assertCanGrantPermissionCodes(codes, actorPermissions, isSuperAdmin);
     const permissionIds = await this.resolvePermissions(codes);
