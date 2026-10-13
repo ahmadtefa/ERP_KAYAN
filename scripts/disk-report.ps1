@@ -208,7 +208,8 @@ Write-Host '  These will be removed. All of them come back by themselves:'
 Write-Host '        .dart_tool      rebuilt on the next run'
 Write-Host '        build           rebuilt by serve-web.bat'
 Write-Host '        backend\dist    rebuilt by npm run build'
-Write-Host '        temporary files older than a week'
+Write-Host '        old files in the temp folder: untouched for a week; a folder'
+Write-Host '                        is removed only if nothing inside it is newer'
 Write-Host ''
 Write-Host '  Nothing else is touched: no source, no database, no invoices,'
 Write-Host '  no backend\.env.'
@@ -242,9 +243,21 @@ foreach ($folder in @('.dart_tool', 'build', 'backend\dist')) {
 }
 
 Write-Host '      temporary files older than a week...'
-Get-ChildItem -LiteralPath $env:TEMP -Recurse -Force -ErrorAction SilentlyContinue |
-    Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } |
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+# Only top-level entries of %TEMP% are considered. An entry is removed only if
+# it is older than 7 days AND, for a folder, nothing inside it is newer than
+# that. A folder that still holds recent files is never deleted as a whole.
+$cutoff = (Get-Date).AddDays(-7)
+Get-ChildItem -LiteralPath $env:TEMP -Force -ErrorAction SilentlyContinue | ForEach-Object {
+    $entry = $_
+    if ($entry.LastWriteTime -ge $cutoff) { return }
+    if ($entry.PSIsContainer) {
+        $recent = Get-ChildItem -LiteralPath $entry.FullName -Recurse -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -ge $cutoff } |
+            Select-Object -First 1
+        if ($recent) { return }
+    }
+    Remove-Item -LiteralPath $entry.FullName -Recurse -Force -ErrorAction SilentlyContinue
+}
 Write-Host '      done.' -ForegroundColor Green
 
 # ------------------------------------------------------ 5. result
