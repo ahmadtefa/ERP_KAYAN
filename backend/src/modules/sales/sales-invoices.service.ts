@@ -249,6 +249,16 @@ export class SalesInvoicesService {
         if (!item) throw new BadRequestException('An invoice line references a missing item');
         if (!item.isStockTracked) continue;
 
+        // Lock the balance row before reading quantity/value. Without this,
+        // two different invoices can both see the same stock and oversell it,
+        // or calculate weighted-average cost from a stale balance.
+        await tx.$queryRaw(
+          Prisma.sql`SELECT "companyId" FROM "stock_balances"
+            WHERE "companyId" = ${companyId}::uuid
+              AND "branchId" = ${invoice.branchId}::uuid
+              AND "itemId" = ${item.id}::uuid
+            FOR UPDATE`,
+        );
         const balance = await tx.stockBalance.findUnique({
           where: {
             companyId_branchId_itemId: {
