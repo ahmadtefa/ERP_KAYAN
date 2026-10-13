@@ -94,7 +94,19 @@ export class JwtAuthGuard implements CanActivate {
             },
           },
         },
-        branches: { select: { branchId: true } },
+        // A stale or malformed UserBranch row must never grant a branch from
+        // another tenant, nor a branch that has been disabled or deleted.
+        branches: {
+          where: {
+            branch: {
+              companyId: payload.companyId,
+              isActive: true,
+              deletedAt: null,
+            },
+          },
+          select: { branchId: true },
+          orderBy: { branchId: 'asc' },
+        },
       },
     });
     if (
