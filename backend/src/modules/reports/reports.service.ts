@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccountType, JournalStatus, Prisma } from '@prisma/client';
+import { AccountType, InvoiceStatus, JournalStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 const MONEY_SCALE = 4;
@@ -17,10 +17,33 @@ const MONEY_SCALE = 4;
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private parseDate(value: string, field: string): Date {
+    const parsed = new Date(value);
+    if (!Number.isFinite(parsed.getTime())) {
+      throw new BadRequestException(`"${field}" must be a valid date`);
+    }
+
+    // Reject impossible calendar dates such as 2026-02-31, which JavaScript
+    // otherwise normalizes into a date in the following month.
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (dateOnly) {
+      const [, year, month, day] = dateOnly;
+      const normalized = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+      if (
+        normalized.getUTCFullYear() !== Number(year) ||
+        normalized.getUTCMonth() !== Number(month) - 1 ||
+        normalized.getUTCDate() !== Number(day)
+      ) {
+        throw new BadRequestException(`"${field}" must be a valid calendar date`);
+      }
+    }
+    return parsed;
+  }
+
   private period(query: { from?: string; to?: string }) {
-    const to = query.to ? new Date(query.to) : new Date();
+    const to = query.to ? this.parseDate(query.to, 'to') : new Date();
     const from = query.from
-      ? new Date(query.from)
+      ? this.parseDate(query.from, 'from')
       : new Date(Date.UTC(to.getUTCFullYear(), 0, 1));
     if (from > to) {
       throw new BadRequestException('"from" must not be after "to"');
@@ -255,7 +278,7 @@ export class ReportsService {
   }
 
   async customerBalances(companyId: string, query: { asOf?: string | null }) {
-    const asOf = query.asOf ? new Date(query.asOf) : new Date();
+    const asOf = query.asOf ? this.parseDate(query.asOf, 'asOf') : new Date();
 
     const customers = await this.prisma.customer.findMany({
       where: { companyId, deletedAt: null },
@@ -267,7 +290,7 @@ export class ReportsService {
       where: {
         companyId,
         deletedAt: null,
-        status: { in: [JournalStatus.POSTED, JournalStatus.REVERSED] },
+        status: { in: [InvoiceStatus.POSTED, InvoiceStatus.REVERSED] },
         invoiceDate: { lte: asOf },
       },
       select: {
@@ -316,7 +339,7 @@ export class ReportsService {
 
   /** The mirror image: what the company still owes each supplier. */
   async supplierBalances(companyId: string, query: { asOf?: string | null }) {
-    const asOf = query.asOf ? new Date(query.asOf) : new Date();
+    const asOf = query.asOf ? this.parseDate(query.asOf, 'asOf') : new Date();
 
     const suppliers = await this.prisma.supplier.findMany({
       where: { companyId, deletedAt: null },
@@ -328,7 +351,7 @@ export class ReportsService {
       where: {
         companyId,
         deletedAt: null,
-        status: { in: [JournalStatus.POSTED, JournalStatus.REVERSED] },
+        status: { in: [InvoiceStatus.POSTED, InvoiceStatus.REVERSED] },
         invoiceDate: { lte: asOf },
       },
       select: {
