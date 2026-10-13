@@ -78,8 +78,8 @@ export class MaintenanceInterceptor implements NestInterceptor {
     if (isRead || isRestoreRequest) return next.handle();
 
     throw new ServiceUnavailableException(
-      'The database is being restored right now. ' +
-        'Try again in a moment — nothing was lost.',
+      'The database is in maintenance mode. Write operations are blocked; ' +
+        'check the restore status before trying again.',
     );
   }
 }
