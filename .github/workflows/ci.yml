@@ -2,7 +2,7 @@ name: ERP KAYAN CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, 'arena/**']
   push:
     branches: [main]
   workflow_dispatch:
