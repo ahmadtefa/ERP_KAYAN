@@ -60,6 +60,7 @@ export class JwtAuthGuard implements CanActivate {
       sub: string;
       username: string;
       companyId: string;
+      branchId?: string | null;
     };
     try {
       payload = await this.jwt.verifyAsync<typeof payload>(token, {
@@ -132,12 +133,17 @@ export class JwtAuthGuard implements CanActivate {
         ),
       ),
     ];
+    const branchId =
+      principal.branches.find((branch) => branch.branchId === payload.branchId)
+        ?.branchId ??
+      principal.branches[0]?.branchId ??
+      null;
 
     request.user = {
       userId: principal.id,
       username: principal.username,
       companyId: principal.companyId,
-      branchId: principal.branches[0]?.branchId ?? null,
+      branchId,
       isSuperAdmin: principal.isSuperAdmin,
       permissions,
     };
