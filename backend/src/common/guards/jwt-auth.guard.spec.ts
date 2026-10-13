@@ -52,6 +52,7 @@ function makeContext(authorization = 'Bearer access-token') {
 
 function makeGuard(options?: {
   principal?: typeof activePrincipal | null;
+  tokenPayload?: typeof payload;
   verifyError?: Error;
 }) {
   const reflector = {
@@ -59,7 +60,9 @@ function makeGuard(options?: {
   } as unknown as Reflector;
   const jwt = {
     verifyAsync: jest.fn().mockImplementation(() =>
-      options?.verifyError ? Promise.reject(options.verifyError) : Promise.resolve(payload),
+      options?.verifyError
+        ? Promise.reject(options.verifyError)
+        : Promise.resolve(options?.tokenPayload ?? payload),
     ),
   } as unknown as JwtService;
   const prisma = {
@@ -126,6 +129,16 @@ describe('JwtAuthGuard account status and live authorization', () => {
       isSuperAdmin: false,
       permissions: ['inventory.items.read', 'reports.read'],
     });
+  });
+
+  it('preserves a selected branch only while it remains assigned and active', async () => {
+    const { guard } = makeGuard({
+      tokenPayload: { ...payload, branchId: 'branch-current' },
+    });
+    const { context, request } = makeContext();
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(request.user).toMatchObject({ branchId: 'branch-current' });
   });
 
   it.each([
