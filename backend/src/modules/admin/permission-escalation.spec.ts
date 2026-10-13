@@ -38,6 +38,24 @@ describe('permission escalation protections', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('does not let a regular user manager reset a super administrator password', async () => {
+    const prisma = {
+      user: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'super-admin-id',
+          companyId,
+          isSuperAdmin: true,
+          deletedAt: null,
+        }),
+      },
+    };
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
+
+    await expect(
+      service.changePassword(companyId, actorId, 'super-admin-id', 'new-test-password', false),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
   it('does not let a role manager create a role with permissions they lack', async () => {
     const prisma = {
       role: { findFirst: jest.fn().mockResolvedValue(null) },
