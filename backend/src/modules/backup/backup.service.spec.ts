@@ -25,20 +25,41 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     'role',
     'rolePermission',
     'user',
+    'userPermission',
     'userRole',
     'userBranch',
     'fiscalPeriod',
     'customer',
     'supplier',
     'item',
+    'itemUnit',
+    'itemCategory',
+    'priceList',
+    'priceListItem',
+    'warehouse',
     'stockBalance',
     'stockMovement',
     'journalEntry',
     'journalLine',
+    'salesOrder',
+    'salesOrderLine',
+    'purchaseOrder',
+    'purchaseOrderLine',
     'salesInvoice',
     'salesInvoiceLine',
     'purchaseInvoice',
     'purchaseInvoiceLine',
+    'stockDocument',
+    'stockDocumentLine',
+    'openingBalance',
+    'openingBalanceLine',
+    'cashAccount',
+    'bankReconciliation',
+    'cashVoucher',
+    'cashTransfer',
+    'cashVoucherAllocation',
+    'companySetting',
+    'costCenter',
     'documentSequence',
     'auditLog',
   ];
@@ -247,6 +268,33 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       expect(txMock.account.createMany).toHaveBeenCalled();
       expect(txMock.branch.createMany).toHaveBeenCalled();
       expect(txMock.journalEntry.createMany).toHaveBeenCalled();
+    });
+
+    test('deletes cash and banking dependants before deleting their ledger accounts', async () => {
+      await service.restore({
+        format: 'kayan-backup',
+        version: 1,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'شركة كيان',
+        counts: {},
+        tables: {},
+      }, COMPANY_ID, { replace: true });
+
+      expect(txMock.cashAccount.deleteMany).toHaveBeenCalled();
+      expect(txMock.cashVoucher.deleteMany).toHaveBeenCalled();
+      expect(txMock.cashTransfer.deleteMany).toHaveBeenCalled();
+      expect(txMock.bankReconciliation.deleteMany).toHaveBeenCalled();
+      expect(txMock.cashVoucherAllocation.deleteMany).toHaveBeenCalled();
+
+      const deleteOrder = (model: string) =>
+        txMock[model].deleteMany.mock.invocationCallOrder[0];
+      expect(deleteOrder('cashVoucherAllocation')).toBeLessThan(deleteOrder('cashVoucher'));
+      expect(deleteOrder('cashTransfer')).toBeLessThan(deleteOrder('cashAccount'));
+      expect(deleteOrder('cashVoucher')).toBeLessThan(deleteOrder('bankReconciliation'));
+      expect(deleteOrder('bankReconciliation')).toBeLessThan(deleteOrder('cashAccount'));
+      expect(deleteOrder('cashAccount')).toBeLessThan(deleteOrder('account'));
     });
 
     test('restores committed demo-data/kayan-company-backup-demo.json with remapped permission IDs and parent-first branches', async () => {
