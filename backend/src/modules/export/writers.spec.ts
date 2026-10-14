@@ -35,7 +35,12 @@ describe('export writers', () => {
 
   describe('toXlsx', () => {
     it('produces a real workbook whose cells keep their types', async () => {
-      const buffer = await toXlsx(table, 'ar', 'شركة كيان');
+      const buffer = await toXlsx(table, 'ar', 'شركة كيان', {
+        companyDetails: [
+          { labelEn: 'Tax ID', labelAr: 'الرقم الضريبي', value: '123456789' },
+          { labelEn: 'Phone', labelAr: 'الهاتف', value: '01000000000' },
+        ],
+      });
       // ZIP magic — .xlsx is a zip container.
       expect(buffer.subarray(0, 2).toString('latin1')).toBe('PK');
 
@@ -79,14 +84,20 @@ describe('export writers', () => {
       });
       expect(texts).toContain('ميزان المراجعة');
       expect(texts).toContain('شركة كيان');
+      expect(texts).toContain('123456789');
+      expect(texts).toContain('01000000000');
     });
   });
 
   describe('toCsv', () => {
     it('writes a byte-order mark so Excel reads Arabic correctly', () => {
-      const csv = toCsv(table, 'ar', 'شركة كيان').toString('utf8');
+      const csv = toCsv(table, 'ar', 'شركة كيان', [
+        { labelEn: 'Tax ID', labelAr: 'الرقم الضريبي', value: '123456789' },
+      ]).toString('utf8');
       expect(csv.startsWith('\uFEFF')).toBe(true);
       expect(csv).toContain('النقدية بالصندوق');
+      expect(csv).toContain('الرقم الضريبي');
+      expect(csv).toContain('123456789');
     });
   });
 
@@ -94,10 +105,17 @@ describe('export writers', () => {
     it('renders right-to-left Arabic with the company header', () => {
       const html = toPrintHtml(table, 'ar', 'شركة كيان', {
         logo: { data: Buffer.from('png-bytes'), mime: 'image/png' },
+        companyDetails: [
+          { labelEn: 'Tax ID', labelAr: 'الرقم الضريبي', value: '123456789' },
+          { labelEn: 'Phone', labelAr: 'الهاتف', value: '01000000000' },
+        ],
       });
       expect(html).toContain('dir="rtl"');
       expect(html).toContain('ميزان المراجعة');
       expect(html).toContain('شركة كيان');
+      expect(html).toContain('الرقم الضريبي');
+      expect(html).toContain('123456789');
+      expect(html).toContain('01000000000');
       // The logo travels inside the page, so the file stands alone.
       expect(html).toContain('data:image/png;base64,');
       // The header row repeats on every printed page.
