@@ -89,6 +89,10 @@ jobs:
           node -e 'const h=JSON.parse(require("fs").readFileSync("/tmp/kayan-health.json","utf8")); if(h.status!=="ok" || h.database!=="up" || h.needsSetup) process.exit(1)'
           curl -fsS -X POST http://127.0.0.1:3000/api/v1/auth/login -H 'Content-Type: application/json' -d '{"username":"ci-admin","password":"CI-only-Admin-Password-12345"}' > /tmp/kayan-login.json
           node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/kayan-login.json","utf8")); if(typeof r.accessToken!=="string" || !r.accessToken || typeof r.refreshToken!=="string" || !r.user) process.exit(1); console.log("Login smoke test passed for",r.user.username)'
+          echo "Running full accounting business scenario against isolated CI PostgreSQL..."
+          ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 node scripts/scenario-accounting.mjs http://127.0.0.1:3000/api/v1
+          echo "Running warehouses, transfers, orders, and price-list scenario..."
+          ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 node scripts/scenario-warehouses-orders.mjs http://127.0.0.1:3000/api/v1
       - name: Audit production dependencies
         run: npm audit --omit=dev
 
