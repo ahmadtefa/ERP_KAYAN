@@ -28,10 +28,9 @@ void main() {
     });
 
     test('accepts the snake_case API spelling', () {
-      final user = UserDto({
-        ...userJson(),
-        'is_super_admin': true,
-      }).toDomain();
+      final json = userJson()..remove('isSuperAdmin');
+      json['is_super_admin'] = true;
+      final user = UserDto(json).toDomain();
 
       expect(user.isSuperAdmin, isTrue);
     });
