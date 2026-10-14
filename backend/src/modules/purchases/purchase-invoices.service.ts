@@ -380,15 +380,17 @@ export class PurchaseInvoicesService {
             'A purchase invoice line has no item, so its stock cannot be returned',
           );
         }
-        const balance = await tx.stockBalance.findUnique({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: invoice.branchId,
-              itemId: line.itemId,
-            },
-          },
-        });
+        const lockedBalances = await tx.$queryRaw<
+          Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
+        >(Prisma.sql`
+          SELECT "quantity", "value"
+            FROM "stock_balances"
+           WHERE "companyId" = ${companyId}::uuid
+             AND "branchId" = ${invoice.branchId}::uuid
+             AND "itemId" = ${line.itemId}::uuid
+           FOR UPDATE
+        `);
+        const balance = lockedBalances[0] ?? null;
         const qtyOnHand = balance?.quantity ?? new Prisma.Decimal(0);
         if (qtyOnHand.lessThan(line.quantity)) {
           throw new BadRequestException(
