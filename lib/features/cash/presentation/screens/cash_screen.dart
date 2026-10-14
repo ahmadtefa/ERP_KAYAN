@@ -173,18 +173,20 @@ class _CashScreenState extends ConsumerState<CashScreen>
     if (kindValues == null || !mounted) return;
     final isReceipt = text(kindValues, 'kind') == 'RECEIPT';
 
-    List<Json> parties;
+    List<Json> parties = const <Json>[];
     try {
       parties = isReceipt
           ? await ref.read(activeCustomersProvider.future)
           : await ref.read(activeSuppliersProvider.future);
     } on Failure catch (error) {
+      // A party is optional for an on-account voucher. Keep the workflow
+      // available if this auxiliary picker cannot load.
       if (mounted) showMessage(context, error.message, error: true);
-      return;
     } catch (error, stackTrace) {
       debugPrint('Loading voucher parties failed: $error\\n$stackTrace');
-      if (mounted) showMessage(context, l10n.unexpectedError, error: true);
-      return;
+      if (mounted) {
+        showMessage(context, l10n.unexpectedError, error: true);
+      }
     }
     if (!mounted) return;
 
