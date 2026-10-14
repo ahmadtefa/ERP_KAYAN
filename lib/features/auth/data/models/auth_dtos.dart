@@ -74,6 +74,10 @@ class UserDto {
       roles: list(['roles']),
       permissions: list(['permissions']),
       isActive: json['isActive'] as bool? ?? json['is_active'] as bool? ?? true,
+      isSuperAdmin:
+          json['isSuperAdmin'] as bool? ??
+          json['is_super_admin'] as bool? ??
+          false,
     );
   }
 }

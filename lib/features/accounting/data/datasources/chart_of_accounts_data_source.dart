@@ -14,7 +14,6 @@ class AccountInput {
     this.parentId,
     this.isPostable,
     this.isActive,
-    this.description,
   });
 
   final String? code;
@@ -24,19 +23,15 @@ class AccountInput {
   final String? parentId;
   final bool? isPostable;
   final bool? isActive;
-  final String? description;
 
   Map<String, dynamic> toJson() => {
     if (code != null && code!.isNotEmpty) 'code': code,
     'nameEn': nameEn,
-    // An empty Arabic name is left out, so an update does not overwrite the
-    // stored name with blank text (the server requires at least one character).
-    if (nameAr.isNotEmpty) 'nameAr': nameAr,
+    'nameAr': nameAr,
     'type': type.name.toUpperCase(),
     if (parentId != null) 'parentId': parentId,
     if (isPostable != null) 'isPostable': isPostable,
     if (isActive != null) 'isActive': isActive,
-    if (description != null) 'description': description,
   };
 }
 

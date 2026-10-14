@@ -1,23 +1,25 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/backend/company_setup_data.dart';
 import '../../../../core/error/failure.dart';
+import '../../../../core/storage/credentials_store.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/error_messages.dart';
-import '../../../../shared/widgets/company_logo.dart';
 import '../../../../shared/widgets/company_setup_form.dart';
 import '../providers/auth_providers.dart';
 
 /// Sign-in screen.
 ///
 /// The form performs local validation only; authentication itself is always
-/// decided by the API. "Remember me" is opt-in and stored through [TokenStore]
-/// (the password only in secure storage). On a brand-new installation with no
-/// company yet, the company setup form is shown before the sign-in form.
+/// decided by the API.
+///
+/// "Remember me" is off by default. When it is on, the username is kept for
+/// the next visit — and the password only in the operating system's own
+/// keystore, never in plain preferences. On the web the username alone is
+/// remembered. Everything can be cleared with one tap.
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
@@ -29,15 +31,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _username = TextEditingController();
   final _password = TextEditingController();
+  final _credentials = CredentialsStore();
 
   bool _obscure = true;
-  bool _rememberLogin = false;
-  bool _rememberLoaded = false;
   bool _busy = false;
+  bool _remember = false;
   String? _error;
 
   /// A brand-new installation has a database but no company and nobody who
-  /// can sign in. The setup form answers that before the sign-in form.
+  /// can sign in. The setup screen answers that before the sign-in form can
+  /// do anything useful.
   bool? _setupNeeded;
   bool _setupBusy = false;
   String? _setupError;
@@ -45,7 +48,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    _restoreRememberedLogin();
+    _loadSaved();
     _checkSetup();
   }
 
@@ -55,24 +58,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
       setState(() => _setupNeeded = status['needsSetup'] == true);
     } catch (_) {
-      // Server unreachable is reported by the sign-in form itself.
+      // The server being unreachable is the sign-in form's own error to
+      // report; from here, just behave as though setup is not needed.
       if (mounted) setState(() => _setupNeeded = false);
     }
-  }
-
-
-  Future<void> _restoreRememberedLogin() async {
-    final store = ref.read(tokenStoreProvider);
-    final enabled = await store.rememberLoginEnabled();
-    final username = enabled ? await store.readRememberedUsername() : null;
-    final password = enabled ? await store.readRememberedPassword() : null;
-    if (!mounted) return;
-    setState(() {
-      _rememberLogin = enabled;
-      _rememberLoaded = true;
-      _username.text = username ?? '';
-      _password.text = password ?? '';
-    });
   }
 
   Future<void> _runSetup(CompanySetupData data) async {
@@ -137,6 +126,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
+  Future<void> _loadSaved() async {
+    final remembered = await _credentials.isRemembered();
+    if (!mounted) return;
+    if (remembered) {
+      final username = await _credentials.savedUsername();
+      final password = await _credentials.savedPassword();
+      if (!mounted) return;
+      setState(() {
+        _remember = true;
+        if (username != null) _username.text = username;
+        if (password != null) _password.text = password;
+      });
+    }
+  }
+
   @override
   void dispose() {
     _username.dispose();
@@ -153,13 +157,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() => _busy = true);
     final result = await ref
         .read(authControllerProvider.notifier)
-        .signIn(
-          username: _username.text,
-          password: _password.text,
-          rememberLogin: _rememberLogin,
-        );
+        .signIn(username: _username.text, password: _password.text);
     if (!mounted) return;
 
+    if (result.isSuccess) {
+      // Only after the API has accepted the sign-in does anything get kept —
+      // a wrong password must not be remembered.
+      await _credentials.save(
+        remember: _remember,
+        username: _username.text.trim(),
+        password: _password.text,
+      );
+    }
+
+    if (!mounted) return;
     setState(() {
       _busy = false;
       _error = result.when(
@@ -169,21 +180,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
   }
 
+  Future<void> _clearSaved() async {
+    await _credentials.clear();
+    if (!mounted) return;
+    setState(() {
+      _remember = false;
+      _username.clear();
+      _password.clear();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.l10n.savedCredentialsCleared)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
-    final branding = ref.watch(companyBrandingProvider).value;
-    final logoPath = branding?['logoUrl'] as String?;
-    final localizedCompanyName = branding == null
-        ? null
-        : (Localizations.localeOf(context).languageCode == 'ar'
-                  ? branding['nameAr']
-                  : branding['nameEn'])
-              ?.toString();
-    final logoUrl = logoPath == null
-        ? null
-        : '${ref.watch(appConfigProvider).apiBaseUrl.replaceFirst(RegExp(r'/+$'), '')}$logoPath';
 
     if (_setupNeeded == true) {
       // First run on this installation: the company is set up here, before
@@ -241,12 +254,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Center(child: CompanyLogo(url: logoUrl, size: 56)),
+                      Icon(
+                        Icons.account_balance,
+                        size: 48,
+                        color: theme.colorScheme.primary,
+                      ),
                       const SizedBox(height: 12),
                       Text(
-                        localizedCompanyName?.trim().isNotEmpty == true
-                            ? localizedCompanyName!
-                            : l10n.appTitle,
+                        l10n.appTitle,
                         textAlign: TextAlign.center,
                         style: theme.textTheme.headlineSmall,
                       ),
@@ -296,33 +311,45 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ? l10n.passwordRequired
                             : null,
                       ),
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        value: _rememberLogin,
-                        onChanged: !_rememberLoaded || _busy
-                            ? null
-                            : (value) async {
-                                final enabled = value ?? false;
-                                setState(() => _rememberLogin = enabled);
-                                if (!enabled) {
-                                  await ref
-                                      .read(tokenStoreProvider)
-                                      .clearRememberedLogin();
-                                }
-                              },
-                        controlAffinity: ListTileControlAffinity.leading,
-                        title: Text(l10n.rememberLogin),
-                        subtitle: Text(
-                          kIsWeb
-                              ? l10n.rememberWebUsernameOnly
-                              : l10n.rememberNativeSecure,
-                        ),
+                      const SizedBox(height: 4),
+                      // "Remember me": optional, off until asked for.
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: _remember,
+                                onChanged: _busy
+                                    ? null
+                                    : (value) => setState(
+                                        () => _remember = value ?? false,
+                                      ),
+                              ),
+                              Expanded(
+                                child: InkWell(
+                                  onTap: _busy
+                                      ? null
+                                      : () => setState(
+                                          () => _remember = !_remember,
+                                        ),
+                                  child: Text(l10n.rememberMe),
+                                ),
+                              ),
+                            ],
+                          ),
+                          TextButton.icon(
+                            onPressed: _busy ? null : _clearSaved,
+                            icon: const Icon(Icons.clear_all, size: 18),
+                            label: Text(l10n.clearSavedCredentials),
+                          ),
+                        ],
                       ),
                       if (_error != null) ...[
                         const SizedBox(height: 12),
                         _ErrorBanner(message: _error!),
                       ],
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 20),
                       FilledButton(
                         onPressed: _busy ? null : _submit,
                         child: _busy

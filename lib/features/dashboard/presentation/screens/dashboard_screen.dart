@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,11 +8,13 @@ import '../../../../l10n/generated/app_localizations.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../accounting/presentation/providers/chart_of_accounts_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../settings/presentation/providers/company_providers.dart';
 
 /// Landing screen after sign-in.
 ///
-/// Counts shown here come from the same providers the feature screens use, so
-/// the dashboard cannot drift from the module it summarises.
+/// Shows company identity, branch context, key metrics and quick module access.
+/// Company data and counts come directly from their providers so updates in
+/// settings reflect immediately on the dashboard without restarting.
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
 
@@ -20,13 +23,75 @@ class DashboardScreen extends ConsumerWidget {
     final l10n = context.l10n;
     final user = ref.watch(currentUserProvider);
     final accounts = ref.watch(chartOfAccountsProvider);
+    final companyAsync = ref.watch(companyProfileProvider);
+    final branchesAsync = ref.watch(branchesProvider);
+    final isArabic = Localizations.localeOf(context).languageCode == 'ar';
+
+    final companyRaw = companyAsync.asData?.value;
+    final company = companyRaw != null
+        ? Map<String, dynamic>.from(companyRaw)
+        : const <String, dynamic>{};
+
+    final branchesRaw = branchesAsync.asData?.value;
+    final branches = branchesRaw != null
+        ? branchesRaw.map((e) => Map<String, dynamic>.from(e)).toList()
+        : const <Map<String, dynamic>>[];
+
+    // Company names:
+    final nameAr = (company['nameAr'] as String?)?.trim() ?? '';
+    final nameEn = (company['nameEn'] as String?)?.trim() ?? '';
+    final companyName = isArabic
+        ? (nameAr.isNotEmpty ? nameAr : nameEn)
+        : (nameEn.isNotEmpty ? nameEn : nameAr);
+
+    // Branch name:
+    String branchName = '';
+    if (user?.branchId != null && branches.isNotEmpty) {
+      final matching = branches.firstWhere(
+        (b) => b['id'] == user!.branchId,
+        orElse: () => const <String, dynamic>{},
+      );
+      if (matching.isNotEmpty) {
+        final bAr = (matching['nameAr'] as String?)?.trim() ?? '';
+        final bEn = (matching['nameEn'] as String?)?.trim() ?? '';
+        branchName = isArabic
+            ? (bAr.isNotEmpty ? bAr : bEn)
+            : (bEn.isNotEmpty ? bEn : bAr);
+      }
+    }
+    if (branchName.isEmpty && branches.isNotEmpty) {
+      final hq = branches.firstWhere(
+        (b) => b['kind'] == 'HEADQUARTERS',
+        orElse: () => branches.first,
+      );
+      final bAr = (hq['nameAr'] as String?)?.trim() ?? '';
+      final bEn = (hq['nameEn'] as String?)?.trim() ?? '';
+      branchName = isArabic
+          ? (bAr.isNotEmpty ? bAr : bEn)
+          : (bEn.isNotEmpty ? bEn : bAr);
+    }
+    if (branchName.isEmpty) {
+      branchName = user?.branchId ?? l10n.notAvailable;
+    }
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text(
-          '${l10n.welcomeBack}${user == null ? '' : ', ${user.fullName}'}',
-          style: Theme.of(context).textTheme.headlineSmall,
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                '${l10n.welcomeBack}${user == null ? '' : ', ${user.fullName}'}',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _CompanyBanner(
+          company: company,
+          branchName: branchName,
         ),
         const SizedBox(height: 16),
         Wrap(
@@ -36,7 +101,6 @@ class DashboardScreen extends ConsumerWidget {
             _StatCard(
               icon: Icons.account_tree_outlined,
               label: l10n.accountsTotal,
-              // Shows a dash rather than a fabricated number while loading.
               value: accounts.when(
                 data: (list) => '${list.length}',
                 loading: () => '—',
@@ -46,14 +110,18 @@ class DashboardScreen extends ConsumerWidget {
             _StatCard(
               icon: Icons.business_outlined,
               label: l10n.company,
-              value: user?.companyId.isNotEmpty ?? false
-                  ? user!.companyId
-                  : l10n.notAvailable,
+              value: companyName.isNotEmpty
+                  ? companyName
+                  : (user?.companyId.isNotEmpty ?? false
+                      ? user!.companyId
+                      : l10n.notAvailable),
             ),
             _StatCard(
               icon: Icons.location_on_outlined,
               label: l10n.branch,
-              value: user?.branchId ?? l10n.notAvailable,
+              value: branchName.isNotEmpty
+                  ? branchName
+                  : (user?.branchId ?? l10n.notAvailable),
             ),
           ],
         ),
@@ -81,6 +149,196 @@ class DashboardScreen extends ConsumerWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+class _CompanyBanner extends StatelessWidget {
+  const _CompanyBanner({
+    required this.company,
+    required this.branchName,
+  });
+
+  final Map<String, dynamic> company;
+  final String branchName;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final l10n = context.l10n;
+    final isArabic = Localizations.localeOf(context).languageCode == 'ar';
+
+    final nameAr = (company['nameAr'] as String?)?.trim() ?? '';
+    final nameEn = (company['nameEn'] as String?)?.trim() ?? '';
+    final primaryName = isArabic
+        ? (nameAr.isNotEmpty ? nameAr : nameEn)
+        : (nameEn.isNotEmpty ? nameEn : nameAr);
+    final secondaryName = isArabic ? nameEn : nameAr;
+
+    final logoBase64 = (company['logoBase64'] as String?)?.trim();
+    final hasLogo = (company['hasLogo'] == true) ||
+        (logoBase64 != null && logoBase64.isNotEmpty);
+    final code = (company['code'] as String?)?.trim() ?? '';
+    final taxId = (company['taxId'] as String?)?.trim() ?? '';
+    final phone = (company['phone'] as String?)?.trim() ?? '';
+    final email = (company['email'] as String?)?.trim() ?? '';
+
+    Widget logoWidget;
+    if (logoBase64 != null && logoBase64.isNotEmpty) {
+      try {
+        final bytes = base64Decode(logoBase64);
+        logoWidget = ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.memory(
+            bytes,
+            width: 56,
+            height: 56,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => CircleAvatar(
+              radius: 28,
+              backgroundColor: theme.colorScheme.primaryContainer,
+              child: Icon(Icons.business, color: theme.colorScheme.onPrimaryContainer),
+            ),
+          ),
+        );
+      } catch (_) {
+        logoWidget = CircleAvatar(
+          radius: 28,
+          backgroundColor: theme.colorScheme.primaryContainer,
+          child: Icon(Icons.business, color: theme.colorScheme.onPrimaryContainer),
+        );
+      }
+    } else {
+      logoWidget = CircleAvatar(
+        radius: 28,
+        backgroundColor: theme.colorScheme.primaryContainer,
+        child: Icon(
+          hasLogo ? Icons.business : Icons.business_outlined,
+          color: theme.colorScheme.onPrimaryContainer,
+          size: 30,
+        ),
+      );
+    }
+
+    return Card(
+      elevation: 0,
+      color: theme.colorScheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                logoWidget,
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        primaryName.isNotEmpty ? primaryName : l10n.company,
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      if (secondaryName.isNotEmpty &&
+                          secondaryName != primaryName) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          secondaryName,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                IconButton.outlined(
+                  tooltip: l10n.companySettings,
+                  icon: const Icon(Icons.edit_outlined, size: 20),
+                  onPressed: () => context.go(AppRoutes.companySettings),
+                ),
+              ],
+            ),
+            if (code.isNotEmpty ||
+                taxId.isNotEmpty ||
+                branchName.isNotEmpty ||
+                phone.isNotEmpty ||
+                email.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  if (code.isNotEmpty)
+                    _InfoChip(
+                      icon: Icons.tag,
+                      label: '${l10n.companyCode}: $code',
+                    ),
+                  if (taxId.isNotEmpty)
+                    _InfoChip(
+                      icon: Icons.receipt_long_outlined,
+                      label: '${l10n.taxId}: $taxId',
+                    ),
+                  if (branchName.isNotEmpty)
+                    _InfoChip(
+                      icon: Icons.location_on_outlined,
+                      label: '${l10n.branch}: $branchName',
+                    ),
+                  if (phone.isNotEmpty)
+                    _InfoChip(
+                      icon: Icons.phone_outlined,
+                      label: phone,
+                    ),
+                  if (email.isNotEmpty)
+                    _InfoChip(
+                      icon: Icons.email_outlined,
+                      label: email,
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: theme.colorScheme.primary),
+          const SizedBox(width: 4),
+          Text(label, style: theme.textTheme.bodySmall),
+        ],
+      ),
     );
   }
 }

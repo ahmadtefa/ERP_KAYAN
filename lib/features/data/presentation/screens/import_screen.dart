@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/platform/browser_actions.dart';
+import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/download_feedback.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/data_providers.dart';
 
@@ -72,14 +74,16 @@ class ImportScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
-                    onPressed: () async {
+                    onPressed: () {
                       final language =
                           Localizations.localeOf(context).languageCode;
-                      final url = await ref.read(reportLinkProvider).importTemplate(
-                            kind: state.kind.slug,
-                            language: language,
-                          );
-                      openInNewTab(url);
+                      runDownload(
+                        context,
+                        ref.read(reportLinkProvider).importTemplate(
+                              kind: state.kind.slug,
+                              language: language,
+                            ),
+                      );
                     },
                     icon: const Icon(Icons.download_outlined),
                     label: Text(l10n.downloadTemplate),
@@ -141,7 +145,13 @@ class _FileCard extends ConsumerWidget {
     final file = state.file;
 
     Future<void> choose() async {
-      final picked = await pickFile(extensions: ['.xlsx', '.csv']);
+      PickedFile? picked;
+      try {
+        picked = await pickFile(extensions: ['.xlsx', '.csv']);
+      } catch (error) {
+        controller.failed(describeApiError(error));
+        return;
+      }
       controller.chooseFile(picked);
       if (picked != null) await _read(ref, dryRun: true);
     }

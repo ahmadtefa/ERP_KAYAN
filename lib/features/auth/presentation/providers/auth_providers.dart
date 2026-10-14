@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/backend/local_backend.dart';
 import '../../../../core/config/app_config.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/result/result.dart';
@@ -11,9 +12,13 @@ import '../../domain/repositories/auth_repository.dart';
 import '../../domain/usecases/sign_in_usecase.dart';
 
 /// Composition root for the authentication feature.
-final appConfigProvider = Provider<AppConfig>(
-  (ref) => AppConfig.fromEnvironment(),
-);
+final appConfigProvider = Provider<AppConfig>((ref) {
+  final localBaseUrl = LocalBackend.instance?.baseUrl;
+  if (localBaseUrl != null && localBaseUrl.isNotEmpty) {
+    return AppConfig.forLocalServer(localBaseUrl);
+  }
+  return AppConfig.fromEnvironment();
+});
 
 final tokenStoreProvider = Provider<TokenStore>((ref) => TokenStore());
 
@@ -21,19 +26,6 @@ final apiClientProvider = Provider<ApiClient>(
   (ref) =>
       ApiClient(ref.watch(appConfigProvider), ref.watch(tokenStoreProvider)),
 );
-
-final companyBrandingProvider = FutureProvider<Map<String, dynamic>?>((
-  ref,
-) async {
-  try {
-    final user = ref.watch(currentUserProvider);
-    return await ref
-        .watch(apiClientProvider)
-        .get(user == null ? '/companies/branding' : '/companies/my-branding');
-  } catch (_) {
-    return null;
-  }
-});
 
 final authRemoteDataSourceProvider = Provider<AuthRemoteDataSource>(
   (ref) => AuthRemoteDataSourceImpl(ref.watch(apiClientProvider)),
@@ -55,6 +47,16 @@ class AuthController extends AsyncNotifier<AppUser?> {
   @override
   Future<AppUser?> build() async {
     final repository = ref.read(authRepositoryProvider);
+
+    // A session that has run out is renewed silently by the API client. When
+    // it cannot be renewed - the refresh token is spent, expired or gone -
+    // there is no session left, and the honest thing is to say so rather
+    // than leave every screen answering "Invalid or expired token".
+    ref.read(apiClientProvider).onSessionExpired = () async {
+      await repository.signOut();
+      ref.invalidateSelf();
+    };
+
     final result = await repository.restoreSession();
     return result.valueOrNull;
   }
@@ -63,22 +65,12 @@ class AuthController extends AsyncNotifier<AppUser?> {
   Future<Result<AppUser>> signIn({
     required String username,
     required String password,
-    bool rememberLogin = false,
   }) async {
     state = const AsyncValue.loading();
     final result = await ref.read(signInUseCaseProvider)(
       username: username,
       password: password,
     );
-    if (result.isSuccess && rememberLogin) {
-      try {
-        await ref
-            .read(tokenStoreProvider)
-            .saveRememberedLogin(username: username.trim(), password: password);
-      } catch (_) {
-        // Remembering is optional; secure-storage failure must not block login.
-      }
-    }
     state = AsyncValue.data(result.valueOrNull);
     return result;
   }

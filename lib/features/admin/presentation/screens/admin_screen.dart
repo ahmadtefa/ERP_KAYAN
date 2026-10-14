@@ -135,6 +135,31 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
     }
   }
 
+  Future<void> _editExtraPermissions(Json row) async {
+    final l10n = context.l10n;
+    final chosen = await showDialog<Set<String>>(
+      context: context,
+      builder: (context) => _PermissionsDialog(
+        title: '${l10n.extraPermissions} — ${text(row, 'username')}',
+        selected: listOf(row['extraPermissions']).map((e) => e.toString()).toSet(),
+      ),
+    );
+    if (chosen == null || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await ref.read(apiClientProvider).patch(
+        '/admin/users/${row['id']}',
+        body: {'extraPermissions': chosen.toList(growable: false)},
+      );
+      await ref.read(usersListProvider.notifier).reload();
+      if (mounted) showMessage(context, l10n.createdSuccessfully);
+    } on Failure catch (e) {
+      if (mounted) showMessage(context, e.message, error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _changePassword(Json row) async {
     final l10n = context.l10n;
     final values = await showFormSheet(
@@ -251,6 +276,11 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
             ColumnSpec(l10n.status, value: (r) => _status(r)),
           ],
           actions: (row) => [
+            IconButton(
+              tooltip: l10n.extraPermissions,
+              icon: const Icon(Icons.rule_outlined, size: 20),
+              onPressed: _busy ? null : () => _editExtraPermissions(row),
+            ),
             IconButton(
               tooltip: l10n.edit,
               icon: const Icon(Icons.edit_outlined, size: 20),
@@ -506,22 +536,61 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
           ),
           data: (catalogue) {
             final items = listOf(catalogue['items']);
-            final modules = (catalogue['modules'] as List? ?? const [])
-                .map((e) => e.toString())
-                .toList(growable: false);
+            final grouped = listOf(catalogue['modules']);
             final isArabic =
                 Localizations.localeOf(context).languageCode == 'ar';
+            final sections = grouped.isNotEmpty
+                ? grouped
+                    .map(
+                      (m) => (
+                        text(m is Json ? m : {'module': m.toString()}, 'module'),
+                        m is Json
+                            ? listOf(m['permissions'])
+                            : items
+                                .where((p) => text(p, 'module') == m.toString())
+                                .toList(growable: false),
+                      ),
+                    )
+                    .toList(growable: false)
+                : [
+                    for (final module in {
+                      for (final p in items) text(p, 'module'),
+                    })
+                      (
+                        module,
+                        items
+                            .where((p) => text(p, 'module') == module)
+                            .toList(growable: false),
+                      ),
+                  ];
 
-            return ListView(
+            return Column(
               children: [
-                for (final module in modules)
-                  _moduleSection(
-                    module,
-                    items
-                        .where((p) => text(p, 'module') == module)
-                        .toList(growable: false),
-                    isArabic,
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    TextButton(
+                      onPressed: () => setState(() {
+                        _selected
+                          ..clear()
+                          ..addAll(items.map((p) => text(p, 'code')));
+                      }),
+                      child: Text(l10n.selectAll),
+                    ),
+                    TextButton(
+                      onPressed: () => setState(_selected.clear),
+                      child: Text(l10n.clearAll),
+                    ),
+                  ],
+                ),
+                Expanded(
+                  child: ListView(
+                    children: [
+                      for (final section in sections)
+                        _moduleSection(section.$1, section.$2, isArabic),
+                    ],
                   ),
+                ),
               ],
             );
           },
@@ -546,9 +615,31 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
       children: [
         Padding(
           padding: const EdgeInsets.only(top: 12, bottom: 4),
-          child: Text(
-            module,
-            style: Theme.of(context).textTheme.titleSmall,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  module,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              TextButton(
+                onPressed: () => setState(() {
+                  for (final p in permissions) {
+                    _selected.add(text(p, 'code'));
+                  }
+                }),
+                child: Text(l10n.selectAll),
+              ),
+              TextButton(
+                onPressed: () => setState(() {
+                  for (final p in permissions) {
+                    _selected.remove(text(p, 'code'));
+                  }
+                }),
+                child: Text(l10n.clearAll),
+              ),
+            ],
           ),
         ),
         for (final permission in permissions)
