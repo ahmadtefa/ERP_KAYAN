@@ -13,11 +13,11 @@
     "prisma:deploy": "prisma migrate deploy",
     "db:prepare": "node scripts/prepare-database.mjs",
     "seed": "ts-node prisma/seed.ts",
+    "test": "jest",
+    "lint": "eslint \"src/**/*.ts\"",
     "seed:permissions": "ts-node prisma/seed-permissions.ts",
     "seed:demo": "ts-node prisma/seed-demo.ts",
     "build:demo": "node scripts/build-demo-backup.mjs",
-    "test": "jest",
-    "lint": "eslint \"src/**/*.ts\"",
     "check:api": "node scripts/api-check.mjs"
   },
   "dependencies": {
@@ -26,7 +26,7 @@
     "@nestjs/core": "^11.0.0",
     "@nestjs/jwt": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
-    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/adapter-pg": "^6.19.3",
     "@prisma/client": "^6.0.0",
     "argon2": "^0.44.0",
     "class-transformer": "^0.5.1",
@@ -42,11 +42,11 @@
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@types/express": "^5.0.0",
-    "@types/jest": "^29.5.14",
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.23.1",
-    "jest": "^29.7.0",
-    "ts-jest": "^29.2.5",
+    "jest": "^30.5.2",
+    "ts-jest": "^29.4.14",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   },
@@ -62,5 +62,9 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "testEnvironment": "node"
+  },
+  "overrides": {
+    "uuid": "^11.1.1",
+    "deepmerge-ts": "^8.0.2"
   }
 }
