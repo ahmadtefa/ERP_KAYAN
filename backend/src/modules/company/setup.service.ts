@@ -167,6 +167,28 @@ export class SetupService {
         },
       });
 
+      // The first-run setup creates its branch after migrations have run,
+      // so it must establish the branch's default warehouse here as well.
+      const baseWarehouseCode = `${hq.code}-MAIN`;
+      const codeClash = await tx.warehouse.findFirst({
+        where: { companyId: company.id, code: baseWarehouseCode },
+        select: { id: true },
+      });
+      const warehouseCode = codeClash
+        ? `${baseWarehouseCode}-${hq.id.slice(0, 8).toUpperCase()}`
+        : baseWarehouseCode;
+      await tx.warehouse.create({
+        data: {
+          companyId: company.id,
+          branchId: hq.id,
+          code: warehouseCode,
+          nameEn: `${hq.nameEn} main store`,
+          nameAr: `${hq.nameAr} - المخزن الرئيسي`,
+          isDefault: true,
+          isActive: true,
+        },
+      });
+
       // The permission catalogue and the two starter roles come from the same
       // definitions the seed uses, so a web setup and a desktop setup produce
       // identical installations.
