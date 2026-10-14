@@ -27,17 +27,24 @@ model Company {
   nameEn   String
   nameAr   String
   taxId    String? // Egyptian Tax Registration Number
+  currency String @default("EGP") @db.VarChar(3)
+  timezone String @default("Africa/Cairo")
+
+  // Company profile: contact details shown on reports and documents.
+  phone   String?
+  email   String?
+  address String?
   commercialRegistration String?
   addressEn String?
   addressAr String?
-  phone String?
-  email String?
   logoPath String?
-  // Logo stored in the database so a full backup carries it (source feature).
+
+  // The company logo, stored in the database so a full backup carries it and
+  // no file permissions on the server can lose it. Optional at all times:
+  // every screen and report works without it. Kept small by the upload
+  // endpoint (type and size are validated before it ever gets here).
   logoData Bytes?
   logoMime String? @db.VarChar(64)
-  currency String @default("EGP") @db.VarChar(3)
-  timezone String @default("Africa/Cairo")
 
   isActive Boolean @default(true)
 
@@ -57,12 +64,27 @@ model Company {
 
   customers        Customer[]
   suppliers        Supplier[]
+  itemCategories   ItemCategory[]
+  costCenters      CostCenter[]
+  settings         CompanySetting?
+  cashAccounts     CashAccount[]
+  cashVouchers     CashVoucher[]
+  cashTransfers    CashTransfer[]
+  reconciliations  BankReconciliation[]
+  openingBalances  OpeningBalance[]
+  stockDocuments   StockDocument[]
+  backupRuns       BackupRun[]
   items            Item[]
   stockBalances    StockBalance[]
   stockMovements   StockMovement[]
   salesInvoices    SalesInvoice[]
   purchaseInvoices PurchaseInvoice[]
   fiscalPeriods FiscalPeriod[]
+
+  warehouses     Warehouse[]
+  priceLists     PriceList[]
+  purchaseOrders PurchaseOrder[]
+  salesOrders    SalesOrder[]
 
   @@map("companies")
 }
@@ -80,7 +102,9 @@ model Branch {
   nameAr    String
   isActive  Boolean @default(true)
 
-  /// A unit is either the company headquarters or a branch of it (source feature).
+  /// A unit is either the company's headquarters or a branch of it. A branch
+  /// points at its parent unit (usually the headquarters), so the tree can be
+  /// walked without guessing.
   kind           BranchKind @default(BRANCH)
   parentBranchId String?    @db.Uuid
 
@@ -100,6 +124,14 @@ model Branch {
   stockMovements   StockMovement[]
   salesInvoices    SalesInvoice[]
   purchaseInvoices PurchaseInvoice[]
+  cashAccounts     CashAccount[]
+  cashVouchers     CashVoucher[]
+  cashTransfers    CashTransfer[]
+  openingBalances  OpeningBalance[]
+  stockDocuments   StockDocument[]
+  warehouses       Warehouse[]
+  purchaseOrders   PurchaseOrder[]
+  salesOrders      SalesOrder[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -132,6 +164,7 @@ model User {
 
   company      Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
   userRoles    UserRole[]
+  userPermissions UserPermission[]
   branches     UserBranch[]
   refreshToken RefreshToken[]
   auditLogs    AuditLog[]
@@ -168,8 +201,21 @@ model Permission {
   nameAr   String
   module   String
   rolePermissions RolePermission[]
+  userPermissions UserPermission[]
 
   @@map("permissions")
+}
+
+/// Extra permissions granted to one user on top of their roles.
+model UserPermission {
+  userId       String @db.Uuid
+  permissionId String @db.Uuid
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@map("user_permissions")
 }
 
 model RolePermission {
@@ -245,7 +291,6 @@ model Account {
   isPostable  Boolean     @default(true)
   isActive    Boolean     @default(true)
   currency    String?     @db.VarChar(3)
-  description String?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -257,6 +302,9 @@ model Account {
   parent   Account? @relation("AccountTree", fields: [parentId], references: [id], onDelete: Restrict)
   children Account[] @relation("AccountTree")
   lines    JournalLine[]
+  cashAccounts     CashAccount[]
+  voucherCounter   CashVoucher[]   @relation("VoucherCounterAccount")
+  openingLines     OpeningBalanceLine[]
 
   @@unique([companyId, code])
   @@index([companyId, type])
@@ -264,10 +312,26 @@ model Account {
   @@map("accounts")
 }
 
+/// The life of a journal entry:
+///
+///   DRAFT ──submit──▶ PENDING_APPROVAL ──approve──▶ APPROVED ──post──▶ POSTED
+///     │                    │                          │                 │
+///     └────────────── cancel ───────────────────────┴─────────▶ CANCELLED
+///                                                                       │
+///                                        posted entries are only ever reversed
+///                                                                       ▼
+///                                                                   REVERSED
+///
+/// A company that does not want a second pair of eyes leaves the approval
+/// setting off, and a draft can be posted directly - the workflow is a policy,
+/// not a cage.
 enum JournalStatus {
   DRAFT
+  PENDING_APPROVAL
+  APPROVED
   POSTED
   REVERSED
+  CANCELLED
 }
 
 model JournalEntry {
@@ -288,6 +352,24 @@ model JournalEntry {
   reversalOfId String?   @db.Uuid
   postedAt     DateTime?
   postedBy     String?   @db.Uuid
+
+  /// The business document this entry came from: SALES_INVOICE, CASH_VOUCHER,
+  /// OPENING_BALANCE and so on, with its id and its number. A manual entry has
+  /// none. This is what makes a ledger line traceable back to its document.
+  sourceType   String?   @db.VarChar(32)
+  sourceId     String?   @db.Uuid
+  sourceNumber String?   @db.VarChar(64)
+
+  /// Who asked for the entry to be looked at, and who agreed to it. Kept
+  /// separately from createdBy so a segregation-of-duties rule can be checked
+  /// without guessing from the audit trail.
+  submittedAt  DateTime?
+  submittedBy  String?   @db.Uuid
+  approvedAt   DateTime?
+  approvedBy   String?   @db.Uuid
+  cancelledAt  DateTime?
+  cancelledBy  String?   @db.Uuid
+  cancelReason String?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -318,11 +400,451 @@ model JournalLine {
 
   entry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   account Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  costCenter CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
 
   @@unique([journalEntryId, lineNumber])
   @@index([accountId])
+  @@index([costCenterId])
   @@map("journal_lines")
 }
+
+// --------------------------------------------------------- cost center tree
+
+/// A cost center is an analytical dimension: "whose cost is this?". Flat by
+/// design - a cost center inherits nothing, and a report over it answers a
+/// question the chart of accounts cannot.
+model CostCenter {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  code      String
+  nameEn    String
+  nameAr    String
+  isActive  Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  updatedBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  lines   JournalLine[]
+
+  @@unique([companyId, code])
+  @@index([companyId, isActive])
+  @@map("cost_centers")
+}
+
+// --------------------------------------------------------- company settings
+
+/// The company's own policies: tax, discount, stock, approval and backup
+/// retention. One row per company, created with defaults the first time it is
+/// read, so nothing has to be configured before the program is usable.
+model CompanySetting {
+  companyId String @id @db.Uuid
+
+  /// Default VAT rate in percent, used when neither the item nor the line
+  /// carries one. 0 means "this company does not charge VAT".
+  taxRate Decimal @default(14) @db.Decimal(9, 4)
+
+  /// When true, the prices typed on a sales line already include VAT and the
+  /// tax is backed out of them instead of being added.
+  pricesIncludeTax Boolean @default(false)
+
+  /// A sale that would take stock below zero is refused unless this is on.
+  /// Turning it on is a deliberate act by an administrator, and it is recorded
+  /// in the audit trail when it changes.
+  allowNegativeStock Boolean @default(false)
+
+  /// The one valuation method the installation uses. Weighted average is the
+  /// default; FIFO is accepted as a value only by a company that has decided
+  /// to switch, and changing it on a database with stock is refused.
+  inventoryValuation String @default("WEIGHTED_AVERAGE") @db.VarChar(32)
+
+  /// When on, a manual journal entry cannot be posted until somebody other
+  /// than its author has approved it.
+  approvalRequiredForJournal Boolean @default(false)
+
+  /// When on, the person who created a document may not approve or post it.
+  segregationOfDuties Boolean @default(false)
+
+  /// How many full backups to keep on the server before the oldest are
+  /// removed. 0 disables pruning, which is only sensible when the operator
+  /// archives them elsewhere.
+  backupRetentionCount Int @default(14)
+
+  /// How many days between scheduled backups. 0 turns the schedule off.
+  backupIntervalHours Int @default(24)
+
+  /// Largest discount a sales line may carry, in percent.
+  maxDiscountPercent Decimal @default(100) @db.Decimal(9, 4)
+
+  updatedAt DateTime @updatedAt
+  updatedBy String?  @db.Uuid
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("company_settings")
+}
+
+// ------------------------------------------------------------ cash & banks
+
+enum CashAccountKind {
+  CASH
+  BANK
+}
+
+/// A cash box or a bank account as the business sees it, tied to the general
+/// ledger account that holds its money. Every voucher names one, so the cash
+/// position is never a guess.
+model CashAccount {
+  id        String          @id @default(uuid()) @db.Uuid
+  companyId String          @db.Uuid
+  branchId  String?         @db.Uuid
+  code      String
+  nameEn    String
+  nameAr    String
+  kind      CashAccountKind @default(CASH)
+  currency  String          @default("EGP") @db.VarChar(3)
+
+  /// The chart-of-accounts account this box or bank posts to.
+  accountId String @db.Uuid
+
+  bankName          String?
+  bankAccountNumber String?
+  iban              String?
+  swiftCode         String?
+  notes             String?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  updatedBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company        Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch         Branch?          @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  account        Account          @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  vouchers       CashVoucher[]
+  transfersOut   CashTransfer[]   @relation("TransferFrom")
+  transfersIn    CashTransfer[]   @relation("TransferTo")
+  reconciliations BankReconciliation[]
+
+  @@unique([companyId, code])
+  @@index([companyId, kind])
+  @@map("cash_accounts")
+}
+
+enum CashVoucherKind {
+  RECEIPT
+  PAYMENT
+}
+
+/// A receipt (سند قبض) or a payment (سند صرف).
+///
+/// Posting one moves money between the cash box or bank and either a partner
+/// (customer/supplier, allocated against specific invoices) or a general
+/// ledger account for everything else - an expense, a loan, the owner.
+model CashVoucher {
+  id            String          @id @default(uuid()) @db.Uuid
+  companyId     String          @db.Uuid
+  branchId      String          @db.Uuid
+  voucherNumber String
+  voucherDate   DateTime        @db.Date
+  kind          CashVoucherKind
+  cashAccountId String          @db.Uuid
+  amount        Decimal         @db.Decimal(19, 4)
+  currency      String          @default("EGP") @db.VarChar(3)
+
+  /// Who the money came from (receipt) or went to (payment). A voucher is
+  /// either against a customer, against a supplier, or against an account.
+  customerId String? @db.Uuid
+  supplierId String? @db.Uuid
+
+  /// Used when the voucher is neither a customer nor a supplier: the other
+  /// side of the entry.
+  counterAccountId String? @db.Uuid
+
+  description String?
+  reference   String?
+
+  status   InvoiceStatus @default(DRAFT)
+  journalEntryId String? @db.Uuid
+  postedAt DateTime?
+  postedBy String?   @db.Uuid
+
+  /// Bank reconciliation: which statement run has claimed this voucher.
+  reconciledAt     DateTime?
+  reconciliationId String?   @db.Uuid
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company     Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch      Branch               @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  cashAccount CashAccount          @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
+  customer    Customer?            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  supplier    Supplier?            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  counterAccount Account?          @relation("VoucherCounterAccount", fields: [counterAccountId], references: [id], onDelete: Restrict)
+  reconciliation BankReconciliation? @relation(fields: [reconciliationId], references: [id], onDelete: SetNull)
+  allocations CashVoucherAllocation[]
+
+  @@unique([companyId, voucherNumber])
+  @@index([companyId, voucherDate])
+  @@index([companyId, status])
+  @@index([cashAccountId, voucherDate])
+  @@map("cash_vouchers")
+}
+
+/// Which invoices a voucher settles. Without this the customer's statement
+/// cannot say which invoice the money was for.
+model CashVoucherAllocation {
+  id             String  @id @default(uuid()) @db.Uuid
+  voucherId      String  @db.Uuid
+  salesInvoiceId String? @db.Uuid
+  purchaseInvoiceId String? @db.Uuid
+  amount         Decimal @db.Decimal(19, 4)
+
+  voucher       CashVoucher      @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  salesInvoice  SalesInvoice?    @relation(fields: [salesInvoiceId], references: [id], onDelete: Restrict)
+  purchaseInvoice PurchaseInvoice? @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Restrict)
+
+  @@index([voucherId])
+  @@index([salesInvoiceId])
+  @@index([purchaseInvoiceId])
+  @@map("cash_voucher_allocations")
+}
+
+/// Money moved between two of the company's own boxes or banks. It posts one
+/// journal entry and never touches a partner.
+model CashTransfer {
+  id              String        @id @default(uuid()) @db.Uuid
+  companyId       String        @db.Uuid
+  branchId        String        @db.Uuid
+  transferNumber  String
+  transferDate    DateTime      @db.Date
+  fromCashAccountId String      @db.Uuid
+  toCashAccountId   String      @db.Uuid
+  amount          Decimal       @db.Decimal(19, 4)
+  currency        String        @default("EGP") @db.VarChar(3)
+  description     String?
+
+  status   InvoiceStatus @default(DRAFT)
+  journalEntryId String? @db.Uuid
+  postedAt DateTime?
+  postedBy String?   @db.Uuid
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch        Branch      @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  fromCashAccount CashAccount @relation("TransferFrom", fields: [fromCashAccountId], references: [id], onDelete: Restrict)
+  toCashAccount   CashAccount @relation("TransferTo", fields: [toCashAccountId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, transferNumber])
+  @@index([companyId, transferDate])
+  @@map("cash_transfers")
+}
+
+/// A bank statement run: the closing balance the bank reported, and the
+/// vouchers the accountant matched to it.
+model BankReconciliation {
+  id            String   @id @default(uuid()) @db.Uuid
+  companyId     String   @db.Uuid
+  cashAccountId String   @db.Uuid
+  statementDate DateTime @db.Date
+  periodFrom    DateTime @db.Date
+  periodTo      DateTime @db.Date
+
+  /// What the bank said the balance was, and what the books say it was.
+  statementBalance Decimal @db.Decimal(19, 4)
+  bookBalance      Decimal @db.Decimal(19, 4)
+  difference       Decimal @db.Decimal(19, 4)
+
+  status   String  @default("DRAFT") @db.VarChar(16)
+  notes    String?
+  createdAt DateTime @default(now())
+  createdBy String? @db.Uuid
+
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  cashAccount CashAccount  @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
+  vouchers    CashVoucher[]
+
+  @@index([companyId, cashAccountId, statementDate])
+  @@map("bank_reconciliations")
+}
+
+// ----------------------------------------------------------- opening balances
+
+/// The figures a company starts with: what each account, partner and item is
+/// worth on the day the books open.
+///
+/// It is one document per branch and date, and it posts a single balanced
+/// journal entry - the same rule as every other document in the system. The
+/// lines also carry the partner or the item, which is what makes an opening
+/// receivable collectable and an opening stock countable instead of being a
+/// number in a ledger nobody can drill into.
+model OpeningBalance {
+  id             String        @id @default(uuid()) @db.Uuid
+  companyId      String        @db.Uuid
+  branchId       String        @db.Uuid
+  documentNumber String
+  asOfDate       DateTime      @db.Date
+  description    String?
+  status         InvoiceStatus @default(DRAFT)
+
+  totalDebit  Decimal @default(0) @db.Decimal(19, 4)
+  totalCredit Decimal @default(0) @db.Decimal(19, 4)
+
+  journalEntryId String?   @db.Uuid
+  postedAt       DateTime?
+  postedBy       String?   @db.Uuid
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch  Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  lines   OpeningBalanceLine[]
+
+  @@unique([companyId, documentNumber])
+  @@index([companyId, asOfDate])
+  @@map("opening_balances")
+}
+
+model OpeningBalanceLine {
+  id               String @id @default(uuid()) @db.Uuid
+  openingBalanceId String @db.Uuid
+  accountId        String @db.Uuid
+  customerId       String? @db.Uuid
+  supplierId       String? @db.Uuid
+  itemId           String? @db.Uuid
+  debit            Decimal @default(0) @db.Decimal(19, 4)
+  credit           Decimal @default(0) @db.Decimal(19, 4)
+
+  /// For an item line: how many units are being opened, and at what cost.
+  /// quantity x unitCost must equal debit - the server refuses a line that
+  /// says otherwise.
+  quantity Decimal? @db.Decimal(19, 4)
+  unitCost Decimal? @db.Decimal(19, 4)
+
+  description String?
+  lineNumber  Int
+
+  openingBalance OpeningBalance @relation(fields: [openingBalanceId], references: [id], onDelete: Cascade)
+  account        Account        @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  customer       Customer?      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  supplier       Supplier?      @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  item           Item?          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([openingBalanceId, lineNumber])
+  @@index([openingBalanceId])
+  @@map("opening_balance_lines")
+}
+
+// ------------------------------------------------------- stock documents
+
+enum StockDocumentKind {
+  ADJUSTMENT
+  TRANSFER
+  COUNT
+  OPENING
+}
+
+/// Stock changes that are not an invoice: a write-off, a transfer between
+/// branches, a physical count, an opening quantity.
+///
+/// Every one of them writes stock movements and, when the value changes, a
+/// journal entry in the same transaction - so the stock ledger and the general
+/// ledger can never tell two different stories.
+model StockDocument {
+  id             String            @id @default(uuid()) @db.Uuid
+  companyId      String            @db.Uuid
+  branchId       String            @db.Uuid
+  kind           StockDocumentKind
+  documentNumber String
+  documentDate   DateTime          @db.Date
+  fromBranchId   String?           @db.Uuid
+  toBranchId     String?           @db.Uuid
+
+  /// A transfer may name the warehouse the goods leave and the one they
+  /// arrive at. A transfer that names neither still works exactly as before:
+  /// the branch's default warehouse on both sides.
+  fromWarehouseId String?          @db.Uuid
+  toWarehouseId   String?          @db.Uuid
+  status         InvoiceStatus     @default(DRAFT)
+  reason         String?
+  notes          String?
+  journalEntryId String?           @db.Uuid
+  postedAt       DateTime?
+  postedBy       String?           @db.Uuid
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company       Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch        Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  fromWarehouse Warehouse?         @relation("StockDocumentFromWarehouse", fields: [fromWarehouseId], references: [id], onDelete: Restrict)
+  toWarehouse   Warehouse?         @relation("StockDocumentToWarehouse", fields: [toWarehouseId], references: [id], onDelete: Restrict)
+  lines         StockDocumentLine[]
+
+  @@unique([companyId, documentNumber])
+  @@index([companyId, kind, documentDate])
+  @@map("stock_documents")
+}
+
+model StockDocumentLine {
+  id              String  @id @default(uuid()) @db.Uuid
+  documentId      String  @db.Uuid
+  itemId          String  @db.Uuid
+  quantity        Decimal @db.Decimal(19, 4)
+  unitCost        Decimal @default(0) @db.Decimal(19, 4)
+  countedQuantity Decimal? @db.Decimal(19, 4)
+  notes           String?
+  lineNumber      Int
+
+  document StockDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  item     Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([documentId, lineNumber])
+  @@index([documentId])
+  @@map("stock_document_lines")
+}
+
+// ------------------------------------------------------------ backup runs
+
+/// One row per backup taken, scheduled or manual, so the screen that answers
+/// "when did we last have a good copy?" reads a table instead of guessing
+/// from file names.
+model BackupRun {
+  id         String   @id @default(uuid()) @db.Uuid
+  companyId  String?  @db.Uuid
+  kind       String   @db.VarChar(24) // FULL | COMPANY_JSON | SCHEDULED
+  fileName   String
+  sizeBytes  BigInt   @default(0)
+  status     String   @db.VarChar(16) // SUCCESS | FAILED | VERIFIED
+  message    String?
+  createdAt  DateTime @default(now())
+  verifiedAt DateTime?
+  createdBy  String?  @db.Uuid
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+  @@map("backup_runs")
+}
+
 
 // ------------------------------------------------------- document numbering
 
@@ -394,6 +916,15 @@ model Customer {
   /// REQUIRES BUSINESS DECISION: whether a sale may exceed this limit.
   creditLimit Decimal @default(0) @db.Decimal(19, 4)
 
+  /// How many days this customer is given to pay. A sales invoice with no due
+  /// date of its own falls due this many days after its date, which is what
+  /// makes the ageing report mean something.
+  paymentTermDays Int @default(0)
+
+  /// The price list this customer buys from. Null means the item's own
+  /// selling price is used.
+  priceListId String? @db.Uuid
+
   isActive Boolean @default(true)
   notes    String?
 
@@ -404,7 +935,11 @@ model Customer {
   deletedAt DateTime?
 
   company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  priceList     PriceList?     @relation(fields: [priceListId], references: [id], onDelete: Restrict)
   salesInvoices SalesInvoice[]
+  salesOrders   SalesOrder[]
+  cashVouchers  CashVoucher[]
+  openingLines  OpeningBalanceLine[]
 
   @@unique([companyId, code])
   @@index([companyId, nameEn])
@@ -424,6 +959,13 @@ model Supplier {
   isActive    Boolean @default(true)
   notes       String?
 
+  /// How many days this supplier gives before payment is due.
+  paymentTermDays Int @default(0)
+
+  /// The price list this supplier's goods are bought from, when the supplier
+  /// has agreed one. Null means the item's own purchase price is used.
+  priceListId String? @db.Uuid
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   createdBy String?   @db.Uuid
@@ -431,7 +973,11 @@ model Supplier {
   deletedAt DateTime?
 
   company          Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  priceList        PriceList?        @relation(fields: [priceListId], references: [id], onDelete: Restrict)
   purchaseInvoices PurchaseInvoice[]
+  purchaseOrders   PurchaseOrder[]
+  cashVouchers     CashVoucher[]
+  openingLines     OpeningBalanceLine[]
 
   @@unique([companyId, code])
   @@index([companyId, nameEn])
@@ -482,10 +1028,24 @@ model Item {
   /// Default selling price. The invoice line may override it.
   salePrice Decimal @default(0) @db.Decimal(19, 4)
 
+  /// Last known purchase price, used as the default on a purchase line. It is
+  /// never used for valuation: the ledger values stock from what was actually
+  /// paid.
+  purchasePrice Decimal @default(0) @db.Decimal(19, 4)
+
+  /// Reorder reporting: when the quantity on hand falls to or below this, the
+  /// item appears on the "needs ordering" report.
+  reorderLevel Decimal @default(0) @db.Decimal(19, 4)
+
+  categoryId String? @db.Uuid
+
   /// Default tax rate in percent, e.g. 14 means 14%.
   /// REQUIRES BUSINESS DECISION: the statutory rate. Stored per item so a
   /// change of policy does not require a schema change.
-  taxRate   Decimal @default(0) @db.Decimal(9, 4)
+  /// VAT rate for this item. Null means "use the company default",
+  /// which is not the same as 0 ("exempt"): a shop that changes its VAT rate
+  /// should not have to edit every item.
+  taxRate         Decimal?  @db.Decimal(9, 4)
 
   isStockTracked Boolean @default(true)
   isActive       Boolean @default(true)
@@ -498,10 +1058,17 @@ model Item {
   deletedAt DateTime?
 
   company        Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  category       ItemCategory?        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  units          ItemUnit[]
   stockBalances  StockBalance[]
   stockMovements StockMovement[]
   salesLines     SalesInvoiceLine[]
   purchaseLines  PurchaseInvoiceLine[]
+  openingLines   OpeningBalanceLine[]
+  stockDocumentLines StockDocumentLine[]
+  priceListItems PriceListItem[]
+  purchaseOrderLines PurchaseOrderLine[]
+  salesOrderLines SalesOrderLine[]
 
   @@unique([companyId, code])
   @@index([companyId, nameEn])
@@ -542,6 +1109,11 @@ model StockMovement {
   id           String         @id @default(uuid()) @db.Uuid
   companyId    String         @db.Uuid
   branchId     String         @db.Uuid
+
+  /// Where the goods physically sat. Null means the movement was recorded
+  /// before warehouses existed, or without naming one; the warehouse reports
+  /// treat it as the branch's default warehouse.
+  warehouseId  String?        @db.Uuid
   itemId       String         @db.Uuid
   movementDate DateTime       @db.Date
   direction    StockDirection
@@ -557,12 +1129,14 @@ model StockMovement {
   createdAt DateTime @default(now())
   createdBy String?  @db.Uuid
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  item    Item    @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch    Branch     @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  item      Item       @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
 
   @@index([companyId, itemId, movementDate])
   @@index([companyId, referenceType, referenceId])
+  @@index([companyId, warehouseId, itemId])
   @@map("stock_movements")
 }
 
@@ -581,6 +1155,17 @@ enum InvoiceStatus {
   REVERSED
 }
 
+/// What kind of document an invoice row is.
+///
+/// A return is not a negative invoice with a minus sign: it is its own
+/// document that names the invoice it returns, so the original stays readable
+/// and a report can show sales and returns side by side.
+enum InvoiceDocumentType {
+  INVOICE
+  CREDIT_NOTE
+  DEBIT_NOTE
+}
+
 /// A sales invoice to a customer.
 ///
 /// Posting it does two things in one transaction: it writes a journal entry
@@ -596,6 +1181,17 @@ model SalesInvoice {
   status        InvoiceStatus @default(DRAFT)
   currency      String        @default("EGP") @db.VarChar(3)
 
+  /// INVOICE, or a return that points back at the invoice it returns.
+  documentType      InvoiceDocumentType @default(INVOICE)
+  originalInvoiceId String?             @db.Uuid
+  returnReason      String?
+
+  /// Discount given on the document as a whole, in percent, applied before
+  /// tax. Stored so the printed document adds up on paper the way the ledger
+  /// says it did.
+  discountPercent Decimal @default(0) @db.Decimal(9, 4)
+  discountAmount  Decimal @default(0) @db.Decimal(19, 4)
+
   subTotal     Decimal @default(0) @db.Decimal(19, 4)
   taxAmount    Decimal @default(0) @db.Decimal(19, 4)
   totalAmount  Decimal @default(0) @db.Decimal(19, 4)
@@ -605,6 +1201,12 @@ model SalesInvoice {
   /// Storing it keeps the gross profit of a posted invoice stable even after
   /// later purchases change the average cost.
   costOfGoods Decimal @default(0) @db.Decimal(19, 4)
+
+  /// The warehouse the goods left. Null means the branch's default.
+  warehouseId String? @db.Uuid
+
+  /// The order this invoice fulfils, when it was raised from one.
+  salesOrderId String? @db.Uuid
 
   notes          String?
   journalEntryId String?   @db.Uuid
@@ -619,7 +1221,12 @@ model SalesInvoice {
   company  Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
   branch   Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
   customer Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  warehouse Warehouse?    @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  salesOrder SalesOrder?  @relation(fields: [salesOrderId], references: [id], onDelete: Restrict)
   lines    SalesInvoiceLine[]
+  allocations CashVoucherAllocation[]
+  originalInvoice SalesInvoice?  @relation("SalesReturns", fields: [originalInvoiceId], references: [id], onDelete: Restrict)
+  returns         SalesInvoice[] @relation("SalesReturns")
 
   @@unique([companyId, invoiceNumber])
   @@index([companyId, invoiceDate])
@@ -640,11 +1247,26 @@ model SalesInvoiceLine {
   taxAmount   Decimal @default(0) @db.Decimal(19, 4)
   lineTotal   Decimal @db.Decimal(19, 4)
 
+  discountPercent Decimal @default(0) @db.Decimal(9, 4)
+  discountAmount  Decimal @default(0) @db.Decimal(19, 4)
+
+  /// How much of this line has already been returned. A return may not take
+  /// more than what is left, which is what stops the same goods being
+  /// credited twice.
+  returnedQuantity Decimal @default(0) @db.Decimal(19, 4)
+
+  /// On a return line only: the line of the original invoice it gives back.
+  /// Naming the line - not just the item - is what makes "return half of it"
+  /// an exact statement instead of a matching game.
+  originalLineId String? @db.Uuid
+
   unitCost  Decimal @default(0) @db.Decimal(19, 4)
   costTotal Decimal @default(0) @db.Decimal(19, 4)
 
   invoice SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item    Item?        @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  originalLine SalesInvoiceLine?  @relation("SalesReturnLines", fields: [originalLineId], references: [id], onDelete: Restrict)
+  returnedBy   SalesInvoiceLine[] @relation("SalesReturnLines")
 
   @@unique([invoiceId, lineNumber])
   @@index([itemId])
@@ -667,10 +1289,23 @@ model PurchaseInvoice {
   status      InvoiceStatus @default(DRAFT)
   currency    String        @default("EGP") @db.VarChar(3)
 
+  documentType      InvoiceDocumentType @default(INVOICE)
+  originalInvoiceId String?             @db.Uuid
+  returnReason      String?
+
+  discountPercent Decimal @default(0) @db.Decimal(9, 4)
+  discountAmount  Decimal @default(0) @db.Decimal(19, 4)
+
   subTotal    Decimal @default(0) @db.Decimal(19, 4)
   taxAmount   Decimal @default(0) @db.Decimal(19, 4)
   totalAmount Decimal @default(0) @db.Decimal(19, 4)
   paidAmount  Decimal @default(0) @db.Decimal(19, 4)
+
+  /// The warehouse the goods arrived at. Null means the branch's default.
+  warehouseId String? @db.Uuid
+
+  /// The order this invoice fulfils, when it was raised from one.
+  purchaseOrderId String? @db.Uuid
 
   notes          String?
   journalEntryId String?   @db.Uuid
@@ -685,7 +1320,12 @@ model PurchaseInvoice {
   company  Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
   branch   Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
   supplier Supplier         @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  warehouse Warehouse?      @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
   lines    PurchaseInvoiceLine[]
+  allocations CashVoucherAllocation[]
+  originalInvoice PurchaseInvoice?  @relation("PurchaseReturns", fields: [originalInvoiceId], references: [id], onDelete: Restrict)
+  returns         PurchaseInvoice[] @relation("PurchaseReturns")
 
   @@unique([companyId, invoiceNumber])
   @@index([companyId, invoiceDate])
@@ -706,10 +1346,312 @@ model PurchaseInvoiceLine {
   taxAmount   Decimal @default(0) @db.Decimal(19, 4)
   lineTotal   Decimal @db.Decimal(19, 4)
 
+  discountPercent  Decimal @default(0) @db.Decimal(9, 4)
+  discountAmount   Decimal @default(0) @db.Decimal(19, 4)
+  returnedQuantity Decimal @default(0) @db.Decimal(19, 4)
+  originalLineId   String? @db.Uuid
+
   invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item    Item?           @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  originalLine PurchaseInvoiceLine?  @relation("PurchaseReturnLines", fields: [originalLineId], references: [id], onDelete: Restrict)
+  returnedBy   PurchaseInvoiceLine[] @relation("PurchaseReturnLines")
 
   @@unique([invoiceId, lineNumber])
   @@index([itemId])
   @@map("purchase_invoice_lines")
+}
+
+
+/// A grouping of items for reporting and for picking: "spare parts",
+/// "food", "services". One level, because a shop's catalogue is not a tree.
+model ItemCategory {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  code      String
+  nameEn    String
+  nameAr    String
+  isActive  Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  updatedBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  items   Item[]
+
+  @@unique([companyId, code])
+  @@map("item_categories")
+}
+
+/// The units an item is bought, stocked and sold in, with the factor that
+/// converts each one to the item's base unit.
+///
+/// Example: an item whose base unit is "piece" has a row with factor 12 for
+/// "dozen" and 24 for "carton". Stock is always kept in the base unit, so a
+/// report never has to add unlike things.
+model ItemUnit {
+  id     String @id @default(uuid()) @db.Uuid
+  itemId String @db.Uuid
+  unit   String
+  /// How many base units one of this unit contains. The base unit itself is 1.
+  factor Decimal @db.Decimal(19, 6)
+
+  barcode       String?
+  salePrice     Decimal? @db.Decimal(19, 4)
+  purchasePrice Decimal? @db.Decimal(19, 4)
+
+  createdAt DateTime @default(now())
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, unit])
+  @@map("item_units")
+}
+
+// ═══════════════════════════════════ warehouses, orders and price lists
+
+/// A place inside a branch where goods physically sit.
+///
+/// Stock was tracked per branch until now. A branch that has a shop floor, a
+/// back store and a van keeps three piles; this is the name for one of them.
+/// A warehouse never crosses a branch, and a document that names none uses
+/// the branch's default.
+model Warehouse {
+  id        String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+  branchId  String @db.Uuid
+  code      String
+  nameEn    String
+  nameAr    String
+  address   String?
+
+  /// The warehouse a document falls back to when it names none. At most one
+  /// per branch; the service moves the flag rather than allowing two.
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  updatedBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Restrict)
+
+  movements            StockMovement[]
+  salesInvoices        SalesInvoice[]
+  purchaseInvoices     PurchaseInvoice[]
+  stockDocumentsFrom   StockDocument[] @relation("StockDocumentFromWarehouse")
+  stockDocumentsTo     StockDocument[] @relation("StockDocumentToWarehouse")
+
+  @@unique([companyId, code])
+  @@index([companyId, branchId])
+  @@map("warehouses")
+}
+
+/// Where an order stands. An order is a promise, not an accounting event: it
+/// touches nothing in the ledger until it becomes an invoice.
+enum OrderStatus {
+  DRAFT
+  APPROVED
+  PARTIALLY_FULFILLED
+  FULFILLED
+  CANCELLED
+}
+
+model PurchaseOrder {
+  id          String      @id @default(uuid()) @db.Uuid
+  companyId   String      @db.Uuid
+  branchId    String      @db.Uuid
+  supplierId  String      @db.Uuid
+  orderNumber String
+  orderDate   DateTime    @db.Date
+  expectedDate DateTime?  @db.Date
+  status      OrderStatus @default(DRAFT)
+  currency    String      @default("EGP") @db.VarChar(3)
+
+  subTotal    Decimal @default(0) @db.Decimal(19, 4)
+  taxAmount   Decimal @default(0) @db.Decimal(19, 4)
+  totalAmount Decimal @default(0) @db.Decimal(19, 4)
+
+  notes      String?
+  approvedAt DateTime?
+  approvedBy String?   @db.Uuid
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  updatedBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch   Branch   @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+
+  lines    PurchaseOrderLine[]
+  invoices PurchaseInvoice[]
+
+  @@unique([companyId, orderNumber])
+  @@index([companyId, orderDate])
+  @@index([companyId, status])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderLine {
+  id          String  @id @default(uuid()) @db.Uuid
+  orderId     String  @db.Uuid
+  lineNumber  Int
+  itemId      String  @db.Uuid
+  description String
+
+  quantity         Decimal @db.Decimal(19, 4)
+  /// How much of the quantity has been invoiced so far. The invoice may cover
+  /// part of the order; the rest stays open.
+  invoicedQuantity Decimal @default(0) @db.Decimal(19, 4)
+
+  unitPrice       Decimal @default(0) @db.Decimal(19, 4)
+  discountPercent Decimal @default(0) @db.Decimal(9, 4)
+  taxRate         Decimal @default(0) @db.Decimal(9, 4)
+  lineTotal       Decimal @default(0) @db.Decimal(19, 4)
+
+  notes String?
+
+  order PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  item  Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, lineNumber])
+  @@index([orderId])
+  @@map("purchase_order_lines")
+}
+
+model SalesOrder {
+  id          String      @id @default(uuid()) @db.Uuid
+  companyId   String      @db.Uuid
+  branchId    String      @db.Uuid
+  customerId  String      @db.Uuid
+  orderNumber String
+  orderDate   DateTime    @db.Date
+  deliveryDate DateTime?  @db.Date
+  status      OrderStatus @default(DRAFT)
+  currency    String      @default("EGP") @db.VarChar(3)
+
+  subTotal    Decimal @default(0) @db.Decimal(19, 4)
+  taxAmount   Decimal @default(0) @db.Decimal(19, 4)
+  totalAmount Decimal @default(0) @db.Decimal(19, 4)
+
+  notes      String?
+  approvedAt DateTime?
+  approvedBy String?   @db.Uuid
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  updatedBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch   Branch   @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  lines    SalesOrderLine[]
+  invoices SalesInvoice[]
+
+  @@unique([companyId, orderNumber])
+  @@index([companyId, orderDate])
+  @@index([companyId, status])
+  @@map("sales_orders")
+}
+
+model SalesOrderLine {
+  id          String  @id @default(uuid()) @db.Uuid
+  orderId     String  @db.Uuid
+  lineNumber  Int
+  itemId      String  @db.Uuid
+  description String
+
+  quantity         Decimal @db.Decimal(19, 4)
+  invoicedQuantity Decimal @default(0) @db.Decimal(19, 4)
+
+  unitPrice       Decimal @default(0) @db.Decimal(19, 4)
+  discountPercent Decimal @default(0) @db.Decimal(9, 4)
+  taxRate         Decimal @default(0) @db.Decimal(9, 4)
+  lineTotal       Decimal @default(0) @db.Decimal(19, 4)
+
+  notes String?
+
+  order SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  item  Item       @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, lineNumber])
+  @@index([orderId])
+  @@map("sales_order_lines")
+}
+
+/// An agreed set of prices, for a customer or a supplier.
+///
+/// The invoice still decides what was actually charged; a price list only
+/// supplies the default when the line is left blank, which is what stops the
+/// same price being typed from memory on every order.
+model PriceList {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  code      String
+  nameEn    String
+  nameAr    String
+
+  currency  String    @default("EGP") @db.VarChar(3)
+  validFrom DateTime? @db.Date
+  validTo   DateTime? @db.Date
+
+  /// Applied on top of the listed price, in percent. Zero means the list is
+  /// the price.
+  discountPercent Decimal @default(0) @db.Decimal(9, 4)
+
+  isActive Boolean @default(true)
+  notes    String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  updatedBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company   Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  items     PriceListItem[]
+  customers Customer[]
+  suppliers Supplier[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@map("price_lists")
+}
+
+model PriceListItem {
+  id          String @id @default(uuid()) @db.Uuid
+  priceListId String @db.Uuid
+  itemId      String @db.Uuid
+
+  /// Empty string means "every unit". Kept not-null so the uniqueness rule
+  /// below means something in PostgreSQL.
+  unit String @default("") @db.VarChar(32)
+
+  /// The row applies from this quantity upwards, so "10 or more costs 9.50"
+  /// is a second row rather than a second mechanism.
+  minQuantity Decimal @default(0) @db.Decimal(19, 4)
+
+  price           Decimal @db.Decimal(19, 4)
+  discountPercent Decimal @default(0) @db.Decimal(9, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  priceList PriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  item      Item      @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([priceListId, itemId, unit, minQuantity])
+  @@index([priceListId])
+  @@map("price_list_items")
 }

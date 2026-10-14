@@ -16,55 +16,14 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { AccountType, PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 
+import { PERMISSIONS } from './permissions';
+
 // The client runs on the plain `pg` driver (engine-less Prisma runtime), so
 // the seed opens its connection the same way the server does.
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
 });
 
-const PERMISSIONS: Array<[string, string, string, string]> = [
-  ['accounting.accounts.read', 'View chart of accounts', 'عرض دليل الحسابات', 'accounting'],
-  ['accounting.accounts.create', 'Add accounts to the chart', 'إضافة حسابات للدليل', 'accounting'],
-  ['accounting.accounts.update', 'Edit accounts', 'تعديل الحسابات', 'accounting'],
-  ['accounting.accounts.delete', 'Delete accounts', 'حذف الحسابات', 'accounting'],
-  ['accounting.journal.read', 'View journal entries', 'عرض القيود اليومية', 'accounting'],
-  ['accounting.journal.create', 'Create journal entries', 'إنشاء قيود يومية', 'accounting'],
-  ['accounting.journal.post', 'Post and reverse entries', 'ترحيل وعكس القيود', 'accounting'],
-  ['admin.users.manage', 'Manage users', 'إدارة المستخدمين', 'admin'],
-  ['admin.roles.manage', 'Manage roles', 'إدارة الأدوار', 'admin'],
-  ['admin.audit.read', 'View audit trail', 'عرض سجل التدقيق', 'admin'],
-  ['admin.backup', 'Take and restore backups', 'أخذ واسترجاع نسخة احتياطية', 'admin'],
-  ['admin.company.manage', 'Manage company profile and branches', 'إدارة بيانات الشركة والفروع', 'admin'],
-  // Kept for the desktop profile endpoints (/companies/profile); granted with
-  // admin.company.manage so an existing administrator keeps both.
-  ['company.profile.manage', 'Manage company profile', 'إدارة بيانات الشركة', 'admin'],
-
-  ['parties.customers.read', 'View customers', 'عرض العملاء', 'parties'],
-  ['parties.customers.create', 'Add customers', 'إضافة عملاء', 'parties'],
-  ['parties.customers.update', 'Edit customers', 'تعديل العملاء', 'parties'],
-  ['parties.suppliers.read', 'View suppliers', 'عرض الموردين', 'parties'],
-  ['parties.suppliers.create', 'Add suppliers', 'إضافة موردين', 'parties'],
-  ['parties.suppliers.update', 'Edit suppliers', 'تعديل الموردين', 'parties'],
-
-  ['inventory.items.read', 'View items', 'عرض الأصناف', 'inventory'],
-  ['inventory.items.create', 'Add items', 'إضافة أصناف', 'inventory'],
-  ['inventory.items.update', 'Edit items', 'تعديل الأصناف', 'inventory'],
-  ['inventory.stock.read', 'View stock balances', 'عرض أرصدة المخزون', 'inventory'],
-
-  ['sales.invoices.read', 'View sales invoices', 'عرض فواتير البيع', 'sales'],
-  ['sales.invoices.create', 'Create sales invoices', 'إنشاء فواتير البيع', 'sales'],
-  ['sales.invoices.post', 'Post and reverse sales invoices', 'ترحيل وعكس فواتير البيع', 'sales'],
-
-  ['purchases.invoices.read', 'View purchase invoices', 'عرض فواتير الشراء', 'purchases'],
-  ['purchases.invoices.create', 'Create purchase invoices', 'إنشاء فواتير الشراء', 'purchases'],
-  ['purchases.invoices.post', 'Post and reverse purchase invoices', 'ترحيل وعكس فواتير الشراء', 'purchases'],
-
-  ['reports.read', 'View reports', 'عرض التقارير', 'reports'],
-
-  ['accounting.periods.read', 'View fiscal periods', 'عرض الفترات المالية', 'accounting'],
-  ['accounting.periods.manage', 'Manage fiscal periods', 'إدارة الفترات المالية', 'accounting'],
-
-];
 
 const ACCOUNTS: Array<{
   code: string;
@@ -95,6 +54,7 @@ const ACCOUNTS: Array<{
   { code: '3', nameEn: 'Equity', nameAr: 'حقوق الملكية', type: AccountType.EQUITY, postable: false },
   { code: '3101', nameEn: 'Capital', nameAr: 'رأس المال', type: AccountType.EQUITY, parent: '3', postable: true },
   { code: '3102', nameEn: 'Retained earnings', nameAr: 'الأرباح المحتجزة', type: AccountType.EQUITY, parent: '3', postable: true },
+  { code: '3103', nameEn: 'Opening balance equity', nameAr: 'أرصدة افتتاحية', type: AccountType.EQUITY, parent: '3', postable: true },
 
   { code: '4', nameEn: 'Revenue', nameAr: 'الإيرادات', type: AccountType.REVENUE, postable: false },
   { code: '4101', nameEn: 'Sales revenue', nameAr: 'إيرادات المبيعات', type: AccountType.REVENUE, parent: '4', postable: true },
@@ -108,6 +68,7 @@ const ACCOUNTS: Array<{
   { code: '5104', nameEn: 'Utilities', nameAr: 'المرافق والخدمات', type: AccountType.EXPENSE, parent: '5', postable: true },
   { code: '5105', nameEn: 'Depreciation expense', nameAr: 'مصروف الإهلاك', type: AccountType.EXPENSE, parent: '5', postable: true },
   { code: '5106', nameEn: 'Professional fees', nameAr: 'أتعاب مهنية', type: AccountType.EXPENSE, parent: '5', postable: true },
+  { code: '5107', nameEn: 'Inventory differences', nameAr: 'فروق المخزون', type: AccountType.EXPENSE, parent: '5', postable: true },
 ];
 
 /// What kind of image these bytes really are — the same rule the logo
@@ -145,7 +106,7 @@ async function main(): Promise<void> {
       nameAr: process.env.KAYAN_COMPANY_NAME_AR?.trim() || 'شركة كيان',
       phone: process.env.KAYAN_COMPANY_PHONE?.trim() || null,
       email: process.env.KAYAN_COMPANY_EMAIL?.trim() || null,
-      addressEn: process.env.KAYAN_COMPANY_ADDRESS?.trim() || null,
+      address: process.env.KAYAN_COMPANY_ADDRESS?.trim() || null,
       currency: 'EGP',
       timezone: 'Africa/Cairo',
     },
