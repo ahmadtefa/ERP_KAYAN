@@ -1,6 +1,9 @@
 import 'package:erp_kayan/features/accounting/domain/entities/account.dart';
 import 'package:erp_kayan/features/accounting/presentation/providers/chart_of_accounts_providers.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
+import 'package:erp_kayan/core/json/json_utils.dart';
+import 'package:erp_kayan/features/common/presentation/providers/resource_providers.dart';
+import 'package:erp_kayan/features/invoicing/presentation/providers/invoice_providers.dart';
 import 'package:erp_kayan/features/dashboard/presentation/screens/dashboard_screen.dart';
 import 'package:erp_kayan/features/settings/presentation/providers/company_providers.dart';
 import 'package:flutter/material.dart';
@@ -69,6 +72,11 @@ void main() {
           branchesProvider.overrideWith(
             () => FakeBranchesController(initialData: effectiveBranches),
           ),
+          salesInvoicesProvider.overrideWith(FakeSalesInvoicesController.new),
+          purchaseInvoicesProvider.overrideWith(FakePurchaseInvoicesController.new),
+          customersProvider.overrideWith((ref) async => const <Json>[]),
+          suppliersProvider.overrideWith((ref) async => const <Json>[]),
+          itemsProvider.overrideWith((ref) async => const <Json>[]),
         ],
         child: wrapWithApp(child: const DashboardScreen(), locale: locale),
       ),
@@ -132,4 +140,21 @@ class FakeBranchesController extends BranchesController {
 
   @override
   Future<List<Map<String, dynamic>>> build() async => initialData;
+}
+
+
+class FakeSalesInvoicesController extends JsonListController {
+  @override
+  String get resourcePath => '/sales/invoices';
+
+  @override
+  Future<List<Json>> build() async => const <Json>[];
+}
+
+class FakePurchaseInvoicesController extends JsonListController {
+  @override
+  String get resourcePath => '/purchases/invoices';
+
+  @override
+  Future<List<Json>> build() async => const <Json>[];
 }
