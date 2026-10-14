@@ -1,0 +1,355 @@
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+
+import { AuditService } from '../../common/audit/audit.service';
+import { PrismaService } from '../../common/prisma/prisma.service';
+import { CompanySettingsService } from '../../common/settings/company-settings.module';
+
+const MONEY_SCALE = 4;
+
+/**
+ * Inventory reporting, and the item catalogue that feeds it.
+ *
+ * Every figure here is read from the stock ledger and the balances kept in
+ * step with it, or from the cost recorded on the documents - never from a
+ * price list someone typed once. A valuation report that agreed with a price
+ * list rather than with the purchases would be worse than no report at all.
+ */
+@Injectable()
+export class InventoryReportsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+    private readonly settings: CompanySettingsService,
+  ) {}
+
+  // ------------------------------------------------------------ categories
+
+  async listCategories(companyId: string, includeInactive = false) {
+    const items = await this.prisma.itemCategory.findMany({
+      where: { companyId, deletedAt: null, ...(includeInactive ? {} : { isActive: true }) },
+      orderBy: { code: 'asc' },
+    });
+    return { items, total: items.length };
+  }
+
+  async createCategory(companyId: string, userId: string, dto: Record<string, unknown>) {
+    const code = String(dto.code ?? '').trim();
+    const nameEn = String(dto.nameEn ?? '').trim();
+    const nameAr = String(dto.nameAr ?? '').trim();
+    if (!code || !nameEn || !nameAr) {
+      throw new BadRequestException('code, nameEn and nameAr are required');
+    }
+    const existing = await this.prisma.itemCategory.findFirst({
+      where: { companyId, code },
+      select: { id: true, deletedAt: true },
+    });
+    if (existing && !existing.deletedAt) {
+      throw new ConflictException(`Category code ${code} is already used`);
+    }
+    const created = await this.prisma.itemCategory.create({
+      data: { companyId, code, nameEn, nameAr, createdBy: userId, updatedBy: userId },
+    });
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'CREATE',
+      entity: 'item_categories',
+      entityId: created.id,
+      after: { code, nameEn },
+    });
+    return created;
+  }
+
+  // ------------------------------------------------------------ item units
+
+  async listUnits(companyId: string, itemId: string) {
+    const item = await this.prisma.item.findFirst({
+      where: { id: itemId, companyId, deletedAt: null },
+      select: { id: true, code: true, unit: true },
+    });
+    if (!item) throw new NotFoundException('Item not found');
+
+    const units = await this.prisma.itemUnit.findMany({
+      where: { itemId },
+      orderBy: { factor: 'asc' },
+    });
+    return {
+      item,
+      items: units.map((unit) => ({
+        id: unit.id,
+        unit: unit.unit,
+        factor: unit.factor.toFixed(6),
+        barcode: unit.barcode,
+        salePrice: unit.salePrice?.toFixed(MONEY_SCALE) ?? null,
+        purchasePrice: unit.purchasePrice?.toFixed(MONEY_SCALE) ?? null,
+        isBase: unit.unit === item.unit,
+      })),
+    };
+  }
+
+  /// Adds a unit and the factor that converts it to the item's base unit.
+  /// The base unit itself is always 1 - a conversion that contradicts that
+  /// would make the stock ledger ambiguous.
+  async addUnit(companyId: string, userId: string, itemId: string, dto: Record<string, unknown>) {
+    const item = await this.prisma.item.findFirst({
+      where: { id: itemId, companyId, deletedAt: null },
+      select: { id: true, unit: true, code: true },
+    });
+    if (!item) throw new NotFoundException('Item not found');
+
+    const unit = String(dto.unit ?? '').trim();
+    if (!unit) throw new BadRequestException('unit is required');
+
+    let factor: Prisma.Decimal;
+    try {
+      factor = new Prisma.Decimal(String(dto.factor ?? '0')).toDecimalPlaces(6);
+    } catch {
+      throw new BadRequestException('factor is not a valid number');
+    }
+    if (factor.lessThanOrEqualTo(0)) {
+      throw new BadRequestException('factor must be greater than zero');
+    }
+    if (unit === item.unit && !factor.equals(1)) {
+      throw new BadRequestException(
+        `factor must be 1 for the base unit of ${item.code}`,
+      );
+    }
+
+    const existing = await this.prisma.itemUnit.findFirst({ where: { itemId, unit } });
+    if (existing) throw new ConflictException(`Item ${item.code} already has a unit called ${unit}`);
+
+    const created = await this.prisma.itemUnit.create({
+      data: {
+        itemId,
+        unit,
+        factor,
+        barcode: (dto.barcode as string) ?? null,
+        salePrice: dto.salePrice === undefined ? null : new Prisma.Decimal(String(dto.salePrice)),
+        purchasePrice:
+          dto.purchasePrice === undefined ? null : new Prisma.Decimal(String(dto.purchasePrice)),
+      },
+    });
+
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'CREATE',
+      entity: 'item_units',
+      entityId: created.id,
+      after: { item: item.code, unit, factor: factor.toFixed(6) },
+    });
+
+    return this.listUnits(companyId, itemId);
+  }
+
+  // -------------------------------------------------------------- reports
+
+  /// What the stock is worth, per item and branch, at the weighted average
+  /// cost the ledger carries. This is the same number the inventory account
+  /// holds - and the totals row says so.
+  async valuation(
+    companyId: string,
+    filters: { branchId?: string; categoryId?: string } = {},
+  ) {
+    const settings = await this.settings.get(companyId);
+
+    const balances = await this.prisma.stockBalance.findMany({
+      where: {
+        companyId,
+        ...(filters.branchId ? { branchId: filters.branchId } : {}),
+        ...(filters.categoryId ? { item: { categoryId: filters.categoryId } } : {}),
+      },
+      include: {
+        item: { select: { code: true, nameEn: true, nameAr: true, unit: true } },
+        branch: { select: { code: true, nameEn: true } },
+      },
+      orderBy: { itemId: 'asc' },
+    });
+
+    const rows = balances
+      .filter((balance) => !balance.quantity.isZero() || !balance.value.isZero())
+      .map((balance) => ({
+        itemId: balance.itemId,
+        itemCode: balance.item.code,
+        itemNameEn: balance.item.nameEn,
+        itemNameAr: balance.item.nameAr,
+        unit: balance.item.unit,
+        branchCode: balance.branch.code,
+        branchNameEn: balance.branch.nameEn,
+        quantity: balance.quantity.toFixed(MONEY_SCALE),
+        value: balance.value.toFixed(MONEY_SCALE),
+        averageCost: (balance.quantity.isZero()
+          ? new Prisma.Decimal(0)
+          : balance.value.div(balance.quantity)
+        ).toFixed(MONEY_SCALE),
+      }));
+
+    const totalValue = rows.reduce(
+      (sum, row) => sum.plus(row.value),
+      new Prisma.Decimal(0),
+    );
+
+    // The ledger's own balance for the inventory account, so the report can
+    // say whether the two agree instead of assuming it.
+    const ledgerRows = await this.prisma.$queryRaw<Array<{ net: Prisma.Decimal }>>(Prisma.sql`
+      SELECT COALESCE(SUM(l.debit - l.credit), 0) AS net
+        FROM journal_lines l
+        JOIN journal_entries e ON e.id = l."journalEntryId"
+        JOIN accounts a ON a.id = l."accountId"
+       WHERE e."companyId" = ${companyId}::uuid
+         AND e.status IN ('POSTED', 'REVERSED')
+         AND a.code = '1104'
+    `);
+    const ledgerValue = new Prisma.Decimal(ledgerRows[0]?.net ?? 0);
+
+    return {
+      valuationMethod: settings.inventoryValuation,
+      rows,
+      totals: {
+        value: totalValue.toFixed(MONEY_SCALE),
+        ledgerValue: ledgerValue.toFixed(MONEY_SCALE),
+        difference: totalValue.minus(ledgerValue).toFixed(MONEY_SCALE),
+      },
+    };
+  }
+
+  /// Items nobody has bought for a while, with what they tie up in cash.
+  async slowMoving(
+    companyId: string,
+    filters: { days?: number; branchId?: string } = {},
+  ) {
+    const days = Math.max(filters.days ?? 90, 1);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const balances = await this.prisma.stockBalance.findMany({
+      where: {
+        companyId,
+        quantity: { gt: 0 },
+        ...(filters.branchId ? { branchId: filters.branchId } : {}),
+      },
+      include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } },
+    });
+
+    const lastOut = await this.prisma.stockMovement.groupBy({
+      by: ['itemId'],
+      where: { companyId, direction: 'OUT' },
+      _max: { movementDate: true },
+    });
+    const lastOutByItem = new Map(lastOut.map((row) => [row.itemId, row._max.movementDate]));
+
+    const rows = balances
+      .map((balance) => {
+        const last = lastOutByItem.get(balance.itemId) ?? null;
+        const idle = last ? Math.floor((Date.now() - last.getTime()) / (24 * 60 * 60 * 1000)) : null;
+        return {
+          itemId: balance.itemId,
+          itemCode: balance.item.code,
+          itemNameEn: balance.item.nameEn,
+          itemNameAr: balance.item.nameAr,
+          unit: balance.item.unit,
+          quantity: balance.quantity.toFixed(MONEY_SCALE),
+          value: balance.value.toFixed(MONEY_SCALE),
+          lastIssuedOn: last ? last.toISOString().slice(0, 10) : null,
+          daysSinceLastIssue: idle,
+        };
+      })
+      .filter((row) => row.lastIssuedOn === null || new Date(row.lastIssuedOn as string) <= since)
+      .sort((a, b) => {
+        const idleA = a.daysSinceLastIssue ?? Number.MAX_SAFE_INTEGER;
+        const idleB = b.daysSinceLastIssue ?? Number.MAX_SAFE_INTEGER;
+        return idleB - idleA;
+      });
+
+    return {
+      days,
+      rows,
+      totals: {
+        value: rows.reduce((sum, row) => sum.plus(row.value), new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
+        items: rows.length,
+      },
+    };
+  }
+
+  /// What needs ordering: on hand at or below the reorder level.
+  async reorder(
+    companyId: string,
+    filters: { branchId?: string } = {},
+  ) {
+    const items = await this.prisma.item.findMany({
+      where: { companyId, deletedAt: null, isActive: true, isStockTracked: true },
+      select: {
+        id: true,
+        code: true,
+        nameEn: true,
+        nameAr: true,
+        unit: true,
+        reorderLevel: true,
+        purchasePrice: true,
+        category: { select: { code: true, nameEn: true } },
+        stockBalances: {
+          where: filters.branchId ? { branchId: filters.branchId } : {},
+          select: { quantity: true, value: true, branch: { select: { code: true } } },
+        },
+      },
+    });
+
+    const rows = items
+      .map((item) => {
+        const onHand = item.stockBalances.reduce(
+          (sum, balance) => sum.plus(balance.quantity),
+          new Prisma.Decimal(0),
+        );
+        const value = item.stockBalances.reduce(
+          (sum, balance) => sum.plus(balance.value),
+          new Prisma.Decimal(0),
+        );
+        const shortfall = item.reorderLevel.minus(onHand);
+        return {
+          itemId: item.id,
+          itemCode: item.code,
+          itemNameEn: item.nameEn,
+          itemNameAr: item.nameAr,
+          unit: item.unit,
+          category: item.category?.code ?? null,
+          categoryNameEn: item.category?.nameEn ?? null,
+          onHand: onHand.toFixed(MONEY_SCALE),
+          value: value.toFixed(MONEY_SCALE),
+          reorderLevel: item.reorderLevel.toFixed(MONEY_SCALE),
+          shortfall: shortfall.greaterThan(0) ? shortfall.toFixed(MONEY_SCALE) : '0.0000',
+          averageCost: (onHand.isZero() ? new Prisma.Decimal(0) : value.div(onHand)).toFixed(MONEY_SCALE),
+          estimatedOrderCost: shortfall
+            .greaterThan(0)
+            ? shortfall.mul(item.purchasePrice).toFixed(MONEY_SCALE)
+            : '0.0000',
+          branches: item.stockBalances.map((balance) => ({
+            branchCode: balance.branch.code,
+            quantity: balance.quantity.toFixed(MONEY_SCALE),
+          })),
+        };
+      })
+      // "At or below the level" is the rule; an item with no level set is not
+      // reported at all rather than flooding the list with every item.
+      .filter(
+        (row) =>
+          !new Prisma.Decimal(row.reorderLevel).isZero() &&
+          new Prisma.Decimal(row.onHand).lessThanOrEqualTo(row.reorderLevel),
+      )
+      .sort((a, b) => new Prisma.Decimal(b.shortfall).minus(a.shortfall).toNumber());
+
+    return {
+      rows,
+      totals: {
+        items: rows.length,
+        estimatedOrderCost: rows
+          .reduce((sum, row) => sum.plus(row.estimatedOrderCost), new Prisma.Decimal(0))
+          .toFixed(MONEY_SCALE),
+      },
+    };
+  }
+}

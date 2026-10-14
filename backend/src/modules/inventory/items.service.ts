@@ -80,8 +80,11 @@ export class ItemsService {
         unit: (dto.unit as string) ?? 'unit',
         barcode: (dto.barcode as string) ?? null,
         salePrice: this.money(dto.salePrice, 'salePrice'),
-        taxRate: this.rate(dto.taxRate, 'taxRate'),
+        purchasePrice: this.money(dto.purchasePrice, 'purchasePrice'),
+        reorderLevel: this.money(dto.reorderLevel, 'reorderLevel'),
+        taxRate: dto.taxRate === undefined ? null : this.rate(dto.taxRate, 'taxRate'),
         isStockTracked: (dto.isStockTracked as boolean) ?? true,
+        categoryId: (dto.categoryId as string) ?? null,
         notes: (dto.notes as string) ?? null,
         createdBy: userId,
         updatedBy: userId,
@@ -117,7 +120,14 @@ export class ItemsService {
       if (dto[key] !== undefined) (data as any)[key] = dto[key];
     }
     if (dto.salePrice !== undefined) data.salePrice = this.money(dto.salePrice, 'salePrice');
-    if (dto.taxRate !== undefined) data.taxRate = this.rate(dto.taxRate, 'taxRate');
+    if (dto.purchasePrice !== undefined) data.purchasePrice = this.money(dto.purchasePrice, 'purchasePrice');
+    if (dto.reorderLevel !== undefined) data.reorderLevel = this.money(dto.reorderLevel, 'reorderLevel');
+    if (dto.taxRate !== undefined) {
+      data.taxRate = dto.taxRate === null || dto.taxRate === '' ? null : this.rate(dto.taxRate, 'taxRate');
+    }
+    if (dto.categoryId !== undefined) {
+      data.category = dto.categoryId ? { connect: { id: String(dto.categoryId) } } : { disconnect: true };
+    }
 
     const updated = await this.prisma.item.update({ where: { id }, data });
 
@@ -208,9 +218,12 @@ export class ItemsService {
     unit: string;
     barcode: string | null;
     salePrice: Prisma.Decimal;
-    taxRate: Prisma.Decimal;
+    purchasePrice: Prisma.Decimal;
+    reorderLevel: Prisma.Decimal;
+    taxRate: Prisma.Decimal | null;
     isStockTracked: boolean;
     isActive: boolean;
+    categoryId: string | null;
     notes: string | null;
     createdAt: Date;
   }) {
@@ -223,9 +236,14 @@ export class ItemsService {
       unit: item.unit,
       barcode: item.barcode,
       salePrice: item.salePrice.toFixed(MONEY_SCALE),
-      taxRate: item.taxRate.toFixed(RATE_SCALE),
+      purchasePrice: item.purchasePrice.toFixed(MONEY_SCALE),
+      reorderLevel: item.reorderLevel.toFixed(MONEY_SCALE),
+      // Null here means "follow the company default", which is different
+      // from the string "0" meaning exempt.
+      taxRate: item.taxRate === null ? null : item.taxRate.toFixed(RATE_SCALE),
       isStockTracked: item.isStockTracked,
       isActive: item.isActive,
+      categoryId: item.categoryId,
       notes: item.notes,
       createdAt: item.createdAt.toISOString(),
     };

@@ -21,6 +21,7 @@ import {
   ExportableReport,
   ReportTablesService,
 } from './report-tables.service';
+import { DocumentsService } from './documents.service';
 import { PdfService } from './pdf.service';
 import { Lang, toCsv, toPrintHtml, toXlsx } from './writers';
 
@@ -42,6 +43,7 @@ export class ExportController {
     private readonly pdf: PdfService,
     private readonly lists: ListTablesService,
     private readonly company: CompanyService,
+    private readonly documents: DocumentsService,
   ) {}
 
   /// The company's name and logo for the file header. The logo is optional and
@@ -72,6 +74,74 @@ export class ExportController {
       formats: this.pdf.available ? ['xlsx', 'csv', 'pdf'] : ['xlsx', 'csv'],
       pdfOnTheServer: this.pdf.available,
     };
+  }
+
+  @Get('documents/:kind/:id/download')
+  @AllowQueryToken()
+  async documentFile(
+    @CurrentUser() user: AuthUser,
+    @Param('kind') kind: string,
+    @Param('id') id: string,
+    @Query() query: ExportQueryDto,
+    @Res() response: Response,
+  ): Promise<void> {
+    const spec = this.documents.spec(kind);
+    this.allowedExport(user, spec.readPermission, spec.exportPermission);
+    const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
+    const table = await this.documents.build(spec.kind, user.companyId, id, lang);
+    const header = await this.companyHeader(user.companyId);
+    const stamp = this.stamp();
+    if (query.format === 'csv') {
+      this.send(response, toCsv(table, lang, header.name), 'text/csv; charset=utf-8', `${kind}-${stamp}.csv`);
+      return;
+    }
+    this.send(
+      response,
+      await toXlsx(table, lang, header.name, { logo: header.logo }),
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      `${kind}-${stamp}.xlsx`,
+    );
+  }
+
+  @Get('documents/:kind/:id/pdf')
+  @AllowQueryToken()
+  async documentPdf(
+    @CurrentUser() user: AuthUser,
+    @Param('kind') kind: string,
+    @Param('id') id: string,
+    @Query() query: ExportQueryDto,
+    @Res() response: Response,
+  ): Promise<void> {
+    const spec = this.documents.spec(kind);
+    this.allowedExport(user, spec.readPermission, spec.exportPermission);
+    const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
+    const table = await this.documents.build(spec.kind, user.companyId, id, lang);
+    const header = await this.companyHeader(user.companyId);
+    const html = toPrintHtml(table, lang, header.name, { autoPrint: false, logo: header.logo });
+    this.send(response, await this.pdf.render(html), 'application/pdf', `${kind}-${this.stamp()}.pdf`);
+  }
+
+  @Get('documents/:kind/:id/print')
+  @AllowQueryToken()
+  async documentPrint(
+    @CurrentUser() user: AuthUser,
+    @Param('kind') kind: string,
+    @Param('id') id: string,
+    @Query() query: ExportQueryDto,
+    @Res() response: Response,
+  ): Promise<void> {
+    const spec = this.documents.spec(kind);
+    this.allowed(user, spec.readPermission);
+    const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
+    const table = await this.documents.build(spec.kind, user.companyId, id, lang);
+    const header = await this.companyHeader(user.companyId);
+    const html = toPrintHtml(table, lang, header.name, {
+      autoPrint: query.auto === '1' || query.auto === 'true',
+      logo: header.logo,
+    });
+    response.type('text/html; charset=utf-8');
+    response.setHeader('Cache-Control', 'no-store');
+    response.send(html);
   }
 
 /// ───────────────────────────────── the everyday lists, as files
@@ -180,16 +250,26 @@ export class ExportController {
     }
   }
 
+  /// A file needs the export permission when the user has it assigned anywhere
+  /// in the catalogue of their roles; otherwise the matching read permission
+  /// still opens the same file so existing accounts keep working.
+  private allowedExport(user: AuthUser, read: string, exportPermission: string): void {
+    if (user.isSuperAdmin) return;
+    if (user.permissions.includes(exportPermission)) return;
+    if (user.permissions.includes(read)) return;
+    throw new ForbiddenException(`Missing permission: ${exportPermission}`);
+  }
+
   /// The spreadsheet: a real .xlsx that opens in Excel and in Google Sheets.
   @Get(':report/download')
   @AllowQueryToken()
-  @RequirePermissions('reports.read')
   async export(
     @CurrentUser() user: AuthUser,
     @Param('report') report: string,
     @Query() query: ExportQueryDto,
     @Res() response: Response,
   ) {
+    this.allowedExport(user, 'reports.read', 'reports.export');
     const slug = this.known(report);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const wanted = (query as { format?: string }).format ?? 'xlsx';
@@ -224,13 +304,13 @@ export class ExportController {
   /// and saved as a PDF. One click, no dialogue.
   @Get(':report/pdf')
   @AllowQueryToken()
-  @RequirePermissions('reports.read')
   async pdfFile(
     @CurrentUser() user: AuthUser,
     @Param('report') report: string,
     @Query() query: ExportQueryDto,
     @Res() response: Response,
   ): Promise<void> {
+    this.allowedExport(user, 'reports.read', 'reports.export');
     const slug = this.known(report);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.tables.build(slug, user.companyId, query, lang);
@@ -290,9 +370,18 @@ export class ExportController {
     filename: string,
   ) {
     response.setHeader('Content-Type', contentType);
+    // Two names, because a browser and Excel do not agree: the plain one for
+    // anything that only reads the first form, and the RFC 5987 one, which is
+    // the only form that can carry an Arabic name. Anything past the last
+    // slash is dropped — a name in a header is either a mistake or an
+    // attempt, and neither belongs in a save dialogue.
+    const bare = filename.split(/[\\/]/).pop() ?? 'download';
     response.setHeader(
       'Content-Disposition',
-      `attachment; filename="${filename}"`,
+      /[\u0080-\uffff]/.test(bare)
+        ? `attachment; filename="${bare.replace(/[^\x20-\x7e]/g, '_')}"; `
+            + `filename*=UTF-8''${encodeURIComponent(bare)}`
+        : `attachment; filename="${bare}"`,
     );
     response.setHeader('Cache-Control', 'no-store');
     response.end(body);

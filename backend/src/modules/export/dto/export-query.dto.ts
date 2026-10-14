@@ -25,16 +25,20 @@ export class ExportQueryDto extends PeriodQueryDto {
   @IsOptional() @IsIn(['1', '0'])
   auto?: string;
 
-  /// The access token, in the query string.
+  /// A one-minute download ticket, in the query string.
   ///
   /// A print page is opened as a navigation - the browser cannot attach an
-  /// Authorization header to it - so the token has to be able to travel in the
-  /// URL. It is declared here because the route validates its query strictly:
-  /// an undeclared property would be refused with "property token should not
+  /// Authorization header to it - so a credential has to be able to travel in
+  /// the URL. It is a ticket rather than the sign-in token: an address ends up
+  /// in browser history and in logs, and a ticket is spent on this file alone
+  /// and dies after a minute.
+  ///
+  /// Declared here because the route validates its query strictly: an
+  /// undeclared property would be refused with "property ticket should not
   /// exist" instead of reaching the guard. Only routes marked
   /// @AllowQueryToken() ever look at it.
   @IsOptional() @IsString()
-  token?: string;
+  ticket?: string;
 
   /// ── the filters the everyday lists use ──
   ///
