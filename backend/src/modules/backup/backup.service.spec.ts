@@ -291,6 +291,9 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     });
 
     test('deletes cash and banking dependants before deleting their ledger accounts', async () => {
+      // A child-table delete is scoped through the parent rows. Give the mock
+      // one voucher so the allocation delete is exercised rather than skipped.
+      txMock.cashVoucher.findMany.mockResolvedValueOnce([{ id: 'voucher-demo' }]);
       await service.restore({
         format: 'kayan-backup',
         version: 1,
