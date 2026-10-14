@@ -53,6 +53,17 @@ class _CashScreenState extends ConsumerState<CashScreen>
       await action();
     } on Failure catch (error) {
       if (mounted) showMessage(context, error.message, error: true);
+    } catch (error, stackTrace) {
+      // A malformed response or an unexpected client exception must never
+      // leave an action looking as if it succeeded.
+      debugPrint('Cash action failed: $error\\n$stackTrace');
+      if (mounted) {
+        showMessage(
+          context,
+          context.l10n.unexpectedError,
+          error: true,
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -68,6 +79,12 @@ class _CashScreenState extends ConsumerState<CashScreen>
           .getList('/accounting/chart-of-accounts');
     } on Failure catch (error) {
       if (mounted) showMessage(context, error.message, error: true);
+      return;
+    } catch (error, stackTrace) {
+      debugPrint('Loading ledger accounts failed: $error\\n$stackTrace');
+      if (mounted) {
+        showMessage(context, context.l10n.unexpectedError, error: true);
+      }
       return;
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -411,6 +428,23 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
     return Column(
       children: [
+        if (balances.hasError)
+          MaterialBanner(
+            content: Text(
+              balances.error is Failure
+                  ? (balances.error as Failure).message
+                  : l10n.unexpectedError,
+            ),
+            leading: const Icon(Icons.warning_amber_outlined),
+            actions: [
+              TextButton(
+                onPressed: () => ref.invalidate(cashBalancesProvider),
+                child: Text(l10n.retry),
+              ),
+            ],
+          ),
+        if (balances.isLoading && accounts.hasValue)
+          const LinearProgressIndicator(minHeight: 2),
         Align(
           alignment: AlignmentDirectional.centerEnd,
           child: Padding(
