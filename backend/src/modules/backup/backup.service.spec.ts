@@ -320,12 +320,12 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       expect(deleteOrder('cashAccount')).toBeLessThan(deleteOrder('account'));
     });
 
-    test('restores committed demo-data/kayan-company-backup-demo.json with remapped permission IDs and parent-first branches', async () => {
+    test('restores committed demo-data/kayan-company-backup-full.json with remapped permission IDs and parent-first branches', async () => {
       const fs = require('node:fs');
       const path = require('node:path');
       const demoPath = path.resolve(
         __dirname,
-        '../../../../demo-data/kayan-company-backup-demo.json',
+        '../../../../demo-data/kayan-company-backup-full.json',
       );
       const demoBackup: BackupFile = JSON.parse(
         fs.readFileSync(demoPath, 'utf8'),
@@ -333,6 +333,8 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
 
       expect(demoBackup.format).toBe('kayan-backup');
       expect(demoBackup.companyCode).toBe('DEMO');
+      expect(Object.keys(demoBackup.tables)).toHaveLength(42);
+      expect(Object.values(demoBackup.tables).every((rows) => rows.length > 0)).toBe(true);
 
       // Verify every journal entry in the demo backup is balanced.
       const entries = demoBackup.tables.journalEntry ?? [];
