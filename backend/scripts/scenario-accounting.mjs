@@ -968,61 +968,29 @@ async function main() {
       `update refused ${updateRefused}, delete refused ${deleteRefused}, ${auditBefore.rows[0].n} rows before and ${auditAfter.rows[0].n} after`,
     );
 
-    // ───────────────────────────────────── 15. company isolation, in the data
-    const otherCompany = await client.query(
-      `INSERT INTO companies (id, code, "nameEn", "nameAr", "createdAt", "updatedAt")
-       VALUES (gen_random_uuid(), $1, $2, $3, now(), now()) RETURNING id`,
-      [`ISO-${stamp}`, `Isolation company ${stamp}`, `شركة العزل ${stamp}`],
-    );
-    const otherCompanyId = otherCompany.rows[0].id;
-    const otherRole = await client.query(
-      `SELECT r.id FROM roles r WHERE r."companyId" = $1 ORDER BY r."isSystem" DESC LIMIT 1`,
-      [companyId],
-    );
-    const otherUser = await client.query(
-      `INSERT INTO users (id, "companyId", username, "fullNameEn", "fullNameAr", "passwordHash", "isSuperAdmin", "isActive", "createdAt", "updatedAt")
-       VALUES (gen_random_uuid(), $1, $2, 'Outsider', 'دخيل', $3, false, true, now(), now()) RETURNING id`,
-      [otherCompanyId, `outsider-${stamp}`, (await client.query('SELECT "passwordHash" FROM users WHERE username = $1', [USERNAME])).rows[0].passwordHash],
-    );
-    if (otherRole.rows[0]) {
+    // ───────────────────────────────────── 15. single-active-company isolation invariant
+    // This product intentionally allows only one non-deleted company at a time.
+    // Do not try to create a second active tenant here: that violates the schema
+    // invariant before an API isolation test can run. Verify the database guard
+    // directly; tenant-scoped authorization is covered by the dedicated auth
+    // and permission tests.
+    let secondActiveCompanyRejected = false;
+    try {
       await client.query(
-        'INSERT INTO user_roles ("userId", "roleId", "companyId") VALUES ($1, $2, $3)',
-        [otherUser.rows[0].id, otherRole.rows[0].id, otherCompanyId],
+        `INSERT INTO companies (id, code, "nameEn", "nameAr", "createdAt", "updatedAt")
+         VALUES (gen_random_uuid(), $1, $2, $3, now(), now()) RETURNING id`,
+        [`ISO-${stamp}`, `Isolation company ${stamp}`, `شركة العزل ${stamp}`],
       );
+    } catch (error) {
+      secondActiveCompanyRejected =
+        error?.code === '23505' &&
+        error?.constraint === 'Company_one_active_company_idx';
     }
-    const outsiderLogin = await api('/auth/login', {
-      method: 'POST',
-      json: { username: `outsider-${stamp}`, password: PASSWORD },
-      noAuth: true,
-    });
-    if (outsiderLogin.status < 300) {
-      const outsiderToken = outsiderLogin.data.accessToken;
-      const outsiderCustomers = await fetch(`${API}/parties/customers`, {
-        headers: { Authorization: `Bearer ${outsiderToken}` },
-      }).then((r) => r.json());
-      const outsiderInvoices = await fetch(`${API}/sales/invoices?page=1&pageSize=10`, {
-        headers: { Authorization: `Bearer ${outsiderToken}` },
-      }).then((r) => r.json());
-      const outsiderInvoice = await fetch(`${API}/sales/invoices/${sale.id}`, {
-        headers: { Authorization: `Bearer ${outsiderToken}` },
-      });
-      check(
-        'a user of another company sees none of this company data',
-        (outsiderCustomers?.items ?? []).length === 0 &&
-          (outsiderInvoices?.items ?? []).length === 0 &&
-          outsiderInvoice.status >= 400,
-        `customers ${(outsiderCustomers?.items ?? []).length}, invoices ${(outsiderInvoices?.items ?? []).length}, direct fetch ${outsiderInvoice.status}`,
-      );
-    }
-    // The fixture is deactivated rather than deleted: the audit log is
-    // append-only and holds rows about this user, and erasing history to tidy
-    // up after a test is exactly what an audit trail is there to prevent.
-    await client.query('UPDATE users SET "isActive" = false WHERE id = $1', [
-      otherUser.rows[0].id,
-    ]);
-    await client.query('UPDATE companies SET "deletedAt" = now() WHERE id = $1', [
-      otherCompanyId,
-    ]);
+    check(
+      'the database rejects a second active company',
+      secondActiveCompanyRejected,
+      'the single-active-company constraint must reject a second non-deleted company',
+    );
 
     // ─────────────────────────────────────────────── 16. migrations, checked
     const migrations = await client.query(
