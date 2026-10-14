@@ -373,6 +373,15 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
           String(row.permissionId).startsWith('target-perm-'),
         ),
       ).toBe(true);
+
+      // User-level permission overrides use the same target catalogue remapping.
+      expect(txMock.userPermission.createMany).toHaveBeenCalled();
+      const userPermissionCall = txMock.userPermission.createMany.mock.calls[0][0];
+      expect(
+        userPermissionCall.data.every((row: any) =>
+          String(row.permissionId).startsWith('target-perm-'),
+        ),
+      ).toBe(true);
     });
   });
 
