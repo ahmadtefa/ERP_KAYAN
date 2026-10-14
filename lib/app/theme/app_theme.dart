@@ -33,6 +33,72 @@ abstract final class AppTheme {
           fontWeight: FontWeight.w700,
         ),
       ),
+      navigationRailTheme: NavigationRailThemeData(
+        backgroundColor: isLight ? Colors.white : scheme.surface,
+        indicatorColor: scheme.primaryContainer,
+        indicatorShape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+        selectedIconTheme: IconThemeData(color: scheme.onPrimaryContainer),
+        selectedLabelTextStyle: TextStyle(
+          color: scheme.primary,
+          fontWeight: FontWeight.w700,
+        ),
+        unselectedLabelTextStyle: TextStyle(
+          color: scheme.onSurfaceVariant,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        height: 72,
+        backgroundColor: isLight ? Colors.white : scheme.surface,
+        indicatorColor: scheme.primaryContainer,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      ),
+      navigationDrawerTheme: NavigationDrawerThemeData(
+        backgroundColor: isLight ? Colors.white : scheme.surface,
+        indicatorColor: scheme.primaryContainer,
+        tileHeight: 54,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+      ),
+      tabBarTheme: TabBarThemeData(
+        labelColor: scheme.primary,
+        unselectedLabelColor: scheme.onSurfaceVariant,
+        indicatorSize: TabBarIndicatorSize.label,
+        dividerColor: scheme.outlineVariant,
+        labelStyle: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: scheme.surfaceContainerLow,
+        selectedColor: scheme.primaryContainer,
+        side: BorderSide(color: scheme.outlineVariant),
+        shape: const StadiumBorder(),
+        labelStyle: TextStyle(color: scheme.onSurface, fontWeight: FontWeight.w500),
+        secondaryLabelStyle: TextStyle(color: scheme.onPrimaryContainer),
+      ),
+      listTileTheme: ListTileThemeData(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: isLight ? Colors.white : scheme.surfaceContainerLow,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+        ),
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: isLight ? Colors.white : scheme.surfaceContainerLow,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.65)),
+        ),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: isLight ? Colors.white : scheme.surfaceContainerHighest,
