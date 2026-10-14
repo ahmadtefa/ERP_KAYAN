@@ -40,6 +40,7 @@ class AccountDto {
           json['isPostable'] as bool? ?? json['is_postable'] as bool? ?? true,
       isActive: json['isActive'] as bool? ?? json['is_active'] as bool? ?? true,
       currency: json['currency']?.toString(),
+      description: json['description']?.toString(),
     );
   }
 

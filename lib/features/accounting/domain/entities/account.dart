@@ -22,6 +22,7 @@ class Account implements AccountNames {
     this.isPostable = true,
     this.isActive = true,
     this.currency,
+    this.description,
   });
 
   final String id;
@@ -43,6 +44,9 @@ class Account implements AccountNames {
   final bool isPostable;
   final bool isActive;
   final String? currency;
+
+  /// Free-text note on the account (desktop expense accounts keep one).
+  final String? description;
 
   bool get isLeaf => isPostable;
 
@@ -66,6 +70,7 @@ class Account implements AccountNames {
     isPostable: isPostable ?? this.isPostable,
     isActive: isActive ?? this.isActive,
     currency: currency,
+    description: description,
   );
 
   @override

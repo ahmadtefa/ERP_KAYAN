@@ -67,6 +67,19 @@ export class ChartOfAccountsController {
     return this.service.update(user.companyId, user.userId, id, dto);
   }
 
+  /// Desktop activation endpoints (same permission as editing an account).
+  @Post(':id/deactivate')
+  @RequirePermissions('accounting.accounts.update')
+  deactivate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.update(user.companyId, user.userId, id, { isActive: false });
+  }
+
+  @Post(':id/activate')
+  @RequirePermissions('accounting.accounts.update')
+  activate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.update(user.companyId, user.userId, id, { isActive: true });
+  }
+
   @Delete(':id')
   @RequirePermissions('accounting.accounts.delete')
   async remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {

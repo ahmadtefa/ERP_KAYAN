@@ -541,16 +541,7 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
                 Localizations.localeOf(context).languageCode == 'ar';
             final sections = grouped.isNotEmpty
                 ? grouped
-                    .map(
-                      (m) => (
-                        text(m is Json ? m : {'module': m.toString()}, 'module'),
-                        m is Json
-                            ? listOf(m['permissions'])
-                            : items
-                                .where((p) => text(p, 'module') == m.toString())
-                                .toList(growable: false),
-                      ),
-                    )
+                    .map((m) => (text(m, 'module'), listOf(m['permissions'])))
                     .toList(growable: false)
                 : [
                     for (final module in {
@@ -610,6 +601,7 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
   }
 
   Widget _moduleSection(String module, List<Json> permissions, bool isArabic) {
+    final l10n = context.l10n;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
