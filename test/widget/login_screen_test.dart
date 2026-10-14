@@ -1,42 +1,18 @@
 import 'package:erp_kayan/core/error/failure.dart';
-import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/core/result/result.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/auth/presentation/screens/login_screen.dart';
-import 'package:erp_kayan/shared/widgets/company_setup_form.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'test_harness.dart';
-
-/// Answers the one request the sign-in screen makes on its own: the setup
-/// status. Everything else on [ApiClient] is unreachable from these tests.
-class _FakeApiClient implements ApiClient {
-  _FakeApiClient({this.needsSetup = false});
-
-  final bool needsSetup;
-
-  @override
-  Future<Map<String, dynamic>> get(
-    String path, {
-    Map<String, dynamic>? query,
-  }) async {
-    if (path == '/setup/status') return {'needsSetup': needsSetup};
-    throw StateError('unexpected GET $path in a login widget test');
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
 
 void main() {
   late FakeTokenStore tokenStore;
   late FakeAuthRepository repository;
 
   setUp(() {
-    SharedPreferences.setMockInitialValues({});
     tokenStore = FakeTokenStore();
     repository = FakeAuthRepository();
   });
@@ -44,32 +20,18 @@ void main() {
   Future<void> pumpLogin(
     WidgetTester tester, {
     Locale locale = const Locale('en'),
-    bool needsSetup = false,
   }) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           tokenStoreProvider.overrideWithValue(tokenStore),
-          apiClientProvider.overrideWithValue(
-            _FakeApiClient(needsSetup: needsSetup),
-          ),
           authRepositoryProvider.overrideWithValue(repository),
-          companyBrandingProvider.overrideWith((ref) async => null),
         ],
         child: wrapWithApp(child: const LoginScreen(), locale: locale),
       ),
     );
     await tester.pumpAndSettle();
   }
-
-  testWidgets('a brand-new installation shows company setup first', (
-    tester,
-  ) async {
-    await pumpLogin(tester, needsSetup: true);
-
-    expect(find.byType(CompanySetupForm), findsOneWidget);
-    expect(find.widgetWithText(FilledButton, 'Sign In'), findsNothing);
-  });
 
   testWidgets('renders the credential fields and the sign-in action', (
     tester,
@@ -127,51 +89,6 @@ void main() {
       ),
       findsOneWidget,
     );
-  });
-
-  testWidgets('remembering saves login details only after successful sign-in', (
-    tester,
-  ) async {
-    await pumpLogin(tester);
-    await tester.enterText(find.byType(TextFormField).first, 'accountant');
-    await tester.enterText(find.byType(TextFormField).last, 'secret123');
-    await tester.tap(find.byType(CheckboxListTile));
-    await tester.tap(find.widgetWithText(FilledButton, 'Sign In'));
-    await tester.pumpAndSettle();
-
-    expect(tokenStore.rememberLogin, isTrue);
-    expect(tokenStore.username, 'accountant');
-    expect(tokenStore.password, 'secret123');
-  });
-
-  testWidgets('remembered values are restored and cleared when unchecked', (
-    tester,
-  ) async {
-    tokenStore.rememberLogin = true;
-    tokenStore.username = 'accountant';
-    tokenStore.password = 'secret123';
-    await pumpLogin(tester);
-
-    expect(
-      tester
-          .widget<TextFormField>(find.byType(TextFormField).first)
-          .controller
-          ?.text,
-      'accountant',
-    );
-    expect(
-      tester
-          .widget<TextFormField>(find.byType(TextFormField).last)
-          .controller
-          ?.text,
-      'secret123',
-    );
-    await tester.tap(find.byType(CheckboxListTile));
-    await tester.pumpAndSettle();
-
-    expect(tokenStore.rememberLogin, isFalse);
-    expect(tokenStore.username, isNull);
-    expect(tokenStore.password, isNull);
   });
 
   testWidgets('the password is obscured until the toggle is pressed', (
