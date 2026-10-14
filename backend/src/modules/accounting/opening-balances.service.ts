@@ -383,6 +383,25 @@ export class OpeningBalancesService {
 
       for (const line of document.lines) {
         if (!line.itemId || !line.quantity || !line.unitCost) continue;
+        const lockedBalances = await tx.$queryRaw<
+          Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
+        >(Prisma.sql`
+          SELECT "quantity", "value"
+            FROM "stock_balances"
+           WHERE "companyId" = ${companyId}::uuid
+             AND "branchId" = ${document.branchId}::uuid
+             AND "itemId" = ${line.itemId}::uuid
+           FOR UPDATE
+        `);
+        const balance = lockedBalances[0] ?? null;
+        const onHand = balance?.quantity ?? new Prisma.Decimal(0);
+        if (onHand.lessThan(line.quantity)) {
+          throw new BadRequestException(
+            `Cannot reverse opening balance: ${onHand.toFixed(MONEY_SCALE)} is available, ` +
+              `${line.quantity.toFixed(MONEY_SCALE)} is required.`,
+          );
+        }
+
         await tx.stockMovement.create({
           data: {
             companyId,
@@ -400,7 +419,7 @@ export class OpeningBalancesService {
             createdBy: userId,
           },
         });
-        await tx.stockBalance.upsert({
+        await tx.stockBalance.update({
           where: {
             companyId_branchId_itemId: {
               companyId,
@@ -408,14 +427,7 @@ export class OpeningBalancesService {
               itemId: line.itemId,
             },
           },
-          create: {
-            companyId,
-            branchId: document.branchId,
-            itemId: line.itemId,
-            quantity: line.quantity.negated(),
-            value: line.debit.negated(),
-          },
-          update: {
+          data: {
             quantity: { decrement: line.quantity },
             value: { decrement: line.debit },
           },
