@@ -22,12 +22,8 @@ export class CreateAccountDto {
   @IsString() @MinLength(1) @MaxLength(200) nameEn!: string;
   @IsString() @MinLength(1) @MaxLength(200) nameAr!: string;
 
-  /// Defaults to EXPENSE: the expense screen creates expense accounts without
-  /// naming a type (the contract the desktop client has always used).
-  @IsOptional() @IsIn(['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'])
-  type?: 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
-
-  @IsOptional() @IsString() @MaxLength(500) description?: string | null;
+  @IsIn(['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'])
+  type!: 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
 
   @IsOptional() @IsUUID() parentId?: string;
 
@@ -50,7 +46,6 @@ export class UpdateAccountDto {
   @IsOptional() @IsBoolean() isPostable?: boolean;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsString() @MaxLength(3) currency?: string;
-  @IsOptional() @IsString() @MaxLength(500) description?: string | null;
 }
 
 export class ListAccountsQueryDto {

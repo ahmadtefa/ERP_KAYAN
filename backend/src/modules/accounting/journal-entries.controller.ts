@@ -43,6 +43,28 @@ export class JournalEntriesController {
     return this.service.post(user.companyId, user.userId, id);
   }
 
+  @Post(':id/submit')
+  @RequirePermissions('accounting.journal.create')
+  submit(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.submitForApproval(user.companyId, user.userId, id);
+  }
+
+  @Post(':id/approve')
+  @RequirePermissions('accounting.journal.approve')
+  approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.approve(user.companyId, user.userId, id);
+  }
+
+  @Post(':id/cancel')
+  @RequirePermissions('accounting.journal.create')
+  cancel(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.service.cancel(user.companyId, user.userId, id, body?.reason);
+  }
+
   @Post(':id/reverse')
   @RequirePermissions('accounting.journal.post')
   reverse(@CurrentUser() user: AuthUser, @Param('id') id: string) {

@@ -27,7 +27,6 @@ export interface AccountResponse {
   isPostable: boolean;
   isActive: boolean;
   currency: string | null;
-  description: string | null;
 }
 
 /**
@@ -130,7 +129,7 @@ export class ChartOfAccountsService {
     userId: string,
     dto: CreateAccountDto,
   ): Promise<AccountResponse> {
-    const type = (dto.type ?? 'EXPENSE') as AccountType;
+    const type = dto.type as AccountType;
     const parentId = dto.parentId ?? null;
 
     // The parent is checked first: an account cannot be planned under a
@@ -160,7 +159,6 @@ export class ChartOfAccountsService {
           parentId,
           isPostable,
           currency: dto.currency ?? null,
-          description: dto.description?.trim() || null,
           createdBy: userId,
           updatedBy: userId,
         },
@@ -200,19 +198,6 @@ export class ChartOfAccountsService {
     dto: UpdateAccountDto,
   ): Promise<AccountResponse> {
     const account = await this.findAccount(companyId, id);
-
-    // Deactivating a grouping account would leave its active children orphaned
-    // in the tree; the subaccounts are deactivated first.
-    if (dto.isActive === false && account.isActive) {
-      const activeChildren = await this.prisma.account.count({
-        where: { parentId: id, companyId, deletedAt: null, isActive: true },
-      });
-      if (activeChildren > 0) {
-        throw new BadRequestException(
-          'Deactivate active subaccounts before deactivating their parent',
-        );
-      }
-    }
 
     if (dto.code !== undefined && dto.code !== account.code) {
       const movements = await this.prisma.journalLine.count({
@@ -266,8 +251,6 @@ export class ChartOfAccountsService {
           isPostable: dto.isPostable,
           isActive: dto.isActive,
           currency: dto.currency,
-          description:
-            dto.description === undefined ? undefined : dto.description?.trim() || null,
           updatedBy: userId,
         },
       });
@@ -386,11 +369,6 @@ export class ChartOfAccountsService {
         'The parent account does not exist in this company',
       );
     }
-    if (!parent.isActive) {
-      throw new BadRequestException(
-        'The parent account is inactive. Activate it before adding sub-accounts under it.',
-      );
-    }
     if (parent.type !== type) {
       throw new BadRequestException(
         `A sub-account must have the same type as its parent ` +
@@ -460,7 +438,6 @@ function toResponse(a: {
   isPostable: boolean;
   isActive: boolean;
   currency: string | null;
-  description: string | null;
 }): AccountResponse {
   return {
     id: a.id,
@@ -476,6 +453,5 @@ function toResponse(a: {
     isPostable: a.isPostable,
     isActive: a.isActive,
     currency: a.currency,
-    description: a.description,
   };
 }
