@@ -6,6 +6,9 @@ import {
 import { InvoiceStatus, JournalStatus, Prisma, StockDirection } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import { WarehouseService } from '../../common/warehouse/warehouse.service';
+import { PriceListsService } from './price-lists.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { PostingService } from '../accounting/posting.service';
@@ -36,6 +39,9 @@ export class SalesInvoicesService {
     private readonly numbers: DocumentNumberService,
     private readonly posting: PostingService,
     private readonly accounts: AccountMapService,
+    private readonly settings: CompanySettingsService,
+    private readonly warehouses: WarehouseService,
+    private readonly prices: PriceListsService,
     private readonly audit: AuditService,
   ) {}
 
@@ -137,7 +143,7 @@ export class SalesInvoicesService {
     if (!customer) throw new BadRequestException('The customer does not exist');
     if (!customer.isActive) throw new BadRequestException('The customer is inactive');
 
-    const lines = await this.prepareLines(companyId, dto.lines);
+    const lines = await this.prepareLines(companyId, dto.lines, dto.customerId);
     const totals = this.totalsOf(lines);
 
     const created = await this.prisma.$transaction(async (tx) => {
@@ -150,11 +156,17 @@ export class SalesInvoicesService {
 
       return tx.salesInvoice.create({
         data: {
+          warehouseId: dto.warehouseId ?? null,
           companyId,
           branchId,
           invoiceNumber,
           invoiceDate: new Date(dto.invoiceDate),
-          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+          // The due date is what the ageing report counts from. If the person
+          // did not give one, the customer's payment terms decide it, so the
+          // invoice is never born with no due date at all.
+          dueDate: dto.dueDate
+            ? new Date(dto.dueDate)
+            : (await this.dueDateFromTerms(companyId, dto.customerId, new Date(dto.invoiceDate))),
           customerId: dto.customerId,
           status: InvoiceStatus.DRAFT,
           subTotal: totals.subTotal,
@@ -217,6 +229,20 @@ export class SalesInvoicesService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // Claim the document before anything else happens. Two people pressing
+      // Post at the same moment: the row lock lets exactly one of them win, and
+      // the other is told the invoice has already been posted - instead of both
+      // of them issuing the same stock and writing the same revenue twice.
+      const claimed = await tx.salesInvoice.updateMany({
+        where: { id: invoice.id, companyId, status: InvoiceStatus.DRAFT, deletedAt: null },
+        data: { status: InvoiceStatus.POSTED, postedAt: new Date(), postedBy: userId },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException(
+          'This invoice was posted by someone else a moment ago. Reload it to see the current state.',
+        );
+      }
+
       const accounts = await this.accounts.resolve(tx, companyId, [
         'accountsReceivable',
         'salesRevenue',
@@ -224,6 +250,21 @@ export class SalesInvoicesService {
         'inventory',
         'costOfGoodsSold',
       ]);
+
+      // Which pile the goods left. A document that names none uses the
+      // branch's default, which is what keeps the warehouse reports complete.
+      const warehouseId = await this.warehouses.resolve(
+        tx,
+        companyId,
+        invoice.branchId,
+        invoice.warehouseId,
+      );
+      if (!invoice.warehouseId && warehouseId) {
+        await tx.salesInvoice.update({
+          where: { id: invoice.id },
+          data: { warehouseId },
+        });
+      }
 
       // ---- stock issue, valued at the weighted average cost
       let costOfGoods = new Prisma.Decimal(0);
@@ -273,6 +314,7 @@ export class SalesInvoicesService {
           data: {
             companyId,
             branchId: invoice.branchId,
+            warehouseId,
             itemId: item.id,
             movementDate: invoice.invoiceDate,
             direction: StockDirection.OUT,
@@ -501,28 +543,59 @@ export class SalesInvoicesService {
 
   // ------------------------------------------------------------------ helpers
 
+  /// The due date the customer's payment terms imply, or null when they have
+  /// none.
+  private async dueDateFromTerms(
+    companyId: string,
+    customerId: string,
+    invoiceDate: Date,
+  ): Promise<Date | null> {
+    const customer = await this.prisma.customer.findFirst({
+      where: { id: customerId, companyId },
+      select: { paymentTermDays: true },
+    });
+    const days = customer?.paymentTermDays ?? 0;
+    if (days <= 0) return null;
+    const due = new Date(invoiceDate.getTime());
+    due.setUTCDate(due.getUTCDate() + days);
+    return due;
+  }
+
   private async prepareLines(
     companyId: string,
     input: SalesInvoiceLineDto[],
+    customerId?: string | null,
   ): Promise<PreparedLine[]> {
     const prepared: PreparedLine[] = [];
+    // The company's own policy: the rate to apply when nobody said otherwise,
+    // and whether the prices being typed already contain it.
+    const settings = await this.settings.get(companyId);
 
     for (const [index, raw] of input.entries()) {
       const quantity = this.positive(raw.quantity, `Line ${index + 1} quantity`);
-      const unitPrice = this.nonNegative(raw.unitPrice, `Line ${index + 1} unitPrice`);
+
+      // A price typed on the line is what was charged. When nobody typed one,
+      // the customer's agreed list speaks, and failing that the item's own
+      // selling price - resolved below, once the item is known.
+      const typedPrice =
+        raw.unitPrice === undefined || raw.unitPrice === null || raw.unitPrice === ''
+          ? null
+          : this.nonNegative(raw.unitPrice, `Line ${index + 1} unitPrice`);
 
       // A line needs to identify itself: either an item, or free text for a
       // service that is not stocked.
       let item: {
         code: string;
         nameEn: string;
-        taxRate: Prisma.Decimal;
+        taxRate: Prisma.Decimal | null;
+        salePrice: Prisma.Decimal;
+        unit: string;
       } | null = null;
 
       if (raw.itemId) {
         item = await this.prisma.item.findFirst({
           where: { id: raw.itemId, companyId, deletedAt: null },
-          select: { code: true, nameEn: true, taxRate: true, isActive: true },
+          select: { code: true, nameEn: true, taxRate: true, isActive: true, salePrice: true, unit: true },
         });
         if (!item) throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
         if (!(item as any).isActive) {
@@ -537,16 +610,50 @@ export class SalesInvoicesService {
         );
       }
 
-      const taxRate =
+      // What this line costs, when the person did not say.
+      let unitPrice: Prisma.Decimal;
+      if (typedPrice !== null) {
+        unitPrice = typedPrice;
+      } else if (item) {
+        const listed = await this.prices.resolvePrice(this.prisma, companyId, {
+          partyId: customerId ?? null,
+          partyKind: 'CUSTOMER',
+          itemId: raw.itemId ?? null,
+          unit: item.unit,
+          quantity,
+        });
+        unitPrice = listed
+          ? listed.price
+              .mul(new Prisma.Decimal(1).minus(listed.discountPercent.div(100)))
+              .toDecimalPlaces(MONEY_SCALE)
+          : item.salePrice;
+      } else {
+        throw new BadRequestException(
+          `Line ${index + 1}: a price is required when the line names no item`,
+        );
+      }
+
+      // The rate is decided in this order: what the person typed on the line,
+      // then what the item carries, then the company's own rate. An item with
+      // no rate of its own follows the company; an item explicitly set to 0 is
+      // exempt, which is a different thing.
+      const taxRate: Prisma.Decimal =
         raw.taxRate !== undefined
           ? this.rate(raw.taxRate, `Line ${index + 1} taxRate`)
-          : (item?.taxRate ?? new Prisma.Decimal(0));
+          : (item?.taxRate ?? new Prisma.Decimal(settings.taxRate));
 
-      const lineTotal = quantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
-      const taxAmount = lineTotal
-        .mul(taxRate)
-        .div(100)
-        .toDecimalPlaces(MONEY_SCALE);
+      // What the person typed is the price of the goods, unless the company
+      // has said its prices already include VAT - in which case the tax is
+      // inside the number and has to be taken back out of it, not added on top
+      // of it a second time.
+      const typedTotal = quantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
+      const grossUp = new Prisma.Decimal(1).plus(taxRate.div(100));
+      const lineTotal = settings.pricesIncludeTax && taxRate.greaterThan(0)
+        ? typedTotal.div(grossUp).toDecimalPlaces(MONEY_SCALE)
+        : typedTotal;
+      const taxAmount = settings.pricesIncludeTax && taxRate.greaterThan(0)
+        ? typedTotal.minus(lineTotal).toDecimalPlaces(MONEY_SCALE)
+        : typedTotal.mul(taxRate).div(100).toDecimalPlaces(MONEY_SCALE);
 
       prepared.push({
         lineNumber: index + 1,
