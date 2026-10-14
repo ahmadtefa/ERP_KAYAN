@@ -12,7 +12,12 @@ disaster-recovery path: `POST /api/v1/backup/full/*`, permission `admin.backup`.
 * One file: `kayan-full-YYYY-MM-DD-HH-MM-SS.dump` (and
   `kayan-safety-…` for the automatic pre-restore copies), in
   `KAYAN_BACKUP_DIR` (default `backend/backups/`, created with normal
-  permissions — never world-writable).
+  permissions — never world-writable). The Windows desktop program sets
+  `KAYAN_BACKUP_DIR` to `%APPDATA%\KAYAN-ERP\backups` itself, because a copy
+  installed under Program Files is not writable; a value written into
+  `kayan.env` still wins. When the folder cannot be created the API answers
+  with a clear machine problem naming `KAYAN_BACKUP_DIR`, never a bare
+  "Unexpected server error".
 * Verified after writing: size > 0 and the `PGDMP` magic bytes are present
   before the API reports success.
 * The filename carries the system name and timestamp. Nothing else — **no
@@ -42,9 +47,13 @@ the reverse is not true.
 `scripts\build-desktop-windows.ps1` (step 5) copies `pg_dump.exe`,
 `pg_restore.exe` and the DLLs they load into `KAYAN-ERP\backend\pg\`, from
 the portable PostgreSQL this project provisions (same family as the database
-it runs) or from an installed PostgreSQL, newest first. The build **fails** if
-no tools are found or if the bundled copies cannot answer `--version` from
-where they were placed — a package without working tools is not shippable.
+it runs) or from an installed PostgreSQL, newest first. On a machine with
+neither (a fresh build machine, CI), the script provisions the same portable
+toolchain `scripts\install-postgres-portable.bat` uses — same download, same
+`%LOCALAPPDATA%\kayan-tools\pgsql` folder — tools only, no database folder,
+no Windows service, no PATH change. The build **fails** if no tools are found
+or if the bundled copies cannot answer `--version` from where they were
+placed — a package without working tools is not shippable.
 `scripts\verify-package.ps1` re-checks the same things on any machine holding
 a finished package. Nothing is installed, nothing existing is replaced, and
 no PostgreSQL authentication setting is read or changed.
@@ -123,3 +132,11 @@ kayan-safety-….dump` with normal DB credentials, then restart.
 * restore from a server file or an uploaded `.dump` — behind a warning dialog
   **and** a typed `RESTORE` confirmation;
 * shows the result, the safety-backup name, or the exact failure.
+
+## The demo backup file
+
+A ready-made, entirely fictional company is published as a downloadable
+PostgreSQL Custom archive, built by the program's own backup route and proved
+by restoring it into a second throwaway database on every push. See
+**[The demo backup file](DEMO_BACKUP.md)** for what is in it, how to download
+it, and how to put it in.
