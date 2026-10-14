@@ -84,25 +84,48 @@ interface TableSpec {
 /// points at comes before it. Restoring in any other order breaks a foreign
 /// key, which is exactly what a half-restore looks like.
 const TABLES: TableSpec[] = [
+  // Insert parents before dependants. Restore deletes this list in reverse,
+  // so every foreign-key dependant is removed before its parent.
   { model: 'branch', scope: 'company', selfReferencing: true },
   { model: 'role', scope: 'company' },
   { model: 'rolePermission', scope: 'child', parent: 'role', foreignKey: 'roleId' },
   { model: 'user', scope: 'company' },
+  { model: 'userPermission', scope: 'child', parent: 'user', foreignKey: 'userId' },
   { model: 'userRole', scope: 'company' },
   { model: 'userBranch', scope: 'child', parent: 'user', foreignKey: 'userId' },
   { model: 'fiscalPeriod', scope: 'company' },
   { model: 'account', scope: 'company', selfReferencing: true },
+  { model: 'costCenter', scope: 'company' },
+  { model: 'companySetting', scope: 'company' },
+  { model: 'priceList', scope: 'company' },
+  { model: 'itemCategory', scope: 'company' },
   { model: 'customer', scope: 'company' },
   { model: 'supplier', scope: 'company' },
   { model: 'item', scope: 'company' },
+  { model: 'itemUnit', scope: 'child', parent: 'item', foreignKey: 'itemId' },
+  { model: 'warehouse', scope: 'company' },
+  { model: 'priceListItem', scope: 'child', parent: 'priceList', foreignKey: 'priceListId' },
   { model: 'stockBalance', scope: 'company' },
   { model: 'stockMovement', scope: 'company' },
   { model: 'journalEntry', scope: 'company' },
   { model: 'journalLine', scope: 'child', parent: 'journalEntry', foreignKey: 'journalEntryId' },
+  { model: 'salesOrder', scope: 'company' },
+  { model: 'salesOrderLine', scope: 'child', parent: 'salesOrder', foreignKey: 'orderId' },
+  { model: 'purchaseOrder', scope: 'company' },
+  { model: 'purchaseOrderLine', scope: 'child', parent: 'purchaseOrder', foreignKey: 'orderId' },
   { model: 'salesInvoice', scope: 'company' },
   { model: 'salesInvoiceLine', scope: 'child', parent: 'salesInvoice', foreignKey: 'invoiceId' },
   { model: 'purchaseInvoice', scope: 'company' },
   { model: 'purchaseInvoiceLine', scope: 'child', parent: 'purchaseInvoice', foreignKey: 'invoiceId' },
+  { model: 'stockDocument', scope: 'company' },
+  { model: 'stockDocumentLine', scope: 'child', parent: 'stockDocument', foreignKey: 'documentId' },
+  { model: 'openingBalance', scope: 'company' },
+  { model: 'openingBalanceLine', scope: 'child', parent: 'openingBalance', foreignKey: 'openingBalanceId' },
+  { model: 'cashAccount', scope: 'company' },
+  { model: 'bankReconciliation', scope: 'company' },
+  { model: 'cashVoucher', scope: 'company' },
+  { model: 'cashTransfer', scope: 'company' },
+  { model: 'cashVoucherAllocation', scope: 'child', parent: 'cashVoucher', foreignKey: 'voucherId' },
   { model: 'documentSequence', scope: 'company' },
   { model: 'auditLog', scope: 'company' },
 ];
@@ -261,6 +284,18 @@ export class BackupService {
 
     const existing = await this.countExisting(requesterCompanyId);
     const hasData = Object.values(existing).some((count) => count > 0);
+
+    // A backup made by an older app may not contain newer tables. Never
+    // interpret a missing table as an instruction to erase live data from it.
+    // A complete backup produced by this version includes every TABLES key.
+    const missingTablesWithLiveData = Object.entries(existing)
+      .filter(([model, count]) => count > 0 && !Array.isArray(file.tables[model]))
+      .map(([model]) => model);
+    if (missingTablesWithLiveData.length > 0) {
+      throw new BadRequestException(
+        `This backup is missing tables that currently contain company data: ${missingTablesWithLiveData.join(', ')}. Create a new company backup with the current version before replacing data. Nothing was changed.`,
+      );
+    }
 
     if (hasData && !options.replace) {
       throw new BadRequestException(
@@ -482,7 +517,7 @@ export class BackupService {
     });
 
     if (
-      spec.model === 'rolePermission' &&
+      (spec.model === 'rolePermission' || spec.model === 'userPermission') &&
       typeof (client as any).permission?.findMany === 'function'
     ) {
       const targetPerms = (await (client as any).permission.findMany()) as Array<{
@@ -517,17 +552,18 @@ export class BackupService {
         const seenPairs = new Set<string>();
         const remapped: Array<Record<string, unknown>> = [];
         for (const r of prepared) {
-          const roleId = String(r.roleId ?? '');
+          const assignmentField = spec.model === 'rolePermission' ? 'roleId' : 'userId';
+          const assignmentId = String(r[assignmentField] ?? '');
           const rawPermId = String(r.permissionId ?? '');
           const mappedPermId =
             (typeof r.permissionCode === 'string'
               ? targetByCode.get(r.permissionCode)
               : undefined) ?? permIdMap.get(rawPermId);
-          if (!roleId || !mappedPermId) continue;
-          const pairKey = `${roleId}:${mappedPermId}`;
+          if (!assignmentId || !mappedPermId) continue;
+          const pairKey = assignmentId + ':' + mappedPermId;
           if (seenPairs.has(pairKey)) continue;
           seenPairs.add(pairKey);
-          remapped.push({ roleId, permissionId: mappedPermId });
+          remapped.push({ [assignmentField]: assignmentId, permissionId: mappedPermId });
         }
         prepared = remapped;
       }

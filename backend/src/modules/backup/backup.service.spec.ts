@@ -25,20 +25,41 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     'role',
     'rolePermission',
     'user',
+    'userPermission',
     'userRole',
     'userBranch',
     'fiscalPeriod',
     'customer',
     'supplier',
     'item',
+    'itemUnit',
+    'itemCategory',
+    'priceList',
+    'priceListItem',
+    'warehouse',
     'stockBalance',
     'stockMovement',
     'journalEntry',
     'journalLine',
+    'salesOrder',
+    'salesOrderLine',
+    'purchaseOrder',
+    'purchaseOrderLine',
     'salesInvoice',
     'salesInvoiceLine',
     'purchaseInvoice',
     'purchaseInvoiceLine',
+    'stockDocument',
+    'stockDocumentLine',
+    'openingBalance',
+    'openingBalanceLine',
+    'cashAccount',
+    'bankReconciliation',
+    'cashVoucher',
+    'cashTransfer',
+    'cashVoucherAllocation',
+    'companySetting',
+    'costCenter',
     'documentSequence',
     'auditLog',
   ];
@@ -249,12 +270,62 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       expect(txMock.journalEntry.createMany).toHaveBeenCalled();
     });
 
-    test('restores committed demo-data/kayan-company-backup-demo.json with remapped permission IDs and parent-first branches', async () => {
+    test('refuses an older backup that omits a table containing live company data', async () => {
+      prismaMock.cashAccount.findMany.mockResolvedValueOnce([
+        { id: 'cash-account-live', companyId: COMPANY_ID, accountId: 'account-live' },
+      ]);
+
+      await expect(service.restore({
+        format: 'kayan-backup',
+        version: 1,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'شركة كيان',
+        counts: {},
+        // Simulate a backup from before cash accounts were part of the format.
+        tables: { account: [] },
+      }, COMPANY_ID, { replace: true })).rejects.toThrow(/missing tables.*cashAccount/i);
+
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    test('deletes cash and banking dependants before deleting their ledger accounts', async () => {
+      // A child-table delete is scoped through the parent rows. Give the mock
+      // one voucher so the allocation delete is exercised rather than skipped.
+      txMock.cashVoucher.findMany.mockResolvedValueOnce([{ id: 'voucher-demo' }]);
+      await service.restore({
+        format: 'kayan-backup',
+        version: 1,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'شركة كيان',
+        counts: {},
+        tables: {},
+      }, COMPANY_ID, { replace: true });
+
+      expect(txMock.cashAccount.deleteMany).toHaveBeenCalled();
+      expect(txMock.cashVoucher.deleteMany).toHaveBeenCalled();
+      expect(txMock.cashTransfer.deleteMany).toHaveBeenCalled();
+      expect(txMock.bankReconciliation.deleteMany).toHaveBeenCalled();
+      expect(txMock.cashVoucherAllocation.deleteMany).toHaveBeenCalled();
+
+      const deleteOrder = (model: string) =>
+        txMock[model].deleteMany.mock.invocationCallOrder[0];
+      expect(deleteOrder('cashVoucherAllocation')).toBeLessThan(deleteOrder('cashVoucher'));
+      expect(deleteOrder('cashTransfer')).toBeLessThan(deleteOrder('cashAccount'));
+      expect(deleteOrder('cashVoucher')).toBeLessThan(deleteOrder('bankReconciliation'));
+      expect(deleteOrder('bankReconciliation')).toBeLessThan(deleteOrder('cashAccount'));
+      expect(deleteOrder('cashAccount')).toBeLessThan(deleteOrder('account'));
+    });
+
+    test('restores committed demo-data/kayan-company-backup-full.json with remapped permission IDs and parent-first branches', async () => {
       const fs = require('node:fs');
       const path = require('node:path');
       const demoPath = path.resolve(
         __dirname,
-        '../../../../demo-data/kayan-company-backup-demo.json',
+        '../../../../demo-data/kayan-company-backup-full.json',
       );
       const demoBackup: BackupFile = JSON.parse(
         fs.readFileSync(demoPath, 'utf8'),
@@ -262,6 +333,8 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
 
       expect(demoBackup.format).toBe('kayan-backup');
       expect(demoBackup.companyCode).toBe('DEMO');
+      expect(Object.keys(demoBackup.tables)).toHaveLength(42);
+      expect(Object.values(demoBackup.tables).every((rows) => rows.length > 0)).toBe(true);
 
       // Verify every journal entry in the demo backup is balanced.
       const entries = demoBackup.tables.journalEntry ?? [];
@@ -297,6 +370,15 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       const rpCall = txMock.rolePermission.createMany.mock.calls[0][0];
       expect(
         rpCall.data.every((row: any) =>
+          String(row.permissionId).startsWith('target-perm-'),
+        ),
+      ).toBe(true);
+
+      // User-level permission overrides use the same target catalogue remapping.
+      expect(txMock.userPermission.createMany).toHaveBeenCalled();
+      const userPermissionCall = txMock.userPermission.createMany.mock.calls[0][0];
+      expect(
+        userPermissionCall.data.every((row: any) =>
           String(row.permissionId).startsWith('target-perm-'),
         ),
       ).toBe(true);
