@@ -665,6 +665,21 @@ export class ListTablesService {
       },
       orderBy: { code: 'asc' },
     });
+    const balanceRows = await this.prisma.$queryRaw<
+      Array<{ accountId: string; net: Prisma.Decimal }>
+    >(Prisma.sql`
+      SELECT l."accountId" AS "accountId",
+             COALESCE(SUM(l.debit - l.credit), 0) AS net
+        FROM journal_lines l
+        JOIN journal_entries e ON e.id = l."journalEntryId"
+       WHERE e."companyId" = ${companyId}::uuid
+         AND e.status IN ('POSTED', 'REVERSED')
+         AND e."entryDate" <= CURRENT_DATE
+       GROUP BY l."accountId"
+    `);
+    const balanceByAccount = new Map(
+      balanceRows.map((row) => [row.accountId, new Prisma.Decimal(row.net)]),
+    );
     return this.table({
       slug: 'cash-accounts',
       titleEn: 'Cash and bank accounts',
@@ -675,6 +690,7 @@ export class ListTablesService {
         { key: 'name', labelEn: 'Name', labelAr: 'الاسم', width: 28 },
         { key: 'kind', labelEn: 'Type', labelAr: 'النوع', width: 14 },
         { key: 'currency', labelEn: 'Currency', labelAr: 'العملة', width: 12 },
+        { key: 'balance', labelEn: 'Current balance', labelAr: 'الرصيد الحالي', numeric: true, width: 18 },
         { key: 'ledgerCode', labelEn: 'Ledger account', labelAr: 'حساب الأستاذ', width: 18 },
         { key: 'ledgerName', labelEn: 'Ledger account name', labelAr: 'اسم حساب الأستاذ', width: 28 },
         { key: 'branch', labelEn: 'Branch', labelAr: 'الفرع', width: 24 },
@@ -688,6 +704,7 @@ export class ListTablesService {
         name: branchName({ nameEn: row.nameEn, nameAr: row.nameAr }, query.lang),
         kind: row.kind,
         currency: row.currency,
+        balance: (balanceByAccount.get(row.accountId) ?? new Prisma.Decimal(0)).toFixed(4),
         ledgerCode: row.account.code,
         ledgerName: branchName({ nameEn: row.account.nameEn, nameAr: row.account.nameAr }, query.lang),
         branch: row.branch ? branchName(row.branch, query.lang) : '',
