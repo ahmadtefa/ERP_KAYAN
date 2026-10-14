@@ -3,7 +3,7 @@
   "version": 1,
   "createdAt": "2026-10-14T10:52:51.690Z",
   "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
-  "companyCode": "DEMO-FULL",
+  "companyCode": "DEMO",
   "companyName": "النخيل للتجارة والتوزيع — بيانات تجريبية شاملة",
   "counts": {
     "branch": 3,
@@ -20449,5 +20449,5 @@
       }
     ]
   },
-  "notes": "Fictional demo data only. This file includes populated accounting, parties, inventory, sales and purchasing, price lists, warehouses, stock documents, opening balances, cash/bank accounts, vouchers, transfers, reconciliations and allocations. Every row is synthetic and linked to the demo company. Use only in a test company; never replace live company data."
+  "notes": "Fictional demo fixture for KAYAN ERP. The special DEMO company code allows this sample backup to be restored into the currently signed-in test company; restore still requires the normal explicit replace confirmation. Contains populated accounting, parties, inventory, sales and purchasing, price lists, warehouses, stock documents, opening balances, cash/bank accounts, vouchers, transfers, reconciliations and allocations. All names, identifiers and transactions are synthetic. Never use as a real company backup."
 }
