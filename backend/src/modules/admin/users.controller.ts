@@ -36,13 +36,7 @@ export class UsersController {
 
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateUserDto) {
-    return this.users.create(
-      user.companyId,
-      user.userId,
-      dto,
-      user.permissions,
-      user.isSuperAdmin,
-    );
+    return this.users.create(user.companyId, user.userId, dto);
   }
 
   @Patch(':id')
@@ -51,14 +45,7 @@ export class UsersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateUserDto,
   ) {
-    return this.users.update(
-      user.companyId,
-      user.userId,
-      id,
-      dto,
-      user.permissions,
-      user.isSuperAdmin,
-    );
+    return this.users.update(user.companyId, user.userId, id, dto);
   }
 
   @Post(':id/password')
@@ -67,17 +54,11 @@ export class UsersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ChangePasswordDto,
   ) {
-    return this.users.changePassword(
-      user.companyId,
-      user.userId,
-      id,
-      dto.password,
-      user.isSuperAdmin,
-    );
+    return this.users.changePassword(user.companyId, user.userId, id, dto.password);
   }
 
   @Post(':id/deactivate')
   deactivate(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.users.deactivate(user.companyId, user.userId, id, user.isSuperAdmin);
+    return this.users.deactivate(user.companyId, user.userId, id);
   }
 }

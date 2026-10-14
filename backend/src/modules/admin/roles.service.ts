@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -74,20 +73,13 @@ export class RolesService {
     };
   }
 
-  async create(
-    companyId: string,
-    actorId: string,
-    dto: CreateRoleDto,
-    actorPermissions: string[],
-    isSuperAdmin: boolean,
-  ) {
+  async create(companyId: string, actorId: string, dto: CreateRoleDto) {
     const code = dto.code.trim().toUpperCase();
     const existing = await this.prisma.role.findFirst({
       where: { companyId, code, deletedAt: null },
     });
     if (existing) throw new ConflictException('A role with that code already exists');
 
-    this.assertCanGrantPermissionCodes(dto.permissions, actorPermissions, isSuperAdmin);
     const permissionIds = await this.resolvePermissions(dto.permissions);
 
     const created = await this.prisma.$transaction(async (tx) => {
@@ -152,22 +144,12 @@ export class RolesService {
     actorId: string,
     id: string,
     codes: string[],
-    actorPermissions: string[],
-    isSuperAdmin: boolean,
   ) {
     const role = await this.prisma.role.findFirst({
       where: { id, deletedAt: null, OR: [{ companyId }, { companyId: null }] },
     });
     if (!role) throw new NotFoundException('Role not found');
-    // Global roles are shared across companies. Letting a company role manager
-    // edit one would change permissions for users in every tenant.
-    if ((role.isSystem || role.companyId === null) && !isSuperAdmin) {
-      throw new ForbiddenException(
-        'Only a super administrator can change permissions on a global system role',
-      );
-    }
 
-    this.assertCanGrantPermissionCodes(codes, actorPermissions, isSuperAdmin);
     const permissionIds = await this.resolvePermissions(codes);
     const before = await this.prisma.rolePermission.findMany({
       where: { roleId: id },
@@ -216,22 +198,6 @@ export class RolesService {
       before: { code: role.code },
     });
     return { id, removed: true };
-  }
-
-  /// Only a super-admin may grant permissions the actor does not already hold.
-  /// This blocks role-management access from becoming a privilege-escalation path.
-  private assertCanGrantPermissionCodes(
-    codes: string[] | undefined,
-    actorPermissions: string[],
-    isSuperAdmin: boolean,
-  ) {
-    if (isSuperAdmin || !codes?.length) return;
-    const forbidden = [...new Set(codes.filter((code) => !actorPermissions.includes(code)))];
-    if (forbidden.length) {
-      throw new ForbiddenException(
-        `You cannot grant permissions you do not hold: ${forbidden.join(', ')}`,
-      );
-    }
   }
 
   // ---------------------------------------------------------------- helpers

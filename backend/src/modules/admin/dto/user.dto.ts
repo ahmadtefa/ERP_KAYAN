@@ -25,6 +25,8 @@ export class CreateUserDto {
   roleIds?: string[];
   @IsOptional() @IsArray() @ArrayUnique() @IsUUID('4', { each: true })
   branchIds?: string[];
+  @IsOptional() @IsArray() @ArrayUnique() @IsString({ each: true })
+  extraPermissions?: string[];
 }
 
 export class UpdateUserDto {
@@ -36,6 +38,8 @@ export class UpdateUserDto {
   roleIds?: string[];
   @IsOptional() @IsArray() @ArrayUnique() @IsUUID('4', { each: true })
   branchIds?: string[];
+  @IsOptional() @IsArray() @ArrayUnique() @IsString({ each: true })
+  extraPermissions?: string[];
 }
 
 export class ChangePasswordDto {
