@@ -323,14 +323,12 @@ export class PurchaseInvoicesService {
         ],
       });
 
+      // The transaction claimed the invoice as POSTED before touching stock.
+      // Do not write its status a second time: the database transition guard
+      // intentionally permits only DRAFT -> POSTED for purchase invoices.
       await tx.purchaseInvoice.update({
         where: { id: invoice.id },
-        data: {
-          status: InvoiceStatus.POSTED,
-          journalEntryId: journal.id,
-          postedAt: new Date(),
-          postedBy: userId,
-        },
+        data: { journalEntryId: journal.id },
       });
 
       return journal;
