@@ -39,6 +39,9 @@ export const LIST_SLUGS = [
   'users',
   'roles',
   'audit-trail',
+  'cash-accounts',
+  'cash-vouchers',
+  'cash-transfers',
 ] as const;
 
 export type ListSlug = (typeof LIST_SLUGS)[number];
@@ -652,6 +655,186 @@ export class ListTablesService {
     });
   }
 
+  /// Cash and bank accounts, including the ledger account each one posts to.
+  async cashAccounts(companyId: string, query: ListQuery): Promise<ReportTable> {
+    const rows = await this.prisma.cashAccount.findMany({
+      where: { companyId, deletedAt: null },
+      include: {
+        branch: { select: { code: true, nameEn: true, nameAr: true } },
+        account: { select: { code: true, nameEn: true, nameAr: true } },
+      },
+      orderBy: { code: 'asc' },
+    });
+    const balanceRows = await this.prisma.$queryRaw<
+      Array<{ accountId: string; net: Prisma.Decimal }>
+    >(Prisma.sql`
+      SELECT l."accountId" AS "accountId",
+             COALESCE(SUM(l.debit - l.credit), 0) AS net
+        FROM journal_lines l
+        JOIN journal_entries e ON e.id = l."journalEntryId"
+       WHERE e."companyId" = ${companyId}::uuid
+         AND e.status IN ('POSTED', 'REVERSED')
+         AND e."entryDate" <= CURRENT_DATE
+       GROUP BY l."accountId"
+    `);
+    const balanceByAccount = new Map(
+      balanceRows.map((row) => [row.accountId, new Prisma.Decimal(row.net)]),
+    );
+    return this.table({
+      slug: 'cash-accounts',
+      titleEn: 'Cash and bank accounts',
+      titleAr: 'الخزائن والحسابات البنكية',
+      meta: [this.count(rows.length)],
+      columns: [
+        { key: 'code', labelEn: 'Code', labelAr: 'الكود', width: 14 },
+        { key: 'name', labelEn: 'Name', labelAr: 'الاسم', width: 28 },
+        { key: 'kind', labelEn: 'Type', labelAr: 'النوع', width: 14 },
+        { key: 'currency', labelEn: 'Currency', labelAr: 'العملة', width: 12 },
+        { key: 'balance', labelEn: 'Current balance', labelAr: 'الرصيد الحالي', numeric: true, width: 18 },
+        { key: 'ledgerCode', labelEn: 'Ledger account', labelAr: 'حساب الأستاذ', width: 18 },
+        { key: 'ledgerName', labelEn: 'Ledger account name', labelAr: 'اسم حساب الأستاذ', width: 28 },
+        { key: 'branch', labelEn: 'Branch', labelAr: 'الفرع', width: 24 },
+        { key: 'bankName', labelEn: 'Bank', labelAr: 'البنك', width: 22 },
+        { key: 'bankAccountNumber', labelEn: 'Bank account number', labelAr: 'رقم الحساب البنكي', width: 22 },
+        { key: 'iban', labelEn: 'IBAN', labelAr: 'آيبان', width: 28 },
+        { key: 'isActive', labelEn: 'Active', labelAr: 'نشط', boolean: true, width: 10 },
+      ],
+      rows: rows.map((row) => ({
+        code: row.code,
+        name: branchName({ nameEn: row.nameEn, nameAr: row.nameAr }, query.lang),
+        kind: row.kind,
+        currency: row.currency,
+        balance: (balanceByAccount.get(row.accountId) ?? new Prisma.Decimal(0)).toFixed(4),
+        ledgerCode: row.account.code,
+        ledgerName: branchName({ nameEn: row.account.nameEn, nameAr: row.account.nameAr }, query.lang),
+        branch: row.branch ? branchName(row.branch, query.lang) : '',
+        bankName: row.bankName ?? '',
+        bankAccountNumber: row.bankAccountNumber ?? '',
+        iban: row.iban ?? '',
+        isActive: row.isActive,
+      })),
+    });
+  }
+
+  /// Receipts and payments, with party, account, posting state and references.
+  async cashVouchers(companyId: string, query: ListQuery): Promise<ReportTable> {
+    const rows = await this.prisma.cashVoucher.findMany({
+      where: {
+        companyId,
+        deletedAt: null,
+        ...(query.status ? { status: query.status as never } : {}),
+        ...(query.from || query.to
+          ? {
+              voucherDate: {
+                ...(query.from ? { gte: new Date(query.from) } : {}),
+                ...(query.to ? { lte: new Date(query.to) } : {}),
+              },
+            }
+          : {}),
+      },
+      include: {
+        branch: { select: { code: true, nameEn: true, nameAr: true } },
+        cashAccount: { select: { code: true, nameEn: true, nameAr: true } },
+        customer: { select: { code: true, nameEn: true, nameAr: true } },
+        supplier: { select: { code: true, nameEn: true, nameAr: true } },
+        counterAccount: { select: { code: true, nameEn: true, nameAr: true } },
+      },
+      orderBy: [{ voucherDate: 'desc' }, { voucherNumber: 'desc' }],
+    });
+    return this.table({
+      slug: 'cash-vouchers',
+      titleEn: 'Cash vouchers',
+      titleAr: 'سندات القبض والصرف',
+      meta: [this.count(rows.length)],
+      columns: [
+        { key: 'number', labelEn: 'Voucher number', labelAr: 'رقم السند', width: 18 },
+        { key: 'date', labelEn: 'Date', labelAr: 'التاريخ', date: true, width: 14 },
+        { key: 'kind', labelEn: 'Type', labelAr: 'النوع', width: 14 },
+        { key: 'cashAccount', labelEn: 'Cash/bank account', labelAr: 'الخزنة/البنك', width: 26 },
+        { key: 'party', labelEn: 'Customer / supplier', labelAr: 'العميل / المورد', width: 28 },
+        { key: 'counterAccount', labelEn: 'Counter account', labelAr: 'الحساب المقابل', width: 26 },
+        { key: 'amount', labelEn: 'Amount', labelAr: 'المبلغ', numeric: true, width: 16 },
+        { key: 'currency', labelEn: 'Currency', labelAr: 'العملة', width: 12 },
+        { key: 'status', labelEn: 'Status', labelAr: 'الحالة', width: 14 },
+        { key: 'branch', labelEn: 'Branch', labelAr: 'الفرع', width: 24 },
+        { key: 'reference', labelEn: 'Reference', labelAr: 'المرجع', width: 22 },
+        { key: 'description', labelEn: 'Description', labelAr: 'البيان', width: 34 },
+      ],
+      rows: rows.map((row) => {
+        const party = row.customer ?? row.supplier;
+        return {
+          number: row.voucherNumber,
+          date: row.voucherDate,
+          kind: row.kind,
+          cashAccount: branchName(row.cashAccount, query.lang),
+          party: party ? `${party.code} — ${branchName(party, query.lang)}` : '',
+          counterAccount: row.counterAccount
+            ? `${row.counterAccount.code} — ${branchName(row.counterAccount, query.lang)}`
+            : '',
+          amount: row.amount.toString(),
+          currency: row.currency,
+          status: row.status,
+          branch: branchName(row.branch, query.lang),
+          reference: row.reference ?? '',
+          description: row.description ?? '',
+        };
+      }),
+    });
+  }
+
+  /// Transfers between two company cash/bank accounts.
+  async cashTransfers(companyId: string, query: ListQuery): Promise<ReportTable> {
+    const rows = await this.prisma.cashTransfer.findMany({
+      where: {
+        companyId,
+        deletedAt: null,
+        ...(query.status ? { status: query.status as never } : {}),
+        ...(query.from || query.to
+          ? {
+              transferDate: {
+                ...(query.from ? { gte: new Date(query.from) } : {}),
+                ...(query.to ? { lte: new Date(query.to) } : {}),
+              },
+            }
+          : {}),
+      },
+      include: {
+        branch: { select: { code: true, nameEn: true, nameAr: true } },
+        fromCashAccount: { select: { code: true, nameEn: true, nameAr: true } },
+        toCashAccount: { select: { code: true, nameEn: true, nameAr: true } },
+      },
+      orderBy: [{ transferDate: 'desc' }, { transferNumber: 'desc' }],
+    });
+    return this.table({
+      slug: 'cash-transfers',
+      titleEn: 'Cash transfers',
+      titleAr: 'التحويلات بين الخزائن والبنوك',
+      meta: [this.count(rows.length)],
+      columns: [
+        { key: 'number', labelEn: 'Transfer number', labelAr: 'رقم التحويل', width: 18 },
+        { key: 'date', labelEn: 'Date', labelAr: 'التاريخ', date: true, width: 14 },
+        { key: 'from', labelEn: 'From account', labelAr: 'من حساب', width: 28 },
+        { key: 'to', labelEn: 'To account', labelAr: 'إلى حساب', width: 28 },
+        { key: 'amount', labelEn: 'Amount', labelAr: 'المبلغ', numeric: true, width: 16 },
+        { key: 'currency', labelEn: 'Currency', labelAr: 'العملة', width: 12 },
+        { key: 'status', labelEn: 'Status', labelAr: 'الحالة', width: 14 },
+        { key: 'branch', labelEn: 'Branch', labelAr: 'الفرع', width: 24 },
+        { key: 'description', labelEn: 'Description', labelAr: 'البيان', width: 34 },
+      ],
+      rows: rows.map((row) => ({
+        number: row.transferNumber,
+        date: row.transferDate,
+        from: `${row.fromCashAccount.code} — ${branchName(row.fromCashAccount, query.lang)}`,
+        to: `${row.toCashAccount.code} — ${branchName(row.toCashAccount, query.lang)}`,
+        amount: row.amount.toString(),
+        currency: row.currency,
+        status: row.status,
+        branch: branchName(row.branch, query.lang),
+        description: row.description ?? '',
+      })),
+    });
+  }
+
   /// ───────────────────────────────────────────────── shared helpers
 
   /// Every list carries at least when it was made and how many rows it holds,
@@ -785,5 +968,26 @@ const SPECS: ListSpec[] = [
     titleAr: 'سجل التدقيق',
     permission: 'admin.audit.read',
     build: (service, companyId, query) => service.auditTrail(companyId, query),
+  },
+  {
+    slug: 'cash-accounts',
+    titleEn: 'Cash and bank accounts',
+    titleAr: 'الخزائن والحسابات البنكية',
+    permission: 'cash.accounts.read',
+    build: (service, companyId, query) => service.cashAccounts(companyId, query),
+  },
+  {
+    slug: 'cash-vouchers',
+    titleEn: 'Cash vouchers',
+    titleAr: 'سندات القبض والصرف',
+    permission: 'cash.vouchers.read',
+    build: (service, companyId, query) => service.cashVouchers(companyId, query),
+  },
+  {
+    slug: 'cash-transfers',
+    titleEn: 'Cash transfers',
+    titleAr: 'التحويلات بين الخزائن والبنوك',
+    permission: 'cash.vouchers.read',
+    build: (service, companyId, query) => service.cashTransfers(companyId, query),
   },
 ];

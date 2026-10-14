@@ -59,6 +59,11 @@ class _ErpShellState extends ConsumerState<ErpShell> {
 
     return Scaffold(
       appBar: AppBar(
+        leadingWidth: 56,
+        leading: Padding(
+          padding: const EdgeInsets.all(9),
+          child: Image.asset('1.png', fit: BoxFit.contain),
+        ),
         title: Text(items[selectedIndex].label),
         actions: const [_LanguageMenu(), _SignOutButton()],
       ),
@@ -83,6 +88,39 @@ class _ErpShellState extends ConsumerState<ErpShell> {
                       primary: false,
                       padding: const EdgeInsets.only(top: 8, bottom: 24),
                       children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
+                          child: isExtended
+                              ? Row(
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Image.asset(
+                                        '1.png',
+                                        width: 42,
+                                        height: 42,
+                                        fit: BoxFit.contain,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        'KAYAN ERP',
+                                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: 0.4,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : Tooltip(
+                                  message: 'KAYAN ERP',
+                                  child: Image.asset('1.png', width: 42, height: 42),
+                                ),
+                        ),
+                        const Divider(height: 1),
+                        const SizedBox(height: 8),
                         for (final item in items)
                           isExtended
                               ? ListTile(
@@ -190,6 +228,27 @@ class _ModuleDrawer extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.only(top: 8, bottom: 24),
           children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              child: Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.asset('1.png', width: 48, height: 48, fit: BoxFit.contain),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'KAYAN ERP',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            const SizedBox(height: 8),
             for (final item in items)
               ListTile(
                 leading: Icon(item.icon),

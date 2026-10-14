@@ -46,6 +46,9 @@ Require-Command 'flutter'
 Require-Command 'node'
 Require-Command 'npm'
 Require-Command 'git'
+Require-Command 'python'
+Run-Native 'python' @('-c','from PIL import Image') $root
+Run-Native 'python' @('scripts/generate_app_icons.py') $root
 $flutter = Get-Command flutter
 if ($flutter.Source -notmatch '\.bat$|\.cmd$') { $flutterCommand = 'flutter' } else { $flutterCommand = $flutter.Source }
 $iscc = Get-Command 'ISCC.exe' -ErrorAction SilentlyContinue

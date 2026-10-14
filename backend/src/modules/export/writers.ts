@@ -20,7 +20,10 @@ export async function toXlsx(
   table: ReportTable,
   lang: Lang,
   companyName: string,
-  options: { logo?: { data: Buffer; mime: string } | null } = {},
+  options: {
+    logo?: { data: Buffer; mime: string } | null;
+    companyDetails?: Array<{ labelEn: string; labelAr: string; value: string }>;
+  } = {},
 ): Promise<Buffer> {
   const workbook = new Workbook();
   workbook.creator = 'KAYAN ERP';
@@ -30,7 +33,7 @@ export async function toXlsx(
     views: [
       {
         state: 'frozen',
-        ySplit: 1 + table.meta.length + 1,
+        ySplit: 4 + (options.companyDetails?.length ?? 0) + table.meta.length,
         // An Arabic sheet reads right to left, the same direction as the
         // screen it was exported from. Without this Excel opens it with the
         // columns the wrong way round.
@@ -48,6 +51,13 @@ export async function toXlsx(
   sheet.mergeCells(titleRow.number, 1, titleRow.number, columnCount);
 
   sheet.addRow([companyName]).font = { bold: true, size: 11 };
+  for (const detail of options.companyDetails ?? []) {
+    const row = sheet.addRow([
+      lang === 'ar' ? detail.labelAr : detail.labelEn,
+      detail.value,
+    ]);
+    row.getCell(1).font = { italic: true, color: { argb: 'FF526174' } };
+  }
 
   // The company's logo, when it has one, sits by the title. It is decoration
   // with a job: the printed sheet has to say whose numbers these are.
@@ -233,11 +243,19 @@ function take(text: string): string {
  * The mark matters: without it Excel opens an Arabic file as mojibake. The
  * values are kept exactly as the API produced them.
  */
-export function toCsv(table: ReportTable, lang: Lang, companyName: string): Buffer {
+export function toCsv(
+  table: ReportTable,
+  lang: Lang,
+  companyName: string,
+  companyDetails: Array<{ labelEn: string; labelAr: string; value: string }> = [],
+): Buffer {
   const lines: string[] = [];
 
   lines.push(csvRow([lang === 'ar' ? table.titleAr : table.titleEn]));
   lines.push(csvRow([companyName]));
+  for (const detail of companyDetails) {
+    lines.push(csvRow([lang === 'ar' ? detail.labelAr : detail.labelEn, detail.value]));
+  }
   for (const meta of table.meta) {
     lines.push(csvRow([lang === 'ar' ? meta.labelAr : meta.labelEn, meta.value]));
   }
@@ -293,6 +311,7 @@ export function toPrintHtml(
     autoPrint?: boolean;
     generatedAt?: Date;
     logo?: { data: Buffer; mime: string } | null;
+    companyDetails?: Array<{ labelEn: string; labelAr: string; value: string }>;
   } = {},
 ): string {
   const rtl = lang === 'ar';
@@ -348,6 +367,10 @@ export function toPrintHtml(
     .map((note) => `<li>${escapeHtml(rtl ? note.ar : note.en)}</li>`)
     .join('');
 
+  const companyDetailsHtml = (options.companyDetails ?? [])
+    .map((detail) => `<div><span class="label">${escapeHtml(rtl ? detail.labelAr : detail.labelEn)}</span> ${escapeHtml(detail.value)}</div>`)
+    .join('');
+
   const stamp = generatedAt.toISOString().slice(0, 16).replace('T', ' ');
 
   return `<!doctype html>
@@ -372,6 +395,8 @@ export function toPrintHtml(
   .head .logo { height: 52px; width: auto; }
   .head h1 { margin: 0 0 2px; }
   .head .company { margin: 0; }
+  .company-details { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 6px; font-size: 11px; color: #526174; }
+  .company-details .label { color: #777; font-weight: 600; }
   .meta { display: flex; flex-wrap: wrap; gap: 6px 24px; font-size: 13px; color: #333;
           border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; padding: 8px 0; margin-bottom: 14px; }
   .meta .label { color: #666; }
@@ -417,6 +442,7 @@ export function toPrintHtml(
       <div>
         <h1>${escapeHtml(title)}</h1>
         <div class="company">${escapeHtml(companyName)}</div>
+        ${companyDetailsHtml ? `<div class="company-details">${companyDetailsHtml}</div>` : ''}
       </div>
     </div>
     <div class="meta">${meta}</div>

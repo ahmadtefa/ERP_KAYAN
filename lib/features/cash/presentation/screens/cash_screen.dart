@@ -12,6 +12,7 @@ import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../providers/cash_providers.dart';
 
 /// Cash boxes, bank accounts, receipts, payments and transfers.
@@ -491,10 +492,18 @@ class _CashScreenState extends ConsumerState<CashScreen>
           alignment: AlignmentDirectional.centerEnd,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-            child: FilledButton.icon(
-              onPressed: _busy ? null : _newAccount,
-              icon: const Icon(Icons.add),
-              label: Text(l10n.newCashAccount),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
+              children: [
+                const ListExportActions(list: 'cash-accounts'),
+                FilledButton.icon(
+                  onPressed: _busy ? null : _newAccount,
+                  icon: const Icon(Icons.add),
+                  label: Text(l10n.newCashAccount),
+                ),
+              ],
             ),
           ),
         ),
@@ -574,10 +583,18 @@ class _CashScreenState extends ConsumerState<CashScreen>
           alignment: AlignmentDirectional.centerEnd,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-            child: FilledButton.icon(
-              onPressed: _busy ? null : _newVoucher,
-              icon: const Icon(Icons.add),
-              label: Text(l10n.newVoucher),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
+              children: [
+                const ListExportActions(list: 'cash-vouchers'),
+                FilledButton.icon(
+                  onPressed: _busy ? null : _newVoucher,
+                  icon: const Icon(Icons.add),
+                  label: Text(l10n.newVoucher),
+                ),
+              ],
             ),
           ),
         ),
@@ -662,10 +679,18 @@ class _CashScreenState extends ConsumerState<CashScreen>
           alignment: AlignmentDirectional.centerEnd,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-            child: FilledButton.icon(
-              onPressed: _busy ? null : _newTransfer,
-              icon: const Icon(Icons.swap_horiz),
-              label: Text(l10n.newTransfer),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
+              children: [
+                const ListExportActions(list: 'cash-transfers'),
+                FilledButton.icon(
+                  onPressed: _busy ? null : _newTransfer,
+                  icon: const Icon(Icons.swap_horiz),
+                  label: Text(l10n.newTransfer),
+                ),
+              ],
             ),
           ),
         ),

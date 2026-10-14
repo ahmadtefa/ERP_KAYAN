@@ -94,6 +94,12 @@ set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
+# Keep the approved brand image beside the bundled executable for the native
+# GTK window icon. This does not affect application data or configuration.
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../1.png"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}" RENAME "app_icon.png"
+  COMPONENT Runtime)
+
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
 

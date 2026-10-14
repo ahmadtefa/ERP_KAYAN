@@ -48,17 +48,50 @@ export class ExportController {
 
   /// The company's name and logo for the file header. The logo is optional and
   /// only fetched when the company has one.
-  private async companyHeader(companyId: string): Promise<{
+  private async companyHeader(companyId: string, lang: Lang): Promise<{
     name: string;
     logo: { data: Buffer; mime: string } | null;
+    details: Array<{ labelEn: string; labelAr: string; value: string }>;
   }> {
     const company = await this.prisma.company.findUnique({
       where: { id: companyId },
-      select: { nameEn: true, nameAr: true },
+      select: {
+        code: true,
+        nameEn: true,
+        nameAr: true,
+        timezone: true,
+        taxId: true,
+        commercialRegistration: true,
+        phone: true,
+        email: true,
+        address: true,
+        addressEn: true,
+        addressAr: true,
+        currency: true,
+      },
     });
-    const name = company?.nameAr ?? company?.nameEn ?? 'KAYAN';
+    const name = lang === 'ar'
+      ? company?.nameAr || company?.nameEn || 'كيان'
+      : company?.nameEn || company?.nameAr || 'KAYAN';
+    const address = lang === 'ar'
+      ? company?.addressAr || company?.address || company?.addressEn
+      : company?.addressEn || company?.address || company?.addressAr;
+    const details = [
+      { labelEn: 'Company code', labelAr: 'كود الشركة', value: company?.code ?? '' },
+      { labelEn: 'Tax ID', labelAr: 'الرقم الضريبي', value: company?.taxId ?? '' },
+      {
+        labelEn: 'Commercial registration',
+        labelAr: 'السجل التجاري',
+        value: company?.commercialRegistration ?? '',
+      },
+      { labelEn: 'Phone', labelAr: 'الهاتف', value: company?.phone ?? '' },
+      { labelEn: 'Email', labelAr: 'البريد الإلكتروني', value: company?.email ?? '' },
+      { labelEn: 'Address', labelAr: 'العنوان', value: address ?? '' },
+      { labelEn: 'Currency', labelAr: 'العملة', value: company?.currency ?? '' },
+      { labelEn: 'Time zone', labelAr: 'المنطقة الزمنية', value: company?.timezone ?? '' },
+    ].filter((item) => item.value.trim().length > 0);
     const logo = await this.company.getLogo(companyId);
-    return { name, logo };
+    return { name, logo, details };
   }
 
   /// What this installation can produce, so the screen only offers buttons
@@ -89,15 +122,15 @@ export class ExportController {
     this.allowedExport(user, spec.readPermission, spec.exportPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.documents.build(spec.kind, user.companyId, id, lang);
-    const header = await this.companyHeader(user.companyId);
+    const header = await this.companyHeader(user.companyId, lang);
     const stamp = this.stamp();
     if (query.format === 'csv') {
-      this.send(response, toCsv(table, lang, header.name), 'text/csv; charset=utf-8', `${kind}-${stamp}.csv`);
+      this.send(response, toCsv(table, lang, header.name, header.details), 'text/csv; charset=utf-8', `${kind}-${stamp}.csv`);
       return;
     }
     this.send(
       response,
-      await toXlsx(table, lang, header.name, { logo: header.logo }),
+      await toXlsx(table, lang, header.name, { logo: header.logo, companyDetails: header.details }),
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       `${kind}-${stamp}.xlsx`,
     );
@@ -116,8 +149,12 @@ export class ExportController {
     this.allowedExport(user, spec.readPermission, spec.exportPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.documents.build(spec.kind, user.companyId, id, lang);
-    const header = await this.companyHeader(user.companyId);
-    const html = toPrintHtml(table, lang, header.name, { autoPrint: false, logo: header.logo });
+    const header = await this.companyHeader(user.companyId, lang);
+    const html = toPrintHtml(table, lang, header.name, {
+      autoPrint: false,
+      logo: header.logo,
+      companyDetails: header.details,
+    });
     this.send(response, await this.pdf.render(html), 'application/pdf', `${kind}-${this.stamp()}.pdf`);
   }
 
@@ -134,10 +171,11 @@ export class ExportController {
     this.allowed(user, spec.readPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.documents.build(spec.kind, user.companyId, id, lang);
-    const header = await this.companyHeader(user.companyId);
+    const header = await this.companyHeader(user.companyId, lang);
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: query.auto === '1' || query.auto === 'true',
       logo: header.logo,
+      companyDetails: header.details,
     });
     response.type('text/html; charset=utf-8');
     response.setHeader('Cache-Control', 'no-store');
@@ -167,13 +205,13 @@ export class ExportController {
 
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.lists.build(list, user.companyId, query);
-    const header = await this.companyHeader(user.companyId);
+    const header = await this.companyHeader(user.companyId, lang);
     const stamp = this.stamp();
 
     if (query.format === 'csv') {
       this.send(
         response,
-        toCsv(table, lang, header.name),
+        toCsv(table, lang, header.name, header.details),
         'text/csv; charset=utf-8',
         `${list}-${stamp}.csv`,
       );
@@ -187,7 +225,7 @@ export class ExportController {
 
     this.send(
       response,
-      await toXlsx(table, lang, header.name, { logo: header.logo }),
+      await toXlsx(table, lang, header.name, { logo: header.logo, companyDetails: header.details }),
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       `${list}-${stamp}.xlsx`,
     );
@@ -207,11 +245,12 @@ export class ExportController {
 
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.lists.build(list, user.companyId, query);
-    const header = await this.companyHeader(user.companyId);
+    const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: false,
       logo: header.logo,
+      companyDetails: header.details,
     });
     this.send(response, await this.pdf.render(html), 'application/pdf', `${list}-${this.stamp()}.pdf`);
   }
@@ -230,11 +269,12 @@ export class ExportController {
 
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.lists.build(list, user.companyId, query);
-    const header = await this.companyHeader(user.companyId);
+    const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: query.auto === '1' || query.auto === 'true',
       logo: header.logo,
+      companyDetails: header.details,
     });
     response.type('text/html; charset=utf-8');
     response.setHeader('Cache-Control', 'no-store');
@@ -275,10 +315,10 @@ export class ExportController {
     const wanted = (query as { format?: string }).format ?? 'xlsx';
 
     const table = await this.tables.build(slug, user.companyId, query, lang);
-    const header = await this.companyHeader(user.companyId);
+    const header = await this.companyHeader(user.companyId, lang);
 
     if (wanted === 'csv') {
-      const body = toCsv(table, lang, header.name);
+      const body = toCsv(table, lang, header.name, header.details);
       this.send(response, body, 'text/csv; charset=utf-8', `${slug}-${this.stamp()}.csv`);
       return;
     }
@@ -289,7 +329,7 @@ export class ExportController {
       );
     }
 
-    const body = await toXlsx(table, lang, header.name, { logo: header.logo });
+    const body = await toXlsx(table, lang, header.name, { logo: header.logo, companyDetails: header.details });
     this.send(
       response,
       body,
@@ -314,11 +354,12 @@ export class ExportController {
     const slug = this.known(report);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.tables.build(slug, user.companyId, query, lang);
-    const header = await this.companyHeader(user.companyId);
+    const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: false,
       logo: header.logo,
+      companyDetails: header.details,
     });
     const body = await this.pdf.render(html);
 
@@ -341,11 +382,12 @@ export class ExportController {
     const slug = this.known(report);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.tables.build(slug, user.companyId, query, lang);
-    const header = await this.companyHeader(user.companyId);
+    const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: query.auto === '1' || query.auto === 'true',
       logo: header.logo,
+      companyDetails: header.details,
     });
 
     response.type('text/html; charset=utf-8');
