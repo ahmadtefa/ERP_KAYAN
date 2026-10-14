@@ -276,6 +276,7 @@ export class AuthService {
       fullNameAr: string;
       companyId: string;
       isActive: boolean;
+      isSuperAdmin: boolean;
     },
     roles: string[],
     permissions: string[],
@@ -290,7 +291,7 @@ export class AuthService {
       roles,
       permissions,
       isActive: user.isActive,
-      isSuperAdmin: (user as { isSuperAdmin?: boolean }).isSuperAdmin ?? false,
+      isSuperAdmin: user.isSuperAdmin,
     };
   }
 }
