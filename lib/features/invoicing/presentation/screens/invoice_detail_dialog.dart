@@ -141,6 +141,11 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
                     ],
                   ),
                   const SizedBox(height: 12),
+                  DocumentExportActions(
+                    kind: widget.kind.isSales ? 'sales-invoice' : 'purchase-invoice',
+                    id: text(widget.summary, 'id'),
+                  ),
+                  const SizedBox(height: 16),
                   Text(l10n.lines, style: Theme.of(context).textTheme.titleSmall),
                   const SizedBox(height: 8),
                   RecordsTable(
@@ -197,10 +202,6 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
         ),
       ),
       actions: [
-        DocumentExportActions(
-          kind: widget.kind.isSales ? 'sales-invoice' : 'purchase-invoice',
-          id: text(widget.summary, 'id'),
-        ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: Text(l10n.close),
