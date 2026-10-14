@@ -27,7 +27,7 @@
  *  12. try what must be refused: selling stock that is not there, posting the
  *      same document twice at the same moment, posting with a read-only user
  *  13. prove the audit log cannot be edited or deleted, even with SQL
- *  14. prove company isolation: a user of another company sees nothing
+ *  14. verify the single-active-company database invariant; tenant-scoped authorization is tested separately
  *  15. check the session lifecycle: refresh, logout, reuse after logout
  *  16. take a full backup, verify it, restore it into a scratch database, and
  *      check the restored data is really there
@@ -893,6 +893,47 @@ async function main() {
       );
       token = adminToken;
     }
+  }
+
+  // Two separate invoices compete for the remaining stock at the same time.
+  // Only one may consume two units when three are available; the other must
+  // observe the locked, updated balance and be refused without a negative row.
+  const competingDrafts = await Promise.all([
+    must('create the first competing sale invoice', '/sales/invoices', {
+      method: 'POST',
+      json: {
+        invoiceDate: today,
+        customerId: customer.id,
+        lines: [{ itemId: itemA.id, quantity: '2', unitPrice: '150' }],
+      },
+    }),
+    must('create the second competing sale invoice', '/sales/invoices', {
+      method: 'POST',
+      json: {
+        invoiceDate: today,
+        customerId: customer.id,
+        lines: [{ itemId: itemA.id, quantity: '2', unitPrice: '150' }],
+      },
+    }),
+  ]);
+  if (competingDrafts.every(Boolean)) {
+    const outcomes = await Promise.all(
+      competingDrafts.map((invoice) =>
+        api(`/sales/invoices/${invoice.id}/post`, { method: 'POST' }),
+      ),
+    );
+    const successfulPosts = outcomes.filter((r) => r.status >= 200 && r.status < 300).length;
+    check(
+      'two different invoices cannot oversell the same stock concurrently',
+      successfulPosts === 1,
+      `statuses ${outcomes.map((r) => r.status).join(' and ')}`,
+    );
+    const stockAfterRace = await api(`/inventory/stock?itemId=${itemA.id}`);
+    check(
+      'concurrent sales preserve the exact nonnegative stock balance',
+      near(quantityOf(stockAfterRace.data, itemA.id), 1),
+      `on hand ${quantityOf(stockAfterRace.data, itemA.id)} (three before the competing posts)`,
+    );
   }
 
   // ─────────────────────────────────────── 13. sessions and their lifecycle
