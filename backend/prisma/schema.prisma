@@ -291,6 +291,7 @@ model Account {
   isPostable  Boolean     @default(true)
   isActive    Boolean     @default(true)
   currency    String?     @db.VarChar(3)
+  description String?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
