@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/platform/browser_actions.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/download_feedback.dart';
 import '../providers/data_providers.dart';
 
 /// The way out of a list: the same four choices a report has.
@@ -44,15 +44,29 @@ class ListExportActions extends ConsumerWidget {
     final capabilities = ref.watch(exportCapabilitiesProvider);
     final pdfReady = capabilities.asData?.value.pdfOnTheServer ?? false;
 
-    Future<void> open(Future<String> link) async {
-      openInNewTab(await link);
-    }
+    Future<void> download(String format) => runDownload(
+          context,
+          links.listFile(
+            list: list,
+            format: format,
+            language: language,
+            filters: filters,
+          ),
+        );
 
-    Future<void> download(String format) =>
-        open(links.listFile(list: list, format: format, language: language, filters: filters));
+    Future<void> downloadPdf() => runDownload(
+          context,
+          links.listPdf(list: list, language: language, filters: filters),
+        );
 
-    void print(bool auto) => open(
-          links.listPrint(list: list, language: language, auto: auto, filters: filters),
+    Future<void> print(bool auto) => runPrint(
+          context,
+          links.listPrint(
+            list: list,
+            language: language,
+            auto: auto,
+            filters: filters,
+          ),
         );
 
     return PopupMenuButton<String>(
@@ -61,7 +75,7 @@ class ListExportActions extends ConsumerWidget {
       onSelected: (choice) => switch (choice) {
         'xlsx' => download('xlsx'),
         'csv' => download('csv'),
-        'pdf' => open(links.listPdf(list: list, language: language, filters: filters)),
+        'pdf' => downloadPdf(),
         'print' => print(true),
         'paper' => print(false),
         _ => null,

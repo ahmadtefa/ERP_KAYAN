@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/error/failure.dart';
+import '../../../../core/platform/picked_file.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../data/company_data_source.dart';
 
@@ -12,6 +13,8 @@ final companyDataSourceProvider = Provider<CompanyDataSource>(
 class CompanyProfileController extends AsyncNotifier<Map<String, dynamic>> {
   @override
   Future<Map<String, dynamic>> build() {
+    final user = ref.watch(currentUserProvider);
+    if (user == null) return Future.value(const <String, dynamic>{});
     return ref.read(companyDataSourceProvider).fetchProfile();
   }
 
@@ -36,6 +39,30 @@ class CompanyProfileController extends AsyncNotifier<Map<String, dynamic>> {
       return '$error';
     }
   }
+
+  Future<String?> uploadLogo(PickedFile file) async {
+    try {
+      await ref.read(companyDataSourceProvider).uploadLogo(file);
+      await refresh();
+      return null;
+    } on Failure catch (failure) {
+      return failure.message;
+    } catch (error) {
+      return '$error';
+    }
+  }
+
+  Future<String?> removeLogo() async {
+    try {
+      await ref.read(companyDataSourceProvider).removeLogo();
+      await refresh();
+      return null;
+    } on Failure catch (failure) {
+      return failure.message;
+    } catch (error) {
+      return '$error';
+    }
+  }
 }
 
 final companyProfileProvider =
@@ -47,6 +74,8 @@ final companyProfileProvider =
 class BranchesController extends AsyncNotifier<List<Map<String, dynamic>>> {
   @override
   Future<List<Map<String, dynamic>>> build() {
+    final user = ref.watch(currentUserProvider);
+    if (user == null) return Future.value(const <Map<String, dynamic>>[]);
     return ref.read(companyDataSourceProvider).fetchBranches();
   }
 
