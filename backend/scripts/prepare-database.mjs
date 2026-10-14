@@ -77,17 +77,14 @@ async function ensureRole(admin, target) {
   );
   if (rows.length === 0) {
     await admin.$executeRawUnsafe(
-      `CREATE ROLE ${quote(target.user)} WITH LOGIN PASSWORD ${literal(target.password)}`,
+      `CREATE ROLE ${quote(target.user)} WITH LOGIN CREATEDB PASSWORD ${literal(target.password)}`,
     );
     return 'created';
   }
-  // The password in the configuration is the one that must work: on a fresh
-  // install the role may exist with an empty password, and on a machine where
-  // the file was edited it may be out of date.
-  await admin.$executeRawUnsafe(
-    `ALTER ROLE ${quote(target.user)} WITH LOGIN PASSWORD ${literal(target.password)}`,
-  );
-  return 'updated';
+  // Never change an existing role password during application startup.
+  // Re-installs and upgrades must preserve credentials. If the configured
+  // password is stale, the explicit authentication check below fails safely.
+  return 'present';
 }
 
 async function ensureDatabase(admin, target) {
@@ -187,6 +184,21 @@ function announce(state) {
   console.log(`KAYAN-DB-STATE=${state}`);
 }
 
+async function canAuthenticate(url) {
+  let client = null;
+  try {
+    client = new PrismaClient({
+      adapter: new PrismaPg({ connectionString: url }),
+    });
+    await client.$queryRaw`SELECT 1`;
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await client?.$disconnect().catch(() => {});
+  }
+}
+
 async function main() {
   if (!appUrl) {
     console.error('  database: DATABASE_URL is not set');
@@ -196,16 +208,15 @@ async function main() {
   const target = parseUrl(appUrl);
   console.log(`  database: ${target.user}@${target.host}:${target.port}/${target.database}`);
 
+  let adminSucceeded = false;
   const admin = adminClient();
   if (admin) {
     try {
       const role = await ensureRole(admin, target);
       const database = await ensureDatabase(admin, target);
       console.log(`  role: ${role}, database: ${database}`);
+      adminSucceeded = true;
     } catch (error) {
-      // Not fatal: the database may already exist and the application role may
-      // already be able to reach it, which is the usual case on a machine that
-      // was set up before. The migration below is the real test.
       const reason = String(error?.message ?? error)
         .split('\n')
         .map((line) => line.trim())
@@ -216,6 +227,34 @@ async function main() {
     }
   } else {
     console.log('  administrator step skipped: no ADMIN_DATABASE_URL');
+  }
+
+  // If administrator configuration was skipped/failed, verify if application
+  // user credentials can authenticate directly before running migration.
+  if (!adminSucceeded) {
+    const appCanAuth = await canAuthenticate(appUrl);
+    if (!appCanAuth) {
+      console.error(
+        '\n  [خطأ مصادقة قاعدة البيانات - Prisma P1000]\n' +
+        '  تعذر الاتصال بقاعدة البيانات بحساب المدير (postgres) أو بحساب التطبيق (erp_app).\n' +
+        `  الهدف: ${target.host}:${target.port}/${target.database} (المستخدم: ${target.user})\n` +
+        '  خطوات الحل:\n' +
+        '  1. تأكد من تشغيل خدمة قاعدة بيانات كايان (KAYAN_PostgreSQL) على المنفذ ' + target.port + '.\n' +
+        '  2. إذا كان لديك خادم مسبق، تأكد من صحة بيانات ADMIN_DATABASE_URL أو DATABASE_URL في:\n' +
+        '     %APPDATA%\\KAYAN-ERP\\kayan.env\n' +
+        '  3. أعد تشغيل البرنامج بعد التحقق.\n'
+      );
+      process.exit(1);
+    }
+  }
+
+  if (adminSucceeded && !(await canAuthenticate(appUrl))) {
+    console.error(
+      '  database: the existing erp_app credentials do not authenticate. ' +
+      'No existing role password or database was changed. Restore the valid ' +
+      'protected KAYAN configuration before retrying.',
+    );
+    process.exit(1);
   }
 
   const code = await migrate();

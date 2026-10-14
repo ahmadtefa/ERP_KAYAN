@@ -21,7 +21,10 @@ export class PurchaseInvoiceLineDto {
   @IsOptional() @IsString() @MaxLength(300) description?: string;
 
   @IsString() quantity!: string;
-  @IsString() unitPrice!: string;
+
+  /// When omitted, the supplier's price list (or the item's own purchase
+  /// price) decides.
+  @IsOptional() @IsString() unitPrice?: string;
 
   @IsOptional() @IsString() taxRate?: string;
 }
@@ -32,6 +35,9 @@ export class CreatePurchaseInvoiceDto {
   @IsUUID() supplierId!: string;
   @IsOptional() @IsString() @MaxLength(60) supplierReference?: string;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
+
+  /// The warehouse the goods arrive in. Omit to use the branch's default.
+  @IsOptional() @IsUUID() warehouseId?: string;
 
   @IsArray()
   @ArrayMinSize(1)

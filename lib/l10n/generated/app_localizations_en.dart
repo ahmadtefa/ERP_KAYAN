@@ -718,6 +718,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get setPermissions => 'Edit permissions';
 
   @override
+  String get selectAll => 'Select all';
+
+  @override
+  String get clearAll => 'Clear all';
+
+  @override
+  String get extraPermissions => 'Extra permissions';
+
+  @override
   String get permissionsNote =>
       'A built-in role: its permissions can be changed, but it cannot be renamed or removed.';
 
@@ -976,38 +985,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'Download this list as it stands: Excel, CSV, PDF, or a page to print.';
 
   @override
-  String get rememberLogin => 'Remember sign-in details';
-
-  @override
-  String get rememberWebUsernameOnly =>
-      'Only the username is saved in this browser.';
-
-  @override
-  String get rememberNativeSecure =>
-      'Password is stored in device secure storage.';
-
-  @override
-  String get newExpenseAccount => 'New expense account';
-
-  @override
-  String get editExpenseAccount => 'Edit expense account';
-
-  @override
-  String get parentAccount => 'Parent account';
-
-  @override
-  String get noParentAccount => 'No parent';
-
-  @override
-  String get accountCanPost => 'Can receive journal postings';
-
-  @override
-  String get activateAccount => 'Activate account';
-
-  @override
-  String get deactivateAccount => 'Deactivate account';
-
-  @override
   String get newAccount => 'New account';
 
   @override
@@ -1036,6 +1013,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get nameEnglish => 'Name in English';
+
+  @override
+  String get parentAccount => 'Parent account';
 
   @override
   String get parentAccountHelper => 'A sub-account takes its parent’s type';
@@ -1214,5 +1194,236 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get companySettingsHint => 'Name, logo, contact details and branches';
+
+  @override
+  String get downloadStarted => 'The file is downloading.';
+
+  @override
+  String get downloadFailedTitle => 'The file could not be downloaded.';
+
+  @override
+  String get printOpened => 'The print page is opening in a new tab.';
+
+  @override
+  String get printBlocked => 'The browser blocked the new tab. Allow pop-ups for this address, then press Print again.';
+
+  @override
+  String get resetData => 'Reset the program\'s data';
+
+  @override
+  String get resetDataHint => 'Clears this company’s books and returns the program to its first run. A backup is taken and checked before anything is deleted, and the reset stops if that backup fails.';
+
+  @override
+  String get resetButton => 'Reset ERP Data';
+
+  @override
+  String get resetOnlyAdmins => 'Only an administrator of the program can do this.';
+
+  @override
+  String resetForCompany(Object company) {
+    return 'This will reset “$company”.';
+  }
+
+  @override
+  String get resetWhatIsDeleted => 'What will be deleted';
+
+  @override
+  String get resetWhatIsKept => 'What is kept';
+
+  @override
+  String get resetDeletedHint => 'Every record the company holds: its books, its parties, its stock and its documents.';
+
+  @override
+  String get resetKeptAdmin => 'The administrator account you are signed in with';
+
+  @override
+  String get resetKeptPermissions => 'The permission catalogue';
+
+  @override
+  String get resetKeptRoles => 'The roles the program ships with';
+
+  @override
+  String get resetKeptConfig => 'The database connection and the program’s settings';
+
+  @override
+  String get resetCountJournalEntries => 'Journal entries';
+
+  @override
+  String get resetCountAccounts => 'Accounts';
+
+  @override
+  String get resetCountCustomers => 'Customers';
+
+  @override
+  String get resetCountSuppliers => 'Suppliers';
+
+  @override
+  String get resetCountItems => 'Items';
+
+  @override
+  String get resetCountSalesInvoices => 'Sales invoices';
+
+  @override
+  String get resetCountPurchaseInvoices => 'Purchase invoices';
+
+  @override
+  String get resetCountStockMovements => 'Stock movements';
+
+  @override
+  String get resetCountFiscalPeriods => 'Financial periods';
+
+  @override
+  String get resetCountBranches => 'Branches';
+
+  @override
+  String get resetCountUsers => 'Other users';
+
+  @override
+  String get resetBackupFirst => 'A full backup will be taken and checked before anything is deleted. If the backup cannot be taken, or cannot be read back, nothing is deleted at all.';
+
+  @override
+  String get resetConfirmTitle => 'This cannot be undone';
+
+  @override
+  String resetConfirmBody(Object word) {
+    return 'The only way back is to restore the backup that is about to be taken. Type your password and the word $word to go ahead.';
+  }
+
+  @override
+  String get resetPasswordLabel => 'Your password';
+
+  @override
+  String get resetPasswordHint => 'The password of the account you are signed in with. The server checks it.';
+
+  @override
+  String resetWordLabel(Object word) {
+    return 'Type $word';
+  }
+
+  @override
+  String resetWrongWord(Object word) {
+    return 'Type $word exactly as it is written to confirm.';
+  }
+
+  @override
+  String resetDone(Object file) {
+    return 'The company’s data was cleared. “$file” holds the old data.';
+  }
+
+  @override
+  String get resetNeedsSetup => 'The program will ask to be set up again the next time it is opened.';
+
+  @override
+  String get resetPreviewFailed => 'What a reset would remove could not be read.';
+
+
+  @override
+  String get cashAndBanks => 'Cash & banks';
+
+  @override
+  String get newCashAccount => 'New box or bank';
+
+  @override
+  String get cashAccount => 'Box or bank';
+
+  @override
+  String get cashBox => 'Cash box';
+
+  @override
+  String get bank => 'Bank';
+
+  @override
+  String get bankName => 'Bank name';
+
+  @override
+  String get iban => 'IBAN';
+
+  @override
+  String get ledgerAccount => 'Ledger account';
+
+  @override
+  String get noCashAccounts => 'No boxes or banks yet';
+
+  @override
+  String get statement => 'Statement';
+
+  @override
+  String get vouchers => 'Receipts & payments';
+
+  @override
+  String get newVoucher => 'New receipt or payment';
+
+  @override
+  String get receipt => 'Receipt';
+
+  @override
+  String get payment => 'Payment';
+
+  @override
+  String get voucherType => 'Type';
+
+  @override
+  String get voucherNumber => 'Number';
+
+  @override
+  String get amount => 'Amount';
+
+  @override
+  String get noVouchers => 'No receipts or payments yet';
+
+  @override
+  String get transfers => 'Transfers';
+
+  @override
+  String get newTransfer => 'New transfer';
+
+  @override
+  String get fromAccount => 'From';
+
+  @override
+  String get toAccount => 'To';
+
+  @override
+  String get noTransfers => 'No transfers yet';
+
+  @override
+  String get transferNeedsTwoAccounts => 'A transfer needs two boxes or banks';
+
+  @override
+  String get party => 'Party';
+
+  @override
+  String get saved => 'Saved';
+
+  @override
+  String get settleOldestFirst => 'Applied to the oldest open invoices';
+@override
+  String get rememberLogin => 'Remember sign-in details';
+
+@override
+  String get rememberWebUsernameOnly =>
+      'Only the username is saved in this browser.';
+
+@override
+  String get rememberNativeSecure =>
+      'Password is stored in device secure storage.';
+
+@override
+  String get newExpenseAccount => 'New expense account';
+
+@override
+  String get editExpenseAccount => 'Edit expense account';
+
+@override
+  String get noParentAccount => 'No parent';
+
+@override
+  String get accountCanPost => 'Can receive journal postings';
+
+@override
+  String get activateAccount => 'Activate account';
+
+@override
+  String get deactivateAccount => 'Deactivate account';
 
 }

@@ -4,6 +4,7 @@ import { CompanyModule } from '../company/company.module';
 import { ReportsModule } from '../reports/reports.module';
 import { ExportController } from './export.controller';
 import { ListTablesService } from './list-tables.service';
+import { DocumentsService } from './documents.service';
 import { PdfService } from './pdf.service';
 import { ReportTablesService } from './report-tables.service';
 
@@ -11,7 +12,7 @@ import { ReportTablesService } from './report-tables.service';
 @Module({
   imports: [ReportsModule, CompanyModule],
   controllers: [ExportController],
-  providers: [ReportTablesService, PdfService, ListTablesService],
-  exports: [ReportTablesService, ListTablesService, PdfService],
+  providers: [ReportTablesService, PdfService, ListTablesService, DocumentsService],
+  exports: [ReportTablesService, ListTablesService, PdfService, DocumentsService],
 })
 export class ExportModule {}

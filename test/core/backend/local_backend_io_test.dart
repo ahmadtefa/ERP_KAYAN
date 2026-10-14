@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('KayanDatabaseConfig', () {
     test('matches the PostgreSQL port provisioned by the Windows scripts', () {
-      expect(KayanDatabaseConfig.port, 5432);
+      expect(KayanDatabaseConfig.port, 5433);
     });
 
     test('encodes application database credentials in its URL', () {
@@ -15,7 +15,7 @@ void main() {
 
       expect(
         url,
-        'postgresql://erp%40app:p%40ss%3A%2F%3F%23@127.0.0.1:5432/erp_kayan?schema=public',
+        'postgresql://erp%40app:p%40ss%3A%2F%3F%23@127.0.0.1:5433/erp_kayan?schema=public',
       );
       final uri = Uri.parse(url);
       expect(uri.host, KayanDatabaseConfig.host);
@@ -26,13 +26,19 @@ void main() {
     test('recognizes only the configured local database endpoint', () {
       expect(
         KayanDatabaseConfig.isLocalDatabaseUrl(
-          'postgresql://erp_app:secret@127.0.0.1:5432/erp_kayan?schema=public',
+          'postgresql://erp_app:secret@127.0.0.1:5433/erp_kayan?schema=public',
         ),
         isTrue,
       );
       expect(
         KayanDatabaseConfig.isLocalDatabaseUrl(
-          'postgresql://erp_app:secret@127.0.0.1:5433/erp_kayan',
+          'postgresql://erp_app:secret@127.0.0.1:5432/erp_kayan',
+        ),
+        isTrue,
+      );
+      expect(
+        KayanDatabaseConfig.isLocalDatabaseUrl(
+          'postgresql://erp_app:secret@127.0.0.1:5434/erp_kayan',
         ),
         isFalse,
       );

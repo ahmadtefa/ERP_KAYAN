@@ -2,8 +2,8 @@ import { Module } from '@nestjs/common';
 
 import { AuditModule } from '../../common/audit/audit.module';
 import { PrismaModule } from '../../common/prisma/prisma.module';
-import { CompaniesController } from './companies.controller';
 import { CompanyController } from './company.controller';
+import { CompaniesController } from './companies.controller';
 import { CompanyService } from './company.service';
 import { SetupController } from './setup.controller';
 import { SetupService } from './setup.service';

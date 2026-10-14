@@ -8,6 +8,7 @@ import '../../features/admin/presentation/screens/admin_screen.dart';
 import '../../features/accounting/presentation/screens/journal_entries_screen.dart';
 import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
+import '../../features/cash/presentation/screens/cash_screen.dart';
 import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
 import '../../features/data/presentation/screens/backup_screen.dart';
 import '../../features/data/presentation/screens/import_screen.dart';
@@ -40,6 +41,7 @@ class AppRoutes {
   static const chartOfAccounts = '/accounting/chart-of-accounts';
   static const journalEntries = '/accounting/journal-entries';
   static const fiscalPeriods = '/accounting/fiscal-periods';
+  static const cash = '/cash';
   static const customers = '/parties/customers';
   static const suppliers = '/parties/suppliers';
   static const items = '/inventory/items';
@@ -58,7 +60,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   final notifier = ref.watch(_routerNotifierProvider);
 
   return GoRouter(
-    initialLocation: AppRoutes.dashboard,
+    initialLocation: AppRoutes.login,
     refreshListenable: notifier,
     redirect: (context, state) {
       final auth = ref.read(authControllerProvider);
@@ -93,6 +95,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 /// Every authenticated screen, in the order the navigation shows them.
 const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.dashboard, child: DashboardScreen()),
+  (path: AppRoutes.cash, child: CashScreen()),
   (path: AppRoutes.journalEntries, child: JournalEntriesScreen()),
   (path: AppRoutes.fiscalPeriods, child: FiscalPeriodsScreen()),
   (

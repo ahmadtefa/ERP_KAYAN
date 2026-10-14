@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/platform/browser_actions.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/download_feedback.dart';
 import '../providers/data_providers.dart';
 
 /// The ways out of a report: a spreadsheet, a plain file, a PDF, or paper.
@@ -10,9 +11,10 @@ import '../providers/data_providers.dart';
 /// One place, used by every report, so all four always look and behave the
 /// same and always describe the period and the account currently on screen.
 ///
-/// The links carry the access token, because the browser fetches them in a new
-/// tab and a tab cannot send an Authorization header. The server accepts a
-/// token in the address on these routes and nowhere else.
+/// A file is fetched by the page and handed to the browser, so a refusal is
+/// reported here rather than turning into a blank tab. A print page is a
+/// navigation and cannot carry a header, so it carries a one-minute download
+/// ticket instead - never the sign-in token.
 class ReportExportActions extends ConsumerWidget {
   const ReportExportActions({
     super.key,
@@ -47,10 +49,10 @@ class ReportExportActions extends ConsumerWidget {
     final capabilities = ref.watch(exportCapabilitiesProvider);
     final pdfReady = capabilities.asData?.value.pdfOnTheServer ?? false;
 
-    Future<void> go(Future<String> link) async {
-      final url = await link;
-      openInNewTab(url);
-    }
+    Future<void> download(Future<DownloadRequest> link) =>
+        runDownload(context, link);
+
+    Future<void> showPage(Future<String> link) => runPrint(context, link);
 
     return Wrap(
       spacing: 8,
@@ -59,7 +61,7 @@ class ReportExportActions extends ConsumerWidget {
       children: [
         OutlinedButton.icon(
           onPressed: ready
-              ? () => go(
+              ? () => download(
                     links.file(
                       report: report,
                       format: 'xlsx',
@@ -75,7 +77,7 @@ class ReportExportActions extends ConsumerWidget {
         ),
         OutlinedButton.icon(
           onPressed: ready
-              ? () => go(
+              ? () => download(
                     links.file(
                       report: report,
                       format: 'csv',
@@ -92,7 +94,7 @@ class ReportExportActions extends ConsumerWidget {
         if (pdfReady)
           FilledButton.tonalIcon(
             onPressed: ready
-                ? () => go(
+                ? () => download(
                       links.pdf(
                         report: report,
                         language: language,
@@ -111,7 +113,7 @@ class ReportExportActions extends ConsumerWidget {
           message: pdfReady ? l10n.printPdfHint : l10n.printHintWhenNoPdf,
           child: OutlinedButton.icon(
             onPressed: ready
-                ? () => go(
+                ? () => showPage(
                       links.print(
                         report: report,
                         language: language,

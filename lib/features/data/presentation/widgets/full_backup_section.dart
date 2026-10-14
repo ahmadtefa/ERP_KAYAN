@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/download_feedback.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 import '../providers/data_providers.dart';
 
 /// Full-database backup and restore: «النسخ الاحتياطي والاستعادة».
@@ -82,10 +84,10 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     }
   }
 
-  Future<void> _download(String name) async {
-    final url = await ref.read(reportLinkProvider).fullBackupDownload(name);
-    openInNewTab(url);
-  }
+  Future<void> _download(String name) => runDownload(
+    context,
+    ref.read(reportLinkProvider).fullBackupDownload(name),
+  );
 
   Future<void> _delete(String name) async {
     final l10n = context.l10n;
@@ -187,6 +189,38 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
       if (!mounted) return;
       setState(() => _notice = l10n.restoreFullDone);
       await _load();
+
+      if (!mounted) return;
+      final theme = Theme.of(context);
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogCtx) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.check_circle, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              const Text('تمت استعادة قاعدة البيانات بنجاح'),
+            ],
+          ),
+          content: const Text(
+            'تمت استعادة قاعدة البيانات الكاملة بنجاح واستبدال البيانات السابقة.\n\n'
+            'لتحديث البيانات وعرضها داخل البرنامج، يجب تسجيل الدخول مجددًا باستخدام بيانات الدخول الموجودة في النسخة المستعادة.\n\n'
+            'مثال للنسخة التجريبية (Demo Backup):\n'
+            '• اسم المستخدم: admin\n'
+            '• كلمة المرور: Admin@12345',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('تسجيل الدخول الآن'),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted) return;
+      await ref.read(authControllerProvider.notifier).signOut();
     } catch (error) {
       if (!mounted) return;
       setState(() => _failure = describeApiError(error));
@@ -196,8 +230,30 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
   }
 
   Future<void> _uploadAndRestore() async {
-    final picked = await pickFile(extensions: ['.dump']);
+    PickedFile? picked;
+    try {
+      picked = await pickFile(extensions: ['.dump', '.json']);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _failure = describeApiError(error));
+      return;
+    }
     if (picked == null) return;
+
+    final isJson = picked.name.toLowerCase().endsWith('.json') ||
+        (picked.bytes.isNotEmpty &&
+            (picked.bytes.first == 0x7B /* '{' */ ||
+                picked.bytes.first == 0x5B /* '[' */));
+    if (isJson) {
+      if (!mounted) return;
+      setState(() {
+        _failure =
+            'هذا الملف هو ملف بيانات JSON وليس أرشيف قاعدة بيانات PostgreSQL (.dump).\n'
+            'لاستيراد نسخ بيانات الشركة بصيغة JSON، يرجى استخدام قسم "استعادة نسخة احتياطية للشركة" أدناه.';
+      });
+      return;
+    }
+
     await _restore(file: picked);
   }
 

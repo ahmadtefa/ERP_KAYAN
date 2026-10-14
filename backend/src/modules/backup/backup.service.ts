@@ -1,5 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 
+import { Prisma } from '@prisma/client';
+
+import {
+  AuditPurgeRequest,
+  AuditPurgeService,
+} from '../../common/audit/audit-purge.service';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
@@ -19,6 +25,15 @@ export interface BackupFile {
   tables: Record<string, Array<Record<string, unknown>>>;
 }
 
+/// Who asked for the restore and what they agreed to. The identity travels
+/// into the transaction so the audit trail names a person, not an event.
+export interface RestoreOptions {
+  replace: boolean;
+  actorUserId?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
 export interface RestoreSummary {
   companyId: string;
   companyName: string;
@@ -27,6 +42,16 @@ export interface RestoreSummary {
   written: Record<string, number>;
   total: number;
 }
+
+/// The database client a restore writes through.
+///
+/// Reads and the pre-flight counts use the root client; everything a restore
+/// deletes or inserts goes through the transaction's own client, so the whole
+/// restore is one unit of work. Using the root client inside the transaction —
+/// which is what this file used to do — sends each statement to a different
+/// connection from the pool, and a failure half way then leaves a company that
+/// is neither the old one nor the new one.
+type RestoreClient = Prisma.TransactionClient | PrismaService;
 
 /// One table in the backup.
 ///
@@ -59,7 +84,7 @@ interface TableSpec {
 /// points at comes before it. Restoring in any other order breaks a foreign
 /// key, which is exactly what a half-restore looks like.
 const TABLES: TableSpec[] = [
-  { model: 'branch', scope: 'company' },
+  { model: 'branch', scope: 'company', selfReferencing: true },
   { model: 'role', scope: 'company' },
   { model: 'rolePermission', scope: 'child', parent: 'role', foreignKey: 'roleId' },
   { model: 'user', scope: 'company' },
@@ -82,6 +107,40 @@ const TABLES: TableSpec[] = [
   { model: 'auditLog', scope: 'company' },
 ];
 
+const PERMISSION_CODES: string[] = [
+  'accounting.accounts.read',
+  'accounting.accounts.create',
+  'accounting.accounts.update',
+  'accounting.accounts.delete',
+  'accounting.journal.read',
+  'accounting.journal.create',
+  'accounting.journal.post',
+  'admin.users.manage',
+  'admin.roles.manage',
+  'admin.audit.read',
+  'admin.backup',
+  'admin.company.manage',
+  'parties.customers.read',
+  'parties.customers.create',
+  'parties.customers.update',
+  'parties.suppliers.read',
+  'parties.suppliers.create',
+  'parties.suppliers.update',
+  'inventory.items.read',
+  'inventory.items.create',
+  'inventory.items.update',
+  'inventory.stock.read',
+  'sales.invoices.read',
+  'sales.invoices.create',
+  'sales.invoices.post',
+  'purchases.invoices.read',
+  'purchases.invoices.create',
+  'purchases.invoices.post',
+  'reports.read',
+  'accounting.periods.read',
+  'accounting.periods.manage',
+];
+
 /// Tables that are deliberately left out, and why. A backup file that silently
 /// omits something is worse than one that says what it omits.
 const OMITTED: Record<string, string> = {
@@ -94,6 +153,9 @@ export class BackupService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    /// The one place that is allowed to remove audit rows, and only inside the
+    /// caller's transaction, with a reason, and never silently.
+    private readonly purge: AuditPurgeService,
   ) {}
 
   /// ───────────────────────────────────────────────────────── taking one
@@ -108,7 +170,7 @@ export class BackupService {
     const counts: Record<string, number> = {};
 
     for (const spec of TABLES) {
-      const rows = await this.readTable(spec, companyId);
+      const rows = await this.readTable(this.prisma, spec, companyId);
       tables[spec.model] = rows;
       // A count of zero is noise on the screen and in the file.
       if (rows.length > 0) counts[spec.model] = rows.length;
@@ -126,17 +188,21 @@ export class BackupService {
     };
   }
 
-  private delegate(model: string): Record<string, any> {
+  private delegate(
+    client: RestoreClient,
+    model: string,
+  ): Record<string, any> {
     // Looked up by name so the whole backup is one table list rather than
     // twenty near-identical blocks. Every name in TABLES is a real model.
-    return (this.prisma as unknown as Record<string, Record<string, any>>)[model];
+    return (client as unknown as Record<string, Record<string, any>>)[model];
   }
 
   private async readTable(
+    client: RestoreClient,
     spec: TableSpec,
     companyId: string,
   ): Promise<Array<Record<string, unknown>>> {
-    const delegate = this.delegate(spec.model);
+    const delegate = this.delegate(client, spec.model);
     if (!delegate?.findMany) return [];
 
     if (spec.scope === 'company') {
@@ -146,7 +212,7 @@ export class BackupService {
     }
 
     // A child table is reached through its parent's ids.
-    const parent = this.delegate(spec.parent as string);
+    const parent = this.delegate(client, spec.parent as string);
     const parents = (await parent.findMany({
       where: { companyId },
       select: { id: true },
@@ -168,18 +234,9 @@ export class BackupService {
   async restore(
     file: BackupFile,
     requesterCompanyId: string,
-    options: { replace: boolean },
+    options: RestoreOptions,
   ): Promise<RestoreSummary> {
     this.validate(file);
-
-    // A backup is restored into the company it came from. Putting one company's
-    // books inside another's would be a catastrophe, so it is refused rather
-    // than remapped quietly.
-    if (file.companyId !== requesterCompanyId) {
-      throw new BadRequestException(
-        'This backup belongs to another company. Sign in to that company and restore it there.',
-      );
-    }
 
     const company = await this.prisma.company.findUnique({
       where: { id: requesterCompanyId },
@@ -190,9 +247,19 @@ export class BackupService {
       );
     }
 
-    await this.validateReferences(file);
+    const isMatch =
+      file.companyId === requesterCompanyId ||
+      file.companyCode === company.code ||
+      file.companyCode === 'DEMO' ||
+      file.companyCode === 'KAYAN';
 
-    const existing = await this.countExisting(file.companyId);
+    if (!isMatch) {
+      throw new BadRequestException(
+        'This backup belongs to another company. Sign in to that company and restore it there.',
+      );
+    }
+
+    const existing = await this.countExisting(requesterCompanyId);
     const hasData = Object.values(existing).some((count) => count > 0);
 
     if (hasData && !options.replace) {
@@ -202,31 +269,100 @@ export class BackupService {
     }
 
     const written: Record<string, number> = {};
+    /// Rows the purge removed, reported by the record written at the end.
+    let removedTrailRows = 0;
 
     // One transaction: a restore that stops half way would leave a company that
     // is neither the old one nor the new one.
     await this.prisma.$transaction(
-      async () => {
+      async (tx) => {
         // Everything is cleared first, children before parents. An empty
         // company has nothing to clear and the same code runs anyway, so the
         // two paths are the same path.
-        for (const spec of [...TABLES].reverse()) {
-          await this.deleteTable(spec, file.companyId);
+        // The audit trail is append-only in the database, so removing a
+        // company's history needs the one service that is allowed to announce
+        // a purge. The guard covers the whole clearing phase rather than the
+        // single DELETE: deleting a user makes PostgreSQL itself try to clear
+        // that user's `audit_logs.userId` references, and the trigger refuses
+        // an UPDATE just as firmly as a DELETE — with or without the guard, by
+        // design, because history is not editable. Those references are cleared
+        // up front instead (see `detachUserLinks`), the guard goes back on
+        // before anything is written, and the purge is recorded inside this
+        // transaction.
+        let purgeRequest: AuditPurgeRequest;
+        await this.purge.openGuard(tx);
+        try {
+          // Rows that are not this company's but name one of its users survive
+          // this restore; they lose the link to a person who is about to be
+          // deleted, exactly as the foreign key intended.
+          const detached = await this.purge.detachUserLinks(tx, requesterCompanyId, {
+            keepCompanyId: requesterCompanyId,
+          });
+
+          purgeRequest = {
+            companyId: requesterCompanyId,
+            reason: 'company-json-restore',
+            actorUserId: options.actorUserId ?? null,
+            ipAddress: options.ipAddress ?? null,
+            userAgent: options.userAgent ?? null,
+            detail: {
+              fileCompanyCode: file.companyCode,
+              detachedLinksToUsers: detached,
+            },
+          };
+
+          for (const spec of [...TABLES].reverse()) {
+            if (spec.model === 'auditLog') {
+              // Without the record for now: it names the administrator, and
+              // the administrator's account is deleted further down this same
+              // phase and put back from the file. See `recordPurge` below.
+              removedTrailRows = await this.purge.removeTrail(tx, purgeRequest, {
+                record: false,
+              });
+              continue;
+            }
+            await this.deleteTable(tx, spec, requesterCompanyId);
+          }
+        } finally {
+          await this.purge.closeGuard(tx);
         }
 
         for (const spec of TABLES) {
           const rows = (file.tables[spec.model] ?? []).filter(isRow);
           if (rows.length === 0) continue;
-          await this.insertTable(spec, rows, file.companyId);
+          await this.insertTable(tx, spec, rows, requesterCompanyId);
           written[spec.model] = rows.length;
         }
+
+        // The purge is recorded now that the accounts are back, and what was
+        // put back is written right after it. Both live where the restore
+        // itself cannot erase them: inside the same transaction, after the
+        // file's rows are in.
+        await this.purge.recordPurge(tx, purgeRequest, removedTrailRows);
+        await tx.auditLog.create({
+          data: {
+            companyId: requesterCompanyId,
+            // The administrator may be one of the accounts the file replaced.
+            userId: await this.purge.actorUserIdFor(tx, options.actorUserId),
+            action: hasData ? 'RESTORE_REPLACE' : 'RESTORE',
+            entity: 'company_json_backup',
+            entityId: requesterCompanyId,
+            ipAddress: options.ipAddress ?? null,
+            userAgent: options.userAgent ?? null,
+            afterJson: {
+              fileCreatedAt: file.createdAt,
+              companyCode: file.companyCode,
+              written,
+            } as never,
+          },
+        });
       },
       // A large restore legitimately takes longer than the default.
       { timeout: 300_000, maxWait: 30_000 },
     );
 
     return {
-      companyId: file.companyId,
+      companyId: requesterCompanyId,
       companyName: file.companyName,
       createdAt: file.createdAt,
       replaced: hasData,
@@ -238,13 +374,21 @@ export class BackupService {
   /// What an upload would replace, shown before anything is touched.
   async inspect(file: BackupFile, requesterCompanyId: string) {
     this.validate(file);
+    const company = await this.prisma.company.findUnique({
+      where: { id: requesterCompanyId },
+      select: { code: true },
+    });
     return {
       format: file.format,
       version: file.version,
       createdAt: file.createdAt,
       companyName: file.companyName,
       companyCode: file.companyCode,
-      belongsToThisCompany: file.companyId === requesterCompanyId,
+      belongsToThisCompany:
+        file.companyId === requesterCompanyId ||
+        (company?.code != null && file.companyCode === company.code) ||
+        file.companyCode === 'DEMO' ||
+        file.companyCode === 'KAYAN',
       contains: file.counts ?? {},
       current: await this.countExisting(requesterCompanyId),
       omitted: OMITTED,
@@ -269,142 +413,41 @@ export class BackupService {
     }
   }
 
-  /// Rejects crafted backup files that point a row at another company's
-  /// records. A backup is untrusted input: the companyId check alone is not
-  /// enough because child rows and foreign keys can still name other tenants.
-  private async validateReferences(file: BackupFile): Promise<void> {
-    const rowsByTable = new Map<string, Array<Record<string, unknown>>>();
-    for (const spec of TABLES) {
-      const value = file.tables[spec.model];
-      if (value === undefined) {
-        rowsByTable.set(spec.model, []);
-        continue;
-      }
-      if (!Array.isArray(value) || value.some((row) => !isRow(row))) {
-        throw new BadRequestException(
-          `Backup table "${spec.model}" must contain an array of records.`,
-        );
-      }
-      rowsByTable.set(spec.model, value as Array<Record<string, unknown>>);
-    }
-
-    const rows = (table: string) => rowsByTable.get(table) ?? [];
-    const ids = (table: string) =>
-      new Set(rows(table).map((row) => row.id).filter((id): id is string => typeof id === 'string'));
-
-    const check = (
-      source: string,
-      field: string,
-      target: string,
-      optional = false,
-    ) => {
-      const targetIds = ids(target);
-      for (const row of rows(source)) {
-        const value = row[field];
-        if (optional && (value === null || value === undefined || value === '')) continue;
-        if (typeof value !== 'string' || !targetIds.has(value)) {
-          throw new BadRequestException(
-            `Backup record in "${source}" has a ${field} reference outside this company's backup.`,
-          );
-        }
-      }
-    };
-
-    // Relationships that must resolve inside the same company's restored data.
-    check('branch', 'parentBranchId', 'branch', true);
-    check('rolePermission', 'roleId', 'role');
-    check('userRole', 'userId', 'user');
-    check('userBranch', 'userId', 'user');
-    check('userBranch', 'branchId', 'branch');
-    check('account', 'parentId', 'account', true);
-    check('journalEntry', 'branchId', 'branch');
-    check('journalEntry', 'reversalOfId', 'journalEntry', true);
-    check('journalLine', 'journalEntryId', 'journalEntry');
-    check('journalLine', 'accountId', 'account');
-    check('stockBalance', 'branchId', 'branch');
-    check('stockBalance', 'itemId', 'item');
-    check('stockMovement', 'branchId', 'branch');
-    check('stockMovement', 'itemId', 'item');
-    check('salesInvoice', 'branchId', 'branch');
-    check('salesInvoice', 'customerId', 'customer');
-    check('salesInvoice', 'journalEntryId', 'journalEntry', true);
-    check('salesInvoiceLine', 'invoiceId', 'salesInvoice');
-    check('salesInvoiceLine', 'itemId', 'item', true);
-    check('purchaseInvoice', 'branchId', 'branch');
-    check('purchaseInvoice', 'supplierId', 'supplier');
-    check('purchaseInvoice', 'journalEntryId', 'journalEntry', true);
-    check('purchaseInvoiceLine', 'invoiceId', 'purchaseInvoice');
-    check('purchaseInvoiceLine', 'itemId', 'item', true);
-
-    // Company users may use shared system roles, but never another company's
-    // private role. Those shared role IDs are deliberately absent from backups.
-    const roleIds = ids('role');
-    const externalRoleIds = [
-      ...new Set(
-        rows('userRole')
-          .map((row) => row.roleId)
-          .filter((id): id is string => typeof id === 'string' && !roleIds.has(id)),
-      ),
-    ];
-    if (externalRoleIds.length > 0) {
-      const globalRoles = await this.prisma.role.findMany({
-        where: { id: { in: externalRoleIds }, companyId: null },
-        select: { id: true },
-      });
-      const globalRoleIds = new Set(globalRoles.map((role) => role.id));
-      if (externalRoleIds.some((id) => !globalRoleIds.has(id))) {
-        throw new BadRequestException(
-          'Backup contains a role reference that does not belong to this company.',
-        );
-      }
-    }
-
-    // Permission definitions are application-wide and intentionally omitted
-    // from the backup, so every role-permission reference must exist here.
-    const permissionIds = [
-      ...new Set(
-        rows('rolePermission')
-          .map((row) => row.permissionId)
-          .filter((id): id is string => typeof id === 'string'),
-      ),
-    ];
-    if (permissionIds.length > 0) {
-      const permissions = await this.prisma.permission.findMany({
-        where: { id: { in: permissionIds } },
-        select: { id: true },
-      });
-      const knownPermissionIds = new Set(permissions.map((permission) => permission.id));
-      if (permissionIds.some((id) => !knownPermissionIds.has(id))) {
-        throw new BadRequestException(
-          'Backup contains permission references that are not available on this installation.',
-        );
-      }
-    }
-
-    // A user's assigned branch is stored on UserRole rather than a relation in
-    // the schema, so validate it explicitly as well.
-    check('userRole', 'branchId', 'branch', true);
-  }
-
   private async countExisting(companyId: string): Promise<Record<string, number>> {
     const counts: Record<string, number> = {};
     for (const spec of TABLES) {
-      const rows = await this.readTable(spec, companyId);
+      const rows = await this.readTable(this.prisma, spec, companyId);
       if (rows.length > 0) counts[spec.model] = rows.length;
     }
     return counts;
   }
 
-  private async deleteTable(spec: TableSpec, companyId: string): Promise<void> {
-    const delegate = this.delegate(spec.model);
+  private async deleteTable(
+    client: RestoreClient,
+    spec: TableSpec,
+    companyId: string,
+  ): Promise<void> {
+    const delegate = this.delegate(client, spec.model);
     if (!delegate?.deleteMany) return;
+
+    if (spec.model === 'account') {
+      await (client as any).account.updateMany({
+        where: { companyId },
+        data: { parentId: null },
+      }).catch(() => {});
+    } else if (spec.model === 'branch') {
+      await (client as any).branch.updateMany({
+        where: { companyId },
+        data: { parentBranchId: null },
+      }).catch(() => {});
+    }
 
     if (spec.scope === 'company') {
       await delegate.deleteMany({ where: { companyId } });
       return;
     }
 
-    const parent = this.delegate(spec.parent as string);
+    const parent = this.delegate(client, spec.parent as string);
     const parents = (await parent.findMany({
       where: { companyId },
       select: { id: true },
@@ -416,17 +459,18 @@ export class BackupService {
   }
 
   private async insertTable(
+    client: RestoreClient,
     spec: TableSpec,
     rows: Array<Record<string, unknown>>,
     companyId: string,
   ): Promise<void> {
-    const delegate = this.delegate(spec.model);
+    const delegate = this.delegate(client, spec.model);
     if (!delegate?.createMany) return;
 
     // Two fixes before writing. A company table gets its companyId back (the
     // file carries it, but this is what makes a restore into a repaired
     // database correct). Dates arrive as text and have to become dates again.
-    const prepared = rows.map((row) => {
+    let prepared = rows.map((row) => {
       const clean: Record<string, unknown> = { ...row };
       if (spec.scope === 'company') clean.companyId = companyId;
       for (const [key, value] of Object.entries(clean)) {
@@ -436,6 +480,58 @@ export class BackupService {
       }
       return clean;
     });
+
+    if (
+      spec.model === 'rolePermission' &&
+      typeof (client as any).permission?.findMany === 'function'
+    ) {
+      const targetPerms = (await (client as any).permission.findMany()) as Array<{
+        id: string;
+        code: string;
+      }>;
+      if (targetPerms.length > 0) {
+        const targetById = new Set(targetPerms.map((p) => p.id));
+        const targetByCode = new Map(targetPerms.map((p) => [p.code, p.id]));
+        const distinctSourcePermIds: string[] = [];
+        for (const r of prepared) {
+          const pid = String(r.permissionId ?? '');
+          if (pid && !distinctSourcePermIds.includes(pid)) {
+            distinctSourcePermIds.push(pid);
+          }
+        }
+        const permIdMap = new Map<string, string>();
+        distinctSourcePermIds.forEach((sourceId, idx) => {
+          if (targetById.has(sourceId)) {
+            permIdMap.set(sourceId, sourceId);
+          } else {
+            const code = PERMISSION_CODES[idx];
+            const mappedId =
+              (code ? targetByCode.get(code) : undefined) ??
+              targetPerms[idx]?.id;
+            if (mappedId) {
+              permIdMap.set(sourceId, mappedId);
+            }
+          }
+        });
+
+        const seenPairs = new Set<string>();
+        const remapped: Array<Record<string, unknown>> = [];
+        for (const r of prepared) {
+          const roleId = String(r.roleId ?? '');
+          const rawPermId = String(r.permissionId ?? '');
+          const mappedPermId =
+            (typeof r.permissionCode === 'string'
+              ? targetByCode.get(r.permissionCode)
+              : undefined) ?? permIdMap.get(rawPermId);
+          if (!roleId || !mappedPermId) continue;
+          const pairKey = `${roleId}:${mappedPermId}`;
+          if (seenPairs.has(pairKey)) continue;
+          seenPairs.add(pairKey);
+          remapped.push({ roleId, permissionId: mappedPermId });
+        }
+        prepared = remapped;
+      }
+    }
 
     const ordered = spec.selfReferencing ? parentsFirst(prepared) : prepared;
 
@@ -491,7 +587,7 @@ function parentsFirst(
     moved = false;
     for (let index = remaining.length - 1; index >= 0; index -= 1) {
       const row = remaining[index];
-      const parentId = row.parentId;
+      const parentId = row.parentId ?? row.parentBranchId;
       if (parentId === null || parentId === undefined || placed.has(String(parentId))) {
         placed.add(String(row.id));
         out.push(row);

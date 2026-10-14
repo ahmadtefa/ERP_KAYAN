@@ -8,6 +8,7 @@ import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../data/presentation/widgets/document_export_actions.dart';
 import '../invoice_status.dart';
 import '../providers/invoice_providers.dart';
 
@@ -196,6 +197,10 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
         ),
       ),
       actions: [
+        DocumentExportActions(
+          kind: widget.kind.isSales ? 'sales-invoice' : 'purchase-invoice',
+          id: text(widget.summary, 'id'),
+        ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: Text(l10n.close),

@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { accountLabel } from '../../common/localization/account-name';
+import { AgingService } from '../reports/aging.service';
+import { FinancialStatementsService } from '../reports/financial-statements.service';
 import { ReportsService } from '../reports/reports.service';
 import { PeriodQueryDto } from '../reports/dto/report-query.dto';
 import { ReportTable, TableMeta, TableTotal } from './report-table';
@@ -11,7 +13,11 @@ export type ExportableReport =
   | 'profit-and-loss'
   | 'customer-balances'
   | 'supplier-balances'
-  | 'account-ledger';
+  | 'account-ledger'
+  | 'balance-sheet'
+  | 'cash-flow'
+  | 'receivables-aging'
+  | 'payables-aging';
 
 export const EXPORTABLE_REPORTS: ExportableReport[] = [
   'trial-balance',
@@ -19,6 +25,10 @@ export const EXPORTABLE_REPORTS: ExportableReport[] = [
   'customer-balances',
   'supplier-balances',
   'account-ledger',
+  'balance-sheet',
+  'cash-flow',
+  'receivables-aging',
+  'payables-aging',
 ];
 
 /// Turns a report into a plain table.
@@ -29,7 +39,11 @@ export const EXPORTABLE_REPORTS: ExportableReport[] = [
 /// its way into a file.
 @Injectable()
 export class ReportTablesService {
-  constructor(private readonly reports: ReportsService) {}
+  constructor(
+    private readonly reports: ReportsService,
+    private readonly statements: FinancialStatementsService,
+    private readonly aging: AgingService,
+  ) {}
 
   async build(
     report: ExportableReport,
@@ -48,6 +62,14 @@ export class ReportTablesService {
         return this.supplierBalances(companyId, query);
       case 'account-ledger':
         return this.accountLedger(companyId, query, lang);
+      case 'balance-sheet':
+        return this.balanceSheet(companyId, query);
+      case 'cash-flow':
+        return this.cashFlow(companyId, query);
+      case 'receivables-aging':
+        return this.agingTable(companyId, query, 'receivables');
+      case 'payables-aging':
+        return this.agingTable(companyId, query, 'payables');
     }
   }
 
@@ -124,14 +146,11 @@ export class ReportTablesService {
     const revenueLabel = lang === 'ar' ? 'إيراد' : 'Revenue';
     const expenseLabel = lang === 'ar' ? 'مصروف' : 'Expense';
     const rows = [
-      // The rows keep whatever the report produced (amounts as text, but also
-      // parentId, which may be null), so the value type is unknown rather than
-      // string; the writer stringifies each cell on the way out.
-      ...data.revenue.map((r: Record<string, unknown>) => ({
+      ...data.revenue.map((r: Record<string, string>) => ({
         ...r,
         group: revenueLabel,
       })),
-      ...data.expenses.map((r: Record<string, unknown>) => ({
+      ...data.expenses.map((r: Record<string, string>) => ({
         ...r,
         group: expenseLabel,
       })),
@@ -258,12 +277,23 @@ export class ReportTablesService {
     // A movement may carry no description of its own, in which case the entry's
     // description is used; if both are empty the cell stays empty rather than
     // printing "null".
-    const movements = (data.movements as Array<Record<string, string>>).map(
-      (movement) => ({
-        ...movement,
-        description: movement.description ?? '',
-      }),
-    );
+    // The ledger rows carry a nested `source` object for drill-down; a printed
+    // table wants flat text, so the document is flattened into two columns.
+    const movements = (
+      data.movements as Array<Record<string, unknown> & {
+        source?: { type?: string; number?: string } | null;
+      }>
+    ).map((movement) => {
+      const source = movement.source ?? null;
+      const { source: _ignored, ...rest } = movement;
+      void _ignored;
+      return {
+        ...(rest as Record<string, string>),
+        description: (movement.description as string) ?? '',
+        documentType: source?.type ?? '',
+        documentNumber: source?.number ?? '',
+      };
+    });
 
     return this.table({
       slug: 'account-ledger',
@@ -299,7 +329,92 @@ export class ReportTablesService {
     });
   }
 
-  // ───────────────────────────────────────────────────────────────
+  private async balanceSheet(companyId: string, query: PeriodQueryDto) {
+    const data = await this.statements.balanceSheet(companyId, query);
+    const rows = [
+      ...data.assets.map((r) => ({ ...r, group: 'Asset' })),
+      ...data.liabilities.map((r) => ({ ...r, group: 'Liability' })),
+      ...data.equity.map((r) => ({ ...r, group: 'Equity' })),
+    ];
+    return this.table({
+      slug: 'balance-sheet',
+      titleEn: 'Balance sheet',
+      titleAr: 'الميزانية العمومية',
+      meta: [{ labelEn: 'As at', labelAr: 'حتى تاريخ', value: data.asOf }],
+      columns: [
+        { key: 'group', labelEn: 'Section', labelAr: 'القسم', width: 14 },
+        { key: 'code', labelEn: 'Code', labelAr: 'الكود', width: 12 },
+        { key: 'nameEn', labelEn: 'Account', labelAr: 'الحساب', width: 34 },
+        { key: 'nameAr', labelEn: 'Account (Arabic)', labelAr: 'الحساب بالعربية', width: 34 },
+        { key: 'balance', labelEn: 'Balance', labelAr: 'الرصيد', numeric: true, width: 16 },
+      ],
+      rows,
+      totals: [
+        { labelEn: 'Assets', labelAr: 'الأصول', value: data.totals.assets },
+        { labelEn: 'Liabilities', labelAr: 'الالتزامات', value: data.totals.liabilities },
+        { labelEn: 'Equity', labelAr: 'حقوق الملكية', value: data.totals.equity },
+        { labelEn: 'Difference (must be zero)', labelAr: 'الفرق (لازم يكون صفر)', value: data.totals.difference },
+      ],
+      notes: [],
+    });
+  }
+
+  private async cashFlow(companyId: string, query: PeriodQueryDto) {
+    const data = await this.statements.cashFlow(companyId, query);
+    const rows = [
+      ...data.inflows.map((r: Record<string, unknown>) => ({ ...r, direction: 'in' })),
+      ...data.outflows.map((r: Record<string, unknown>) => ({ ...r, direction: 'out' })),
+    ];
+    return this.table({
+      slug: 'cash-flow',
+      titleEn: 'Cash flow',
+      titleAr: 'التدفقات النقدية',
+      meta: this.periodMeta(data.from, data.to),
+      columns: [
+        { key: 'direction', labelEn: 'Direction', labelAr: 'الاتجاه', width: 12 },
+        { key: 'code', labelEn: 'Account', labelAr: 'الحساب', width: 14 },
+        { key: 'nameEn', labelEn: 'Name', labelAr: 'الاسم', width: 28 },
+        { key: 'amount', labelEn: 'Amount', labelAr: 'المبلغ', numeric: true, width: 16 },
+      ],
+      rows,
+      totals: [
+        { labelEn: 'Inflow', labelAr: 'وارد', value: data.totals.inflow },
+        { labelEn: 'Outflow', labelAr: 'صادر', value: data.totals.outflow },
+        { labelEn: 'Net', labelAr: 'الصافي', value: data.totals.net },
+      ],
+      notes: [],
+    });
+  }
+
+  private async agingTable(
+    companyId: string,
+    query: PeriodQueryDto,
+    side: 'receivables' | 'payables',
+  ) {
+    const data =
+      side === 'receivables'
+        ? await this.aging.receivables(companyId, { asOf: query.to })
+        : await this.aging.payables(companyId, { asOf: query.to });
+    return this.table({
+      slug: side === 'receivables' ? 'receivables-aging' : 'payables-aging',
+      titleEn: side === 'receivables' ? 'Receivables aging' : 'Payables aging',
+      titleAr: side === 'receivables' ? 'أعمار المدينين' : 'أعمار الدائنين',
+      meta: [{ labelEn: 'As at', labelAr: 'حتى تاريخ', value: data.asOf }],
+      columns: [
+        { key: 'code', labelEn: 'Code', labelAr: 'الكود', width: 12 },
+        { key: 'nameEn', labelEn: 'Name', labelAr: 'الاسم', width: 28 },
+        { key: 'nameAr', labelEn: 'Name (Arabic)', labelAr: 'الاسم بالعربية', width: 28 },
+        { key: 'total', labelEn: 'Total', labelAr: 'الإجمالي', numeric: true, width: 16 },
+        { key: 'overdue', labelEn: 'Overdue', labelAr: 'متأخر', numeric: true, width: 16 },
+      ],
+      rows: data.rows,
+      totals: [
+        { labelEn: 'Total', labelAr: 'الإجمالي', value: data.totals.total },
+        { labelEn: 'Overdue', labelAr: 'متأخر', value: data.totals.overdue },
+      ],
+      notes: [],
+    });
+  }
 
   private table(input: {
     slug: string;

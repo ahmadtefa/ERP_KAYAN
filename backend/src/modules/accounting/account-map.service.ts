@@ -18,7 +18,11 @@ export const ACCOUNT_CODES = {
   vatReceivable: '1105',
   vatPayable: '2103',
   salesRevenue: '4101',
+  salesReturns: '4102',
   costOfGoodsSold: '5101',
+  inventoryDifference: '5107',
+  retainedEarnings: '3102',
+  openingBalanceEquity: '3103',
 } as const;
 
 export type AccountKey = keyof typeof ACCOUNT_CODES;

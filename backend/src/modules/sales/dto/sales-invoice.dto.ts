@@ -22,7 +22,10 @@ export class SalesInvoiceLineDto {
   /// Quantities and prices are strings so no binary floating-point rounding
   /// happens before the value reaches the server.
   @IsString() quantity!: string;
-  @IsString() unitPrice!: string;
+
+  /// When omitted, the customer's price list (or the item's own price)
+  /// decides, so the same list is not retyped on every invoice.
+  @IsOptional() @IsString() unitPrice?: string;
 
   /// Percent. When omitted the item's own rate is used.
   @IsOptional() @IsString() taxRate?: string;
@@ -33,6 +36,9 @@ export class CreateSalesInvoiceDto {
   @IsOptional() @IsDateString() dueDate?: string;
   @IsUUID() customerId!: string;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
+
+  /// The warehouse the goods leave. Omit to use the branch's default.
+  @IsOptional() @IsUUID() warehouseId?: string;
 
   @IsArray()
   @ArrayMinSize(1)

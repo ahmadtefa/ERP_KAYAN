@@ -221,12 +221,7 @@ class _TrialBalanceTab extends ConsumerWidget {
                     value: (r) => text(r, 'code'),
                     emphasise: true,
                   ),
-                  ColumnSpec(
-                    l10n.accountName,
-                    value: (r) =>
-                        ('    ' * ((r['depth'] as num?)?.toInt() ?? 0)) +
-                        text(r, 'nameEn'),
-                  ),
+                  ColumnSpec(l10n.accountName, value: (r) => text(r, 'nameEn')),
                   ColumnSpec(
                     l10n.opening,
                     numeric: true,
@@ -389,17 +384,7 @@ class _SheetSection extends StatelessWidget {
                 child: Row(
                   children: [
                     SizedBox(width: 70, child: Text(text(row, 'code'))),
-                    Expanded(
-                      child: Text(
-                        ('    ' * ((row['depth'] as num?)?.toInt() ?? 0)) +
-                            text(row, 'nameEn'),
-                        style: TextStyle(
-                          fontWeight: (row['isPostable'] == false)
-                              ? FontWeight.w600
-                              : null,
-                        ),
-                      ),
-                    ),
+                    Expanded(child: Text(text(row, 'nameEn'))),
                     Text(formatAmount(asString(row['amount']))),
                   ],
                 ),

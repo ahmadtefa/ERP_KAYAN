@@ -19,6 +19,17 @@ export class CreateItemDto {
   /// Amounts travel as strings so no precision is lost before the database.
   @IsOptional() @IsString() salePrice?: string;
 
+  /// What the item costs to buy. It is the default on a purchase line, so a
+  /// buyer does not retype last month's price, and it is what the reorder
+  /// report prices a suggested order at.
+  @IsOptional() @IsString() purchasePrice?: string;
+
+  /// At or below this quantity the item needs reordering. 0 means "not
+  /// watched", which is different from "order when stock runs out".
+  @IsOptional() @IsString() reorderLevel?: string;
+
+  @IsOptional() @IsString() categoryId?: string;
+
   /// Percent, e.g. "14" for 14%.
   /// REQUIRES BUSINESS DECISION: the statutory rate.
   @IsOptional() @IsString() taxRate?: string;
@@ -33,6 +44,9 @@ export class UpdateItemDto {
   @IsOptional() @IsString() @MaxLength(20) unit?: string;
   @IsOptional() @IsString() @MaxLength(60) barcode?: string;
   @IsOptional() @IsString() salePrice?: string;
+  @IsOptional() @IsString() purchasePrice?: string;
+  @IsOptional() @IsString() reorderLevel?: string;
+  @IsOptional() @IsString() categoryId?: string;
   @IsOptional() @IsString() taxRate?: string;
   @IsOptional() @IsBoolean() isStockTracked?: boolean;
   @IsOptional() @IsBoolean() isActive?: boolean;

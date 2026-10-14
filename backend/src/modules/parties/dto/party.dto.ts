@@ -2,9 +2,11 @@ import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEmail,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -18,6 +20,8 @@ export class CreatePartyDto {
   @IsOptional() @IsString() @MaxLength(60) taxNumber?: string;
   @IsOptional() @IsString() @MaxLength(500) address?: string;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
+  /// Payment term in days: 0 means "due on the day of the invoice".
+  @IsOptional() @IsInt() @Min(0) @Max(3650) @Type(() => Number) paymentTermDays?: number;
 }
 
 export class UpdatePartyDto {
@@ -29,6 +33,7 @@ export class UpdatePartyDto {
   @IsOptional() @IsString() @MaxLength(500) address?: string;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsInt() @Min(0) @Max(3650) @Type(() => Number) paymentTermDays?: number;
 }
 
 export class CreateCustomerDto extends CreatePartyDto {

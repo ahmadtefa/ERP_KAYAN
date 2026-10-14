@@ -1,20 +1,20 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/config/app_config.dart';
+import '../../../../core/platform/download_request.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 
-/// Where the server is, so a download link can be built.
-final appConfigProvider = Provider<AppConfig>(
-  (ref) => AppConfig.fromEnvironment(),
-);
+export '../../../auth/presentation/providers/auth_providers.dart'
+    show appConfigProvider;
 
-/// Builds the URL of a report file or a print page.
+/// Builds the address of a report file or a print page, and the credential
+/// that has to travel in it.
 ///
-/// The token travels in the address because the browser opens these links
-/// itself - a new tab cannot carry an Authorization header. The server accepts
-/// a query token on these two routes only.
+/// The browser opens these links itself: a new tab cannot carry an
+/// Authorization header. What goes in the address is therefore a one-minute
+/// download ticket minted for the occasion, never the sign-in token - see
+/// `_downloadTicket`.
 final reportLinkProvider = Provider<ReportLinkBuilder>(
   (ref) => ReportLinkBuilder(ref),
 );
@@ -24,15 +24,52 @@ class ReportLinkBuilder {
 
   final Ref _ref;
 
+  /// A ticket already minted, and when it stops being good.
+  ///
+  /// Several buttons are often pressed in a row, and a ticket is good for a
+  /// minute anyway, so the same one is reused until it is nearly spent
+  /// rather than asking the server for a new one on every click.
+  String? _ticket;
+  DateTime? _ticketExpiresAt;
+
   String get _base => _ref.read(appConfigProvider).apiBaseUrl;
 
-  Future<String> _token() async {
-    final token = await _ref.read(tokenStoreProvider).readAccessToken();
-    return token ?? '';
+  /// Asks the server for a one-minute credential to put in an address.
+  ///
+  /// A print page opened in a new tab is a navigation, and a navigation
+  /// cannot carry an Authorization header — so something has to travel in
+  /// the address. It is a ticket rather than the sign-in token, because an
+  /// address ends up in browser history and in logs, and because a ticket
+  /// buys this one file and nothing else.
+  Future<String> _downloadTicket() async {
+    final now = DateTime.now();
+    final held = _ticket;
+    final expiresAt = _ticketExpiresAt;
+    if (held != null &&
+        expiresAt != null &&
+        now.isBefore(expiresAt.subtract(const Duration(seconds: 10)))) {
+      return held;
+    }
+    final response = await _ref
+        .read(apiClientProvider)
+        .raw
+        .post<Map<String, dynamic>>('/auth/download-ticket');
+    final data = Map<String, dynamic>.from(response.data ?? const {});
+    final ticket = '${data['ticket'] ?? ''}';
+    if (ticket.isEmpty) {
+      throw StateError(
+        'The server did not issue a download ticket. Sign in again and '
+        'try once more.',
+      );
+    }
+    final seconds = int.tryParse('${data['expiresIn'] ?? 60}') ?? 60;
+    _ticket = ticket;
+    _ticketExpiresAt = now.add(Duration(seconds: seconds));
+    return ticket;
   }
 
   /// A spreadsheet or a CSV of one report.
-  Future<String> file({
+  Future<DownloadRequest> file({
     required String report,
     required String format,
     required String language,
@@ -48,13 +85,15 @@ class ReportLinkBuilder {
       'to': ?to,
       'accountId': ?accountId,
       'branchId': ?branchId,
-      'token': await _token(),
+      'ticket': await _downloadTicket(),
     };
-    return '$_base/exports/$report/download?${_encode(query)}';
+    return DownloadRequest(
+      url: '$_base/exports/$report/download?${_encode(query)}',
+    );
   }
 
   /// The report as a PDF file, made by the server.
-  Future<String> pdf({
+  Future<DownloadRequest> pdf({
     required String report,
     required String language,
     String? from,
@@ -66,12 +105,14 @@ class ReportLinkBuilder {
       'from': ?from,
       'to': ?to,
       'accountId': ?accountId,
-      'token': await _token(),
+      'ticket': await _downloadTicket(),
     };
-    return '$_base/exports/$report/pdf?${_encode(query)}';
+    return DownloadRequest(url: '$_base/exports/$report/pdf?${_encode(query)}');
   }
 
-  /// The print page. `auto` opens the print dialogue by itself.
+  /// The print page, opened in a new tab. `auto` opens the print dialogue by
+  /// itself — a tab has no way to send a header, so this one carries a
+  /// ticket in the address.
   Future<String> print({
     required String report,
     required String language,
@@ -86,7 +127,7 @@ class ReportLinkBuilder {
       'from': ?from,
       'to': ?to,
       'accountId': ?accountId,
-      'token': await _token(),
+      'ticket': await _downloadTicket(),
     };
     return '$_base/exports/$report/print?${_encode(query)}';
   }
@@ -98,7 +139,7 @@ class ReportLinkBuilder {
   /// is currently showing, so the file matches what the person can see.
 
   /// A list as a spreadsheet or a plain file.
-  Future<String> listFile({
+  Future<DownloadRequest> listFile({
     required String list,
     required String format,
     required String language,
@@ -108,13 +149,15 @@ class ReportLinkBuilder {
       'format': format,
       'lang': language,
       ...filters,
-      'token': await _token(),
+      'ticket': await _downloadTicket(),
     };
-    return '$_base/exports/lists/$list/download?${_encode(query)}';
+    return DownloadRequest(
+      url: '$_base/exports/lists/$list/download?${_encode(query)}',
+    );
   }
 
   /// A list as a PDF file, made by the server.
-  Future<String> listPdf({
+  Future<DownloadRequest> listPdf({
     required String list,
     required String language,
     Map<String, String> filters = const {},
@@ -122,9 +165,11 @@ class ReportLinkBuilder {
     final query = <String, String>{
       'lang': language,
       ...filters,
-      'token': await _token(),
+      'ticket': await _downloadTicket(),
     };
-    return '$_base/exports/lists/$list/pdf?${_encode(query)}';
+    return DownloadRequest(
+      url: '$_base/exports/lists/$list/pdf?${_encode(query)}',
+    );
   }
 
   /// A list as a page to print.
@@ -138,29 +183,83 @@ class ReportLinkBuilder {
       'lang': language,
       if (auto) 'auto': '1',
       ...filters,
-      'token': await _token(),
+      'ticket': await _downloadTicket(),
     };
     return '$_base/exports/lists/$list/print?${_encode(query)}';
   }
 
+  Future<DownloadRequest> documentFile({
+    required String kind,
+    required String id,
+    required String format,
+    required String language,
+  }) async {
+    final query = <String, String>{
+      'format': format,
+      'lang': language,
+      'ticket': await _downloadTicket(),
+    };
+    return DownloadRequest(
+      url: '$_base/exports/documents/$kind/$id/download?${_encode(query)}',
+    );
+  }
+
+  Future<DownloadRequest> documentPdf({
+    required String kind,
+    required String id,
+    required String language,
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      'ticket': await _downloadTicket(),
+    };
+    return DownloadRequest(
+      url: '$_base/exports/documents/$kind/$id/pdf?${_encode(query)}',
+    );
+  }
+
+  Future<String> documentPrint({
+    required String kind,
+    required String id,
+    required String language,
+    bool auto = true,
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      if (auto) 'auto': '1',
+      'ticket': await _downloadTicket(),
+    };
+    return '$_base/exports/documents/$kind/$id/print?${_encode(query)}';
+  }
+
   /// A blank spreadsheet to fill in, for one kind of import.
-  Future<String> importTemplate({
+  Future<DownloadRequest> importTemplate({
     required String kind,
     required String language,
   }) async {
-    final query = <String, String>{'lang': language, 'token': await _token()};
-    return '$_base/import/templates/$kind?${_encode(query)}';
+    final query = <String, String>{
+      'lang': language,
+      'ticket': await _downloadTicket(),
+    };
+    return DownloadRequest(
+      url: '$_base/import/templates/$kind?${_encode(query)}',
+      fileName: 'kayan-template-$kind.xlsx',
+    );
   }
 
   /// The whole company, as one file.
-  Future<String> backup() async {
-    return '$_base/backup/download?token=${await _token()}';
+  Future<DownloadRequest> backup() async {
+    final query = <String, String>{'ticket': await _downloadTicket()};
+    return DownloadRequest(url: '$_base/backup/download?${_encode(query)}');
   }
 
   /// One full-database backup file, sitting on the server.
-  Future<String> fullBackupDownload(String name) async {
-    return '$_base/backup/full/${Uri.encodeComponent(name)}/download'
-        '?token=${await _token()}';
+  Future<DownloadRequest> fullBackupDownload(String name) async {
+    final query = <String, String>{'ticket': await _downloadTicket()};
+    return DownloadRequest(
+      url: '$_base/backup/full/${Uri.encodeComponent(name)}/download'
+          '?${_encode(query)}',
+    );
   }
 
   String _encode(Map<String, String> query) => query.entries
@@ -237,17 +336,20 @@ class ImportController extends Notifier<ImportState> {
     state = ImportState(kind: kind);
   }
 
-  void chooseMode(ImportMode mode) => state = state.copyWith(mode: mode);
+  void chooseMode(ImportMode mode) {
+    // The dry run counted what would happen in the old mode; those numbers
+    // cannot vouch for the button that writes in the new one.
+    state = state.copyWith(mode: mode, clearReport: true);
+  }
 
   void chooseFile(PickedFile? file) => state = state.copyWith(
     file: file,
-    report: null,
-    failure: null,
     clearFile: file == null,
+    clearReport: true,
   );
 
   void beginning() =>
-      state = state.copyWith(busy: true, failure: null, report: null);
+      state = state.copyWith(busy: true, failure: null, clearReport: true);
 
   void succeeded(ImportReport report) =>
       state = state.copyWith(busy: false, report: report, failure: null);
@@ -292,6 +394,7 @@ class ImportState {
     bool clearFile = false,
     bool? busy,
     ImportReport? report,
+    bool clearReport = false,
     String? failure,
   }) {
     return ImportState(
@@ -299,7 +402,9 @@ class ImportState {
       mode: mode ?? this.mode,
       file: clearFile ? null : (file ?? this.file),
       busy: busy ?? this.busy,
-      report: report ?? this.report,
+      // A report can be replaced, and it can be thrown away - but it must
+      // never survive a change that makes its numbers meaningless.
+      report: clearReport ? null : (report ?? this.report),
       failure: failure,
     );
   }

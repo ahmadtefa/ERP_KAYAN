@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/platform/browser_actions.dart';
+import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../providers/company_providers.dart';
@@ -73,6 +75,21 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
   }
 
   @override
+  void didUpdateWidget(_ProfileCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.profile != oldWidget.profile && !_saving) {
+      final p = widget.profile;
+      _code.text = '${p['code'] ?? ''}';
+      _nameAr.text = '${p['nameAr'] ?? ''}';
+      _nameEn.text = '${p['nameEn'] ?? ''}';
+      _taxId.text = '${p['taxId'] ?? ''}';
+      _phone.text = '${p['phone'] ?? ''}';
+      _email.text = '${p['email'] ?? ''}';
+      _address.text = '${p['address'] ?? ''}';
+    }
+  }
+
+  @override
   void dispose() {
     _code.dispose();
     _nameAr.dispose();
@@ -100,6 +117,9 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
     if (!mounted) return;
     setState(() => _saving = false);
     final l10n = context.l10n;
+    if (error == null) {
+      ref.invalidate(companyProfileProvider);
+    }
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(error ?? l10n.profileSaved)));
   }
@@ -113,7 +133,10 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _LogoRow(hasLogo: widget.profile['hasLogo'] == true),
+            _LogoRow(
+              hasLogo: widget.profile['hasLogo'] == true,
+              logoBase64: widget.profile['logoBase64'] as String?,
+            ),
             const SizedBox(height: 16),
             Row(
               children: [
@@ -187,9 +210,10 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
 }
 
 class _LogoRow extends ConsumerStatefulWidget {
-  const _LogoRow({required this.hasLogo});
+  const _LogoRow({required this.hasLogo, this.logoBase64});
 
   final bool hasLogo;
+  final String? logoBase64;
 
   @override
   ConsumerState<_LogoRow> createState() => _LogoRowState();
@@ -200,45 +224,46 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
 
   Future<void> _upload() async {
     final l10n = context.l10n;
-    final picked = await pickFile(
-      extensions: ['.png', '.jpg', '.jpeg', '.webp'],
-    );
+    PickedFile? picked;
+    try {
+      picked = await pickFile(
+        extensions: ['.png', '.jpg', '.jpeg', '.webp'],
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$error')));
+      return;
+    }
     if (picked == null || !mounted) return;
     setState(() => _busy = true);
-    String message;
-    try {
-      await ref.read(companyDataSourceProvider).uploadLogo(picked);
-      message = l10n.logoUpdated;
-    } catch (error) {
-      message = '$error';
-    }
+    final error = await ref
+        .read(companyProfileProvider.notifier)
+        .uploadLogo(picked);
     if (!mounted) return;
     setState(() => _busy = false);
-    ref.read(companyProfileProvider.notifier).refresh();
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(error ?? l10n.logoUpdated)),
+    );
   }
 
   Future<void> _remove() async {
     final l10n = context.l10n;
     setState(() => _busy = true);
-    String message;
-    try {
-      await ref.read(companyDataSourceProvider).removeLogo();
-      message = l10n.logoRemoved;
-    } catch (error) {
-      message = '$error';
-    }
+    final error =
+        await ref.read(companyProfileProvider.notifier).removeLogo();
     if (!mounted) return;
     setState(() => _busy = false);
-    ref.read(companyProfileProvider.notifier).refresh();
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(error ?? l10n.logoRemoved)),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final hasImage =
+        widget.logoBase64 != null && widget.logoBase64!.trim().isNotEmpty;
     return Row(
       children: [
         CircleAvatar(
@@ -246,9 +271,23 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
           backgroundColor: Theme.of(context)
               .colorScheme
               .surfaceContainerHighest,
-          child: widget.hasLogo
-              ? const Icon(Icons.business, size: 28)
-              : const Icon(Icons.business_outlined, size: 28),
+          child: hasImage
+              ? ClipOval(
+                  child: Image.memory(
+                    base64Decode(widget.logoBase64!),
+                    width: 56,
+                    height: 56,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const Icon(
+                      Icons.business,
+                      size: 28,
+                    ),
+                  ),
+                )
+              : Icon(
+                  widget.hasLogo ? Icons.business : Icons.business_outlined,
+                  size: 28,
+                ),
         ),
         const SizedBox(width: 12),
         Expanded(

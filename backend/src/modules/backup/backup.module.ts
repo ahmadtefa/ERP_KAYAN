@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 
 import { AuditModule } from '../../common/audit/audit.module';
 import { BackupController } from './backup.controller';
+import { BackupScheduleController } from './backup-schedule.controller';
+import { BackupScheduleService } from './backup-schedule.service';
 import { BackupService } from './backup.service';
 import { FullBackupController } from './full-backup.controller';
 import { FullBackupService } from './full-backup.service';
@@ -13,8 +15,8 @@ import { FullBackupService } from './full-backup.service';
 /// (everything on this installation, for disaster recovery).
 @Module({
   imports: [AuditModule],
-  controllers: [BackupController, FullBackupController],
-  providers: [BackupService, FullBackupService],
-  exports: [BackupService, FullBackupService],
+  controllers: [BackupController, FullBackupController, BackupScheduleController],
+  providers: [BackupService, FullBackupService, BackupScheduleService],
+  exports: [BackupService, FullBackupService, BackupScheduleService],
 })
 export class BackupModule {}

@@ -36,7 +36,7 @@ export class ReportsService {
    * The totals are returned so the caller can see that for themselves rather
    * than taking it on trust.
    */
-    async trialBalance(
+  async trialBalance(
     companyId: string,
     query: { from?: string; to?: string; branchId?: string },
   ) {
@@ -44,9 +44,9 @@ export class ReportsService {
     const branchFilter = query.branchId ? Prisma.sql`AND e."branchId" = ${query.branchId}::uuid` : Prisma.sql``;
 
     const accounts = await this.prisma.account.findMany({
-      where: { companyId, deletedAt: null },
+      where: { companyId, deletedAt: null, isPostable: true },
       orderBy: { code: 'asc' },
-      select: { id: true, parentId: true, isPostable: true, code: true, nameEn: true, nameAr: true, type: true },
+      select: { id: true, code: true, nameEn: true, nameAr: true, type: true },
     });
 
     const opening = await this.prisma.$queryRaw<
@@ -87,42 +87,6 @@ export class ReportsService {
       ]),
     );
 
-    // Rollup from bottom to top
-    // Find leaves and work our way up
-    const childrenMap = new Map<string, string[]>();
-    for (const a of accounts) {
-      if (a.parentId) {
-        if (!childrenMap.has(a.parentId)) childrenMap.set(a.parentId, []);
-        childrenMap.get(a.parentId)!.push(a.id);
-      }
-    }
-
-    // recursive function to rollup
-    const computeTotals = (id: string) => {
-      let open = openingById.get(id) ?? new Prisma.Decimal(0);
-      let deb = movementById.get(id)?.debit ?? new Prisma.Decimal(0);
-      let cred = movementById.get(id)?.credit ?? new Prisma.Decimal(0);
-
-      const children = childrenMap.get(id) || [];
-      for (const childId of children) {
-        const childTotals = computeTotals(childId);
-        open = open.plus(childTotals.open);
-        deb = deb.plus(childTotals.deb);
-        cred = cred.plus(childTotals.cred);
-      }
-
-      openingById.set(id, open);
-      movementById.set(id, { debit: deb, credit: cred });
-      return { open, deb, cred };
-    };
-
-    // roots
-    for (const a of accounts) {
-      if (!a.parentId) {
-        computeTotals(a.id);
-      }
-    }
-
     const rows = accounts
       .map((a) => {
         const open = openingById.get(a.id) ?? new Prisma.Decimal(0);
@@ -131,20 +95,8 @@ export class ReportsService {
           credit: new Prisma.Decimal(0),
         };
         const closing = open.plus(mv.debit).minus(mv.credit);
-        
-        let depth = 0;
-        let curr = a;
-        while(curr.parentId) {
-          depth++;
-          curr = accounts.find(acc => acc.id === curr.parentId) || curr;
-          if (curr.id === a.id) break; // cycle
-        }
-        
         return {
           accountId: a.id,
-          parentId: a.parentId,
-          isPostable: a.isPostable,
-          depth,
           code: a.code,
           nameEn: a.nameEn,
           nameAr: a.nameAr,
@@ -155,49 +107,27 @@ export class ReportsService {
           closing: closing.toFixed(MONEY_SCALE),
         };
       })
+      // An account with nothing in it and nothing carried forward is noise.
       .filter(
         (r) =>
-          !r.isPostable || // Always show parent accounts to maintain structure if they have children shown, but maybe filter out empty groups?
           !new Prisma.Decimal(r.opening).isZero() ||
           !new Prisma.Decimal(r.debit).isZero() ||
           !new Prisma.Decimal(r.credit).isZero(),
       );
 
-    // Remove empty groups (parents with no postable children that have balances)
-    const validRows = new Set<string>();
-    for (const r of rows) {
-      if (r.isPostable) validRows.add(r.accountId);
-    }
-    let added = true;
-    while(added) {
-      added = false;
-      for (const r of rows) {
-        if (!r.isPostable && !validRows.has(r.accountId)) {
-          // check if any of its children is valid
-          const hasValidChild = rows.some(c => c.parentId === r.accountId && validRows.has(c.accountId));
-          if (hasValidChild) {
-            validRows.add(r.accountId);
-            added = true;
-          }
-        }
-      }
-    }
-
-    const finalRows = rows.filter(r => validRows.has(r.accountId)).sort((a,b) => a.code.localeCompare(b.code));
-
-    const totalDebit = finalRows.filter(r => r.isPostable).reduce(
+    const totalDebit = rows.reduce(
       (s, r) => s.plus(r.debit),
       new Prisma.Decimal(0),
     );
-    const totalCredit = finalRows.filter(r => r.isPostable).reduce(
+    const totalCredit = rows.reduce(
       (s, r) => s.plus(r.credit),
       new Prisma.Decimal(0),
     );
-    const totalClosingDebit = finalRows.filter(r => r.isPostable).reduce(
+    const totalClosingDebit = rows.reduce(
       (s, r) => s.plus(new Prisma.Decimal(r.closing).greaterThan(0) ? r.closing : 0),
       new Prisma.Decimal(0),
     );
-    const totalClosingCredit = finalRows.filter(r => r.isPostable).reduce(
+    const totalClosingCredit = rows.reduce(
       (s, r) => s.plus(new Prisma.Decimal(r.closing).lessThan(0) ? new Prisma.Decimal(r.closing).negated() : 0),
       new Prisma.Decimal(0),
     );
@@ -205,18 +135,21 @@ export class ReportsService {
     return {
       from: from.toISOString().slice(0, 10),
       to: to.toISOString().slice(0, 10),
-      rows: finalRows,
+      rows,
       totals: {
         debit: totalDebit.toFixed(MONEY_SCALE),
         credit: totalCredit.toFixed(MONEY_SCALE),
         closingDebit: totalClosingDebit.toFixed(MONEY_SCALE),
         closingCredit: totalClosingCredit.toFixed(MONEY_SCALE),
+        // Zero here means the ledger balances. Anything else is a bug worth
+        // investigating, not a rounding artefact.
         difference: totalClosingDebit.minus(totalClosingCredit).toFixed(MONEY_SCALE),
       },
     };
   }
 
-    async profitAndLoss(
+  /** Profit and loss for the period. Revenue less expenses. */
+  async profitAndLoss(
     companyId: string,
     query: { from?: string; to?: string; branchId?: string },
   ) {
@@ -238,8 +171,8 @@ export class ReportsService {
         amount: new Prisma.Decimal(r.debit).minus(r.credit).toFixed(MONEY_SCALE),
       }));
 
-    const totalRevenue = revenue.filter(r => r.isPostable).reduce((s, r) => s.plus(r.amount), new Prisma.Decimal(0));
-    const totalExpenses = expenses.filter(r => r.isPostable).reduce((s, r) => s.plus(r.amount), new Prisma.Decimal(0));
+    const totalRevenue = revenue.reduce((s, r) => s.plus(r.amount), new Prisma.Decimal(0));
+    const totalExpenses = expenses.reduce((s, r) => s.plus(r.amount), new Prisma.Decimal(0));
 
     return {
       from: tb.from,
@@ -254,6 +187,12 @@ export class ReportsService {
     };
   }
 
+  /**
+   * What each customer still owes, from posted invoices.
+   *
+   * This is the document view, not the ledger view: it answers "which invoices
+   * are unpaid", which is what a collections call needs.
+   */
   async customerBalances(companyId: string, query: { asOf?: string | null }) {
     const asOf = query.asOf ? new Date(query.asOf) : new Date();
 
@@ -416,7 +355,16 @@ export class ReportsService {
       },
       include: {
         entry: {
-          select: { entryNumber: true, entryDate: true, description: true, status: true },
+          select: {
+            entryNumber: true,
+            entryDate: true,
+            description: true,
+            status: true,
+            sourceType: true,
+            sourceId: true,
+            sourceNumber: true,
+            reversalOfId: true,
+          },
         },
       },
       orderBy: [{ entry: { entryDate: 'asc' } }, { entry: { entryNumber: 'asc' } }],
@@ -433,6 +381,15 @@ export class ReportsService {
         debit: l.debit.toFixed(MONEY_SCALE),
         credit: l.credit.toFixed(MONEY_SCALE),
         runningBalance: running.toFixed(MONEY_SCALE),
+        /// Which document this line came from, so the reader can open it.
+        source: l.entry.sourceType
+          ? {
+              type: l.entry.sourceType,
+              id: l.entry.sourceId,
+              number: l.entry.sourceNumber,
+            }
+          : null,
+        isReversal: Boolean(l.entry.reversalOfId),
       };
     });
 

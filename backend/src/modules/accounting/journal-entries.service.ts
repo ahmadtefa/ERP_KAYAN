@@ -7,6 +7,7 @@ import { JournalStatus, Prisma } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { accountName } from '../../common/localization/account-name';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { DocumentNumberService } from './document-number.service';
 import { CreateJournalEntryDto, JournalLineDto } from './dto/create-journal-entry.dto';
 import { FiscalPeriodsService } from './fiscal-periods.service';
@@ -39,6 +40,7 @@ export class JournalEntriesService {
     private readonly numbers: DocumentNumberService,
     private readonly audit: AuditService,
     private readonly periods: FiscalPeriodsService,
+    private readonly settings: CompanySettingsService,
   ) {}
 
   async findAll(companyId: string, page = 1, pageSize = 50) {
@@ -95,6 +97,7 @@ export class JournalEntriesService {
         'The signed-in user is not assigned to a branch',
       );
     }
+
     const lines = dto.lines.map((l) => this.normaliseLine(l));
 
     const totalDebit = lines.reduce(
@@ -204,30 +207,43 @@ export class JournalEntriesService {
       include: { lines: true },
     });
     if (!entry) throw new NotFoundException('Journal entry not found');
-    if (entry.status !== JournalStatus.DRAFT) {
+    if (entry.status !== JournalStatus.DRAFT && entry.status !== JournalStatus.APPROVED) {
       throw new BadRequestException(
-        `Only draft entries can be posted (current status: ${entry.status})`,
+        `Only a draft or an approved entry can be posted (current status: ${entry.status})`,
       );
+    }
+
+    const policy = await this.settings.get(companyId);
+
+    // A company that wants its manual entries reviewed says so once, in its
+    // settings, and the rule is enforced here - not by the screen hiding a
+    // button. A draft can only reach the ledger through an approval.
+    if (entry.status === JournalStatus.DRAFT && policy.approvalRequiredForJournal) {
+      throw new BadRequestException(
+        'This company requires manual journal entries to be approved before posting. Submit the entry for approval first.',
+      );
+    }
+
+    // Separation of duties: whoever wrote an entry does not also approve or
+    // post it. Skipped for a super administrator, who is the escape hatch a
+    // small company needs when the accountant is on holiday.
+    if (policy.segregationOfDuties && !entry.reversalOfId && !(await this.isSuperAdmin(userId))) {
+      if (entry.status === JournalStatus.APPROVED && entry.approvedBy === entry.createdBy) {
+        throw new BadRequestException(
+          'Separation of duties is on: the person who approved this entry may not post it, and the person who wrote it may not approve it.',
+        );
+      }
+      if (entry.createdBy === userId && entry.approvedBy !== userId) {
+        throw new BadRequestException(
+          'Separation of duties is on: the person who created this entry may not post it.',
+        );
+      }
     }
 
     if (!entry.totalDebit.equals(entry.totalCredit)) {
       throw new BadRequestException('Journal entry is not balanced');
     }
 
-    const postingAccountIds = [...new Set(entry.lines.map((line) => line.accountId))];
-    const validAccounts = await this.prisma.account.findMany({
-      where: {
-        id: { in: postingAccountIds },
-        companyId,
-        isActive: true,
-        isPostable: true,
-        deletedAt: null,
-      },
-      select: { id: true },
-    });
-    if (validAccounts.length !== postingAccountIds.length) {
-      throw new BadRequestException('One or more accounts are no longer active and postable');
-    }
     // A manual entry goes straight to the ledger, so it has to respect the
     // same closed-period rule the documents do. Without this check a closed
     // year could still be written to by hand.
@@ -265,6 +281,127 @@ export class JournalEntriesService {
     });
 
     return this.toResponse(updated);
+  }
+
+  /// Moves a draft to "waiting for approval".
+  ///
+  /// Asking for a review is not the same as posting: nothing reaches the
+  /// ledger, and the entry can still be cancelled or corrected by its author.
+  async submitForApproval(companyId: string, userId: string, id: string) {
+    const entry = await this.requireStatus(companyId, id, [JournalStatus.DRAFT]);
+    const updated = await this.prisma.journalEntry.update({
+      where: { id: entry.id },
+      data: {
+        status: JournalStatus.PENDING_APPROVAL,
+        submittedAt: new Date(),
+        submittedBy: userId,
+      },
+      include: { lines: LINES_WITH_ACCOUNT },
+    });
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'SUBMIT',
+      entity: 'journal_entries',
+      entityId: id,
+      before: { status: entry.status },
+      after: { status: updated.status },
+    });
+    return this.toResponse(updated);
+  }
+
+  /// Approves an entry that is waiting. The approver's identity is recorded on
+  /// the entry itself, so the report that asks "who approved this?" does not
+  /// have to search the audit trail.
+  async approve(companyId: string, userId: string, id: string) {
+    const entry = await this.requireStatus(companyId, id, [JournalStatus.PENDING_APPROVAL]);
+    const policy = await this.settings.get(companyId);
+
+    if (
+      policy.segregationOfDuties &&
+      entry.createdBy === userId &&
+      !(await this.isSuperAdmin(userId))
+    ) {
+      throw new BadRequestException(
+        'Separation of duties is on: an entry cannot be approved by the person who created it.',
+      );
+    }
+
+    const updated = await this.prisma.journalEntry.update({
+      where: { id: entry.id },
+      data: { status: JournalStatus.APPROVED, approvedAt: new Date(), approvedBy: userId },
+      include: { lines: LINES_WITH_ACCOUNT },
+    });
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'APPROVE',
+      entity: 'journal_entries',
+      entityId: id,
+      before: { status: entry.status },
+      after: { status: updated.status },
+    });
+    return this.toResponse(updated);
+  }
+
+  /// Cancels a draft, a submitted entry or an approved one.
+  ///
+  /// A posted entry is never cancelled: it is reversed, because the books must
+  /// show that something was posted and then taken back. A cancelled entry
+  /// keeps its number and its reason, and is excluded from every report.
+  async cancel(companyId: string, userId: string, id: string, reason?: string) {
+    const entry = await this.requireStatus(companyId, id, [
+      JournalStatus.DRAFT,
+      JournalStatus.PENDING_APPROVAL,
+      JournalStatus.APPROVED,
+    ]);
+
+    const updated = await this.prisma.journalEntry.update({
+      where: { id: entry.id },
+      data: {
+        status: JournalStatus.CANCELLED,
+        cancelledAt: new Date(),
+        cancelledBy: userId,
+        cancelReason: reason?.trim() || null,
+      },
+      include: { lines: LINES_WITH_ACCOUNT },
+    });
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'CANCEL',
+      entity: 'journal_entries',
+      entityId: id,
+      before: { status: entry.status },
+      after: { status: updated.status, reason: reason ?? null },
+    });
+    return this.toResponse(updated);
+  }
+
+  private async requireStatus(
+    companyId: string,
+    id: string,
+    allowed: JournalStatus[],
+  ): Promise<{ id: string; status: JournalStatus; createdBy: string | null; approvedBy: string | null }> {
+    const entry = await this.prisma.journalEntry.findFirst({
+      where: { id, companyId },
+      select: { id: true, status: true, createdBy: true, approvedBy: true },
+    });
+    if (!entry) throw new NotFoundException('Journal entry not found');
+    if (!allowed.includes(entry.status)) {
+      throw new BadRequestException(
+        `This action is not allowed while the entry is ${entry.status}. Allowed from: ${allowed.join(', ')}.`,
+      );
+    }
+    return entry;
+  }
+
+  private async isSuperAdmin(userId: string): Promise<boolean> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { isSuperAdmin: true },
+    });
+    return user?.isSuperAdmin ?? false;
   }
 
   /**

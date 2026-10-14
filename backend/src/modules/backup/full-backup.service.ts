@@ -39,8 +39,9 @@ import { PrismaService } from '../../common/prisma/prisma.service';
  *
  * Restoring is deliberately paranoid:
  *
- *  1. the file is checked before anything else (magic bytes, readable by
- *     `pg_restore --list`);
+ *  1. the file is checked before anything else (magic bytes, then a real
+ *     `pg_restore --list` so a truncated or foreign archive is refused before
+ *     it is allowed near the database);
  *  2. it is restored into a scratch database first — a restore that cannot
  *     complete never touches production;
  *  3. the current database is dumped to a safety file; if that fails, the
@@ -57,6 +58,12 @@ const CUSTOM_MAGIC = Buffer.from('PGDMP', 'latin1');
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*\.dump$/;
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
 
+/// How long a "the tools are not here" answer is remembered. Tools can be
+/// installed or provisioned while the program is running, so a negative
+/// answer is re-checked after this long instead of sticking for the lifetime
+/// of the process.
+const TOOL_CACHE_TTL_MS = 60_000;
+
 export interface FullBackupFile {
   name: string;
   sizeBytes: number;
@@ -72,14 +79,30 @@ export interface RestoreOptions {
   confirm: boolean;
 }
 
+export interface BackupVerification {
+  name: string;
+  sizeBytes: number;
+  /// How many objects `pg_restore --list` found inside the archive. Zero
+  /// means the archive is empty, which is never a usable backup.
+  entries: number;
+  verifiedAt: string;
+  tool: string;
+}
+
 @Injectable()
 export class FullBackupService {
   private readonly logger = new Logger(FullBackupService.name);
 
   /// Tool paths are found once and remembered: the search walks the disk.
-  private toolsCache: { pgDump: string | null; pgRestore: string | null } | null =
-    null;
-  private restoreInProgress = false;
+  private toolsCache:
+    | { pgDump: string | null; pgRestore: string | null; at: number }
+    | null = null;
+
+  /// Whether this installation may open a scratch database to rehearse a
+  /// restore in. Learned the first time a restore runs, and reported by
+  /// `capabilities()` so the screen can say which protection is in place.
+  private canCreateDatabase = true;
+  private lastCreateDatabaseFailure: string | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -121,10 +144,20 @@ export class FullBackupService {
       available,
       pgDump: tools.pgDump,
       pgRestore: tools.pgRestore,
-      version,
+      version: version?.trim() ?? null,
       serverVersion,
       warning,
       backupDirectory: this.backupDir(),
+      // Whether this installation may open a scratch database. Without it a
+      // restore can still be checked with `pg_restore --list`, but it cannot
+      // be rehearsed first, and the screen says which of the two it is.
+      canRehearseRestore: this.canCreateDatabase,
+      rehearsalNote: this.canCreateDatabase
+        ? null
+        : `A restore could not be rehearsed in a scratch database (${
+            this.lastCreateDatabaseFailure ?? 'the server refused'
+          }). Uploads are still checked with pg_restore --list and a safety ` +
+          'copy is taken first.',
       reason: available
         ? null
         : 'PostgreSQL command-line tools (pg_dump / pg_restore) were not found ' +
@@ -146,7 +179,13 @@ export class FullBackupService {
   }
 
   private findTools(): { pgDump: string | null; pgRestore: string | null } {
-    if (this.toolsCache) return this.toolsCache;
+    const now = Date.now();
+    // Remembered for a minute, not for the life of the process: on a machine
+    // where the tools are installed or provisioned while the program is open,
+    // the buttons start working by themselves.
+    if (this.toolsCache && now - this.toolsCache.at < TOOL_CACHE_TTL_MS) {
+      return this.toolsCache;
+    }
 
     const lookup = (name: string, envVar: string): string | null => {
       // An explicit choice wins over any guess.
@@ -172,7 +211,10 @@ export class FullBackupService {
       // Where a Windows or macOS PostgreSQL installer puts them. The version
       // folders are read from the disk rather than guessed.
       for (const folder of this.platformToolDirs()) {
-        const candidate = join(folder, name + (process.platform === 'win32' ? '.exe' : ''));
+        const candidate = join(
+          folder,
+          name + (process.platform === 'win32' ? '.exe' : ''),
+        );
         if (existsSync(candidate)) return candidate;
       }
       return null;
@@ -181,8 +223,15 @@ export class FullBackupService {
     this.toolsCache = {
       pgDump: lookup('pg_dump', 'KAYAN_PG_DUMP'),
       pgRestore: lookup('pg_restore', 'KAYAN_PG_RESTORE'),
+      at: now,
     };
     return this.toolsCache;
+  }
+
+  /// Forgets what was found, so the next question looks at the disk again.
+  /// Used after the program provisions its own copy of the tools.
+  forgetTools(): void {
+    this.toolsCache = null;
   }
 
   /// Folders the program itself owns: the copy that travels inside the
@@ -191,16 +240,25 @@ export class FullBackupService {
   private bundledToolDirs(): string[] {
     const dirs: string[] = [];
     // backend\pg — next to the running server, however it was started.
+    dirs.push(join(process.cwd(), 'pg', 'bin'));
     dirs.push(join(process.cwd(), 'pg'));
+    dirs.push(join(process.cwd(), 'backend', 'pg', 'bin'));
     dirs.push(join(process.cwd(), 'backend', 'pg'));
     // From dist/src/modules/backup (packaged) and src/modules/backup (source):
     // both resolve to the backend root, which is where pg\ lives.
+    dirs.push(join(__dirname, '..', '..', '..', '..', 'pg', 'bin'));
     dirs.push(join(__dirname, '..', '..', '..', '..', 'pg'));
     dirs.push(join(__dirname, '..', '..', '..', 'pg'));
     if (process.platform === 'win32') {
       const localAppData =
         process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local');
       dirs.push(join(localAppData, 'kayan-tools', 'pgsql', 'bin'));
+      // Production PostgreSQL lives under ProgramData so standard Windows
+      // users can run the backup/restore screens without a separate install.
+      const programData = process.env.ProgramData ?? process.env.PROGRAMDATA;
+      if (programData) {
+        dirs.push(join(programData, 'KAYAN-ERP', 'pgsql', 'bin'));
+      }
     }
     return dirs;
   }
@@ -230,7 +288,12 @@ export class FullBackupService {
         '/usr/local/opt/postgresql@16/bin',
       );
     } else {
-      dirs.push('/usr/lib/postgresql/16/bin', '/usr/lib/postgresql/15/bin', '/usr/bin');
+      dirs.push(
+        '/usr/lib/postgresql/16/bin',
+        '/usr/lib/postgresql/15/bin',
+        '/usr/lib/postgresql/14/bin',
+        '/usr/bin',
+      );
     }
     return dirs;
   }
@@ -243,7 +306,7 @@ export class FullBackupService {
    * is worse than no dump at all.
    */
   async createFull(
-    userId: string,
+    userId: string | null,
   ): Promise<{ file: FullBackupFile; durationMs: number }> {
     return this.dump('full', userId);
   }
@@ -259,6 +322,7 @@ export class FullBackupService {
   ): Promise<{ file: FullBackupFile; durationMs: number }> {
     const tools = this.requireTools();
     const dir = await this.ensureBackupDir();
+    const database = this.requireDatabase();
     const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
     const name = `kayan-${kind}-${stamp}.dump`;
     const path = join(dir, name);
@@ -276,7 +340,12 @@ export class FullBackupService {
       ]);
     } catch (error) {
       await unlink(path).catch(() => {});
-      this.logger.error(`pg_dump failed: ${(error as Error).message}`);
+      // The command line is not logged: it carries the database name, and the
+      // password travels in the child's environment. Only what pg_dump itself
+      // said, and the shape of the command, reach the log.
+      this.logger.error(
+        `pg_dump of database "${database}" failed: ${(error as Error).message}`,
+      );
       throw new ServiceUnavailableException(
         'The backup could not be created. The database tools on this machine ' +
           'reported a problem; the details are in the server log. ' +
@@ -303,7 +372,17 @@ export class FullBackupService {
     const dir = this.backupDir();
     if (!existsSync(dir)) return [];
 
-    const entries = await readdir(dir);
+    let entries: string[];
+    try {
+      entries = await readdir(dir);
+    } catch (error) {
+      // A folder the program cannot read is a machine problem with a name.
+      throw new ServiceUnavailableException(
+        `The backup folder "${dir}" could not be read ` +
+          `(${(error as Error).message}).`,
+      );
+    }
+
     const files: FullBackupFile[] = [];
     for (const name of entries) {
       if (!name.endsWith('.dump')) continue;
@@ -329,15 +408,137 @@ export class FullBackupService {
     if (!existsSync(path)) {
       throw new NotFoundException(`No backup file named "${name}" on this server`);
     }
-    return { data: await readFile(path), name };
+    try {
+      return { data: await readFile(path), name };
+    } catch (error) {
+      throw new ServiceUnavailableException(
+        `The backup file "${name}" could not be read ` +
+          `(${(error as Error).message}). The database was not changed.`,
+      );
+    }
   }
 
-  async remove(name: string, userId: string): Promise<void> {
+  /**
+   * Reads a backup back and proves it is a usable archive, not merely a file
+   * with the right first five bytes: `pg_restore --list` walks the whole
+   * table of contents, so a truncated or foreign file is caught here rather
+   * than halfway through a restore.
+   *
+   * Used before a destructive reset, where "the backup exists" is not good
+   * enough — it has to be a backup that can be put back.
+   */
+  async verify(name: string): Promise<BackupVerification> {
+    const tools = this.requireTools();
+    const path = this.safePath(name);
+    const info = await stat(path).catch(() => null);
+    if (!info || !info.isFile() || info.size === 0) {
+      throw new NotFoundException(
+        `The backup file "${name}" is not on this server, or it is empty.`,
+      );
+    }
+
+    const head = Buffer.alloc(5);
+    let handle;
+    try {
+      handle = await open(path, 'r');
+      await handle.read(head, 0, 5, 0);
+    } catch (error) {
+      throw new ServiceUnavailableException(
+        `The backup file "${name}" could not be read back for checking ` +
+          `(${(error as Error).message}). Nothing was changed.`,
+      );
+    } finally {
+      await handle?.close();
+    }
+    if (!head.equals(CUSTOM_MAGIC)) {
+      throw new ServiceUnavailableException(
+        `The backup file "${name}" is not a PostgreSQL archive. ` +
+          'Nothing was changed.',
+      );
+    }
+
+    let listing: string;
+    try {
+      listing = await runCapture(
+        tools.pgRestore as string,
+        ['--list', path],
+        120_000,
+      );
+    } catch (error) {
+      throw new ServiceUnavailableException(
+        `The backup file "${name}" could not be read by pg_restore ` +
+          `(${(error as Error).message}). It may be damaged, or written by a ` +
+          'newer PostgreSQL than this machine has. Nothing was changed.',
+      );
+    }
+
+    // One line per object in the archive, plus a handful of comment lines a
+    // reader can skip. Comments are counted out so an empty archive cannot
+    // pass as a real one.
+    const entries = listing
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith(';')).length;
+
+    if (entries === 0) {
+      throw new ServiceUnavailableException(
+        `The backup file "${name}" holds no database objects. ` +
+          'Nothing was changed.',
+      );
+    }
+
+    return {
+      name,
+      sizeBytes: info.size,
+      entries,
+      verifiedAt: new Date().toISOString(),
+      tool: tools.pgRestore as string,
+    };
+  }
+
+  /// The same check, for bytes that were uploaded rather than read from disk.
+  private async verifyUploaded(
+    buffer: Buffer,
+    label: string,
+    pgRestore: string,
+    stagingPath: string,
+  ): Promise<number> {
+    let listing: string;
+    try {
+      listing = await runCapture(pgRestore, ['--list', stagingPath], 120_000);
+    } catch (error) {
+      throw new BadRequestException(
+        `The file "${label}" is not a PostgreSQL archive pg_restore can read ` +
+          `(${(error as Error).message}). It may be damaged, or made by a ` +
+          'different PostgreSQL version. The current data was not touched.',
+      );
+    }
+    const entries = listing
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith(';')).length;
+    if (entries === 0) {
+      throw new BadRequestException(
+        `The file "${label}" holds no database objects, so it cannot be ` +
+          'restored. The current data was not touched.',
+      );
+    }
+    return entries;
+  }
+
+  async remove(name: string, userId: string | null): Promise<void> {
     const path = this.safePath(name);
     if (!existsSync(path)) {
       throw new NotFoundException(`No backup file named "${name}" on this server`);
     }
-    await unlink(path);
+    try {
+      await unlink(path);
+    } catch (error) {
+      throw new ServiceUnavailableException(
+        `The backup file "${name}" could not be deleted ` +
+          `(${(error as Error).message}). Nothing else was changed.`,
+      );
+    }
     await this.audit.record({
       action: 'DELETE',
       entity: 'backup_full',
@@ -354,27 +555,20 @@ export class FullBackupService {
    * before production data is touched — every step of it is deliberate.
    */
   async restore(options: RestoreOptions, userId: string) {
-    if (this.restoreInProgress) {
-      throw new ServiceUnavailableException(
-        'A full database restore is already in progress. Wait for it to finish before starting another operation.',
-      );
-    }
-
-    // Lock before even validating/staging the upload: otherwise two requests
-    // can both pass preflight and race to replace the same database.
-    this.restoreInProgress = true;
-    try {
-      return await this.restoreOnce(options, userId);
-    } finally {
-      this.restoreInProgress = false;
-    }
-  }
-
-  private async restoreOnce(options: RestoreOptions, userId: string) {
     if (!options.confirm) {
       throw new BadRequestException(
         'A full restore replaces the whole database. Send confirm=true to say ' +
           'you understand that.',
+      );
+    }
+
+    // Two restores at once would each take a safety copy of the other's
+    // half-written database. The switch is the same one that blocks writes
+    // for the duration, so it is already the right question to ask.
+    if (this.maintenance.isActive) {
+      throw new ServiceUnavailableException(
+        'A restore is already running. Wait for it to finish before starting ' +
+          'another one.',
       );
     }
 
@@ -401,36 +595,74 @@ export class FullBackupService {
 
     const dir = await this.ensureBackupDir();
     const staging = join(dir, `.restore-staging-${Date.now()}.dump`);
-    await writeFile(staging, buffer);
-    let keepMaintenanceActive = false;
+    try {
+      await writeFile(staging, buffer);
+    } catch (error) {
+      throw new ServiceUnavailableException(
+        `The upload could not be written to "${dir}" ` +
+          `(${(error as Error).message}). Set KAYAN_BACKUP_DIR to a folder ` +
+          'this program may write to, then try again.',
+      );
+    }
 
     try {
+      // 1b. Read the archive's table of contents. This is what catches a
+      //     truncated download or a file from a foreign database before any
+      //     database is involved at all.
+      const entries = await this.verifyUploaded(
+        buffer,
+        label,
+        tools.pgRestore as string,
+        staging,
+      );
+      this.logger.log(`Backup "${label}" lists ${entries} objects`);
+
       // 2. A scratch database: the file must restore cleanly somewhere before
-      //    it is allowed to restore here.
+      //    it is allowed to restore here. Where the installation is not
+      //    allowed to create one (a locked-down hosted database), the
+      //    `--list` check above plus the safety copy below are the protection,
+      //    and the reason is recorded rather than silently swallowed.
       const scratchName = `kayan_restore_check_${Date.now()}`;
-      this.logger.log(`Restoring into scratch database ${scratchName} first`);
-      await this.execSql(`CREATE DATABASE "${scratchName}"`);
+      let rehearsed = false;
       try {
-        await run(tools.pgRestore as string, [
-          '--exit-on-error',
-          '--no-owner',
-          '--no-privileges',
-          `--dbname=${scratchName}`,
-          ...this.connectionArgs(scratchName),
-          staging,
-        ]);
+        await this.execSql(`CREATE DATABASE "${scratchName}"`);
+        this.canCreateDatabase = true;
       } catch (error) {
-        throw new BadRequestException(
-          'This file did not restore cleanly into a test database, so the ' +
-            'current data was not touched. It may be damaged, or made by a ' +
-            'different PostgreSQL version. Details: ' +
-            String((error as Error).message ?? error).slice(0, 300),
+        this.canCreateDatabase = false;
+        this.lastCreateDatabaseFailure = String(
+          (error as Error).message ?? error,
         );
-      } finally {
-        // The scratch database has done its job; drop it on the way out.
-        await this.execSql(
-          `DROP DATABASE IF EXISTS "${scratchName}"`,
-        ).catch(() => {});
+        this.logger.warn(
+          'A restore could not be rehearsed in a scratch database: ' +
+            `${this.lastCreateDatabaseFailure}. Continuing: the archive was ` +
+            'checked with pg_restore --list and a safety copy is taken next.',
+        );
+      }
+
+      if (this.canCreateDatabase) {
+        this.logger.log(`Restoring into scratch database ${scratchName} first`);
+        try {
+          await run(tools.pgRestore as string, [
+            '--exit-on-error',
+            '--no-owner',
+            '--no-privileges',
+            `--dbname=${scratchName}`,
+            staging,
+          ]);
+          rehearsed = true;
+        } catch (error) {
+          throw new BadRequestException(
+            'This file did not restore cleanly into a test database, so the ' +
+              'current data was not touched. It may be damaged, or made by a ' +
+              'different PostgreSQL version. Details: ' +
+              String((error as Error).message ?? error).slice(0, 300),
+          );
+        } finally {
+          // The scratch database has done its job; drop it on the way out.
+          await this.execSql(`DROP DATABASE IF EXISTS "${scratchName}"`).catch(
+            () => {},
+          );
+        }
       }
 
       // 3. The safety net. No safety copy, no restore.
@@ -443,9 +675,8 @@ export class FullBackupService {
       );
       let restored = false;
       try {
+        await this.cleanDatabaseSchema();
         await run(tools.pgRestore as string, [
-          '--clean',
-          '--if-exists',
           '--exit-on-error',
           '--no-owner',
           '--no-privileges',
@@ -456,15 +687,11 @@ export class FullBackupService {
       } catch (error) {
         this.logger.error(`pg_restore failed: ${(error as Error).message}`);
         // The database may be half-replaced. Put the safety copy back.
-        const recovered = await this.recoverFrom(safety.name, tools.pgRestore as string);
-        if (!recovered) keepMaintenanceActive = true;
-        const recoveryStatus = recovered
-          ? `The safety backup (${safety.name}) was restored automatically.`
-          : `Automatic recovery from ${safety.name} also failed. The system remains in maintenance mode; restore manually from the backup folder.`;
+        await this.recoverFrom(safety.name, tools.pgRestore as string);
         throw new ServiceUnavailableException(
-          'The restore failed part way through. ' +
-            recoveryStatus +
-            ` Details: ${String((error as Error).message ?? error).slice(0, 300)}`,
+          'The restore failed part way through. The safety backup taken just ' +
+            `before (${safety.name}) was restored back automatically. ` +
+            `Details: ${String((error as Error).message ?? error).slice(0, 300)}`,
         );
       }
 
@@ -473,16 +700,11 @@ export class FullBackupService {
         const check = await this.postRestoreCheck();
         if (!check.ok) {
           this.logger.error(`Post-restore check failed: ${check.detail}`);
-          const recovered = await this.recoverFrom(safety.name, tools.pgRestore as string);
-          if (!recovered) keepMaintenanceActive = true;
-          const recoveryStatus = recovered
-            ? 'The safety backup was restored automatically.'
-            : 'Automatic recovery also failed. The system remains in maintenance mode; restore manually from the backup folder.';
+          await this.recoverFrom(safety.name, tools.pgRestore as string);
           throw new ServiceUnavailableException(
             'The restore finished but the data did not pass the checks that ' +
-              'follow one. ' +
-              recoveryStatus +
-              ` Details: ${check.detail}`,
+              'follow one. The safety backup was restored back automatically. ' +
+              `Details: ${check.detail}`,
           );
         }
       }
@@ -494,6 +716,7 @@ export class FullBackupService {
         after: {
           source: label,
           safetyBackup: safety.name,
+          rehearsedInScratchDatabase: rehearsed,
           postRestoreCheck: 'passed',
         },
         userId,
@@ -504,12 +727,11 @@ export class FullBackupService {
         source: label,
         safetyBackup: safety.name,
         checked: true,
+        rehearsed,
       };
     } finally {
       await unlink(staging).catch(() => {});
-      // If automatic recovery also failed, keep writes blocked. Ending
-      // maintenance here would expose a potentially half-restored database.
-      if (!keepMaintenanceActive) this.maintenance.end();
+      this.maintenance.end();
     }
   }
 
@@ -518,13 +740,12 @@ export class FullBackupService {
    * program stays in maintenance mode — a database nobody can trust must not
    * pretend to be open for business.
    */
-  private async recoverFrom(name: string, pgRestore: string): Promise<boolean> {
+  private async recoverFrom(name: string, pgRestore: string): Promise<void> {
     this.logger.warn(`Recovering from safety backup ${name}`);
     try {
       const path = this.safePath(name);
+      await this.cleanDatabaseSchema();
       await run(pgRestore, [
-        '--clean',
-        '--if-exists',
         '--exit-on-error',
         '--no-owner',
         '--no-privileges',
@@ -534,7 +755,6 @@ export class FullBackupService {
       const check = await this.postRestoreCheck();
       if (!check.ok) throw new Error(check.detail);
       this.maintenance.end();
-      return true;
     } catch (error) {
       this.maintenance.begin(
         'ATTENTION: a database restore failed and the automatic recovery ' +
@@ -544,7 +764,6 @@ export class FullBackupService {
       this.logger.error(
         `Recovery from ${name} failed: ${(error as Error).message}`,
       );
-      return false;
     }
   }
 
@@ -610,16 +829,61 @@ export class FullBackupService {
     return tools;
   }
 
-  private backupDir(): string {
+  /**
+   * The database address, read once and checked.
+   *
+   * A missing or unreadable `DATABASE_URL` used to surface as a `TypeError`
+   * from `new URL(...)`, which the error filter could only report as
+   * "Unexpected server error" — the single least helpful thing a backup
+   * button can say. It is asked here, where the answer can name the problem.
+   */
+  private requireDatabase(): string {
+    const raw = process.env.DATABASE_URL?.trim();
+    if (!raw) {
+      throw new ServiceUnavailableException(
+        'This server has no DATABASE_URL, so it does not know which database ' +
+          'to back up. Set DATABASE_URL and restart the server.',
+      );
+    }
+    try {
+      const url = new URL(raw);
+      const name = decodeURIComponent(url.pathname.replace(/^\//, ''));
+      if (!name) {
+        throw new Error('the address names no database');
+      }
+      return name;
+    } catch (error) {
+      throw new ServiceUnavailableException(
+        `The DATABASE_URL this server was started with cannot be read ` +
+          `(${(error as Error).message}). Fix it and restart the server. ` +
+          'Nothing was changed.',
+      );
+    }
+  }
+
+  public backupDir(): string {
     return (
-      process.env.KAYAN_BACKUP_DIR?.trim() ||
-      join(process.cwd(), 'backups')
+      process.env.KAYAN_BACKUP_DIR?.trim() || join(process.cwd(), 'backups')
     );
   }
 
-  private async ensureBackupDir(): Promise<string> {
+  public async ensureBackupDir(): Promise<string> {
     const dir = this.backupDir();
-    await mkdir(dir, { recursive: true });
+    try {
+      await mkdir(dir, { recursive: true });
+    } catch (error) {
+      // A folder the program cannot create (a read-only install directory,
+      // a missing drive, a permission) is a machine problem with an obvious
+      // fix worth naming - not a mystery "unexpected server error".
+      this.logger.error(
+        `Could not create the backup folder ${dir}: ${(error as Error).message}`,
+      );
+      throw new ServiceUnavailableException(
+        `Backups cannot be written to "${dir}" on this machine ` +
+          `(${(error as Error).message}). Set KAYAN_BACKUP_DIR to a folder ` +
+          'this program may write to, then try again.',
+      );
+    }
     return dir;
   }
 
@@ -651,11 +915,17 @@ export class FullBackupService {
       );
     }
     const head = Buffer.alloc(5);
-    const handle = await open(path, 'r');
+    let handle;
     try {
+      handle = await open(path, 'r');
       await handle.read(head, 0, 5, 0);
+    } catch (error) {
+      throw new ServiceUnavailableException(
+        `The backup file "${name}" could not be read back for checking ` +
+          `(${(error as Error).message}). The database was not changed.`,
+      );
     } finally {
-      await handle.close();
+      await handle?.close();
     }
     if (!head.equals(CUSTOM_MAGIC)) {
       await unlink(path).catch(() => {});
@@ -679,10 +949,17 @@ export class FullBackupService {
     if (buffer.length > MAX_UPLOAD_BYTES) {
       throw new BadRequestException('The backup file is larger than 2 GB.');
     }
+    const isJson = buffer[0] === 0x7b /* '{' */ || label.toLowerCase().endsWith('.json');
+    if (isJson) {
+      throw new BadRequestException(
+        `الملف "${label}" هو ملف نسخة احتياطية لبيانات الشركة بصيغة JSON، وليس ملف أرشيف PostgreSQL (.dump). ` +
+          'لاستعادة ملف JSON، يرجى استخدام قسم "استعادة بيانات الشركة" (/api/v1/backup/restore).',
+      );
+    }
     if (!buffer.subarray(0, 5).equals(CUSTOM_MAGIC)) {
       throw new BadRequestException(
-        `"${label}" is not a PostgreSQL backup made with pg_dump (Custom ` +
-          'format). Choose a .dump file created by the backup screen.',
+        `الملف "${label}" ليس ملف أرشيف PostgreSQL صالحاً بصيغة Custom Format (.dump). ` +
+          'يرجى اختيار ملف .dump صالح تم إنشاؤه عبر pg_dump.',
       );
     }
   }
@@ -693,15 +970,34 @@ export class FullBackupService {
    * line where every user of the machine could read it.
    */
   private connectionArgs(databaseOverride?: string): string[] {
-    const url = new URL(process.env.DATABASE_URL ?? '');
     if (databaseOverride) {
-      return [`--dbname=${databaseOverride}`];
+      return [`--dbname=${cleanDatabaseUrl(databaseOverride)}`];
     }
-    return [`--dbname=${decodeURIComponent(url.pathname.replace(/^\//, ''))}`];
+    return [`--dbname=${cleanDatabaseUrl(this.requireDatabase())}`];
   }
 
   private async execSql(sql: string): Promise<void> {
     await this.prisma.$executeRawUnsafe(sql);
+  }
+
+  private async cleanDatabaseSchema(): Promise<void> {
+    try {
+      await this.execSql('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
+    } catch (error) {
+      this.logger.warn(
+        `Could not drop public schema with CASCADE: ${(error as Error).message}`,
+      );
+    }
+  }
+}
+
+function cleanDatabaseUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    url.searchParams.delete('schema');
+    return url.toString();
+  } catch {
+    return raw.replace(/([?&])schema=[^&]*/, '$1').replace(/[?&]$/, '');
   }
 }
 
@@ -710,14 +1006,18 @@ export class FullBackupService {
 function connectionEnv(): NodeJS.ProcessEnv {
   const raw = process.env.DATABASE_URL;
   if (!raw) return {};
-  const url = new URL(raw);
-  return {
-    PGHOST: url.hostname,
-    PGPORT: url.port || '5432',
-    PGUSER: decodeURIComponent(url.username),
-    PGPASSWORD: decodeURIComponent(url.password),
-    PGDATABASE: decodeURIComponent(url.pathname.replace(/^\//, '')),
-  };
+  try {
+    const url = new URL(raw);
+    return {
+      PGHOST: url.hostname,
+      PGPORT: url.port || '5432',
+      PGUSER: decodeURIComponent(url.username),
+      PGPASSWORD: decodeURIComponent(url.password),
+      PGDATABASE: decodeURIComponent(url.pathname.replace(/^\//, '')).split('?')[0],
+    };
+  } catch {
+    return {};
+  }
 }
 
 /// Runs a command and resolves when it exits cleanly; rejects with the tool's
@@ -755,7 +1055,6 @@ function runCapture(
   });
 }
 
-/// The PATH lookup, without pulling in a dependency for one function.
 /// The leading version number of a "pg_dump (PostgreSQL) 17.7" line or of a
 /// "17.7" server version string.
 function majorOf(text: string | null | undefined): number | null {
@@ -764,6 +1063,7 @@ function majorOf(text: string | null | undefined): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/// The PATH lookup, without pulling in a dependency for one function.
 function which(name: string): string | null {
   const paths = (process.env.PATH ?? '').split(
     process.platform === 'win32' ? ';' : ':',

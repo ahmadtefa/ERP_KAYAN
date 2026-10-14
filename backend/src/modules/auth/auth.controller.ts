@@ -78,6 +78,7 @@ export class AuthController {
         roles,
         permissions,
         isActive: record.isActive,
+        isSuperAdmin: record.isSuperAdmin,
       },
     };
   }

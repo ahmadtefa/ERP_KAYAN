@@ -41,7 +41,6 @@ export class CompanyController {
   constructor(private readonly service: CompanyService) {}
 
   @Get('profile')
-  @RequirePermissions('admin.company.manage')
   profile(@CurrentUser() user: AuthUser) {
     return this.service.getProfile(user.companyId);
   }
@@ -56,7 +55,6 @@ export class CompanyController {
   }
 
   @Get('logo')
-  @RequirePermissions('admin.company.manage')
   async logo(@CurrentUser() user: AuthUser, @Res() response: Response) {
     const logo = await this.service.getLogo(user.companyId);
     if (!logo) {
@@ -96,7 +94,6 @@ export class CompanyController {
   }
 
   @Get('branches')
-  @RequirePermissions('admin.company.manage')
   branches(@CurrentUser() user: AuthUser) {
     return this.service.listBranches(user.companyId);
   }

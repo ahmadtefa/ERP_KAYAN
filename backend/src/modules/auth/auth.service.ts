@@ -21,6 +21,7 @@ export interface SessionUser {
   roles: string[];
   permissions: string[];
   isActive: boolean;
+  isSuperAdmin: boolean;
 }
 
 @Injectable()
@@ -275,6 +276,7 @@ export class AuthService {
       fullNameAr: string;
       companyId: string;
       isActive: boolean;
+      isSuperAdmin: boolean;
     },
     roles: string[],
     permissions: string[],
@@ -289,6 +291,7 @@ export class AuthService {
       roles,
       permissions,
       isActive: user.isActive,
+      isSuperAdmin: user.isSuperAdmin,
     };
   }
 }

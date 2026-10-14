@@ -237,6 +237,12 @@ export class ImportService {
     const workbook = new Workbook();
     workbook.creator = 'KAYAN ERP';
 
+    // Nothing but a header and one example row goes on the sheet that is
+    // uploaded. Notes used to sit under the example on the same sheet, which
+    // meant the file this screen hands out could not be uploaded back
+    // without being edited first - and the errors it produced looked like
+    // the screen was broken. They have their own sheet now; the importer
+    // reads the first one and ignores the rest.
     const sheet = workbook.addWorksheet('Import');
     const header = sheet.addRow(fields.map((field) => field.labelEn));
     header.font = { bold: true };
@@ -247,30 +253,41 @@ export class ImportService {
         fgColor: { argb: 'FFE8EEF7' },
       };
     });
-
-    // A second header row carries the Arabic label, so the person filling the
-    // sheet in can read it even if their Excel is in Arabic.
-    const arabic = sheet.addRow(fields.map((field) => field.labelAr));
-    arabic.font = { italic: true, size: 10, color: { argb: 'FF666666' } };
-
     sheet.addRow(fields.map((field) => field.example));
-    sheet.addRow([]);
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
 
+    // The same columns named in Arabic, so a sheet filled in from an Arabic
+    // Excel still matches, and the notes a person needs before they start.
+    const notes = workbook.addWorksheet('Instructions');
+    notes.columns = [{ width: 26 }, { width: 26 }, { width: 22 }, { width: 60 }];
+    notes.addRow(['English column', 'Arabic column', 'Required', 'Notes']).font = {
+      bold: true,
+    };
+    for (const field of fields) {
+      const detail = [
+        field.required ? 'required' : 'optional',
+        field.maxLength === undefined
+            ? null
+            : `up to ${field.maxLength} characters`,
+        field.decimal ? 'a number' : null,
+        field.boolean ? 'yes or no' : null,
+      ].filter(Boolean);
+      notes.addRow([
+        field.labelEn,
+        field.labelAr,
+        field.required ? 'Required' : 'Optional',
+        detail.join(', '),
+      ]);
+    }
+    notes.addRow([]);
     const { en, ar } = this.instructions(kind);
-    for (const line of en) {
-      const row = sheet.addRow([line]);
-      row.font = { size: 9, color: { argb: 'FF444444' } };
-    }
-    sheet.addRow([]);
-    for (const line of ar) {
-      const row = sheet.addRow([line]);
-      row.font = { size: 9, color: { argb: 'FF444444' } };
-    }
+    for (const line of en) notes.addRow([line]);
+    notes.addRow([]);
+    for (const line of ar) notes.addRow([line]);
 
     fields.forEach((field, index) => {
       sheet.getColumn(index + 1).width = Math.max(field.labelEn.length + 4, 14);
     });
-    sheet.views = [{ state: 'frozen', ySplit: 2 }];
 
     const buffer = await workbook.xlsx.writeBuffer();
     return Buffer.from(buffer);
@@ -330,6 +347,13 @@ export class ImportService {
     const byHeader = new Map<string, FieldSpec>();
     for (const field of fields) {
       byHeader.set(field.key, field);
+      // The names this program writes into its own template are the English
+      // and Arabic labels, so they have to be recognised here too. Without
+      // them a file downloaded from this screen came back half-understood:
+      // "Name (English)" and "Name (Arabic)" were reported as columns nobody
+      // knew, and the records were written without them.
+      byHeader.set(normaliseHeader(field.labelEn), field);
+      byHeader.set(normaliseHeader(field.labelAr), field);
       for (const alias of field.aliases ?? []) byHeader.set(alias, field);
     }
 
@@ -408,6 +432,22 @@ export class ImportService {
         }
 
         values[field.key] = field.boolean ? this.truthy(value) : value;
+      }
+
+      // A column the file does not carry at all leaves no value behind, and a
+      // blank cell in a column it does carry leaves an empty one. Both mean
+      // the record cannot be written, and a required field with nothing in it
+      // must be named rather than quietly defaulted.
+      if (rowCode) {
+        for (const field of fields) {
+          if (field.required && !values[field.key]) {
+            errors.push({
+              row: row.rowNumber,
+              column: field.labelEn,
+              message: `${field.labelEn} is required`,
+            });
+          }
+        }
       }
 
       if (errors.some((error) => error.row === row.rowNumber)) continue;

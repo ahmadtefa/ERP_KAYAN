@@ -10,6 +10,9 @@ export interface PostingLine {
   debit?: Prisma.Decimal | string;
   credit?: Prisma.Decimal | string;
   description?: string;
+  /// The analytical dimension, when the document knows one. An invoice line
+  /// that names a cost center carries it through to the ledger.
+  costCenterId?: string | null;
 }
 
 export interface PostingRequest {
@@ -20,9 +23,25 @@ export interface PostingRequest {
   description: string;
   lines: PostingLine[];
   /** Where the entry came from, kept for tracing an entry back to its document. */
-  sourceType: 'SALES_INVOICE' | 'PURCHASE_INVOICE';
+  sourceType:
+    | 'SALES_INVOICE'
+    | 'PURCHASE_INVOICE'
+    | 'SALES_RETURN'
+    | 'PURCHASE_RETURN'
+    | 'CASH_VOUCHER'
+    | 'CASH_TRANSFER'
+    | 'STOCK_DOCUMENT'
+    | 'OPENING_BALANCE'
+    | 'YEAR_END_CLOSE'
+    | 'MANUAL';
   sourceId: string;
   sourceNumber: string;
+  /// Overrides the description written on the entry. Defaults to the
+  /// document's own description plus its number in brackets, which is what
+  /// makes a ledger line traceable back to the document that caused it.
+  entryDescription?: string;
+  /// Overrides the period code used when a message has to name the period.
+  currency?: string;
 }
 
 /**
@@ -50,6 +69,7 @@ export class PostingService {
         debit: this.amount(l.debit),
         credit: this.amount(l.credit),
         description: l.description ?? null,
+        costCenterId: l.costCenterId ?? null,
       }))
       // A zero line carries no information and would only clutter the ledger.
       .filter((l) => !l.debit.isZero() || !l.credit.isZero());
@@ -121,13 +141,20 @@ export class PostingService {
         branchId: request.branchId,
         entryNumber,
         entryDate: request.entryDate,
-        description: `${request.description} [${request.sourceNumber}]`,
+        description:
+          request.entryDescription ?? `${request.description} [${request.sourceNumber}]`,
         status: JournalStatus.POSTED,
         totalDebit,
         totalCredit,
+        currency: request.currency ?? 'EGP',
         postedAt: new Date(),
         postedBy: request.userId,
         createdBy: request.userId,
+        // The document this entry came from, so a report can drill down into
+        // it instead of leaving the reader with a number and no explanation.
+        sourceType: request.sourceType,
+        sourceId: request.sourceId,
+        sourceNumber: request.sourceNumber,
         lines: {
           create: lines.map((l, index) => ({
             lineNumber: index + 1,
@@ -135,6 +162,7 @@ export class PostingService {
             debit: l.debit,
             credit: l.credit,
             description: l.description,
+            costCenterId: l.costCenterId,
           })),
         },
       },
@@ -142,6 +170,81 @@ export class PostingService {
     });
 
     return entry;
+  }
+
+  /**
+   * Writes the mirror entry that cancels a posted one.
+   *
+   * Nothing is ever edited or deleted: the original stays in the books and a
+   * second entry, with its own number, takes it back. That is the only way a
+   * reader of the ledger can see both what happened and that it was undone.
+   *
+   * Runs inside the caller's transaction so a document that reverses its
+   * accounting and its stock together cannot half-succeed.
+   */
+  async reverse(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    userId: string,
+    journalEntryId: string,
+    description: string,
+    entryDate: Date = new Date(),
+  ): Promise<{ id: string; entryNumber: string }> {
+    const original = await tx.journalEntry.findFirst({
+      where: { id: journalEntryId, companyId },
+      include: { lines: { orderBy: { lineNumber: 'asc' } } },
+    });
+    if (!original) {
+      throw new BadRequestException('The journal entry to reverse was not found');
+    }
+    if (original.status === JournalStatus.REVERSED) {
+      throw new BadRequestException('This journal entry has already been reversed');
+    }
+    if (original.status !== JournalStatus.POSTED) {
+      throw new BadRequestException('Only a posted journal entry can be reversed');
+    }
+
+    const entryNumber = await this.numbers.next(tx, companyId, 'JOURNAL', 'JV');
+    const reversal = await tx.journalEntry.create({
+      data: {
+        companyId,
+        branchId: original.branchId,
+        entryNumber,
+        entryDate,
+        description,
+        status: JournalStatus.POSTED,
+        currency: original.currency,
+        totalDebit: original.totalCredit,
+        totalCredit: original.totalDebit,
+        reversalOfId: original.id,
+        // A reversal points at the same document as what it reverses: the
+        // reader who drills down wants the invoice, not the mirror entry.
+        sourceType: original.sourceType,
+        sourceId: original.sourceId,
+        sourceNumber: original.sourceNumber,
+        postedAt: new Date(),
+        postedBy: userId,
+        createdBy: userId,
+        lines: {
+          create: original.lines.map((line) => ({
+            lineNumber: line.lineNumber,
+            accountId: line.accountId,
+            debit: line.credit,
+            credit: line.debit,
+            description: line.description,
+            costCenterId: line.costCenterId,
+          })),
+        },
+      },
+      select: { id: true, entryNumber: true },
+    });
+
+    await tx.journalEntry.update({
+      where: { id: original.id },
+      data: { status: JournalStatus.REVERSED },
+    });
+
+    return reversal;
   }
 
   private amount(value: Prisma.Decimal | string | undefined): Prisma.Decimal {
