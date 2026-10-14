@@ -59,8 +59,8 @@ abstract final class AppTheme {
         backgroundColor: isLight ? Colors.white : scheme.surface,
         indicatorColor: scheme.primaryContainer,
         tileHeight: 54,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
+        indicatorShape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
         ),
       ),
       tabBarTheme: TabBarThemeData(
