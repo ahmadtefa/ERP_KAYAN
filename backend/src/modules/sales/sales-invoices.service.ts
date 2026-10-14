@@ -280,15 +280,17 @@ export class SalesInvoicesService {
         if (!item) throw new BadRequestException('An invoice line references a missing item');
         if (!item.isStockTracked) continue;
 
-        const balance = await tx.stockBalance.findUnique({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: invoice.branchId,
-              itemId: item.id,
-            },
-          },
-        });
+        const lockedBalances = await tx.$queryRaw<
+          Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
+        >(Prisma.sql`
+          SELECT "quantity", "value"
+            FROM "stock_balances"
+           WHERE "companyId" = ${companyId}::uuid
+             AND "branchId" = ${invoice.branchId}::uuid
+             AND "itemId" = ${item.id}::uuid
+           FOR UPDATE
+        `);
+        const balance = lockedBalances[0] ?? null;
 
         const qtyOnHand = balance?.quantity ?? new Prisma.Decimal(0);
         const valueOnHand = balance?.value ?? new Prisma.Decimal(0);
@@ -328,7 +330,10 @@ export class SalesInvoicesService {
           },
         });
 
-        await tx.stockBalance.upsert({
+        // The balance was locked and verified above. Never upsert an OUT
+        // movement with a negative create quantity: PostgreSQL checks the
+        // nonnegative constraint before resolving ON CONFLICT.
+        await tx.stockBalance.update({
           where: {
             companyId_branchId_itemId: {
               companyId,
@@ -336,14 +341,7 @@ export class SalesInvoicesService {
               itemId: item.id,
             },
           },
-          create: {
-            companyId,
-            branchId: invoice.branchId,
-            itemId: item.id,
-            quantity: line.quantity.negated(),
-            value: costTotal.negated(),
-          },
-          update: {
+          data: {
             quantity: { decrement: line.quantity },
             value: { decrement: costTotal },
           },
