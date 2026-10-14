@@ -71,8 +71,13 @@ describe('export writers', () => {
       expect((dateCell as any).value).toBeInstanceOf(Date);
     });
 
-    it('keeps the Arabic titles in the sheet', async () => {
-      const buffer = await toXlsx(table, 'ar', 'شركة كيان');
+    it('keeps the Arabic titles and company profile in the sheet', async () => {
+      const buffer = await toXlsx(table, 'ar', 'شركة كيان', {
+        companyDetails: [
+          { labelEn: 'Tax ID', labelAr: 'الرقم الضريبي', value: '123456789' },
+          { labelEn: 'Phone', labelAr: 'الهاتف', value: '01000000000' },
+        ],
+      });
       const workbook = new Workbook();
       await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
       const sheet = workbook.worksheets[0];
