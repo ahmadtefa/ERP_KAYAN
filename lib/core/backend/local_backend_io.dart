@@ -73,7 +73,7 @@ class KayanDatabaseConfig {
   const KayanDatabaseConfig._();
 
   static const String host = '127.0.0.1';
-  static const int port = 5432;
+  static const int port = 5433;
   static const String databaseName = 'erp_kayan';
   static const String username = 'erp_app';
   static const String adminUsername = 'postgres';
@@ -424,7 +424,7 @@ class LocalBackend {
     // Developer-installed PostgreSQL and non-Windows desktop builds keep their
     // existing path; only the installer ships this executable.
     if (!await executable.exists()) return true;
-    final port = int.tryParse(url.port.toString()) ?? 5432;
+    final port = int.tryParse(url.port.toString()) ?? 5433;
     final deadline = DateTime.now().add(const Duration(seconds: 60));
     while (DateTime.now().isBefore(deadline)) {
       try {
@@ -898,9 +898,9 @@ class RuntimeSettings {
     'JWT_ACCESS_TTL': '900',
     'JWT_REFRESH_TTL': '1209600',
     'DATABASE_URL':
-        'postgresql://erp_app:postgres@127.0.0.1:5432/erp_kayan?schema=public',
+        'postgresql://erp_app:postgres@127.0.0.1:5433/erp_kayan?schema=public',
     'ADMIN_DATABASE_URL':
-        'postgresql://postgres:postgres@127.0.0.1:5432/postgres',
+        'postgresql://postgres:postgres@127.0.0.1:5433/postgres',
   };
 
   static Future<RuntimeSettings> load(BackendLayout layout, int port) async {
