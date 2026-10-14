@@ -17,7 +17,7 @@ def square(size: int) -> Image.Image:
         # Preserve the full logo on a clean square canvas rather than cropping
         # text or marks from the uploaded artwork.
         fitted = ImageOps.contain(image, (size, size), method=Image.Resampling.LANCZOS)
-        canvas = Image.new("RGBA", (size, size), (255, 255, 255, 0))
+        canvas = Image.new("RGBA", (size, size), (245, 247, 250, 255))
         canvas.alpha_composite(fitted, ((size - fitted.width) // 2, (size - fitted.height) // 2))
         return canvas
 
