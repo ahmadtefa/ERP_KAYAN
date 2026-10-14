@@ -32,7 +32,10 @@ class ResetDataCard extends ConsumerWidget {
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final user = ref.watch(currentUserProvider);
-    final allowed = user != null && user.can('admin.company.manage');
+    // The server reset service requires a super-administrator specifically;
+    // a company manager with profile-edit permission must not see a button
+    // that the server will reject.
+    final allowed = user?.isSuperAdmin == true;
 
     if (!allowed) return const SizedBox.shrink();
 
