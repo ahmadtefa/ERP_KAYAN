@@ -934,9 +934,37 @@ async function main() {
       near(quantityOf(stockAfterRace.data, itemA.id), 1),
       `on hand ${quantityOf(stockAfterRace.data, itemA.id)} (three before the competing posts)`,
     );
+
+    const successfulIndex = outcomes.findIndex((r) => r.status >= 200 && r.status < 300);
+    if (successfulIndex >= 0) {
+      const successfulInvoice = competingDrafts[successfulIndex];
+      const reversed = await api(`/sales/invoices/${successfulInvoice.id}/reverse`, {
+        method: 'POST',
+      });
+      check(
+        'a posted sales invoice reverses with its stock and ledger effects',
+        reversed.status >= 200 && reversed.status < 300 &&
+          String(reversed.data?.status).toUpperCase() === 'REVERSED',
+        `status ${reversed.status}, document ${reversed.data?.status ?? 'unknown'}`,
+      );
+      const repeatedReversal = await api(`/sales/invoices/${successfulInvoice.id}/reverse`, {
+        method: 'POST',
+      });
+      check(
+        'reversing the same sales invoice twice is refused',
+        repeatedReversal.status >= 400,
+        `status ${repeatedReversal.status}`,
+      );
+      const stockAfterReversal = await api(`/inventory/stock?itemId=${itemA.id}`);
+      check(
+        'repeated reversal does not change stock a second time',
+        near(quantityOf(stockAfterReversal.data, itemA.id), 3),
+        `on hand ${quantityOf(stockAfterReversal.data, itemA.id)} after restoring the reversed sale`,
+      );
+    }
   }
 
-  // ─────────────────────────────────────── 13. sessions and their lifecycle
+  // ─────────────────────────────────────── 14. sessions and their lifecycle
   const refreshed = await api('/auth/refresh', {
     method: 'POST',
     json: { refreshToken },
