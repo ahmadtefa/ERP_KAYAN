@@ -56,8 +56,10 @@ export class ExportController {
     const company = await this.prisma.company.findUnique({
       where: { id: companyId },
       select: {
+        code: true,
         nameEn: true,
         nameAr: true,
+        timezone: true,
         taxId: true,
         commercialRegistration: true,
         phone: true,
@@ -75,6 +77,7 @@ export class ExportController {
       ? company?.addressAr || company?.address || company?.addressEn
       : company?.addressEn || company?.address || company?.addressAr;
     const details = [
+      { labelEn: 'Company code', labelAr: 'كود الشركة', value: company?.code ?? '' },
       { labelEn: 'Tax ID', labelAr: 'الرقم الضريبي', value: company?.taxId ?? '' },
       {
         labelEn: 'Commercial registration',
@@ -85,6 +88,7 @@ export class ExportController {
       { labelEn: 'Email', labelAr: 'البريد الإلكتروني', value: company?.email ?? '' },
       { labelEn: 'Address', labelAr: 'العنوان', value: address ?? '' },
       { labelEn: 'Currency', labelAr: 'العملة', value: company?.currency ?? '' },
+      { labelEn: 'Time zone', labelAr: 'المنطقة الزمنية', value: company?.timezone ?? '' },
     ].filter((item) => item.value.trim().length > 0);
     const logo = await this.company.getLogo(companyId);
     return { name, logo, details };
