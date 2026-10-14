@@ -204,6 +204,14 @@ export class PostingService {
       throw new BadRequestException('Only a posted journal entry can be reversed');
     }
 
+    const claimed = await tx.journalEntry.updateMany({
+      where: { id: original.id, companyId, status: JournalStatus.POSTED },
+      data: { status: JournalStatus.REVERSED },
+    });
+    if (claimed.count !== 1) {
+      throw new BadRequestException('This journal entry has already been reversed');
+    }
+
     const entryNumber = await this.numbers.next(tx, companyId, 'JOURNAL', 'JV');
     const reversal = await tx.journalEntry.create({
       data: {
@@ -237,11 +245,6 @@ export class PostingService {
         },
       },
       select: { id: true, entryNumber: true },
-    });
-
-    await tx.journalEntry.update({
-      where: { id: original.id },
-      data: { status: JournalStatus.REVERSED },
     });
 
     return reversal;

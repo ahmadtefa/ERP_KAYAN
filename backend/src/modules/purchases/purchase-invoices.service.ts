@@ -323,14 +323,12 @@ export class PurchaseInvoicesService {
         ],
       });
 
+      // The transaction claimed the invoice as POSTED before touching stock.
+      // Do not write its status a second time: the database transition guard
+      // intentionally permits only DRAFT -> POSTED for purchase invoices.
       await tx.purchaseInvoice.update({
         where: { id: invoice.id },
-        data: {
-          status: InvoiceStatus.POSTED,
-          journalEntryId: journal.id,
-          postedAt: new Date(),
-          postedBy: userId,
-        },
+        data: { journalEntryId: journal.id },
       });
 
       return journal;
@@ -376,21 +374,38 @@ export class PurchaseInvoicesService {
     }
 
     const reversal = await this.prisma.$transaction(async (tx) => {
+      const claimedInvoice = await tx.purchaseInvoice.updateMany({
+        where: { id: invoice.id, companyId, status: InvoiceStatus.POSTED, deletedAt: null },
+        data: { status: InvoiceStatus.REVERSED },
+      });
+      if (claimedInvoice.count !== 1) {
+        throw new BadRequestException('This invoice has already been reversed');
+      }
+      const claimedJournal = await tx.journalEntry.updateMany({
+        where: { id: original.id, companyId, status: JournalStatus.POSTED },
+        data: { status: JournalStatus.REVERSED },
+      });
+      if (claimedJournal.count !== 1) {
+        throw new BadRequestException('The original journal entry has already been reversed');
+      }
+
       for (const line of invoice.lines) {
         if (!line.itemId) {
           throw new BadRequestException(
             'A purchase invoice line has no item, so its stock cannot be returned',
           );
         }
-        const balance = await tx.stockBalance.findUnique({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: invoice.branchId,
-              itemId: line.itemId,
-            },
-          },
-        });
+        const lockedBalances = await tx.$queryRaw<
+          Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
+        >(Prisma.sql`
+          SELECT "quantity", "value"
+            FROM "stock_balances"
+           WHERE "companyId" = ${companyId}::uuid
+             AND "branchId" = ${invoice.branchId}::uuid
+             AND "itemId" = ${line.itemId}::uuid
+           FOR UPDATE
+        `);
+        const balance = lockedBalances[0] ?? null;
         const qtyOnHand = balance?.quantity ?? new Prisma.Decimal(0);
         if (qtyOnHand.lessThan(line.quantity)) {
           throw new BadRequestException(
@@ -460,16 +475,6 @@ export class PurchaseInvoicesService {
           },
         },
         select: { id: true, entryNumber: true },
-      });
-
-      await tx.journalEntry.update({
-        where: { id: original.id },
-        data: { status: JournalStatus.REVERSED },
-      });
-
-      await tx.purchaseInvoice.update({
-        where: { id: invoice.id },
-        data: { status: InvoiceStatus.REVERSED },
       });
 
       return mirror;

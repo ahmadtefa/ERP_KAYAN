@@ -346,17 +346,48 @@ export class CompanyService {
       dto.parentBranchId ?? null,
     );
 
-    const created = await this.prisma.branch.create({
-      data: {
-        companyId,
-        code: dto.code,
-        nameEn: dto.nameEn,
-        nameAr: dto.nameAr,
-        kind,
-        parentBranchId,
-        createdBy: userId,
-        updatedBy: userId,
-      },
+    const created = await this.prisma.$transaction(async (tx) => {
+      const branch = await tx.branch.create({
+        data: {
+          companyId,
+          code: dto.code,
+          nameEn: dto.nameEn,
+          nameAr: dto.nameAr,
+          kind,
+          parentBranchId,
+          createdBy: userId,
+          updatedBy: userId,
+        },
+      });
+
+      // A branch and its default warehouse are one operational unit. Create
+      // both in the same transaction so new branches can receive and issue
+      // stock immediately, even though the warehouse backfill migration has
+      // already run.
+      const baseWarehouseCode = `${branch.code}-MAIN`;
+      const codeClash = await tx.warehouse.findFirst({
+        where: { companyId, code: baseWarehouseCode },
+        select: { id: true },
+      });
+      const warehouseCode = codeClash
+        ? `${baseWarehouseCode}-${branch.id.slice(0, 8).toUpperCase()}`
+        : baseWarehouseCode;
+
+      await tx.warehouse.create({
+        data: {
+          companyId,
+          branchId: branch.id,
+          code: warehouseCode,
+          nameEn: `${branch.nameEn} main store`,
+          nameAr: `${branch.nameAr} - المخزن الرئيسي`,
+          isDefault: true,
+          isActive: true,
+          createdBy: userId,
+          updatedBy: userId,
+        },
+      });
+
+      return branch;
     });
 
     await this.audit.record({

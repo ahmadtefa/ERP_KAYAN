@@ -280,15 +280,17 @@ export class SalesInvoicesService {
         if (!item) throw new BadRequestException('An invoice line references a missing item');
         if (!item.isStockTracked) continue;
 
-        const balance = await tx.stockBalance.findUnique({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: invoice.branchId,
-              itemId: item.id,
-            },
-          },
-        });
+        const lockedBalances = await tx.$queryRaw<
+          Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
+        >(Prisma.sql`
+          SELECT "quantity", "value"
+            FROM "stock_balances"
+           WHERE "companyId" = ${companyId}::uuid
+             AND "branchId" = ${invoice.branchId}::uuid
+             AND "itemId" = ${item.id}::uuid
+           FOR UPDATE
+        `);
+        const balance = lockedBalances[0] ?? null;
 
         const qtyOnHand = balance?.quantity ?? new Prisma.Decimal(0);
         const valueOnHand = balance?.value ?? new Prisma.Decimal(0);
@@ -328,7 +330,10 @@ export class SalesInvoicesService {
           },
         });
 
-        await tx.stockBalance.upsert({
+        // The balance was locked and verified above. Never upsert an OUT
+        // movement with a negative create quantity: PostgreSQL checks the
+        // nonnegative constraint before resolving ON CONFLICT.
+        await tx.stockBalance.update({
           where: {
             companyId_branchId_itemId: {
               companyId,
@@ -336,14 +341,7 @@ export class SalesInvoicesService {
               itemId: item.id,
             },
           },
-          create: {
-            companyId,
-            branchId: invoice.branchId,
-            itemId: item.id,
-            quantity: line.quantity.negated(),
-            value: costTotal.negated(),
-          },
-          update: {
+          data: {
             quantity: { decrement: line.quantity },
             value: { decrement: costTotal },
           },
@@ -381,14 +379,13 @@ export class SalesInvoicesService {
         ],
       });
 
+      // The transaction already claimed the invoice as POSTED. Attach the
+      // accounting/cost results without repeating the guarded status change.
       const updated = await tx.salesInvoice.update({
         where: { id: invoice.id },
         data: {
-          status: InvoiceStatus.POSTED,
           costOfGoods,
           journalEntryId: journal.id,
-          postedAt: new Date(),
-          postedBy: userId,
         },
       });
 
@@ -443,6 +440,21 @@ export class SalesInvoicesService {
     }
 
     const journal = await this.prisma.$transaction(async (tx) => {
+      const claimedInvoice = await tx.salesInvoice.updateMany({
+        where: { id: invoice.id, companyId, status: InvoiceStatus.POSTED, deletedAt: null },
+        data: { status: InvoiceStatus.REVERSED },
+      });
+      if (claimedInvoice.count !== 1) {
+        throw new BadRequestException('This invoice has already been reversed');
+      }
+      const claimedJournal = await tx.journalEntry.updateMany({
+        where: { id: original.id, companyId, status: JournalStatus.POSTED },
+        data: { status: JournalStatus.REVERSED },
+      });
+      if (claimedJournal.count !== 1) {
+        throw new BadRequestException('The original journal entry has already been reversed');
+      }
+
       for (const line of invoice.lines) {
         if (!line.itemId || line.costTotal.isZero()) continue;
 
@@ -514,16 +526,6 @@ export class SalesInvoicesService {
           },
         },
         select: { id: true, entryNumber: true },
-      });
-
-      await tx.journalEntry.update({
-        where: { id: original.id },
-        data: { status: JournalStatus.REVERSED },
-      });
-
-      await tx.salesInvoice.update({
-        where: { id: invoice.id },
-        data: { status: InvoiceStatus.REVERSED },
       });
 
       return reversal;

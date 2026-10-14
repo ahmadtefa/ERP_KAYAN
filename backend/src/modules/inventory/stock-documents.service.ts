@@ -631,9 +631,17 @@ export class StockDocumentsService {
     branchId: string,
     itemId: string,
   ) {
-    return tx.stockBalance.findUnique({
-      where: { companyId_branchId_itemId: { companyId, branchId, itemId } },
-    });
+    const rows = await tx.$queryRaw<
+      Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
+    >(Prisma.sql`
+      SELECT "quantity", "value"
+        FROM "stock_balances"
+       WHERE "companyId" = ${companyId}::uuid
+         AND "branchId" = ${branchId}::uuid
+         AND "itemId" = ${itemId}::uuid
+       FOR UPDATE
+    `);
+    return rows[0] ?? null;
   }
 
   private async move(
@@ -660,7 +668,13 @@ export class StockDocumentsService {
     const balance = await this.balance(tx, input.companyId, input.branchId, input.itemId);
     const onHand = balance?.quantity ?? new Prisma.Decimal(0);
 
-    if (input.requireStock && onHand.lessThan(input.quantity)) {
+    // The database deliberately enforces nonnegative stock balances.
+    // Even paths that do not request an extra business-level check must not
+    // attempt an OUT upsert that inserts a negative row.
+    if (
+      input.direction === StockDirection.OUT &&
+      onHand.lessThan(input.quantity)
+    ) {
       throw new BadRequestException(
         `Not enough stock: ${onHand.toFixed(MONEY_SCALE)} on hand, ` +
           `${input.quantity.toFixed(MONEY_SCALE)} requested in ${input.referenceNumber}.`,
@@ -685,31 +699,42 @@ export class StockDocumentsService {
       },
     });
 
-    const signedQuantity =
-      input.direction === StockDirection.IN ? input.quantity : input.quantity.negated();
-    const signedValue =
-      input.direction === StockDirection.IN ? input.totalCost : input.totalCost.negated();
-
-    await tx.stockBalance.upsert({
-      where: {
-        companyId_branchId_itemId: {
-          companyId: input.companyId,
-          branchId: input.branchId,
-          itemId: input.itemId,
-        },
-      },
-      create: {
+    const where = {
+      companyId_branchId_itemId: {
         companyId: input.companyId,
         branchId: input.branchId,
         itemId: input.itemId,
-        quantity: signedQuantity,
-        value: signedValue,
       },
-      update: {
-        quantity: { increment: signedQuantity },
-        value: { increment: signedValue },
-      },
-    });
+    };
+    if (input.direction === StockDirection.IN) {
+      await tx.stockBalance.upsert({
+        where,
+        create: {
+          companyId: input.companyId,
+          branchId: input.branchId,
+          itemId: input.itemId,
+          quantity: input.quantity,
+          value: input.totalCost,
+        },
+        update: {
+          quantity: { increment: input.quantity },
+          value: { increment: input.totalCost },
+        },
+      });
+    } else {
+      if (!balance) {
+        throw new BadRequestException(
+          `No stock balance exists for ${input.referenceNumber}; an OUT movement cannot create negative stock.`,
+        );
+      }
+      await tx.stockBalance.update({
+        where,
+        data: {
+          quantity: { decrement: input.quantity },
+          value: { decrement: input.totalCost },
+        },
+      });
+    }
   }
 
   private decimal(value: unknown, field: string): Prisma.Decimal {

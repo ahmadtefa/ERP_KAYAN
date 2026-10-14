@@ -132,6 +132,54 @@ async function main(): Promise<void> {
     },
   });
 
+  // A first-run company is created after migrations have already run, so
+  // it cannot rely on the historical warehouse backfill. Keep seed runs
+  // idempotent and ensure its branch always has one active default warehouse.
+  const defaultWarehouse = await prisma.warehouse.findFirst({
+    where: { companyId: company.id, branchId: branch.id, isDefault: true, deletedAt: null },
+    select: { id: true, isActive: true },
+  });
+  if (defaultWarehouse) {
+    if (!defaultWarehouse.isActive) {
+      await prisma.warehouse.update({
+        where: { id: defaultWarehouse.id },
+        data: { isActive: true },
+      });
+    }
+  } else {
+    const existingWarehouse = await prisma.warehouse.findFirst({
+      where: { companyId: company.id, branchId: branch.id, deletedAt: null },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (existingWarehouse) {
+      await prisma.warehouse.update({
+        where: { id: existingWarehouse.id },
+        data: { isDefault: true, isActive: true },
+      });
+    } else {
+      const baseWarehouseCode = `${branch.code}-MAIN`;
+      const codeClash = await prisma.warehouse.findFirst({
+        where: { companyId: company.id, code: baseWarehouseCode },
+        select: { id: true },
+      });
+      const warehouseCode = codeClash
+        ? `${baseWarehouseCode}-${branch.id.slice(0, 8).toUpperCase()}`
+        : baseWarehouseCode;
+      await prisma.warehouse.create({
+        data: {
+          companyId: company.id,
+          branchId: branch.id,
+          code: warehouseCode,
+          nameEn: `${branch.nameEn} main store`,
+          nameAr: `${branch.nameAr} - المخزن الرئيسي`,
+          isDefault: true,
+          isActive: true,
+        },
+      });
+    }
+  }
+
   // The company logo, when the setup dialog picked one: it travels as a file
   // the shell wrote to a temporary folder (an image does not belong in an
   // environment variable), and the same content rules apply as on the logo

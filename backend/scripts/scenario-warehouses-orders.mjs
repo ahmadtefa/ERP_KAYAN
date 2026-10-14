@@ -100,13 +100,13 @@ async function main() {
     noAuth: true,
     json: { username: USERNAME, password: PASSWORD },
   });
-  if (!session?.accessToken) return;
+  if (!session?.accessToken) { process.exitCode = 1; return; }
   token = session.accessToken;
 
   const profile = await must('the company profile is readable', '/company/profile');
   const branches = await must('the branches are readable', '/company/branches');
   const branch = (branches?.items ?? branches ?? [])[0];
-  if (!profile || !branch) return;
+  if (!profile || !branch) { process.exitCode = 1; return; }
 
   // ─────────────────────────────────────────── the warehouse every branch has
   const warehousesBefore = await must('the warehouses are listed', '/inventory/warehouses');
@@ -138,7 +138,7 @@ async function main() {
       branchId: branch.id,
     },
   });
-  if (!warehouseA || !warehouseB) return;
+  if (!warehouseA || !warehouseB) { process.exitCode = 1; return; }
 
   check(
     'making one warehouse the default takes the flag off the other',
@@ -195,7 +195,7 @@ async function main() {
       nameAr: `عميل مخزني ${stamp}`,
     },
   });
-  if (!item || !supplier || !customer) return;
+  if (!item || !supplier || !customer) { process.exitCode = 1; return; }
 
   const settings = await must('the company policy is readable', '/accounting/settings');
   const taxRate = Number(settings?.taxRate ?? 0);
@@ -210,7 +210,7 @@ async function main() {
       lines: [{ itemId: item.id, quantity: '10.0000', unitPrice: '100.0000' }],
     },
   });
-  if (!purchase) return;
+  if (!purchase) { process.exitCode = 1; return; }
   await must('the purchase invoice is posted', `/purchases/invoices/${purchase.id}/post`, { method: 'POST' });
 
   const inB = await must('the warehouse report answers', `/inventory/warehouses/${warehouseB.id}/stock`);
@@ -251,7 +251,7 @@ async function main() {
       lines: [{ itemId: item.id, quantity: '4.0000' }],
     },
   });
-  if (!transfer) return;
+  if (!transfer) { process.exitCode = 1; return; }
   await must('the transfer is posted', `/inventory/stock-documents/${transfer.id}/post`, { method: 'POST' });
 
   const afterTransferB = await must('the source warehouse is reported', `/inventory/warehouses/${warehouseB.id}/stock`);
@@ -280,7 +280,7 @@ async function main() {
       lines: [{ itemId: item.id, quantity: '1.0000', unitPrice: '150.0000' }],
     },
   });
-  if (!sale) return;
+  if (!sale) { process.exitCode = 1; return; }
   await must('the sale is posted', `/sales/invoices/${sale.id}/post`, { method: 'POST' });
 
   const afterSaleA = await must('the selling warehouse is reported', `/inventory/warehouses/${warehouseA.id}/stock`);
@@ -303,7 +303,7 @@ async function main() {
       discountPercent: '0.0000',
     },
   });
-  if (!list) return;
+  if (!list) { process.exitCode = 1; return; }
 
   await must('a price can be listed for an item', `/sales/price-lists/${list.id}/items`, {
     method: 'POST',
@@ -342,7 +342,7 @@ async function main() {
       lines: [{ itemId: item.id, quantity: '1.0000', unitPrice: '200.0000' }],
     },
   });
-  if (!priced1 || !priced10 || !pricedTyped) return;
+  if (!priced1 || !priced10 || !pricedTyped) { process.exitCode = 1; return; }
 
   const lineOf = (invoice) => invoice?.lines?.[0];
   check(
@@ -379,7 +379,7 @@ async function main() {
       ],
     },
   });
-  if (!po) return;
+  if (!po) { process.exitCode = 1; return; }
 
   const expectedNet = 500 + 450;
   const expectedTax = (expectedNet * taxRate) / 100;
@@ -407,7 +407,7 @@ async function main() {
     method: 'POST',
     json: { lines: [{ orderLineId: po.lines[0].id, quantity: '3.0000' }] },
   });
-  if (!partial) return;
+  if (!partial) { process.exitCode = 1; return; }
 
   check(
     'the invoice covers exactly what was asked for, not the whole order',
@@ -469,7 +469,7 @@ async function main() {
       lines: [{ itemId: item.id, quantity: '2.0000', unitPrice: '130.0000' }],
     },
   });
-  if (!so) return;
+  if (!so) { process.exitCode = 1; return; }
   check('a sales order also starts as a draft', so.status === 'DRAFT', `status ${so.status}`);
 
   await mustRefuse(
@@ -520,7 +520,7 @@ async function main() {
       permissions: ['inventory.warehouses.read', 'reports.read'],
     },
   });
-  if (!role?.id) return;
+  if (!role?.id) { process.exitCode = 1; return; }
   const user = await must('a user can be given that role alone', '/admin/users', {
     method: 'POST',
     json: {
@@ -532,7 +532,7 @@ async function main() {
       branchIds: [branch.id],
     },
   });
-  if (!user) return;
+  if (!user) { process.exitCode = 1; return; }
 
   const narrow = await api('/auth/login', {
     method: 'POST',
