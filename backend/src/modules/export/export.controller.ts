@@ -146,7 +146,11 @@ export class ExportController {
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const table = await this.documents.build(spec.kind, user.companyId, id, lang);
     const header = await this.companyHeader(user.companyId, lang);
-    const html = toPrintHtml(table, lang, header.name, { autoPrint: false, logo: header.logo });
+    const html = toPrintHtml(table, lang, header.name, {
+      autoPrint: false,
+      logo: header.logo,
+      companyDetails: header.details,
+    });
     this.send(response, await this.pdf.render(html), 'application/pdf', `${kind}-${this.stamp()}.pdf`);
   }
 
