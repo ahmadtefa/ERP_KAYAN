@@ -5,12 +5,13 @@ import {
   Get,
   Post,
   Query,
+  Req,
   Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 
 import { AllowQueryToken } from '../../common/decorators/allow-query-token.decorator';
 import { AuditService } from '../../common/audit/audit.service';
@@ -110,10 +111,18 @@ export class BackupController {
     @UploadedFile() file: UploadedBackup | undefined,
     @Query() query: { replace?: string },
     @Body() body: { replace?: boolean },
+    @Req() request: Request,
   ) {
     const parsed = this.parse(file);
+    // The identity and the address travel into the transaction: a restore is
+    // destructive enough that the audit trail has to name who did it and from
+    // where, and the record is written inside the same transaction so it
+    // cannot survive a restore that failed.
     return this.service.restore(parsed, user.companyId, {
       replace: query.replace === 'true' || body?.replace === true,
+      actorUserId: user.userId,
+      ipAddress: request.ip ?? null,
+      userAgent: request.headers['user-agent'] ?? null,
     });
   }
 
@@ -124,11 +133,20 @@ export class BackupController {
     if (file.size > 64 * 1024 * 1024) {
       throw new BadRequestException('The backup file is larger than 64 MB.');
     }
+    if (
+      file.buffer.subarray(0, 5).toString('latin1') === 'PGDMP' ||
+      file.originalname.toLowerCase().endsWith('.dump')
+    ) {
+      throw new BadRequestException(
+        'هذا الملف هو أرشيف قاعدة بيانات PostgreSQL (.dump) وليس ملف نسخة احتياطية لبيانات الشركة بصيغة JSON. ' +
+          'لاستعادة ملف DUMP، يرجى استخدام قسم "النسخ الاحتياطي الكامل لقاعدة البيانات" (/api/v1/backup/full/restore).',
+      );
+    }
     try {
       return JSON.parse(file.buffer.toString('utf8')) as BackupFile;
     } catch {
       throw new BadRequestException(
-        'The file is not readable as a backup. It may be incomplete - check that the download finished.',
+        'The file is not readable as a JSON company backup. It may be incomplete or invalid JSON.',
       );
     }
   }

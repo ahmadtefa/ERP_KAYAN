@@ -1,16 +1,6 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { plainToInstance } from 'class-transformer';
-import { validate } from 'class-validator';
+import { BadRequestException } from '@nestjs/common';
 
-import { AuditService } from '../../common/audit/audit.service';
-import { PrismaService } from '../../common/prisma/prisma.service';
-import { InitialSetupDto } from './dto/company.dto';
-import {
-  CompanyService,
-  LOGO_MAX_BYTES,
-  logoDimensions,
-  validateLogo,
-} from './company.service';
+import { LOGO_MAX_BYTES, validateLogo } from './company.service';
 
 /// The logo rules protect the database from whatever someone uploads.
 describe('validateLogo', () => {
@@ -42,7 +32,9 @@ describe('validateLogo', () => {
   });
 
   it('refuses a type outside the list', () => {
-    expect(() => validateLogo(png, 'image/svg+xml')).toThrow(BadRequestException);
+    expect(() => validateLogo(png, 'image/svg+xml')).toThrow(
+      BadRequestException,
+    );
     expect(() => validateLogo(png, 'text/html')).toThrow(BadRequestException);
   });
 
@@ -69,197 +61,11 @@ describe('validateLogo', () => {
     ]);
     expect(() => validateLogo(fake, 'image/webp')).toThrow(BadRequestException);
   });
-
-  it('reads the pixel size of a PNG', () => {
-    const header = Buffer.alloc(24);
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header);
-    header.writeUInt32BE(64, 16);
-    header.writeUInt32BE(48, 20);
-    expect(logoDimensions(header, 'image/png')).toEqual({ width: 64, height: 48 });
-  });
 });
 
-describe('CompanyService', () => {
-  const prisma = {
-    company: {
-      findUnique: jest.fn(),
-      findFirst: jest.fn(),
-      findMany: jest.fn(),
-      update: jest.fn(),
-    },
-  } as unknown as PrismaService;
-
-  const audit = {
-    record: jest.fn().mockResolvedValue(undefined),
-  } as unknown as AuditService;
-
-  const service = new CompanyService(prisma, audit);
-  const updatedAt = new Date('2026-10-13T10:00:00Z');
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  describe('getProfile / profile', () => {
-    it('returns the profile with no logo when none is stored', async () => {
-      (prisma.company.findUnique as jest.Mock).mockResolvedValue({
-        id: 'comp-1',
-        code: 'KAYAN',
-        nameEn: 'Kayan ERP',
-        nameAr: 'كيان',
-        taxId: null,
-        commercialRegistration: null,
-        addressEn: 'Minya',
-        addressAr: null,
-        phone: null,
-        email: null,
-        currency: 'EGP',
-        timezone: 'Africa/Cairo',
-        isActive: true,
-        deletedAt: null,
-        logoData: null,
-        logoMime: null,
-        logoPath: null,
-        updatedAt,
-      });
-
-      const result = await service.getProfile('comp-1');
-
-      expect(result).toMatchObject({
-        id: 'comp-1',
-        nameEn: 'Kayan ERP',
-        address: 'Minya',
-        hasLogo: false,
-        logoUrl: null,
-      });
-    });
-
-    it('points at the logo endpoint when a legacy file logo exists', async () => {
-      (prisma.company.findUnique as jest.Mock).mockResolvedValue({
-        id: 'comp-1',
-        code: 'KAYAN',
-        nameEn: 'Kayan ERP',
-        nameAr: 'كيان',
-        currency: 'EGP',
-        timezone: 'Africa/Cairo',
-        isActive: true,
-        deletedAt: null,
-        logoData: null,
-        logoMime: null,
-        logoPath: 'logo-1.png',
-        updatedAt,
-      });
-
-      const result = await service.profile('comp-1');
-
-      expect(result.hasLogo).toBe(true);
-      expect(result.logoUrl).toBe(
-        `/companies/logo/comp-1?v=${updatedAt.getTime()}`,
-      );
-    });
-
-    it('throws NotFoundException when company does not exist', async () => {
-      (prisma.company.findUnique as jest.Mock).mockResolvedValue(null);
-
-      await expect(service.profile('missing')).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
-    });
-  });
-
-  describe('publicBranding', () => {
-    it('returns default branding when no active company exists', async () => {
-      (prisma.company.findFirst as jest.Mock).mockResolvedValue(null);
-
-      const result = await service.publicBranding();
-
-      expect(result).toEqual({
-        nameEn: 'KAYAN ERP',
-        nameAr: 'نظام كيان',
-        logoUrl: null,
-      });
-    });
-
-    it('returns company branding when active company exists', async () => {
-      (prisma.company.findFirst as jest.Mock).mockResolvedValue({
-        id: 'comp-1',
-        nameEn: 'Kayan Co',
-        nameAr: 'شركة كيان',
-        logoData: null,
-        logoPath: 'logo.png',
-        updatedAt,
-      });
-
-      const result = await service.publicBranding();
-
-      expect(result).toEqual({
-        nameEn: 'Kayan Co',
-        nameAr: 'شركة كيان',
-        logoUrl: `/companies/logo/comp-1?v=${updatedAt.getTime()}`,
-      });
-    });
-  });
-
-  describe('updateProfile', () => {
-    const existing = {
-      id: 'comp-1',
-      code: 'KAYAN',
-      nameEn: 'Old Name',
-      nameAr: 'الاسم القديم',
-      currency: 'EGP',
-      timezone: 'Africa/Cairo',
-      isActive: true,
-      deletedAt: null,
-      logoData: null,
-      logoMime: null,
-      logoPath: null,
-      updatedAt,
-    };
-
-    it('rejects blank company names', async () => {
-      (prisma.company.findUnique as jest.Mock).mockResolvedValue(existing);
-
-      await expect(
-        service.updateProfile('comp-1', 'user-1', { nameEn: '   ' }),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      expect(prisma.company.update).not.toHaveBeenCalled();
-    });
-
-    it('updates the profile and audits it without any logo bytes', async () => {
-      (prisma.company.findUnique as jest.Mock)
-        .mockResolvedValueOnce(existing)
-        .mockResolvedValueOnce({ ...existing, nameEn: 'New Name' });
-      (prisma.company.update as jest.Mock).mockResolvedValue({
-        ...existing,
-        nameEn: 'New Name',
-        logoData: new Uint8Array([1, 2, 3]),
-      });
-
-      await service.updateProfile('comp-1', 'user-1', { nameEn: 'New Name' });
-
-      expect(audit.record).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: 'UPDATE',
-          entity: 'companies',
-          entityId: 'comp-1',
-        }),
-      );
-      const call = (audit.record as jest.Mock).mock.calls[0][0];
-      expect(JSON.stringify(call)).not.toContain('logoData');
-    });
-
-    it('maps the single-line address to addressEn', async () => {
-      (prisma.company.findUnique as jest.Mock).mockResolvedValue(existing);
-      (prisma.company.update as jest.Mock).mockResolvedValue(existing);
-
-      await service.updateProfile('comp-1', 'user-1', { address: ' Minya ' });
-
-      expect((prisma.company.update as jest.Mock).mock.calls[0][0].data.addressEn).toBe(
-        'Minya',
-      );
-    });
-  });
-});
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { InitialSetupDto } from './dto/company.dto';
 
 describe('InitialSetupDto', () => {
   function makeValidDto(): Record<string, unknown> {

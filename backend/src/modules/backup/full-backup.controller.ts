@@ -69,6 +69,13 @@ export class FullBackupController {
     return this.service.createFull(user.userId);
   }
 
+  /// Reads a backup back from disk and reports what is inside it. A backup
+  /// nobody has ever read is a hope, not a backup.
+  @Post(':name/verify')
+  verify(@Param('name') name: string) {
+    return this.service.verify(name);
+  }
+
   /// One backup file, as a download.
   @Get(':name/download')
   @AllowQueryToken()
