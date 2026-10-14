@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-installer-${{ github.ref }}
@@ -21,6 +21,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Read application version
+        id: app-version
+        shell: powershell
+        run: |
+          $line = Select-String -Path pubspec.yaml -Pattern '^version:\s*(\S+)' | Select-Object -First 1
+          if (-not $line) { throw 'Could not read app version from pubspec.yaml' }
+          $version = $line.Matches[0].Groups[1].Value.Split('+')[0]
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Installer release version: $version"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -130,7 +140,21 @@ jobs:
           Get-FileHash $setupCanonical, $files[0].FullName -Algorithm SHA256 |
             Format-List Algorithm, Hash, Path
 
-      - name: Upload Windows installer
+      - name: Publish direct Setup.exe download
+        if: github.event_name == 'workflow_dispatch'
+        uses: ncipollo/release-action@v1
+        with:
+          tag: windows-v${{ steps.app-version.outputs.version }}
+          name: KAYAN ERP Windows ${{ steps.app-version.outputs.version }}
+          artifacts: build/windows-installer/KAYAN-ERP-Setup.exe
+          artifactContentType: application/vnd.microsoft.portable-executable
+          allowUpdates: true
+          replacesArtifacts: true
+          makeLatest: true
+          generateReleaseNotes: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows installer (diagnostic build artifact)
         uses: actions/upload-artifact@v4
         with:
           name: KAYAN-ERP-Windows-x64-Installer
