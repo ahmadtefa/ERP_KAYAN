@@ -381,14 +381,13 @@ export class SalesInvoicesService {
         ],
       });
 
+      // The transaction already claimed the invoice as POSTED. Attach the
+      // accounting/cost results without repeating the guarded status change.
       const updated = await tx.salesInvoice.update({
         where: { id: invoice.id },
         data: {
-          status: InvoiceStatus.POSTED,
           costOfGoods,
           journalEntryId: journal.id,
-          postedAt: new Date(),
-          postedBy: userId,
         },
       });
 
