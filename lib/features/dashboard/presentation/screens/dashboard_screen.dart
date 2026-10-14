@@ -154,7 +154,7 @@ class DashboardScreen extends ConsumerWidget {
                 salesAsync.when(
                   data: (rows) => rows.length.toString(),
                   loading: () => '—',
-                  error: (_, __) => '—',
+                  error: (_, _) => '—',
                 ),
                 _money(salesTotal, arabic),
                 Icons.trending_up_rounded,
@@ -165,7 +165,7 @@ class DashboardScreen extends ConsumerWidget {
                 purchasesAsync.when(
                   data: (rows) => rows.length.toString(),
                   loading: () => '—',
-                  error: (_, __) => '—',
+                  error: (_, _) => '—',
                 ),
                 _money(purchaseTotal, arabic),
                 Icons.shopping_bag_outlined,
@@ -176,7 +176,7 @@ class DashboardScreen extends ConsumerWidget {
                 customersAsync.when(
                   data: (rows) => rows.length.toString(),
                   loading: () => '—',
-                  error: (_, __) => '—',
+                  error: (_, _) => '—',
                 ),
                 arabic ? 'إجمالي المسجلين' : 'Registered records',
                 Icons.groups_2_outlined,
@@ -187,7 +187,7 @@ class DashboardScreen extends ConsumerWidget {
                 itemsAsync.when(
                   data: (rows) => rows.length.toString(),
                   loading: () => '—',
-                  error: (_, __) => '—',
+                  error: (_, _) => '—',
                 ),
                 arabic ? 'الأصناف المسجلة' : 'Catalog records',
                 Icons.inventory_2_outlined,
@@ -248,7 +248,7 @@ class DashboardScreen extends ConsumerWidget {
               value: accounts.when(
                 data: (rows) => rows.length.toString(),
                 loading: () => '—',
-                error: (_, __) => '—',
+                error: (_, _) => '—',
               ),
               icon: Icons.account_tree_outlined,
             ),
@@ -257,7 +257,7 @@ class DashboardScreen extends ConsumerWidget {
               value: suppliersAsync.when(
                 data: (rows) => rows.length.toString(),
                 loading: () => '—',
-                error: (_, __) => '—',
+                error: (_, _) => '—',
               ),
               icon: Icons.local_shipping_outlined,
             ),
@@ -328,11 +328,11 @@ List<double> _monthTotals(List<dynamic> rows) {
 
 String _money(double amount, bool arabic) {
   final value = amount.abs() >= 1000000
-      ? (amount / 1000000).toStringAsFixed(1) + 'M'
+      ? '${(amount / 1000000).toStringAsFixed(1)}M'
       : amount.abs() >= 1000
-          ? (amount / 1000).toStringAsFixed(1) + 'K'
+          ? '${(amount / 1000).toStringAsFixed(1)}K'
           : amount.toStringAsFixed(0);
-  return value + (arabic ? ' ج.م' : ' EGP');
+  return '$value ${arabic ? "ج.م" : "EGP"}';
 }
 
 class _CompanyHero extends StatelessWidget {
@@ -364,7 +364,7 @@ class _CompanyHero extends StatelessWidget {
           width: 58,
           height: 58,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) =>
+          errorBuilder: (_, _, _) =>
               const Icon(Icons.apartment_rounded, size: 32, color: Colors.white),
         );
       } catch (_) {
@@ -602,7 +602,7 @@ class _ActivityChart extends StatelessWidget {
     final labels = List.generate(6, (index) {
       final date = DateTime(now.year, now.month - 5 + index);
       return arabic
-          ? date.month.toString() + '/' + date.year.toString().substring(2)
+          ? '${date.month}/${date.year.toString().substring(2)}'
           : _monthName(date.month);
     });
     final maxValue = <double>[...sales, ...purchases]
