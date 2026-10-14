@@ -138,7 +138,18 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
   Future<void> _newVoucher() async {
     final l10n = context.l10n;
-    final accounts = ref.read(cashAccountsProvider).value ?? const <Json>[];
+    List<Json> accounts;
+    try {
+      accounts = await ref.read(cashAccountsProvider.future);
+    } on Failure catch (error) {
+      if (mounted) showMessage(context, error.message, error: true);
+      return;
+    } catch (error, stackTrace) {
+      debugPrint('Loading cash accounts for voucher failed: $error\\n$stackTrace');
+      if (mounted) showMessage(context, l10n.unexpectedError, error: true);
+      return;
+    }
+    if (!mounted) return;
     if (accounts.isEmpty) {
       showMessage(context, l10n.noCashAccounts, error: true);
       return;
@@ -162,9 +173,19 @@ class _CashScreenState extends ConsumerState<CashScreen>
     if (kindValues == null || !mounted) return;
     final isReceipt = text(kindValues, 'kind') == 'RECEIPT';
 
-    final parties = isReceipt
-        ? ref.read(activeCustomersProvider).value ?? const <Json>[]
-        : ref.read(activeSuppliersProvider).value ?? const <Json>[];
+    List<Json> parties;
+    try {
+      parties = isReceipt
+          ? await ref.read(activeCustomersProvider.future)
+          : await ref.read(activeSuppliersProvider.future);
+    } on Failure catch (error) {
+      if (mounted) showMessage(context, error.message, error: true);
+      return;
+    } catch (error, stackTrace) {
+      debugPrint('Loading voucher parties failed: $error\\n$stackTrace');
+      if (mounted) showMessage(context, l10n.unexpectedError, error: true);
+      return;
+    }
     if (!mounted) return;
 
     final values = await showFormSheet(
@@ -222,6 +243,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
     // oldest debt unless somebody says otherwise, and the screen says so.
     final partyId = text(values, isReceipt ? 'customerId' : 'supplierId');
     var allocations = const <Json>[];
+    var allocationLookupFailed = false;
     if (partyId.isNotEmpty) {
       setState(() => _busy = true);
       try {
@@ -248,11 +270,18 @@ class _CashScreenState extends ConsumerState<CashScreen>
           left -= applied;
         }
       } on Failure catch (error) {
+        allocationLookupFailed = true;
         if (mounted) showMessage(context, error.message, error: true);
+      } catch (error, stackTrace) {
+        allocationLookupFailed = true;
+        debugPrint('Loading open invoices failed: $error\\n$stackTrace');
+        if (mounted) {
+          showMessage(context, l10n.unexpectedError, error: true);
+        }
       } finally {
         if (mounted) setState(() => _busy = false);
       }
-      if (!mounted) return;
+      if (!mounted || allocationLookupFailed) return;
     }
 
     final body = <String, dynamic>{
@@ -276,7 +305,18 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
   Future<void> _newTransfer() async {
     final l10n = context.l10n;
-    final accounts = ref.read(cashAccountsProvider).value ?? const <Json>[];
+    List<Json> accounts;
+    try {
+      accounts = await ref.read(cashAccountsProvider.future);
+    } on Failure catch (error) {
+      if (mounted) showMessage(context, error.message, error: true);
+      return;
+    } catch (error, stackTrace) {
+      debugPrint('Loading cash accounts for transfer failed: $error\\n$stackTrace');
+      if (mounted) showMessage(context, l10n.unexpectedError, error: true);
+      return;
+    }
+    if (!mounted) return;
     if (accounts.length < 2) {
       showMessage(context, l10n.transferNeedsTwoAccounts, error: true);
       return;
