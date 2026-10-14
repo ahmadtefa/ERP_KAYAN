@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -39,7 +40,6 @@ export class UsersService {
         userRoles: {
           include: { role: { select: { id: true, code: true, nameEn: true } } },
         },
-        userPermissions: { include: { permission: true } },
         branches: { include: { branch: true } },
       },
     });
@@ -53,7 +53,6 @@ export class UsersService {
         userRoles: {
           include: { role: { select: { id: true, code: true, nameEn: true } } },
         },
-        userPermissions: { include: { permission: true } },
         branches: { include: { branch: true } },
       },
     });
@@ -61,7 +60,13 @@ export class UsersService {
     return this.toResponse(user);
   }
 
-  async create(companyId: string, actorId: string, dto: CreateUserDto) {
+  async create(
+    companyId: string,
+    actorId: string,
+    dto: CreateUserDto,
+    actorPermissions: string[],
+    isSuperAdmin: boolean,
+  ) {
     const username = dto.username.trim().toLowerCase();
     if (username === SYSTEM_USERNAME) {
       throw new ConflictException('That username is reserved');
@@ -69,7 +74,12 @@ export class UsersService {
     const existing = await this.prisma.user.findUnique({ where: { username } });
     if (existing) throw new ConflictException('That username is already taken');
 
-    await this.assertRolesBelongToCompany(companyId, dto.roleIds);
+    await this.assertRolesAssignable(
+      companyId,
+      dto.roleIds,
+      actorPermissions,
+      isSuperAdmin,
+    );
     await this.assertBranchesBelongToCompany(companyId, dto.branchIds);
 
     const passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
@@ -90,7 +100,6 @@ export class UsersService {
       });
       await this.replaceRoles(tx, companyId, user.id, dto.roleIds);
       await this.replaceBranches(tx, user.id, dto.branchIds);
-      await this.replaceExtraPermissions(tx, user.id, dto.extraPermissions);
       return user;
     });
 
@@ -105,16 +114,31 @@ export class UsersService {
     return this.findOne(companyId, created.id);
   }
 
-  async update(companyId: string, actorId: string, id: string, dto: UpdateUserDto) {
+  async update(
+    companyId: string,
+    actorId: string,
+    id: string,
+    dto: UpdateUserDto,
+    actorPermissions: string[],
+    isSuperAdmin: boolean,
+  ) {
     const before = await this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
     });
     if (!before) throw new NotFoundException('User not found');
+    if (before.isSuperAdmin && !isSuperAdmin) {
+      throw new ForbiddenException('Only a super administrator can modify a super administrator account');
+    }
     if (before.username === SYSTEM_USERNAME && dto.isActive === false) {
       throw new BadRequestException('The system administrator cannot be deactivated');
     }
 
-    await this.assertRolesBelongToCompany(companyId, dto.roleIds);
+    await this.assertRolesAssignable(
+      companyId,
+      dto.roleIds,
+      actorPermissions,
+      isSuperAdmin,
+    );
     await this.assertBranchesBelongToCompany(companyId, dto.branchIds);
 
     await this.prisma.$transaction(async (tx) => {
@@ -130,7 +154,12 @@ export class UsersService {
       });
       if (dto.roleIds) await this.replaceRoles(tx, companyId, id, dto.roleIds);
       if (dto.branchIds) await this.replaceBranches(tx, id, dto.branchIds);
-      if (dto.extraPermissions) await this.replaceExtraPermissions(tx, id, dto.extraPermissions);
+      if (dto.isActive === false) {
+        await tx.refreshToken.updateMany({
+          where: { userId: id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
     });
 
     await this.audit.record({
@@ -149,11 +178,20 @@ export class UsersService {
   ///
   /// A password change that leaves old refresh tokens alive keeps an attacker
   /// signed in, so the sessions are cut here.
-  async changePassword(companyId: string, actorId: string, id: string, password: string) {
+  async changePassword(
+    companyId: string,
+    actorId: string,
+    id: string,
+    password: string,
+    actorIsSuperAdmin: boolean,
+  ) {
     const user = await this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
     });
     if (!user) throw new NotFoundException('User not found');
+    if (user.isSuperAdmin && !actorIsSuperAdmin) {
+      throw new ForbiddenException('Only a super administrator can reset a super administrator password');
+    }
 
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
     await this.prisma.$transaction([
@@ -184,13 +222,21 @@ export class UsersService {
     return { id, sessionsRevoked: true };
   }
 
-  async deactivate(companyId: string, actorId: string, id: string) {
+  async deactivate(
+    companyId: string,
+    actorId: string,
+    id: string,
+    actorIsSuperAdmin: boolean,
+  ) {
     const user = await this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
     });
     if (!user) throw new NotFoundException('User not found');
     if (user.id === actorId) {
       throw new BadRequestException('You cannot deactivate your own account');
+    }
+    if (user.isSuperAdmin && !actorIsSuperAdmin) {
+      throw new ForbiddenException('Only a super administrator can deactivate a super administrator account');
     }
     if (user.username === SYSTEM_USERNAME) {
       throw new BadRequestException('The system administrator cannot be deactivated');
@@ -234,28 +280,6 @@ export class UsersService {
     }
   }
 
-  private async replaceExtraPermissions(
-    tx: Prisma.TransactionClient,
-    userId: string,
-    codes?: string[],
-  ) {
-    if (!codes) return;
-    const unique = [...new Set(codes.map((c) => c.trim()).filter(Boolean))];
-    const found = unique.length
-      ? await tx.permission.findMany({ where: { code: { in: unique } } })
-      : [];
-    if (found.length !== unique.length) {
-      const known = new Set(found.map((p) => p.code));
-      throw new BadRequestException(
-        `Unknown permission(s): ${unique.filter((c) => !known.has(c)).join(', ')}`,
-      );
-    }
-    await tx.userPermission.deleteMany({ where: { userId } });
-    for (const permission of found) {
-      await tx.userPermission.create({ data: { userId, permissionId: permission.id } });
-    }
-  }
-
   private async replaceBranches(
     tx: Prisma.TransactionClient,
     userId: string,
@@ -268,19 +292,43 @@ export class UsersService {
     }
   }
 
-  /// A company must never be able to grant a role that belongs to another
-  /// company, so the ids are checked rather than trusted.
-  private async assertRolesBelongToCompany(companyId: string, roleIds?: string[]) {
+  /// Prevents a user administrator from assigning a role with permissions
+  /// they do not personally hold. System super-admins may assign any role.
+  private async assertRolesAssignable(
+    companyId: string,
+    roleIds: string[] | undefined,
+    actorPermissions: string[],
+    isSuperAdmin: boolean,
+  ) {
     if (!roleIds?.length) return;
-    const found = await this.prisma.role.count({
+    const roles = await this.prisma.role.findMany({
       where: {
         id: { in: roleIds },
         deletedAt: null,
         OR: [{ companyId }, { companyId: null }],
       },
+      include: {
+        rolePermissions: { include: { permission: { select: { code: true } } } },
+      },
     });
-    if (found !== roleIds.length) {
+    if (roles.length !== roleIds.length) {
       throw new BadRequestException('One of the roles does not exist in this company');
+    }
+    if (isSuperAdmin) return;
+
+    const forbidden = [
+      ...new Set(
+        roles.flatMap((role) =>
+          role.rolePermissions
+            .map((rp) => rp.permission.code)
+            .filter((code) => !actorPermissions.includes(code)),
+        ),
+      ),
+    ];
+    if (forbidden.length) {
+      throw new ForbiddenException(
+        `You cannot assign permissions you do not hold: ${forbidden.join(', ')}`,
+      );
     }
   }
 
@@ -307,7 +355,6 @@ export class UsersService {
       isSuperAdmin: user.isSuperAdmin,
       lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
       lockedUntil: user.lockedUntil?.toISOString() ?? null,
-      extraPermissions: (user.userPermissions ?? []).map((up: any) => up.permission.code),
       roles: (user.userRoles ?? []).map((ur: any) => ({
         id: ur.role.id,
         code: ur.role.code,

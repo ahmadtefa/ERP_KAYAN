@@ -4,7 +4,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BranchKind, Prisma } from '@prisma/client';
+import { BranchKind } from '@prisma/client';
+import { readFile, unlink } from 'node:fs/promises';
+import { basename, extname, join } from 'node:path';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -44,6 +46,19 @@ export interface BranchResponse {
   isActive: boolean;
 }
 
+/// Directory where logos uploaded by earlier versions (file-based `logoPath`)
+/// are kept. New logos are stored in the database and do not use it.
+export function uploadsDir(): string {
+  return process.env.KAYAN_UPLOAD_DIR ?? join(process.cwd(), 'uploads');
+}
+
+const LEGACY_LOGO_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+};
+
 @Injectable()
 export class CompanyService {
   constructor(
@@ -60,21 +75,37 @@ export class CompanyService {
     if (!company || company.deletedAt) {
       throw new NotFoundException('Company not found');
     }
+    return this.toProfile(company);
+  }
+
+  /// Kept for the existing `/companies/profile` contract.
+  profile(companyId: string) {
+    return this.getProfile(companyId);
+  }
+
+  /// Public branding (no sign-in): the first active company, or the defaults
+  /// when the installation has no company yet.
+  async publicBranding() {
+    const company = await this.defaultCompany();
+    if (!company) {
+      return { nameEn: 'KAYAN ERP', nameAr: 'نظام كيان', logoUrl: null };
+    }
     return {
-      id: company.id,
-      code: company.code,
       nameEn: company.nameEn,
       nameAr: company.nameAr,
-      taxId: company.taxId,
-      currency: company.currency,
-      timezone: company.timezone,
-      phone: company.phone,
-      email: company.email,
-      address: company.address,
-      hasLogo: (company.logoData?.length ?? 0) > 0,
-      logoMime: company.logoData ? company.logoMime : null,
-      logoBase64: company.logoData ? Buffer.from(company.logoData).toString('base64') : null,
-      isActive: company.isActive,
+      logoUrl: this.logoUrl(company),
+    };
+  }
+
+  async brandingFor(companyId: string) {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+    });
+    if (!company) throw new NotFoundException('Company not found');
+    return {
+      nameEn: company.nameEn,
+      nameAr: company.nameAr,
+      logoUrl: this.logoUrl(company),
     };
   }
 
@@ -83,30 +114,52 @@ export class CompanyService {
     userId: string,
     dto: UpdateCompanyProfileDto,
   ) {
-    const before = await this.getProfile(companyId);
+    const before = await this.prisma.company.findUnique({
+      where: { id: companyId },
+    });
+    if (!before || before.deletedAt) {
+      throw new NotFoundException('Company not found');
+    }
 
-    if (dto.code !== undefined && dto.code !== before.code) {
+    if (
+      (dto.nameEn !== undefined && !dto.nameEn.trim()) ||
+      (dto.nameAr !== undefined && !dto.nameAr.trim())
+    ) {
+      throw new BadRequestException('Company names cannot be blank');
+    }
+
+    const code = dto.code?.trim();
+    if (code !== undefined && code !== before.code) {
       const clash = await this.prisma.company.findFirst({
-        where: { code: dto.code, id: { not: companyId } },
+        where: { code, id: { not: companyId } },
         select: { id: true },
       });
       if (clash) {
         throw new ConflictException(
-          `Another company already uses the code "${dto.code}"`,
+          `Another company already uses the code "${code}"`,
         );
       }
     }
 
+    const optional = (value: string | null | undefined) =>
+      value === undefined ? undefined : value?.trim() || null;
+
     const updated = await this.prisma.company.update({
       where: { id: companyId },
       data: {
-        code: dto.code,
-        nameEn: dto.nameEn,
-        nameAr: dto.nameAr,
-        taxId: dto.taxId,
-        phone: dto.phone,
-        email: dto.email,
-        address: dto.address,
+        ...(code !== undefined ? { code } : {}),
+        nameEn: dto.nameEn?.trim(),
+        nameAr: dto.nameAr?.trim(),
+        taxId: optional(dto.taxId),
+        commercialRegistration: optional(dto.commercialRegistration),
+        // `address` is the single-line field of the desktop screens; it fills
+        // the English address unless the caller sends addressEn explicitly.
+        addressEn: optional(
+          dto.addressEn !== undefined ? dto.addressEn : dto.address,
+        ),
+        addressAr: optional(dto.addressAr),
+        phone: optional(dto.phone),
+        email: optional(dto.email),
         updatedBy: userId,
       },
     });
@@ -117,15 +170,8 @@ export class CompanyService {
       action: 'UPDATE',
       entity: 'companies',
       entityId: companyId,
-      before,
-      after: {
-        code: updated.code,
-        nameEn: updated.nameEn,
-        nameAr: updated.nameAr,
-        phone: updated.phone,
-        email: updated.email,
-        address: updated.address,
-      },
+      before: this.auditProfile(before),
+      after: this.auditProfile(updated),
     });
 
     return this.getProfile(companyId);
@@ -138,18 +184,39 @@ export class CompanyService {
     userId: string,
     data: Buffer,
     mime: string,
-  ): Promise<{ hasLogo: true; logoMime: string }> {
+  ): Promise<Record<string, unknown>> {
     const checked = validateLogo(data, mime);
-    const size = checked.data.length;
+    const dimensions = logoDimensions(data, checked.mime);
+    if (
+      !dimensions ||
+      dimensions.width > 2048 ||
+      dimensions.height > 2048 ||
+      dimensions.width < 32 ||
+      dimensions.height < 32
+    ) {
+      throw new BadRequestException(
+        'Use a valid PNG, JPEG or WebP logo between 32px and 2048px',
+      );
+    }
+    const before = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true, logoPath: true, deletedAt: true },
+    });
+    if (!before || before.deletedAt) {
+      throw new NotFoundException('Company not found');
+    }
 
     await this.prisma.company.update({
       where: { id: companyId },
       data: {
         logoData: checked.data,
         logoMime: checked.mime,
+        // The database copy replaces any legacy file.
+        logoPath: null,
         updatedBy: userId,
       },
     });
+    await this.removeLegacyFile(before.logoPath);
 
     await this.audit.record({
       companyId,
@@ -158,28 +225,63 @@ export class CompanyService {
       entity: 'companies',
       entityId: companyId,
       // The bytes themselves are not audited — only that the logo changed.
-      after: { logo: checked.mime, size },
+      after: { logo: checked.mime, size: checked.data.length },
     });
 
-    return { hasLogo: true, logoMime: checked.mime };
+    const profile = await this.getProfile(companyId);
+    return { ...profile, hasLogo: true, logoMime: checked.mime };
   }
 
+  /// Returns the logo bytes for a company: the database copy, or the legacy
+  /// file of an installation that was set up before logos moved into the
+  /// database. `companyId` omitted means the default (first active) company.
   async getLogo(
-    companyId: string,
+    companyId?: string,
   ): Promise<{ data: Buffer; mime: string } | null> {
-    const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: { logoData: true, logoMime: true },
-    });
-    if (!company?.logoData?.length) return null;
-    return { data: Buffer.from(company.logoData), mime: company.logoMime ?? 'image/png' };
+    const company = companyId
+      ? await this.prisma.company.findUnique({ where: { id: companyId } })
+      : await this.defaultCompany();
+    if (!company || company.deletedAt) return null;
+
+    if (company.logoData && company.logoData.length > 0) {
+      return {
+        data: Buffer.from(company.logoData),
+        mime: company.logoMime ?? 'image/png',
+      };
+    }
+    if (company.logoPath) {
+      const name = basename(company.logoPath);
+      try {
+        const data = await readFile(join(uploadsDir(), name));
+        return {
+          data,
+          mime: LEGACY_LOGO_MIME[extname(name).toLowerCase()] ?? 'image/png',
+        };
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 
   async deleteLogo(companyId: string, userId: string): Promise<void> {
+    const before = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true, logoPath: true },
+    });
+    if (!before) throw new NotFoundException('Company not found');
+
     await this.prisma.company.update({
       where: { id: companyId },
-      data: { logoData: null, logoMime: null, updatedBy: userId },
+      data: {
+        logoData: null,
+        logoMime: null,
+        logoPath: null,
+        updatedBy: userId,
+      },
     });
+    await this.removeLegacyFile(before.logoPath);
+
     await this.audit.record({
       companyId,
       userId,
@@ -244,36 +346,17 @@ export class CompanyService {
       dto.parentBranchId ?? null,
     );
 
-    const created = await this.prisma.$transaction(async (tx) => {
-      const branch = await tx.branch.create({
-        data: {
-          companyId,
-          code: dto.code,
-          nameEn: dto.nameEn,
-          nameAr: dto.nameAr,
-          kind,
-          parentBranchId,
-          createdBy: userId,
-          updatedBy: userId,
-        },
-      });
-
-      // Every branch can hold stock, so every branch arrives with the one
-      // warehouse that makes "where are these goods?" answerable from its
-      // first day rather than its first document.
-      await tx.warehouse.create({
-        data: {
-          companyId,
-          branchId: branch.id,
-          code: `${branch.code}-MAIN`,
-          nameEn: `${branch.nameEn} main store`,
-          nameAr: `${branch.nameAr} - المخزن الرئيسي`,
-          isDefault: true,
-          createdBy: userId,
-        },
-      });
-
-      return branch;
+    const created = await this.prisma.branch.create({
+      data: {
+        companyId,
+        code: dto.code,
+        nameEn: dto.nameEn,
+        nameAr: dto.nameAr,
+        kind,
+        parentBranchId,
+        createdBy: userId,
+        updatedBy: userId,
+      },
     });
 
     await this.audit.record({
@@ -417,6 +500,84 @@ export class CompanyService {
 
   /// ────────────────────────────────────────────────────────────── helpers
 
+  private async defaultCompany() {
+    return this.prisma.company.findFirst({
+      where: { isActive: true, deletedAt: null },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  private logoUrl(company: {
+    id: string;
+    logoData?: Uint8Array | null;
+    logoPath?: string | null;
+    updatedAt: Date;
+  }): string | null {
+    const hasLogo =
+      (company.logoData?.length ?? 0) > 0 || Boolean(company.logoPath);
+    if (!hasLogo) return null;
+    return `/companies/logo/${company.id}?v=${company.updatedAt.getTime()}`;
+  }
+
+  private toProfile(company: {
+    id: string;
+    code: string;
+    nameEn: string;
+    nameAr: string;
+    taxId: string | null;
+    commercialRegistration: string | null;
+    addressEn: string | null;
+    addressAr: string | null;
+    phone: string | null;
+    email: string | null;
+    currency: string;
+    timezone: string;
+    isActive: boolean;
+    logoData: Uint8Array | null;
+    logoMime: string | null;
+    logoPath: string | null;
+    updatedAt: Date;
+  }) {
+    const hasLogo =
+      (company.logoData?.length ?? 0) > 0 || Boolean(company.logoPath);
+    return {
+      id: company.id,
+      code: company.code,
+      nameEn: company.nameEn,
+      nameAr: company.nameAr,
+      taxId: company.taxId,
+      commercialRegistration: company.commercialRegistration,
+      addressEn: company.addressEn,
+      addressAr: company.addressAr,
+      // Single-line address for the desktop screens that predate the
+      // bilingual address fields.
+      address: company.addressEn ?? company.addressAr ?? null,
+      phone: company.phone,
+      email: company.email,
+      currency: company.currency,
+      timezone: company.timezone,
+      isActive: company.isActive,
+      hasLogo,
+      logoMime: company.logoData ? company.logoMime : null,
+      logoUrl: this.logoUrl(company),
+    };
+  }
+
+  private auditProfile(company: object) {
+    const {
+      logoData: _logoData,
+      logoMime: _logoMime,
+      logoPath: _logoPath,
+      ...safe
+    } = company as Record<string, unknown>;
+    return safe;
+  }
+
+  private async removeLegacyFile(oldPath: string | null) {
+    if (!oldPath) return;
+    await unlink(join(uploadsDir(), basename(oldPath))).catch(() => {});
+  }
+
   private async findBranch(companyId: string, branchId: string) {
     const branch = await this.prisma.branch.findFirst({
       where: { id: branchId, companyId, deletedAt: null },
@@ -555,4 +716,33 @@ export function validateLogo(
   }
   // Prisma's Bytes column wants a Uint8Array; same bytes, right type.
   return { data: Uint8Array.from(data), mime: normalised };
+}
+
+
+/// Reads the pixel size of a PNG, JPEG or WebP without decoding it.
+export function logoDimensions(
+  data: Buffer,
+  mime: string,
+): { width: number; height: number } | null {
+  if (mime === 'image/png' && data.length >= 24 && data.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) {
+    return { width: data.readUInt32BE(16), height: data.readUInt32BE(20) };
+  }
+  if (mime === 'image/webp' && data.length >= 30 && data.toString('ascii', 0, 4) === 'RIFF' && data.toString('ascii', 8, 12) === 'WEBP') {
+    const kind = data.toString('ascii', 12, 16);
+    if (kind === 'VP8X') return { width: 1 + data.readUIntLE(24, 3), height: 1 + data.readUIntLE(27, 3) };
+    if (kind === 'VP8 ' && data.length >= 30) return { width: data.readUInt16LE(26) & 0x3fff, height: data.readUInt16LE(28) & 0x3fff };
+    if (kind === 'VP8L' && data.length >= 26) return { width: 1 + (((data[22] ?? 0) | ((data[23] ?? 0) & 0x3f) << 8)), height: 1 + ((((data[23] ?? 0) >> 6) | (data[24] ?? 0) << 2 | ((data[25] ?? 0) & 0x0f) << 10)) };
+  }
+  if (mime === 'image/jpeg' && data.length >= 4 && data[0] === 0xff && data[1] === 0xd8) {
+    let offset = 2;
+    while (offset + 9 < data.length) {
+      if (data[offset] !== 0xff) { offset++; continue; }
+      const marker = data[offset + 1] ?? 0;
+      const length = data.readUInt16BE(offset + 2);
+      if ([0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf].includes(marker)) return { height: data.readUInt16BE(offset + 5), width: data.readUInt16BE(offset + 7) };
+      if (length < 2) return null;
+      offset += 2 + length;
+    }
+  }
+  return null;
 }

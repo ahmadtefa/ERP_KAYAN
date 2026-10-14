@@ -21,17 +21,21 @@ import {
 const CODE_PATTERN = /^[A-Za-z0-9_-]{2,20}$/;
 
 export class UpdateCompanyProfileDto {
-  @IsOptional() @IsString() @MaxLength(4) @Matches(CODE_PATTERN, {
+  @IsOptional() @IsString() @MaxLength(20) @Matches(CODE_PATTERN, {
     message: 'code must be 2-20 characters: letters, digits, dash or underscore',
   })
   code?: string;
 
   @IsOptional() @IsString() @MinLength(1) @MaxLength(200) nameEn?: string;
   @IsOptional() @IsString() @MinLength(1) @MaxLength(200) nameAr?: string;
-  @IsOptional() @IsString() @MaxLength(50) taxId?: string;
-  @IsOptional() @IsString() @MaxLength(30) phone?: string;
-  @IsOptional() @IsEmail() @MaxLength(200) email?: string;
-  @IsOptional() @IsString() @MaxLength(500) address?: string;
+  @IsOptional() @IsString() @MaxLength(50) taxId?: string | null;
+  @IsOptional() @IsString() @MaxLength(60) commercialRegistration?: string | null;
+  @IsOptional() @IsString() @MaxLength(500) addressEn?: string | null;
+  @IsOptional() @IsString() @MaxLength(500) addressAr?: string | null;
+  /// Single-line address used by the desktop screens; maps to addressEn.
+  @IsOptional() @IsString() @MaxLength(500) address?: string | null;
+  @IsOptional() @IsString() @MaxLength(40) phone?: string | null;
+  @IsOptional() @IsEmail() @MaxLength(254) email?: string | null;
 }
 
 export class CreateBranchDto {
