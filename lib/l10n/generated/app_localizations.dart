@@ -1490,6 +1490,12 @@ abstract class AppLocalizations {
   /// **'Edit permissions'**
   String get setPermissions;
 
+  String get selectAll;
+
+  String get clearAll;
+
+  String get extraPermissions;
+
   /// No description provided for @permissionsNote.
   ///
   /// In en, this message translates to:
@@ -1976,100 +1982,6 @@ abstract class AppLocalizations {
   /// **'Download this list as it stands: Excel, CSV, PDF, or a page to print.'**
   String get exportListHint;
 
-  /// No description provided for @rememberLogin.
-  ///
-  /// In en, this message translates to:
-  /// **'Remember sign-in details'**
-  String get rememberLogin;
-
-  /// No description provided for @rememberWebUsernameOnly.
-  ///
-  /// In en, this message translates to:
-  /// **'Only the username is saved in this browser.'**
-  String get rememberWebUsernameOnly;
-
-  /// No description provided for @rememberNativeSecure.
-  ///
-  /// In en, this message translates to:
-  /// **'Password is stored in device secure storage.'**
-  String get rememberNativeSecure;
-
-  /// No description provided for @newExpenseAccount.
-  ///
-  /// In en, this message translates to:
-  /// **'New expense account'**
-  String get newExpenseAccount;
-
-  /// No description provided for @editExpenseAccount.
-  ///
-  /// In en, this message translates to:
-  /// **'Edit expense account'**
-  String get editExpenseAccount;
-
-  /// No description provided for @parentAccount.
-  ///
-  /// In en, this message translates to:
-  /// **'Parent account'**
-  String get parentAccount;
-
-  /// No description provided for @noParentAccount.
-  ///
-  /// In en, this message translates to:
-  /// **'No parent'**
-  String get noParentAccount;
-
-  /// No description provided for @accountCanPost.
-  ///
-  /// In en, this message translates to:
-  /// **'Can receive journal postings'**
-  String get accountCanPost;
-
-  /// No description provided for @activateAccount.
-  ///
-  /// In en, this message translates to:
-  /// **'Activate account'**
-  String get activateAccount;
-
-  /// No description provided for @deactivateAccount.
-  ///
-  /// In en, this message translates to:
-  /// **'Deactivate account'**
-  String get deactivateAccount;
-}
-
-class _AppLocalizationsDelegate
-    extends LocalizationsDelegate<AppLocalizations> {
-  const _AppLocalizationsDelegate();
-
-  @override
-  Future<AppLocalizations> load(Locale locale) {
-    return SynchronousFuture<AppLocalizations>(lookupAppLocalizations(locale));
-  }
-
-  @override
-  bool isSupported(Locale locale) =>
-      <String>['ar', 'en'].contains(locale.languageCode);
-
-  @override
-  bool shouldReload(_AppLocalizationsDelegate old) => false;
-}
-
-AppLocalizations lookupAppLocalizations(Locale locale) {
-  // Lookup logic when only language code is specified.
-  switch (locale.languageCode) {
-    case 'ar':
-      return AppLocalizationsAr();
-    case 'en':
-      return AppLocalizationsEn();
-  }
-
-  throw FlutterError(
-    'AppLocalizations.delegate failed to load unsupported locale "$locale". This is likely '
-    'an issue with the localizations generation tool. Please file an issue '
-    'on GitHub with a reproducible sample app and the gen-l10n configuration '
-    'that was used.',
-  );
-
   /// No description provided for @newAccount.
   ///
   /// In en, this message translates to:
@@ -2123,6 +2035,12 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   /// In en, this message translates to:
   /// **'Name in English'**
   String get nameEnglish;
+
+  /// No description provided for @parentAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent account'**
+  String get parentAccount;
 
   /// No description provided for @parentAccountHelper.
   ///
@@ -2459,5 +2377,441 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   /// In en, this message translates to:
   /// **'Name, logo, contact details and branches'**
   String get companySettingsHint;
+  String get rememberLogin;
 
+  String get rememberWebUsernameOnly;
+
+  String get rememberNativeSecure;
+
+  String get newExpenseAccount;
+
+  String get editExpenseAccount;
+
+  String get noParentAccount;
+
+  String get accountCanPost;
+
+  String get activateAccount;
+
+  String get deactivateAccount;
+
+}
+
+class _AppLocalizationsDelegate
+    extends LocalizationsDelegate<AppLocalizations> {
+  const _AppLocalizationsDelegate();
+
+  @override
+  Future<AppLocalizations> load(Locale locale) {
+    return SynchronousFuture<AppLocalizations>(lookupAppLocalizations(locale));
+  }
+
+  @override
+  bool isSupported(Locale locale) =>
+      <String>['ar', 'en'].contains(locale.languageCode);
+
+  @override
+  bool shouldReload(_AppLocalizationsDelegate old) => false;
+}
+
+AppLocalizations lookupAppLocalizations(Locale locale) {
+
+  /// No description provided for @downloadStarted.
+  ///
+  /// In en, this message translates to:
+  /// **'The file is downloading.'**
+  String get downloadStarted;
+
+  /// No description provided for @downloadFailedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'The file could not be downloaded.'**
+  String get downloadFailedTitle;
+
+  /// No description provided for @printOpened.
+  ///
+  /// In en, this message translates to:
+  /// **'The print page is opening in a new tab.'**
+  String get printOpened;
+
+  /// No description provided for @printBlocked.
+  ///
+  /// In en, this message translates to:
+  /// **'The browser blocked the new tab. Allow pop-ups for this address, then press Print again.'**
+  String get printBlocked;
+
+  /// No description provided for @resetData.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset the program\'s data'**
+  String get resetData;
+
+  /// No description provided for @resetDataHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Clears this company’s books and returns the program to its first run. A backup is taken and checked before anything is deleted, and the reset stops if that backup fails.'**
+  String get resetDataHint;
+
+  /// No description provided for @resetButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset ERP Data'**
+  String get resetButton;
+
+  /// No description provided for @resetOnlyAdmins.
+  ///
+  /// In en, this message translates to:
+  /// **'Only an administrator of the program can do this.'**
+  String get resetOnlyAdmins;
+
+  /// No description provided for @resetForCompany.
+  ///
+  /// In en, this message translates to:
+  /// **'This will reset “{company}”.'**
+  String resetForCompany(Object company);
+
+  /// No description provided for @resetWhatIsDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'What will be deleted'**
+  String get resetWhatIsDeleted;
+
+  /// No description provided for @resetWhatIsKept.
+  ///
+  /// In en, this message translates to:
+  /// **'What is kept'**
+  String get resetWhatIsKept;
+
+  /// No description provided for @resetDeletedHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Every record the company holds: its books, its parties, its stock and its documents.'**
+  String get resetDeletedHint;
+
+  /// No description provided for @resetKeptAdmin.
+  ///
+  /// In en, this message translates to:
+  /// **'The administrator account you are signed in with'**
+  String get resetKeptAdmin;
+
+  /// No description provided for @resetKeptPermissions.
+  ///
+  /// In en, this message translates to:
+  /// **'The permission catalogue'**
+  String get resetKeptPermissions;
+
+  /// No description provided for @resetKeptRoles.
+  ///
+  /// In en, this message translates to:
+  /// **'The roles the program ships with'**
+  String get resetKeptRoles;
+
+  /// No description provided for @resetKeptConfig.
+  ///
+  /// In en, this message translates to:
+  /// **'The database connection and the program’s settings'**
+  String get resetKeptConfig;
+
+  /// No description provided for @resetCountJournalEntries.
+  ///
+  /// In en, this message translates to:
+  /// **'Journal entries'**
+  String get resetCountJournalEntries;
+
+  /// No description provided for @resetCountAccounts.
+  ///
+  /// In en, this message translates to:
+  /// **'Accounts'**
+  String get resetCountAccounts;
+
+  /// No description provided for @resetCountCustomers.
+  ///
+  /// In en, this message translates to:
+  /// **'Customers'**
+  String get resetCountCustomers;
+
+  /// No description provided for @resetCountSuppliers.
+  ///
+  /// In en, this message translates to:
+  /// **'Suppliers'**
+  String get resetCountSuppliers;
+
+  /// No description provided for @resetCountItems.
+  ///
+  /// In en, this message translates to:
+  /// **'Items'**
+  String get resetCountItems;
+
+  /// No description provided for @resetCountSalesInvoices.
+  ///
+  /// In en, this message translates to:
+  /// **'Sales invoices'**
+  String get resetCountSalesInvoices;
+
+  /// No description provided for @resetCountPurchaseInvoices.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase invoices'**
+  String get resetCountPurchaseInvoices;
+
+  /// No description provided for @resetCountStockMovements.
+  ///
+  /// In en, this message translates to:
+  /// **'Stock movements'**
+  String get resetCountStockMovements;
+
+  /// No description provided for @resetCountFiscalPeriods.
+  ///
+  /// In en, this message translates to:
+  /// **'Financial periods'**
+  String get resetCountFiscalPeriods;
+
+  /// No description provided for @resetCountBranches.
+  ///
+  /// In en, this message translates to:
+  /// **'Branches'**
+  String get resetCountBranches;
+
+  /// No description provided for @resetCountUsers.
+  ///
+  /// In en, this message translates to:
+  /// **'Other users'**
+  String get resetCountUsers;
+
+  /// No description provided for @resetBackupFirst.
+  ///
+  /// In en, this message translates to:
+  /// **'A full backup will be taken and checked before anything is deleted. If the backup cannot be taken, or cannot be read back, nothing is deleted at all.'**
+  String get resetBackupFirst;
+
+  /// No description provided for @resetConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'This cannot be undone'**
+  String get resetConfirmTitle;
+
+  /// No description provided for @resetConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The only way back is to restore the backup that is about to be taken. Type your password and the word {word} to go ahead.'**
+  String resetConfirmBody(Object word);
+
+  /// No description provided for @resetPasswordLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Your password'**
+  String get resetPasswordLabel;
+
+  /// No description provided for @resetPasswordHint.
+  ///
+  /// In en, this message translates to:
+  /// **'The password of the account you are signed in with. The server checks it.'**
+  String get resetPasswordHint;
+
+  /// No description provided for @resetWordLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Type {word}'**
+  String resetWordLabel(Object word);
+
+  /// No description provided for @resetWrongWord.
+  ///
+  /// In en, this message translates to:
+  /// **'Type {word} exactly as it is written to confirm.'**
+  String resetWrongWord(Object word);
+
+  /// No description provided for @resetDone.
+  ///
+  /// In en, this message translates to:
+  /// **'The company’s data was cleared. “{file}” holds the old data.'**
+  String resetDone(Object file);
+
+  /// No description provided for @resetNeedsSetup.
+  ///
+  /// In en, this message translates to:
+  /// **'The program will ask to be set up again the next time it is opened.'**
+  String get resetNeedsSetup;
+
+  /// No description provided for @resetPreviewFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'What a reset would remove could not be read.'**
+  String get resetPreviewFailed;
+
+  /// No description provided for @cashAndBanks.
+  ///
+  /// In ar, this message translates to:
+  /// **'الخزائن والبنوك'**
+  String get cashAndBanks;
+
+  /// No description provided for @newCashAccount.
+  ///
+  /// In ar, this message translates to:
+  /// **'خزنة أو حساب بنكي جديد'**
+  String get newCashAccount;
+
+  /// No description provided for @cashAccount.
+  ///
+  /// In ar, this message translates to:
+  /// **'الخزنة أو البنك'**
+  String get cashAccount;
+
+  /// No description provided for @cashBox.
+  ///
+  /// In ar, this message translates to:
+  /// **'خزنة'**
+  String get cashBox;
+
+  /// No description provided for @bank.
+  ///
+  /// In ar, this message translates to:
+  /// **'بنك'**
+  String get bank;
+
+  /// No description provided for @bankName.
+  ///
+  /// In ar, this message translates to:
+  /// **'اسم البنك'**
+  String get bankName;
+
+  /// No description provided for @iban.
+  ///
+  /// In ar, this message translates to:
+  /// **'رقم الحساب الدولي'**
+  String get iban;
+
+  /// No description provided for @ledgerAccount.
+  ///
+  /// In ar, this message translates to:
+  /// **'الحساب الدفتري'**
+  String get ledgerAccount;
+
+  /// No description provided for @noCashAccounts.
+  ///
+  /// In ar, this message translates to:
+  /// **'لا توجد خزائن أو بنوك بعد'**
+  String get noCashAccounts;
+
+  /// No description provided for @statement.
+  ///
+  /// In ar, this message translates to:
+  /// **'كشف حساب'**
+  String get statement;
+
+  /// No description provided for @vouchers.
+  ///
+  /// In ar, this message translates to:
+  /// **'سندات القبض والصرف'**
+  String get vouchers;
+
+  /// No description provided for @newVoucher.
+  ///
+  /// In ar, this message translates to:
+  /// **'سند قبض أو صرف جديد'**
+  String get newVoucher;
+
+  /// No description provided for @receipt.
+  ///
+  /// In ar, this message translates to:
+  /// **'سند قبض'**
+  String get receipt;
+
+  /// No description provided for @payment.
+  ///
+  /// In ar, this message translates to:
+  /// **'سند صرف'**
+  String get payment;
+
+  /// No description provided for @voucherType.
+  ///
+  /// In ar, this message translates to:
+  /// **'النوع'**
+  String get voucherType;
+
+  /// No description provided for @voucherNumber.
+  ///
+  /// In ar, this message translates to:
+  /// **'الرقم'**
+  String get voucherNumber;
+
+  /// No description provided for @amount.
+  ///
+  /// In ar, this message translates to:
+  /// **'المبلغ'**
+  String get amount;
+
+  /// No description provided for @noVouchers.
+  ///
+  /// In ar, this message translates to:
+  /// **'لا توجد سندات بعد'**
+  String get noVouchers;
+
+  /// No description provided for @transfers.
+  ///
+  /// In ar, this message translates to:
+  /// **'التحويلات'**
+  String get transfers;
+
+  /// No description provided for @newTransfer.
+  ///
+  /// In ar, this message translates to:
+  /// **'تحويل جديد'**
+  String get newTransfer;
+
+  /// No description provided for @fromAccount.
+  ///
+  /// In ar, this message translates to:
+  /// **'من'**
+  String get fromAccount;
+
+  /// No description provided for @toAccount.
+  ///
+  /// In ar, this message translates to:
+  /// **'إلى'**
+  String get toAccount;
+
+  /// No description provided for @noTransfers.
+  ///
+  /// In ar, this message translates to:
+  /// **'لا توجد تحويلات بعد'**
+  String get noTransfers;
+
+  /// No description provided for @transferNeedsTwoAccounts.
+  ///
+  /// In ar, this message translates to:
+  /// **'يحتاج التحويل إلى خزنتين أو حسابين بنكيين'**
+  String get transferNeedsTwoAccounts;
+
+  /// No description provided for @party.
+  ///
+  /// In ar, this message translates to:
+  /// **'الطرف'**
+  String get party;
+
+  /// No description provided for @saved.
+  ///
+  /// In ar, this message translates to:
+  /// **'تم الحفظ'**
+  String get saved;
+
+  /// No description provided for @settleOldestFirst.
+  ///
+  /// In ar, this message translates to:
+  /// **'تم تخصيص المبلغ على أقدم الفواتير المفتوحة'**
+  String get settleOldestFirst;
+
+  // Lookup logic when only language code is specified.
+  switch (locale.languageCode) {
+    case 'ar':
+      return AppLocalizationsAr();
+    case 'en':
+      return AppLocalizationsEn();
+  }
+
+  throw FlutterError(
+    'AppLocalizations.delegate failed to load unsupported locale "$locale". This is likely '
+    'an issue with the localizations generation tool. Please file an issue '
+    'on GitHub with a reproducible sample app and the gen-l10n configuration '
+    'that was used.',
+  );
 }

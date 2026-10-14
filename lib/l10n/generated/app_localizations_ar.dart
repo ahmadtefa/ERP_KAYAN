@@ -715,6 +715,15 @@ class AppLocalizationsAr extends AppLocalizations {
   String get setPermissions => 'تعديل الصلاحيات';
 
   @override
+  String get selectAll => 'تحديد الكل';
+
+  @override
+  String get clearAll => 'إلغاء الكل';
+
+  @override
+  String get extraPermissions => 'صلاحيات إضافية';
+
+  @override
   String get permissionsNote =>
       'دور نظامي: تقدر تعدّل صلاحياته، لكن مش ينفع تسمّيه من جديد ولا تحذفه.';
 
@@ -970,36 +979,6 @@ class AppLocalizationsAr extends AppLocalizations {
       'نزّل القائمة زي ما هي على الشاشة: إكسل أو CSV أو PDF أو ورقة للطباعة.';
 
   @override
-  String get rememberLogin => 'تذكر بيانات الدخول';
-
-  @override
-  String get rememberWebUsernameOnly => 'سيتم حفظ اسم المستخدم فقط في المتصفح.';
-
-  @override
-  String get rememberNativeSecure => 'تُحفظ كلمة المرور في مخزن النظام الآمن.';
-
-  @override
-  String get newExpenseAccount => 'حساب مصروفات جديد';
-
-  @override
-  String get editExpenseAccount => 'تعديل حساب مصروفات';
-
-  @override
-  String get parentAccount => 'الحساب الأب';
-
-  @override
-  String get noParentAccount => 'بدون حساب أب';
-
-  @override
-  String get accountCanPost => 'قابل لاستقبال قيود يومية';
-
-  @override
-  String get activateAccount => 'تفعيل الحساب';
-
-  @override
-  String get deactivateAccount => 'تعطيل الحساب';
-
-  @override
   String get newAccount => 'حساب جديد';
 
   @override
@@ -1028,6 +1007,9 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get nameEnglish => 'الاسم بالإنجليزية';
+
+  @override
+  String get parentAccount => 'الحساب الأب';
 
   @override
   String get parentAccountHelper => 'الحسابات الفرعية تأخذ نفس نوع الأب';
@@ -1206,5 +1188,234 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get companySettingsHint => 'الاسم والشعار والتواصل والفروع';
+
+  @override
+  String get downloadStarted => 'جارٍ تنزيل الملف.';
+
+  @override
+  String get downloadFailedTitle => 'تعذّر تنزيل الملف.';
+
+  @override
+  String get printOpened => 'تُفتح صفحة الطباعة في تبويب جديد.';
+
+  @override
+  String get printBlocked => 'حجب المتصفح التبويب الجديد. اسمح بالفتح في تبويب جديد لهذا العنوان ثم اضغط طباعة مرة أخرى.';
+
+  @override
+  String get resetData => 'إعادة ضبط بيانات البرنامج';
+
+  @override
+  String get resetDataHint => 'يحذف بيانات هذه الشركة ويعيد البرنامج إلى أول تشغيل. تؤخذ نسخة احتياطية ويتم التأكد منها قبل حذف أي شيء، وتتوقف العملية إن تعذّر ذلك.';
+
+  @override
+  String get resetButton => 'إعادة ضبط بيانات البرنامج';
+
+  @override
+  String get resetOnlyAdmins => 'لا يمكن تنفيذ هذا إلا بصلاحية مدير البرنامج.';
+
+  @override
+  String resetForCompany(Object company) {
+    return 'ستتم إعادة ضبط بيانات «$company».';
+  }
+
+  @override
+  String get resetWhatIsDeleted => 'ما سيتم حذفه';
+
+  @override
+  String get resetWhatIsKept => 'ما سيبقى';
+
+  @override
+  String get resetDeletedHint => 'كل ما تحمله الشركة من سجلات: دفاترها وأطرافها ومخزونها ومستنداتها.';
+
+  @override
+  String get resetKeptAdmin => 'حساب المدير الذي تستخدمه الآن';
+
+  @override
+  String get resetKeptPermissions => 'قائمة الصلاحيات';
+
+  @override
+  String get resetKeptRoles => 'الأدوار التي يأتي بها البرنامج';
+
+  @override
+  String get resetKeptConfig => 'إعدادات الاتصال بقاعدة البيانات وإعدادات البرنامج';
+
+  @override
+  String get resetCountJournalEntries => 'قيود اليومية';
+
+  @override
+  String get resetCountAccounts => 'الحسابات';
+
+  @override
+  String get resetCountCustomers => 'العملاء';
+
+  @override
+  String get resetCountSuppliers => 'الموردون';
+
+  @override
+  String get resetCountItems => 'الأصناف';
+
+  @override
+  String get resetCountSalesInvoices => 'فواتير البيع';
+
+  @override
+  String get resetCountPurchaseInvoices => 'فواتير الشراء';
+
+  @override
+  String get resetCountStockMovements => 'حركات المخزون';
+
+  @override
+  String get resetCountFiscalPeriods => 'الفترات المالية';
+
+  @override
+  String get resetCountBranches => 'الفروع';
+
+  @override
+  String get resetCountUsers => 'المستخدمون الآخرون';
+
+  @override
+  String get resetBackupFirst => 'تؤخذ نسخة احتياطية كاملة ويتم التأكد من صحتها قبل حذف أي شيء. وإن تعذّر أخذ النسخة أو التحقق منها فلن يُحذف شيء.';
+
+  @override
+  String get resetConfirmTitle => 'لا يمكن التراجع عن هذا';
+
+  @override
+  String resetConfirmBody(Object word) {
+    return 'العودة تكون فقط باستعادة النسخة التي ستؤخذ الآن. اكتب كلمة المرور وكلمة $word للمتابعة.';
+  }
+
+  @override
+  String get resetPasswordLabel => 'كلمة المرور';
+
+  @override
+  String get resetPasswordHint => 'كلمة مرور الحساب الذي تستخدمه الآن، ويتحقق منها الخادم.';
+
+  @override
+  String resetWordLabel(Object word) {
+    return 'اكتب $word';
+  }
+
+  @override
+  String resetWrongWord(Object word) {
+    return 'اكتب $word تماماً كما هي للتأكيد.';
+  }
+
+  @override
+  String resetDone(Object file) {
+    return 'تم حذف بيانات الشركة. تحتوي «$file» على البيانات القديمة.';
+  }
+
+  @override
+  String get resetNeedsSetup => 'سيطلب البرنامج إعداده من جديد عند فتحه في المرة القادمة.';
+
+  @override
+  String get resetPreviewFailed => 'تعذّر قراءة ما ستزيله إعادة الضبط.';
+
+
+  @override
+  String get cashAndBanks => 'الخزائن والبنوك';
+
+  @override
+  String get newCashAccount => 'خزنة أو حساب بنكي جديد';
+
+  @override
+  String get cashAccount => 'الخزنة أو البنك';
+
+  @override
+  String get cashBox => 'خزنة';
+
+  @override
+  String get bank => 'بنك';
+
+  @override
+  String get bankName => 'اسم البنك';
+
+  @override
+  String get iban => 'رقم الحساب الدولي';
+
+  @override
+  String get ledgerAccount => 'الحساب الدفتري';
+
+  @override
+  String get noCashAccounts => 'لا توجد خزائن أو بنوك بعد';
+
+  @override
+  String get statement => 'كشف حساب';
+
+  @override
+  String get vouchers => 'سندات القبض والصرف';
+
+  @override
+  String get newVoucher => 'سند قبض أو صرف جديد';
+
+  @override
+  String get receipt => 'سند قبض';
+
+  @override
+  String get payment => 'سند صرف';
+
+  @override
+  String get voucherType => 'النوع';
+
+  @override
+  String get voucherNumber => 'الرقم';
+
+  @override
+  String get amount => 'المبلغ';
+
+  @override
+  String get noVouchers => 'لا توجد سندات بعد';
+
+  @override
+  String get transfers => 'التحويلات';
+
+  @override
+  String get newTransfer => 'تحويل جديد';
+
+  @override
+  String get fromAccount => 'من';
+
+  @override
+  String get toAccount => 'إلى';
+
+  @override
+  String get noTransfers => 'لا توجد تحويلات بعد';
+
+  @override
+  String get transferNeedsTwoAccounts => 'يحتاج التحويل إلى خزنتين أو حسابين بنكيين';
+
+  @override
+  String get party => 'الطرف';
+
+  @override
+  String get saved => 'تم الحفظ';
+
+  @override
+  String get settleOldestFirst => 'تم تخصيص المبلغ على أقدم الفواتير المفتوحة';
+@override
+  String get rememberLogin => 'تذكر بيانات الدخول';
+
+@override
+  String get rememberWebUsernameOnly => 'سيتم حفظ اسم المستخدم فقط في المتصفح.';
+
+@override
+  String get rememberNativeSecure => 'تُحفظ كلمة المرور في مخزن النظام الآمن.';
+
+@override
+  String get newExpenseAccount => 'حساب مصروفات جديد';
+
+@override
+  String get editExpenseAccount => 'تعديل حساب مصروفات';
+
+@override
+  String get noParentAccount => 'بدون حساب أب';
+
+@override
+  String get accountCanPost => 'قابل لاستقبال قيود يومية';
+
+@override
+  String get activateAccount => 'تفعيل الحساب';
+
+@override
+  String get deactivateAccount => 'تعطيل الحساب';
 
 }
