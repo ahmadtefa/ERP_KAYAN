@@ -270,6 +270,26 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       expect(txMock.journalEntry.createMany).toHaveBeenCalled();
     });
 
+    test('refuses an older backup that omits a table containing live company data', async () => {
+      prismaMock.cashAccount.findMany.mockResolvedValueOnce([
+        { id: 'cash-account-live', companyId: COMPANY_ID, accountId: 'account-live' },
+      ]);
+
+      await expect(service.restore({
+        format: 'kayan-backup',
+        version: 1,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'شركة كيان',
+        counts: {},
+        // Simulate a backup from before cash accounts were part of the format.
+        tables: { account: [] },
+      }, COMPANY_ID, { replace: true })).rejects.toThrow(/missing tables.*cashAccount/i);
+
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
     test('deletes cash and banking dependants before deleting their ledger accounts', async () => {
       await service.restore({
         format: 'kayan-backup',
