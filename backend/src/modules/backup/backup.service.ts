@@ -517,7 +517,7 @@ export class BackupService {
     });
 
     if (
-      spec.model === 'rolePermission' &&
+      (spec.model === 'rolePermission' || spec.model === 'userPermission') &&
       typeof (client as any).permission?.findMany === 'function'
     ) {
       const targetPerms = (await (client as any).permission.findMany()) as Array<{
@@ -552,17 +552,18 @@ export class BackupService {
         const seenPairs = new Set<string>();
         const remapped: Array<Record<string, unknown>> = [];
         for (const r of prepared) {
-          const roleId = String(r.roleId ?? '');
+          const assignmentField = spec.model === 'rolePermission' ? 'roleId' : 'userId';
+          const assignmentId = String(r[assignmentField] ?? '');
           const rawPermId = String(r.permissionId ?? '');
           const mappedPermId =
             (typeof r.permissionCode === 'string'
               ? targetByCode.get(r.permissionCode)
               : undefined) ?? permIdMap.get(rawPermId);
-          if (!roleId || !mappedPermId) continue;
-          const pairKey = `${roleId}:${mappedPermId}`;
+          if (!assignmentId || !mappedPermId) continue;
+          const pairKey = assignmentId + ':' + mappedPermId;
           if (seenPairs.has(pairKey)) continue;
           seenPairs.add(pairKey);
-          remapped.push({ roleId, permissionId: mappedPermId });
+          remapped.push({ [assignmentField]: assignmentId, permissionId: mappedPermId });
         }
         prepared = remapped;
       }
