@@ -103,6 +103,7 @@ export class PartiesService {
       taxNumber: (dto.taxNumber as string) ?? null,
       address: (dto.address as string) ?? null,
       notes: (dto.notes as string) ?? null,
+      paymentTermDays: this.paymentTerm(dto.paymentTermDays),
       createdBy: userId,
       updatedBy: userId,
     };
@@ -151,6 +152,9 @@ export class PartiesService {
     }
     if (kind === 'customer' && dto.creditLimit !== undefined) {
       data.creditLimit = this.money(dto.creditLimit, 'creditLimit');
+    }
+    if (dto.paymentTermDays !== undefined) {
+      data.paymentTermDays = this.paymentTerm(dto.paymentTermDays);
     }
 
     const updated = await model.update({ where: { id }, data });
@@ -201,6 +205,17 @@ export class PartiesService {
     return this.toResponse(updated);
   }
 
+  /// Payment terms are whole days. They are validated here as well as in the
+  /// DTO because the service is also called from the import path.
+  private paymentTerm(value: unknown): number {
+    if (value === undefined || value === null || value === '') return 0;
+    const days = Number(value);
+    if (!Number.isInteger(days) || days < 0 || days > 3650) {
+      throw new BadRequestException('paymentTermDays must be a whole number of days between 0 and 3650');
+    }
+    return days;
+  }
+
   private money(value: unknown, field: string): Prisma.Decimal {
     try {
       const d = new Prisma.Decimal(String(value)).toDecimalPlaces(MONEY_SCALE);
@@ -214,6 +229,7 @@ export class PartiesService {
   private toResponse(row: any) {
     return {
       id: row.id,
+      paymentTermDays: row.paymentTermDays ?? 0,
       companyId: row.companyId,
       code: row.code,
       nameEn: row.nameEn,
