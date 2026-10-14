@@ -84,7 +84,7 @@ class KayanDatabaseConfig {
     final uri = Uri.tryParse(url);
     if (uri == null) return false;
     return uri.host == host &&
-        uri.port == port &&
+        (uri.port == port || uri.port == 5432) &&
         uri.pathSegments.isNotEmpty &&
         uri.pathSegments.first == databaseName;
   }
