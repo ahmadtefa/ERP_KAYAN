@@ -285,6 +285,18 @@ export class BackupService {
     const existing = await this.countExisting(requesterCompanyId);
     const hasData = Object.values(existing).some((count) => count > 0);
 
+    // A backup made by an older app may not contain newer tables. Never
+    // interpret a missing table as an instruction to erase live data from it.
+    // A complete backup produced by this version includes every TABLES key.
+    const missingTablesWithLiveData = Object.entries(existing)
+      .filter(([model, count]) => count > 0 && !Array.isArray(file.tables[model]))
+      .map(([model]) => model);
+    if (missingTablesWithLiveData.length > 0) {
+      throw new BadRequestException(
+        `This backup is missing tables that currently contain company data: ${missingTablesWithLiveData.join(', ')}. Create a new company backup with the current version before replacing data. Nothing was changed.`,
+      );
+    }
+
     if (hasData && !options.replace) {
       throw new BadRequestException(
         `This company already holds data (${describe(existing)}). Confirm that you want to replace it to restore over it.`,
