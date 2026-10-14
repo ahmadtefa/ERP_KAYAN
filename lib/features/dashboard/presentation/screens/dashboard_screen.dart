@@ -353,6 +353,8 @@ class _CompanyHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final secondaryName = _localName(company, !arabic, 'nameAr', 'nameEn');
+    final taxId = (company['taxId'] as String?)?.trim() ?? '';
     final rawLogo = (company['logoBase64'] as String?)?.trim();
     Widget logo = const Icon(Icons.apartment_rounded, size: 32, color: Colors.white);
     if (rawLogo != null && rawLogo.isNotEmpty) {
@@ -416,6 +418,15 @@ class _CompanyHero extends StatelessWidget {
                         fontWeight: FontWeight.w800,
                       ),
                 ),
+                if (secondaryName.isNotEmpty && secondaryName != name) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    secondaryName,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.82),
+                        ),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
@@ -425,6 +436,11 @@ class _CompanyHero extends StatelessWidget {
                       icon: Icons.location_on_outlined,
                       label: branch,
                     ),
+                    if (taxId.isNotEmpty)
+                      _HeroChip(
+                        icon: Icons.receipt_long_outlined,
+                        label: (arabic ? 'الرقم الضريبي: ' : 'Tax ID: ') + taxId,
+                      ),
                     if ((company['code'] as String?)?.isNotEmpty ?? false)
                       _HeroChip(
                         icon: Icons.badge_outlined,
