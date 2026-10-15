@@ -61,3 +61,4 @@ backend/backups/
 
 # Maven (accidentally created, not part of this project)
 .mvn/
+backend/.engines-offline/

@@ -1,3 +1,0 @@
-#!/bin/sh
-echo "offline stub"
-exit 0
