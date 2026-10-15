@@ -258,9 +258,14 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
     Set-Content -LiteralPath $bootstrapMarker -Value 'KAYAN PostgreSQL 17 installer bootstrap v1' -Encoding ASCII
   }
   Save-UserSettings $settings
-  $tempPassword = Join-Path $ProgramDataRoot 'postgres-init-password.tmp'
+  # Keep the one-time bootstrap password file in the installer process's own
+  # temporary directory, not ProgramDataRoot: that directory is deliberately
+  # restricted to SYSTEM/Administrators and may exclude the interactive token
+  # that launches initdb on Windows.
+  $tempPassword = Join-Path $env:TEMP ('kayan-postgres-init-' + [guid]::NewGuid().ToString('N') + '.tmp')
   [IO.File]::WriteAllText($tempPassword, $dbPassword, [Text.Encoding]::ASCII)
-  Set-PrivateAcl $ProgramDataRoot 'BUILTIN\Administrators'
+  $currentIdentitySid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  Set-PrivateAcl $tempPassword @($currentIdentitySid)
   try {
     Invoke-Pg (Join-Path $pgBin 'initdb.exe') @('-D',$pgData,'-U','postgres','-A','scram-sha-256','--pwfile',$tempPassword,'-E','UTF8')
   } finally { Remove-Item -LiteralPath $tempPassword -Force -ErrorAction SilentlyContinue }
