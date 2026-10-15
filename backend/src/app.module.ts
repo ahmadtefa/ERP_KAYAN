@@ -27,6 +27,7 @@ import { PurchasesModule } from './modules/purchases/purchases.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { ReturnsModule } from './modules/returns/returns.module';
 import { SalesModule } from './modules/sales/sales.module';
+import { SearchModule } from './modules/search/search.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { SalesModule } from './modules/sales/sales.module';
     ReportsModule,
     ReturnsModule,
     DashboardModule,
+    SearchModule,
     ExportModule,
     ImportModule,
     BackupModule,

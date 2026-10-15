@@ -50,4 +50,7 @@ export class ListPartiesDto {
   @IsOptional() @IsBoolean() @Type(() => Boolean) includeInactive?: boolean;
   @IsOptional() @IsNumber() @Min(1) @Type(() => Number) page?: number = 1;
   @IsOptional() @IsNumber() @Min(1) @Type(() => Number) pageSize?: number = 50;
+  /// Sort key: code (default), name, or createdAt.
+  @IsOptional() @IsString() @MaxLength(20) sort?: string;
+  @IsOptional() @IsString() @MaxLength(4) dir?: string;
 }
