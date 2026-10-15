@@ -2,6 +2,8 @@ name: Windows Installer
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
 
@@ -63,22 +65,10 @@ jobs:
         run: |
           choco install innosetup --no-progress -y
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) {
-            $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
-          }
-          if (-not (Test-Path $iscc)) {
-            throw "Inno Setup compiler not found: $iscc"
-          }
-          # Verify the compiler by reading its file version, not by running /?.
+          if (-not (Test-Path $iscc)) { $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found: $iscc" }
           $item = Get-Item -LiteralPath $iscc
-          $version = $item.VersionInfo.FileVersion
-          if ($version) {
-            Write-Host "Inno Setup compiler: $iscc (version $version)"
-          } else {
-            Write-Warning "ISCC.exe has no file version; the installer build will verify it."
-          }
-
-          # Prevent a stale Chocolatey exit code from failing this PowerShell step.
+          if ($item.VersionInfo.FileVersion) { Write-Host "Inno Setup compiler: $iscc (version $($item.VersionInfo.FileVersion))" }
           $global:LASTEXITCODE = 0
 
       - name: Install backend dependencies
@@ -101,12 +91,7 @@ jobs:
         shell: powershell
         run: |
           $required = @('backend\dist\src\main.js', 'backend\dist\prisma\seed.js')
-          foreach ($item in $required) {
-            if (-not (Test-Path $item)) {
-              throw "Required clean build output missing: $item"
-            }
-          }
-          Write-Host "Verified backend build outputs: $($required -join ', ')"
+          foreach ($item in $required) { if (-not (Test-Path $item)) { throw "Required clean build output missing: $item" } }
 
       - name: Get Flutter dependencies
         run: flutter pub get
@@ -122,23 +107,20 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           & .\distribution\windows\build-installer.ps1
-          if ($LASTEXITCODE -ne 0) {
-            throw "Windows installer build failed."
-          }
+          if ($LASTEXITCODE -ne 0) { throw "Windows installer build failed." }
 
       - name: Verify installer artifact
         shell: powershell
         run: |
           $setupCanonical = ".\build\windows-installer\KAYAN-ERP-Setup.exe"
-          if (-not (Test-Path $setupCanonical)) {
-            throw "Expected canonical installer EXE not found: $setupCanonical"
-          }
+          if (-not (Test-Path $setupCanonical)) { throw "Expected canonical installer EXE not found: $setupCanonical" }
           $files = @(Get-ChildItem .\build\windows-installer\KAYAN-ERP-Setup-*-x64.exe -File)
-          if ($files.Count -lt 1) {
-            throw "Expected at least one versioned installer EXE; found $($files.Count)."
-          }
-          Get-FileHash $setupCanonical, $files[0].FullName -Algorithm SHA256 |
-            Format-List Algorithm, Hash, Path
+          if ($files.Count -lt 1) { throw "Expected at least one versioned installer EXE; found $($files.Count)." }
+          Get-FileHash $setupCanonical, $files[0].FullName -Algorithm SHA256 | Format-List Algorithm, Hash, Path
+
+      - name: Smoke-test the actual installed Windows application
+        shell: powershell
+        run: .\scripts\smoke-test-installed-windows.ps1 -SetupPath .\build\windows-installer\KAYAN-ERP-Setup.exe
 
       - name: Publish direct Setup.exe download
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
