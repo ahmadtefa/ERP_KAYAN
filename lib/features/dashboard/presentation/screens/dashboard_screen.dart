@@ -27,6 +27,8 @@ class DashboardScreen extends ConsumerWidget {
     final user = ref.watch(currentUserProvider);
     final companyAsync = ref.watch(companyProfileProvider);
     final branchesAsync = ref.watch(branchesProvider);
+    final summaryAsync = ref.watch(dashboardSummaryProvider);
+    final monthlyAsync = ref.watch(dashboardMonthlyProvider);
     final company = companyAsync.asData?.value == null
         ? <String, dynamic>{}
         : Map<String, dynamic>.from(companyAsync.asData!.value as Map);
@@ -113,7 +115,25 @@ class DashboardScreen extends ConsumerWidget {
           onEdit: () => context.go(AppRoutes.companySettings),
         ),
         const SizedBox(height: 24),
-        Text(medium ? 'wide-ok' : 'narrow-ok'),
+        summaryAsync.when(
+          loading: () => const Padding(
+            padding: EdgeInsets.symmetric(vertical: 48),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (error, _) => _ErrorCard(
+            arabic: arabic,
+            onRetry: () => ref.invalidate(dashboardSummaryProvider),
+          ),
+          data: (summary) => _SummarySections(
+            summary: summary,
+            monthly: monthlyAsync.asData?.value,
+            monthlyLoading: monthlyAsync.isLoading,
+            arabic: arabic,
+            wide: wide,
+            medium: medium,
+            l10n: l10n,
+          ),
+        ),
       ],
     );
   }
