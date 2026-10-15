@@ -122,6 +122,40 @@ jobs:
         shell: powershell
         run: .\scripts\smoke-test-installed-windows.ps1 -SetupPath .\build\windows-installer\KAYAN-ERP-Setup.exe
 
+      - name: Collect installer diagnostics on failure
+        if: failure()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $dest = Join-Path $env:RUNNER_TEMP 'kayan-installer-diagnostics'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $sources = @(
+            (Join-Path $env:TEMP 'kayan-setup-smoke.log'),
+            (Join-Path $env:TEMP 'kayan-installer-prep-stdout.log'),
+            (Join-Path $env:TEMP 'kayan-installer-prep-stderr.log'),
+            (Join-Path $env:ProgramData 'KAYAN-ERP\logs'),
+            (Join-Path $env:APPDATA 'KAYAN-ERP\logs')
+          )
+          foreach ($source in $sources) {
+            if (Test-Path $source) {
+              Copy-Item -LiteralPath $source -Destination $dest -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+          Get-ChildItem $dest -Recurse -File | ForEach-Object {
+            (Get-Content -LiteralPath $_.FullName -Raw) -replace '(?i)postgres(?:ql)?://[^\s"'']+', '[DATABASE URL REDACTED]' |
+              Set-Content -LiteralPath $_.FullName -Encoding UTF8
+          }
+        continue-on-error: true
+
+      - name: Upload installer diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kayan-installer-diagnostics
+          path: ${{ runner.temp }}/kayan-installer-diagnostics
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Publish direct Setup.exe download
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: ncipollo/release-action@v1

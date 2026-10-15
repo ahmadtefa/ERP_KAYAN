@@ -45,14 +45,32 @@ if (Test-Path $vcRuntime) {
   if ($vc.ExitCode -notin @(0,1638,3010)) { throw "Microsoft Visual C++ runtime installation failed ($($vc.ExitCode))." }
 }
 
-function Invoke-Pg([string]$Exe, [string[]]$Args) {
-  & $Exe @Args
-  if ($LASTEXITCODE -ne 0) { throw "PostgreSQL command failed ($LASTEXITCODE): $([IO.Path]::GetFileName($Exe))" }
+function Invoke-Pg([string]$Exe, [string[]]$Arguments) {
+  # Preserve PostgreSQL's actual diagnostic output in the protected installer
+  # log. First-run failures otherwise look identical to users and CI even when
+  # the underlying causes differ.
+  # Windows PowerShell 5.1 turns native stderr lines into error records when
+  # they are redirected; with ErrorActionPreference=Stop that would abort a
+  # perfectly healthy command that only wrote a note to stderr.
+  $previousEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $commandOutput = @(& $Exe @Arguments 2>&1)
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousEap
+  }
+  if ($exitCode -ne 0) {
+    $details = ($commandOutput | Out-String).Trim()
+    if ($details.Length -gt 4000) { $details = $details.Substring(0,4000) }
+    throw "PostgreSQL command failed ($exitCode): $([IO.Path]::GetFileName($Exe)). Output: $details"
+  }
+  if ($commandOutput.Count -gt 0) { $commandOutput | ForEach-Object { Write-Output $_ } }
 }
-function Invoke-PsqlInput([string]$Exe, [string[]]$Args, [string]$Sql) {
+function Invoke-PsqlInput([string]$Exe, [string[]]$Arguments, [string]$Sql) {
   $start = New-Object System.Diagnostics.ProcessStartInfo
   $start.FileName = $Exe
-  $start.Arguments = $Args -join ' '
+  $start.Arguments = $Arguments -join ' '
   $start.UseShellExecute = $false
   $start.CreateNoWindow = $true
   $start.RedirectStandardInput = $true
@@ -67,7 +85,11 @@ function Invoke-PsqlInput([string]$Exe, [string[]]$Args, [string]$Sql) {
   $stdout = $process.StandardOutput.ReadToEnd()
   $stderr = $process.StandardError.ReadToEnd()
   $process.WaitForExit()
-  if ($process.ExitCode -ne 0) { throw "PostgreSQL initialization SQL failed ($($process.ExitCode)); details are in the PostgreSQL log." }
+  if ($process.ExitCode -ne 0) {
+    $details = (($stdout + "`n" + $stderr) | Out-String).Trim()
+    if ($details.Length -gt 4000) { $details = $details.Substring(0,4000) }
+    throw "PostgreSQL initialization SQL failed ($($process.ExitCode)). Output: $details"
+  }
 }
 function Set-PrivateAcl([string]$Path, [string[]]$Principals) {
   # Strict least-privilege: SYSTEM, Administrators, and explicitly authorized user(s).
@@ -138,22 +160,49 @@ function Get-ActiveDesktopUserContext {
 # A running Windows service is not the same thing as a PostgreSQL that accepts
 # connections. Ask the server itself before anything (Prisma included) touches
 # the database, so a slow start is waited out and a real failure is reported.
+function Get-PgLogTail {
+  # The newest PostgreSQL log lines, for the error a person will actually see.
+  try {
+    $newest = Get-ChildItem -Path (Split-Path -Parent $pgLog) -Filter 'postgresql-*.log' -ErrorAction SilentlyContinue |
+      Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($newest) {
+      $tail = (Get-Content -LiteralPath $newest.FullName -Tail 20 -ErrorAction SilentlyContinue) -join [Environment]::NewLine
+      if ($tail) { return "[postgresql log $($newest.Name)]$([Environment]::NewLine)$tail" }
+    }
+    if (Test-Path -LiteralPath $pgLog) {
+      $tail = (Get-Content -LiteralPath $pgLog -Tail 20 -ErrorAction SilentlyContinue) -join [Environment]::NewLine
+      if ($tail) { return "[postgresql log]$([Environment]::NewLine)$tail" }
+    }
+  } catch { }
+  return '(no PostgreSQL log output was found)'
+}
 function Wait-PgReady {
   $ready = Join-Path $pgBin 'pg_isready.exe'
   if (-not (Test-Path $ready)) { throw 'Bundled PostgreSQL readiness tool is missing.' }
   $deadline = (Get-Date).AddSeconds(60)
-  while ((Get-Date) -lt $deadline) {
-    & $ready -h 127.0.0.1 -p 5432 -U postgres *> $null
-    if ($LASTEXITCODE -eq 0) { return }
-    Start-Sleep -Seconds 1
+  $previousEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    while ((Get-Date) -lt $deadline) {
+      & $ready -h 127.0.0.1 -p 5432 -U postgres *> $null
+      if ($LASTEXITCODE -eq 0) { return }
+      Start-Sleep -Seconds 1
+    }
+  } finally {
+    $ErrorActionPreference = $previousEap
   }
-  throw 'PostgreSQL did not accept connections before the 60 second deadline. Existing data was not changed; see the PostgreSQL log.'
+  throw ('PostgreSQL did not accept connections before the 60 second deadline. Existing data was not changed. ' + (Get-PgLogTail))
 }
 function Start-PgService {
   $current = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-  if ($current -and $current.Status -ne 'Running') {
-    Start-Service -Name $serviceName
-    (Get-Service -Name $serviceName).WaitForStatus('Running',[TimeSpan]::FromSeconds(60))
+  if (-not $current) { throw "The PostgreSQL service '$serviceName' is not registered. " + (Get-PgLogTail) }
+  if ($current.Status -ne 'Running') {
+    try {
+      Start-Service -Name $serviceName
+      (Get-Service -Name $serviceName).WaitForStatus('Running',[TimeSpan]::FromSeconds(60))
+    } catch {
+      throw ("The PostgreSQL service '$serviceName' did not start. " + (Get-PgLogTail))
+    }
   }
   Wait-PgReady
 }
@@ -249,11 +298,16 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
     Set-Content -LiteralPath $bootstrapMarker -Value 'KAYAN PostgreSQL 17 installer bootstrap v1' -Encoding ASCII
   }
   Save-UserSettings $settings
-  $tempPassword = Join-Path $ProgramDataRoot 'postgres-init-password.tmp'
+  # Keep the one-time bootstrap password file in the installer process's own
+  # temporary directory, not ProgramDataRoot: that directory is deliberately
+  # restricted to SYSTEM/Administrators and may exclude the interactive token
+  # that launches initdb on Windows.
+  $tempPassword = Join-Path $env:TEMP ('kayan-postgres-init-' + [guid]::NewGuid().ToString('N') + '.tmp')
   [IO.File]::WriteAllText($tempPassword, $dbPassword, [Text.Encoding]::ASCII)
-  Set-PrivateAcl $ProgramDataRoot 'BUILTIN\Administrators'
+  $currentIdentitySid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  Set-PrivateAcl $tempPassword @($currentIdentitySid)
   try {
-    Invoke-Pg (Join-Path $pgBin 'initdb.exe') @('-D',$pgData,'-U','postgres','-A','scram-sha-256','--pwfile',$tempPassword,'-E','UTF8')
+    Invoke-Pg -Exe (Join-Path $pgBin 'initdb.exe') -Arguments @('-D',$pgData,'-U','postgres','-A','scram-sha-256','--pwfile',$tempPassword,'-E','UTF8')
   } finally { Remove-Item -LiteralPath $tempPassword -Force -ErrorAction SilentlyContinue }
 
   $conf = Join-Path $pgData 'postgresql.conf'
@@ -263,28 +317,31 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   $env:DATABASE_URL = "postgresql://erp_app:$dbPassword@127.0.0.1:5432/erp_kayan?schema=public"
   $env:ADMIN_DATABASE_URL = "postgresql://postgres:$dbPassword@127.0.0.1:5432/postgres?schema=public"
   $env:PGPASSWORD = $dbPassword
-  # Start postgres briefly as the installer, create the least-privileged app role/db, then register the permanent service.
+  # PostgreSQL on Windows refuses to run as a member of the Administrators
+  # group ("Execution of PostgreSQL by a user with administrative permissions
+  # is not permitted"), and this script runs elevated. So the server is never
+  # started by hand as the installer: the permanent service runs it as
+  # NT AUTHORITY\LocalService from the very first start, and the one-time
+  # role/database bootstrap goes through that service over TCP.
+  Set-PrivateAcl $pgData 'NT AUTHORITY\LOCAL SERVICE'
+  Set-PrivateAcl (Split-Path -Parent $pgLog) 'NT AUTHORITY\LOCAL SERVICE'
   $pgCtl = Join-Path $pgBin 'pg_ctl.exe'
-  Invoke-Pg $pgCtl @('start','-D',$pgData,'-l',$pgLog,'-w','-t','60')
+  if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
+    Invoke-Pg -Exe $pgCtl -Arguments @('register','-N',$serviceName,'-U','NT AUTHORITY\LocalService','-D',$pgData,'-S','auto')
+  }
+  Start-PgService
   try {
     Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "DO `$`$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'erp_app') THEN CREATE ROLE erp_app WITH LOGIN PASSWORD '$dbPassword'; ELSE ALTER ROLE erp_app WITH LOGIN PASSWORD '$dbPassword'; END IF; END `$`$;"
     Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "SELECT 'CREATE DATABASE erp_kayan OWNER erp_app' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'erp_kayan')\gexec"
-    } finally {
-      Invoke-Pg $pgCtl @('stop','-D',$pgData,'-m','fast','-w')
-      Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
-    }
-  if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
-    Invoke-Pg $pgCtl @('register','-N',$serviceName,'-U','NT AUTHORITY\LocalService','-D',$pgData,'-S','auto')
+  } finally {
+    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
   }
-  Set-PrivateAcl $pgData 'NT AUTHORITY\LOCAL SERVICE'
-  Set-PrivateAcl (Split-Path -Parent $pgLog) 'NT AUTHORITY\LOCAL SERVICE'
-  Start-PgService
   Remove-Item Env:DATABASE_URL,Env:ADMIN_DATABASE_URL -ErrorAction SilentlyContinue
 } else {
   $version = (Get-Content (Join-Path $pgData 'PG_VERSION') -Raw).Trim()
   if ($version -ne '17') { throw "Existing PostgreSQL data version $version is incompatible with bundled PostgreSQL 17. Data was not changed." }
   if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
-    Invoke-Pg (Join-Path $pgBin 'pg_ctl.exe') @('register','-N',$serviceName,'-U','NT AUTHORITY\LocalService','-D',$pgData,'-S','auto')
+    Invoke-Pg -Exe (Join-Path $pgBin 'pg_ctl.exe') -Arguments @('register','-N',$serviceName,'-U','NT AUTHORITY\LocalService','-D',$pgData,'-S','auto')
   }
   Set-PrivateAcl $pgData 'NT AUTHORITY\LOCAL SERVICE'
   Set-PrivateAcl (Split-Path -Parent $pgLog) 'NT AUTHORITY\LOCAL SERVICE'
