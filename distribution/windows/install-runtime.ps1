@@ -102,32 +102,36 @@ function Invoke-PsqlInput([string]$Exe, [string[]]$Arguments, [string]$Sql) {
   }
 }
 function Set-PrivateAcl([string]$Path, [string[]]$Principals) {
-  # Strict least-privilege: SYSTEM, Administrators, and explicitly authorized user(s).
-  # NEVER grant BUILTIN\Users or Everyone access to database passwords or signing secrets.
-  $aclCommands = @('/inheritance:r', '/grant:r', 'SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F')
-  foreach ($p in $Principals) {
-    # Raw SIDs must be icacls-prefixed with '*'; a bare SID string is read as
-    # an account name and the whole grant is refused.
-    if ($p -match '^S-1-') { $aclCommands += "*$p`:(OI)(CI)F" }
-    elseif ($p) { $aclCommands += "$p`:(OI)(CI)F" }
+  # Strict least-privilege: SYSTEM, Administrators, and explicitly authorized
+  # user(s). NEVER grant BUILTIN\Users or Everyone access to database passwords
+  # or signing secrets. One /grant:r per principal on purpose: icacls rejects
+  # multi-token grants on some builds and can leave the object with inheritance
+  # removed but no grants at all - invisible even to its creator.
+  if (-not (Test-Path -LiteralPath $Path)) { throw "Cannot secure missing path: $Path" }
+  $grants = @('SYSTEM', 'BUILTIN\Administrators') + @($Principals | Where-Object { $_ })
+  $aclArgs = @($Path, '/inheritance:r')
+  foreach ($who in $grants) {
+    $spec = if ($who -match '^S-1-') { "*$who`:(OI)(CI)F" } else { "$who`:(OI)(CI)F" }
+    $aclArgs += '/grant:r'
+    $aclArgs += $spec
   }
-  & icacls.exe $Path @aclCommands | Out-Null
+  & icacls.exe @aclArgs | Out-Null
   if ($LASTEXITCODE -ne 0) {
     # Non-English Windows fallback using well-known SIDs:
     # S-1-5-18 = SYSTEM, S-1-5-32-544 = Administrators
-    $sidCommands = @('/inheritance:r', '/grant:r', '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
-    foreach ($p in $Principals) {
-      if ($p) {
-        if ($p -match '^S-1-') { $sidCommands += "*$p`:(OI)(CI)F" }
-        else {
-          try {
-            $s = (New-Object Security.Principal.NTAccount($p)).Translate([Security.Principal.SecurityIdentifier]).Value
-            $sidCommands += "*$s`:(OI)(CI)F"
-          } catch { $sidCommands += "$p`:(OI)(CI)F" }
-        }
+    $sidArgs = @($Path, '/inheritance:r')
+    foreach ($who in $grants) {
+      $sid = if ($who -match '^S-1-') { $who } else {
+        try { (New-Object Security.Principal.NTAccount($who)).Translate([Security.Principal.SecurityIdentifier]).Value } catch { $null }
       }
+      if ($sid) { $sidArgs += '/grant:r'; $sidArgs += "*$sid`:(OI)(CI)F" }
     }
-    & icacls.exe $Path @sidCommands | Out-Null
+    & icacls.exe @sidArgs | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      # Never leave an object with inheritance stripped and no grants.
+      & icacls.exe $Path /inheritance:e | Out-Null
+      throw "Could not secure $Path with icacls."
+    }
   }
 }
 
@@ -306,7 +310,8 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   if (-not $settings['JWT_REFRESH_TTL']) { $settings['JWT_REFRESH_TTL'] = '1209600' }
   # Persist recovery information before touching the new cluster. If setup is
   # interrupted, a rerun reuses these values rather than changing user config.
-  Set-PrivateAcl $ProgramDataRoot 'BUILTIN\Administrators'
+  Set-PrivateAcl $ProgramDataRoot @('BUILTIN\Administrators', 'NT AUTHORITY\LocalService')
+  Write-RuntimeMarker ("KAYAN-RUNTIME-ROOT visible=" + (Test-Path -LiteralPath $ProgramDataRoot) + " " + ((& icacls.exe $ProgramDataRoot | Select-Object -First 8) -join ';'))
   if (-not (Test-Path -LiteralPath $bootstrapMarker)) {
     Set-Content -LiteralPath $bootstrapMarker -Value 'KAYAN PostgreSQL 17 installer bootstrap v1' -Encoding ASCII
   }
@@ -323,7 +328,11 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   # "present but empty" path and never runs its recursive mkdir walk - that
   # walk trips over the pre-created ProgramData root on this PostgreSQL
   # Windows build ("could not create directory ...: File exists").
-  New-Item -ItemType Directory -Force -Path $pgData | Out-Null
+  [void][IO.Directory]::CreateDirectory($pgData)
+  if (-not (Test-Path -LiteralPath $pgData -PathType Container)) {
+    throw "The cluster directory could not be created: $pgData"
+  }
+  Write-RuntimeMarker ("KAYAN-RUNTIME-INITDB-DIR ok=" + (Test-Path -LiteralPath $pgData) + " user=" + [Security.Principal.WindowsIdentity]::GetCurrent().Name + " attrs=" + ((Get-Item -LiteralPath $pgData).Attributes))
   try {
     Invoke-Pg -Exe (Join-Path $pgBin 'initdb.exe') -Arguments @('-D',$pgData,'-U','postgres','-A','scram-sha-256','--pwfile',$tempPassword,'-E','UTF8')
   } finally { Remove-Item -LiteralPath $tempPassword -Force -ErrorAction SilentlyContinue }
