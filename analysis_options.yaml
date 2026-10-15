@@ -9,3 +9,10 @@ analyzer:
     - windows/**
     - macos/**
     - linux/**
+    # TEMPORARY diagnostic probe - removed once the failing file is found.
+    - lib/features/dashboard/**
+    - lib/features/search/**
+    - lib/features/reports/**
+    - lib/features/parties/presentation/widgets/**
+    - lib/app/shell/erp_shell.dart
+    - test/widget/dashboard_screen_test.dart
