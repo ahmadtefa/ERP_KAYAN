@@ -108,10 +108,17 @@ function Set-PrivateAcl([string]$Path, [string[]]$Principals) {
   # multi-token grants on some builds and can leave the object with inheritance
   # removed but no grants at all - invisible even to its creator.
   if (-not (Test-Path -LiteralPath $Path)) { throw "Cannot secure missing path: $Path" }
-  $grants = @('SYSTEM', 'BUILTIN\Administrators') + @($Principals | Where-Object { $_ })
+  # Container ACEs carry (OI)(CI); file ACEs must not - icacls refuses the
+  # whole grant otherwise and the object ends up with an empty DACL.
+  $inherit = if (Test-Path -LiteralPath $Path -PathType Container) { '(OI)(CI)F' } else { 'F' }
+  # The caller's own SID always works even when a UAC-filtered token makes
+  # BUILTIN\Administrators a deny-only group.
+  $mine = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  $grants = @('SYSTEM', 'BUILTIN\Administrators', $mine) + @($Principals | Where-Object { $_ })
+  $grants = @($grants | Select-Object -Unique)
   $aclArgs = @($Path, '/inheritance:r')
   foreach ($who in $grants) {
-    $spec = if ($who -match '^S-1-') { "*$who`:(OI)(CI)F" } else { "$who`:(OI)(CI)F" }
+    $spec = if ($who -match '^S-1-') { "*$who`:$inherit" } else { "$who`:$inherit" }
     $aclArgs += '/grant:r'
     $aclArgs += $spec
   }
@@ -124,7 +131,7 @@ function Set-PrivateAcl([string]$Path, [string[]]$Principals) {
       $sid = if ($who -match '^S-1-') { $who } else {
         try { (New-Object Security.Principal.NTAccount($who)).Translate([Security.Principal.SecurityIdentifier]).Value } catch { $null }
       }
-      if ($sid) { $sidArgs += '/grant:r'; $sidArgs += "*$sid`:(OI)(CI)F" }
+      if ($sid) { $sidArgs += '/grant:r'; $sidArgs += "*$sid`:$inherit" }
     }
     & icacls.exe @sidArgs | Out-Null
     if ($LASTEXITCODE -ne 0) {
