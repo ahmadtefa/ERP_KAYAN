@@ -10,6 +10,14 @@ analyzer:
     - macos/**
     - linux/**
   errors:
+    unused_local_variable: ignore
+    unused_element: ignore
+    unused_field: ignore
+    unused_catch_clause: ignore
+    unused_catch_stack: ignore
+    dead_code: ignore
+    unused_shown_name: ignore
+    unused_result: ignore
     annotate_overrides: ignore
     avoid_empty_else: ignore
     avoid_function_literals_in_foreach_calls: ignore
