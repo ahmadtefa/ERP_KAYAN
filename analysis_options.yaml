@@ -10,6 +10,15 @@ analyzer:
     - macos/**
     - linux/**
   errors:
+    prefer_adjacent_string_concatenation: ignore
+    prefer_collection_literals: ignore
+    prefer_conditional_assignment: ignore
+    prefer_const_constructors_in_immutables: ignore
+    prefer_contains: ignore
+    prefer_final_fields: ignore
+    prefer_for_elements_to_map_fromIterable: ignore
+    prefer_function_declarations_over_variables: ignore
+    prefer_generic_function_type_aliases: ignore
     annotate_overrides: ignore
     avoid_empty_else: ignore
     avoid_function_literals_in_foreach_calls: ignore
