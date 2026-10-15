@@ -333,14 +333,13 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
     throw "The cluster directory could not be created: $pgData"
   }
   $fwd = ($pgData -replace '\\','/')
-  Write-RuntimeMarker ("KAYAN-RUNTIME-INITDB-DIR ok=" + (Test-Path -LiteralPath $pgData) + " dotnet=" + [IO.Directory]::Exists($pgData) + " fwd=" + (Test-Path -LiteralPath $fwd) + " fwdDotNet=" + [IO.Directory]::Exists($fwd) + " user=" + [Security.Principal.WindowsIdentity]::GetCurrent().Name + " attrs=" + ((Get-Item -LiteralPath $pgData).Attributes) + " argv=-D|" + $pgData + "|stage=" + (Join-Path $env:ProgramData 'KAYAN-ERP-PG-STAGE'))
+  Write-RuntimeMarker ("KAYAN-RUNTIME-INITDB-DIR ok=" + (Test-Path -LiteralPath $pgData) + " dotnet=" + [IO.Directory]::Exists($pgData) + " fwd=" + (Test-Path -LiteralPath $fwd) + " fwdDotNet=" + [IO.Directory]::Exists($fwd) + " user=" + [Security.Principal.WindowsIdentity]::GetCurrent().Name + " attrs=" + ((Get-Item -LiteralPath $pgData).Attributes) + " argv=-D|C:\kayan-pg-stage")
   # initdb's directory probe cannot see the locked ProgramData tree even
-  # though the same process can. Stage the cluster under a plain, unmodified
-  # path (only C:\ProgramData above it, whose probe is known to work), then
-  # move the finished cluster into its final home.
-  $stageRoot = Join-Path $env:ProgramData 'KAYAN-ERP-PG-STAGE'
+  # though the same process can. Stage the cluster at a single-level path
+  # (C:\kayan-pg-stage): initdb's mkdir walk then has no intermediate level
+  # to trip over, then move the finished cluster into its final home.
+  $stageRoot = 'C:\kayan-pg-stage'
   Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
-  [void][IO.Directory]::CreateDirectory($stageRoot)
   try {
     Invoke-Pg -Exe (Join-Path $pgBin 'initdb.exe') -Arguments @('-D',$stageRoot,'-U','postgres','-A','scram-sha-256','--pwfile',$tempPassword,'-E','UTF8')
   } finally { Remove-Item -LiteralPath $tempPassword -Force -ErrorAction SilentlyContinue }
