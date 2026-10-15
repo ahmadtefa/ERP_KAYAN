@@ -27,7 +27,8 @@ export type ExportableReport =
   | 'payments'
   | 'cash'
   | 'outstanding-invoices'
-  | 'party-statement';
+  | 'party-statement'
+  | 'general-journal';
 
 export const EXPORTABLE_REPORTS: ExportableReport[] = [
   'trial-balance',
@@ -47,6 +48,7 @@ export const EXPORTABLE_REPORTS: ExportableReport[] = [
   'cash',
   'outstanding-invoices',
   'party-statement',
+  'general-journal',
 ];
 
 /// Turns a report into a plain table.
@@ -114,10 +116,52 @@ export class ReportTablesService {
         return this.outstandingReport(companyId, query);
       case 'party-statement':
         return this.partyStatement(companyId, query);
+      case 'general-journal':
+        return this.generalJournal(companyId, query);
     }
   }
 
   // ───────────────────────────────────────────────────────────────
+
+  private async generalJournal(companyId: string, query: PeriodQueryDto) {
+    // The day book answers with paged `items`, not `rows`; the printed table
+    // shows the page it was asked for and totals that page honestly.
+    const data = await this.statements.generalJournal(companyId, query);
+    return this.table({
+      slug: 'general-journal',
+      titleEn: 'General journal',
+      titleAr: 'اليومية العامة',
+      meta: this.periodMeta(data.from, data.to),
+      columns: [
+        { key: 'entryNumber', labelEn: 'Entry', labelAr: 'القيد', width: 16 },
+        { key: 'entryDate', labelEn: 'Date', labelAr: 'التاريخ', width: 12 },
+        { key: 'description', labelEn: 'Description', labelAr: 'البيان', width: 30 },
+        { key: 'sourceType', labelEn: 'Source kind', labelAr: 'نوع المصدر', width: 14 },
+        { key: 'sourceNumber', labelEn: 'Source number', labelAr: 'رقم المصدر', width: 16 },
+        { key: 'status', labelEn: 'Status', labelAr: 'الحالة', width: 10 },
+        { key: 'totalDebit', labelEn: 'Total', labelAr: 'الإجمالي', numeric: true, width: 16 },
+      ],
+      rows: data.items.map((entry: Record<string, unknown>) => ({
+        ...entry,
+        sourceType: (entry.source as { type?: string } | null)?.type ?? '',
+        sourceNumber: entry.sourceNumber ?? '',
+      })),
+      totals: [
+        { labelEn: 'Entries (page)', labelAr: 'عدد القيود (الصفحة)', value: String(data.items.length) },
+        {
+          labelEn: 'Total debit',
+          labelAr: 'إجمالي المدين',
+          value: this.sum(data.items.map((entry) => entry.totalDebit as string)),
+        },
+        {
+          labelEn: 'Total credit',
+          labelAr: 'إجمالي الدائن',
+          value: this.sum(data.items.map((entry) => entry.totalCredit as string)),
+        },
+      ],
+      notes: [],
+    });
+  }
 
   private async trialBalance(companyId: string, query: PeriodQueryDto) {
     const data = await this.reports.trialBalance(companyId, query);
