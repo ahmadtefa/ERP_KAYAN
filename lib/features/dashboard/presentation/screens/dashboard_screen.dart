@@ -179,7 +179,7 @@ class _SummarySections extends StatelessWidget {
     final quick =
         Map<String, dynamic>.from(summary['quickActions'] as Map? ?? {});
     final hasData = flag(summary, 'hasData', fallback: true);
-    final money = (Object? value) => formatAmount(asString(value), decimals: 0);
+    String money(Object? value) => formatAmount(asString(value), decimals: 0);
 
     final metrics = <_Metric>[
       _Metric(
