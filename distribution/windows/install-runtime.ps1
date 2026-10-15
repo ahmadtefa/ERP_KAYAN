@@ -46,8 +46,17 @@ if (Test-Path $vcRuntime) {
 }
 
 function Invoke-Pg([string]$Exe, [string[]]$Args) {
-  & $Exe @Args
-  if ($LASTEXITCODE -ne 0) { throw "PostgreSQL command failed ($LASTEXITCODE): $([IO.Path]::GetFileName($Exe))" }
+  # Preserve PostgreSQL's actual diagnostic output in the protected installer log.
+  # This is essential for first-run initdb failures, which otherwise look identical
+  # to users and CI even when the underlying causes differ.
+  $commandOutput = @(& $Exe @Args 2>&1)
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) {
+    $details = ($commandOutput | Out-String).Trim()
+    if ($details.Length -gt 4000) { $details = $details.Substring(0,4000) }
+    throw "PostgreSQL command failed ($exitCode): $([IO.Path]::GetFileName($Exe)). Output: $details"
+  }
+  if ($commandOutput.Count -gt 0) { $commandOutput | ForEach-Object { Write-Output $_ } }
 }
 function Invoke-PsqlInput([string]$Exe, [string[]]$Args, [string]$Sql) {
   $start = New-Object System.Diagnostics.ProcessStartInfo
