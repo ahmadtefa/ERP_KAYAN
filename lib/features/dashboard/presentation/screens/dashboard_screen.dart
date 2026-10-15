@@ -113,7 +113,7 @@ class DashboardScreen extends ConsumerWidget {
           onEdit: () => context.go(AppRoutes.companySettings),
         ),
         const SizedBox(height: 24),
-        const SizedBox.shrink(),
+        Text(medium ? 'wide-ok' : 'narrow-ok'),
       ],
     );
   }
