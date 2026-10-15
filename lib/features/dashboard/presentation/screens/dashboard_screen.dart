@@ -453,7 +453,89 @@ class _ComparisonStrip extends StatelessWidget {
   final bool arabic;
 
   @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final changeRaw = asString(previous['revenueChange']);
+    final change = changeRaw == null ? null : num.tryParse(changeRaw);
+    final changeColor = change == null
+        ? theme.colorScheme.onSurfaceVariant
+        : change >= 0
+            ? const Color(0xFF1B8A5A)
+            : const Color(0xFFC2474B);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest
+            .withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Wrap(
+        spacing: 24,
+        runSpacing: 12,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          _comparisonItem(
+            context,
+            arabic ? 'إيرادات هذه الفترة' : 'Revenue this period',
+            formatAmount(asString(summary['revenue'])),
+          ),
+          _comparisonItem(
+            context,
+            arabic ? 'إيرادات الفترة السابقة' : 'Revenue previous period',
+            formatAmount(asString(previous['revenue'])),
+          ),
+          _comparisonItem(
+            context,
+            arabic ? 'النتيجة السابقة' : 'Previous result',
+            formatAmount(asString(previous['result'])),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                arabic ? 'التغير: ' : 'Change: ',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              Text(
+                change == null
+                    ? (arabic ? '—' : '—')
+                    : '${change >= 0 ? '+' : ''}${change.toStringAsFixed(1)}%',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: changeColor,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _comparisonItem(BuildContext context, String label, String value) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        Text(
+          value,
+          style: theme.textTheme.titleMedium
+              ?.copyWith(fontWeight: FontWeight.w800),
+        ),
+      ],
+    );
+  }
+}
+
 /// Module shortcuts plus the work waiting in drafts and overdue debts.
 class _QuickActions extends StatelessWidget {
   const _QuickActions({
@@ -471,7 +553,35 @@ class _QuickActions extends StatelessWidget {
   final AppLocalizations l10n;
 
   @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    final drafts = asString(quick['draftDocuments']) ?? '0';
+    final overdue = asString(quick['overdueInvoices']) ?? '0';
+    final reorder = asString(quick['itemsToReorder']) ?? '0';
+    return GridView.count(
+      crossAxisCount: wide ? 5 : medium ? 3 : 2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+      childAspectRatio: wide ? 1.8 : 1.5,
+      children: [
+        for (final module in _modules(l10n))
+          QuickActionTile(
+            icon: module.icon,
+            label: module.label,
+            onTap: () => context.go(module.path),
+            badge: switch (module.path) {
+              AppRoutes.journalEntries => drafts,
+              AppRoutes.salesInvoices => overdue,
+              AppRoutes.stock => reorder,
+              _ => null,
+            },
+          ),
+      ],
+    );
+  }
+}
+
 class _ErrorCard extends StatelessWidget {
   const _ErrorCard({required this.arabic, required this.onRetry});
 
@@ -479,7 +589,38 @@ class _ErrorCard extends StatelessWidget {
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        children: [
+          Icon(Icons.cloud_off_rounded,
+              size: 40, color: theme.colorScheme.error),
+          const SizedBox(height: 10),
+          Text(
+            arabic
+                ? 'تعذر تحميل مؤشرات لوحة التحكم. تحقق من الاتصال ثم أعد المحاولة.'
+                : 'The dashboard figures could not be loaded. Check the connection and try again.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded),
+            label: Text(arabic ? 'إعادة المحاولة' : 'Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 String _localName(
   Map<String, dynamic> row,
   bool arabic,
@@ -669,9 +810,87 @@ class _MetricCard extends StatelessWidget {
   final _Metric metric;
 
   @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(17),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.025),
+            blurRadius: 16,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: metric.color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(metric.icon, color: metric.color),
+              ),
+              const Spacer(),
+              Icon(Icons.north_east_rounded,
+                  size: 17, color: theme.colorScheme.onSurfaceVariant),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            metric.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            metric.value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            metric.note,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(color: metric.color),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 List<({IconData icon, String label, String path})> _modules(
   AppLocalizations l10n,
 ) => [
+      (icon: Icons.menu_book_outlined, label: l10n.journalEntries, path: AppRoutes.journalEntries),
+      (icon: Icons.people_outline, label: l10n.customers, path: AppRoutes.customers),
+      (icon: Icons.local_shipping_outlined, label: l10n.suppliers, path: AppRoutes.suppliers),
+      (icon: Icons.category_outlined, label: l10n.items, path: AppRoutes.items),
+      (icon: Icons.inventory_2_outlined, label: l10n.stock, path: AppRoutes.stock),
+      (icon: Icons.point_of_sale_outlined, label: l10n.salesInvoices, path: AppRoutes.salesInvoices),
+      (icon: Icons.shopping_cart_outlined, label: l10n.purchaseInvoices, path: AppRoutes.purchaseInvoices),
+      (icon: Icons.account_tree_outlined, label: l10n.chartOfAccounts, path: AppRoutes.chartOfAccounts),
+      (icon: Icons.bar_chart_outlined, label: l10n.reports, path: AppRoutes.reports),
       (icon: Icons.settings_outlined, label: l10n.settings, path: AppRoutes.settings),
-];
+    ];
