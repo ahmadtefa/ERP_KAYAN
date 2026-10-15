@@ -85,6 +85,7 @@ $clientPath = Join-Path $installRoot "erp_kayan.exe"
 $client = Start-Process -FilePath $clientPath -WorkingDirectory $installRoot -PassThru
 try {
   $health = $null
+  $apiPort = $null
   for ($attempt = 0; $attempt -lt 90; $attempt++) {
     if ($client.HasExited) {
       throw ("The installed KAYAN client exited with code $($client.ExitCode) before its local server became healthy." + [Environment]::NewLine + (Read-Details))
@@ -92,18 +93,21 @@ try {
     foreach ($port in @(3000,3001,3002,3003,3010,3020)) {
       try {
         $candidate = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/v1/health" -TimeoutSec 2
-        if ($candidate.status -eq "ok" -and $candidate.database -eq "up") { $health = $candidate; break }
+        if ($candidate.status -eq "ok" -and $candidate.database -eq "up") {
+          $health = $candidate
+          $apiPort = $port
+          break
+        }
       } catch { }
     }
     if ($health) { break }
     Start-Sleep -Seconds 1
   }
-  if (-not $health) { throw ("The installed KAYAN client did not start a healthy local API within 90 seconds." + [Environment]::NewLine + (Read-Details)) }
-  Write-Host "PASS: launching installed erp_kayan.exe started a healthy local API."
+  if (-not $health -or -not $apiPort) { throw ("The installed KAYAN client did not start a healthy local API within 90 seconds." + [Environment]::NewLine + (Read-Details)) }
+  Write-Host "PASS: launching installed erp_kayan.exe started a healthy local API on port $apiPort."
 
-  $port = 3000
   $loginPayload = @{ username = "ci-admin"; password = "CiSmoke-Admin-Password-7241" } | ConvertTo-Json -Compress
-  $login = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$port/api/v1/auth/login" -ContentType "application/json" -Body $loginPayload -TimeoutSec 10
+  $login = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$apiPort/api/v1/auth/login" -ContentType "application/json" -Body $loginPayload -TimeoutSec 10
   if (-not $login.accessToken) { throw "Installed API login did not return an access token." }
   Write-Host "PASS: installed API accepted a login against the bundled database."
 } finally {
