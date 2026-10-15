@@ -54,24 +54,6 @@ analyzer:
     null_closures: ignore
     overridden_fields: ignore
     package_names: ignore
-    prefer_adjacent_string_concatenation: ignore
-    prefer_collection_literals: ignore
-    prefer_conditional_assignment: ignore
-    prefer_const_constructors_in_immutables: ignore
-    prefer_contains: ignore
-    prefer_final_fields: ignore
-    prefer_for_elements_to_map_fromIterable: ignore
-    prefer_function_declarations_over_variables: ignore
-    prefer_generic_function_type_aliases: ignore
-    prefer_if_null_operators: ignore
-    prefer_initializing_formals: ignore
-    prefer_inlined_adds: ignore
-    prefer_interpolation_to_compose_strings: ignore
-    prefer_is_empty: ignore
-    prefer_is_not_empty: ignore
-    prefer_is_not_operator: ignore
-    prefer_null_aware_operators: ignore
-    prefer_spread_collections: ignore
     provide_deprecation_message: ignore
     recursive_getters: ignore
     secure_pubspec_urls: ignore
