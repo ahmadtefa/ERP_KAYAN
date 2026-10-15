@@ -5,13 +5,23 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $bootstrapLog = Join-Path (Join-Path $env:ProgramData 'KAYAN-ERP') 'logs\installer.log'
-trap {
+$resultLog = Join-Path (Join-Path $env:ProgramData 'KAYAN-ERP') 'logs\installer-result.txt'
+function Write-RuntimeMarker([string]$Message) {
+  # A lighthouse for support and CI: whatever happens, the last marker in the
+  # protected log says how far the runtime setup got.
   try {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $bootstrapLog) | Out-Null
+    Add-Content -LiteralPath $bootstrapLog -Value ("{0:u} {1}" -f (Get-Date),$Message) -Encoding UTF8
+    Set-Content -LiteralPath $resultLog -Value $Message -Encoding UTF8
+  } catch { }
+}
+Write-RuntimeMarker 'KAYAN-RUNTIME-START'
+trap {
+  try {
     $message = $_.Exception.Message
     $message = [regex]::Replace($message, '(?i)postgres(?:ql)?://[^\s"'']+', '[DATABASE URL REDACTED]')
     $message = [regex]::Replace($message, '(?i)(password\s*[=:]\s*)[^\s;]+', '$1[REDACTED]')
-    Add-Content -LiteralPath $bootstrapLog -Value ("{0:u} {1}" -f (Get-Date),$message) -Encoding UTF8
+    Write-RuntimeMarker ("KAYAN-RUNTIME-FAILED " + $message)
   } catch { }
   Write-Output 'KAYAN runtime setup failed. See the protected installer log for a redacted diagnostic.'
   exit 1
@@ -349,4 +359,5 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
 }
 
 if (-not (Test-Path -LiteralPath $UserSettingsPath)) { throw 'Per-user runtime settings were not created.' }
+Write-RuntimeMarker 'KAYAN-RUNTIME-OK'
 Write-Output 'KAYAN PostgreSQL is installed and running. Company database files are under ProgramData and will be kept on uninstall.'

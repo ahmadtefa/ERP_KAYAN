@@ -12,20 +12,37 @@ $node = Join-Path $backend "node\node.exe"
 $settings = Join-Path $env:ProgramData "KAYAN-ERP\kayan.env"
 
 function Read-Details {
-  $paths = @(
-    $installLog,
-    (Join-Path $env:ProgramData "KAYAN-ERP\logs\installer.log"),
-    (Join-Path $env:ProgramData "KAYAN-ERP\logs\postgresql.log"),
-    (Join-Path $env:APPDATA "KAYAN-ERP\logs\backend.log")
-  )
-  $out = @()
-  foreach ($path in $paths) {
-    if (Test-Path $path) {
-      $out += "--- $path ---"
-      $out += Get-Content $path -Tail 100 -ErrorAction SilentlyContinue
-    }
+  # Ordered most relevant first: the runtime setup log is the root-cause log,
+  # and GitHub annotations cut the message after 4000 characters.
+  $sections = @()
+  $resultFile = Join-Path $env:ProgramData "KAYAN-ERP\logs\installer-result.txt"
+  $runtimeLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\installer.log"
+  if (Test-Path $resultFile) {
+    $sections += "--- runtime result ---"
+    $sections += Get-Content $resultFile -Tail 5 -ErrorAction SilentlyContinue
+  } else {
+    $sections += "--- runtime result ---"
+    $sections += "(not found: install-runtime.ps1 did not leave a result marker)"
   }
-  return ($out -join [Environment]::NewLine)
+  if (Test-Path $runtimeLog) {
+    $sections += "--- $runtimeLog ---"
+    $sections += Get-Content $runtimeLog -Tail 40 -ErrorAction SilentlyContinue
+  }
+  $pgLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\postgresql.log"
+  if (Test-Path $pgLog) {
+    $sections += "--- $pgLog ---"
+    $sections += Get-Content $pgLog -Tail 15 -ErrorAction SilentlyContinue
+  }
+  $backendLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\backend.log"
+  if (Test-Path $backendLog) {
+    $sections += "--- $backendLog ---"
+    $sections += Get-Content $backendLog -Tail 15 -ErrorAction SilentlyContinue
+  }
+  if (Test-Path $installLog) {
+    $sections += "--- setup log tail ---"
+    $sections += Get-Content $installLog -Tail 20 -ErrorAction SilentlyContinue
+  }
+  return ($sections -join [Environment]::NewLine)
 }
 
 # Publishes a failure where a person (and the CI annotations API) can see it:
@@ -63,7 +80,7 @@ if ($install.ExitCode -ne 0) {
 Get-Process -Name erp_kayan -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-if (-not $service) { Fail "The bundled PostgreSQL service '$serviceName' was not installed." }
+if (-not $service) { Fail ("The bundled PostgreSQL service '$serviceName' was not installed (installer exit code: " + $install.ExitCode + ").") }
 if ($service.Status -ne "Running") { Fail "The bundled PostgreSQL service is not running (state: $($service.Status))." }
 
 foreach ($relative in @(
