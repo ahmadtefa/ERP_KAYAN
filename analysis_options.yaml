@@ -12,7 +12,6 @@ analyzer:
   errors:
     prefer_final_fields: ignore
     prefer_for_elements_to_map_fromIterable: ignore
-    prefer_function_declarations_over_variables: ignore
     prefer_generic_function_type_aliases: ignore
     annotate_overrides: ignore
     avoid_empty_else: ignore
