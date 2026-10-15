@@ -27,8 +27,6 @@ class DashboardScreen extends ConsumerWidget {
     final user = ref.watch(currentUserProvider);
     final companyAsync = ref.watch(companyProfileProvider);
     final branchesAsync = ref.watch(branchesProvider);
-    final summaryAsync = ref.watch(dashboardSummaryProvider);
-    final monthlyAsync = ref.watch(dashboardMonthlyProvider);
     final company = companyAsync.asData?.value == null
         ? <String, dynamic>{}
         : Map<String, dynamic>.from(companyAsync.asData!.value as Map);
@@ -115,25 +113,7 @@ class DashboardScreen extends ConsumerWidget {
           onEdit: () => context.go(AppRoutes.companySettings),
         ),
         const SizedBox(height: 24),
-        summaryAsync.when(
-          loading: () => const Padding(
-            padding: EdgeInsets.symmetric(vertical: 48),
-            child: Center(child: CircularProgressIndicator()),
-          ),
-          error: (error, _) => _ErrorCard(
-            arabic: arabic,
-            onRetry: () => ref.invalidate(dashboardSummaryProvider),
-          ),
-          data: (summary) => _SummarySections(
-            summary: summary,
-            monthly: monthlyAsync.asData?.value,
-            monthlyLoading: monthlyAsync.isLoading,
-            arabic: arabic,
-            wide: wide,
-            medium: medium,
-            l10n: l10n,
-          ),
-        ),
+        const SizedBox.shrink(),
       ],
     );
   }
@@ -160,7 +140,286 @@ class _SummarySections extends StatelessWidget {
   final AppLocalizations l10n;
 
   @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    final sales = Map<String, dynamic>.from(summary['sales'] as Map? ?? {});
+    final purchases =
+        Map<String, dynamic>.from(summary['purchases'] as Map? ?? {});
+    final receipts =
+        Map<String, dynamic>.from(summary['receipts'] as Map? ?? {});
+    final payments =
+        Map<String, dynamic>.from(summary['payments'] as Map? ?? {});
+    final overdue = Map<String, dynamic>.from(summary['overdue'] as Map? ?? {});
+    final parties = Map<String, dynamic>.from(summary['parties'] as Map? ?? {});
+    final customers =
+        Map<String, dynamic>.from(parties['customers'] as Map? ?? {});
+    final suppliers =
+        Map<String, dynamic>.from(parties['suppliers'] as Map? ?? {});
+    final previous =
+        Map<String, dynamic>.from(summary['previousPeriod'] as Map? ?? {});
+    final quick =
+        Map<String, dynamic>.from(summary['quickActions'] as Map? ?? {});
+    final hasData = flag(summary, 'hasData', fallback: true);
+    final money = (Object? value) => formatAmount(asString(value), decimals: 0);
+
+    final metrics = <_Metric>[
+      _Metric(
+        arabic ? 'إجمالي المبيعات' : 'Total sales',
+        money(sales['total']),
+        arabic
+            ? '${sales['invoices'] ?? 0} فاتورة'
+            : '${sales['invoices'] ?? 0} invoices',
+        Icons.trending_up_rounded,
+        const Color(0xFF087F8C),
+      ),
+      _Metric(
+        arabic ? 'إجمالي المشتريات' : 'Total purchases',
+        money(purchases['total']),
+        arabic
+            ? '${purchases['invoices'] ?? 0} فاتورة'
+            : '${purchases['invoices'] ?? 0} invoices',
+        Icons.shopping_bag_outlined,
+        const Color(0xFF7657C8),
+      ),
+      _Metric(
+        arabic ? 'المقبوضات' : 'Receipts',
+        money(receipts['total']),
+        arabic
+            ? '${receipts['vouchers'] ?? 0} سند'
+            : '${receipts['vouchers'] ?? 0} vouchers',
+        Icons.south_west_rounded,
+        const Color(0xFF1B8A5A),
+      ),
+      _Metric(
+        arabic ? 'المدفوعات' : 'Payments',
+        money(payments['total']),
+        arabic
+            ? '${payments['vouchers'] ?? 0} سند'
+            : '${payments['vouchers'] ?? 0} vouchers',
+        Icons.north_east_rounded,
+        const Color(0xFFC2474B),
+      ),
+      _Metric(
+        arabic ? 'صافي النتيجة' : 'Net result',
+        money(summary['grossResult']),
+        arabic ? 'إيرادات ناقص مصروفات' : 'Revenue less expenses',
+        Icons.insights_rounded,
+        const Color(0xFF2878C8),
+      ),
+      _Metric(
+        arabic ? 'المصروفات' : 'Expenses',
+        money(summary['expenses']),
+        arabic ? 'من دليل الحسابات' : 'From the ledger',
+        Icons.receipt_long_outlined,
+        const Color(0xFFB36A18),
+      ),
+      _Metric(
+        arabic ? 'النقدية' : 'Cash position',
+        money(summary['cashPosition']),
+        arabic ? 'الصناديق والبنوك' : 'Cash boxes and banks',
+        Icons.account_balance_wallet_outlined,
+        const Color(0xFF0F766E),
+      ),
+      _Metric(
+        arabic ? 'الذمم المدينة' : 'Receivables',
+        money(summary['receivables']),
+        arabic ? 'مستحق من العملاء' : 'Owed by customers',
+        Icons.groups_2_outlined,
+        const Color(0xFF2878C8),
+      ),
+      _Metric(
+        arabic ? 'الذمم الدائنة' : 'Payables',
+        money(summary['payables']),
+        arabic ? 'مستحق للموردين' : 'Owed to suppliers',
+        Icons.local_shipping_outlined,
+        const Color(0xFF7657C8),
+      ),
+      _Metric(
+        arabic ? 'الفواتير المتأخرة' : 'Overdue invoices',
+        money(overdue['total']),
+        arabic
+            ? '${overdue['invoices'] ?? 0} فاتورة'
+            : '${overdue['invoices'] ?? 0} invoices',
+        Icons.warning_amber_rounded,
+        const Color(0xFFC2474B),
+      ),
+      _Metric(
+        arabic ? 'العملاء' : 'Customers',
+        '${customers['count'] ?? 0}',
+        arabic
+            ? '${customers['active'] ?? 0} نشط'
+            : '${customers['active'] ?? 0} active',
+        Icons.people_outline,
+        const Color(0xFF2878C8),
+      ),
+      _Metric(
+        arabic ? 'الموردون' : 'Suppliers',
+        '${suppliers['count'] ?? 0}',
+        arabic
+            ? '${suppliers['active'] ?? 0} نشط'
+            : '${suppliers['active'] ?? 0} active',
+        Icons.local_shipping_outlined,
+        const Color(0xFFB36A18),
+      ),
+    ];
+
+    final monthlyRows = listOf(monthly?['months']);
+    final topCustomers = listOf(summary['topCustomers']);
+    final topItems = listOf(summary['topItems']);
+    final recent = listOf(summary['recentDocuments']);
+    final cashAccounts = listOf(summary['cashAccounts']);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!hasData)
+          Container(
+            margin: const EdgeInsets.only(bottom: 18),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF2878C8).withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: const Color(0xFF2878C8).withValues(alpha: 0.25),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline, color: Color(0xFF2878C8)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    arabic
+                        ? 'لا توجد مستندات في هذه الفترة بعد. ابدأ بتسجيل أول فاتورة أو سند.'
+                        : 'There are no documents in this period yet. Raise your first invoice or voucher.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        Text(
+          arabic ? 'مؤشرات الأعمال' : 'Business overview',
+          style: Theme.of(context)
+              .textTheme
+              .titleLarge
+              ?.copyWith(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns = wide ? 4 : 2;
+            const gap = 12.0;
+            final cardWidth =
+                (constraints.maxWidth - gap * (columns - 1)) / columns;
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: [
+                for (final metric in metrics)
+                  SizedBox(
+                    width: cardWidth,
+                    child: _MetricCard(metric: metric),
+                  ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 18),
+        _ComparisonStrip(summary: summary, previous: previous, arabic: arabic),
+        const SizedBox(height: 22),
+        if (monthlyLoading && monthlyRows.isEmpty)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else
+          MonthlyBarsChart(months: monthlyRows, arabic: arabic),
+        const SizedBox(height: 22),
+        Text(
+          arabic ? 'أعلى العملاء والمنتجات' : 'Top customers & products',
+          style: Theme.of(context)
+              .textTheme
+              .titleLarge
+              ?.copyWith(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TopListPanel(
+                title: arabic ? 'أهم العملاء' : 'Top customers',
+                rows: topCustomers,
+                arabic: arabic,
+                emptyText: arabic
+                    ? 'ستظهر الأسماء هنا عند توفر مبيعات.'
+                    : 'Names appear here once sales exist.',
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TopListPanel(
+                title: arabic
+                    ? 'أكثر المنتجات مبيعاً'
+                    : 'Best-selling products',
+                rows: topItems,
+                arabic: arabic,
+                quantitySuffix: arabic ? 'وحدة' : 'units',
+                emptyText: arabic
+                    ? 'ستظهر الأصناف هنا عند توفر مبيعات.'
+                    : 'Items appear here once sales exist.',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 22),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: CashAccountsPanel(
+                rows: cashAccounts,
+                arabic: arabic,
+                emptyText: arabic
+                    ? 'لم تُسجَّل حسابات نقدية بعد.'
+                    : 'No cash accounts recorded yet.',
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: RecentDocumentsPanel(
+                rows: recent,
+                arabic: arabic,
+                emptyText: arabic
+                    ? 'لا توجد عمليات بعد.'
+                    : 'No activity yet.',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        Text(
+          arabic ? 'إجراءات سريعة' : 'Quick actions',
+          style: Theme.of(context)
+              .textTheme
+              .titleLarge
+              ?.copyWith(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 12),
+        _QuickActions(
+          quick: quick,
+          arabic: arabic,
+          wide: wide,
+          medium: medium,
+          l10n: l10n,
+        ),
+      ],
+    );
+  }
+}
+
 /// This period against the previous one, in one honest sentence each.
 class _ComparisonStrip extends StatelessWidget {
   const _ComparisonStrip({
@@ -174,7 +433,89 @@ class _ComparisonStrip extends StatelessWidget {
   final bool arabic;
 
   @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final changeRaw = asString(previous['revenueChange']);
+    final change = changeRaw == null ? null : num.tryParse(changeRaw);
+    final changeColor = change == null
+        ? theme.colorScheme.onSurfaceVariant
+        : change >= 0
+            ? const Color(0xFF1B8A5A)
+            : const Color(0xFFC2474B);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest
+            .withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Wrap(
+        spacing: 24,
+        runSpacing: 12,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          _comparisonItem(
+            context,
+            arabic ? 'إيرادات هذه الفترة' : 'Revenue this period',
+            formatAmount(asString(summary['revenue'])),
+          ),
+          _comparisonItem(
+            context,
+            arabic ? 'إيرادات الفترة السابقة' : 'Revenue previous period',
+            formatAmount(asString(previous['revenue'])),
+          ),
+          _comparisonItem(
+            context,
+            arabic ? 'النتيجة السابقة' : 'Previous result',
+            formatAmount(asString(previous['result'])),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                arabic ? 'التغير: ' : 'Change: ',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              Text(
+                change == null
+                    ? (arabic ? '—' : '—')
+                    : '${change >= 0 ? '+' : ''}${change.toStringAsFixed(1)}%',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: changeColor,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _comparisonItem(BuildContext context, String label, String value) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        Text(
+          value,
+          style: theme.textTheme.titleMedium
+              ?.copyWith(fontWeight: FontWeight.w800),
+        ),
+      ],
+    );
+  }
+}
+
 /// Module shortcuts plus the work waiting in drafts and overdue debts.
 class _QuickActions extends StatelessWidget {
   const _QuickActions({
@@ -192,7 +533,35 @@ class _QuickActions extends StatelessWidget {
   final AppLocalizations l10n;
 
   @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    final drafts = asString(quick['draftDocuments']) ?? '0';
+    final overdue = asString(quick['overdueInvoices']) ?? '0';
+    final reorder = asString(quick['itemsToReorder']) ?? '0';
+    return GridView.count(
+      crossAxisCount: wide ? 5 : medium ? 3 : 2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+      childAspectRatio: wide ? 1.8 : 1.5,
+      children: [
+        for (final module in _modules(l10n))
+          QuickActionTile(
+            icon: module.icon,
+            label: module.label,
+            onTap: () => context.go(module.path),
+            badge: switch (module.path) {
+              AppRoutes.journalEntries => drafts,
+              AppRoutes.salesInvoices => overdue,
+              AppRoutes.stock => reorder,
+              _ => null,
+            },
+          ),
+      ],
+    );
+  }
+}
+
 class _ErrorCard extends StatelessWidget {
   const _ErrorCard({required this.arabic, required this.onRetry});
 
@@ -200,7 +569,38 @@ class _ErrorCard extends StatelessWidget {
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        children: [
+          Icon(Icons.cloud_off_rounded,
+              size: 40, color: theme.colorScheme.error),
+          const SizedBox(height: 10),
+          Text(
+            arabic
+                ? 'تعذر تحميل مؤشرات لوحة التحكم. تحقق من الاتصال ثم أعد المحاولة.'
+                : 'The dashboard figures could not be loaded. Check the connection and try again.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded),
+            label: Text(arabic ? 'إعادة المحاولة' : 'Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 String _localName(
   Map<String, dynamic> row,
   bool arabic,
@@ -390,9 +790,87 @@ class _MetricCard extends StatelessWidget {
   final _Metric metric;
 
   @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(17),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.025),
+            blurRadius: 16,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: metric.color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(metric.icon, color: metric.color),
+              ),
+              const Spacer(),
+              Icon(Icons.north_east_rounded,
+                  size: 17, color: theme.colorScheme.onSurfaceVariant),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            metric.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            metric.value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            metric.note,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(color: metric.color),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 List<({IconData icon, String label, String path})> _modules(
   AppLocalizations l10n,
 ) => [
+      (icon: Icons.menu_book_outlined, label: l10n.journalEntries, path: AppRoutes.journalEntries),
+      (icon: Icons.people_outline, label: l10n.customers, path: AppRoutes.customers),
+      (icon: Icons.local_shipping_outlined, label: l10n.suppliers, path: AppRoutes.suppliers),
+      (icon: Icons.category_outlined, label: l10n.items, path: AppRoutes.items),
+      (icon: Icons.inventory_2_outlined, label: l10n.stock, path: AppRoutes.stock),
+      (icon: Icons.point_of_sale_outlined, label: l10n.salesInvoices, path: AppRoutes.salesInvoices),
+      (icon: Icons.shopping_cart_outlined, label: l10n.purchaseInvoices, path: AppRoutes.purchaseInvoices),
+      (icon: Icons.account_tree_outlined, label: l10n.chartOfAccounts, path: AppRoutes.chartOfAccounts),
+      (icon: Icons.bar_chart_outlined, label: l10n.reports, path: AppRoutes.reports),
       (icon: Icons.settings_outlined, label: l10n.settings, path: AppRoutes.settings),
-];
+    ];
