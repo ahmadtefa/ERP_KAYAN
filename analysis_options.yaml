@@ -10,5 +10,4 @@ analyzer:
     - macos/**
     - linux/**
     # TEMPORARY diagnostic probe - removed once the failing file is found.
-    - lib/features/search/**
-    - lib/features/search/**
+    - lib/features/dashboard/presentation/screens/**
