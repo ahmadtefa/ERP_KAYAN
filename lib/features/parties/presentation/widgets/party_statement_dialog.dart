@@ -156,40 +156,49 @@ class _PartyStatementDialogState extends ConsumerState<_PartyStatementDialog> {
                       summaryAsync.when(
                         loading: () => const SizedBox.shrink(),
                         error: (_, _) => const SizedBox.shrink(),
-                        data: (summary) => Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                          child: Wrap(
-                            spacing: 18,
-                            runSpacing: 6,
-                            children: [
-                              _chip(
-                                context,
-                                arabic ? 'إجمالي الفواتير' : 'Invoiced',
-                                formatAmount(asString(summary['invoiced'])),
-                              ),
-                              _chip(
-                                context,
-                                arabic ? 'المسدَّد' : 'Paid',
-                                formatAmount(asString(summary['paid'])),
-                              ),
-                              _chip(
-                                context,
-                                arabic ? 'الرصيد' : 'Balance',
-                                formatAmount(asString(summary['balance'])),
-                              ),
-                              _chip(
-                                context,
-                                arabic ? 'المتأخر' : 'Overdue',
-                                formatAmount(asString(summary['overdue'])),
-                              ),
-                              _chip(
-                                context,
-                                arabic ? 'أيام التأخير' : 'Avg days late',
-                                asString(summary['averageDaysLate']) ?? '0',
-                              ),
-                            ],
-                          ),
-                        ),
+                        data: (summary) {
+                          final totals = summary['totals'] is Map
+                              ? Map<String, dynamic>.from(
+                                  summary['totals'] as Map,
+                                )
+                              : <String, dynamic>{};
+                          return Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                            child: Wrap(
+                              spacing: 18,
+                              runSpacing: 6,
+                              children: [
+                                _chip(
+                                  context,
+                                  arabic ? 'إجمالي الفواتير' : 'Invoiced',
+                                  formatAmount(asString(totals['invoiced'])),
+                                ),
+                                _chip(
+                                  context,
+                                  arabic ? 'المسدَّد' : 'Paid',
+                                  formatAmount(asString(totals['paid'])),
+                                ),
+                                _chip(
+                                  context,
+                                  arabic ? 'الرصيد' : 'Balance',
+                                  formatAmount(
+                                    asString(totals['outstanding']),
+                                  ),
+                                ),
+                                _chip(
+                                  context,
+                                  arabic ? 'المتأخر' : 'Overdue',
+                                  formatAmount(asString(totals['overdue'])),
+                                ),
+                                _chip(
+                                  context,
+                                  arabic ? 'عدد الفواتير' : 'Invoices',
+                                  '${totals['invoices'] ?? 0}',
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20),

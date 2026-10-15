@@ -106,7 +106,10 @@ function Set-PrivateAcl([string]$Path, [string[]]$Principals) {
   # NEVER grant BUILTIN\Users or Everyone access to database passwords or signing secrets.
   $aclCommands = @('/inheritance:r', '/grant:r', 'SYSTEM:(OI)(CI)F', 'BUILTIN\Administrators:(OI)(CI)F')
   foreach ($p in $Principals) {
-    if ($p) { $aclCommands += "$p`:(OI)(CI)F" }
+    # Raw SIDs must be icacls-prefixed with '*'; a bare SID string is read as
+    # an account name and the whole grant is refused.
+    if ($p -match '^S-1-') { $aclCommands += "*$p`:(OI)(CI)F" }
+    elseif ($p) { $aclCommands += "$p`:(OI)(CI)F" }
   }
   & icacls.exe $Path @aclCommands | Out-Null
   if ($LASTEXITCODE -ne 0) {
@@ -316,6 +319,11 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   [IO.File]::WriteAllText($tempPassword, $dbPassword, [Text.Encoding]::ASCII)
   $currentIdentitySid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
   Set-PrivateAcl $tempPassword @($currentIdentitySid)
+  # Create the cluster directory ourselves, empty. initdb then takes its
+  # "present but empty" path and never runs its recursive mkdir walk - that
+  # walk trips over the pre-created ProgramData root on this PostgreSQL
+  # Windows build ("could not create directory ...: File exists").
+  New-Item -ItemType Directory -Force -Path $pgData | Out-Null
   try {
     Invoke-Pg -Exe (Join-Path $pgBin 'initdb.exe') -Arguments @('-D',$pgData,'-U','postgres','-A','scram-sha-256','--pwfile',$tempPassword,'-E','UTF8')
   } finally { Remove-Item -LiteralPath $tempPassword -Force -ErrorAction SilentlyContinue }
