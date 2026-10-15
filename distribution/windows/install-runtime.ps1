@@ -45,11 +45,11 @@ if (Test-Path $vcRuntime) {
   if ($vc.ExitCode -notin @(0,1638,3010)) { throw "Microsoft Visual C++ runtime installation failed ($($vc.ExitCode))." }
 }
 
-function Invoke-Pg([string]$Exe, [string[]]$Args) {
+function Invoke-Pg([string]$Exe, [string[]]$Arguments) {
   # Preserve PostgreSQL's actual diagnostic output in the protected installer log.
   # This is essential for first-run initdb failures, which otherwise look identical
   # to users and CI even when the underlying causes differ.
-  $commandOutput = @(& $Exe @Args 2>&1)
+  $commandOutput = @(& $Exe @Arguments 2>&1)
   $exitCode = $LASTEXITCODE
   if ($exitCode -ne 0) {
     $details = ($commandOutput | Out-String).Trim()
@@ -58,10 +58,10 @@ function Invoke-Pg([string]$Exe, [string[]]$Args) {
   }
   if ($commandOutput.Count -gt 0) { $commandOutput | ForEach-Object { Write-Output $_ } }
 }
-function Invoke-PsqlInput([string]$Exe, [string[]]$Args, [string]$Sql) {
+function Invoke-PsqlInput([string]$Exe, [string[]]$Arguments, [string]$Sql) {
   $start = New-Object System.Diagnostics.ProcessStartInfo
   $start.FileName = $Exe
-  $start.Arguments = $Args -join ' '
+  $start.Arguments = $Arguments -join ' '
   $start.UseShellExecute = $false
   $start.CreateNoWindow = $true
   $start.RedirectStandardInput = $true
