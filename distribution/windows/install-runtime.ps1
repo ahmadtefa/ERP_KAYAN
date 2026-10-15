@@ -267,7 +267,7 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   $currentIdentitySid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
   Set-PrivateAcl $tempPassword @($currentIdentitySid)
   try {
-    Invoke-Pg (Join-Path $pgBin 'initdb.exe') @('-D',$pgData,'-U','postgres','-A','scram-sha-256','--pwfile',$tempPassword,'-E','UTF8')
+    Invoke-Pg -Exe (Join-Path $pgBin 'initdb.exe') -Arguments @('-D',$pgData,'-U','postgres','-A','scram-sha-256','--pwfile',$tempPassword,'-E','UTF8')
   } finally { Remove-Item -LiteralPath $tempPassword -Force -ErrorAction SilentlyContinue }
 
   $conf = Join-Path $pgData 'postgresql.conf'
@@ -279,16 +279,16 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   $env:PGPASSWORD = $dbPassword
   # Start postgres briefly as the installer, create the least-privileged app role/db, then register the permanent service.
   $pgCtl = Join-Path $pgBin 'pg_ctl.exe'
-  Invoke-Pg $pgCtl @('start','-D',$pgData,'-l',$pgLog,'-w','-t','60')
+  Invoke-Pg -Exe $pgCtl -Arguments @('start','-D',$pgData,'-l',$pgLog,'-w','-t','60')
   try {
     Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "DO `$`$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'erp_app') THEN CREATE ROLE erp_app WITH LOGIN PASSWORD '$dbPassword'; ELSE ALTER ROLE erp_app WITH LOGIN PASSWORD '$dbPassword'; END IF; END `$`$;"
     Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "SELECT 'CREATE DATABASE erp_kayan OWNER erp_app' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'erp_kayan')\gexec"
     } finally {
-      Invoke-Pg $pgCtl @('stop','-D',$pgData,'-m','fast','-w')
+      Invoke-Pg -Exe $pgCtl -Arguments @('stop','-D',$pgData,'-m','fast','-w')
       Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
     }
   if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
-    Invoke-Pg $pgCtl @('register','-N',$serviceName,'-U','NT AUTHORITY\LocalService','-D',$pgData,'-S','auto')
+    Invoke-Pg -Exe $pgCtl -Arguments @('register','-N',$serviceName,'-U','NT AUTHORITY\LocalService','-D',$pgData,'-S','auto')
   }
   Set-PrivateAcl $pgData 'NT AUTHORITY\LOCAL SERVICE'
   Set-PrivateAcl (Split-Path -Parent $pgLog) 'NT AUTHORITY\LOCAL SERVICE'
@@ -298,7 +298,7 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   $version = (Get-Content (Join-Path $pgData 'PG_VERSION') -Raw).Trim()
   if ($version -ne '17') { throw "Existing PostgreSQL data version $version is incompatible with bundled PostgreSQL 17. Data was not changed." }
   if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
-    Invoke-Pg (Join-Path $pgBin 'pg_ctl.exe') @('register','-N',$serviceName,'-U','NT AUTHORITY\LocalService','-D',$pgData,'-S','auto')
+    Invoke-Pg -Exe (Join-Path $pgBin 'pg_ctl.exe') -Arguments @('register','-N',$serviceName,'-U','NT AUTHORITY\LocalService','-D',$pgData,'-S','auto')
   }
   Set-PrivateAcl $pgData 'NT AUTHORITY\LOCAL SERVICE'
   Set-PrivateAcl (Split-Path -Parent $pgLog) 'NT AUTHORITY\LOCAL SERVICE'
