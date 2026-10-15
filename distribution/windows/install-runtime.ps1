@@ -332,10 +332,20 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   if (-not (Test-Path -LiteralPath $pgData -PathType Container)) {
     throw "The cluster directory could not be created: $pgData"
   }
-  Write-RuntimeMarker ("KAYAN-RUNTIME-INITDB-DIR ok=" + (Test-Path -LiteralPath $pgData) + " user=" + [Security.Principal.WindowsIdentity]::GetCurrent().Name + " attrs=" + ((Get-Item -LiteralPath $pgData).Attributes))
+  $fwd = ($pgData -replace '\\','/')
+  Write-RuntimeMarker ("KAYAN-RUNTIME-INITDB-DIR ok=" + (Test-Path -LiteralPath $pgData) + " dotnet=" + [IO.Directory]::Exists($pgData) + " fwd=" + (Test-Path -LiteralPath $fwd) + " fwdDotNet=" + [IO.Directory]::Exists($fwd) + " user=" + [Security.Principal.WindowsIdentity]::GetCurrent().Name + " attrs=" + ((Get-Item -LiteralPath $pgData).Attributes) + " argv=-D|" + $pgData + "|stage=" + (Join-Path $env:ProgramData 'KAYAN-ERP-PG-STAGE'))
+  # initdb's directory probe cannot see the locked ProgramData tree even
+  # though the same process can. Stage the cluster under a plain, unmodified
+  # path (only C:\ProgramData above it, whose probe is known to work), then
+  # move the finished cluster into its final home.
+  $stageRoot = Join-Path $env:ProgramData 'KAYAN-ERP-PG-STAGE'
+  Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
+  [void][IO.Directory]::CreateDirectory($stageRoot)
   try {
-    Invoke-Pg -Exe (Join-Path $pgBin 'initdb.exe') -Arguments @('-D',$pgData,'-U','postgres','-A','scram-sha-256','--pwfile',$tempPassword,'-E','UTF8')
+    Invoke-Pg -Exe (Join-Path $pgBin 'initdb.exe') -Arguments @('-D',$stageRoot,'-U','postgres','-A','scram-sha-256','--pwfile',$tempPassword,'-E','UTF8')
   } finally { Remove-Item -LiteralPath $tempPassword -Force -ErrorAction SilentlyContinue }
+  Get-ChildItem -LiteralPath $stageRoot -Force | Move-Item -Destination $pgData -Force
+  Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
 
   $conf = Join-Path $pgData 'postgresql.conf'
   Add-Content -LiteralPath $conf -Value "`n# KAYAN local-only database configuration`nlisten_addresses = '127.0.0.1'`nport = 5432`npassword_encryption = 'scram-sha-256'`nlogging_collector = on`nlog_directory = '$($ProgramDataRoot.Replace('\','/'))/logs'`nlog_filename = 'postgresql-%Y-%m-%d.log'`n"
