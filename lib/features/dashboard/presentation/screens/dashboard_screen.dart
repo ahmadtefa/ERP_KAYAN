@@ -100,6 +100,10 @@ class DashboardScreen extends ConsumerWidget {
             IconButton.filledTonal(
               tooltip: arabic ? 'تحديث البيانات' : 'Refresh data',
               onPressed: () {
+                // Refresh every live source shown on this dashboard, including
+                // the company identity and branch context in the hero header.
+                ref.invalidate(companyProfileProvider);
+                ref.invalidate(branchesProvider);
                 ref.invalidate(salesInvoicesProvider);
                 ref.invalidate(purchaseInvoicesProvider);
                 ref.invalidate(customersProvider);
