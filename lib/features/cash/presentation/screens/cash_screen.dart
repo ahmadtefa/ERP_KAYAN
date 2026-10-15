@@ -13,6 +13,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
+import '../../../data/presentation/widgets/document_export_actions.dart';
 import '../providers/cash_providers.dart';
 
 /// Cash boxes, bank accounts, receipts, payments and transfers.
@@ -641,6 +642,28 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 ColumnSpec(l10n.status, value: (r) => text(r, 'status')),
               ],
               actions: (row) => [
+                IconButton(
+                  tooltip: isArabic ? 'طباعة وتنزيل المستند' : 'Print and download document',
+                  icon: const Icon(Icons.print_outlined, size: 20),
+                  onPressed: () => showDialog<void>(
+                    context: context,
+                    builder: (dialogContext) => AlertDialog(
+                      title: Text(
+                        '${l10n.voucherNumber}: ${text(row, 'voucherNumber')}',
+                      ),
+                      content: DocumentExportActions(
+                        kind: 'cash-voucher',
+                        id: text(row, 'id'),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(dialogContext).pop(),
+                          child: Text(l10n.close),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
                 if (text(row, 'status').toUpperCase() == 'DRAFT')
                   IconButton(
                     tooltip: l10n.post,
