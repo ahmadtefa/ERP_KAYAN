@@ -71,6 +71,12 @@ function Fail([string]$Reason) {
   exit 1
 }
 
+# Nothing may die silently: every unhandled error becomes a real, annotated
+# failure with the same diagnostics as Fail().
+trap {
+  Fail ("Unhandled error in the smoke test: " + $_.Exception.Message + [Environment]::NewLine + ($_ | Out-String))
+}
+
 $install = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", ("/LOG=" + $installLog)) -Wait -PassThru
 if ($install.ExitCode -ne 0) {
   Fail ("KAYAN-ERP-Setup.exe failed with exit code $($install.ExitCode).")
@@ -150,7 +156,11 @@ try {
   Write-Host "PASS: launching installed erp_kayan.exe started a healthy local API on port $apiPort."
 
   $loginPayload = @{ username = "ci-admin"; password = "CiSmoke-Admin-Password-7241" } | ConvertTo-Json -Compress
-  $login = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$apiPort/api/v1/auth/login" -ContentType "application/json" -Body $loginPayload -TimeoutSec 10
+  try {
+    $login = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$apiPort/api/v1/auth/login" -ContentType "application/json" -Body $loginPayload -TimeoutSec 10
+  } catch {
+    Fail ("Installed API login request failed: " + $_.Exception.Message)
+  }
   if (-not $login.accessToken) { Fail "Installed API login did not return an access token." }
   Write-Host "PASS: installed API accepted a login against the bundled database."
   Write-Output "::notice::Windows installer smoke test passed: service, database preparation, client startup on port $apiPort and login all verified."
