@@ -15,6 +15,7 @@ import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/chart_of_accounts_providers.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
+import '../../../data/presentation/widgets/document_export_actions.dart';
 
 class JournalEntriesController extends JsonListController {
   @override
@@ -136,6 +137,30 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
           actions: (row) {
             final status = text(row, 'status').toLowerCase();
             return [
+              IconButton(
+                tooltip: Localizations.localeOf(context).languageCode == 'ar'
+                    ? 'طباعة وتنزيل المستند'
+                    : 'Print and download document',
+                icon: const Icon(Icons.print_outlined, size: 20),
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (dialogContext) => AlertDialog(
+                    title: Text(
+                      '${l10n.entryNumber}: ${text(row, 'entryNumber')}',
+                    ),
+                    content: DocumentExportActions(
+                      kind: 'journal-entry',
+                      id: text(row, 'id'),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        child: Text(l10n.close),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               if (status == 'draft')
                 IconButton(
                   tooltip: l10n.post,
