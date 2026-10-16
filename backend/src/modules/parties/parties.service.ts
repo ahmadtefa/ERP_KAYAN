@@ -31,7 +31,14 @@ export class PartiesService {
   async findAll(
     companyId: string,
     kind: PartyKind,
-    query: { q?: string; includeInactive?: boolean; page?: number; pageSize?: number },
+    query: {
+      q?: string;
+      includeInactive?: boolean;
+      page?: number;
+      pageSize?: number;
+      sort?: string;
+      dir?: string;
+    },
   ) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
@@ -48,11 +55,19 @@ export class PartiesService {
       ];
     }
 
+    const sortField =
+      query.sort === 'name'
+        ? 'nameEn'
+        : query.sort === 'createdAt'
+          ? 'createdAt'
+          : 'code';
+    const direction: 'asc' | 'desc' = query.dir === 'desc' ? 'desc' : 'asc';
+
     const model = this.model(kind) as any;
     const [items, total] = await this.prisma.$transaction([
       model.findMany({
         where,
-        orderBy: { code: 'asc' },
+        orderBy: { [sortField]: direction },
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -72,6 +87,310 @@ export class PartiesService {
     const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
     if (!row) throw new NotFoundException(`${kind} not found`);
     return this.toResponse(row);
+  }
+
+  /**
+   * The partner's card: how much has been traded, what is still open, and the
+   * last documents - everything the list screen shows when a row is opened.
+   */
+  async summary(companyId: string, kind: PartyKind, id: string) {
+    const model = this.model(kind) as any;
+    const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
+    if (!row) throw new NotFoundException(`${kind} not found`);
+
+    const invoices =
+      kind === 'customer'
+        ? await this.prisma.salesInvoice.findMany({
+            where: {
+              companyId,
+              customerId: id,
+              deletedAt: null,
+              status: 'POSTED',
+              documentType: 'INVOICE',
+            },
+            select: {
+              id: true,
+              invoiceNumber: true,
+              invoiceDate: true,
+              dueDate: true,
+              totalAmount: true,
+              paidAmount: true,
+              status: true,
+            },
+            orderBy: { invoiceDate: 'desc' },
+          })
+        : await this.prisma.purchaseInvoice.findMany({
+            where: {
+              companyId,
+              supplierId: id,
+              deletedAt: null,
+              status: 'POSTED',
+              documentType: 'INVOICE',
+            },
+            select: {
+              id: true,
+              invoiceNumber: true,
+              invoiceDate: true,
+              dueDate: true,
+              totalAmount: true,
+              paidAmount: true,
+              status: true,
+            },
+            orderBy: { invoiceDate: 'desc' },
+          });
+
+    const vouchers = await this.prisma.cashVoucher.findMany({
+      where: {
+        companyId,
+        deletedAt: null,
+        status: 'POSTED',
+        ...(kind === 'customer' ? { customerId: id } : { supplierId: id }),
+      },
+      select: {
+        id: true,
+        voucherNumber: true,
+        voucherDate: true,
+        kind: true,
+        amount: true,
+        status: true,
+      },
+      orderBy: { voucherDate: 'desc' },
+    });
+
+    const totalInvoiced = invoices.reduce((sum, inv) => sum.plus(inv.totalAmount), new Prisma.Decimal(0));
+    const totalPaid = vouchers.reduce(
+      (sum, voucher) =>
+        voucher.kind === 'RECEIPT' ? sum.plus(voucher.amount) : sum.minus(voucher.amount),
+      new Prisma.Decimal(0),
+    );
+    const outstanding = invoices.reduce(
+      (sum, inv) => sum.plus(inv.totalAmount).minus(inv.paidAmount),
+      new Prisma.Decimal(0),
+    );
+    const overdue = invoices
+      .filter(
+        (inv) =>
+          inv.dueDate &&
+          inv.dueDate.getTime() < Date.now() &&
+          inv.totalAmount.minus(inv.paidAmount).isPositive(),
+      )
+      .reduce((sum, inv) => sum.plus(inv.totalAmount).minus(inv.paidAmount), new Prisma.Decimal(0));
+
+    const recentDocuments = [
+      ...invoices.slice(0, 5).map((inv) => ({
+        kind: kind === 'customer' ? 'SALES_INVOICE' : 'PURCHASE_INVOICE',
+        id: inv.id,
+        number: inv.invoiceNumber,
+        date: inv.invoiceDate.toISOString().slice(0, 10),
+        amount: inv.totalAmount.toFixed(MONEY_SCALE),
+        status: inv.status,
+      })),
+      ...vouchers.slice(0, 5).map((voucher) => ({
+        kind: voucher.kind === 'RECEIPT' ? 'CASH_RECEIPT' : 'CASH_PAYMENT',
+        id: voucher.id,
+        number: voucher.voucherNumber,
+        date: voucher.voucherDate.toISOString().slice(0, 10),
+        amount: voucher.amount.toFixed(MONEY_SCALE),
+        status: voucher.status,
+      })),
+    ]
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+      .slice(0, 8);
+
+    return {
+      party: this.toResponse(row),
+      totals: {
+        invoiced: totalInvoiced.toFixed(MONEY_SCALE),
+        paid: totalPaid.toFixed(MONEY_SCALE),
+        outstanding: outstanding.toFixed(MONEY_SCALE),
+        overdue: overdue.toFixed(MONEY_SCALE),
+        invoices: invoices.length,
+        vouchers: vouchers.length,
+        lastActivity:
+          recentDocuments.length > 0 ? recentDocuments[0].date : null,
+      },
+      recentDocuments,
+    };
+  }
+
+  /**
+   * Statement of account (كشف حساب): every movement in the period with a
+   * running balance, plus the opening balance from everything before it.
+   *
+   * For a customer, an invoice is a debit (they owe more) and a receipt is a
+   * credit (they paid). For a supplier it is the other way round: a purchase
+   * invoice is a credit (we owe more) and a payment is a debit.
+   */
+  async statement(
+    companyId: string,
+    kind: PartyKind,
+    id: string,
+    query: { from?: string; to?: string },
+  ) {
+    const model = this.model(kind) as any;
+    const row = await model.findFirst({ where: { id, companyId, deletedAt: null } });
+    if (!row) throw new NotFoundException(`${kind} not found`);
+
+    const to = query.to ? new Date(`${query.to.slice(0, 10)}T23:59:59.999Z`) : new Date();
+    const from = query.from
+      ? new Date(`${query.from.slice(0, 10)}T00:00:00.000Z`)
+      : new Date(0);
+
+    const invoiceWhere = {
+      companyId,
+      deletedAt: null,
+      status: 'POSTED',
+      ...(kind === 'customer' ? { customerId: id } : { supplierId: id }),
+    } as const;
+
+    const [invoices, vouchers] = await Promise.all([
+      kind === 'customer'
+        ? this.prisma.salesInvoice.findMany({
+            where: invoiceWhere,
+            select: {
+              id: true,
+              invoiceNumber: true,
+              invoiceDate: true,
+              totalAmount: true,
+              documentType: true,
+              notes: true,
+            },
+            orderBy: { invoiceDate: 'asc' },
+          })
+        : this.prisma.purchaseInvoice.findMany({
+            where: invoiceWhere,
+            select: {
+              id: true,
+              invoiceNumber: true,
+              invoiceDate: true,
+              totalAmount: true,
+              documentType: true,
+              notes: true,
+            },
+            orderBy: { invoiceDate: 'asc' },
+          }),
+      this.prisma.cashVoucher.findMany({
+        where: {
+          companyId,
+          deletedAt: null,
+          status: 'POSTED',
+          ...(kind === 'customer' ? { customerId: id } : { supplierId: id }),
+        },
+        select: {
+          id: true,
+          voucherNumber: true,
+          voucherDate: true,
+          kind: true,
+          amount: true,
+          description: true,
+        },
+        orderBy: { voucherDate: 'asc' },
+      }),
+    ]);
+
+    type Entry = {
+      date: Date;
+      type: string;
+      id: string;
+      number: string;
+      description: string;
+      debit: Prisma.Decimal;
+      credit: Prisma.Decimal;
+    };
+    const all: Entry[] = [];
+    for (const invoice of invoices) {
+      const isReturn = invoice.documentType !== 'INVOICE';
+      const amount = invoice.totalAmount;
+      const debit =
+        kind === 'customer'
+          ? isReturn
+            ? new Prisma.Decimal(0)
+            : amount
+          : isReturn
+            ? amount
+            : new Prisma.Decimal(0);
+      const credit =
+        kind === 'customer'
+          ? isReturn
+            ? amount
+            : new Prisma.Decimal(0)
+          : isReturn
+            ? new Prisma.Decimal(0)
+            : amount;
+      all.push({
+        date: invoice.invoiceDate,
+        type: isReturn
+          ? kind === 'customer'
+            ? 'CREDIT_NOTE'
+            : 'DEBIT_NOTE'
+          : kind === 'customer'
+            ? 'SALES_INVOICE'
+            : 'PURCHASE_INVOICE',
+        id: invoice.id,
+        number: invoice.invoiceNumber,
+        description: invoice.notes ?? '',
+        debit,
+        credit,
+      });
+    }
+    for (const voucher of vouchers) {
+      // The ledger moves the party's account the same way for both kinds of
+      // partner: a receipt credits them (they paid / we received), a payment
+      // debits them (we paid / they received). See the voucher posting.
+      const isReceipt = voucher.kind === 'RECEIPT';
+      const debit = isReceipt ? new Prisma.Decimal(0) : voucher.amount;
+      const credit = isReceipt ? voucher.amount : new Prisma.Decimal(0);
+      all.push({
+        date: voucher.voucherDate,
+        type: isReceipt ? 'CASH_RECEIPT' : 'CASH_PAYMENT',
+        id: voucher.id,
+        number: voucher.voucherNumber,
+        description: voucher.description ?? '',
+        debit,
+        credit,
+      });
+    }
+    all.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    // Everything before the period is the opening balance; Decimal is
+    // immutable, so it is one explicit sum.
+    const openingBalance = all
+      .filter((entry) => entry.date.getTime() < from.getTime())
+      .reduce((sum, entry) => sum.plus(entry.debit).minus(entry.credit), new Prisma.Decimal(0));
+
+    const period = all.filter(
+      (entry) =>
+        entry.date.getTime() >= from.getTime() && entry.date.getTime() <= to.getTime(),
+    );
+
+    let running = openingBalance;
+    const rows = period.map((entry) => {
+      running = running.plus(entry.debit).minus(entry.credit);
+      return {
+        date: entry.date.toISOString().slice(0, 10),
+        type: entry.type,
+        id: entry.id,
+        number: entry.number,
+        description: entry.description,
+        debit: entry.debit.toFixed(MONEY_SCALE),
+        credit: entry.credit.toFixed(MONEY_SCALE),
+        balance: running.toFixed(MONEY_SCALE),
+      };
+    });
+
+    const totalDebit = period.reduce((sum, entry) => sum.plus(entry.debit), new Prisma.Decimal(0));
+    const totalCredit = period.reduce((sum, entry) => sum.plus(entry.credit), new Prisma.Decimal(0));
+
+    return {
+      party: this.toResponse(row),
+      from: from.toISOString().slice(0, 10),
+      to: to.toISOString().slice(0, 10),
+      openingBalance: openingBalance.toFixed(MONEY_SCALE),
+      totalDebit: totalDebit.toFixed(MONEY_SCALE),
+      totalCredit: totalCredit.toFixed(MONEY_SCALE),
+      closingBalance: running.toFixed(MONEY_SCALE),
+      rows,
+    };
   }
 
   async create(

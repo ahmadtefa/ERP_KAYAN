@@ -1,19 +1,22 @@
 import 'dart:convert';
-import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/router/app_router.dart';
+import '../../../../core/json/amount_format.dart';
+import '../../../../core/json/json_utils.dart';
 import '../../../../l10n/generated/app_localizations.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../accounting/presentation/providers/chart_of_accounts_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
-import '../../../common/presentation/providers/resource_providers.dart';
-import '../../../invoicing/presentation/providers/invoice_providers.dart';
 import '../../../settings/presentation/providers/company_providers.dart';
+import '../providers/dashboard_providers.dart';
+import '../widgets/dashboard_panels.dart';
 
-/// Responsive executive dashboard with live, tenant-scoped API data.
+/// Responsive executive dashboard, fed by the server-side dashboard figures:
+/// totals, cash, debts, who buys most, what sells most, and what is waiting.
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
 
@@ -22,14 +25,10 @@ class DashboardScreen extends ConsumerWidget {
     final l10n = context.l10n;
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
     final user = ref.watch(currentUserProvider);
-    final accounts = ref.watch(chartOfAccountsProvider);
     final companyAsync = ref.watch(companyProfileProvider);
     final branchesAsync = ref.watch(branchesProvider);
-    final salesAsync = ref.watch(salesInvoicesProvider);
-    final purchasesAsync = ref.watch(purchaseInvoicesProvider);
-    final customersAsync = ref.watch(customersProvider);
-    final suppliersAsync = ref.watch(suppliersProvider);
-    final itemsAsync = ref.watch(itemsProvider);
+    final summaryAsync = ref.watch(dashboardSummaryProvider);
+    final monthlyAsync = ref.watch(dashboardMonthlyProvider);
     final company = companyAsync.asData?.value == null
         ? <String, dynamic>{}
         : Map<String, dynamic>.from(companyAsync.asData!.value as Map);
@@ -58,13 +57,6 @@ class DashboardScreen extends ConsumerWidget {
     }
     if (branchName.isEmpty) branchName = user?.branchId ?? l10n.notAvailable;
 
-    final sales = salesAsync.asData?.value ?? const <dynamic>[];
-    final purchases = purchasesAsync.asData?.value ?? const <dynamic>[];
-    final salesTotal = sales.fold<double>(0, (sum, row) => sum + _amount(row));
-    final purchaseTotal =
-        purchases.fold<double>(0, (sum, row) => sum + _amount(row));
-    final salesByMonth = _monthTotals(sales);
-    final purchasesByMonth = _monthTotals(purchases);
     final wide = MediaQuery.sizeOf(context).width >= 1100;
     final medium = MediaQuery.sizeOf(context).width >= 650;
     final pad = wide ? 28.0 : 16.0;
@@ -100,15 +92,12 @@ class DashboardScreen extends ConsumerWidget {
             IconButton.filledTonal(
               tooltip: arabic ? 'تحديث البيانات' : 'Refresh data',
               onPressed: () {
-                // Refresh every live source shown on this dashboard, including
-                // the company identity and branch context in the hero header.
+                // Refresh every live source on this dashboard, including the
+                // company identity and branch context in the hero header.
+                ref.invalidate(dashboardSummaryProvider);
+                ref.invalidate(dashboardMonthlyProvider);
                 ref.invalidate(companyProfileProvider);
                 ref.invalidate(branchesProvider);
-                ref.invalidate(salesInvoicesProvider);
-                ref.invalidate(purchaseInvoicesProvider);
-                ref.invalidate(customersProvider);
-                ref.invalidate(suppliersProvider);
-                ref.invalidate(itemsProvider);
                 ref.invalidate(chartOfAccountsProvider);
               },
               icon: const Icon(Icons.refresh_rounded),
@@ -126,78 +115,222 @@ class DashboardScreen extends ConsumerWidget {
           onEdit: () => context.go(AppRoutes.companySettings),
         ),
         const SizedBox(height: 24),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                arabic ? 'مؤشرات الأعمال' : 'Business overview',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.w800),
+        summaryAsync.when(
+          loading: () => const Padding(
+            padding: EdgeInsets.symmetric(vertical: 48),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (error, _) => _ErrorCard(
+            arabic: arabic,
+            onRetry: () => ref.invalidate(dashboardSummaryProvider),
+          ),
+          data: (summary) => _SummarySections(
+            summary: summary,
+            monthly: monthlyAsync.asData?.value,
+            monthlyLoading: monthlyAsync.isLoading,
+            arabic: arabic,
+            wide: wide,
+            medium: medium,
+            l10n: l10n,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Everything below the hero, built from the server summary.
+class _SummarySections extends StatelessWidget {
+  const _SummarySections({
+    required this.summary,
+    required this.monthly,
+    required this.monthlyLoading,
+    required this.arabic,
+    required this.wide,
+    required this.medium,
+    required this.l10n,
+  });
+
+  final Json summary;
+  final Json? monthly;
+  final bool monthlyLoading;
+  final bool arabic;
+  final bool wide;
+  final bool medium;
+  final AppLocalizations l10n;
+
+  @override
+  Widget build(BuildContext context) {
+    final sales = Map<String, dynamic>.from(summary['sales'] as Map? ?? {});
+    final purchases =
+        Map<String, dynamic>.from(summary['purchases'] as Map? ?? {});
+    final receipts =
+        Map<String, dynamic>.from(summary['receipts'] as Map? ?? {});
+    final payments =
+        Map<String, dynamic>.from(summary['payments'] as Map? ?? {});
+    final overdue = Map<String, dynamic>.from(summary['overdue'] as Map? ?? {});
+    final parties = Map<String, dynamic>.from(summary['parties'] as Map? ?? {});
+    final customers =
+        Map<String, dynamic>.from(parties['customers'] as Map? ?? {});
+    final suppliers =
+        Map<String, dynamic>.from(parties['suppliers'] as Map? ?? {});
+    final previous =
+        Map<String, dynamic>.from(summary['previousPeriod'] as Map? ?? {});
+    final quick =
+        Map<String, dynamic>.from(summary['quickActions'] as Map? ?? {});
+    final hasData = flag(summary, 'hasData', fallback: true);
+    String money(Object? value) => formatAmount(asString(value), decimals: 0);
+
+    final metrics = <_Metric>[
+      _Metric(
+        arabic ? 'إجمالي المبيعات' : 'Total sales',
+        money(sales['total']),
+        arabic
+            ? '${sales['invoices'] ?? 0} فاتورة'
+            : '${sales['invoices'] ?? 0} invoices',
+        Icons.trending_up_rounded,
+        const Color(0xFF087F8C),
+      ),
+      _Metric(
+        arabic ? 'إجمالي المشتريات' : 'Total purchases',
+        money(purchases['total']),
+        arabic
+            ? '${purchases['invoices'] ?? 0} فاتورة'
+            : '${purchases['invoices'] ?? 0} invoices',
+        Icons.shopping_bag_outlined,
+        const Color(0xFF7657C8),
+      ),
+      _Metric(
+        arabic ? 'المقبوضات' : 'Receipts',
+        money(receipts['total']),
+        arabic
+            ? '${receipts['vouchers'] ?? 0} سند'
+            : '${receipts['vouchers'] ?? 0} vouchers',
+        Icons.south_west_rounded,
+        const Color(0xFF1B8A5A),
+      ),
+      _Metric(
+        arabic ? 'المدفوعات' : 'Payments',
+        money(payments['total']),
+        arabic
+            ? '${payments['vouchers'] ?? 0} سند'
+            : '${payments['vouchers'] ?? 0} vouchers',
+        Icons.north_east_rounded,
+        const Color(0xFFC2474B),
+      ),
+      _Metric(
+        arabic ? 'صافي النتيجة' : 'Net result',
+        money(summary['grossResult']),
+        arabic ? 'إيرادات ناقص مصروفات' : 'Revenue less expenses',
+        Icons.insights_rounded,
+        const Color(0xFF2878C8),
+      ),
+      _Metric(
+        arabic ? 'المصروفات' : 'Expenses',
+        money(summary['expenses']),
+        arabic ? 'من دليل الحسابات' : 'From the ledger',
+        Icons.receipt_long_outlined,
+        const Color(0xFFB36A18),
+      ),
+      _Metric(
+        arabic ? 'النقدية' : 'Cash position',
+        money(summary['cashPosition']),
+        arabic ? 'الصناديق والبنوك' : 'Cash boxes and banks',
+        Icons.account_balance_wallet_outlined,
+        const Color(0xFF0F766E),
+      ),
+      _Metric(
+        arabic ? 'الذمم المدينة' : 'Receivables',
+        money(summary['receivables']),
+        arabic ? 'مستحق من العملاء' : 'Owed by customers',
+        Icons.groups_2_outlined,
+        const Color(0xFF2878C8),
+      ),
+      _Metric(
+        arabic ? 'الذمم الدائنة' : 'Payables',
+        money(summary['payables']),
+        arabic ? 'مستحق للموردين' : 'Owed to suppliers',
+        Icons.local_shipping_outlined,
+        const Color(0xFF7657C8),
+      ),
+      _Metric(
+        arabic ? 'الفواتير المتأخرة' : 'Overdue invoices',
+        money(overdue['total']),
+        arabic
+            ? '${overdue['invoices'] ?? 0} فاتورة'
+            : '${overdue['invoices'] ?? 0} invoices',
+        Icons.warning_amber_rounded,
+        const Color(0xFFC2474B),
+      ),
+      _Metric(
+        arabic ? 'العملاء' : 'Customers',
+        '${customers['count'] ?? 0}',
+        arabic
+            ? '${customers['active'] ?? 0} نشط'
+            : '${customers['active'] ?? 0} active',
+        Icons.people_outline,
+        const Color(0xFF2878C8),
+      ),
+      _Metric(
+        arabic ? 'الموردون' : 'Suppliers',
+        '${suppliers['count'] ?? 0}',
+        arabic
+            ? '${suppliers['active'] ?? 0} نشط'
+            : '${suppliers['active'] ?? 0} active',
+        Icons.local_shipping_outlined,
+        const Color(0xFFB36A18),
+      ),
+    ];
+
+    final monthlyRows = listOf(monthly?['months']);
+    final topCustomers = listOf(summary['topCustomers']);
+    final topItems = listOf(summary['topItems']);
+    final recent = listOf(summary['recentDocuments']);
+    final cashAccounts = listOf(summary['cashAccounts']);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!hasData)
+          Container(
+            margin: const EdgeInsets.only(bottom: 18),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF2878C8).withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: const Color(0xFF2878C8).withValues(alpha: 0.25),
               ),
             ),
-            if (salesAsync.isLoading || purchasesAsync.isLoading)
-              const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-          ],
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline, color: Color(0xFF2878C8)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    arabic
+                        ? 'لا توجد مستندات في هذه الفترة بعد. ابدأ بتسجيل أول فاتورة أو سند.'
+                        : 'There are no documents in this period yet. Raise your first invoice or voucher.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        Text(
+          arabic ? 'مؤشرات الأعمال' : 'Business overview',
+          style: Theme.of(context)
+              .textTheme
+              .titleLarge
+              ?.copyWith(fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 12),
         LayoutBuilder(
           builder: (context, constraints) {
             final columns = wide ? 4 : 2;
-            final gap = 12.0;
+            const gap = 12.0;
             final cardWidth =
                 (constraints.maxWidth - gap * (columns - 1)) / columns;
-            final metrics = <_Metric>[
-              _Metric(
-                arabic ? 'فواتير المبيعات' : 'Sales invoices',
-                salesAsync.when(
-                  data: (rows) => rows.length.toString(),
-                  loading: () => '—',
-                  error: (_, _) => '—',
-                ),
-                _money(salesTotal, arabic),
-                Icons.trending_up_rounded,
-                const Color(0xFF087F8C),
-              ),
-              _Metric(
-                arabic ? 'فواتير المشتريات' : 'Purchase invoices',
-                purchasesAsync.when(
-                  data: (rows) => rows.length.toString(),
-                  loading: () => '—',
-                  error: (_, _) => '—',
-                ),
-                _money(purchaseTotal, arabic),
-                Icons.shopping_bag_outlined,
-                const Color(0xFF7657C8),
-              ),
-              _Metric(
-                arabic ? 'العملاء' : 'Customers',
-                customersAsync.when(
-                  data: (rows) => rows.length.toString(),
-                  loading: () => '—',
-                  error: (_, _) => '—',
-                ),
-                arabic ? 'إجمالي المسجلين' : 'Registered records',
-                Icons.groups_2_outlined,
-                const Color(0xFF2878C8),
-              ),
-              _Metric(
-                arabic ? 'أصناف المخزون' : 'Inventory items',
-                itemsAsync.when(
-                  data: (rows) => rows.length.toString(),
-                  loading: () => '—',
-                  error: (_, _) => '—',
-                ),
-                arabic ? 'الأصناف المسجلة' : 'Catalog records',
-                Icons.inventory_2_outlined,
-                const Color(0xFFB36A18),
-              ),
-            ];
             return Wrap(
               spacing: gap,
               runSpacing: gap,
@@ -211,63 +344,279 @@ class DashboardScreen extends ConsumerWidget {
             );
           },
         ),
+        const SizedBox(height: 18),
+        _ComparisonStrip(summary: summary, previous: previous, arabic: arabic),
         const SizedBox(height: 22),
-        _ActivityChart(
-          sales: salesByMonth,
-          purchases: purchasesByMonth,
-          arabic: arabic,
-        ),
-        const SizedBox(height: 24),
+        if (monthlyLoading && monthlyRows.isEmpty)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else
+          MonthlyBarsChart(months: monthlyRows, arabic: arabic),
+        const SizedBox(height: 22),
         Text(
-          arabic ? 'الوصول السريع' : 'Quick access',
+          arabic ? 'أعلى العملاء والمنتجات' : 'Top customers & products',
           style: Theme.of(context)
               .textTheme
               .titleLarge
               ?.copyWith(fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 12),
-        GridView.count(
-          crossAxisCount: wide ? 5 : medium ? 3 : 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: wide ? 1.8 : 1.5,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final module in _modules(l10n))
-              _ModuleTile(
-                icon: module.icon,
-                label: module.label,
-                onTap: () => context.go(module.path),
+            Expanded(
+              child: TopListPanel(
+                title: arabic ? 'أهم العملاء' : 'Top customers',
+                rows: topCustomers,
+                arabic: arabic,
+                emptyText: arabic
+                    ? 'ستظهر الأسماء هنا عند توفر مبيعات.'
+                    : 'Names appear here once sales exist.',
               ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TopListPanel(
+                title: arabic
+                    ? 'أكثر المنتجات مبيعاً'
+                    : 'Best-selling products',
+                rows: topItems,
+                arabic: arabic,
+                quantitySuffix: arabic ? 'وحدة' : 'units',
+                emptyText: arabic
+                    ? 'ستظهر الأصناف هنا عند توفر مبيعات.'
+                    : 'Items appear here once sales exist.',
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 18),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
+        const SizedBox(height: 22),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _MiniStat(
-              title: arabic ? 'دليل الحسابات' : 'Chart of accounts',
-              value: accounts.when(
-                data: (rows) => rows.length.toString(),
-                loading: () => '—',
-                error: (_, _) => '—',
+            Expanded(
+              child: CashAccountsPanel(
+                rows: cashAccounts,
+                arabic: arabic,
+                emptyText: arabic
+                    ? 'لم تُسجَّل حسابات نقدية بعد.'
+                    : 'No cash accounts recorded yet.',
               ),
-              icon: Icons.account_tree_outlined,
             ),
-            _MiniStat(
-              title: arabic ? 'الموردون' : 'Suppliers',
-              value: suppliersAsync.when(
-                data: (rows) => rows.length.toString(),
-                loading: () => '—',
-                error: (_, _) => '—',
+            const SizedBox(width: 12),
+            Expanded(
+              child: RecentDocumentsPanel(
+                rows: recent,
+                arabic: arabic,
+                emptyText: arabic
+                    ? 'لا توجد عمليات بعد.'
+                    : 'No activity yet.',
               ),
-              icon: Icons.local_shipping_outlined,
             ),
           ],
+        ),
+        const SizedBox(height: 24),
+        Text(
+          arabic ? 'إجراءات سريعة' : 'Quick actions',
+          style: Theme.of(context)
+              .textTheme
+              .titleLarge
+              ?.copyWith(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 12),
+        _QuickActions(
+          quick: quick,
+          arabic: arabic,
+          wide: wide,
+          medium: medium,
+          l10n: l10n,
         ),
       ],
+    );
+  }
+}
+
+/// This period against the previous one, in one honest sentence each.
+class _ComparisonStrip extends StatelessWidget {
+  const _ComparisonStrip({
+    required this.summary,
+    required this.previous,
+    required this.arabic,
+  });
+
+  final Json summary;
+  final Json previous;
+  final bool arabic;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final changeRaw = asString(previous['revenueChange']);
+    final change = changeRaw == null ? null : num.tryParse(changeRaw);
+    final changeColor = change == null
+        ? theme.colorScheme.onSurfaceVariant
+        : change >= 0
+            ? const Color(0xFF1B8A5A)
+            : const Color(0xFFC2474B);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest
+            .withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Wrap(
+        spacing: 24,
+        runSpacing: 12,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          _comparisonItem(
+            context,
+            arabic ? 'إيرادات هذه الفترة' : 'Revenue this period',
+            formatAmount(asString(summary['revenue'])),
+          ),
+          _comparisonItem(
+            context,
+            arabic ? 'إيرادات الفترة السابقة' : 'Revenue previous period',
+            formatAmount(asString(previous['revenue'])),
+          ),
+          _comparisonItem(
+            context,
+            arabic ? 'النتيجة السابقة' : 'Previous result',
+            formatAmount(asString(previous['result'])),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                arabic ? 'التغير: ' : 'Change: ',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              Text(
+                change == null
+                    ? (arabic ? '—' : '—')
+                    : '${change >= 0 ? '+' : ''}${change.toStringAsFixed(1)}%',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: changeColor,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _comparisonItem(BuildContext context, String label, String value) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        Text(
+          value,
+          style: theme.textTheme.titleMedium
+              ?.copyWith(fontWeight: FontWeight.w800),
+        ),
+      ],
+    );
+  }
+}
+
+/// Module shortcuts plus the work waiting in drafts and overdue debts.
+class _QuickActions extends StatelessWidget {
+  const _QuickActions({
+    required this.quick,
+    required this.arabic,
+    required this.wide,
+    required this.medium,
+    required this.l10n,
+  });
+
+  final Json quick;
+  final bool arabic;
+  final bool wide;
+  final bool medium;
+  final AppLocalizations l10n;
+
+  @override
+  Widget build(BuildContext context) {
+    final drafts = asString(quick['draftDocuments']) ?? '0';
+    final overdue = asString(quick['overdueInvoices']) ?? '0';
+    final reorder = asString(quick['itemsToReorder']) ?? '0';
+    return GridView.count(
+      crossAxisCount: wide ? 5 : medium ? 3 : 2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+      childAspectRatio: wide ? 1.8 : 1.5,
+      children: [
+        for (final module in _modules(l10n))
+          QuickActionTile(
+            icon: module.icon,
+            label: module.label,
+            onTap: () => context.go(module.path),
+            badge: switch (module.path) {
+              AppRoutes.journalEntries => drafts,
+              AppRoutes.salesInvoices => overdue,
+              AppRoutes.stock => reorder,
+              _ => null,
+            },
+          ),
+      ],
+    );
+  }
+}
+
+class _ErrorCard extends StatelessWidget {
+  const _ErrorCard({required this.arabic, required this.onRetry});
+
+  final bool arabic;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        children: [
+          Icon(Icons.cloud_off_rounded,
+              size: 40, color: theme.colorScheme.error),
+          const SizedBox(height: 10),
+          Text(
+            arabic
+                ? 'تعذر تحميل مؤشرات لوحة التحكم. تحقق من الاتصال ثم أعد المحاولة.'
+                : 'The dashboard figures could not be loaded. Check the connection and try again.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded),
+            label: Text(arabic ? 'إعادة المحاولة' : 'Retry'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -281,62 +630,6 @@ String _localName(
   final ar = (row[arKey] as String?)?.trim() ?? '';
   final en = (row[enKey] as String?)?.trim() ?? '';
   return arabic ? (ar.isNotEmpty ? ar : en) : (en.isNotEmpty ? en : ar);
-}
-
-double _amount(dynamic value) {
-  if (value is! Map) return 0;
-  final row = Map<String, dynamic>.from(value);
-  for (final key in const [
-    'grandTotal',
-    'totalAmount',
-    'total',
-    'netTotal',
-    'totalDebit',
-  ]) {
-    final raw = row[key];
-    if (raw is num) return raw.toDouble();
-    if (raw is String) {
-      final parsed = double.tryParse(raw.replaceAll(',', ''));
-      if (parsed != null) return parsed;
-    }
-  }
-  return 0;
-}
-
-DateTime? _documentDate(dynamic value) {
-  if (value is! Map) return null;
-  final row = Map<String, dynamic>.from(value);
-  for (final key in const ['invoiceDate', 'documentDate', 'date', 'createdAt']) {
-    final raw = row[key];
-    if (raw is DateTime) return raw;
-    if (raw is String) {
-      final parsed = DateTime.tryParse(raw);
-      if (parsed != null) return parsed;
-    }
-  }
-  return null;
-}
-
-List<double> _monthTotals(List<dynamic> rows) {
-  final now = DateTime.now();
-  final first = DateTime(now.year, now.month - 5);
-  final values = List<double>.filled(6, 0);
-  for (final row in rows) {
-    final date = _documentDate(row);
-    if (date == null) continue;
-    final index = (date.year - first.year) * 12 + date.month - first.month;
-    if (index >= 0 && index < values.length) values[index] += _amount(row);
-  }
-  return values;
-}
-
-String _money(double amount, bool arabic) {
-  final value = amount.abs() >= 1000000
-      ? '${(amount / 1000000).toStringAsFixed(1)}M'
-      : amount.abs() >= 1000
-          ? '${(amount / 1000).toStringAsFixed(1)}K'
-          : amount.toStringAsFixed(0);
-  return '$value ${arabic ? "ج.م" : "EGP"}';
 }
 
 class _CompanyHero extends StatelessWidget {
@@ -587,265 +880,6 @@ class _MetricCard extends StatelessWidget {
   }
 }
 
-class _ActivityChart extends StatelessWidget {
-  const _ActivityChart({
-    required this.sales,
-    required this.purchases,
-    required this.arabic,
-  });
-  final List<double> sales;
-  final List<double> purchases;
-  final bool arabic;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final salesColor = theme.colorScheme.primary;
-    const purchaseColor = Color(0xFFB36A18);
-    final now = DateTime.now();
-    final labels = List.generate(6, (index) {
-      final date = DateTime(now.year, now.month - 5 + index);
-      return arabic
-          ? '${date.month}/${date.year.toString().substring(2)}'
-          : _monthName(date.month);
-    });
-    final maxValue = <double>[...sales, ...purchases]
-        .fold<double>(0, (max, value) => math.max(max, value).toDouble());
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            arabic ? 'حركة المبيعات والمشتريات' : 'Sales & purchase activity',
-            style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            arabic
-                ? 'قيمة الفواتير خلال آخر ستة أشهر'
-                : 'Invoice totals over the last six months',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 18,
-            runSpacing: 8,
-            children: [
-              _Legend(color: salesColor, label: arabic ? 'المبيعات' : 'Sales'),
-              _Legend(color: purchaseColor, label: arabic ? 'المشتريات' : 'Purchases'),
-            ],
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 225,
-            width: double.infinity,
-            child: CustomPaint(
-              painter: _LineChartPainter(
-                sales: sales,
-                purchases: purchases,
-                labels: labels,
-                maxValue: maxValue <= 0 ? 1 : maxValue,
-                salesColor: salesColor,
-                purchaseColor: purchaseColor,
-                gridColor: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
-                labelColor: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-          if (sales.every((value) => value == 0) &&
-              purchases.every((value) => value == 0))
-            Text(
-              arabic
-                  ? 'ستظهر البيانات هنا عند توفر فواتير مؤرخة.'
-                  : 'Chart data appears here when dated invoices are available.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-String _monthName(int month) => const [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-    ][month - 1];
-
-class _Legend extends StatelessWidget {
-  const _Legend({required this.color, required this.label});
-  final Color color;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 9,
-            height: 9,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 7),
-          Text(label, style: Theme.of(context).textTheme.bodySmall),
-        ],
-      );
-}
-
-class _LineChartPainter extends CustomPainter {
-  const _LineChartPainter({
-    required this.sales,
-    required this.purchases,
-    required this.labels,
-    required this.maxValue,
-    required this.salesColor,
-    required this.purchaseColor,
-    required this.gridColor,
-    required this.labelColor,
-  });
-
-  final List<double> sales;
-  final List<double> purchases;
-  final List<String> labels;
-  final double maxValue;
-  final Color salesColor;
-  final Color purchaseColor;
-  final Color gridColor;
-  final Color labelColor;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const left = 8.0;
-    const right = 8.0;
-    const top = 12.0;
-    const bottom = 28.0;
-    final rect = Rect.fromLTRB(
-      left,
-      top,
-      size.width - right,
-      size.height - bottom,
-    );
-    final grid = Paint()..color = gridColor..strokeWidth = 1;
-    for (var i = 0; i < 4; i++) {
-      final y = rect.top + rect.height * i / 3;
-      canvas.drawLine(Offset(rect.left, y), Offset(rect.right, y), grid);
-    }
-    for (var i = 0; i < labels.length; i++) {
-      final x = rect.left + rect.width * i / (labels.length - 1);
-      final painter = TextPainter(
-        text: TextSpan(
-          text: labels[i],
-          style: TextStyle(color: labelColor, fontSize: 10),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      painter.paint(canvas, Offset(x - painter.width / 2, rect.bottom + 9));
-    }
-    _drawSeries(canvas, rect, sales, salesColor);
-    _drawSeries(canvas, rect, purchases, purchaseColor);
-  }
-
-  void _drawSeries(Canvas canvas, Rect rect, List<double> values, Color color) {
-    if (values.length < 2) return;
-    final points = <Offset>[];
-    for (var i = 0; i < values.length; i++) {
-      final x = rect.left + rect.width * i / (values.length - 1);
-      final ratio = (values[i] / maxValue).clamp(0.0, 1.0);
-      points.add(Offset(x, rect.bottom - ratio * rect.height));
-    }
-    final path = Path()..moveTo(points.first.dx, points.first.dy);
-    for (var i = 1; i < points.length; i++) {
-      final previous = points[i - 1];
-      final current = points[i];
-      final mid = (previous.dx + current.dx) / 2;
-      path.cubicTo(mid, previous.dy, mid, current.dy, current.dx, current.dy);
-    }
-    final fill = Path.from(path)
-      ..lineTo(points.last.dx, rect.bottom)
-      ..lineTo(points.first.dx, rect.bottom)
-      ..close();
-    canvas.drawPath(
-      fill,
-      Paint()
-        ..shader = LinearGradient(
-          colors: [color.withValues(alpha: 0.19), color.withValues(alpha: 0.005)],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ).createShader(rect),
-    );
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = color
-        ..strokeWidth = 2.8
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round,
-    );
-    for (final point in points) {
-      canvas.drawCircle(point, 5.5, Paint()..color = color.withValues(alpha: 0.15));
-      canvas.drawCircle(point, 3, Paint()..color = color);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _LineChartPainter old) =>
-      old.sales != sales ||
-      old.purchases != purchases ||
-      old.maxValue != maxValue ||
-      old.salesColor != salesColor ||
-      old.purchaseColor != purchaseColor;
-}
-
-class _MiniStat extends StatelessWidget {
-  const _MiniStat({
-    required this.title,
-    required this.value,
-    required this.icon,
-  });
-  final String title;
-  final String value;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      width: 250,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: theme.colorScheme.primary),
-          const SizedBox(width: 10),
-          Expanded(child: Text(title, style: theme.textTheme.bodyMedium)),
-          Text(
-            value,
-            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 List<({IconData icon, String label, String path})> _modules(
   AppLocalizations l10n,
 ) => [
@@ -860,49 +894,3 @@ List<({IconData icon, String label, String path})> _modules(
       (icon: Icons.bar_chart_outlined, label: l10n.reports, path: AppRoutes.reports),
       (icon: Icons.settings_outlined, label: l10n.settings, path: AppRoutes.settings),
     ];
-
-class _ModuleTile extends StatelessWidget {
-  const _ModuleTile({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.surface,
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
-            ),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, color: theme.colorScheme.primary, size: 26),
-              const SizedBox(height: 9),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

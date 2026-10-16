@@ -17,6 +17,24 @@ export class SuppliersController {
     return this.service.findAll(user.companyId, 'supplier', query);
   }
 
+  // Declared before ':id' so 'summary' is never read as an identifier.
+  @Get('summary/:id')
+  @RequirePermissions('parties.suppliers.read')
+  summary(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.summary(user.companyId, 'supplier', id);
+  }
+
+  @Get('statement/:id')
+  @RequirePermissions('parties.suppliers.read')
+  statement(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.service.statement(user.companyId, 'supplier', id, { from, to });
+  }
+
   @Get(':id')
   @RequirePermissions('parties.suppliers.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {

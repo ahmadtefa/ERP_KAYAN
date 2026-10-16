@@ -21,6 +21,24 @@ export class CustomersController {
     return this.service.findAll(user.companyId, 'customer', query);
   }
 
+  // Declared before ':id' so 'summary' is never read as an identifier.
+  @Get('summary/:id')
+  @RequirePermissions('parties.customers.read')
+  summary(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.summary(user.companyId, 'customer', id);
+  }
+
+  @Get('statement/:id')
+  @RequirePermissions('parties.customers.read')
+  statement(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.service.statement(user.companyId, 'customer', id, { from, to });
+  }
+
   @Get(':id')
   @RequirePermissions('parties.customers.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {

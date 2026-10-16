@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/providers/auth_providers.dart';
+import '../../features/search/presentation/search_dialog.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
 import '../router/app_router.dart';
@@ -65,7 +66,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
           child: Image.asset('1.png', fit: BoxFit.contain),
         ),
         title: Text(items[selectedIndex].label),
-        actions: const [_LanguageMenu(), _SignOutButton()],
+        actions: const [_SearchButton(), _LanguageMenu(), _SignOutButton()],
       ),
       drawer: isWide
           ? null
@@ -262,6 +263,21 @@ class _ModuleDrawer extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Opens the one search box that reaches every module.
+class _SearchButton extends StatelessWidget {
+  const _SearchButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return IconButton(
+      tooltip: l10n.search,
+      onPressed: () => showGlobalSearchDialog(context),
+      icon: const Icon(Icons.search_rounded),
     );
   }
 }

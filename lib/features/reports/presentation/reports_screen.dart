@@ -57,6 +57,31 @@ final ledgerAccountProvider =
       _LedgerAccountController.new,
     );
 
+/// The filters the operational reports keep while the user moves between
+/// tabs - a status chosen for sales stays chosen for sales.
+class _FilterController extends Notifier<String> {
+  _FilterController(this.initial);
+  final String initial;
+
+  @override
+  String build() => initial;
+
+  void choose(String value) => state = value;
+}
+
+final salesStatusProvider = NotifierProvider<_FilterController, String>(
+  () => _FilterController('ALL'),
+);
+final purchaseStatusProvider = NotifierProvider<_FilterController, String>(
+  () => _FilterController('ALL'),
+);
+final paymentsKindProvider = NotifierProvider<_FilterController, String>(
+  () => _FilterController('ALL'),
+);
+final outstandingKindProvider = NotifierProvider<_FilterController, String>(
+  () => _FilterController('ALL'),
+);
+
 /// Reads an endpoint that answers with a `{ rows: [...], totals: {...} }`
 /// object.
 final reportProvider = FutureProvider.family<Json, String>((ref, path) async {
@@ -73,7 +98,7 @@ class ReportsScreen extends ConsumerStatefulWidget {
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 5, vsync: this)
+  late final TabController _tabs = TabController(length: 15, vsync: this)
     ..addListener(() => setState(() {}));
 
   @override
@@ -115,9 +140,25 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
             tabs: [
               Tab(text: l10n.trialBalance),
               Tab(text: l10n.profitAndLoss),
+              Tab(text: _t(context, 'الميزانية العمومية', 'Balance sheet')),
+              Tab(text: _t(context, 'التدفقات النقدية', 'Cash flow')),
               Tab(text: l10n.customerBalances),
               Tab(text: l10n.supplierBalances),
               Tab(text: l10n.accountLedger),
+              Tab(text: _t(context, 'اليومية العامة', 'General journal')),
+              Tab(text: l10n.sales),
+              Tab(text: l10n.purchases),
+              Tab(text: _t(context, 'المقبوضات والمدفوعات', 'Payments')),
+              Tab(text: _t(context, 'النقدية', 'Cash')),
+              Tab(
+                text: _t(
+                  context,
+                  'الفواتير غير المسددة',
+                  'Outstanding invoices',
+                ),
+              ),
+              Tab(text: l10n.expenses),
+              Tab(text: _t(context, 'الإيرادات', 'Income')),
             ],
           ),
           // Download and print always reflect the tab that is open and the
@@ -130,7 +171,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
                 report: _reportSlug,
                 from: period.from,
                 to: period.to,
-                accountId: _tabs.index == 4
+                accountId: _tabs.index == 6
                     ? ref.watch(ledgerAccountProvider)
                     : null,
               ),
@@ -140,15 +181,25 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
             child: switch (_tabs.index) {
               0 => const _TrialBalanceTab(),
               1 => const _ProfitAndLossTab(),
-              2 => const _BalancesTab(
+              2 => const _BalanceSheetTab(),
+              3 => const _CashFlowTab(),
+              4 => const _BalancesTab(
                 path: '/reports/customer-balances',
                 isCustomer: true,
               ),
-              3 => const _BalancesTab(
+              5 => const _BalancesTab(
                 path: '/reports/supplier-balances',
                 isCustomer: false,
               ),
-              _ => const _AccountLedgerTab(),
+              6 => const _AccountLedgerTab(),
+              7 => const _GeneralJournalTab(),
+              8 => const _SalesReportTab(),
+              9 => const _PurchasesReportTab(),
+              10 => const _PaymentsReportTab(),
+              11 => const _CashReportTab(),
+              12 => const _OutstandingInvoicesTab(),
+              13 => const _ExpensesIncomeTab(isExpense: true),
+              _ => const _ExpensesIncomeTab(isExpense: false),
             },
           ),
         ],
@@ -160,9 +211,19 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
   String get _reportSlug => switch (_tabs.index) {
     0 => 'trial-balance',
     1 => 'profit-and-loss',
-    2 => 'customer-balances',
-    3 => 'supplier-balances',
-    _ => 'account-ledger',
+    2 => 'balance-sheet',
+    3 => 'cash-flow',
+    4 => 'customer-balances',
+    5 => 'supplier-balances',
+    6 => 'account-ledger',
+    7 => 'general-journal',
+    8 => 'sales',
+    9 => 'purchases',
+    10 => 'payments',
+    11 => 'cash',
+    12 => 'outstanding-invoices',
+    13 => 'expenses',
+    _ => 'income',
   };
 
   Future<void> _pickPeriod() async {
@@ -576,6 +637,723 @@ class _AccountLedgerTabState extends ConsumerState<_AccountLedgerTab> {
               );
             },
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Inline bilingual label: the report center grows faster than the
+/// translation files, and a hard-coded English label is worse than this.
+String _t(BuildContext context, String ar, String en) =>
+    Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
+
+/// A compact totals strip: label + formatted amount pairs from `data['totals']`.
+class _SummaryStrip extends StatelessWidget {
+  const _SummaryStrip({required this.entries});
+
+  final List<MapEntry<String, String>> entries;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Wrap(
+        spacing: 18,
+        runSpacing: 6,
+        children: [
+          for (final entry in entries)
+            Text(
+              '${entry.key}: ${entry.value}',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Rows + totals, the shape shared by the operational reports.
+class _RowsTab extends ConsumerWidget {
+  const _RowsTab({
+    required this.path,
+    required this.columns,
+    this.summary = const {},
+    this.filters = const [],
+  });
+
+  final String path;
+  final List<ColumnSpec> columns;
+  final Map<String, String> summary;
+  final List<Widget> filters;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(reportProvider(path));
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final rows = listOf(data['rows']);
+        final totals = data['totals'] is Map
+            ? Map<String, dynamic>.from(data['totals'] as Map)
+            : <String, dynamic>{};
+        return Column(
+          children: [
+            if (filters.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Row(children: filters),
+              ),
+            if (summary.isNotEmpty)
+              _SummaryStrip(
+                entries: [
+                  for (final entry in summary.entries)
+                    MapEntry(
+                      entry.value,
+                      (entry.key == 'count' || entry.key == 'documents')
+                          ? '${totals[entry.key] ?? ''}'
+                          : formatAmount(asString(totals[entry.key])),
+                    ),
+                ],
+              ),
+            Expanded(
+              child: RecordsTable(rows: rows, columns: columns),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// A status/kind filter dropdown bound to its provider.
+class _FilterChoice extends ConsumerWidget {
+  const _FilterChoice({
+    required this.provider,
+    required this.options,
+    required this.label,
+  });
+
+  final NotifierProvider<_FilterController, String> provider;
+  final Map<String, String> options;
+  final String label;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final current = ref.watch(provider);
+    return SizedBox(
+      width: 220,
+      child: DropdownButtonFormField<String>(
+        initialValue: options.containsKey(current) ? current : options.keys.first,
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          isDense: true,
+        ),
+        items: [
+          for (final entry in options.entries)
+            DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+        ],
+        onChanged: (value) {
+          if (value != null) ref.read(provider.notifier).choose(value);
+        },
+      ),
+    );
+  }
+}
+
+class _BalanceSheetTab extends ConsumerWidget {
+  const _BalanceSheetTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    final async = ref.watch(
+      reportProvider('/reports/balance-sheet?from=${period.from}&to=${period.to}'),
+    );
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final totals = data['totals'] is Map
+            ? Map<String, dynamic>.from(data['totals'] as Map)
+            : <String, dynamic>{};
+        String section(String key) {
+          final rows = listOf(data[key]);
+          final lines = StringBuffer();
+          for (final row in rows) {
+            lines.writeln(
+              '${text(row, 'code')}  ${text(row, 'nameEn')}  '
+              '${formatAmount(asString(row['balance']))}',
+            );
+          }
+          return lines.toString().trim();
+        }
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _SummaryStrip(
+                entries: [
+                  MapEntry(
+                    _t(context, 'الأصول', 'Assets'),
+                    formatAmount(asString(totals['assets'])),
+                  ),
+                  MapEntry(
+                    _t(context, 'الالتزامات', 'Liabilities'),
+                    formatAmount(asString(totals['liabilities'])),
+                  ),
+                  MapEntry(
+                    _t(context, 'حقوق الملكية', 'Equity'),
+                    formatAmount(asString(totals['equity'])),
+                  ),
+                  MapEntry(
+                    _t(context, 'الفرق (يجب أن يكون صفر)', 'Difference (must be zero)'),
+                    formatAmount(asString(totals['difference'])),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              for (final entry in <MapEntry<String, String>>[
+                MapEntry(_t(context, 'الأصول', 'Assets'), section('assets')),
+                MapEntry(
+                  _t(context, 'الالتزامات', 'Liabilities'),
+                  section('liabilities'),
+                ),
+                MapEntry(
+                  _t(context, 'حقوق الملكية', 'Equity'),
+                  section('equity'),
+                ),
+              ])
+                Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          entry.key,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          entry.value.isEmpty
+                              ? context.l10n.noData
+                              : entry.value,
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(fontFamily: 'monospace'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _CashFlowTab extends ConsumerWidget {
+  const _CashFlowTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    final async = ref.watch(
+      reportProvider('/reports/cash-flow?from=${period.from}&to=${period.to}'),
+    );
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final rows = [
+          ...listOf(data['inflows']),
+          ...listOf(data['outflows']),
+        ];
+        final totals = data['totals'] is Map
+            ? Map<String, dynamic>.from(data['totals'] as Map)
+            : <String, dynamic>{};
+        return Column(
+          children: [
+            _SummaryStrip(
+              entries: [
+                MapEntry(
+                  _t(context, 'وارد', 'Inflow'),
+                  formatAmount(asString(totals['inflow'])),
+                ),
+                MapEntry(
+                  _t(context, 'صادر', 'Outflow'),
+                  formatAmount(asString(totals['outflow'])),
+                ),
+                MapEntry(
+                  _t(context, 'الصافي', 'Net'),
+                  formatAmount(asString(totals['net'])),
+                ),
+              ],
+            ),
+            Expanded(
+              child: RecordsTable(
+                rows: rows,
+                columns: [
+                  ColumnSpec('Code', value: (r) => text(r, 'code')),
+                  ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
+                  ColumnSpec(
+                    _t(context, 'الاسم بالعربية', 'Name (Arabic)'),
+                    value: (r) => text(r, 'nameAr'),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'المبلغ', 'Amount'),
+                    numeric: true,
+                    value: (r) => formatAmount(asString(r['amount'])),
+                    emphasise: true,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _GeneralJournalTab extends ConsumerWidget {
+  const _GeneralJournalTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    final async = ref.watch(
+      reportProvider(
+        '/reports/general-journal?from=${period.from}&to=${period.to}',
+      ),
+    );
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final rows = listOf(data['items']);
+        return Column(
+          children: [
+            _SummaryStrip(
+              entries: [
+                MapEntry(
+                  _t(context, 'عدد القيود', 'Entries'),
+                  '${data['total'] ?? rows.length}',
+                ),
+                MapEntry(
+                  _t(context, 'الصفحة', 'Page'),
+                  '${data['page'] ?? 1}',
+                ),
+              ],
+            ),
+            Expanded(
+              child: RecordsTable(
+                rows: rows,
+                columns: [
+                  ColumnSpec(
+                    _t(context, 'القيد', 'Entry'),
+                    value: (r) => text(r, 'entryNumber'),
+                    emphasise: true,
+                  ),
+                  ColumnSpec(
+                    _t(context, 'التاريخ', 'Date'),
+                    value: (r) => text(r, 'entryDate'),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'البيان', 'Description'),
+                    value: (r) => text(r, 'description'),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'المصدر', 'Source'),
+                    value: (r) {
+                      final source = r['source'];
+                      final kind = source is Map
+                          ? text(source as Map<String, dynamic>, 'type')
+                          : '';
+                      return [
+                        kind,
+                        text(r, 'sourceNumber'),
+                      ].where((part) => part.isNotEmpty).join(' ');
+                    },
+                  ),
+                  ColumnSpec(
+                    _t(context, 'الحالة', 'Status'),
+                    value: (r) => text(r, 'status'),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'الإجمالي', 'Total'),
+                    numeric: true,
+                    value: (r) => formatAmount(asString(r['totalDebit'])),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _SalesReportTab extends ConsumerWidget {
+  const _SalesReportTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    final status = ref.watch(salesStatusProvider);
+    final filter = status == 'ALL' ? '' : '&status=$status';
+    return _RowsTab(
+      path:
+          '/reports/sales?from=${period.from}&to=${period.to}$filter',
+      summary: {
+        'total': _t(context, 'الإجمالي', 'Total'),
+        'paid': _t(context, 'المسدَّد', 'Paid'),
+        'outstanding': _t(context, 'المتبقي', 'Outstanding'),
+        'grossProfit': _t(context, 'مجمل الربح', 'Gross profit'),
+        'documents': _t(context, 'الفواتير', 'Invoices'),
+      },
+      filters: [
+        _FilterChoice(
+          provider: salesStatusProvider,
+          label: _t(context, 'الحالة', 'Status'),
+          options: {
+            'ALL': _t(context, 'الكل', 'All'),
+            'DRAFT': _t(context, 'مسودة', 'Draft'),
+            'POSTED': _t(context, 'مرحّلة', 'Posted'),
+            'CANCELLED': _t(context, 'ملغاة', 'Cancelled'),
+          },
+        ),
+      ],
+      columns: [
+        ColumnSpec(
+          _t(context, 'الفاتورة', 'Invoice'),
+          value: (r) => text(r, 'invoiceNumber'),
+          emphasise: true,
+        ),
+        ColumnSpec(
+          _t(context, 'التاريخ', 'Date'),
+          value: (r) => text(r, 'invoiceDate'),
+        ),
+        ColumnSpec(
+          _t(context, 'العميل', 'Customer'),
+          value: (r) => r['customer'] is Map
+              ? text(r['customer'] as Map<String, dynamic>, 'nameEn')
+              : '',
+        ),
+        ColumnSpec(
+          _t(context, 'الإجمالي', 'Total'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['totalAmount'])),
+        ),
+        ColumnSpec(
+          _t(context, 'المسدَّد', 'Paid'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['paidAmount'])),
+        ),
+        ColumnSpec(
+          _t(context, 'المتبقي', 'Outstanding'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['outstanding'])),
+        ),
+        ColumnSpec(
+          _t(context, 'مجمل الربح', 'Gross profit'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['grossProfit'])),
+        ),
+      ],
+    );
+  }
+}
+
+class _PurchasesReportTab extends ConsumerWidget {
+  const _PurchasesReportTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    final status = ref.watch(purchaseStatusProvider);
+    final filter = status == 'ALL' ? '' : '&status=$status';
+    return _RowsTab(
+      path:
+          '/reports/purchases?from=${period.from}&to=${period.to}$filter',
+      summary: {
+        'total': _t(context, 'الإجمالي', 'Total'),
+        'paid': _t(context, 'المسدَّد', 'Paid'),
+        'outstanding': _t(context, 'المتبقي', 'Outstanding'),
+        'documents': _t(context, 'الفواتير', 'Invoices'),
+      },
+      filters: [
+        _FilterChoice(
+          provider: purchaseStatusProvider,
+          label: _t(context, 'الحالة', 'Status'),
+          options: {
+            'ALL': _t(context, 'الكل', 'All'),
+            'DRAFT': _t(context, 'مسودة', 'Draft'),
+            'POSTED': _t(context, 'مرحّلة', 'Posted'),
+            'CANCELLED': _t(context, 'ملغاة', 'Cancelled'),
+          },
+        ),
+      ],
+      columns: [
+        ColumnSpec(
+          _t(context, 'الفاتورة', 'Invoice'),
+          value: (r) => text(r, 'invoiceNumber'),
+          emphasise: true,
+        ),
+        ColumnSpec(
+          _t(context, 'التاريخ', 'Date'),
+          value: (r) => text(r, 'invoiceDate'),
+        ),
+        ColumnSpec(
+          _t(context, 'المورد', 'Supplier'),
+          value: (r) => r['supplier'] is Map
+              ? text(r['supplier'] as Map<String, dynamic>, 'nameEn')
+              : '',
+        ),
+        ColumnSpec(
+          _t(context, 'الإجمالي', 'Total'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['totalAmount'])),
+        ),
+        ColumnSpec(
+          _t(context, 'المسدَّد', 'Paid'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['paidAmount'])),
+        ),
+        ColumnSpec(
+          _t(context, 'المتبقي', 'Outstanding'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['outstanding'])),
+        ),
+      ],
+    );
+  }
+}
+
+class _PaymentsReportTab extends ConsumerWidget {
+  const _PaymentsReportTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    final kind = ref.watch(paymentsKindProvider);
+    final filter = kind == 'ALL' ? '' : '&kind=$kind';
+    return _RowsTab(
+      path: '/reports/payments?from=${period.from}&to=${period.to}$filter',
+      summary: {
+        'receipts': _t(context, 'المقبوضات', 'Receipts'),
+        'payments': _t(context, 'المدفوعات', 'Payments'),
+        'net': _t(context, 'الصافي', 'Net'),
+        'count': _t(context, 'السندات', 'Vouchers'),
+      },
+      filters: [
+        _FilterChoice(
+          provider: paymentsKindProvider,
+          label: _t(context, 'النوع', 'Kind'),
+          options: {
+            'ALL': _t(context, 'الكل', 'All'),
+            'RECEIPT': _t(context, 'قبض', 'Receipt'),
+            'PAYMENT': _t(context, 'دفع', 'Payment'),
+          },
+        ),
+      ],
+      columns: [
+        ColumnSpec(
+          _t(context, 'السند', 'Voucher'),
+          value: (r) => text(r, 'voucherNumber'),
+          emphasise: true,
+        ),
+        ColumnSpec(
+          _t(context, 'التاريخ', 'Date'),
+          value: (r) => text(r, 'voucherDate'),
+        ),
+        ColumnSpec(
+          _t(context, 'النوع', 'Kind'),
+          value: (r) => text(r, 'kind'),
+        ),
+        ColumnSpec(
+          _t(context, 'الطرف', 'Party'),
+          value: (r) {
+            for (final key in ['customer', 'supplier', 'counterAccount']) {
+              if (r[key] is Map) {
+                final name = text(r[key] as Map<String, dynamic>, 'nameEn');
+                if (name.isNotEmpty) return name;
+              }
+            }
+            return '';
+          },
+        ),
+        ColumnSpec(
+          _t(context, 'المبلغ', 'Amount'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['amount'])),
+          emphasise: true,
+        ),
+      ],
+    );
+  }
+}
+
+class _CashReportTab extends ConsumerWidget {
+  const _CashReportTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    return _RowsTab(
+      path: '/reports/cash?from=${period.from}&to=${period.to}',
+      summary: {
+        'opening': _t(context, 'رصيد افتتاحي', 'Opening'),
+        'inflow': _t(context, 'وارد', 'Inflow'),
+        'outflow': _t(context, 'صادر', 'Outflow'),
+        'closing': _t(context, 'رصيد ختامي', 'Closing'),
+      },
+      columns: [
+        ColumnSpec('Code', value: (r) => text(r, 'code'), emphasise: true),
+        ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
+        ColumnSpec(
+          _t(context, 'النوع', 'Kind'),
+          value: (r) => text(r, 'kind'),
+        ),
+        ColumnSpec(
+          _t(context, 'رصيد افتتاحي', 'Opening'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['opening'])),
+        ),
+        ColumnSpec(
+          _t(context, 'وارد', 'In'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['inflow'])),
+        ),
+        ColumnSpec(
+          _t(context, 'صادر', 'Out'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['outflow'])),
+        ),
+        ColumnSpec(
+          _t(context, 'رصيد ختامي', 'Closing'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['closing'])),
+          emphasise: true,
+        ),
+      ],
+    );
+  }
+}
+
+class _OutstandingInvoicesTab extends ConsumerWidget {
+  const _OutstandingInvoicesTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    final kind = ref.watch(outstandingKindProvider);
+    final filter = kind == 'ALL' ? '' : '&kind=$kind';
+    return _RowsTab(
+      path:
+          '/reports/outstanding-invoices?from=${period.from}&to=${period.to}'
+          '$filter',
+      summary: {
+        'outstanding': _t(context, 'المتبقي', 'Outstanding'),
+        'overdue': _t(context, 'متأخر', 'Overdue'),
+        'count': _t(context, 'الفواتير', 'Invoices'),
+      },
+      filters: [
+        _FilterChoice(
+          provider: outstandingKindProvider,
+          label: _t(context, 'النوع', 'Kind'),
+          options: {
+            'ALL': _t(context, 'الكل', 'All'),
+            'sales': _t(context, 'مبيعات', 'Sales'),
+            'purchases': _t(context, 'مشتريات', 'Purchases'),
+          },
+        ),
+      ],
+      columns: [
+        ColumnSpec(
+          _t(context, 'الفاتورة', 'Invoice'),
+          value: (r) => text(r, 'invoiceNumber'),
+          emphasise: true,
+        ),
+        ColumnSpec(
+          _t(context, 'التاريخ', 'Date'),
+          value: (r) => text(r, 'invoiceDate'),
+        ),
+        ColumnSpec(
+          _t(context, 'الاستحقاق', 'Due'),
+          value: (r) => text(r, 'dueDate'),
+        ),
+        ColumnSpec(
+          _t(context, 'الطرف', 'Party'),
+          value: (r) => r['party'] is Map
+              ? text(r['party'] as Map<String, dynamic>, 'nameEn')
+              : '',
+        ),
+        ColumnSpec(
+          _t(context, 'المتبقي', 'Outstanding'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['outstanding'])),
+          emphasise: true,
+        ),
+        ColumnSpec(
+          _t(context, 'أيام التأخير', 'Days overdue'),
+          numeric: true,
+          value: (r) => asString(r['daysOverdue']),
+        ),
+        ColumnSpec(
+          _t(context, 'الحالة', 'State'),
+          value: (r) => text(r, 'state'),
+        ),
+      ],
+    );
+  }
+}
+
+class _ExpensesIncomeTab extends ConsumerWidget {
+  const _ExpensesIncomeTab({required this.isExpense});
+
+  final bool isExpense;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    final path = isExpense ? '/reports/expenses' : '/reports/income';
+    return _RowsTab(
+      path: '$path?from=${period.from}&to=${period.to}',
+      summary: {
+        'total': isExpense
+            ? _t(context, 'إجمالي المصروفات', 'Total expenses')
+            : _t(context, 'إجمالي الإيرادات', 'Total income'),
+        'count': _t(context, 'الحسابات', 'Accounts'),
+      },
+      columns: [
+        ColumnSpec('Code', value: (r) => text(r, 'code'), emphasise: true),
+        ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
+        ColumnSpec(
+          _t(context, 'الاسم بالعربية', 'Name (Arabic)'),
+          value: (r) => text(r, 'nameAr'),
+        ),
+        ColumnSpec(
+          _t(context, 'عدد القيود', 'Entries'),
+          numeric: true,
+          value: (r) => asString(r['entries']),
+        ),
+        ColumnSpec(
+          _t(context, 'الصافي', 'Net'),
+          numeric: true,
+          value: (r) => formatAmount(asString(r['net'])),
+          emphasise: true,
         ),
       ],
     );

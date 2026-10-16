@@ -67,4 +67,16 @@ export class ExportQueryDto extends PeriodQueryDto {
 
   @IsOptional() @IsIn(['true', 'false'])
   includeDeleted?: string;
+
+  /// RECEIPT/PAYMENT/ALL for the payments report; sales/purchases for the
+  /// outstanding-invoices report; customer/supplier for a party statement.
+  @IsOptional() @IsString() @MaxLength(20)
+  kind?: string;
+
+  /// The partner a statement is asked for (with `kind`).
+  @IsOptional() @IsUUID()
+  partyId?: string;
+
+  @IsOptional() @IsUUID()
+  cashAccountId?: string;
 }

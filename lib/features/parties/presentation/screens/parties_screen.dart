@@ -13,6 +13,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
+import '../../presentation/widgets/party_statement_dialog.dart';
 
 /// Which of the two party lists a screen is showing.
 enum PartyKind { customer, supplier }
@@ -196,6 +197,17 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
             ),
           ],
           actions: (row) => [
+            IconButton(
+              tooltip: l10n.statement,
+              icon: const Icon(Icons.receipt_long_outlined, size: 20),
+              onPressed: _busy
+                  ? null
+                  : () => showPartyStatementDialog(
+                        context,
+                        isCustomer: _isCustomer,
+                        party: row,
+                      ),
+            ),
             IconButton(
               tooltip: l10n.edit,
               icon: const Icon(Icons.edit_outlined, size: 20),

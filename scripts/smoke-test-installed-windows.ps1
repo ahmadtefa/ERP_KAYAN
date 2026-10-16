@@ -12,33 +12,82 @@ $node = Join-Path $backend "node\node.exe"
 $settings = Join-Path $env:ProgramData "KAYAN-ERP\kayan.env"
 
 function Read-Details {
-  $paths = @(
-    $installLog,
-    (Join-Path $env:ProgramData "KAYAN-ERP\logs\installer.log"),
-    (Join-Path $env:ProgramData "KAYAN-ERP\logs\postgresql.log"),
-    (Join-Path $env:APPDATA "KAYAN-ERP\logs\backend.log")
-  )
-  $out = @()
-  foreach ($path in $paths) {
-    if (Test-Path $path) {
-      $out += "--- $path ---"
-      $out += Get-Content $path -Tail 100 -ErrorAction SilentlyContinue
-    }
+  # Ordered most relevant first: the runtime setup log is the root-cause log,
+  # and GitHub annotations cut the message after 4000 characters.
+  $sections = @()
+  $resultFile = Join-Path $env:ProgramData "KAYAN-ERP\logs\installer-result.txt"
+  $runtimeLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\installer.log"
+  if (Test-Path $resultFile) {
+    $sections += "--- runtime result ---"
+    $sections += Get-Content $resultFile -Tail 5 -ErrorAction SilentlyContinue
+  } else {
+    $sections += "--- runtime result ---"
+    $sections += "(not found: install-runtime.ps1 did not leave a result marker)"
   }
-  return ($out -join [Environment]::NewLine)
+  if (Test-Path $runtimeLog) {
+    $sections += "--- $runtimeLog ---"
+    $sections += Get-Content $runtimeLog -Tail 40 -ErrorAction SilentlyContinue
+  }
+  $pgLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\postgresql.log"
+  if (Test-Path $pgLog) {
+    $sections += "--- $pgLog ---"
+    $sections += Get-Content $pgLog -Tail 15 -ErrorAction SilentlyContinue
+  }
+  $backendLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\backend.log"
+  if (Test-Path $backendLog) {
+    $sections += "--- $backendLog ---"
+    $sections += Get-Content $backendLog -Tail 15 -ErrorAction SilentlyContinue
+  }
+  if (Test-Path $installLog) {
+    $sections += "--- setup log tail ---"
+    $sections += Get-Content $installLog -Tail 20 -ErrorAction SilentlyContinue
+  }
+  return ($sections -join [Environment]::NewLine)
+}
+
+# Publishes a failure where a person (and the CI annotations API) can see it:
+# the step summary page, and a GitHub error annotation. The installer log is
+# redacted the same way the runtime scripts redact it.
+function Publish-Failure([string]$Reason) {
+  $redacted = [regex]::Replace($Reason, '(?i)postgres(?:ql)?://[^\s"'']+', '[DATABASE URL REDACTED]')
+  $redacted = [regex]::Replace($redacted, '(?i)(password\s*[=:]\s*)[^\s;]+', '$1[REDACTED]')
+  $annotation = ($redacted -replace '\r?\n', ' | ')
+  if ($annotation.Length -gt 4000) { $annotation = $annotation.Substring(0, 4000) }
+  # ::error:: turns this line into a check annotation, readable without the
+  # full job log (which is only available to signed-in users).
+  Write-Output "::error::Windows installer smoke test failed: $annotation"
+  if ($env:GITHUB_STEP_SUMMARY) {
+    try {
+      $summary = "## Windows installer smoke test failed`n`````n$redacted`n````"
+      if ($summary.Length -gt 60000) { $summary = $summary.Substring(0, 60000) }
+      Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary -Encoding UTF8
+    } catch { }
+  }
+  Write-Output $redacted
+}
+
+function Fail([string]$Reason) {
+  Publish-Failure ($Reason + [Environment]::NewLine + (Read-Details))
+  exit 1
+}
+
+# Nothing may die silently: every unhandled error becomes a real, annotated
+# failure with the same diagnostics as Fail().
+trap {
+  Fail ("Unhandled error in the smoke test: " + $_.Exception.Message + [Environment]::NewLine + ($_ | Out-String))
 }
 
 $install = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", ("/LOG=" + $installLog)) -Wait -PassThru
 if ($install.ExitCode -ne 0) {
-  throw ("KAYAN-ERP-Setup.exe failed with exit code $($install.ExitCode)." + [Environment]::NewLine + (Read-Details))
+  Fail ("KAYAN-ERP-Setup.exe failed with exit code $($install.ExitCode).")
 }
 
 # The installer may launch the client through its post-install [Run] entry.
 Get-Process -Name erp_kayan -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-if (-not $service) { throw ("The bundled PostgreSQL service '$serviceName' was not installed." + [Environment]::NewLine + (Read-Details)) }
-if ($service.Status -ne "Running") { throw ("The bundled PostgreSQL service is not running." + [Environment]::NewLine + (Read-Details)) }
+if (-not $service) { Fail ("The bundled PostgreSQL service '$serviceName' was not installed (installer exit code: " + $install.ExitCode + ").") }
+if ($service.Status -ne "Running") { Fail "The bundled PostgreSQL service is not running (state: $($service.Status))." }
 
 foreach ($relative in @(
   "backend\postgres\bin\initdb.exe",
@@ -50,13 +99,13 @@ foreach ($relative in @(
   "erp_kayan.exe"
 )) {
   $path = Join-Path $installRoot $relative
-  if (-not (Test-Path $path)) { throw "Installed package is missing $relative" }
+  if (-not (Test-Path $path)) { Fail "Installed package is missing $relative" }
 }
-if (-not (Test-Path $settings)) { throw "The installer did not create $settings" }
+if (-not (Test-Path $settings)) { Fail "The installer did not create $settings" }
 
 $pgReady = Join-Path $installRoot "backend\postgres\bin\pg_isready.exe"
 & $pgReady -h 127.0.0.1 -p 5432 -U postgres *> $null
-if ($LASTEXITCODE -ne 0) { throw ("Bundled PostgreSQL does not accept connections on 127.0.0.1:5432." + [Environment]::NewLine + (Read-Details)) }
+if ($LASTEXITCODE -ne 0) { Fail "Bundled PostgreSQL does not accept connections on 127.0.0.1:5432." }
 Write-Host "PASS: bundled PostgreSQL service is running and accepting connections."
 
 $envValues = @{}
@@ -70,14 +119,14 @@ $prepOut = Join-Path $env:TEMP "kayan-installer-prep-stdout.log"
 $prepErr = Join-Path $env:TEMP "kayan-installer-prep-stderr.log"
 $prepare = Start-Process -FilePath $node -ArgumentList @("scripts\prepare-database.mjs") -WorkingDirectory $backend -Wait -PassThru -NoNewWindow -RedirectStandardOutput $prepOut -RedirectStandardError $prepErr
 if ($prepare.ExitCode -ne 0) {
-  throw ("Production database preparation failed with exit code $($prepare.ExitCode)." + [Environment]::NewLine + (Get-Content $prepOut -Raw) + [Environment]::NewLine + (Get-Content $prepErr -Raw) + [Environment]::NewLine + (Read-Details))
+  Fail (("Production database preparation failed with exit code $($prepare.ExitCode)." + [Environment]::NewLine + (Get-Content $prepOut -Raw) + [Environment]::NewLine + (Get-Content $prepErr -Raw)))
 }
 
 # Seed only a disposable CI administrator so the desktop shell is allowed to start its API.
 $env:KAYAN_ADMIN_USERNAME = "ci-admin"
 $env:KAYAN_ADMIN_PASSWORD = "CiSmoke-Admin-Password-7241"
 $seed = Start-Process -FilePath $node -ArgumentList @("scripts\prepare-database.mjs") -WorkingDirectory $backend -Wait -PassThru -NoNewWindow
-if ($seed.ExitCode -ne 0) { throw ("CI administrator setup failed with exit code $($seed.ExitCode)." + [Environment]::NewLine + (Read-Details)) }
+if ($seed.ExitCode -ne 0) { Fail "CI administrator setup failed with exit code $($seed.ExitCode)." }
 Remove-Item Env:KAYAN_ADMIN_USERNAME,Env:KAYAN_ADMIN_PASSWORD -ErrorAction SilentlyContinue
 
 # The important test: start the actual installed Flutter executable by itself.
@@ -88,7 +137,7 @@ try {
   $apiPort = $null
   for ($attempt = 0; $attempt -lt 90; $attempt++) {
     if ($client.HasExited) {
-      throw ("The installed KAYAN client exited with code $($client.ExitCode) before its local server became healthy." + [Environment]::NewLine + (Read-Details))
+      Fail ("The installed KAYAN client exited with code $($client.ExitCode) before its local server became healthy.")
     }
     foreach ($port in @(3000,3001,3002,3003,3010,3020)) {
       try {
@@ -103,13 +152,18 @@ try {
     if ($health) { break }
     Start-Sleep -Seconds 1
   }
-  if (-not $health -or -not $apiPort) { throw ("The installed KAYAN client did not start a healthy local API within 90 seconds." + [Environment]::NewLine + (Read-Details)) }
+  if (-not $health -or -not $apiPort) { Fail "The installed KAYAN client did not start a healthy local API within 90 seconds." }
   Write-Host "PASS: launching installed erp_kayan.exe started a healthy local API on port $apiPort."
 
   $loginPayload = @{ username = "ci-admin"; password = "CiSmoke-Admin-Password-7241" } | ConvertTo-Json -Compress
-  $login = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$apiPort/api/v1/auth/login" -ContentType "application/json" -Body $loginPayload -TimeoutSec 10
-  if (-not $login.accessToken) { throw "Installed API login did not return an access token." }
+  try {
+    $login = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$apiPort/api/v1/auth/login" -ContentType "application/json" -Body $loginPayload -TimeoutSec 10
+  } catch {
+    Fail ("Installed API login request failed: " + $_.Exception.Message)
+  }
+  if (-not $login.accessToken) { Fail "Installed API login did not return an access token." }
   Write-Host "PASS: installed API accepted a login against the bundled database."
+  Write-Output "::notice::Windows installer smoke test passed: service, database preparation, client startup on port $apiPort and login all verified."
 } finally {
   if ($client -and -not $client.HasExited) {
     $null = $client.CloseMainWindow()

@@ -1,8 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { accountLabel } from '../../common/localization/account-name';
+import { PartiesService } from '../parties/parties.service';
 import { AgingService } from '../reports/aging.service';
 import { FinancialStatementsService } from '../reports/financial-statements.service';
+import { OperationsReportsService } from '../reports/operations-reports.service';
 import { ReportsService } from '../reports/reports.service';
 import { PeriodQueryDto } from '../reports/dto/report-query.dto';
 import { ReportTable, TableMeta, TableTotal } from './report-table';
@@ -17,7 +19,16 @@ export type ExportableReport =
   | 'balance-sheet'
   | 'cash-flow'
   | 'receivables-aging'
-  | 'payables-aging';
+  | 'payables-aging'
+  | 'sales'
+  | 'purchases'
+  | 'expenses'
+  | 'income'
+  | 'payments'
+  | 'cash'
+  | 'outstanding-invoices'
+  | 'party-statement'
+  | 'general-journal';
 
 export const EXPORTABLE_REPORTS: ExportableReport[] = [
   'trial-balance',
@@ -29,6 +40,15 @@ export const EXPORTABLE_REPORTS: ExportableReport[] = [
   'cash-flow',
   'receivables-aging',
   'payables-aging',
+  'sales',
+  'purchases',
+  'expenses',
+  'income',
+  'payments',
+  'cash',
+  'outstanding-invoices',
+  'party-statement',
+  'general-journal',
 ];
 
 /// Turns a report into a plain table.
@@ -43,12 +63,22 @@ export class ReportTablesService {
     private readonly reports: ReportsService,
     private readonly statements: FinancialStatementsService,
     private readonly aging: AgingService,
+    private readonly operations: OperationsReportsService,
+    private readonly parties: PartiesService,
   ) {}
 
   async build(
     report: ExportableReport,
     companyId: string,
-    query: PeriodQueryDto & { accountId?: string },
+    query: PeriodQueryDto & {
+      accountId?: string;
+      partyId?: string;
+      kind?: string;
+      customerId?: string;
+      supplierId?: string;
+      status?: string;
+      cashAccountId?: string;
+    },
     lang: 'ar' | 'en' = 'en',
   ): Promise<ReportTable> {
     switch (report) {
@@ -70,10 +100,68 @@ export class ReportTablesService {
         return this.agingTable(companyId, query, 'receivables');
       case 'payables-aging':
         return this.agingTable(companyId, query, 'payables');
+      case 'sales':
+        return this.salesReport(companyId, query);
+      case 'purchases':
+        return this.purchasesReport(companyId, query);
+      case 'expenses':
+        return this.accountMovementReport(companyId, query, 'EXPENSE');
+      case 'income':
+        return this.accountMovementReport(companyId, query, 'REVENUE');
+      case 'payments':
+        return this.paymentsReport(companyId, query);
+      case 'cash':
+        return this.cashReport(companyId, query);
+      case 'outstanding-invoices':
+        return this.outstandingReport(companyId, query);
+      case 'party-statement':
+        return this.partyStatement(companyId, query);
+      case 'general-journal':
+        return this.generalJournal(companyId, query);
     }
   }
 
   // ───────────────────────────────────────────────────────────────
+
+  private async generalJournal(companyId: string, query: PeriodQueryDto) {
+    // The day book answers with paged `items`, not `rows`; the printed table
+    // shows the page it was asked for and totals that page honestly.
+    const data = await this.statements.generalJournal(companyId, query);
+    return this.table({
+      slug: 'general-journal',
+      titleEn: 'General journal',
+      titleAr: 'اليومية العامة',
+      meta: this.periodMeta(data.from, data.to),
+      columns: [
+        { key: 'entryNumber', labelEn: 'Entry', labelAr: 'القيد', width: 16 },
+        { key: 'entryDate', labelEn: 'Date', labelAr: 'التاريخ', width: 12 },
+        { key: 'description', labelEn: 'Description', labelAr: 'البيان', width: 30 },
+        { key: 'sourceType', labelEn: 'Source kind', labelAr: 'نوع المصدر', width: 14 },
+        { key: 'sourceNumber', labelEn: 'Source number', labelAr: 'رقم المصدر', width: 16 },
+        { key: 'status', labelEn: 'Status', labelAr: 'الحالة', width: 10 },
+        { key: 'totalDebit', labelEn: 'Total', labelAr: 'الإجمالي', numeric: true, width: 16 },
+      ],
+      rows: data.items.map((entry: Record<string, unknown>) => ({
+        ...entry,
+        sourceType: (entry.source as { type?: string } | null)?.type ?? '',
+        sourceNumber: entry.sourceNumber ?? '',
+      })),
+      totals: [
+        { labelEn: 'Entries (page)', labelAr: 'عدد القيود (الصفحة)', value: String(data.items.length) },
+        {
+          labelEn: 'Total debit',
+          labelAr: 'إجمالي المدين',
+          value: this.sum(data.items.map((entry) => entry.totalDebit as string)),
+        },
+        {
+          labelEn: 'Total credit',
+          labelAr: 'إجمالي الدائن',
+          value: this.sum(data.items.map((entry) => entry.totalCredit as string)),
+        },
+      ],
+      notes: [],
+    });
+  }
 
   private async trialBalance(companyId: string, query: PeriodQueryDto) {
     const data = await this.reports.trialBalance(companyId, query);
@@ -411,6 +499,280 @@ export class ReportTablesService {
       totals: [
         { labelEn: 'Total', labelAr: 'الإجمالي', value: data.totals.total },
         { labelEn: 'Overdue', labelAr: 'متأخر', value: data.totals.overdue },
+      ],
+      notes: [],
+    });
+  }
+
+  // ─────────────────────────────────────────── operational reports
+
+  private async salesReport(
+    companyId: string,
+    query: PeriodQueryDto & { customerId?: string; status?: string },
+  ) {
+    const data = await this.operations.sales(companyId, query);
+    return this.table({
+      slug: 'sales',
+      titleEn: 'Sales report',
+      titleAr: 'تقرير المبيعات',
+      meta: this.periodMeta(data.from, data.to),
+      columns: [
+        { key: 'invoiceNumber', labelEn: 'Invoice', labelAr: 'الفاتورة', width: 16 },
+        { key: 'invoiceDate', labelEn: 'Date', labelAr: 'التاريخ', width: 12 },
+        { key: 'partyName', labelEn: 'Customer', labelAr: 'العميل', width: 26 },
+        { key: 'documentType', labelEn: 'Kind', labelAr: 'النوع', width: 12 },
+        { key: 'status', labelEn: 'Status', labelAr: 'الحالة', width: 10 },
+        { key: 'totalAmount', labelEn: 'Total', labelAr: 'الإجمالي', numeric: true, width: 14 },
+        { key: 'paidAmount', labelEn: 'Paid', labelAr: 'المسدَّد', numeric: true, width: 14 },
+        { key: 'outstanding', labelEn: 'Outstanding', labelAr: 'المتبقي', numeric: true, width: 14 },
+        { key: 'grossProfit', labelEn: 'Gross profit', labelAr: 'مجمل الربح', numeric: true, width: 14 },
+      ],
+      rows: data.rows.map((row) => ({
+        ...row,
+        partyName: `${(row.customer as { nameEn?: string }).nameEn ?? ''} ${(row.customer as { nameAr?: string }).nameAr ?? ''}`.trim(),
+      })),
+      totals: [
+        { labelEn: 'Invoices', labelAr: 'عدد الفواتير', value: String(data.totals.documents) },
+        { labelEn: 'Total', labelAr: 'الإجمالي', value: data.totals.total },
+        { labelEn: 'Paid', labelAr: 'المسدَّد', value: data.totals.paid },
+        { labelEn: 'Outstanding', labelAr: 'المتبقي', value: data.totals.outstanding },
+        { labelEn: 'Gross profit', labelAr: 'مجمل الربح', value: data.totals.grossProfit },
+      ],
+      notes: [],
+    });
+  }
+
+  private async purchasesReport(
+    companyId: string,
+    query: PeriodQueryDto & { supplierId?: string; status?: string },
+  ) {
+    const data = await this.operations.purchases(companyId, query);
+    return this.table({
+      slug: 'purchases',
+      titleEn: 'Purchases report',
+      titleAr: 'تقرير المشتريات',
+      meta: this.periodMeta(data.from, data.to),
+      columns: [
+        { key: 'invoiceNumber', labelEn: 'Invoice', labelAr: 'الفاتورة', width: 16 },
+        { key: 'invoiceDate', labelEn: 'Date', labelAr: 'التاريخ', width: 12 },
+        { key: 'partyName', labelEn: 'Supplier', labelAr: 'المورد', width: 26 },
+        { key: 'documentType', labelEn: 'Kind', labelAr: 'النوع', width: 12 },
+        { key: 'status', labelEn: 'Status', labelAr: 'الحالة', width: 10 },
+        { key: 'totalAmount', labelEn: 'Total', labelAr: 'الإجمالي', numeric: true, width: 14 },
+        { key: 'paidAmount', labelEn: 'Paid', labelAr: 'المسدَّد', numeric: true, width: 14 },
+        { key: 'outstanding', labelEn: 'Outstanding', labelAr: 'المتبقي', numeric: true, width: 14 },
+      ],
+      rows: data.rows.map((row) => ({
+        ...row,
+        partyName: `${(row.supplier as { nameEn?: string }).nameEn ?? ''} ${(row.supplier as { nameAr?: string }).nameAr ?? ''}`.trim(),
+      })),
+      totals: [
+        { labelEn: 'Invoices', labelAr: 'عدد الفواتير', value: String(data.totals.documents) },
+        { labelEn: 'Total', labelAr: 'الإجمالي', value: data.totals.total },
+        { labelEn: 'Paid', labelAr: 'المسدَّد', value: data.totals.paid },
+        { labelEn: 'Outstanding', labelAr: 'المتبقي', value: data.totals.outstanding },
+      ],
+      notes: [],
+    });
+  }
+
+  private async accountMovementReport(
+    companyId: string,
+    query: PeriodQueryDto & { accountId?: string },
+    type: 'EXPENSE' | 'REVENUE',
+  ) {
+    const data = await this.operations.accountMovement(companyId, type, query);
+    const expense = type === 'EXPENSE';
+    return this.table({
+      slug: expense ? 'expenses' : 'income',
+      titleEn: expense ? 'Expenses report' : 'Income report',
+      titleAr: expense ? 'تقرير المصروفات' : 'تقرير الإيرادات',
+      meta: this.periodMeta(data.from, data.to),
+      columns: [
+        { key: 'code', labelEn: 'Code', labelAr: 'الكود', width: 12 },
+        { key: 'nameEn', labelEn: 'Account', labelAr: 'الحساب', width: 30 },
+        { key: 'nameAr', labelEn: 'Account (Arabic)', labelAr: 'الحساب بالعربية', width: 30 },
+        { key: 'entries', labelEn: 'Entries', labelAr: 'عدد القيود', numeric: true, width: 12 },
+        { key: 'net', labelEn: 'Net', labelAr: 'الصافي', numeric: true, width: 18 },
+      ],
+      rows: data.rows.map((row) => ({ ...row, entries: String(row.entries) })),
+      totals: [
+        {
+          labelEn: expense ? 'Total expenses' : 'Total income',
+          labelAr: expense ? 'إجمالي المصروفات' : 'إجمالي الإيرادات',
+          value: data.total,
+        },
+      ],
+      notes: [],
+    });
+  }
+
+  private async paymentsReport(
+    companyId: string,
+    query: PeriodQueryDto & {
+      kind?: string;
+      customerId?: string;
+      supplierId?: string;
+    },
+  ) {
+    const data = await this.operations.payments(companyId, query);
+    return this.table({
+      slug: 'payments',
+      titleEn: 'Payments report',
+      titleAr: 'تقرير المقبوضات والمدفوعات',
+      meta: this.periodMeta(data.from, data.to),
+      columns: [
+        { key: 'voucherNumber', labelEn: 'Voucher', labelAr: 'السند', width: 14 },
+        { key: 'voucherDate', labelEn: 'Date', labelAr: 'التاريخ', width: 12 },
+        { key: 'kind', labelEn: 'Kind', labelAr: 'النوع', width: 12 },
+        { key: 'partyName', labelEn: 'Party', labelAr: 'الطرف', width: 24 },
+        { key: 'cashName', labelEn: 'Cash account', labelAr: 'حساب النقدية', width: 20 },
+        { key: 'amount', labelEn: 'Amount', labelAr: 'المبلغ', numeric: true, width: 14 },
+        { key: 'status', labelEn: 'Status', labelAr: 'الحالة', width: 10 },
+      ],
+      rows: data.rows.map((row) => ({
+        ...row,
+        partyName: [
+          (row.customer as { nameEn?: string } | null)?.nameEn,
+          (row.supplier as { nameEn?: string } | null)?.nameEn,
+          (row.counterAccount as { nameEn?: string } | null)?.nameEn,
+        ]
+          .filter(Boolean)
+          .join(' / '),
+        cashName: (row.cashAccount as { nameEn?: string }).nameEn ?? '',
+      })),
+      totals: [
+        { labelEn: 'Receipts', labelAr: 'المقبوضات', value: data.totals.receipts },
+        { labelEn: 'Payments', labelAr: 'المدفوعات', value: data.totals.payments },
+        { labelEn: 'Net', labelAr: 'الصافي', value: data.totals.net },
+      ],
+      notes: [],
+    });
+  }
+
+  private async cashReport(
+    companyId: string,
+    query: PeriodQueryDto & { cashAccountId?: string },
+  ) {
+    const data = await this.operations.cash(companyId, query);
+    return this.table({
+      slug: 'cash',
+      titleEn: 'Cash report',
+      titleAr: 'تقرير النقدية',
+      meta: this.periodMeta(data.from, data.to),
+      columns: [
+        { key: 'code', labelEn: 'Code', labelAr: 'الكود', width: 12 },
+        { key: 'nameEn', labelEn: 'Account', labelAr: 'الحساب', width: 26 },
+        { key: 'kind', labelEn: 'Kind', labelAr: 'النوع', width: 10 },
+        { key: 'opening', labelEn: 'Opening', labelAr: 'رصيد افتتاحي', numeric: true, width: 16 },
+        { key: 'inflow', labelEn: 'In', labelAr: 'وارد', numeric: true, width: 14 },
+        { key: 'outflow', labelEn: 'Out', labelAr: 'صادر', numeric: true, width: 14 },
+        { key: 'closing', labelEn: 'Closing', labelAr: 'رصيد ختامي', numeric: true, width: 16 },
+      ],
+      rows: data.rows,
+      totals: [
+        { labelEn: 'Opening', labelAr: 'رصيد افتتاحي', value: data.totals.opening },
+        { labelEn: 'Inflow', labelAr: 'وارد', value: data.totals.inflow },
+        { labelEn: 'Outflow', labelAr: 'صادر', value: data.totals.outflow },
+        { labelEn: 'Closing', labelAr: 'رصيد ختامي', value: data.totals.closing },
+      ],
+      notes: [],
+    });
+  }
+
+  private async outstandingReport(
+    companyId: string,
+    query: PeriodQueryDto & {
+      kind?: string;
+      customerId?: string;
+      supplierId?: string;
+    },
+  ) {
+    const data = await this.operations.outstandingInvoices(companyId, {
+      asOf: query.asOf ?? query.to,
+      kind: query.kind,
+      customerId: query.customerId,
+      supplierId: query.supplierId,
+    });
+    return this.table({
+      slug: 'outstanding-invoices',
+      titleEn: 'Outstanding invoices',
+      titleAr: 'الفواتير غير المسددة',
+      meta: [{ labelEn: 'As at', labelAr: 'حتى تاريخ', value: data.asOf }],
+      columns: [
+        { key: 'invoiceNumber', labelEn: 'Invoice', labelAr: 'الفاتورة', width: 16 },
+        { key: 'invoiceDate', labelEn: 'Date', labelAr: 'التاريخ', width: 12 },
+        { key: 'dueDate', labelEn: 'Due', labelAr: 'الاستحقاق', width: 12 },
+        { key: 'partyName', labelEn: 'Party', labelAr: 'الطرف', width: 24 },
+        { key: 'totalAmount', labelEn: 'Total', labelAr: 'الإجمالي', numeric: true, width: 14 },
+        { key: 'paidAmount', labelEn: 'Paid', labelAr: 'المسدَّد', numeric: true, width: 14 },
+        { key: 'outstanding', labelEn: 'Outstanding', labelAr: 'المتبقي', numeric: true, width: 14 },
+        { key: 'daysOverdue', labelEn: 'Days overdue', labelAr: 'أيام التأخير', numeric: true, width: 12 },
+        { key: 'state', labelEn: 'State', labelAr: 'الحالة', width: 10 },
+      ],
+      rows: data.rows.map((row) => ({
+        ...row,
+        partyName: [
+          (row.party as { nameEn?: string } | null)?.nameEn,
+          (row.party as { nameAr?: string } | null)?.nameAr,
+        ]
+          .filter(Boolean)
+          .join(' / '),
+        daysOverdue: String(row.daysOverdue),
+      })),
+      totals: [
+        { labelEn: 'Invoices', labelAr: 'عدد الفواتير', value: String(data.totals.invoices) },
+        { labelEn: 'Outstanding', labelAr: 'المتبقي', value: data.totals.outstanding },
+        { labelEn: 'Due', labelAr: 'مستحق', value: data.totals.due },
+        { labelEn: 'Overdue', labelAr: 'متأخر', value: data.totals.overdue },
+      ],
+      notes: [],
+    });
+  }
+
+  private async partyStatement(
+    companyId: string,
+    query: PeriodQueryDto & { partyId?: string; kind?: string },
+  ) {
+    if (!query.partyId) {
+      throw new BadRequestException(
+        'A party statement needs a partner: pass partyId and kind.',
+      );
+    }
+    const kind = query.kind === 'supplier' ? 'supplier' : 'customer';
+    const data = await this.parties.statement(companyId, kind, query.partyId, {
+      from: query.from,
+      to: query.to,
+    });
+    const party = data.party as {
+      code: string;
+      nameEn: string;
+      nameAr: string;
+      phone?: string | null;
+    };
+    return this.table({
+      slug: 'party-statement',
+      titleEn: `Statement — ${accountLabel({ code: party.code, nameEn: party.nameEn, nameAr: party.nameAr }, 'en')}`,
+      titleAr: `كشف حساب — ${accountLabel({ code: party.code, nameEn: party.nameEn, nameAr: party.nameAr }, 'ar')}`,
+      meta: [
+        ...this.periodMeta(data.from, data.to),
+        { labelEn: 'Opening balance', labelAr: 'رصيد افتتاحي', value: data.openingBalance },
+        { labelEn: 'Closing balance', labelAr: 'رصيد ختامي', value: data.closingBalance },
+      ],
+      columns: [
+        { key: 'date', labelEn: 'Date', labelAr: 'التاريخ', width: 12 },
+        { key: 'number', labelEn: 'Document', labelAr: 'المستند', width: 16 },
+        { key: 'type', labelEn: 'Kind', labelAr: 'النوع', width: 16 },
+        { key: 'description', labelEn: 'Description', labelAr: 'البيان', width: 26 },
+        { key: 'debit', labelEn: 'Debit', labelAr: 'مدين', numeric: true, width: 14 },
+        { key: 'credit', labelEn: 'Credit', labelAr: 'دائن', numeric: true, width: 14 },
+        { key: 'balance', labelEn: 'Balance', labelAr: 'الرصيد', numeric: true, width: 14 },
+      ],
+      rows: data.rows,
+      totals: [
+        { labelEn: 'Total debit', labelAr: 'إجمالي المدين', value: data.totalDebit },
+        { labelEn: 'Total credit', labelAr: 'إجمالي الدائن', value: data.totalCredit },
+        { labelEn: 'Closing balance', labelAr: 'الرصيد الختامي', value: data.closingBalance },
       ],
       notes: [],
     });

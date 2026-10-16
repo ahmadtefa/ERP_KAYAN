@@ -17,4 +17,18 @@ export class DashboardController {
   ) {
     return this.service.summary(user.companyId, { from, to, branchId });
   }
+
+  /// Month-by-month comparison behind the dashboard charts.
+  @Get('monthly')
+  @RequirePermissions('reports.read')
+  monthly(
+    @CurrentUser() user: AuthUser,
+    @Query('months') months?: string,
+    @Query('branchId') branchId?: string,
+  ) {
+    return this.service.monthly(user.companyId, {
+      months: months ? Number(months) : undefined,
+      branchId,
+    });
+  }
 }
