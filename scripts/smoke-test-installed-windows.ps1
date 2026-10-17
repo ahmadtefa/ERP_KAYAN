@@ -33,6 +33,11 @@ function Read-Details {
     $sections += "--- $pgLog ---"
     $sections += Get-Content $pgLog -Tail 15 -ErrorAction SilentlyContinue
   }
+  $initLogs = @(Get-ChildItem (Join-Path $env:ProgramData "KAYAN-ERP\logs") -Filter "initdb-*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+  foreach ($initLog in $initLogs) {
+    $sections += "--- $($initLog.FullName) ---"
+    $sections += Get-Content $initLog.FullName -Tail 25 -ErrorAction SilentlyContinue
+  }
   $backendLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\backend.log"
   if (Test-Path $backendLog) {
     $sections += "--- $backendLog ---"
@@ -89,6 +94,36 @@ $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if (-not $service) { Fail ("The bundled PostgreSQL service '$serviceName' was not installed (installer exit code: " + $install.ExitCode + ").") }
 if ($service.Status -ne "Running") { Fail "The bundled PostgreSQL service is not running (state: $($service.Status))." }
 
+# PostgreSQL refuses to run with administrative permissions, so the bundled
+# service must not run as an administrator. This is the one thing that made
+# the installer fail on a fresh machine, and it has to stay that way.
+$serviceInfo = Get-CimInstance Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
+$serviceAccount = if ($serviceInfo) { $serviceInfo.StartName } else { "" }
+if ($serviceAccount) {
+  try {
+    $accountSid = (New-Object Security.Principal.NTAccount($serviceAccount)).Translate([Security.Principal.SecurityIdentifier]).Value
+    $administratorsSid = (New-Object Security.Principal.NTAccount('BUILTIN\Administrators')).Translate([Security.Principal.SecurityIdentifier]).Value
+    if ($accountSid -eq $administratorsSid) {
+      Fail "The bundled PostgreSQL service runs as the Administrators group. PostgreSQL refuses to run with administrative permissions, so this account cannot work."
+    }
+    Write-Host "PASS: the bundled PostgreSQL service runs as '$serviceAccount' (not an administrator)."
+  } catch {
+    Write-Host "NOTE: could not check the service account ('$serviceAccount')."
+  }
+}
+
+# The cluster has to live in its final directory: the service account has to
+# be able to write the files of the cluster it serves.
+$dataDirectory = Join-Path $env:ProgramData "KAYAN-ERP\PostgreSQL\data"
+if (-not (Test-Path (Join-Path $dataDirectory "PG_VERSION"))) {
+  Fail "The bundled PostgreSQL cluster was not initialized in $dataDirectory."
+}
+$runtimeLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\installer.log"
+if (-not (Test-Path $runtimeLog) -or -not (Select-String -LiteralPath $runtimeLog -Pattern 'KAYAN-RUNTIME-BOOTSTRAP-RESTRICTED' -Quiet)) {
+  Fail "The elevated installer did not initialize PostgreSQL with the restricted-token bootstrap."
+}
+Write-Host "PASS: initdb ran with PostgreSQL's required restricted token."
+
 foreach ($relative in @(
   "backend\postgres\bin\initdb.exe",
   "backend\postgres\bin\pg_ctl.exe",
@@ -128,6 +163,38 @@ $env:KAYAN_ADMIN_PASSWORD = "CiSmoke-Admin-Password-7241"
 $seed = Start-Process -FilePath $node -ArgumentList @("scripts\prepare-database.mjs") -WorkingDirectory $backend -Wait -PassThru -NoNewWindow
 if ($seed.ExitCode -ne 0) { Fail "CI administrator setup failed with exit code $($seed.ExitCode)." }
 Remove-Item Env:KAYAN_ADMIN_USERNAME,Env:KAYAN_ADMIN_PASSWORD -ErrorAction SilentlyContinue
+
+# Put a disposable record in the freshly installed company database, run the
+# installer again as an upgrade/reinstall, and prove that the record remains.
+# This is synthetic CI data only; no customer database is ever reset.
+$databasePassword = $null
+if ($envValues['DATABASE_URL'] -match '^postgresql://erp_app:([a-fA-F0-9]+)@127\.0\.0\.1:5432/erp_kayan\?schema=public$') {
+  $databasePassword = $matches[1]
+} else {
+  Fail "The installed DATABASE_URL does not match the bundled local database format."
+}
+$psql = Join-Path $installRoot "backend\postgres\bin\psql.exe"
+$env:PGPASSWORD = $databasePassword
+$sentinelSql = "CREATE TABLE IF NOT EXISTS kayan_installer_upgrade_probe (id integer PRIMARY KEY, value text NOT NULL); INSERT INTO kayan_installer_upgrade_probe (id,value) VALUES (1,'preserved') ON CONFLICT (id) DO UPDATE SET value=EXCLUDED.value;"
+& $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -v ON_ERROR_STOP=1 -c $sentinelSql *> $null
+if ($LASTEXITCODE -ne 0) { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue; Fail "Could not create the disposable company-data preservation probe." }
+Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+
+$upgradeLog = Join-Path $env:TEMP "kayan-setup-upgrade-smoke.log"
+$upgrade = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", ("/LOG=" + $upgradeLog)) -Wait -PassThru
+if ($upgrade.ExitCode -ne 0) { Fail "The KAYAN upgrade/reinstall exited with code $($upgrade.ExitCode)." }
+$service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if (-not $service -or $service.Status -ne "Running") { Fail "The PostgreSQL service did not restart after the upgrade/reinstall." }
+& $pgReady -h 127.0.0.1 -p 5432 -U postgres *> $null
+if ($LASTEXITCODE -ne 0) { Fail "PostgreSQL did not accept connections after the upgrade/reinstall." }
+$env:PGPASSWORD = $databasePassword
+$sentinelResult = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT value FROM kayan_installer_upgrade_probe WHERE id=1" 2>&1)
+$sentinelExit = $LASTEXITCODE
+Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+if ($sentinelExit -ne 0 -or (($sentinelResult -join '').Trim() -ne 'preserved')) {
+  Fail ("The disposable company-data preservation probe did not survive the upgrade/reinstall. PostgreSQL output: " + ($sentinelResult -join ' '))
+}
+Write-Host "PASS: the upgrade/reinstall retained the existing company-data probe."
 
 # The important test: start the actual installed Flutter executable by itself.
 $clientPath = Join-Path $installRoot "erp_kayan.exe"

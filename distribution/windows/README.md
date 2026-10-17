@@ -30,13 +30,35 @@ The installer itself (not the build) requires elevation because it registers a P
 3. On first app start, the existing backend preparation path applies checked-in Prisma migrations and asks the first user to choose the initial administrator credentials. It does not seed a default user or reset an existing database.
 4. The Flutter client starts the bundled Nest API with the bundled Node runtime, waits for `/api/v1/health`, and renders the interface. The API is bound to loopback and serves the included web build from the same origin as well.
 
+### Two Windows rules the runtime setup has to respect
+
+**PostgreSQL refuses administrative permissions.** The server aborts with
+"Execution of PostgreSQL by a user with administrative permissions is not
+permitted." before it does anything, and that includes the bootstrap backend
+`initdb` starts. The installer itself is elevated, so `install-runtime.ps1`
+starts `initdb` through `UnelevatedProcess.cs`, which duplicates the process
+token and marks the Administrators and Power Users groups "deny only" - the
+same thing Windows does for a normal, non-elevated administrator session. The
+server itself runs as the restricted `NT AUTHORITY\LocalService` account,
+which is not an administrator. `scripts/smoke-test-installed-windows.ps1`
+asserts that the service does not run as an administrator.
+
+**The cluster is created in its final directory.** PostgreSQL gives the files
+it creates the permissions of the directory they are created in. A cluster
+that is built somewhere else and moved afterwards keeps the permissions of
+the place it came from, and the service account then cannot write the WAL
+files of its own database. The data directory is therefore created (empty)
+first, with the service account and inheritance already in place, and
+`initdb` writes straight into it. On an upgrade the whole tree gets the
+inheritance of its directory re-applied, so an older cluster keeps working.
+
 The Start menu provides start/stop/restart PostgreSQL shortcuts; Windows displays UAC for service control when required. Closing the ERP window stops its API child process. PostgreSQL remains running as a Windows service until explicitly stopped or uninstalled.
 
 ## Persistent data and uninstall
 
 - PostgreSQL data: `%ProgramData%\KAYAN-ERP\PostgreSQL\data`
 - PostgreSQL diagnostic logs: `%ProgramData%\KAYAN-ERP\logs\`
-- Installer/bootstrap diagnostics: `%ProgramData%\KAYAN-ERP\logs\installer.log` (connection strings and password values are redacted).
+- Installer/bootstrap diagnostics: `%ProgramData%\KAYAN-ERP\logs\installer.log` (connection strings and password values are redacted). The last line of that log names the step that failed, and the installer shows that same step to the customer.
 - Per-user ACL-protected connection settings and signing keys: `%APPDATA%\KAYAN-ERP\kayan.env`
 - App/backend logs: `%APPDATA%\KAYAN-ERP\logs\backend.log`
 - Company logo uploads: `%APPDATA%\KAYAN-ERP\uploads`; the packaged API receives this path through `KAYAN_UPLOAD_DIR`, never inside the replaceable program folder.
@@ -47,4 +69,6 @@ The first install needs enough disk for the bundled installer plus a PostgreSQL 
 
 ## Verification boundary
 
-The build pipeline validates artifact hashes, staged entry points, required dependencies, absence of development `.env`, and emits a runtime manifest. On the Linux development environment the packaging sources were additionally validated as far as that platform allows: all four PowerShell scripts were machine-parsed (tree-sitter PowerShell grammar) and structurally balance-checked, `installer.iss` was cross-checked against the staging contract (every define, constant, and referenced file), and the backend `npm ci` / Prisma generate / `nest build` steps plus the Jest suite were executed successfully (the compiler fix in `backend/src/modules/company/company.service.ts` came out of that run). A real `.exe` installer compile, Windows service lifecycle, UAC behavior, shortcut validation, update-over-existing-data run, and uninstall retention test must still be performed on a Windows x64 machine before distributing the installer; build success alone is not proof of those behaviors.
+The build pipeline validates artifact hashes, staged entry points, required dependencies, absence of development `.env`, and emits a runtime manifest. The **Windows Installer** workflow goes further: on a real `windows-latest` machine it compiles the `.exe`, installs it silently, and then verifies the installed product with `scripts/smoke-test-installed-windows.ps1` - installer exit code, the `KayanERPPostgreSQL` service exists and runs as a non-administrator account, `pg_isready` on `127.0.0.1:5432`, the cluster really was initialized in `%ProgramData%\KAYAN-ERP\PostgreSQL\data`, the production database preparation, a disposable CI administrator, and a second upgrade/reinstall that must preserve a disposable company-data row. It then launches the installed `erp_kayan.exe`, verifies `/api/v1/health` reports `status=ok` and `database=up`, and logs in against the installed database. A build that only compiles is never treated as proof.
+
+The automated second install exercises the upgrade/reinstall path and proves a disposable database row survives. It does not replace a carefully supervised update of a real customer's installation, which should still be tested before a wide rollout. Uninstall retention (service removed, database kept) is not yet automated and should also be confirmed before broad distribution.

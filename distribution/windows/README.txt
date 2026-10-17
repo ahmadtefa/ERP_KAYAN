@@ -15,6 +15,11 @@ are available in the KAYAN ERP Start menu. The service listens only on the local
 machine. If another application already uses port 5432, setup stops with an
 error and does not replace that application.
 
+If the setup cannot finish, the installer says which step failed and where the
+full, redacted diagnostics are written:
+  %ProgramData%\KAYAN-ERP\logs\installer.log
+Your company data is never deleted to make an installation succeed.
+
 Company data is kept outside Program Files:
   Database: %ProgramData%\KAYAN-ERP\PostgreSQL\data
   Database logs: %ProgramData%\KAYAN-ERP\logs
@@ -29,6 +34,9 @@ and logs. Back up from the in-app Backup and Restore screen before moving or
 replacing the computer. To permanently erase records, uninstall first, verify
 your backup, and then manually remove the ProgramData database directory.
 
-Only Windows x64 is supported. A Windows x64 installation test is required
-before distributing this release; this installer was assembled on a Windows
-build host using the repository packaging instructions.
+Only Windows x64 is supported. This installer was built and smoke-tested on a
+Windows x64 CI machine, including a fresh install, database startup, local API
+health, login, and an upgrade/reinstall that retained a database record. The
+automated upgrade check uses disposable CI data; test an update over a real
+company installation carefully before a wide rollout. Uninstall retention is
+also not part of the automated smoke test.
