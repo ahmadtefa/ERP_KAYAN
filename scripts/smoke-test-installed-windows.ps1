@@ -118,6 +118,11 @@ $dataDirectory = Join-Path $env:ProgramData "KAYAN-ERP\PostgreSQL\data"
 if (-not (Test-Path (Join-Path $dataDirectory "PG_VERSION"))) {
   Fail "The bundled PostgreSQL cluster was not initialized in $dataDirectory."
 }
+$runtimeLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\installer.log"
+if (-not (Test-Path $runtimeLog) -or -not (Select-String -LiteralPath $runtimeLog -Pattern 'KAYAN-RUNTIME-BOOTSTRAP-RESTRICTED' -Quiet)) {
+  Fail "The elevated installer did not initialize PostgreSQL with the restricted-token bootstrap."
+}
+Write-Host "PASS: initdb ran with PostgreSQL's required restricted token."
 
 foreach ($relative in @(
   "backend\postgres\bin\initdb.exe",

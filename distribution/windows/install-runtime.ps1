@@ -155,12 +155,13 @@ try {
 }
 
 function Test-CurrentTokenIsAdministrator {
-  # True when the Administrators group is enabled in this process token. That
-  # is exactly what PostgreSQL refuses to run with.
+  # PostgreSQL rejects either of these groups when enabled in its process
+  # token. The restricted bootstrap helper disables both.
   try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    return ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) -or
+      $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::PowerUser))
   } catch { return $false }
 }
 
@@ -188,44 +189,48 @@ function Invoke-Pg([string]$Exe, [string[]]$Arguments) {
 }
 
 function Invoke-PgBootstrap([string]$Exe, [string[]]$Arguments, [string]$WorkingDirectory) {
-  # Runs a PostgreSQL program that refuses to run with administrative
-  # permissions. initdb is one of them: it starts "postgres --boot", and the
-  # server aborts before it does anything when the Administrators group is
-  # enabled in the token.
-  #
-  # The program's own output is written to a file so the real PostgreSQL
-  # diagnostics survive in the protected log.
+  # initdb starts postgres in bootstrap mode, and PostgreSQL rejects a process
+  # whose token has enabled Administrators/Power Users membership. Its own
+  # restricted-token re-exec can be blocked by endpoint security policy. Start
+  # it with PostgreSQL-compatible restricted credentials ourselves and set
+  # PG_RESTRICT_EXEC so initdb does not need a second re-exec.
   $outputFile = Join-Path $logDirectory ('initdb-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.log')
-  $exitCode = -1
-  $startFailure = $null
-  $useHelper = $script:unprivilegedReady -and (Test-CurrentTokenIsAdministrator)
-  if ($useHelper) {
-    # The helper starts the program itself, so the arguments have to be
-    # quoted here. A Windows user name may contain a space, and the
-    # temporary password file lives in that user's temporary folder.
-    $quoted = @($Arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"','\"') + '"' } else { $_ } })
-    try {
-      $exitCode = [Kayan.UnelevatedProcess]::Run($Exe, ($quoted -join ' '), $WorkingDirectory, $outputFile, 900000)
-    } catch {
-      $startFailure = $_.Exception.Message
-      Write-RuntimeMarker ("KAYAN-RUNTIME-BOOTSTRAP-HELPER-FAILED " + (Protect-Secret $startFailure))
-    }
+  $isPrivileged = Test-CurrentTokenIsAdministrator
+  if ($isPrivileged -and -not $script:unprivilegedReady) {
+    throw 'The PostgreSQL restricted-token helper could not be prepared. Refusing to start initdb with administrative permissions.'
   }
-  if ($useHelper -and -not $startFailure) {
-    $output = ''
-    if (Test-Path -LiteralPath $outputFile) { $output = (Get-Content -LiteralPath $outputFile -Raw -ErrorAction SilentlyContinue) }
-    if ($output) { Write-Output (Protect-Secret $output) }
-    if ($exitCode -ne 0) {
-      $details = ($output | Out-String).Trim()
-      if ($details.Length -gt 4000) { $details = $details.Substring(0,4000) }
-      throw "PostgreSQL initialization failed ($exitCode). Output: $(Protect-Secret $details)"
-    }
+  if (-not $isPrivileged) {
+    Write-RuntimeMarker 'KAYAN-RUNTIME-BOOTSTRAP-DIRECT-NONADMIN'
+    Invoke-Pg -Exe $Exe -Arguments $Arguments
     return
   }
-  # No helper, or the helper could not start the program: run it directly.
-  # This is the right thing when the process is not administrative at all.
-  Write-RuntimeMarker 'KAYAN-RUNTIME-BOOTSTRAP-DIRECT'
-  Invoke-Pg -Exe $Exe -Arguments $Arguments
+
+  # The helper starts the program itself, so quote the paths with spaces.
+  $quoted = @($Arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"','\"') + '"' } else { $_ } })
+  $oldRestrictExec = $env:PG_RESTRICT_EXEC
+  try {
+    # PostgreSQL initdb otherwise repeats the same CreateProcessAsUser step
+    # internally, the Windows security-policy failure this helper avoids.
+    $env:PG_RESTRICT_EXEC = '1'
+    Write-RuntimeMarker 'KAYAN-RUNTIME-BOOTSTRAP-RESTRICTED'
+    $exitCode = [Kayan.UnelevatedProcess]::Run($Exe, ($quoted -join ' '), $WorkingDirectory, $outputFile, 900000)
+  } catch {
+    $reason = Protect-Secret $_.Exception.Message
+    Write-RuntimeMarker ("KAYAN-RUNTIME-BOOTSTRAP-HELPER-FAILED " + $reason)
+    throw "PostgreSQL restricted-token bootstrap could not start: $reason"
+  } finally {
+    if ($null -eq $oldRestrictExec) { Remove-Item Env:PG_RESTRICT_EXEC -ErrorAction SilentlyContinue }
+    else { $env:PG_RESTRICT_EXEC = $oldRestrictExec }
+  }
+
+  $output = ''
+  if (Test-Path -LiteralPath $outputFile) { $output = Get-Content -LiteralPath $outputFile -Raw -ErrorAction SilentlyContinue }
+  if ($output) { Write-Output (Protect-Secret $output) }
+  if ($exitCode -ne 0) {
+    $details = ($output | Out-String).Trim()
+    if ($details.Length -gt 4000) { $details = $details.Substring(0,4000) }
+    throw "PostgreSQL initialization failed ($exitCode). Output: $(Protect-Secret $details)"
+  }
 }
 
 function Invoke-PsqlInput([string]$Exe, [string[]]$Arguments, [string]$Sql) {
