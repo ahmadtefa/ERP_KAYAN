@@ -52,7 +52,7 @@ first, with the service account and inheritance already in place, and
 `initdb` writes straight into it. On an upgrade the whole tree gets the
 inheritance of its directory re-applied, so an older cluster keeps working.
 
-The Start menu provides start/stop/restart PostgreSQL shortcuts; Windows displays UAC for service control when required. Closing the ERP window stops its API child process. PostgreSQL remains running as a Windows service until explicitly stopped or uninstalled.
+The Start menu provides `Repair KAYAN ERP` plus start/stop/restart PostgreSQL shortcuts (and `{app}\repair-kayan.bat` / `{app}\repair-runtime.ps1` inside the installation directory); Windows displays UAC for service control or repair when required. If an earlier installation left `%ProgramData%\KAYAN-ERP\kayan.env` with a broken or empty DACL, both the installer and the bundled repair tool recover ownership and file permissions in place without deleting or overwriting the existing credentials or company database. Closing the ERP window stops its API child process. PostgreSQL remains running as a Windows service until explicitly stopped or uninstalled.
 
 ## Persistent data and uninstall
 

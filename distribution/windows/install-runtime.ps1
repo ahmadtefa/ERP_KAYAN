@@ -257,13 +257,42 @@ function Invoke-PsqlInput([string]$Exe, [string[]]$Arguments, [string]$Sql) {
     throw "PostgreSQL initialization SQL failed ($($process.ExitCode)). Output: $(Protect-Secret $details)"
   }
 }
+function Test-ExistingPath([string]$Path) {
+  if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+  if (Test-Path -LiteralPath $Path) { return $true }
+  $parent = Split-Path -Parent $Path
+  $leaf = Split-Path -Leaf $Path
+  if (-not $parent -or -not $leaf) { return $false }
+  if (-not (Test-Path -LiteralPath $parent)) { return $false }
+  $found = @(Get-ChildItem -LiteralPath $parent -Filter $leaf -Force -ErrorAction SilentlyContinue)
+  return ($found.Count -gt 0)
+}
+
+function Recover-RawAcl([string]$Path) {
+  if (-not (Test-ExistingPath $Path)) { return }
+  if ($script:unprivilegedReady) {
+    try { [Kayan.UnelevatedProcess]::RecoverFileAccess($Path) } catch { }
+  }
+  $previousEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & takeown.exe /F $Path *> $null
+    if ($LASTEXITCODE -ne 0) { & takeown.exe /F $Path /A *> $null }
+    & icacls.exe $Path /reset *> $null
+    & attrib.exe -R -S -H $Path *> $null
+  } finally {
+    $ErrorActionPreference = $previousEap
+  }
+}
+
 function Set-PrivateAcl([string]$Path, [string[]]$Principals) {
   # Strict least-privilege: SYSTEM, Administrators, and explicitly authorized
   # user(s). NEVER grant BUILTIN\Users or Everyone access to database passwords
   # or signing secrets. One /grant:r per principal on purpose: icacls rejects
   # multi-token grants on some builds and can leave the object with inheritance
   # removed but no grants at all - invisible even to its creator.
-  if (-not (Test-Path -LiteralPath $Path)) { throw "Cannot secure missing path: $Path" }
+  if (-not (Test-ExistingPath $Path)) { throw "Cannot secure missing path: $Path" }
+  if (-not (Test-Path -LiteralPath $Path)) { Recover-RawAcl $Path }
   # Container ACEs carry (OI)(CI); file ACEs must not - icacls refuses the
   # whole grant otherwise and the object ends up with an empty DACL.
   $inherit = if (Test-Path -LiteralPath $Path -PathType Container) { '(OI)(CI)F' } else { 'F' }
@@ -280,6 +309,7 @@ function Set-PrivateAcl([string]$Path, [string[]]$Principals) {
   }
   & icacls.exe @aclArgs | Out-Null
   if ($LASTEXITCODE -ne 0) {
+    Recover-RawAcl $Path
     # Non-English Windows fallback using well-known SIDs:
     # S-1-5-18 = SYSTEM, S-1-5-32-544 = Administrators
     $sidArgs = @($Path, '/inheritance:r')
@@ -296,6 +326,42 @@ function Set-PrivateAcl([string]$Path, [string[]]$Principals) {
       throw "Could not secure $Path with icacls."
     }
   }
+}
+
+function Repair-ProtectedFileAccess([string]$Path, [string[]]$Principals) {
+  if (-not (Test-ExistingPath $Path)) { return $false }
+  $needsRecovery = $false
+  try {
+    [void][IO.File]::ReadAllBytes($Path)
+  } catch {
+    $needsRecovery = $true
+  }
+  if (-not $needsRecovery) {
+    try {
+      $aclText = (@(& icacls.exe $Path 2>$null) -join ' ')
+      if ($aclText -notmatch ':\((?:[^)]*F|[^)]*M|[^)]*W)') { $needsRecovery = $true }
+    } catch { $needsRecovery = $true }
+  }
+  if ($needsRecovery) {
+    Write-RuntimeMarker ("KAYAN-RUNTIME-ACL-RECOVERING " + $Path)
+    Recover-RawAcl $Path
+    Write-RuntimeMarker ("KAYAN-RUNTIME-ACL-RECOVERED " + $Path)
+  }
+  Set-PrivateAcl $Path $Principals
+  return $true
+}
+
+function Read-SettingsFile([string]$Path, [string[]]$Principals) {
+  $map = @{}
+  if (-not (Test-ExistingPath $Path)) { return $map }
+  [void](Repair-ProtectedFileAccess $Path $Principals)
+  foreach ($line in Get-Content -LiteralPath $Path) {
+    $clean = $line.TrimStart([char]0xFEFF)
+    if ($clean -match '^\s*([A-Z_]+)="?(.*?)"?\s*$') {
+      $map[$matches[1]] = $matches[2].Trim('"')
+    }
+  }
+  return $map
 }
 
 function Secure-PgDataDirectory([switch]$Recurse) {
@@ -446,19 +512,35 @@ New-Item -ItemType Directory -Force -Path $ProgramDataRoot, $pgDataParent, $logD
 if ($UserSettingsPath) {
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $UserSettingsPath) | Out-Null
 }
+Set-PrivateAcl $ProgramDataRoot @('BUILTIN\Administrators', $serviceAccount)
+Set-PrivateAcl $pgDataParent @('BUILTIN\Administrators', $serviceAccount)
+Set-PrivateAcl $logDirectory @('BUILTIN\Administrators', $serviceAccount)
 
-function Save-UserSettings([hashtable]$Values) {
+function Get-AuthorizedSettingsPrincipals {
   $activeContext = Get-ActiveDesktopUserContext
-  $body = @('# KAYAN ERP machine-local runtime configuration; do not share this file.') + @($Values.GetEnumerator() | Sort-Object Key | ForEach-Object { '{0}="{1}"' -f $_.Key,$_.Value })
-
   $authorizedPrincipals = @()
   if ($activeContext.Sid) { $authorizedPrincipals += $activeContext.Sid }
   if ($activeContext.UserName) { $authorizedPrincipals += $activeContext.UserName }
+  return [PSCustomObject]@{
+    Context = $activeContext
+    Principals = $authorizedPrincipals
+  }
+}
+
+function Save-UserSettings([hashtable]$Values) {
+  $authInfo = Get-AuthorizedSettingsPrincipals
+  $activeContext = $authInfo.Context
+  $authorizedPrincipals = $authInfo.Principals
+  $body = @('# KAYAN ERP machine-local runtime configuration; do not share this file.') + @($Values.GetEnumerator() | Sort-Object Key | ForEach-Object { '{0}="{1}"' -f $_.Key,$_.Value })
 
   # 1. Save to the designated user settings path (caller profile)
   if ($UserSettingsPath) {
-    Set-Content -LiteralPath $UserSettingsPath -Value $body -Encoding ASCII
     Set-PrivateAcl (Split-Path -Parent $UserSettingsPath) $authorizedPrincipals
+    if (Test-ExistingPath $UserSettingsPath) {
+      [void](Repair-ProtectedFileAccess $UserSettingsPath $authorizedPrincipals)
+    }
+    Set-Content -LiteralPath $UserSettingsPath -Value $body -Encoding ASCII
+    Set-PrivateAcl $UserSettingsPath $authorizedPrincipals
   }
 
   # 2. If the active desktop user is a standard user whose profile differs from caller,
@@ -468,8 +550,12 @@ function Save-UserSettings([hashtable]$Values) {
     $activeUserKayanEnv = Join-Path $activeUserKayanDir 'kayan.env'
     if ($activeUserKayanEnv -ne $UserSettingsPath) {
       New-Item -ItemType Directory -Force -Path $activeUserKayanDir | Out-Null
-      Set-Content -LiteralPath $activeUserKayanEnv -Value $body -Encoding ASCII
       Set-PrivateAcl $activeUserKayanDir $authorizedPrincipals
+      if (Test-ExistingPath $activeUserKayanEnv) {
+        [void](Repair-ProtectedFileAccess $activeUserKayanEnv $authorizedPrincipals)
+      }
+      Set-Content -LiteralPath $activeUserKayanEnv -Value $body -Encoding ASCII
+      Set-PrivateAcl $activeUserKayanEnv $authorizedPrincipals
     }
   }
 
@@ -477,16 +563,35 @@ function Save-UserSettings([hashtable]$Values) {
   # Strictly restricted to SYSTEM, Administrators, and the active authorized user.
   # BUILTIN\Users has NO ACCESS.
   $machineConfig = Join-Path $ProgramDataRoot 'kayan.env'
+  if (Test-ExistingPath $machineConfig) {
+    [void](Repair-ProtectedFileAccess $machineConfig $authorizedPrincipals)
+  }
   Set-Content -LiteralPath $machineConfig -Value $body -Encoding ASCII
   Set-PrivateAcl $machineConfig $authorizedPrincipals
 }
 
+$authInfo = Get-AuthorizedSettingsPrincipals
+$initialPrincipals = $authInfo.Principals
+if (Test-ExistingPath $bootstrapMarker) {
+  [void](Repair-ProtectedFileAccess $bootstrapMarker @('BUILTIN\Administrators', $serviceAccount))
+}
 $machineSettingsPath = Join-Path $ProgramDataRoot 'kayan.env'
-$settingsSource = if (Test-Path -LiteralPath $UserSettingsPath) { $UserSettingsPath } elseif (Test-Path -LiteralPath $machineSettingsPath) { $machineSettingsPath } else { $null }
+$machineSettings = Read-SettingsFile $machineSettingsPath $initialPrincipals
+$userSettings = Read-SettingsFile $UserSettingsPath $initialPrincipals
 $settings = @{}
-if ($settingsSource) {
-  foreach ($line in Get-Content -LiteralPath $settingsSource) {
-    if ($line -match '^\s*([A-Z_]+)="?(.*?)"?\s*$') { $settings[$matches[1]] = $matches[2].Trim('"') }
+foreach ($entry in $machineSettings.GetEnumerator()) {
+  $settings[$entry.Key] = $entry.Value
+}
+foreach ($entry in $userSettings.GetEnumerator()) {
+  $settings[$entry.Key] = $entry.Value
+}
+$bundledDbUrlPattern = '^postgresql://erp_app:([a-fA-F0-9]+)@127\.0\.0\.1:5432/erp_kayan\?schema=public$'
+if ($machineSettings['DATABASE_URL'] -match $bundledDbUrlPattern -and
+    $userSettings['DATABASE_URL'] -and
+    $userSettings['DATABASE_URL'] -notmatch $bundledDbUrlPattern) {
+  $settings['DATABASE_URL'] = $machineSettings['DATABASE_URL']
+  if ($machineSettings['ADMIN_DATABASE_URL']) {
+    $settings['ADMIN_DATABASE_URL'] = $machineSettings['ADMIN_DATABASE_URL']
   }
 }
 $settingsExists = $settings.Count -gt 0
@@ -503,14 +608,19 @@ if (-not $clusterExists) {
     throw "A KAYAN PostgreSQL service is registered but its data directory is missing. The service was left untouched and no data was changed. Remove the leftover '$serviceName' service manually, or restore the database directory, before reinstalling."
   }
   if ($settingsExists) {
-    if (-not (Test-Path -LiteralPath $bootstrapMarker)) {
-      throw 'Existing runtime settings were found without a KAYAN database cluster. They were preserved; refusing to overwrite or repurpose them.'
-    }
     $existingDbUrl = $settings['DATABASE_URL']
-    if ($existingDbUrl -notmatch '^postgresql://erp_app:([a-fA-F0-9]+)@127\.0\.0\.1:5432/erp_kayan\?schema=public$') {
+    if ($existingDbUrl -match $bundledDbUrlPattern) {
+      $dbPassword = $matches[1]
+    } elseif ($existingDbUrl -eq 'postgresql://erp_app:postgres@127.0.0.1:5433/erp_kayan?schema=public') {
+      # Uninitialized first-run placeholder created by the desktop shell before
+      # the bundled PostgreSQL runtime was set up; preserve JWT secrets and
+      # provision the local 5432 database credential.
+      $dbPassword = New-Secret
+    } elseif (-not (Test-Path -LiteralPath $bootstrapMarker)) {
+      throw 'Existing runtime settings were found without a KAYAN database cluster. They were preserved; refusing to overwrite or repurpose them.'
+    } else {
       throw 'An existing user settings file points outside the bundled local database. It was preserved; refusing to replace those settings or initialize an unrelated database.'
     }
-    $dbPassword = $matches[1]
   } else { $dbPassword = New-Secret }
   $settings['DATABASE_URL'] = "postgresql://erp_app:$dbPassword@127.0.0.1:5432/erp_kayan?schema=public"
   $settings['ADMIN_DATABASE_URL'] = "postgresql://postgres:$dbPassword@127.0.0.1:5432/postgres?schema=public"
@@ -527,9 +637,10 @@ if (-not $clusterExists) {
   Set-PrivateAcl $logDirectory @('BUILTIN\Administrators', $serviceAccount)
   # Persist recovery information before touching the new cluster. If setup is
   # interrupted, a rerun reuses these values rather than changing user config.
-  if (-not (Test-Path -LiteralPath $bootstrapMarker)) {
+  if (-not (Test-ExistingPath $bootstrapMarker)) {
     Set-Content -LiteralPath $bootstrapMarker -Value 'KAYAN PostgreSQL 17 installer bootstrap v1' -Encoding ASCII
   }
+  [void](Repair-ProtectedFileAccess $bootstrapMarker @('BUILTIN\Administrators', $serviceAccount))
   Save-UserSettings $settings
   # The cluster is created inside its final directory. PostgreSQL inherits the
   # permissions of the directory it creates its files in, and the service
@@ -596,6 +707,11 @@ if (-not $clusterExists) {
   if (-not $settingsExists) {
     throw 'Company data was found, but the protected settings file that holds its database credentials is missing. Nothing was changed. Restore kayan.env from a backup, or move the database directory aside yourself after taking a backup of the company data.'
   }
+  if (-not $settings['JWT_ACCESS_SECRET']) { $settings['JWT_ACCESS_SECRET'] = New-Secret }
+  if (-not $settings['JWT_REFRESH_SECRET']) { $settings['JWT_REFRESH_SECRET'] = New-Secret }
+  if (-not $settings['JWT_ACCESS_TTL']) { $settings['JWT_ACCESS_TTL'] = '900' }
+  if (-not $settings['JWT_REFRESH_TTL']) { $settings['JWT_REFRESH_TTL'] = '1209600' }
+  Save-UserSettings $settings
 
   Set-Stage 'securing the PostgreSQL data directory'
   # The same rights the first install gives the cluster, so an upgrade does
@@ -614,6 +730,17 @@ if (-not $clusterExists) {
 
   Set-Stage 'starting the KayanERPPostgreSQL service'
   Start-PgService
+
+  if ($settings['DATABASE_URL'] -match $bundledDbUrlPattern) {
+    $dbPassword = $matches[1]
+    $env:PGPASSWORD = $dbPassword
+    try {
+      Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "DO `$`$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'erp_app') THEN CREATE ROLE erp_app WITH LOGIN PASSWORD '$dbPassword'; END IF; END `$`$;"
+      Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "SELECT 'CREATE DATABASE erp_kayan OWNER erp_app' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'erp_kayan')\gexec"
+    } finally {
+      Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    }
+  }
 }
 
 if (-not (Test-Path -LiteralPath $UserSettingsPath)) { throw 'Per-user runtime settings were not created.' }

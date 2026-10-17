@@ -10,10 +10,11 @@ The first launch applies the checked-in Prisma migrations and asks you to
 create the first administrator. It does not insert a default account, reset a
 database, or seed sample records.
 
-Local PostgreSQL starts automatically with Windows. Start/Stop/Restart shortcuts
-are available in the KAYAN ERP Start menu. The service listens only on the local
-machine. If another application already uses port 5432, setup stops with an
-error and does not replace that application.
+Local PostgreSQL starts automatically with Windows. Repair KAYAN ERP and
+Start/Stop/Restart PostgreSQL shortcuts are available in the KAYAN ERP Start
+menu (or by running repair-kayan.bat in the installation folder). The service
+listens only on the local machine. If another application already uses port
+5432, setup stops with an error and does not replace that application.
 
 If the setup cannot finish, the installer says which step failed and where the
 full, redacted diagnostics are written:
