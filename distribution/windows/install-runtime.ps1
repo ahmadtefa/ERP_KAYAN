@@ -57,13 +57,23 @@ function Protect-Secret([string]$Text) {
   return $protected
 }
 
+function Write-Result([string]$Message) {
+  # The one line the installer shows the customer when something goes wrong.
+  # It is written without a byte order mark, so the installer can read it as
+  # it is, and it always stays on a single short line.
+  try {
+    $single = (Protect-Secret $Message) -replace '[\r\n]+', ' '
+    if ($single.Length -gt 400) { $single = $single.Substring(0, 400) }
+    [IO.File]::WriteAllText($resultLog, $single, (New-Object Text.UTF8Encoding($false)))
+  } catch { }
+}
+
 function Write-RuntimeMarker([string]$Message) {
   # A lighthouse for support and CI: whatever happens, the last marker in the
   # protected log says how far the runtime setup got.
   try {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $bootstrapLog) | Out-Null
     Add-Content -LiteralPath $bootstrapLog -Value ("{0:u} {1}" -f (Get-Date),(Protect-Secret $Message)) -Encoding UTF8
-    Set-Content -LiteralPath $resultLog -Value (Protect-Secret $Message) -Encoding UTF8
   } catch { }
 }
 
@@ -72,13 +82,18 @@ function Set-Stage([string]$Name) {
   # has to say which part of the setup actually failed.
   $script:stage = $Name
   Write-RuntimeMarker ("KAYAN-RUNTIME-STAGE " + $Name)
+  Write-Result ("Last completed step: " + $Name)
 }
 
 Write-RuntimeMarker 'KAYAN-RUNTIME-START'
+Write-Result 'Last completed step: starting'
 trap {
   try {
     $message = $_.Exception.Message
-    Write-RuntimeMarker ("KAYAN-RUNTIME-FAILED stage=" + $script:stage + " " + (Protect-Secret $message))
+    Write-RuntimeMarker ("KAYAN-RUNTIME-FAILED stage=" + $script:stage + " " + $message)
+    # The line the installer shows the customer: the step that failed and
+    # what PostgreSQL said about it.
+    Write-Result ("Failing step: " + $script:stage + ": " + $message)
   } catch { }
   Write-Output ("KAYAN runtime setup failed during the '" + $script:stage + "' step. Nothing was deleted; see the protected installer log for a redacted diagnostic.")
   exit 1

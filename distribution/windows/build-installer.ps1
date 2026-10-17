@@ -22,6 +22,33 @@ $vcRuntimeUrl = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
 $nodeSha256 = '158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541'
 $postgresSha256 = '2aacc055d9bac49763ac0164759c13866bc0235123d7ffdbb6a6aaa20dc25d9a'
 
+# The build log is the only thing that can explain a failed build, and the
+# job log of a CI run is not always readable. It is written next to the
+# installer and repeated as a GitHub annotation when something goes wrong.
+$buildLog = Join-Path $root 'build\windows-installer-build.log'
+$transcriptRunning = $false
+try {
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $buildLog) | Out-Null
+  Start-Transcript -Path $buildLog -Force | Out-Null
+  $transcriptRunning = $true
+} catch {
+  Write-Host "Could not start the build transcript: $($_.Exception.Message)"
+}
+trap {
+  $reason = $_.Exception.Message
+  if ($transcriptRunning) { try { Stop-Transcript | Out-Null } catch { } }
+  Write-Host ("::error title=Windows installer build failed::" + (($reason -replace '[\r\n]+', ' ')))
+  try {
+    $tail = @(Get-Content -LiteralPath $buildLog -Tail 60 -ErrorAction SilentlyContinue)
+    if ($tail.Count -gt 0) {
+      $flat = (($tail -join ' | ') -replace '[\r\n]+', ' ')
+      if ($flat.Length -gt 3000) { $flat = $flat.Substring($flat.Length - 3000) }
+      Write-Host ("::error title=Installer build log::" + $flat)
+    }
+  } catch { }
+  exit 1
+}
+
 function Require-Command([string]$Name) {
   if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) { throw "Required build command '$Name' was not found. Install it on the Windows build machine." }
 }
