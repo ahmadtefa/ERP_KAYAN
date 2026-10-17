@@ -180,6 +180,14 @@ class LocalBackend {
     //    from fighting over the database.
     for (final port in candidatePorts) {
       if (await _isKayanApi(port)) {
+        // A reachable API can still be attached to a completely empty
+        // database. Check its health payload before treating it as ready;
+        // otherwise an already-running API skips the first-administrator
+        // screen and leaves the user stranded at the login form.
+        if (await _needsFirstAdministrator(port)) {
+          return const LocalBackendStatus.needsFirstAdministrator();
+        }
+
         // The address we already started on. Keep the handle to the child:
         // replacing it here would lose the only reference to the server and
         // leave it running after the window closes.
@@ -331,6 +339,30 @@ class LocalBackend {
       return response.statusCode == 200 && body.contains('"status"');
     } on Object {
       return false;
+    }
+  }
+
+  /// Checks whether an already-running API still needs its first
+  /// administrator. This matters when another process started the API before
+  /// the desktop shell: the health endpoint is the source of truth for setup.
+  static Future<bool> _needsFirstAdministrator(int port) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 2);
+    try {
+      final request = await client
+          .getUrl(Uri.parse('http://127.0.0.1:$port/api/v1/health'))
+          .timeout(const Duration(seconds: 3));
+      final response = await request.close().timeout(
+        const Duration(seconds: 3),
+      );
+      if (response.statusCode != 200) return false;
+      final body = await response.transform(utf8.decoder).join();
+      final decoded = jsonDecode(body);
+      return decoded is Map && decoded['needsSetup'] == true;
+    } on Object {
+      return false;
+    } finally {
+      client.close(force: true);
     }
   }
 
