@@ -164,6 +164,38 @@ $seed = Start-Process -FilePath $node -ArgumentList @("scripts\prepare-database.
 if ($seed.ExitCode -ne 0) { Fail "CI administrator setup failed with exit code $($seed.ExitCode)." }
 Remove-Item Env:KAYAN_ADMIN_USERNAME,Env:KAYAN_ADMIN_PASSWORD -ErrorAction SilentlyContinue
 
+# Put a disposable record in the freshly installed company database, run the
+# installer again as an upgrade/reinstall, and prove that the record remains.
+# This is synthetic CI data only; no customer database is ever reset.
+$databasePassword = $null
+if ($envValues['DATABASE_URL'] -match '^postgresql://erp_app:([a-fA-F0-9]+)@127\.0\.0\.1:5432/erp_kayan\?schema=public$') {
+  $databasePassword = $matches[1]
+} else {
+  Fail "The installed DATABASE_URL does not match the bundled local database format."
+}
+$psql = Join-Path $installRoot "backend\postgres\bin\psql.exe"
+$env:PGPASSWORD = $databasePassword
+$sentinelSql = "CREATE TABLE IF NOT EXISTS kayan_installer_upgrade_probe (id integer PRIMARY KEY, value text NOT NULL); INSERT INTO kayan_installer_upgrade_probe (id,value) VALUES (1,'preserved') ON CONFLICT (id) DO UPDATE SET value=EXCLUDED.value;"
+& $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -v ON_ERROR_STOP=1 -c $sentinelSql *> $null
+if ($LASTEXITCODE -ne 0) { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue; Fail "Could not create the disposable company-data preservation probe." }
+Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+
+$upgradeLog = Join-Path $env:TEMP "kayan-setup-upgrade-smoke.log"
+$upgrade = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", ("/LOG=" + $upgradeLog)) -Wait -PassThru
+if ($upgrade.ExitCode -ne 0) { Fail "The KAYAN upgrade/reinstall exited with code $($upgrade.ExitCode)." }
+$service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if (-not $service -or $service.Status -ne "Running") { Fail "The PostgreSQL service did not restart after the upgrade/reinstall." }
+& $pgReady -h 127.0.0.1 -p 5432 -U postgres *> $null
+if ($LASTEXITCODE -ne 0) { Fail "PostgreSQL did not accept connections after the upgrade/reinstall." }
+$env:PGPASSWORD = $databasePassword
+$sentinelResult = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT value FROM kayan_installer_upgrade_probe WHERE id=1" 2>&1)
+$sentinelExit = $LASTEXITCODE
+Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+if ($sentinelExit -ne 0 -or (($sentinelResult -join '').Trim() -ne 'preserved')) {
+  Fail ("The disposable company-data preservation probe did not survive the upgrade/reinstall. PostgreSQL output: " + ($sentinelResult -join ' '))
+}
+Write-Host "PASS: the upgrade/reinstall retained the existing company-data probe."
+
 # The important test: start the actual installed Flutter executable by itself.
 $clientPath = Join-Path $installRoot "erp_kayan.exe"
 $client = Start-Process -FilePath $clientPath -WorkingDirectory $installRoot -PassThru
