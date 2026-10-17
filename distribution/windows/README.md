@@ -30,13 +30,35 @@ The installer itself (not the build) requires elevation because it registers a P
 3. On first app start, the existing backend preparation path applies checked-in Prisma migrations and asks the first user to choose the initial administrator credentials. It does not seed a default user or reset an existing database.
 4. The Flutter client starts the bundled Nest API with the bundled Node runtime, waits for `/api/v1/health`, and renders the interface. The API is bound to loopback and serves the included web build from the same origin as well.
 
+### Two Windows rules the runtime setup has to respect
+
+**PostgreSQL refuses administrative permissions.** The server aborts with
+"Execution of PostgreSQL by a user with administrative permissions is not
+permitted." before it does anything, and that includes the bootstrap backend
+`initdb` starts. The installer itself is elevated, so `install-runtime.ps1`
+starts `initdb` through `UnelevatedProcess.cs`, which duplicates the process
+token and marks the Administrators and Power Users groups "deny only" - the
+same thing Windows does for a normal, non-elevated administrator session. The
+server itself runs as the restricted `NT AUTHORITY\LocalService` account,
+which is not an administrator. `scripts/smoke-test-installed-windows.ps1`
+asserts that the service does not run as an administrator.
+
+**The cluster is created in its final directory.** PostgreSQL gives the files
+it creates the permissions of the directory they are created in. A cluster
+that is built somewhere else and moved afterwards keeps the permissions of
+the place it came from, and the service account then cannot write the WAL
+files of its own database. The data directory is therefore created (empty)
+first, with the service account and inheritance already in place, and
+`initdb` writes straight into it. On an upgrade the whole tree gets the
+inheritance of its directory re-applied, so an older cluster keeps working.
+
 The Start menu provides start/stop/restart PostgreSQL shortcuts; Windows displays UAC for service control when required. Closing the ERP window stops its API child process. PostgreSQL remains running as a Windows service until explicitly stopped or uninstalled.
 
 ## Persistent data and uninstall
 
 - PostgreSQL data: `%ProgramData%\KAYAN-ERP\PostgreSQL\data`
 - PostgreSQL diagnostic logs: `%ProgramData%\KAYAN-ERP\logs\`
-- Installer/bootstrap diagnostics: `%ProgramData%\KAYAN-ERP\logs\installer.log` (connection strings and password values are redacted).
+- Installer/bootstrap diagnostics: `%ProgramData%\KAYAN-ERP\logs\installer.log` (connection strings and password values are redacted). The last line of that log names the step that failed, and the installer shows that same step to the customer.
 - Per-user ACL-protected connection settings and signing keys: `%APPDATA%\KAYAN-ERP\kayan.env`
 - App/backend logs: `%APPDATA%\KAYAN-ERP\logs\backend.log`
 - Company logo uploads: `%APPDATA%\KAYAN-ERP\uploads`; the packaged API receives this path through `KAYAN_UPLOAD_DIR`, never inside the replaceable program folder.

@@ -64,6 +64,30 @@ begin
   Result := Exec(PowerShell, Args, ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+{ Reads the last thing the runtime setup wrote down, so a failure names the
+  step that actually failed instead of only saying "something went wrong". }
+function ReadRuntimeResult: String;
+var
+  ResultFile: String;
+  Content: String;
+begin
+  Result := '';
+  ResultFile := ExpandConstant('{commonappdata}\KAYAN-ERP\logs\installer-result.txt');
+  if FileExists(ResultFile) then
+  begin
+    if LoadStringFromFile(ResultFile, Content) then
+    begin
+      Content := StringChangeEx(Content, #13#10, ' ', True);
+      Content := StringChangeEx(Content, #10, ' ', True);
+      if Length(Content) > 400 then
+        Content := Copy(Content, 1, 400);
+      Result := Content;
+    end;
+  end;
+  if Result = '' then
+    Result := 'the failing step was not recorded';
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
@@ -110,6 +134,7 @@ begin
     if not RunPowerShell(Args, ResultCode) then
       RaiseException('Could not start the local PostgreSQL setup. Check permissions and the installer log.')
     else if ResultCode <> 0 then
-      RaiseException('KAYAN PostgreSQL setup failed. Existing company data was not deleted; use the diagnostics in README.txt.')
+      RaiseException('KAYAN PostgreSQL setup failed. Existing company data was not deleted. Failing step: ' +
+        ReadRuntimeResult + '. Full diagnostics: ' + ExpandConstant('{commonappdata}\KAYAN-ERP\logs\installer.log'))
   end;
 end;

@@ -1,3 +1,41 @@
+<#
+    KAYAN ERP - Windows runtime setup.
+
+    Runs from the installer, elevated, and does four things:
+
+      1. writes the protected machine settings (kayan.env) with a random
+         database password and random JWT secrets,
+      2. initializes the bundled PostgreSQL 17 cluster (once, and never over
+         an existing one),
+      3. registers and starts the KayanERPPostgreSQL Windows service, and
+      4. creates the erp_app role and the erp_kayan database.
+
+    It never deletes, resets or overwrites an existing database.
+
+    Two Windows details decide how this works, and both of them used to make
+    the setup fail on a fresh machine:
+
+    a) PostgreSQL refuses to run with administrative permissions. Its own
+       check (src/backend/main/main.c) aborts with "Execution of PostgreSQL
+       by a user with administrative permissions is not permitted." before
+       the server does anything at all, and that includes the bootstrap
+       backend that initdb starts. The installer runs elevated, so initdb
+       is started here with a token whose Administrators and Power Users
+       groups are marked deny-only - exactly what a normal, non-elevated
+       administrator session looks like. The server itself runs as the
+       restricted LocalService account, which is not an administrator.
+
+    b) The cluster has to be created inside its final data directory. The
+       files PostgreSQL creates inherit the permissions of the directory
+       they are created in, and the service account needs to be able to
+       write every one of them. A cluster that is built somewhere else and
+       moved afterwards keeps the permissions of the place it came from, and
+       the server then cannot write its own WAL files.
+
+    Every step records what it is doing in %ProgramData%\KAYAN-ERP\logs\
+    installer.log, and the failing step is named in the error the customer
+    sees. Connection strings and passwords are redacted everywhere.
+#>
 [CmdletBinding()]
 param(
   [Parameter(Mandatory=$true)][string]$UserSettingsPath,
@@ -6,31 +44,56 @@ param(
 $ErrorActionPreference = 'Stop'
 $bootstrapLog = Join-Path (Join-Path $env:ProgramData 'KAYAN-ERP') 'logs\installer.log'
 $resultLog = Join-Path (Join-Path $env:ProgramData 'KAYAN-ERP') 'logs\installer-result.txt'
+$script:stage = 'starting'
+$script:unprivilegedReady = $false
+
+function Protect-Secret([string]$Text) {
+  # Nothing that reaches a log file may contain a password or a connection
+  # string. The log is protected, but it is still a file on the machine.
+  if ([string]::IsNullOrEmpty($Text)) { return '' }
+  $protected = [regex]::Replace($Text, '(?i)postgres(?:ql)?://[^\s"'']+', '[DATABASE URL REDACTED]')
+  $protected = [regex]::Replace($protected, '(?i)(password\s*[=:]\s*)[^\s;]+', '$1[REDACTED]')
+  $protected = [regex]::Replace($protected, "(?i)(password\s+')[^']+(')", '$1[REDACTED]$2')
+  return $protected
+}
+
 function Write-RuntimeMarker([string]$Message) {
   # A lighthouse for support and CI: whatever happens, the last marker in the
   # protected log says how far the runtime setup got.
   try {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $bootstrapLog) | Out-Null
-    Add-Content -LiteralPath $bootstrapLog -Value ("{0:u} {1}" -f (Get-Date),$Message) -Encoding UTF8
-    Set-Content -LiteralPath $resultLog -Value $Message -Encoding UTF8
+    Add-Content -LiteralPath $bootstrapLog -Value ("{0:u} {1}" -f (Get-Date),(Protect-Secret $Message)) -Encoding UTF8
+    Set-Content -LiteralPath $resultLog -Value (Protect-Secret $Message) -Encoding UTF8
   } catch { }
 }
+
+function Set-Stage([string]$Name) {
+  # The stage is what the customer is told when something goes wrong, so it
+  # has to say which part of the setup actually failed.
+  $script:stage = $Name
+  Write-RuntimeMarker ("KAYAN-RUNTIME-STAGE " + $Name)
+}
+
 Write-RuntimeMarker 'KAYAN-RUNTIME-START'
 trap {
   try {
     $message = $_.Exception.Message
-    $message = [regex]::Replace($message, '(?i)postgres(?:ql)?://[^\s"'']+', '[DATABASE URL REDACTED]')
-    $message = [regex]::Replace($message, '(?i)(password\s*[=:]\s*)[^\s;]+', '$1[REDACTED]')
-    Write-RuntimeMarker ("KAYAN-RUNTIME-FAILED " + $message)
+    Write-RuntimeMarker ("KAYAN-RUNTIME-FAILED stage=" + $script:stage + " " + (Protect-Secret $message))
   } catch { }
-  Write-Output 'KAYAN runtime setup failed. See the protected installer log for a redacted diagnostic.'
+  Write-Output ("KAYAN runtime setup failed during the '" + $script:stage + "' step. Nothing was deleted; see the protected installer log for a redacted diagnostic.")
   exit 1
 }
 $serviceName = 'KayanERPPostgreSQL'
+# The service account is deliberately a restricted built-in account: the
+# PostgreSQL server refuses to run with administrative permissions, and this
+# account has none.
+$serviceAccount = 'NT AUTHORITY\LocalService'
 $pgRoot = Join-Path $PSScriptRoot 'backend\postgres'
 $pgBin = Join-Path $pgRoot 'bin'
 $pgData = Join-Path $ProgramDataRoot 'PostgreSQL\data'
+$pgDataParent = Split-Path -Parent $pgData
 $pgLog = Join-Path $ProgramDataRoot 'logs\postgresql.log'
+$logDirectory = Split-Path -Parent $pgLog
 $bootstrapMarker = Join-Path $ProgramDataRoot 'installer-bootstrap-v1'
 
 # Refuse to claim a foreign PostgreSQL process on the fixed local port.
@@ -49,10 +112,41 @@ try {
   }
 } finally { $probe.Dispose() }
 
+Set-Stage 'installing the Microsoft Visual C++ runtime'
 $vcRuntime = Join-Path $PSScriptRoot 'prerequisites\vc_redist.x64.exe'
 if (Test-Path $vcRuntime) {
   $vc = Start-Process -FilePath $vcRuntime -ArgumentList '/install','/quiet','/norestart' -Wait -PassThru -WindowStyle Hidden
   if ($vc.ExitCode -notin @(0,1638,3010)) { throw "Microsoft Visual C++ runtime installation failed ($($vc.ExitCode))." }
+}
+
+Set-Stage 'checking the bundled PostgreSQL runtime'
+foreach ($required in @('initdb.exe','pg_ctl.exe','pg_isready.exe','psql.exe')) {
+  if (-not (Test-Path (Join-Path $pgBin $required))) {
+    throw "The bundled PostgreSQL runtime is incomplete: $required is missing."
+  }
+}
+if (-not (Test-Path (Join-Path $PSScriptRoot 'backend\node\node.exe'))) { throw 'Bundled Node runtime is missing.' }
+
+Set-Stage 'preparing the PostgreSQL bootstrap helper'
+try {
+  $helperPath = Join-Path $PSScriptRoot 'UnelevatedProcess.cs'
+  if (-not (Test-Path -LiteralPath $helperPath)) { throw "The PostgreSQL bootstrap helper is missing: $helperPath" }
+  if (-not ('Kayan.UnelevatedProcess' -as [type])) { Add-Type -Path $helperPath }
+  $script:unprivilegedReady = $true
+} catch {
+  # Not fatal by itself: PostgreSQL's own initdb narrows its token when it
+  # can. If it cannot, the failure below says so in plain words.
+  Write-RuntimeMarker ("KAYAN-RUNTIME-HELPER-UNAVAILABLE " + (Protect-Secret $_.Exception.Message))
+}
+
+function Test-CurrentTokenIsAdministrator {
+  # True when the Administrators group is enabled in this process token. That
+  # is exactly what PostgreSQL refuses to run with.
+  try {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  } catch { return $false }
 }
 
 function Invoke-Pg([string]$Exe, [string[]]$Arguments) {
@@ -77,6 +171,48 @@ function Invoke-Pg([string]$Exe, [string[]]$Arguments) {
   }
   if ($commandOutput.Count -gt 0) { $commandOutput | ForEach-Object { Write-Output $_ } }
 }
+
+function Invoke-PgBootstrap([string]$Exe, [string[]]$Arguments, [string]$WorkingDirectory) {
+  # Runs a PostgreSQL program that refuses to run with administrative
+  # permissions. initdb is one of them: it starts "postgres --boot", and the
+  # server aborts before it does anything when the Administrators group is
+  # enabled in the token.
+  #
+  # The program's own output is written to a file so the real PostgreSQL
+  # diagnostics survive in the protected log.
+  $outputFile = Join-Path $logDirectory ('initdb-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.log')
+  $exitCode = -1
+  $startFailure = $null
+  $useHelper = $script:unprivilegedReady -and (Test-CurrentTokenIsAdministrator)
+  if ($useHelper) {
+    # The helper starts the program itself, so the arguments have to be
+    # quoted here. A Windows user name may contain a space, and the
+    # temporary password file lives in that user's temporary folder.
+    $quoted = @($Arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"','\"') + '"' } else { $_ } })
+    try {
+      $exitCode = [Kayan.UnelevatedProcess]::Run($Exe, ($quoted -join ' '), $WorkingDirectory, $outputFile, 900000)
+    } catch {
+      $startFailure = $_.Exception.Message
+      Write-RuntimeMarker ("KAYAN-RUNTIME-BOOTSTRAP-HELPER-FAILED " + (Protect-Secret $startFailure))
+    }
+  }
+  if ($useHelper -and -not $startFailure) {
+    $output = ''
+    if (Test-Path -LiteralPath $outputFile) { $output = (Get-Content -LiteralPath $outputFile -Raw -ErrorAction SilentlyContinue) }
+    if ($output) { Write-Output (Protect-Secret $output) }
+    if ($exitCode -ne 0) {
+      $details = ($output | Out-String).Trim()
+      if ($details.Length -gt 4000) { $details = $details.Substring(0,4000) }
+      throw "PostgreSQL initialization failed ($exitCode). Output: $(Protect-Secret $details)"
+    }
+    return
+  }
+  # No helper, or the helper could not start the program: run it directly.
+  # This is the right thing when the process is not administrative at all.
+  Write-RuntimeMarker 'KAYAN-RUNTIME-BOOTSTRAP-DIRECT'
+  Invoke-Pg -Exe $Exe -Arguments $Arguments
+}
+
 function Invoke-PsqlInput([string]$Exe, [string[]]$Arguments, [string]$Sql) {
   $start = New-Object System.Diagnostics.ProcessStartInfo
   $start.FileName = $Exe
@@ -98,7 +234,7 @@ function Invoke-PsqlInput([string]$Exe, [string[]]$Arguments, [string]$Sql) {
   if ($process.ExitCode -ne 0) {
     $details = (($stdout + "`n" + $stderr) | Out-String).Trim()
     if ($details.Length -gt 4000) { $details = $details.Substring(0,4000) }
-    throw "PostgreSQL initialization SQL failed ($($process.ExitCode)). Output: $details"
+    throw "PostgreSQL initialization SQL failed ($($process.ExitCode)). Output: $(Protect-Secret $details)"
   }
 }
 function Set-PrivateAcl([string]$Path, [string[]]$Principals) {
@@ -140,6 +276,31 @@ function Set-PrivateAcl([string]$Path, [string[]]$Principals) {
       throw "Could not secure $Path with icacls."
     }
   }
+}
+
+function Secure-PgDataDirectory([switch]$Recurse) {
+  # The service account has to be able to read and write every file of the
+  # cluster, and no other local user may read them.
+  #
+  # The container carries the wanted principals with inheritable rights, and
+  # every file inside inherits them again.
+  Set-PrivateAcl $pgData @($serviceAccount)
+  if (-not $Recurse) { return }
+  # A cluster that was created somewhere else - by an older installer, or by
+  # a different tool - keeps the permissions of the place it came from, and
+  # the server then cannot write its own WAL files. Inheritance is re-applied
+  # across the whole tree so every file gets the rights of its directory.
+  $previousEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & icacls.exe $pgData /inheritance:e /T /C | Out-Null
+  } finally {
+    $ErrorActionPreference = $previousEap
+  }
+  # The service account still needs to be able to create new files in every
+  # directory of the cluster, so it is granted inheritable rights again on
+  # the container after the re-application.
+  Set-PrivateAcl $pgData @($serviceAccount)
 }
 
 function Get-ActiveDesktopUserContext {
@@ -187,7 +348,7 @@ function Get-ActiveDesktopUserContext {
 function Get-PgLogTail {
   # The newest PostgreSQL log lines, for the error a person will actually see.
   try {
-    $newest = Get-ChildItem -Path (Split-Path -Parent $pgLog) -Filter 'postgresql-*.log' -ErrorAction SilentlyContinue |
+    $newest = Get-ChildItem -Path $logDirectory -Filter 'postgresql-*.log' -ErrorAction SilentlyContinue |
       Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($newest) {
       $tail = (Get-Content -LiteralPath $newest.FullName -Tail 20 -ErrorAction SilentlyContinue) -join [Environment]::NewLine
@@ -200,10 +361,26 @@ function Get-PgLogTail {
   } catch { }
   return '(no PostgreSQL log output was found)'
 }
+function Get-ServiceEventTail {
+  # The Windows event log is where a service that dies immediately leaves its
+  # own last words. Best effort only.
+  try {
+    $events = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = (Get-Date).AddMinutes(-15) } -MaxEvents 40 -ErrorAction SilentlyContinue |
+      Where-Object { $_.ProviderName -match 'postgres|Service Control Manager' -or $_.Message -match 'postgres' } |
+      Select-Object -First 6
+    if ($events) {
+      $lines = foreach ($event in $events) {
+        '{0:u} {1}: {2}' -f $event.TimeCreated, $event.ProviderName, (($event.Message -replace '\s+',' ').Trim())
+      }
+      return ($lines -join [Environment]::NewLine)
+    }
+  } catch { }
+  return ''
+}
 function Wait-PgReady {
   $ready = Join-Path $pgBin 'pg_isready.exe'
   if (-not (Test-Path $ready)) { throw 'Bundled PostgreSQL readiness tool is missing.' }
-  $deadline = (Get-Date).AddSeconds(60)
+  $deadline = (Get-Date).AddSeconds(90)
   $previousEap = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
   try {
@@ -215,7 +392,10 @@ function Wait-PgReady {
   } finally {
     $ErrorActionPreference = $previousEap
   }
-  throw ('PostgreSQL did not accept connections before the 60 second deadline. Existing data was not changed. ' + (Get-PgLogTail))
+  $events = Get-ServiceEventTail
+  $message = 'PostgreSQL did not accept connections before the 90 second deadline. Existing data was not changed. ' + (Get-PgLogTail)
+  if ($events) { $message += [Environment]::NewLine + $events }
+  throw $message
 }
 function Start-PgService {
   $current = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
@@ -239,9 +419,8 @@ function New-Secret {
   } finally { $rng.Dispose() }
 }
 
-if (-not (Test-Path (Join-Path $pgBin 'initdb.exe'))) { throw 'Bundled PostgreSQL runtime is incomplete.' }
-if (-not (Test-Path (Join-Path $PSScriptRoot 'backend\node\node.exe'))) { throw 'Bundled Node runtime is missing.' }
-New-Item -ItemType Directory -Force -Path $ProgramDataRoot, (Split-Path -Parent $pgData), (Split-Path -Parent $pgLog) | Out-Null
+Set-Stage 'creating the protected installation folders'
+New-Item -ItemType Directory -Force -Path $ProgramDataRoot, $pgDataParent, $logDirectory | Out-Null
 if ($UserSettingsPath) {
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $UserSettingsPath) | Out-Null
 }
@@ -289,8 +468,10 @@ if ($settingsSource) {
   }
 }
 $settingsExists = $settings.Count -gt 0
+$clusterExists = Test-Path -LiteralPath (Join-Path $pgData 'PG_VERSION')
 
-if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
+if (-not $clusterExists) {
+  Set-Stage 'preparing the PostgreSQL data directory'
   if (Test-Path $pgData) {
     if (Get-ChildItem -LiteralPath $pgData -Force -ErrorAction SilentlyContinue | Select-Object -First 1) {
       throw 'The PostgreSQL data directory exists but is not initialized. Refusing to remove or overwrite it.'
@@ -315,14 +496,29 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   if (-not $settings['JWT_REFRESH_SECRET']) { $settings['JWT_REFRESH_SECRET'] = New-Secret }
   if (-not $settings['JWT_ACCESS_TTL']) { $settings['JWT_ACCESS_TTL'] = '900' }
   if (-not $settings['JWT_REFRESH_TTL']) { $settings['JWT_REFRESH_TTL'] = '1209600' }
+  # The data directory and the log directory are created here, with the
+  # service account already able to use them, and with inheritance switched
+  # on. Everything PostgreSQL creates inside them inherits these rights, so
+  # the service can write its own files.
+  Set-PrivateAcl $ProgramDataRoot @('BUILTIN\Administrators', $serviceAccount)
+  Set-PrivateAcl $pgDataParent @('BUILTIN\Administrators', $serviceAccount)
+  Set-PrivateAcl $logDirectory @('BUILTIN\Administrators', $serviceAccount)
   # Persist recovery information before touching the new cluster. If setup is
   # interrupted, a rerun reuses these values rather than changing user config.
-  Set-PrivateAcl $ProgramDataRoot @('BUILTIN\Administrators', 'NT AUTHORITY\LocalService')
-  Write-RuntimeMarker ("KAYAN-RUNTIME-ROOT visible=" + (Test-Path -LiteralPath $ProgramDataRoot) + " " + ((& icacls.exe $ProgramDataRoot | Select-Object -First 8) -join ';'))
   if (-not (Test-Path -LiteralPath $bootstrapMarker)) {
     Set-Content -LiteralPath $bootstrapMarker -Value 'KAYAN PostgreSQL 17 installer bootstrap v1' -Encoding ASCII
   }
   Save-UserSettings $settings
+  # The cluster is created inside its final directory. PostgreSQL inherits the
+  # permissions of the directory it creates its files in, and the service
+  # account has to be able to write every one of them.
+  if (-not (Test-Path -LiteralPath $pgData -PathType Container)) {
+    [void][IO.Directory]::CreateDirectory($pgData)
+  }
+  if (-not (Test-Path -LiteralPath $pgData -PathType Container)) {
+    throw "The cluster directory could not be created: $pgData"
+  }
+  Set-PrivateAcl $pgData @('BUILTIN\Administrators', $serviceAccount)
   # Keep the one-time bootstrap password file in the installer process's own
   # temporary directory, not ProgramDataRoot: that directory is deliberately
   # restricted to SYSTEM/Administrators and may exclude the interactive token
@@ -331,48 +527,39 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   [IO.File]::WriteAllText($tempPassword, $dbPassword, [Text.Encoding]::ASCII)
   $currentIdentitySid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
   Set-PrivateAcl $tempPassword @($currentIdentitySid)
-  # Create the cluster directory ourselves, empty. initdb then takes its
-  # "present but empty" path and never runs its recursive mkdir walk - that
-  # walk trips over the pre-created ProgramData root on this PostgreSQL
-  # Windows build ("could not create directory ...: File exists").
-  [void][IO.Directory]::CreateDirectory($pgData)
-  if (-not (Test-Path -LiteralPath $pgData -PathType Container)) {
-    throw "The cluster directory could not be created: $pgData"
-  }
-  $fwd = ($pgData -replace '\\','/')
-  Write-RuntimeMarker ("KAYAN-RUNTIME-INITDB-DIR ok=" + (Test-Path -LiteralPath $pgData) + " dotnet=" + [IO.Directory]::Exists($pgData) + " fwd=" + (Test-Path -LiteralPath $fwd) + " fwdDotNet=" + [IO.Directory]::Exists($fwd) + " user=" + [Security.Principal.WindowsIdentity]::GetCurrent().Name + " attrs=" + ((Get-Item -LiteralPath $pgData).Attributes) + " argv=-D|C:\kayan-pg-stage")
-  # initdb's directory probe cannot see the locked ProgramData tree even
-  # though the same process can. Stage the cluster at a single-level path
-  # (C:\kayan-pg-stage): initdb's mkdir walk then has no intermediate level
-  # to trip over, then move the finished cluster into its final home.
-  $stageRoot = 'C:\kayan-pg-stage'
-  Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
-  try {
-    Invoke-Pg -Exe (Join-Path $pgBin 'initdb.exe') -Arguments @('-D',$stageRoot,'-U','postgres','-A','scram-sha-256','--pwfile',$tempPassword,'-E','UTF8')
-  } finally { Remove-Item -LiteralPath $tempPassword -Force -ErrorAction SilentlyContinue }
-  Get-ChildItem -LiteralPath $stageRoot -Force | Move-Item -Destination $pgData -Force
-  Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
 
+  Set-Stage 'initializing the PostgreSQL cluster'
+  try {
+    Invoke-PgBootstrap -Exe (Join-Path $pgBin 'initdb.exe') -Arguments @('-D',$pgData,'-U','postgres','-A','scram-sha-256','--pwfile',$tempPassword,'-E','UTF8') -WorkingDirectory $pgBin
+  } finally { Remove-Item -LiteralPath $tempPassword -Force -ErrorAction SilentlyContinue }
+  if (-not (Test-Path -LiteralPath (Join-Path $pgData 'PG_VERSION'))) {
+    throw 'PostgreSQL did not create a usable cluster in the data directory.'
+  }
+
+  Set-Stage 'configuring the PostgreSQL cluster'
   $conf = Join-Path $pgData 'postgresql.conf'
   Add-Content -LiteralPath $conf -Value "`n# KAYAN local-only database configuration`nlisten_addresses = '127.0.0.1'`nport = 5432`npassword_encryption = 'scram-sha-256'`nlogging_collector = on`nlog_directory = '$($ProgramDataRoot.Replace('\','/'))/logs'`nlog_filename = 'postgresql-%Y-%m-%d.log'`n"
   $hba = Join-Path $pgData 'pg_hba.conf'
-  Set-Content -LiteralPath $hba -Value @('# TYPE  DATABASE        USER            ADDRESS                 METHOD','local   all             all                                     scram-sha-256','host    all             all             127.0.0.1/32            scram-sha-256','host    all             all             ::1/128                 reject') -Encoding ASCII
+  Set-Content -LiteralPath $hba -Value @('# TYPE  DATABASE        USER            ADDRESS                 METHOD','local   all             all                                     scram-sha-256','host    all             all             127.0.0.1/32            scram-sha-256','host    all             all             ::1/128                 scram-sha-256') -Encoding ASCII
+
+  Set-Stage 'securing the PostgreSQL data directory'
+  Secure-PgDataDirectory
+
+  Set-Stage 'registering the KayanERPPostgreSQL service'
+  $pgCtl = Join-Path $pgBin 'pg_ctl.exe'
+  if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
+    Invoke-Pg -Exe $pgCtl -Arguments @('register','-N',$serviceName,'-U',$serviceAccount,'-D',$pgData,'-S','auto')
+  }
+  Set-PrivateAcl $pgData @('BUILTIN\Administrators', $serviceAccount)
+  Set-PrivateAcl $logDirectory @('BUILTIN\Administrators', $serviceAccount)
+
+  Set-Stage 'starting the KayanERPPostgreSQL service'
+  Start-PgService
+
+  Set-Stage 'creating the erp_app role and the erp_kayan database'
   $env:DATABASE_URL = "postgresql://erp_app:$dbPassword@127.0.0.1:5432/erp_kayan?schema=public"
   $env:ADMIN_DATABASE_URL = "postgresql://postgres:$dbPassword@127.0.0.1:5432/postgres?schema=public"
   $env:PGPASSWORD = $dbPassword
-  # PostgreSQL on Windows refuses to run as a member of the Administrators
-  # group ("Execution of PostgreSQL by a user with administrative permissions
-  # is not permitted"), and this script runs elevated. So the server is never
-  # started by hand as the installer: the permanent service runs it as
-  # NT AUTHORITY\LocalService from the very first start, and the one-time
-  # role/database bootstrap goes through that service over TCP.
-  Set-PrivateAcl $pgData 'NT AUTHORITY\LOCAL SERVICE'
-  Set-PrivateAcl (Split-Path -Parent $pgLog) 'NT AUTHORITY\LOCAL SERVICE'
-  $pgCtl = Join-Path $pgBin 'pg_ctl.exe'
-  if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
-    Invoke-Pg -Exe $pgCtl -Arguments @('register','-N',$serviceName,'-U','NT AUTHORITY\LocalService','-D',$pgData,'-S','auto')
-  }
-  Start-PgService
   try {
     Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "DO `$`$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'erp_app') THEN CREATE ROLE erp_app WITH LOGIN PASSWORD '$dbPassword'; ELSE ALTER ROLE erp_app WITH LOGIN PASSWORD '$dbPassword'; END IF; END `$`$;"
     Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "SELECT 'CREATE DATABASE erp_kayan OWNER erp_app' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'erp_kayan')\gexec"
@@ -381,16 +568,33 @@ if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
   }
   Remove-Item Env:DATABASE_URL,Env:ADMIN_DATABASE_URL -ErrorAction SilentlyContinue
 } else {
+  Set-Stage 'checking the existing PostgreSQL cluster'
   $version = (Get-Content (Join-Path $pgData 'PG_VERSION') -Raw).Trim()
   if ($version -ne '17') { throw "Existing PostgreSQL data version $version is incompatible with bundled PostgreSQL 17. Data was not changed." }
-  if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
-    Invoke-Pg -Exe (Join-Path $pgBin 'pg_ctl.exe') -Arguments @('register','-N',$serviceName,'-U','NT AUTHORITY\LocalService','-D',$pgData,'-S','auto')
+  if (-not $settingsExists) {
+    throw 'Company data was found, but the protected settings file that holds its database credentials is missing. Nothing was changed. Restore kayan.env from a backup, or move the database directory aside yourself after taking a backup of the company data.'
   }
-  Set-PrivateAcl $pgData 'NT AUTHORITY\LOCAL SERVICE'
-  Set-PrivateAcl (Split-Path -Parent $pgLog) 'NT AUTHORITY\LOCAL SERVICE'
+
+  Set-Stage 'securing the PostgreSQL data directory'
+  # The same rights the first install gives the cluster, so an upgrade does
+  # not leave the service account unable to write its own files.
+  Set-PrivateAcl $ProgramDataRoot @('BUILTIN\Administrators', $serviceAccount)
+  Set-PrivateAcl $pgDataParent @('BUILTIN\Administrators', $serviceAccount)
+  Set-PrivateAcl $logDirectory @('BUILTIN\Administrators', $serviceAccount)
+  Secure-PgDataDirectory -Recurse
+
+  Set-Stage 'registering the KayanERPPostgreSQL service'
+  $pgCtl = Join-Path $pgBin 'pg_ctl.exe'
+  if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
+    Invoke-Pg -Exe $pgCtl -Arguments @('register','-N',$serviceName,'-U',$serviceAccount,'-D',$pgData,'-S','auto')
+  }
+  Set-PrivateAcl $logDirectory @('BUILTIN\Administrators', $serviceAccount)
+
+  Set-Stage 'starting the KayanERPPostgreSQL service'
   Start-PgService
 }
 
 if (-not (Test-Path -LiteralPath $UserSettingsPath)) { throw 'Per-user runtime settings were not created.' }
+Set-Stage 'finished'
 Write-RuntimeMarker 'KAYAN-RUNTIME-OK'
 Write-Output 'KAYAN PostgreSQL is installed and running. Company database files are under ProgramData and will be kept on uninstall.'

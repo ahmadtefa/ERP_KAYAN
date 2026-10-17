@@ -33,6 +33,11 @@ function Read-Details {
     $sections += "--- $pgLog ---"
     $sections += Get-Content $pgLog -Tail 15 -ErrorAction SilentlyContinue
   }
+  $initLogs = @(Get-ChildItem (Join-Path $env:ProgramData "KAYAN-ERP\logs") -Filter "initdb-*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+  foreach ($initLog in $initLogs) {
+    $sections += "--- $($initLog.FullName) ---"
+    $sections += Get-Content $initLog.FullName -Tail 25 -ErrorAction SilentlyContinue
+  }
   $backendLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\backend.log"
   if (Test-Path $backendLog) {
     $sections += "--- $backendLog ---"
@@ -88,6 +93,31 @@ Get-Process -Name erp_kayan -ErrorAction SilentlyContinue | Stop-Process -Force 
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if (-not $service) { Fail ("The bundled PostgreSQL service '$serviceName' was not installed (installer exit code: " + $install.ExitCode + ").") }
 if ($service.Status -ne "Running") { Fail "The bundled PostgreSQL service is not running (state: $($service.Status))." }
+
+# PostgreSQL refuses to run with administrative permissions, so the bundled
+# service must not run as an administrator. This is the one thing that made
+# the installer fail on a fresh machine, and it has to stay that way.
+$serviceInfo = Get-CimInstance Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
+$serviceAccount = if ($serviceInfo) { $serviceInfo.StartName } else { "" }
+if ($serviceAccount) {
+  try {
+    $accountSid = (New-Object Security.Principal.NTAccount($serviceAccount)).Translate([Security.Principal.SecurityIdentifier]).Value
+    $administratorsSid = (New-Object Security.Principal.NTAccount('BUILTIN\Administrators')).Translate([Security.Principal.SecurityIdentifier]).Value
+    if ($accountSid -eq $administratorsSid) {
+      Fail "The bundled PostgreSQL service runs as the Administrators group. PostgreSQL refuses to run with administrative permissions, so this account cannot work."
+    }
+    Write-Host "PASS: the bundled PostgreSQL service runs as '$serviceAccount' (not an administrator)."
+  } catch {
+    Write-Host "NOTE: could not check the service account ('$serviceAccount')."
+  }
+}
+
+# The cluster has to live in its final directory: the service account has to
+# be able to write the files of the cluster it serves.
+$dataDirectory = Join-Path $env:ProgramData "KAYAN-ERP\PostgreSQL\data"
+if (-not (Test-Path (Join-Path $dataDirectory "PG_VERSION"))) {
+  Fail "The bundled PostgreSQL cluster was not initialized in $dataDirectory."
+}
 
 foreach ($relative in @(
   "backend\postgres\bin\initdb.exe",

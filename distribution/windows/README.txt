@@ -15,6 +15,11 @@ are available in the KAYAN ERP Start menu. The service listens only on the local
 machine. If another application already uses port 5432, setup stops with an
 error and does not replace that application.
 
+If the setup cannot finish, the installer says which step failed and where the
+full, redacted diagnostics are written:
+  %ProgramData%\KAYAN-ERP\logs\installer.log
+Your company data is never deleted to make an installation succeed.
+
 Company data is kept outside Program Files:
   Database: %ProgramData%\KAYAN-ERP\PostgreSQL\data
   Database logs: %ProgramData%\KAYAN-ERP\logs
