@@ -1,8 +1,13 @@
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][ValidateSet('start','stop','restart','status')][string]$Action)
+param([Parameter(Mandatory=$true)][ValidateSet('start','stop','restart','status','repair')][string]$Action)
 $ErrorActionPreference = 'Stop'
 $name = 'KayanERPPostgreSQL'
 function Control-Service([string]$Verb) {
+  if ($Verb -eq 'repair') {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'repair-runtime.ps1') -Quiet
+    if ($LASTEXITCODE -ne 0) { throw "KAYAN ERP runtime repair failed ($LASTEXITCODE)." }
+    return
+  }
   $s = Get-Service -Name $name -ErrorAction SilentlyContinue
   if (-not $s) {
     # Stopping a service that is not there is a successful no-op. This is also

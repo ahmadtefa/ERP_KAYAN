@@ -82,6 +82,48 @@ trap {
   Fail ("Unhandled error in the smoke test: " + $_.Exception.Message + [Environment]::NewLine + ($_ | Out-String))
 }
 
+function New-SmokeHexSecret {
+  $bytes = New-Object byte[] 32
+  $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $rng.GetBytes($bytes)
+    return [BitConverter]::ToString($bytes).Replace('-', '').ToLowerInvariant()
+  } finally { $rng.Dispose() }
+}
+
+# Simulate the real-machine regression where an earlier interrupted installer
+# left C:\ProgramData\KAYAN-ERP\kayan.env with 0 ACEs (empty DACL) and no
+# PostgreSQL cluster or Windows service yet. Setup must recover the DACL in
+# place and preserve the existing credentials without deleting or overwriting
+# the file.
+$preExistingDbPassword = New-SmokeHexSecret
+$preExistingAccessSecret = New-SmokeHexSecret
+$preExistingRefreshSecret = New-SmokeHexSecret
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $settings) | Out-Null
+$preExistingLines = @(
+  '# KAYAN ERP machine-local runtime configuration; do not share this file.',
+  ('ADMIN_DATABASE_URL="postgresql://postgres:' + $preExistingDbPassword + '@127.0.0.1:5432/postgres?schema=public"'),
+  ('DATABASE_URL="postgresql://erp_app:' + $preExistingDbPassword + '@127.0.0.1:5432/erp_kayan?schema=public"'),
+  ('JWT_ACCESS_SECRET="' + $preExistingAccessSecret + '"'),
+  'JWT_ACCESS_TTL="900"',
+  ('JWT_REFRESH_SECRET="' + $preExistingRefreshSecret + '"'),
+  'JWT_REFRESH_TTL="1209600"'
+)
+Set-Content -LiteralPath $settings -Value $preExistingLines -Encoding ASCII
+$emptyAcl = New-Object System.Security.AccessControl.FileSecurity
+$emptyAcl.SetAccessRuleProtection($true, $false)
+[System.IO.File]::SetAccessControl($settings, $emptyAcl)
+$lockedAsExpected = $false
+try {
+  [void][System.IO.File]::ReadAllText($settings)
+} catch {
+  $lockedAsExpected = $true
+}
+if (-not $lockedAsExpected) {
+  Fail "Could not reproduce the 0-ACE locked kayan.env precondition before running Setup.exe."
+}
+Write-Host "PASS: created pre-existing 0-ACE kayan.env to exercise broken-DACL recovery."
+
 $install = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", ("/LOG=" + $installLog)) -Wait -PassThru
 if ($install.ExitCode -ne 0) {
   Fail ("KAYAN-ERP-Setup.exe failed with exit code $($install.ExitCode).")
@@ -131,6 +173,11 @@ foreach ($relative in @(
   "backend\node\node.exe",
   "backend\dist\src\main.js",
   "backend\scripts\prepare-database.mjs",
+  "prerequisites\vc_redist.x64.exe",
+  "install-runtime.ps1",
+  "repair-runtime.ps1",
+  "repair-kayan.bat",
+  "database-control.ps1",
   "erp_kayan.exe"
 )) {
   $path = Join-Path $installRoot $relative
@@ -147,6 +194,10 @@ $envValues = @{}
 Get-Content $settings | ForEach-Object {
   if ($_ -match '^\s*([A-Z_]+)="?(.*?)"?\s*$') { $envValues[$matches[1]] = $matches[2].Trim('"') }
 }
+if ($envValues['DATABASE_URL'] -ne ('postgresql://erp_app:' + $preExistingDbPassword + '@127.0.0.1:5432/erp_kayan?schema=public')) {
+  Fail "The installer did not preserve the credentials from the pre-existing 0-ACE kayan.env file."
+}
+Write-Host "PASS: installer recovered the 0-ACE kayan.env DACL and preserved its existing credentials."
 foreach ($entry in $envValues.GetEnumerator()) { Set-Item -Path ("Env:" + $entry.Key) -Value $entry.Value }
 
 # Run the exact production database preparation used by the desktop shell.
@@ -195,6 +246,32 @@ if ($sentinelExit -ne 0 -or (($sentinelResult -join '').Trim() -ne 'preserved'))
   Fail ("The disposable company-data preservation probe did not survive the upgrade/reinstall. PostgreSQL output: " + ($sentinelResult -join ' '))
 }
 Write-Host "PASS: the upgrade/reinstall retained the existing company-data probe."
+
+# Exercise the bundled repair tool against a stopped service and a re-corrupted
+# 0-ACE kayan.env file, proving that repair-runtime.ps1 restores both service
+# health and file permissions without losing company data.
+Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+[System.IO.File]::SetAccessControl($settings, $emptyAcl)
+$repairScript = Join-Path $installRoot "repair-runtime.ps1"
+$repair = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ('"' + $repairScript + '"'), "-Quiet") -WorkingDirectory $installRoot -Wait -PassThru -NoNewWindow
+if ($repair.ExitCode -ne 0) {
+  Fail "The bundled repair tool (repair-runtime.ps1) failed with exit code $($repair.ExitCode)."
+}
+$service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if (-not $service -or $service.Status -ne "Running") {
+  Fail "The bundled repair tool did not restart the PostgreSQL service."
+}
+if (-not (Select-String -LiteralPath $runtimeLog -Pattern 'KAYAN-REPAIR-OK' -Quiet)) {
+  Fail "The bundled repair tool did not record KAYAN-REPAIR-OK in installer.log."
+}
+$env:PGPASSWORD = $databasePassword
+$repairProbe = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT value FROM kayan_installer_upgrade_probe WHERE id=1" 2>&1)
+$repairProbeExit = $LASTEXITCODE
+Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+if ($repairProbeExit -ne 0 -or (($repairProbe -join '').Trim() -ne 'preserved')) {
+  Fail ("The company-data probe did not survive the bundled repair tool run. PostgreSQL output: " + ($repairProbe -join ' '))
+}
+Write-Host "PASS: bundled repair tool recovered the 0-ACE kayan.env and stopped PostgreSQL service while preserving company data."
 
 # The important test: start the actual installed Flutter executable by itself.
 $clientPath = Join-Path $installRoot "erp_kayan.exe"

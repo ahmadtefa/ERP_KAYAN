@@ -55,7 +55,12 @@ namespace Kayan
         private const int TokenDefaultDacl = 6;
         private const uint AclRevision = 2;
         private const uint AclSizeInformation = 2;
+        private const int SE_FILE_OBJECT = 1;
+        private const uint OWNER_SECURITY_INFORMATION = 0x00000001;
+        private const uint DACL_SECURITY_INFORMATION = 0x00000004;
+        private const uint UNPROTECTED_DACL_SECURITY_INFORMATION = 0x20000000;
 
+        private const string SystemSid = "S-1-5-18";
         private const string AdministratorsSid = "S-1-5-32-544";
         private const string PowerUsersSid = "S-1-5-32-547";
 
@@ -241,6 +246,16 @@ namespace Kayan
 
         [DllImport("advapi32.dll", SetLastError = true)]
         private static extern uint GetLengthSid(IntPtr sid);
+
+        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern uint SetNamedSecurityInfoW(
+            string pObjectName,
+            int objectType,
+            uint securityInfo,
+            IntPtr psidOwner,
+            IntPtr psidGroup,
+            IntPtr pDacl,
+            IntPtr pSacl);
 
         [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern bool CreateProcessAsUser(
@@ -469,6 +484,101 @@ namespace Kayan
                 if (newAcl != IntPtr.Zero) Marshal.FreeHGlobal(newAcl);
                 if (daclInfo != IntPtr.Zero) Marshal.FreeHGlobal(daclInfo);
                 if (userInfo != IntPtr.Zero) Marshal.FreeHGlobal(userInfo);
+            }
+        }
+
+        /// <summary>
+        /// Recovers ownership and DACL access on an existing file whose DACL was
+        /// stripped or left empty (0 ACEs) by an earlier interrupted install.
+        /// Uses SeTakeOwnershipPrivilege and SeRestorePrivilege so the file content
+        /// is never deleted or overwritten.
+        /// </summary>
+        public static void RecoverFileAccess(string path)
+        {
+            if (string.IsNullOrEmpty(path)) throw new ArgumentException("path is required", "path");
+
+            IntPtr callerToken = IntPtr.Zero;
+            IntPtr userInfo = IntPtr.Zero;
+            IntPtr adminSid = IntPtr.Zero;
+            IntPtr systemSid = IntPtr.Zero;
+            IntPtr newAcl = IntPtr.Zero;
+            try
+            {
+                if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, out callerToken) ||
+                    callerToken == IntPtr.Zero)
+                    throw LastError("OpenProcessToken failed");
+
+                EnablePrivilege(callerToken, "SeTakeOwnershipPrivilege");
+                EnablePrivilege(callerToken, "SeRestorePrivilege");
+                EnablePrivilege(callerToken, "SeBackupPrivilege");
+                EnablePrivilege(callerToken, "SeSecurityPrivilege");
+
+                uint needed;
+                GetTokenInformation(callerToken, TokenUser, IntPtr.Zero, 0, out needed);
+                if (needed == 0) throw LastError("Could not size TokenUser information");
+                userInfo = Marshal.AllocHGlobal((int)needed);
+                if (!GetTokenInformation(callerToken, TokenUser, userInfo, needed, out needed))
+                    throw LastError("Could not read TokenUser information");
+                SID_AND_ATTRIBUTES user = (SID_AND_ATTRIBUTES)Marshal.PtrToStructure(userInfo, typeof(SID_AND_ATTRIBUTES));
+
+                if (!ConvertStringSidToSid(AdministratorsSid, out adminSid) || adminSid == IntPtr.Zero)
+                    throw LastError("Could not create the Administrators SID");
+                if (!ConvertStringSidToSid(SystemSid, out systemSid) || systemSid == IntPtr.Zero)
+                    throw LastError("Could not create the SYSTEM SID");
+
+                uint ownerStatus = SetNamedSecurityInfoW(
+                    path,
+                    SE_FILE_OBJECT,
+                    OWNER_SECURITY_INFORMATION,
+                    user.Sid,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    IntPtr.Zero);
+                if (ownerStatus != 0)
+                {
+                    SetNamedSecurityInfoW(
+                        path,
+                        SE_FILE_OBJECT,
+                        OWNER_SECURITY_INFORMATION,
+                        adminSid,
+                        IntPtr.Zero,
+                        IntPtr.Zero,
+                        IntPtr.Zero);
+                }
+
+                uint aclLength = 8 +
+                    (12 + GetLengthSid(user.Sid) - 4) +
+                    (12 + GetLengthSid(adminSid) - 4) +
+                    (12 + GetLengthSid(systemSid) - 4) + 64;
+                newAcl = Marshal.AllocHGlobal((int)aclLength);
+                if (!InitializeAcl(newAcl, aclLength, AclRevision))
+                    throw LastError("Could not initialize the recovery DACL");
+
+                if (!AddAccessAllowedAceEx(newAcl, AclRevision, 0, GENERIC_ALL, user.Sid))
+                    throw LastError("Could not add the current user to the recovery DACL");
+                if (!AddAccessAllowedAceEx(newAcl, AclRevision, 0, GENERIC_ALL, adminSid))
+                    throw LastError("Could not add Administrators to the recovery DACL");
+                if (!AddAccessAllowedAceEx(newAcl, AclRevision, 0, GENERIC_ALL, systemSid))
+                    throw LastError("Could not add SYSTEM to the recovery DACL");
+
+                uint daclStatus = SetNamedSecurityInfoW(
+                    path,
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION | UNPROTECTED_DACL_SECURITY_INFORMATION,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    newAcl,
+                    IntPtr.Zero);
+                if (daclStatus != 0)
+                    throw new Win32Exception(unchecked((int)daclStatus), "SetNamedSecurityInfoW (DACL) failed");
+            }
+            finally
+            {
+                if (newAcl != IntPtr.Zero) Marshal.FreeHGlobal(newAcl);
+                if (systemSid != IntPtr.Zero) LocalFree(systemSid);
+                if (adminSid != IntPtr.Zero) LocalFree(adminSid);
+                if (userInfo != IntPtr.Zero) Marshal.FreeHGlobal(userInfo);
+                if (callerToken != IntPtr.Zero) CloseHandle(callerToken);
             }
         }
 
