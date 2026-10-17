@@ -256,6 +256,18 @@ namespace Kayan
             ref STARTUPINFO startupInfo,
             out PROCESS_INFORMATION processInformation);
 
+        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool CreateProcessWithTokenW(
+            IntPtr token,
+            uint logonFlags,
+            string applicationName,
+            StringBuilder commandLine,
+            uint creationFlags,
+            IntPtr environment,
+            string currentDirectory,
+            ref STARTUPINFO startupInfo,
+            out PROCESS_INFORMATION processInformation);
+
         [DllImport("kernel32.dll")]
         private static extern IntPtr LocalFree(IntPtr handle);
 
@@ -286,6 +298,7 @@ namespace Kayan
                 // token. Enabling them here does not grant them to the child.
                 EnablePrivilege(callerToken, "SeAssignPrimaryTokenPrivilege");
                 EnablePrivilege(callerToken, "SeIncreaseQuotaPrivilege");
+                EnablePrivilege(callerToken, "SeImpersonatePrivilege");
 
                 if (!ConvertStringSidToSid(AdministratorsSid, out adminSid) || adminSid == IntPtr.Zero)
                     throw LastError("Could not create the Administrators SID");
@@ -337,11 +350,30 @@ namespace Kayan
                 startup.hStdError = output;
 
                 PROCESS_INFORMATION information;
-                if (!CreateProcessAsUser(primaryToken, null, mutableCommandLine,
-                                         IntPtr.Zero, IntPtr.Zero, true, 0, IntPtr.Zero,
-                                         string.IsNullOrEmpty(workingDirectory) ? null : workingDirectory,
-                                         ref startup, out information))
-                    throw LastError("Could not start PostgreSQL with a non-administrator token");
+                bool started = CreateProcessAsUser(primaryToken, null, mutableCommandLine,
+                                                   IntPtr.Zero, IntPtr.Zero, true, 0, IntPtr.Zero,
+                                                   string.IsNullOrEmpty(workingDirectory) ? null : workingDirectory,
+                                                   ref startup, out information);
+                int createAsUserError = started ? 0 : Marshal.GetLastWin32Error();
+                if (!started)
+                {
+                    // Some Windows policies deny CreateProcessAsUser even to
+                    // an elevated installer. The documented token-based
+                    // alternative works with SeImpersonatePrivilege, which is
+                    // also enabled above.
+                    mutableCommandLine = new StringBuilder(commandLine.ToString(), commandLine.Length + 64);
+                    started = CreateProcessWithTokenW(primaryToken, 0, null, mutableCommandLine,
+                                                      0, IntPtr.Zero,
+                                                      string.IsNullOrEmpty(workingDirectory) ? null : workingDirectory,
+                                                      ref startup, out information);
+                    if (!started)
+                    {
+                        int withTokenError = Marshal.GetLastWin32Error();
+                        throw new Win32Exception(withTokenError,
+                            "Could not start PostgreSQL with a restricted token (CreateProcessAsUser " +
+                            createAsUserError + ", CreateProcessWithTokenW " + withTokenError + ")");
+                    }
+                }
 
                 process = information.hProcess;
                 thread = information.hThread;
