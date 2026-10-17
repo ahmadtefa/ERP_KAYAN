@@ -307,19 +307,21 @@ function Secure-PgDataDirectory([switch]$Recurse) {
   Set-PrivateAcl $pgData @($serviceAccount)
   if (-not $Recurse) { return }
   # A cluster that was created somewhere else - by an older installer, or by
-  # a different tool - keeps the permissions of the place it came from, and
-  # the server then cannot write its own WAL files. Inheritance is re-applied
-  # across the whole tree so every file gets the rights of its directory.
+  # a different tool - may retain explicit grants from its former directory.
+  # Merely enabling inheritance would leave those grants in place. Reset the
+  # ACLs on the data tree so every object inherits only the protected grants
+  # on this directory; this changes file permissions, never database content.
   $previousEap = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
   try {
-    & icacls.exe $pgData /inheritance:e /T /C | Out-Null
+    & icacls.exe $pgData /reset /T /C | Out-Null
+    $aclExit = $LASTEXITCODE
   } finally {
     $ErrorActionPreference = $previousEap
   }
-  # The service account still needs to be able to create new files in every
-  # directory of the cluster, so it is granted inheritable rights again on
-  # the container after the re-application.
+  if ($aclExit -ne 0) { throw "Could not reset inherited PostgreSQL data-directory permissions (icacls exit $aclExit). Database files were not changed." }
+  # Reapply a protected ACL at the cluster root. Its inheritable grants flow
+  # to every existing and future file and directory below it.
   Set-PrivateAcl $pgData @($serviceAccount)
 }
 
