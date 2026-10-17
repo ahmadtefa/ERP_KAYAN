@@ -27,6 +27,7 @@ namespace Kayan
     /// </summary>
     public static class UnelevatedProcess
     {
+        private const uint TOKEN_ALL_ACCESS = 0x000F01FF;
         private const uint TOKEN_ASSIGN_PRIMARY = 0x0001;
         private const uint TOKEN_DUPLICATE = 0x0002;
         private const uint TOKEN_QUERY = 0x0008;
@@ -276,8 +277,9 @@ namespace Kayan
             IntPtr thread = IntPtr.Zero;
             try
             {
-                uint callerAccess = TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ADJUST_PRIVILEGES;
-                if (!OpenProcessToken(GetCurrentProcess(), callerAccess, out callerToken) || callerToken == IntPtr.Zero)
+                // PostgreSQL's CreateRestrictedToken path opens TOKEN_ALL_ACCESS
+                // because it also edits the restricted token's default DACL.
+                if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ALL_ACCESS, out callerToken) || callerToken == IntPtr.Zero)
                     throw LastError("OpenProcessToken failed");
 
                 // CreateProcessAsUser requires these privileges in the caller's
