@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: windows-installer-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -97,10 +97,10 @@ jobs:
         run: flutter pub get
 
       - name: Analyze Flutter
-        run: flutter analyze
+        run: python scripts/ci-diagnose.py flutter analyze
 
       - name: Test Flutter
-        run: flutter test
+        run: python scripts/ci-diagnose.py flutter test --reporter expanded
 
       - name: Build Windows installer
         shell: powershell
@@ -117,6 +117,8 @@ jobs:
           $files = @(Get-ChildItem .\build\windows-installer\KAYAN-ERP-Setup-*-x64.exe -File)
           if ($files.Count -lt 1) { throw "Expected at least one versioned installer EXE; found $($files.Count)." }
           Get-FileHash $setupCanonical, $files[0].FullName -Algorithm SHA256 | Format-List Algorithm, Hash, Path
+          $canonicalHash = (Get-FileHash $setupCanonical -Algorithm SHA256).Hash
+          Write-Host "::notice title=Installer SHA256::KAYAN-ERP-Setup.exe SHA256=$canonicalHash"
 
       - name: Smoke-test the actual installed Windows application
         shell: powershell
@@ -142,6 +144,5 @@ jobs:
           name: KAYAN-ERP-Windows-x64-Installer
           path: |
             build/windows-installer/KAYAN-ERP-Setup.exe
-            build/windows-installer/KAYAN-ERP-Setup-*-x64.exe
           if-no-files-found: error
           retention-days: 14

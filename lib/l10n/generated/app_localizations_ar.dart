@@ -59,6 +59,19 @@ class AppLocalizationsAr extends AppLocalizations {
   String get chartOfAccounts => 'دليل الحسابات';
 
   @override
+  String get openingBalancesTitle => 'الأرصدة الافتتاحية';
+
+  @override
+  String get reviewOpeningBalances => 'مراجعة الأرصدة الافتتاحية';
+
+  @override
+  String get noOpeningBalanceDocuments => 'لا توجد مسودات أرصدة افتتاحية بعد';
+
+  @override
+  String get openingBalanceDraftHint =>
+      'الأرصدة المستوردة تبقى مسودات حتى تراجعها وترحّلها.';
+
+  @override
   String get journalEntries => 'القيود اليومية';
 
   @override
@@ -99,6 +112,9 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get branch => 'الفرع';
+
+  @override
+  String get warehouse => 'المخزن';
 
   @override
   String get notAvailable => 'غير محدد';
@@ -265,6 +281,10 @@ class AppLocalizationsAr extends AppLocalizations {
   String get stockNotTracked => 'خدمة / بدون مخزون';
 
   @override
+  String get stockTrackingDoesNotAddQuantity =>
+      'تتبع المخزون لا يضيف كمية تلقائياً. أدخل الرصيد من الأرصدة الافتتاحية ثم راجع المسودة ورحّلها.';
+
+  @override
   String get noStock => 'لا يوجد مخزون';
 
   @override
@@ -323,6 +343,87 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get newPurchaseInvoice => 'فاتورة شراء جديدة';
+
+  @override
+  String get landedCosts => 'تكاليف الشراء الإضافية';
+
+  @override
+  String get landedCostAllocationHint => 'أضف كل تكلفة للشحن أو النقل أو الجمارك أو غيرها؛ ويُوزّع الإجمالي على أصناف المخزون حسب قيمة كل بند.';
+
+  @override
+  String get landedCostCannotBeNegative => 'لا يمكن أن تكون تكاليف الشراء الإضافية سالبة';
+
+  @override
+  String get addLandedCost => 'إضافة تكلفة';
+
+  @override
+  String get removeLandedCost => 'حذف التكلفة';
+
+  @override
+  String get otherLandedCosts => 'تكاليف شراء أخرى';
+
+  @override
+  String get landedCostDescriptionRequired => 'أدخل وصفًا لكل تكلفة شراء إضافية';
+
+  @override
+  String get landedCostAmountInvalid => 'أدخل مبلغًا صحيحًا غير سالب لكل تكلفة شراء إضافية';
+
+  @override
+  String get editDraftInvoice => 'تعديل مسودة الفاتورة';
+
+  @override
+  String get onlyDraftInvoiceCanBeEdited => 'يمكن تعديل الفواتير المسودة فقط';
+
+  @override
+  String get salesReturns => 'مرتجعات المبيعات';
+
+  @override
+  String get purchaseReturns => 'مرتجعات المشتريات';
+
+  @override
+  String get newSalesReturn => 'مرتجع مبيعات جديد';
+
+  @override
+  String get newPurchaseReturn => 'مرتجع مشتريات جديد';
+
+  @override
+  String get noReturns => 'لا توجد مرتجعات بعد';
+
+  @override
+  String get returnDate => 'تاريخ المرتجع';
+
+  @override
+  String get returnReason => 'سبب المرتجع';
+
+  @override
+  String get originalInvoice => 'الفاتورة الأصلية';
+
+  @override
+  String get selectOriginalInvoice => 'اختر فاتورة مُرحّلة';
+
+  @override
+  String get remainingToReturn => 'الكمية المتبقية للمرتجع';
+
+  @override
+  String get quantityToReturn => 'الكمية المرتجعة';
+
+  @override
+  String get createReturn => 'إنشاء مرتجع';
+
+  @override
+  String get returnCreated => 'تم حفظ المرتجع كمسودة';
+
+  @override
+  String get confirmPostReturn => 'سيؤدي ترحيل المرتجع إلى تحديث المخزون ورصيد العميل أو المورد. هل تريد المتابعة؟';
+
+  @override
+  String get returnPosted => 'تم ترحيل المرتجع';
+
+  @override
+  String get returnReversed => 'تم عكس المرتجع';
+
+  @override
+  String get returnLines => 'بنود المرتجع';
 
   @override
   String get invoiceNumber => 'الرقم';
@@ -1058,7 +1159,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get removeLogo => 'إزالة الشعار';
 
   @override
-  String get logoHint => 'اختياري — PNG أو JPEG أو WebP حتى 2 ميجابايت';
+  String get logoHint => 'اختياري — PNG أو JPEG أو WebP؛ يُصغّر إلى ١٠٢٤ × ١٠٢٤ بكسل، حتى ٢ ميجابايت';
 
   @override
   String get logoUpdated => 'تم تحديث الشعار';
@@ -1417,5 +1518,27 @@ class AppLocalizationsAr extends AppLocalizations {
 
 @override
   String get deactivateAccount => 'تعطيل الحساب';
+
+  @override
+  String get demoBackupTitle => 'جرّب الشركة التجريبية';
+
+  @override
+  String get demoBackupHint =>
+      'نزّل نسخة تجريبية واقعية للشركة، ثم اخترها من قسم الاستعادة. راجع المعاينة قبل استبدال أي بيانات.';
+
+  @override
+  String get downloadDemoBackup => 'تنزيل النسخة التجريبية';
+
+  @override
+  String get demoLoginHint =>
+      'بعد الاستعادة، سجّل الدخول باسم admin وكلمة المرور Admin@12345.';
+
+  @override
+  String get logoInvalid =>
+      'اختر صورة PNG أو JPEG أو WebP صالحة، وبأبعاد لا تقل عن ٣٢ × ٣٢ بكسل.';
+
+  @override
+  String get logoTooLarge =>
+      'ما زال حجم الشعار بعد التصغير أكبر من ٢ ميجابايت. اختر صورة أبسط.';
 
 }

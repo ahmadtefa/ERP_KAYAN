@@ -101,18 +101,34 @@ export class AuthService {
       throw invalid;
     }
 
+    // A user may only receive grants assigned in their own company. Shared
+    // system roles are allowed, but deleted or cross-company roles are ignored.
+    const currentUserRoles = user.userRoles.filter(
+      (ur) =>
+        ur.companyId === user.companyId &&
+        ur.role.deletedAt === null &&
+        (ur.role.companyId === user.companyId || ur.role.companyId === null),
+    );
     const permissions = [
       ...new Set(
-        user.userRoles.flatMap((ur) =>
+        currentUserRoles.flatMap((ur) =>
           ur.role.rolePermissions.map((rp) => rp.permission.code),
         ),
       ),
     ];
-    const roles = [...new Set(user.userRoles.map((ur) => ur.role.code))];
+    const roles = [...new Set(currentUserRoles.map((ur) => ur.role.code))];
 
     const branches = await this.prisma.userBranch.findMany({
-      where: { userId: user.id },
+      where: {
+        userId: user.id,
+        branch: {
+          companyId: user.companyId,
+          isActive: true,
+          deletedAt: null,
+        },
+      },
       select: { branchId: true },
+      orderBy: { branchId: 'asc' },
     });
     const branchId = branches[0]?.branchId ?? null;
 
@@ -123,6 +139,7 @@ export class AuthService {
         companyId: user.companyId,
         branchId,
         isSuperAdmin: user.isSuperAdmin,
+        tokenVersion: user.tokenVersion,
         permissions,
       },
       {
@@ -169,7 +186,13 @@ export class AuthService {
                 },
               },
             },
-            branches: true,
+            branches: {
+              include: {
+                branch: {
+                  select: { companyId: true, isActive: true, deletedAt: true },
+                },
+              },
+            },
           },
         },
       },
@@ -199,15 +222,30 @@ export class AuthService {
     if (rotation.count !== 1) {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
+    const currentUserRoles = user.userRoles.filter(
+      (ur) =>
+        ur.companyId === user.companyId &&
+        ur.role.deletedAt === null &&
+        (ur.role.companyId === user.companyId || ur.role.companyId === null),
+    );
     const permissions = [
       ...new Set(
-        user.userRoles.flatMap((ur) =>
+        currentUserRoles.flatMap((ur) =>
           ur.role.rolePermissions.map((rp) => rp.permission.code),
         ),
       ),
     ];
-    const roles = [...new Set(user.userRoles.map((ur) => ur.role.code))];
-    const branchId = user.branches[0]?.branchId ?? null;
+    const roles = [...new Set(currentUserRoles.map((ur) => ur.role.code))];
+    const branchId =
+      user.branches
+        .filter(
+          (ub) =>
+            ub.branch.companyId === user.companyId &&
+            ub.branch.isActive &&
+            ub.branch.deletedAt === null,
+        )
+        .map((ub) => ub.branchId)
+        .sort()[0] ?? null;
 
     const accessToken = await this.jwt.signAsync(
       {
@@ -216,6 +254,7 @@ export class AuthService {
         companyId: user.companyId,
         branchId,
         isSuperAdmin: user.isSuperAdmin,
+        tokenVersion: user.tokenVersion,
         permissions,
       },
       {

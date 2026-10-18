@@ -12,9 +12,14 @@ import { isCorsOriginAllowed } from './common/security/cors-origin';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
+    bodyParser: false,
   });
   const logger = new Logger('Bootstrap');
 
+  // The first-run form can carry a resized company logo as base64 JSON. Keep
+  // the parser bounded (not Express's 100 KB default, and not unlimited).
+  app.useBodyParser('json', { limit: '6mb' });
+  app.useBodyParser('urlencoded', { extended: true, limit: '1mb' });
   app.setGlobalPrefix('api/v1');
 
   // Reject unknown properties so a typo cannot silently create a half-formed

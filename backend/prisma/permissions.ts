@@ -9,6 +9,7 @@
  * Each entry is [code, English name, Arabic name, module].
  */
 export const PERMISSIONS: Array<[string, string, string, string]> = [
+  ['company.profile.manage', 'Manage company profile', 'إدارة بيانات الشركة', 'admin'],
   ['accounting.accounts.read', 'View chart of accounts', 'عرض دليل الحسابات', 'accounting'],
   ['accounting.accounts.create', 'Add accounts to the chart', 'إضافة حسابات للدليل', 'accounting'],
   ['accounting.accounts.update', 'Edit accounts', 'تعديل الحسابات', 'accounting'],

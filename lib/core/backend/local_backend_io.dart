@@ -402,6 +402,10 @@ class LocalBackend {
         workingDirectory: layout.backendDirectory,
         environment: {
           ...settings.asEnvironment(port),
+          // Installed Program Files is read-only for ordinary users.
+          'KAYAN_BACKUP_DIR':
+              settings.asEnvironment(port)['KAYAN_BACKUP_DIR'] ??
+              '${layout.dataDirectory.path}${Platform.pathSeparator}backups',
           // The desktop server is private to this machine.
           'KAYAN_UPLOAD_DIR':
               '${layout.dataDirectory.path}${Platform.pathSeparator}uploads',

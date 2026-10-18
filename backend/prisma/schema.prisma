@@ -151,6 +151,8 @@ model User {
   passwordHash String // Argon2id. Never stores a plain or reversible value.
   isActive     Boolean   @default(true)
   isSuperAdmin Boolean   @default(false)
+  /// Increment to revoke every already-issued access token for this user.
+  tokenVersion Int       @default(0)
 
   failedLoginCount Int       @default(0)
   lockedUntil      DateTime?
@@ -696,8 +698,10 @@ model OpeningBalance {
   id             String        @id @default(uuid()) @db.Uuid
   companyId      String        @db.Uuid
   branchId       String        @db.Uuid
-  documentNumber String
-  asOfDate       DateTime      @db.Date
+  warehouseId    String?       @db.Uuid
+  documentNumber   String
+  importFingerprint String?     @db.VarChar(64)
+  asOfDate         DateTime    @db.Date
   description    String?
   status         InvoiceStatus @default(DRAFT)
 
@@ -714,10 +718,12 @@ model OpeningBalance {
   deletedAt DateTime?
 
   company Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  branch  Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  lines   OpeningBalanceLine[]
+  branch    Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  warehouse Warehouse?         @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  lines     OpeningBalanceLine[]
 
   @@unique([companyId, documentNumber])
+  @@unique([companyId, importFingerprint])
   @@index([companyId, asOfDate])
   @@map("opening_balances")
 }
@@ -1255,6 +1261,14 @@ model SalesInvoiceLine {
   /// more than what is left, which is what stops the same goods being
   /// credited twice.
   returnedQuantity Decimal @default(0) @db.Decimal(19, 4)
+  /// Net sales value already credited by posted returns, for exact partial-return rounding.
+  returnedSubTotal Decimal @default(0) @db.Decimal(19, 4)
+  /// Exact cost already credited back by posted returns, used to assign the
+  /// rounding remainder to the last partial return.
+  returnedCostTotal Decimal @default(0) @db.Decimal(19, 4)
+  /// Tax already credited by posted returns; the last partial return receives
+  /// the rounding remainder so a full return exactly reverses the invoice.
+  returnedTaxTotal Decimal @default(0) @db.Decimal(19, 4)
 
   /// On a return line only: the line of the original invoice it gives back.
   /// Naming the line - not just the item - is what makes "return half of it"
@@ -1299,8 +1313,10 @@ model PurchaseInvoice {
 
   subTotal    Decimal @default(0) @db.Decimal(19, 4)
   taxAmount   Decimal @default(0) @db.Decimal(19, 4)
-  totalAmount Decimal @default(0) @db.Decimal(19, 4)
-  paidAmount  Decimal @default(0) @db.Decimal(19, 4)
+  totalAmount      Decimal @default(0) @db.Decimal(19, 4)
+  paidAmount       Decimal @default(0) @db.Decimal(19, 4)
+  landedCostAmount Decimal @default(0) @db.Decimal(19, 4)
+  landedCostCharges Json   @default("[]")
 
   /// The warehouse the goods arrived at. Null means the branch's default.
   warehouseId String? @db.Uuid
@@ -1347,9 +1363,18 @@ model PurchaseInvoiceLine {
   taxAmount   Decimal @default(0) @db.Decimal(19, 4)
   lineTotal   Decimal @db.Decimal(19, 4)
 
+  /// Purchase-cost add-on distributed across invoice lines by line value.
+  landedCostAmount   Decimal @default(0) @db.Decimal(19, 4)
+  inventoryCostTotal Decimal @default(0) @db.Decimal(19, 4)
+  returnedCostTotal  Decimal @default(0) @db.Decimal(19, 4)
+  /// Tax already credited by posted returns for this invoice line.
+  returnedTaxTotal   Decimal @default(0) @db.Decimal(19, 4)
+
   discountPercent  Decimal @default(0) @db.Decimal(9, 4)
   discountAmount   Decimal @default(0) @db.Decimal(19, 4)
   returnedQuantity Decimal @default(0) @db.Decimal(19, 4)
+  /// Net purchase value already credited by posted returns.
+  returnedSubTotal Decimal @default(0) @db.Decimal(19, 4)
   originalLineId   String? @db.Uuid
 
   invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
@@ -1447,6 +1472,7 @@ model Warehouse {
   purchaseInvoices     PurchaseInvoice[]
   stockDocumentsFrom   StockDocument[] @relation("StockDocumentFromWarehouse")
   stockDocumentsTo     StockDocument[] @relation("StockDocumentToWarehouse")
+  openingBalances      OpeningBalance[]
 
   @@unique([companyId, code])
   @@index([companyId, branchId])

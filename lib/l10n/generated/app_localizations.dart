@@ -194,6 +194,30 @@ abstract class AppLocalizations {
   /// **'Chart of Accounts'**
   String get chartOfAccounts;
 
+  /// No description provided for @openingBalancesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Opening balances'**
+  String get openingBalancesTitle;
+
+  /// No description provided for @reviewOpeningBalances.
+  ///
+  /// In en, this message translates to:
+  /// **'Review opening balances'**
+  String get reviewOpeningBalances;
+
+  /// No description provided for @noOpeningBalanceDocuments.
+  ///
+  /// In en, this message translates to:
+  /// **'No opening-balance drafts yet'**
+  String get noOpeningBalanceDocuments;
+
+  /// No description provided for @openingBalanceDraftHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Imported opening balances are drafts until you review and post them.'**
+  String get openingBalanceDraftHint;
+
   /// No description provided for @journalEntries.
   ///
   /// In en, this message translates to:
@@ -277,6 +301,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Branch'**
   String get branch;
+
+  /// No description provided for @warehouse.
+  ///
+  /// In en, this message translates to:
+  /// **'Warehouse'**
+  String get warehouse;
 
   /// No description provided for @notAvailable.
   ///
@@ -596,6 +626,12 @@ abstract class AppLocalizations {
   /// **'Service / not stocked'**
   String get stockNotTracked;
 
+  /// No description provided for @stockTrackingDoesNotAddQuantity.
+  ///
+  /// In en, this message translates to:
+  /// **'Stock tracking does not add quantity. Use Opening balances to enter opening stock, then review and post the draft.'**
+  String get stockTrackingDoesNotAddQuantity;
+
   /// No description provided for @noStock.
   ///
   /// In en, this message translates to:
@@ -715,6 +751,168 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'New purchase invoice'**
   String get newPurchaseInvoice;
+
+  /// No description provided for @landedCosts.
+  ///
+  /// In en, this message translates to:
+  /// **'Landed costs'**
+  String get landedCosts;
+
+  /// No description provided for @landedCostAllocationHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Add each freight, shipping, duty, or other charge. The total is allocated across stock lines by line value.'**
+  String get landedCostAllocationHint;
+
+  /// No description provided for @landedCostCannotBeNegative.
+  ///
+  /// In en, this message translates to:
+  /// **'Landed costs cannot be negative'**
+  String get landedCostCannotBeNegative;
+
+  /// No description provided for @addLandedCost.
+  ///
+  /// In en, this message translates to:
+  /// **'Add charge'**
+  String get addLandedCost;
+
+  /// No description provided for @removeLandedCost.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove charge'**
+  String get removeLandedCost;
+
+  /// No description provided for @otherLandedCosts.
+  ///
+  /// In en, this message translates to:
+  /// **'Other landed costs'**
+  String get otherLandedCosts;
+
+  /// No description provided for @landedCostDescriptionRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a description for each landed-cost charge'**
+  String get landedCostDescriptionRequired;
+
+  /// No description provided for @landedCostAmountInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a valid non-negative amount for each landed-cost charge'**
+  String get landedCostAmountInvalid;
+
+  /// No description provided for @editDraftInvoice.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit draft invoice'**
+  String get editDraftInvoice;
+
+  /// No description provided for @onlyDraftInvoiceCanBeEdited.
+  ///
+  /// In en, this message translates to:
+  /// **'Only a draft invoice can be edited'**
+  String get onlyDraftInvoiceCanBeEdited;
+
+  /// No description provided for @salesReturns.
+  ///
+  /// In en, this message translates to:
+  /// **'Sales returns'**
+  String get salesReturns;
+
+  /// No description provided for @purchaseReturns.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase returns'**
+  String get purchaseReturns;
+
+  /// No description provided for @newSalesReturn.
+  ///
+  /// In en, this message translates to:
+  /// **'New sales return'**
+  String get newSalesReturn;
+
+  /// No description provided for @newPurchaseReturn.
+  ///
+  /// In en, this message translates to:
+  /// **'New purchase return'**
+  String get newPurchaseReturn;
+
+  /// No description provided for @noReturns.
+  ///
+  /// In en, this message translates to:
+  /// **'No returns yet'**
+  String get noReturns;
+
+  /// No description provided for @returnDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Return date'**
+  String get returnDate;
+
+  /// No description provided for @returnReason.
+  ///
+  /// In en, this message translates to:
+  /// **'Return reason'**
+  String get returnReason;
+
+  /// No description provided for @originalInvoice.
+  ///
+  /// In en, this message translates to:
+  /// **'Original invoice'**
+  String get originalInvoice;
+
+  /// No description provided for @selectOriginalInvoice.
+  ///
+  /// In en, this message translates to:
+  /// **'Select a posted invoice'**
+  String get selectOriginalInvoice;
+
+  /// No description provided for @remainingToReturn.
+  ///
+  /// In en, this message translates to:
+  /// **'Remaining to return'**
+  String get remainingToReturn;
+
+  /// No description provided for @quantityToReturn.
+  ///
+  /// In en, this message translates to:
+  /// **'Quantity to return'**
+  String get quantityToReturn;
+
+  /// No description provided for @createReturn.
+  ///
+  /// In en, this message translates to:
+  /// **'Create return'**
+  String get createReturn;
+
+  /// No description provided for @returnCreated.
+  ///
+  /// In en, this message translates to:
+  /// **'Return saved as a draft'**
+  String get returnCreated;
+
+  /// No description provided for @confirmPostReturn.
+  ///
+  /// In en, this message translates to:
+  /// **'Posting updates stock and the customer or supplier balance. Continue?'**
+  String get confirmPostReturn;
+
+  /// No description provided for @returnPosted.
+  ///
+  /// In en, this message translates to:
+  /// **'Return posted'**
+  String get returnPosted;
+
+  /// No description provided for @returnReversed.
+  ///
+  /// In en, this message translates to:
+  /// **'Return reversed'**
+  String get returnReversed;
+
+  /// No description provided for @returnLines.
+  ///
+  /// In en, this message translates to:
+  /// **'Return lines'**
+  String get returnLines;
 
   /// No description provided for @invoiceNumber.
   ///
@@ -2135,7 +2333,7 @@ abstract class AppLocalizations {
   /// No description provided for @logoHint.
   ///
   /// In en, this message translates to:
-  /// **'Optional — PNG, JPEG or WebP up to 2 MB'**
+  /// **'Optional — PNG, JPEG or WebP; resized to 1024 × 1024 px, up to 2 MB.'**
   String get logoHint;
 
   /// No description provided for @logoUpdated.
@@ -2149,6 +2347,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Logo removed'**
   String get logoRemoved;
+
+  /// No description provided for @logoInvalid.
+  String get logoInvalid;
+
+  /// No description provided for @logoTooLarge.
+  String get logoTooLarge;
+
+  /// No description provided for @demoBackupTitle.
+  String get demoBackupTitle;
+
+  /// No description provided for @demoBackupHint.
+  String get demoBackupHint;
+
+  /// No description provided for @downloadDemoBackup.
+  String get downloadDemoBackup;
+
+  /// No description provided for @demoLoginHint.
+  String get demoLoginHint;
 
   /// No description provided for @noLogo.
   ///

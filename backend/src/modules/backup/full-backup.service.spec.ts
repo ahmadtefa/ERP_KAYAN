@@ -81,6 +81,13 @@ describe('FullBackupService guards', () => {
     return service;
   }
 
+  it('looks in the actual installer PostgreSQL directory before legacy tools', () => {
+    const service = serviceWithEnv(temporaryDir('kayan-tools-'));
+    const folders = (service as any).bundledToolDirs() as string[];
+    expect(folders[0]).toBe(join(process.cwd(), 'postgres', 'bin'));
+    expect(folders).toContain(join(process.cwd(), 'backend', 'postgres', 'bin'));
+  });
+
   describe('safePath', () => {
     it('accepts a plain backup file name', () => {
       const dir = temporaryDir('kayan-backups-');

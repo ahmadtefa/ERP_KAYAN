@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InvoiceStatus, JournalStatus, Prisma, StockDirection } from '@prisma/client';
+import { InvoiceDocumentType, InvoiceStatus, JournalStatus, Prisma, StockDirection } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
@@ -49,7 +49,11 @@ export class SalesInvoicesService {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
 
-    const where: Prisma.SalesInvoiceWhereInput = { companyId, deletedAt: null };
+    const where: Prisma.SalesInvoiceWhereInput = {
+      companyId,
+      deletedAt: null,
+      documentType: InvoiceDocumentType.INVOICE,
+    };
     if (query.customerId) where.customerId = query.customerId;
     if (query.status) {
       const status = query.status.toUpperCase() as InvoiceStatus;
@@ -115,6 +119,7 @@ export class SalesInvoicesService {
         unit: l.item?.unit ?? null,
         description: l.description,
         quantity: l.quantity.toFixed(MONEY_SCALE),
+        returnedQuantity: l.returnedQuantity.toFixed(MONEY_SCALE),
         unitPrice: l.unitPrice.toFixed(MONEY_SCALE),
         taxRate: l.taxRate.toFixed(RATE_SCALE),
         taxAmount: l.taxAmount.toFixed(MONEY_SCALE),
@@ -447,6 +452,20 @@ export class SalesInvoicesService {
       if (claimedInvoice.count !== 1) {
         throw new BadRequestException('This invoice has already been reversed');
       }
+      const activeReturns = await tx.salesInvoice.count({
+        where: {
+          companyId,
+          originalInvoiceId: invoice.id,
+          documentType: InvoiceDocumentType.CREDIT_NOTE,
+          status: InvoiceStatus.POSTED,
+          deletedAt: null,
+        },
+      });
+      if (activeReturns > 0) {
+        throw new BadRequestException(
+          'Reverse the posted sales returns before reversing their source invoice.',
+        );
+      }
       const claimedJournal = await tx.journalEntry.updateMany({
         where: { id: original.id, companyId, status: JournalStatus.POSTED },
         data: { status: JournalStatus.REVERSED },
@@ -455,13 +474,33 @@ export class SalesInvoicesService {
         throw new BadRequestException('The original journal entry has already been reversed');
       }
 
+      const warehouseId = await this.warehouses.resolveForReversal(
+        tx,
+        companyId,
+        invoice.branchId,
+        invoice.warehouseId,
+      );
+      if (!invoice.warehouseId && warehouseId) {
+        await tx.salesInvoice.update({
+          where: { id: invoice.id },
+          data: { warehouseId },
+        });
+      }
+
       for (const line of invoice.lines) {
-        if (!line.itemId || line.costTotal.isZero()) continue;
+        if (!line.itemId) continue;
+        const item = await tx.item.findFirst({
+          where: { id: line.itemId, companyId, deletedAt: null },
+          select: { id: true, isStockTracked: true },
+        });
+        if (!item) throw new BadRequestException('A sales invoice item no longer exists');
+        if (!item.isStockTracked) continue;
 
         await tx.stockMovement.create({
           data: {
             companyId,
             branchId: invoice.branchId,
+            warehouseId,
             itemId: line.itemId,
             movementDate: new Date(),
             direction: StockDirection.IN,
@@ -720,6 +759,7 @@ export class SalesInvoicesService {
 
   private toSummary(invoice: {
     id: string;
+    branchId: string;
     invoiceNumber: string;
     invoiceDate: Date;
     dueDate: Date | null;
@@ -735,6 +775,7 @@ export class SalesInvoicesService {
   }) {
     return {
       id: invoice.id,
+      branchId: invoice.branchId,
       invoiceNumber: invoice.invoiceNumber,
       invoiceDate: invoice.invoiceDate.toISOString().slice(0, 10),
       dueDate: invoice.dueDate?.toISOString().slice(0, 10) ?? null,

@@ -36,10 +36,13 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
 
   String get _basePath => widget.kind.basePath;
 
-  Future<void> _openEditor() async {
+  Future<void> _openEditor({String? invoiceId}) async {
     await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => InvoiceEditorScreen(kind: widget.kind),
+        builder: (_) => InvoiceEditorScreen(
+          kind: widget.kind,
+          invoiceId: invoiceId,
+        ),
       ),
     );
   }
@@ -182,6 +185,14 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
           actions: (row) {
             final status = text(row, 'status').toLowerCase();
             return [
+              if (status == 'draft' && !isSales)
+                IconButton(
+                  tooltip: l10n.editDraftInvoice,
+                  icon: const Icon(Icons.edit_outlined, size: 20),
+                  onPressed: _busy
+                      ? null
+                      : () => _openEditor(invoiceId: text(row, 'id')),
+                ),
               IconButton(
                 tooltip: l10n.viewDetails,
                 icon: const Icon(Icons.receipt_long_outlined, size: 20),
