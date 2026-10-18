@@ -36,12 +36,7 @@ class CompanyDataSource {
     final form = FormData.fromMap({
       'file': MultipartFile.fromBytes(file.bytes, filename: file.name),
     });
-    final response = await _client.raw.post<dynamic>(
-      '$_path/logo',
-      data: form,
-    );
-    final data = response.data;
-    return data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+    return _client.post('$_path/logo', body: form);
   }
 
   Future<void> removeLogo() => _client.delete('$_path/logo');

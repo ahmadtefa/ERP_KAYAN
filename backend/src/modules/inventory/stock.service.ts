@@ -71,7 +71,10 @@ export class StockService {
     const movements = await this.prisma.stockMovement.findMany({
       where: { companyId, itemId },
       orderBy: [{ movementDate: 'asc' }, { createdAt: 'asc' }],
-      include: { branch: { select: { code: true } } },
+      include: {
+        branch: { select: { code: true } },
+        warehouse: { select: { code: true, nameEn: true, nameAr: true } },
+      },
     });
 
     let runningQty = new Prisma.Decimal(0);
@@ -87,9 +90,15 @@ export class StockService {
 
         return {
           id: m.id,
+          // `date` is the key consumed by the stock-card screen; keep the
+          // explicit name too for clients that use the API directly.
+          date: m.movementDate.toISOString().slice(0, 10),
           movementDate: m.movementDate.toISOString().slice(0, 10),
           direction: m.direction.toLowerCase(),
           branchCode: m.branch.code,
+          warehouseCode: m.warehouse?.code ?? null,
+          warehouseNameEn: m.warehouse?.nameEn ?? null,
+          warehouseNameAr: m.warehouse?.nameAr ?? null,
           quantity: m.quantity.toFixed(MONEY_SCALE),
           unitCost: m.unitCost.toFixed(MONEY_SCALE),
           totalCost: m.totalCost.toFixed(MONEY_SCALE),

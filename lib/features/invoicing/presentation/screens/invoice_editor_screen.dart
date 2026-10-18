@@ -33,14 +33,29 @@ class _LineDraft {
   }
 }
 
+class _LandedCostDraft {
+  _LandedCostDraft({String description = '', String amount = '0'})
+      : description = TextEditingController(text: description),
+        amount = TextEditingController(text: amount);
+
+  final TextEditingController description;
+  final TextEditingController amount;
+
+  void dispose() {
+    description.dispose();
+    amount.dispose();
+  }
+}
+
 /// Creates a draft sales or purchase invoice.
 ///
 /// The screen only ever creates a draft. Posting is a separate, deliberate
 /// step from the list, because posting moves stock and writes to the ledger.
 class InvoiceEditorScreen extends ConsumerStatefulWidget {
-  const InvoiceEditorScreen({super.key, required this.kind});
+  const InvoiceEditorScreen({super.key, required this.kind, this.invoiceId});
 
   final InvoiceKind kind;
+  final String? invoiceId;
 
   @override
   ConsumerState<InvoiceEditorScreen> createState() =>
@@ -53,7 +68,9 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   String? _supplierReference;
   String? _notes;
   late String _invoiceDate;
+  final _landedCosts = <_LandedCostDraft>[];
   bool _saving = false;
+  bool _loadingExisting = false;
 
   @override
   void initState() {
@@ -64,6 +81,70 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
     _lines.add(_LineDraft());
+    if (widget.invoiceId != null) {
+      _loadingExisting = true;
+      _loadExisting();
+    }
+  }
+
+  Future<void> _loadExisting() async {
+    try {
+      final invoice = await ref
+          .read(apiClientProvider)
+          .getObject('${widget.kind.basePath}/${widget.invoiceId}');
+      if (!mounted) return;
+      if (text(invoice, 'status').toLowerCase() != 'draft') {
+        showMessage(context, context.l10n.onlyDraftInvoiceCanBeEdited, error: true);
+        Navigator.of(context).pop();
+        return;
+      }
+      for (final line in _lines) {
+        line.dispose();
+      }
+      _lines.clear();
+      for (final charge in _landedCosts) {
+        charge.dispose();
+      }
+      _landedCosts.clear();
+      for (final row in listOf(invoice['landedCostCharges'])) {
+        _landedCosts.add(_LandedCostDraft(
+          description: text(row, 'description'),
+          amount: text(row, 'amount', fallback: '0'),
+        ));
+      }
+      final legacyLandedCost = Decimal.tryParse(text(invoice, 'landedCostAmount')) ?? Decimal.zero;
+      if (_landedCosts.isEmpty && legacyLandedCost > Decimal.zero) {
+        _landedCosts.add(_LandedCostDraft(
+          description: context.l10n.otherLandedCosts,
+          amount: legacyLandedCost.toString(),
+        ));
+      }
+      for (final row in listOf(invoice['lines'])) {
+        final line = _LineDraft(
+          quantity: text(row, 'quantity', fallback: '1'),
+          unitPrice: text(row, 'unitPrice', fallback: '0'),
+          taxRate: text(row, 'taxRate', fallback: '0'),
+        )..itemId = text(row, 'itemId').isEmpty ? null : text(row, 'itemId');
+        _lines.add(line);
+      }
+      if (_lines.isEmpty) _lines.add(_LineDraft());
+      setState(() {
+        _partyId = text(invoice, widget.kind.partyKey).isNotEmpty
+            ? text(Map<String, dynamic>.from(invoice[widget.kind.partyKey] as Map), 'id')
+            : null;
+        _supplierReference = text(invoice, 'supplierReference').isEmpty
+            ? null
+            : text(invoice, 'supplierReference');
+        _notes = text(invoice, 'notes').isEmpty ? null : text(invoice, 'notes');
+        _invoiceDate = text(invoice, 'invoiceDate', fallback: _invoiceDate);
+        _loadingExisting = false;
+      });
+    } on Failure catch (error) {
+      if (mounted) {
+        setState(() => _loadingExisting = false);
+        showMessage(context, error.message, error: true);
+      }
+    }
   }
 
   @override
@@ -71,12 +152,15 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     for (final line in _lines) {
       line.dispose();
     }
+    for (final charge in _landedCosts) {
+      charge.dispose();
+    }
     super.dispose();
   }
 
   /// Totals computed with [Decimal], the same arithmetic the server uses, so
   /// what is previewed here is what will be stored.
-  ({Decimal subTotal, Decimal tax, Decimal total}) get _totals {
+  ({Decimal subTotal, Decimal tax, Decimal landedCost, Decimal total}) get _totals {
     var subTotal = Decimal.zero;
     var tax = Decimal.zero;
     for (final line in _lines) {
@@ -92,7 +176,18 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           .toDecimal(scaleOnInfinitePrecision: 8)
           .round(scale: 4);
     }
-    return (subTotal: subTotal, tax: tax, total: subTotal + tax);
+    var landedCost = Decimal.zero;
+    if (!widget.kind.isSales) {
+      for (final charge in _landedCosts) {
+        landedCost += Decimal.tryParse(charge.amount.text.trim()) ?? Decimal.zero;
+      }
+    }
+    return (
+      subTotal: subTotal,
+      tax: tax,
+      landedCost: landedCost,
+      total: subTotal + tax + landedCost,
+    );
   }
 
   void _applyItemDefaults(_LineDraft line, Json item) {
@@ -122,6 +217,34 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       return;
     }
 
+    final landedCostCharges = <Json>[];
+    var landedCost = Decimal.zero;
+    if (!widget.kind.isSales) {
+      for (final charge in _landedCosts) {
+        final description = charge.description.text.trim();
+        final rawAmount = charge.amount.text.trim();
+        final amount = Decimal.tryParse(rawAmount);
+        if (description.isEmpty &&
+            (rawAmount.isEmpty || (amount != null && amount == Decimal.zero))) {
+          continue;
+        }
+        if (description.isEmpty) {
+          showMessage(context, l10n.landedCostDescriptionRequired, error: true);
+          return;
+        }
+        if (amount == null) {
+          showMessage(context, l10n.landedCostAmountInvalid, error: true);
+          return;
+        }
+        if (amount < Decimal.zero) {
+          showMessage(context, l10n.landedCostCannotBeNegative, error: true);
+          return;
+        }
+        landedCost += amount;
+        landedCostCharges.add({'description': description, 'amount': amount.toString()});
+      }
+    }
+
     final lines = <Json>[];
     for (final line in _lines) {
       final quantity = line.quantity.text.trim();
@@ -146,20 +269,25 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
 
     setState(() => _saving = true);
     try {
-      await ref
-          .read(apiClientProvider)
-          .post(
-            widget.kind.basePath,
-            body: {
-              'invoiceDate': _invoiceDate,
-              if (widget.kind.isSales) 'customerId': _partyId,
-              if (!widget.kind.isSales) 'supplierId': _partyId,
-              if (!widget.kind.isSales && _supplierReference != null)
-                'supplierReference': _supplierReference,
-              if (_notes != null && _notes!.isNotEmpty) 'notes': _notes,
-              'lines': lines,
-            },
-          );
+      final body = <String, dynamic>{
+        'invoiceDate': _invoiceDate,
+        if (widget.kind.isSales) 'customerId': _partyId,
+        if (!widget.kind.isSales) 'supplierId': _partyId,
+        if (!widget.kind.isSales) 'landedCostAmount': landedCost.toString(),
+        if (!widget.kind.isSales) 'landedCostCharges': landedCostCharges,
+        if (!widget.kind.isSales && _supplierReference != null)
+          'supplierReference': _supplierReference,
+        if (_notes != null && _notes!.isNotEmpty) 'notes': _notes,
+        'lines': lines,
+      };
+      if (widget.invoiceId != null) {
+        await ref.read(apiClientProvider).put(
+          '${widget.kind.basePath}/${widget.invoiceId}',
+          body: body,
+        );
+      } else {
+        await ref.read(apiClientProvider).post(widget.kind.basePath, body: body);
+      }
       await ref.read(invoiceListProvider(widget.kind).notifier).reload();
       if (mounted) {
         Navigator.of(context).pop(true);
@@ -183,13 +311,17 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.kind.isSales ? l10n.newSalesInvoice : l10n.newPurchaseInvoice,
+          widget.invoiceId != null
+              ? l10n.editDraftInvoice
+              : widget.kind.isSales
+                  ? l10n.newSalesInvoice
+                  : l10n.newPurchaseInvoice,
         ),
         actions: [
           Padding(
             padding: const EdgeInsetsDirectional.only(end: 16),
             child: FilledButton.icon(
-              onPressed: _saving ? null : _save,
+              onPressed: _saving || _loadingExisting ? null : _save,
               icon: const Icon(Icons.save_outlined),
               label: Text(l10n.save),
             ),
@@ -200,6 +332,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           _Header(
+            key: ValueKey('${widget.invoiceId ?? 'new'}-$_loadingExisting'),
             kind: widget.kind,
             invoiceDate: _invoiceDate,
             onDateChanged: (value) => setState(() => _invoiceDate = value),
@@ -212,6 +345,58 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
             onNotesChanged: (value) => setState(() => _notes = value),
             parties: partiesAsync.value ?? const [],
           ),
+          if (!widget.kind.isSales) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(child: Text(l10n.landedCosts, style: Theme.of(context).textTheme.titleMedium)),
+                TextButton.icon(
+                  onPressed: () => setState(() => _landedCosts.add(_LandedCostDraft())),
+                  icon: const Icon(Icons.add),
+                  label: Text(l10n.addLandedCost),
+                ),
+              ],
+            ),
+            Text(l10n.landedCostAllocationHint, style: Theme.of(context).textTheme.bodySmall),
+            for (var index = 0; index < _landedCosts.length; index++) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: TextField(
+                      controller: _landedCosts[index].description,
+                      decoration: InputDecoration(
+                        labelText: l10n.description,
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: TextField(
+                      controller: _landedCosts[index].amount,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: InputDecoration(
+                        labelText: l10n.amount,
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: l10n.removeLandedCost,
+                    onPressed: () => setState(() => _landedCosts.removeAt(index).dispose()),
+                    icon: const Icon(Icons.delete_outline),
+                  ),
+                ],
+              ),
+            ],
+          ],
           const SizedBox(height: 16),
           Row(
             children: [
@@ -235,7 +420,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
             onItemDefaults: _applyItemDefaults,
           ),
           const SizedBox(height: 16),
-          _Totals(totals: _totals),
+          _Totals(totals: _totals, showLandedCost: !widget.kind.isSales),
         ],
       ),
     );
@@ -521,9 +706,10 @@ class _LineTotal extends StatelessWidget {
 }
 
 class _Totals extends StatelessWidget {
-  const _Totals({required this.totals});
+  const _Totals({required this.totals, required this.showLandedCost});
 
-  final ({Decimal subTotal, Decimal tax, Decimal total}) totals;
+  final ({Decimal subTotal, Decimal tax, Decimal landedCost, Decimal total}) totals;
+  final bool showLandedCost;
 
   @override
   Widget build(BuildContext context) {
@@ -557,6 +743,7 @@ class _Totals extends StatelessWidget {
           children: [
             row(l10n.subTotal, totals.subTotal),
             row(l10n.taxAmount, totals.tax),
+            if (showLandedCost) row(l10n.landedCosts, totals.landedCost),
             const Divider(),
             row(l10n.totalAmount, totals.total, strong: true),
           ],

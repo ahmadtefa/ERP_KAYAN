@@ -8,7 +8,7 @@ import * as argon2 from 'argon2';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { validateLogo } from './company.service';
+import { normalizeLogo } from './company.service';
 import { InitialSetupDto } from './dto/company.dto';
 
 /**
@@ -114,7 +114,7 @@ export class SetupService {
     let logo: { data: Uint8Array<ArrayBuffer>; mime: string } | null = null;
     if (dto.logoBase64) {
       const buffer = Buffer.from(dto.logoBase64, 'base64');
-      logo = validateLogo(buffer, dto.logoMime ?? 'image/png');
+      logo = await normalizeLogo(buffer, dto.logoMime ?? 'image/png');
     }
 
     const passwordHash = await argon2.hash(dto.adminPassword);
@@ -380,7 +380,7 @@ export class SetupService {
 
 /// Mirrors `PERMISSIONS` in prisma/seed.ts. Kept here so a web-first setup
 /// creates exactly the same catalogue as the desktop installer.
-const SETUP_PERMISSIONS: Array<[string, string, string, string]> = [
+export const SETUP_PERMISSIONS: Array<[string, string, string, string]> = [
   ['accounting.accounts.read', 'View chart of accounts', 'عرض دليل الحسابات', 'accounting'],
   ['accounting.accounts.create', 'Add accounts to the chart', 'إضافة حسابات للدليل', 'accounting'],
   ['accounting.accounts.update', 'Edit accounts', 'تعديل الحسابات', 'accounting'],
@@ -388,6 +388,7 @@ const SETUP_PERMISSIONS: Array<[string, string, string, string]> = [
   ['accounting.journal.read', 'View journal entries', 'عرض القيود اليومية', 'accounting'],
   ['accounting.journal.create', 'Create journal entries', 'إنشاء قيود يومية', 'accounting'],
   ['accounting.journal.post', 'Post and reverse entries', 'ترحيل وعكس القيود', 'accounting'],
+  ['accounting.openingbalances.manage', 'Open the books: opening balances', 'إدخال الأرصدة الافتتاحية', 'accounting'],
   ['admin.users.manage', 'Manage users', 'إدارة المستخدمين', 'admin'],
   ['admin.roles.manage', 'Manage roles', 'إدارة الأدوار', 'admin'],
   ['admin.audit.read', 'View audit trail', 'عرض سجل التدقيق', 'admin'],

@@ -27,7 +27,13 @@ function makeContext(authorization = 'Bearer access-token') {
 }
 
 function makeGuard(options?: {
-  principal?: { id: string; companyId: string; isActive: boolean; deletedAt: Date | null } | null;
+  principal?: {
+    id: string;
+    companyId: string;
+    isActive: boolean;
+    deletedAt: Date | null;
+    tokenVersion?: number;
+  } | null;
   verifyError?: Error;
 }) {
   const reflector = {
@@ -48,6 +54,7 @@ function makeGuard(options?: {
               companyId: payload.companyId,
               isActive: true,
               deletedAt: null,
+              tokenVersion: 0,
             },
       ),
     },
@@ -63,7 +70,13 @@ describe('JwtAuthGuard account status', () => {
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(prisma.user.findUnique).toHaveBeenCalledWith({
       where: { id: payload.sub },
-      select: { id: true, companyId: true, isActive: true, deletedAt: true },
+      select: {
+        id: true,
+        companyId: true,
+        isActive: true,
+        deletedAt: true,
+        tokenVersion: true,
+      },
     });
     expect(request.user).toMatchObject({
       userId: payload.sub,
@@ -77,6 +90,7 @@ describe('JwtAuthGuard account status', () => {
     ['deleted', { id: payload.sub, companyId: payload.companyId, isActive: true, deletedAt: new Date() }],
     ['missing', null],
     ['company mismatch', { id: payload.sub, companyId: 'other-company', isActive: true, deletedAt: null }],
+    ['revoked token version', { id: payload.sub, companyId: payload.companyId, isActive: true, deletedAt: null, tokenVersion: 1 }],
   ])('rejects a %s account before allowing protected requests', async (_label, principal) => {
     const { guard } = makeGuard({ principal });
     const { context } = makeContext();

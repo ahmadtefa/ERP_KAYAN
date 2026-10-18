@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/image/company_logo_image.dart';
 import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -236,15 +237,62 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
       return;
     }
     if (picked == null || !mounted) return;
+
+    late final PickedFile normalized;
+    try {
+      final bytes = await normalizeCompanyLogo(picked.bytes);
+      normalized = PickedFile(
+        name: 'company-logo.png',
+        bytes: bytes,
+        mimeType: 'image/png',
+      );
+    } on CompanyLogoImageException catch (problem) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(problem.tooLarge ? l10n.logoTooLarge : l10n.logoInvalid)),
+      );
+      return;
+    }
+    if (!mounted) return;
+
     setState(() => _busy = true);
     final error = await ref
         .read(companyProfileProvider.notifier)
-        .uploadLogo(picked);
+        .uploadLogo(normalized);
     if (!mounted) return;
     setState(() => _busy = false);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error ?? l10n.logoUpdated)),
+      SnackBar(
+        content: Text(
+          error == null
+              ? l10n.logoUpdated
+              : _localizedLogoError(
+                  error,
+                  tooLarge: l10n.logoTooLarge,
+                  invalid: l10n.logoInvalid,
+                ),
+        ),
+      ),
     );
+  }
+
+  String _localizedLogoError(
+    String error, {
+    required String tooLarge,
+    required String invalid,
+  }) {
+    final lower = error.toLowerCase();
+    if (lower.contains('larger than') || lower.contains('too large')) {
+      return tooLarge;
+    }
+    if (lower.contains('logo') ||
+        lower.contains('image') ||
+        lower.contains('webp') ||
+        lower.contains('png') ||
+        lower.contains('jpeg')) {
+      return invalid;
+    }
+    return error;
   }
 
   Future<void> _remove() async {

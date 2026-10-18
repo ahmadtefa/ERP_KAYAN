@@ -48,6 +48,7 @@ import { YearEndCloseService } from './year-end-close.service';
     PostingService,
     FiscalPeriodsService,
     CostCentersService,
+    OpeningBalancesService,
   ],
 })
 export class AccountingModule {}

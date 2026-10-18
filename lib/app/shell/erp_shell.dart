@@ -167,6 +167,11 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         Icons.event_available_outlined,
         l10n.fiscalPeriods,
       ),
+      _NavItem(
+        AppRoutes.openingBalances,
+        Icons.account_balance_wallet_outlined,
+        l10n.openingBalancesTitle,
+      ),
       _NavItem(AppRoutes.customers, Icons.people_outline, l10n.customers),
       _NavItem(
         AppRoutes.suppliers,
@@ -184,6 +189,16 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.purchaseInvoices,
         Icons.shopping_cart_outlined,
         l10n.purchaseInvoices,
+      ),
+      _NavItem(
+        AppRoutes.salesReturns,
+        Icons.assignment_return_outlined,
+        l10n.salesReturns,
+      ),
+      _NavItem(
+        AppRoutes.purchaseReturns,
+        Icons.keyboard_return_outlined,
+        l10n.purchaseReturns,
       ),
       _NavItem(
         AppRoutes.chartOfAccounts,

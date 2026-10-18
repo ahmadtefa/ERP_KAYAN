@@ -123,6 +123,7 @@ export class AuthService {
         companyId: user.companyId,
         branchId,
         isSuperAdmin: user.isSuperAdmin,
+        tokenVersion: user.tokenVersion,
         permissions,
       },
       {
@@ -216,6 +217,7 @@ export class AuthService {
         companyId: user.companyId,
         branchId,
         isSuperAdmin: user.isSuperAdmin,
+        tokenVersion: user.tokenVersion,
         permissions,
       },
       {

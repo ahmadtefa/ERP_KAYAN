@@ -62,6 +62,7 @@ export class JwtAuthGuard implements CanActivate {
       companyId: string;
       branchId: string | null;
       isSuperAdmin: boolean;
+      tokenVersion?: number;
       permissions: string[];
     };
     try {
@@ -77,13 +78,20 @@ export class JwtAuthGuard implements CanActivate {
     // take effect immediately rather than leaving a 15-minute access window.
     const principal = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, companyId: true, isActive: true, deletedAt: true },
+      select: {
+        id: true,
+        companyId: true,
+        isActive: true,
+        deletedAt: true,
+        tokenVersion: true,
+      },
     });
     if (
       !principal ||
       !principal.isActive ||
       principal.deletedAt !== null ||
-      principal.companyId !== payload.companyId
+      principal.companyId !== payload.companyId ||
+      principal.tokenVersion !== (payload.tokenVersion ?? 0)
     ) {
       throw new UnauthorizedException('Account is inactive or unavailable');
     }

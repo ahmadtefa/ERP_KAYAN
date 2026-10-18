@@ -1,4 +1,5 @@
 import { PERMISSIONS } from '../../../prisma/permissions';
+import { SETUP_PERMISSIONS } from '../company/setup.service';
 
 describe('permission catalogue', () => {
   it('has unique codes and bilingual names', () => {
@@ -10,6 +11,11 @@ describe('permission catalogue', () => {
       expect(nameAr.length).toBeGreaterThan(3);
       expect(module.length).toBeGreaterThan(2);
     }
+  });
+
+  it('includes opening-balance management in both seeded permission catalogues', () => {
+    expect(PERMISSIONS.some(([code]) => code === 'accounting.openingbalances.manage')).toBe(true);
+    expect(SETUP_PERMISSIONS.some(([code]) => code === 'accounting.openingbalances.manage')).toBe(true);
   });
 
   it('covers print and export as their own operations', () => {

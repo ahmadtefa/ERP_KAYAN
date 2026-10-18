@@ -59,6 +59,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get chartOfAccounts => 'Chart of Accounts';
 
   @override
+  String get openingBalancesTitle => 'Opening balances';
+
+  @override
+  String get reviewOpeningBalances => 'Review opening balances';
+
+  @override
+  String get noOpeningBalanceDocuments => 'No opening-balance drafts yet';
+
+  @override
+  String get openingBalanceDraftHint =>
+      'Imported opening balances are drafts until you review and post them.';
+
+  @override
   String get journalEntries => 'Journal Entries';
 
   @override
@@ -99,6 +112,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get branch => 'Branch';
+
+  @override
+  String get warehouse => 'Warehouse';
 
   @override
   String get notAvailable => 'Not set';
@@ -265,6 +281,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get stockNotTracked => 'Service / not stocked';
 
   @override
+  String get stockTrackingDoesNotAddQuantity =>
+      'Stock tracking does not add quantity. Use Opening balances to enter opening stock, then review and post the draft.';
+
+  @override
   String get noStock => 'No stock on hand';
 
   @override
@@ -323,6 +343,87 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get newPurchaseInvoice => 'New purchase invoice';
+
+  @override
+  String get landedCosts => 'Landed costs';
+
+  @override
+  String get landedCostAllocationHint => 'Add each freight, shipping, duty, or other charge. The total is allocated across stock lines by line value.';
+
+  @override
+  String get landedCostCannotBeNegative => 'Landed costs cannot be negative';
+
+  @override
+  String get addLandedCost => 'Add charge';
+
+  @override
+  String get removeLandedCost => 'Remove charge';
+
+  @override
+  String get otherLandedCosts => 'Other landed costs';
+
+  @override
+  String get landedCostDescriptionRequired => 'Enter a description for each landed-cost charge';
+
+  @override
+  String get landedCostAmountInvalid => 'Enter a valid non-negative amount for each landed-cost charge';
+
+  @override
+  String get editDraftInvoice => 'Edit draft invoice';
+
+  @override
+  String get onlyDraftInvoiceCanBeEdited => 'Only a draft invoice can be edited';
+
+  @override
+  String get salesReturns => 'Sales returns';
+
+  @override
+  String get purchaseReturns => 'Purchase returns';
+
+  @override
+  String get newSalesReturn => 'New sales return';
+
+  @override
+  String get newPurchaseReturn => 'New purchase return';
+
+  @override
+  String get noReturns => 'No returns yet';
+
+  @override
+  String get returnDate => 'Return date';
+
+  @override
+  String get returnReason => 'Return reason';
+
+  @override
+  String get originalInvoice => 'Original invoice';
+
+  @override
+  String get selectOriginalInvoice => 'Select a posted invoice';
+
+  @override
+  String get remainingToReturn => 'Remaining to return';
+
+  @override
+  String get quantityToReturn => 'Quantity to return';
+
+  @override
+  String get createReturn => 'Create return';
+
+  @override
+  String get returnCreated => 'Return saved as a draft';
+
+  @override
+  String get confirmPostReturn => 'Posting updates stock and the customer or supplier balance. Continue?';
+
+  @override
+  String get returnPosted => 'Return posted';
+
+  @override
+  String get returnReversed => 'Return reversed';
+
+  @override
+  String get returnLines => 'Return lines';
 
   @override
   String get invoiceNumber => 'Number';
@@ -1064,7 +1165,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get removeLogo => 'Remove logo';
 
   @override
-  String get logoHint => 'Optional — PNG, JPEG or WebP up to 2 MB';
+  String get logoHint => 'Optional — PNG, JPEG or WebP; resized to 1024 × 1024 px, up to 2 MB.';
 
   @override
   String get logoUpdated => 'Logo updated';
@@ -1425,5 +1526,27 @@ class AppLocalizationsEn extends AppLocalizations {
 
 @override
   String get deactivateAccount => 'Deactivate account';
+
+  @override
+  String get demoBackupTitle => 'Try the sample company';
+
+  @override
+  String get demoBackupHint =>
+      'Download a realistic sample company backup, then choose it under Restore. Inspect the preview before replacing any company data.';
+
+  @override
+  String get downloadDemoBackup => 'Download sample backup';
+
+  @override
+  String get demoLoginHint =>
+      'After restoring, sign in with admin / Admin@12345.';
+
+  @override
+  String get logoInvalid =>
+      'Choose a valid PNG, JPEG or WebP image at least 32 × 32 pixels.';
+
+  @override
+  String get logoTooLarge =>
+      'The resized logo is still larger than 2 MB. Choose a simpler image.';
 
 }

@@ -135,235 +135,293 @@
     "rolePermission": [
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "a68f8a93-3e10-4d52-9000-9c23e18662fa"
+        "permissionId": "a68f8a93-3e10-4d52-9000-9c23e18662fa",
+        "permissionCode": "accounting.accounts.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "5aff562e-65cf-408c-ba7d-364c3ba8fc5b"
+        "permissionId": "5aff562e-65cf-408c-ba7d-364c3ba8fc5b",
+        "permissionCode": "accounting.accounts.create"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "c5fbec5d-170a-43da-b88d-be88f1371fea"
+        "permissionId": "c5fbec5d-170a-43da-b88d-be88f1371fea",
+        "permissionCode": "accounting.accounts.update"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "20f4b93f-e013-47ce-8182-3a1c838389fc"
+        "permissionId": "20f4b93f-e013-47ce-8182-3a1c838389fc",
+        "permissionCode": "accounting.accounts.delete"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "ca8fa733-e688-4479-ac8e-19ba01051be1"
+        "permissionId": "ca8fa733-e688-4479-ac8e-19ba01051be1",
+        "permissionCode": "accounting.journal.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "b3a28846-a249-490d-90fb-f03d02421d59"
+        "permissionId": "b3a28846-a249-490d-90fb-f03d02421d59",
+        "permissionCode": "accounting.journal.create"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "dfff8011-c751-4e19-b873-db802d45fc2e"
+        "permissionId": "dfff8011-c751-4e19-b873-db802d45fc2e",
+        "permissionCode": "accounting.journal.post"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "84db3157-b076-4d8c-8008-0a60e29c8b56"
+        "permissionId": "84db3157-b076-4d8c-8008-0a60e29c8b56",
+        "permissionCode": "admin.users.manage"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "fc2e2586-284e-4b3d-a575-8164163deafa"
+        "permissionId": "fc2e2586-284e-4b3d-a575-8164163deafa",
+        "permissionCode": "admin.roles.manage"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "e5800330-489e-4342-aba3-ca4ef7f4c343"
+        "permissionId": "e5800330-489e-4342-aba3-ca4ef7f4c343",
+        "permissionCode": "admin.audit.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "fe9ae1b3-7d87-4831-8144-22c424129cd6"
+        "permissionId": "fe9ae1b3-7d87-4831-8144-22c424129cd6",
+        "permissionCode": "admin.backup"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "87f17dde-6c03-4973-8a44-fdee65b206a5"
+        "permissionId": "87f17dde-6c03-4973-8a44-fdee65b206a5",
+        "permissionCode": "admin.company.manage"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "78ef011b-3205-4728-aa95-6292f891a1a2"
+        "permissionId": "78ef011b-3205-4728-aa95-6292f891a1a2",
+        "permissionCode": "parties.customers.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "bd2fcb2e-d54e-43ce-bb30-77cc0101ef92"
+        "permissionId": "bd2fcb2e-d54e-43ce-bb30-77cc0101ef92",
+        "permissionCode": "parties.customers.create"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "7e06a85f-0cba-48d8-bd75-d1c798428462"
+        "permissionId": "7e06a85f-0cba-48d8-bd75-d1c798428462",
+        "permissionCode": "parties.customers.update"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "ec8454bd-a993-447e-98a2-315d5b4094b8"
+        "permissionId": "ec8454bd-a993-447e-98a2-315d5b4094b8",
+        "permissionCode": "parties.suppliers.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "032435c5-d176-4a4b-a64e-7a602d76ba9f"
+        "permissionId": "032435c5-d176-4a4b-a64e-7a602d76ba9f",
+        "permissionCode": "parties.suppliers.create"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "c442c051-9f9a-4419-8d27-840d9b7b7970"
+        "permissionId": "c442c051-9f9a-4419-8d27-840d9b7b7970",
+        "permissionCode": "parties.suppliers.update"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "9b828dc6-e064-44b6-884b-91ba510034ec"
+        "permissionId": "9b828dc6-e064-44b6-884b-91ba510034ec",
+        "permissionCode": "inventory.items.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "b86336a7-b0a0-4dee-bb43-5f303c6c67fd"
+        "permissionId": "b86336a7-b0a0-4dee-bb43-5f303c6c67fd",
+        "permissionCode": "inventory.items.create"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "bf746cd7-bcef-400c-96d4-50154059902f"
+        "permissionId": "bf746cd7-bcef-400c-96d4-50154059902f",
+        "permissionCode": "inventory.items.update"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "22f87ad4-c52b-48cd-849b-2c5d5dd3a358"
+        "permissionId": "22f87ad4-c52b-48cd-849b-2c5d5dd3a358",
+        "permissionCode": "inventory.stock.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "af669a1e-1fed-46ea-9c56-2b3f04724dd4"
+        "permissionId": "af669a1e-1fed-46ea-9c56-2b3f04724dd4",
+        "permissionCode": "sales.invoices.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "5f1c869b-4553-4c97-b221-db3bc00b236e"
+        "permissionId": "5f1c869b-4553-4c97-b221-db3bc00b236e",
+        "permissionCode": "sales.invoices.create"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "a1781838-67f7-4d12-999a-d30ba1cb7a4f"
+        "permissionId": "a1781838-67f7-4d12-999a-d30ba1cb7a4f",
+        "permissionCode": "sales.invoices.post"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "57e34e84-6f09-4eff-977d-749aaaf1bc34"
+        "permissionId": "57e34e84-6f09-4eff-977d-749aaaf1bc34",
+        "permissionCode": "purchases.invoices.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "9f062d36-b813-4881-8131-43a5a6ace86c"
+        "permissionId": "9f062d36-b813-4881-8131-43a5a6ace86c",
+        "permissionCode": "purchases.invoices.create"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "4b02c299-b567-4e25-8f2a-7cf4309e1f7c"
+        "permissionId": "4b02c299-b567-4e25-8f2a-7cf4309e1f7c",
+        "permissionCode": "purchases.invoices.post"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "b654303f-be6c-4c6d-91e7-c7dfc826495f"
+        "permissionId": "b654303f-be6c-4c6d-91e7-c7dfc826495f",
+        "permissionCode": "reports.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "e0f58a06-0bcd-4e3e-a724-19789cc3b19c"
+        "permissionId": "e0f58a06-0bcd-4e3e-a724-19789cc3b19c",
+        "permissionCode": "accounting.periods.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "d2db8022-b67d-49c0-8716-ab696fd97c0b"
+        "permissionId": "d2db8022-b67d-49c0-8716-ab696fd97c0b",
+        "permissionCode": "accounting.periods.manage"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "a68f8a93-3e10-4d52-9000-9c23e18662fa"
+        "permissionId": "a68f8a93-3e10-4d52-9000-9c23e18662fa",
+        "permissionCode": "accounting.accounts.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "5aff562e-65cf-408c-ba7d-364c3ba8fc5b"
+        "permissionId": "5aff562e-65cf-408c-ba7d-364c3ba8fc5b",
+        "permissionCode": "accounting.accounts.create"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "c5fbec5d-170a-43da-b88d-be88f1371fea"
+        "permissionId": "c5fbec5d-170a-43da-b88d-be88f1371fea",
+        "permissionCode": "accounting.accounts.update"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "20f4b93f-e013-47ce-8182-3a1c838389fc"
+        "permissionId": "20f4b93f-e013-47ce-8182-3a1c838389fc",
+        "permissionCode": "accounting.accounts.delete"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "ca8fa733-e688-4479-ac8e-19ba01051be1"
+        "permissionId": "ca8fa733-e688-4479-ac8e-19ba01051be1",
+        "permissionCode": "accounting.journal.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "b3a28846-a249-490d-90fb-f03d02421d59"
+        "permissionId": "b3a28846-a249-490d-90fb-f03d02421d59",
+        "permissionCode": "accounting.journal.create"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "dfff8011-c751-4e19-b873-db802d45fc2e"
+        "permissionId": "dfff8011-c751-4e19-b873-db802d45fc2e",
+        "permissionCode": "accounting.journal.post"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "78ef011b-3205-4728-aa95-6292f891a1a2"
+        "permissionId": "78ef011b-3205-4728-aa95-6292f891a1a2",
+        "permissionCode": "parties.customers.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "bd2fcb2e-d54e-43ce-bb30-77cc0101ef92"
+        "permissionId": "bd2fcb2e-d54e-43ce-bb30-77cc0101ef92",
+        "permissionCode": "parties.customers.create"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "7e06a85f-0cba-48d8-bd75-d1c798428462"
+        "permissionId": "7e06a85f-0cba-48d8-bd75-d1c798428462",
+        "permissionCode": "parties.customers.update"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "ec8454bd-a993-447e-98a2-315d5b4094b8"
+        "permissionId": "ec8454bd-a993-447e-98a2-315d5b4094b8",
+        "permissionCode": "parties.suppliers.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "032435c5-d176-4a4b-a64e-7a602d76ba9f"
+        "permissionId": "032435c5-d176-4a4b-a64e-7a602d76ba9f",
+        "permissionCode": "parties.suppliers.create"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "c442c051-9f9a-4419-8d27-840d9b7b7970"
+        "permissionId": "c442c051-9f9a-4419-8d27-840d9b7b7970",
+        "permissionCode": "parties.suppliers.update"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "9b828dc6-e064-44b6-884b-91ba510034ec"
+        "permissionId": "9b828dc6-e064-44b6-884b-91ba510034ec",
+        "permissionCode": "inventory.items.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "b86336a7-b0a0-4dee-bb43-5f303c6c67fd"
+        "permissionId": "b86336a7-b0a0-4dee-bb43-5f303c6c67fd",
+        "permissionCode": "inventory.items.create"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "bf746cd7-bcef-400c-96d4-50154059902f"
+        "permissionId": "bf746cd7-bcef-400c-96d4-50154059902f",
+        "permissionCode": "inventory.items.update"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "22f87ad4-c52b-48cd-849b-2c5d5dd3a358"
+        "permissionId": "22f87ad4-c52b-48cd-849b-2c5d5dd3a358",
+        "permissionCode": "inventory.stock.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "af669a1e-1fed-46ea-9c56-2b3f04724dd4"
+        "permissionId": "af669a1e-1fed-46ea-9c56-2b3f04724dd4",
+        "permissionCode": "sales.invoices.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "57e34e84-6f09-4eff-977d-749aaaf1bc34"
+        "permissionId": "57e34e84-6f09-4eff-977d-749aaaf1bc34",
+        "permissionCode": "purchases.invoices.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "b654303f-be6c-4c6d-91e7-c7dfc826495f"
+        "permissionId": "b654303f-be6c-4c6d-91e7-c7dfc826495f",
+        "permissionCode": "reports.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "e0f58a06-0bcd-4e3e-a724-19789cc3b19c"
+        "permissionId": "e0f58a06-0bcd-4e3e-a724-19789cc3b19c",
+        "permissionCode": "accounting.periods.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "d2db8022-b67d-49c0-8716-ab696fd97c0b"
+        "permissionId": "d2db8022-b67d-49c0-8716-ab696fd97c0b",
+        "permissionCode": "accounting.periods.manage"
       },
       {
         "roleId": "5cffaff0-538f-4b85-9cee-2f29b0391db1",
-        "permissionId": "78ef011b-3205-4728-aa95-6292f891a1a2"
+        "permissionId": "78ef011b-3205-4728-aa95-6292f891a1a2",
+        "permissionCode": "parties.customers.read"
       },
       {
         "roleId": "5cffaff0-538f-4b85-9cee-2f29b0391db1",
-        "permissionId": "9b828dc6-e064-44b6-884b-91ba510034ec"
+        "permissionId": "9b828dc6-e064-44b6-884b-91ba510034ec",
+        "permissionCode": "inventory.items.read"
       },
       {
         "roleId": "5cffaff0-538f-4b85-9cee-2f29b0391db1",
-        "permissionId": "22f87ad4-c52b-48cd-849b-2c5d5dd3a358"
+        "permissionId": "22f87ad4-c52b-48cd-849b-2c5d5dd3a358",
+        "permissionCode": "inventory.stock.read"
       },
       {
         "roleId": "5cffaff0-538f-4b85-9cee-2f29b0391db1",
-        "permissionId": "af669a1e-1fed-46ea-9c56-2b3f04724dd4"
+        "permissionId": "af669a1e-1fed-46ea-9c56-2b3f04724dd4",
+        "permissionCode": "sales.invoices.read"
       },
       {
         "roleId": "5cffaff0-538f-4b85-9cee-2f29b0391db1",
-        "permissionId": "5f1c869b-4553-4c97-b221-db3bc00b236e"
+        "permissionId": "5f1c869b-4553-4c97-b221-db3bc00b236e",
+        "permissionCode": "sales.invoices.create"
       }
     ],
     "user": [
@@ -19534,19 +19592,23 @@
     "userPermission": [
       {
         "userId": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
-        "permissionId": "a68f8a93-3e10-4d52-9000-9c23e18662fa"
+        "permissionId": "a68f8a93-3e10-4d52-9000-9c23e18662fa",
+        "permissionCode": "accounting.accounts.read"
       },
       {
         "userId": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
-        "permissionId": "5aff562e-65cf-408c-ba7d-364c3ba8fc5b"
+        "permissionId": "5aff562e-65cf-408c-ba7d-364c3ba8fc5b",
+        "permissionCode": "accounting.accounts.create"
       },
       {
         "userId": "4ad98007-8589-423f-8bfe-0777fb6f26e2",
-        "permissionId": "c5fbec5d-170a-43da-b88d-be88f1371fea"
+        "permissionId": "c5fbec5d-170a-43da-b88d-be88f1371fea",
+        "permissionCode": "accounting.accounts.update"
       },
       {
         "userId": "9bca255e-4b55-43cc-adff-9c938c8e2087",
-        "permissionId": "20f4b93f-e013-47ce-8182-3a1c838389fc"
+        "permissionId": "20f4b93f-e013-47ce-8182-3a1c838389fc",
+        "permissionCode": "accounting.accounts.delete"
       }
     ],
     "costCenter": [
@@ -20449,5 +20511,20 @@
       }
     ]
   },
-  "notes": "Fictional demo fixture for KAYAN ERP. The special DEMO company code allows this sample backup to be restored into the currently signed-in test company; restore still requires the normal explicit replace confirmation. Contains populated accounting, parties, inventory, sales and purchasing, price lists, warehouses, stock documents, opening balances, cash/bank accounts, vouchers, transfers, reconciliations and allocations. All names, identifiers and transactions are synthetic. Never use as a real company backup."
+  "notes": "Fictional demo fixture for KAYAN ERP. The special DEMO company code allows this sample backup to be restored into the currently signed-in test company; restore still requires the normal explicit replace confirmation. Contains populated accounting, parties, inventory, sales and purchasing, price lists, warehouses, stock documents, opening balances, cash/bank accounts, vouchers, transfers, reconciliations and allocations. All names, identifiers and transactions are synthetic. Never use as a real company backup.",
+  "companyProfile": {
+    "nameEn": "Al Nakheel Trading and Distribution",
+    "nameAr": "النخيل للتجارة والتوزيع",
+    "taxId": null,
+    "commercialRegistration": null,
+    "addressEn": "Minya, Egypt",
+    "addressAr": "المنيا، مصر",
+    "phone": "+20 86 000 0000",
+    "email": "demo@kayan-erp.local",
+    "address": "Minya, Egypt",
+    "currency": "EGP",
+    "timezone": "Africa/Cairo",
+    "logoBase64": null,
+    "logoMime": null
+  }
 }

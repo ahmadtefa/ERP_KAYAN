@@ -37,6 +37,8 @@ const PERMISSION: Record<ImportKind, string> = {
   customers: 'parties.customers.create',
   suppliers: 'parties.suppliers.create',
   items: 'inventory.items.create',
+  'chart-of-accounts': 'accounting.accounts.create',
+  'opening-balances': 'accounting.openingbalances.manage',
 };
 
 export const IMPORT_PERMISSIONS = PERMISSION;
@@ -96,7 +98,7 @@ export class ImportController {
     return this.service.run(slug, user.companyId, user.userId, file, {
       dryRun: query.dryRun === 'true' || query.dryRun === '1',
       mode: query.mode === 'upsert' ? 'upsert' : 'insert',
-    });
+    }, user.branchId, user.isSuperAdmin);
   }
 
   private kind(value: string): ImportKind {

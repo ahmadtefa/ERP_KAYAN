@@ -7,6 +7,7 @@ import { InvoiceStatus, Prisma, StockDirection } from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from './account-map.service';
 import { DocumentNumberService } from './document-number.service';
 import { PostingService } from './posting.service';
@@ -47,6 +48,7 @@ export class OpeningBalancesService {
     private readonly posting: PostingService,
     private readonly accounts: AccountMapService,
     private readonly audit: AuditService,
+    private readonly warehouses: WarehouseService,
   ) {}
 
   async findAll(companyId: string) {
@@ -66,6 +68,7 @@ export class OpeningBalancesService {
       where: { id, companyId, deletedAt: null },
       include: {
         branch: { select: { code: true, nameEn: true, nameAr: true } },
+        warehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
         lines: {
           orderBy: { lineNumber: 'asc' },
           include: {
@@ -81,6 +84,7 @@ export class OpeningBalancesService {
 
     return {
       ...this.toSummary(document),
+      warehouse: document.warehouse,
       lines: document.lines.map((line) => ({
         id: line.id,
         lineNumber: line.lineNumber,
@@ -115,8 +119,13 @@ export class OpeningBalancesService {
       lines: OpeningBalanceLineInput[];
       /** Put any difference on the opening-balance equity account instead of refusing. */
       autoBalanceToEquity?: boolean;
+      warehouseId?: string;
+      importFingerprint?: string;
     },
   ) {
+    if (dto.importFingerprint !== undefined && !/^[0-9a-f]{64}$/.test(dto.importFingerprint)) {
+      throw new BadRequestException('The import fingerprint must be a SHA-256 hex digest');
+    }
     const targetBranch = dto.branchId ?? branchId;
     if (!targetBranch) {
       throw new BadRequestException('Select the branch these opening figures belong to');
@@ -126,55 +135,93 @@ export class OpeningBalancesService {
       throw new BadRequestException('An opening balance needs at least two lines');
     }
 
-    const prepared = await this.prepareLines(companyId, dto.lines);
-
-    let totalDebit = prepared.reduce((sum, l) => sum.plus(l.debit), new Prisma.Decimal(0));
-    let totalCredit = prepared.reduce((sum, l) => sum.plus(l.credit), new Prisma.Decimal(0));
-
-    const lines = [...prepared];
-    if (dto.autoBalanceToEquity && !totalDebit.equals(totalCredit)) {
-      // The other side of the opening figures - capital, an accumulated
-      // surplus - has to sit somewhere. This puts it on the designated
-      // equity account so the document balances and the accountant can see it,
-      // instead of the entry being silently forced through.
-      const equity = await this.accounts.resolve(this.prisma as never, companyId, [
-        'openingBalanceEquity',
-      ]);
-      const difference = totalDebit.minus(totalCredit);
-      lines.push({
-        accountId: equity.openingBalanceEquity,
-        debit: difference.isNegative() ? difference.negated() : new Prisma.Decimal(0),
-        credit: difference.isNegative() ? new Prisma.Decimal(0) : difference,
-        customerId: null,
-        supplierId: null,
-        itemId: null,
-        quantity: null,
-        unitCost: null,
-        description: 'Opening balance equity',
+    const result = await this.prisma.$transaction(async (tx) => {
+      const branch = await tx.branch.findFirst({
+        where: { id: targetBranch, companyId, deletedAt: null },
+        select: { id: true },
       });
-      totalDebit = lines.reduce((sum, l) => sum.plus(l.debit), new Prisma.Decimal(0));
-      totalCredit = lines.reduce((sum, l) => sum.plus(l.credit), new Prisma.Decimal(0));
-    }
+      if (!branch) {
+        throw new BadRequestException('The branch does not exist in this company');
+      }
 
-    if (!totalDebit.equals(totalCredit)) {
-      throw new BadRequestException({
-        message: 'The opening balance does not balance',
-        errors: {
-          totalDebit: totalDebit.toFixed(MONEY_SCALE),
-          totalCredit: totalCredit.toFixed(MONEY_SCALE),
-          difference: totalDebit.minus(totalCredit).toFixed(MONEY_SCALE),
-          hint: 'Send autoBalanceToEquity to put the difference on the opening-balance equity account.',
-        },
-      });
-    }
+      // Resolve every reference and calculate the document inside the same
+      // transaction that persists it. In particular, AccountMapService
+      // requires a transaction client; using the root PrismaService here
+      // would split a dry read from the write and bypass that contract.
+      const prepared = await this.prepareLines(tx, companyId, dto.lines);
+      let totalDebit = prepared.reduce(
+        (sum, line) => sum.plus(line.debit),
+        new Prisma.Decimal(0),
+      );
+      let totalCredit = prepared.reduce(
+        (sum, line) => sum.plus(line.credit),
+        new Prisma.Decimal(0),
+      );
+      const lines = [...prepared];
 
-    const created = await this.prisma.$transaction(async (tx) => {
-      const documentNumber = await this.numbers.next(tx, companyId, 'OPENING_BALANCE', 'OB');
-      return tx.openingBalance.create({
+      if (dto.autoBalanceToEquity && !totalDebit.equals(totalCredit)) {
+        // Make the balancing figure visible on the designated equity account;
+        // never force a one-sided balance into the ledger silently.
+        const equity = await this.accounts.resolve(tx, companyId, [
+          'openingBalanceEquity',
+        ]);
+        const difference = totalDebit.minus(totalCredit);
+        lines.push({
+          accountId: equity.openingBalanceEquity,
+          debit: difference.isNegative()
+              ? difference.negated()
+              : new Prisma.Decimal(0),
+          credit: difference.isNegative()
+              ? new Prisma.Decimal(0)
+              : difference,
+          customerId: null,
+          supplierId: null,
+          itemId: null,
+          quantity: null,
+          unitCost: null,
+          description: 'Opening balance equity',
+        });
+        totalDebit = lines.reduce(
+          (sum, line) => sum.plus(line.debit),
+          new Prisma.Decimal(0),
+        );
+        totalCredit = lines.reduce(
+          (sum, line) => sum.plus(line.credit),
+          new Prisma.Decimal(0),
+        );
+      }
+
+      if (!totalDebit.equals(totalCredit)) {
+        throw new BadRequestException({
+          message: 'The opening balance does not balance',
+          errors: {
+            totalDebit: totalDebit.toFixed(MONEY_SCALE),
+            totalCredit: totalCredit.toFixed(MONEY_SCALE),
+            difference: totalDebit.minus(totalCredit).toFixed(MONEY_SCALE),
+            hint: 'Send autoBalanceToEquity to put the difference on the opening-balance equity account.',
+          },
+        });
+      }
+
+      const documentNumber = await this.numbers.next(
+        tx,
+        companyId,
+        'OPENING_BALANCE',
+        'OB',
+      );
+      const warehouseId = await this.warehouses.resolve(
+        tx,
+        companyId,
+        targetBranch,
+        dto.warehouseId,
+      );
+      const created = await tx.openingBalance.create({
         data: {
           companyId,
           branchId: targetBranch,
+          warehouseId,
           documentNumber,
+          importFingerprint: dto.importFingerprint ?? null,
           asOfDate,
           description: dto.description ?? null,
           status: InvoiceStatus.DRAFT,
@@ -197,6 +244,8 @@ export class OpeningBalancesService {
           },
         },
       });
+
+      return { created, totalDebit, lineCount: lines.length };
     });
 
     await this.audit.record({
@@ -204,15 +253,15 @@ export class OpeningBalancesService {
       userId,
       action: 'CREATE',
       entity: 'opening_balances',
-      entityId: created.id,
+      entityId: result.created.id,
       after: {
-        documentNumber: created.documentNumber,
-        totalDebit: totalDebit.toFixed(MONEY_SCALE),
-        lines: lines.length,
+        documentNumber: result.created.documentNumber,
+        totalDebit: result.totalDebit.toFixed(MONEY_SCALE),
+        lines: result.lineCount,
       },
     });
 
-    return this.findOne(companyId, created.id);
+    return this.findOne(companyId, result.created.id);
   }
 
   /**
@@ -250,6 +299,68 @@ export class OpeningBalancesService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // Serialize posts for this branch. The duplicate check outside the
+      // transaction is a useful early error, but only this lock closes the
+      // race where two drafts are posted at the same time.
+      await tx.$queryRaw(Prisma.sql`
+        SELECT id FROM branches
+         WHERE id = ${document.branchId}::uuid
+           AND "companyId" = ${companyId}::uuid
+         FOR UPDATE
+      `);
+
+      // Claim this exact draft before writing any stock or ledger rows. The
+      // branch lock serializes competing opening documents; this conditional
+      // update also serializes two requests posting the same document. If a
+      // later step fails, the transaction rolls this claim back with it.
+      const claimed = await tx.openingBalance.updateMany({
+        where: {
+          id: document.id,
+          companyId,
+          status: InvoiceStatus.DRAFT,
+          deletedAt: null,
+        },
+        data: {
+          status: InvoiceStatus.POSTED,
+          postedAt: new Date(),
+          postedBy: userId,
+        },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException(
+          'This opening balance has just been posted by someone else.',
+        );
+      }
+
+      const alreadyPostedInTransaction = await tx.openingBalance.findFirst({
+        where: {
+          companyId,
+          branchId: document.branchId,
+          status: InvoiceStatus.POSTED,
+          deletedAt: null,
+          id: { not: document.id },
+        },
+        select: { documentNumber: true },
+      });
+      if (alreadyPostedInTransaction) {
+        throw new BadRequestException(
+          `This branch already has a posted opening balance (${alreadyPostedInTransaction.documentNumber}).`,
+        );
+      }
+
+      const warehouseId = await this.warehouses.resolve(
+        tx,
+        companyId,
+        document.branchId,
+        document.warehouseId,
+      );
+      if (!document.warehouseId && warehouseId) {
+        await tx.openingBalance.update({
+          where: { id: document.id },
+          data: { warehouseId },
+        });
+      }
+
       // ---- stock: quantities are opened as movements, at the cost the
       // document states, so the stock ledger and the inventory account agree.
       for (const line of document.lines) {
@@ -279,6 +390,7 @@ export class OpeningBalancesService {
           data: {
             companyId,
             branchId: document.branchId,
+            warehouseId,
             itemId: item.id,
             movementDate: document.asOfDate,
             direction: StockDirection.IN,
@@ -381,8 +493,14 @@ export class OpeningBalancesService {
         `Reversal of opening balance ${document.documentNumber}`,
       );
 
+      const warehouseId = await this.warehouses.resolveForReversal(
+        tx,
+        companyId,
+        document.branchId,
+        document.warehouseId,
+      );
       for (const line of document.lines) {
-        if (!line.itemId || !line.quantity || !line.unitCost) continue;
+        if (!line.itemId || line.quantity === null || line.unitCost === null) continue;
         const lockedBalances = await tx.$queryRaw<
           Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
         >(Prisma.sql`
@@ -395,10 +513,12 @@ export class OpeningBalancesService {
         `);
         const balance = lockedBalances[0] ?? null;
         const onHand = balance?.quantity ?? new Prisma.Decimal(0);
-        if (onHand.lessThan(line.quantity)) {
+        const valueOnHand = balance?.value ?? new Prisma.Decimal(0);
+        if (onHand.lessThan(line.quantity) || valueOnHand.lessThan(line.debit)) {
           throw new BadRequestException(
-            `Cannot reverse opening balance: ${onHand.toFixed(MONEY_SCALE)} is available, ` +
-              `${line.quantity.toFixed(MONEY_SCALE)} is required.`,
+            `Cannot reverse opening balance: ${onHand.toFixed(MONEY_SCALE)} units and ` +
+              `${valueOnHand.toFixed(MONEY_SCALE)} of inventory value are available; ` +
+              `${line.quantity.toFixed(MONEY_SCALE)} units and ${line.debit.toFixed(MONEY_SCALE)} of value are required.`,
           );
         }
 
@@ -406,6 +526,7 @@ export class OpeningBalancesService {
           data: {
             companyId,
             branchId: document.branchId,
+            warehouseId,
             itemId: line.itemId,
             movementDate: new Date(),
             direction: StockDirection.OUT,
@@ -457,6 +578,7 @@ export class OpeningBalancesService {
   // ------------------------------------------------------------------ helpers
 
   private async prepareLines(
+    tx: Prisma.TransactionClient,
     companyId: string,
     input: OpeningBalanceLineInput[],
   ): Promise<
@@ -473,6 +595,7 @@ export class OpeningBalancesService {
     }>
   > {
     const prepared = [];
+    const seenStockItems = new Map<string, number>();
 
     for (const [index, raw] of input.entries()) {
       const debit = this.amount(raw.debit, `Line ${index + 1} debit`);
@@ -484,7 +607,7 @@ export class OpeningBalancesService {
         throw new BadRequestException(`Line ${index + 1} cannot be both a debit and a credit`);
       }
 
-      const account = await this.prisma.account.findFirst({
+      const account = await tx.account.findFirst({
         where: { id: raw.accountId, companyId, deletedAt: null },
         select: { id: true, code: true, isPostable: true, isActive: true },
       });
@@ -501,27 +624,56 @@ export class OpeningBalancesService {
       let quantity: Prisma.Decimal | null = null;
       let unitCost: Prisma.Decimal | null = null;
       if (raw.itemId) {
-        const item = await this.prisma.item.findFirst({
+        const item = await tx.item.findFirst({
           where: { id: raw.itemId, companyId, deletedAt: null },
-          select: { id: true },
+          select: { id: true, isStockTracked: true },
         });
         if (!item) throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
-        quantity = this.amount(raw.quantity, `Line ${index + 1} quantity`);
-        unitCost = this.amount(raw.unitCost, `Line ${index + 1} unit cost`);
-        if (quantity.isZero()) {
-          throw new BadRequestException(`Line ${index + 1}: an item line needs a quantity`);
+        if (item.isStockTracked) {
+          const previousLine = seenStockItems.get(item.id);
+          if (previousLine !== undefined) {
+            throw new BadRequestException(
+              `Line ${index + 1}: stock item ${item.id} is repeated from line ${previousLine}; combine its opening quantity and cost into one line.`,
+            );
+          }
+          seenStockItems.set(item.id, index + 1);
+          quantity = this.amount(raw.quantity, `Line ${index + 1} quantity`);
+          unitCost = this.amount(raw.unitCost, `Line ${index + 1} unit cost`);
+          if (quantity.isZero()) {
+            throw new BadRequestException(`Line ${index + 1}: a stock item needs a quantity greater than zero`);
+          }
+          const stockValue = quantity.mul(unitCost).toDecimalPlaces(MONEY_SCALE);
+          if (!debit.equals(stockValue)) {
+            throw new BadRequestException(
+              `Line ${index + 1}: quantity x unit cost (${stockValue.toFixed(MONEY_SCALE)}) ` +
+                `must equal the debit (${debit.toFixed(MONEY_SCALE)}).`,
+            );
+          }
+          const inventory = await this.accounts.resolve(tx, companyId, ['inventory']);
+          if (account.id !== inventory.inventory) {
+            throw new BadRequestException(
+              `Line ${index + 1}: opening stock must be posted to the inventory account.`,
+            );
+          }
+        } else if (
+          (raw.quantity !== undefined && raw.quantity !== '') ||
+          (raw.unitCost !== undefined && raw.unitCost !== '')
+        ) {
+          throw new BadRequestException(
+            `Line ${index + 1}: non-stock items cannot carry an opening stock quantity or cost.`,
+          );
         }
       }
 
       if (raw.customerId) {
-        const customer = await this.prisma.customer.findFirst({
+        const customer = await tx.customer.findFirst({
           where: { id: raw.customerId, companyId, deletedAt: null },
           select: { id: true },
         });
         if (!customer) throw new BadRequestException(`Line ${index + 1}: the customer does not exist`);
       }
       if (raw.supplierId) {
-        const supplier = await this.prisma.supplier.findFirst({
+        const supplier = await tx.supplier.findFirst({
           where: { id: raw.supplierId, companyId, deletedAt: null },
           select: { id: true },
         });

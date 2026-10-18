@@ -6,6 +6,7 @@ import '../../features/accounting/presentation/screens/chart_of_accounts_screen.
 import '../../features/accounting/presentation/screens/fiscal_periods_screen.dart';
 import '../../features/admin/presentation/screens/admin_screen.dart';
 import '../../features/accounting/presentation/screens/journal_entries_screen.dart';
+import '../../features/accounting/presentation/screens/opening_balances_screen.dart';
 import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/cash/presentation/screens/cash_screen.dart';
@@ -16,6 +17,8 @@ import '../../features/inventory/presentation/screens/items_screen.dart';
 import '../../features/inventory/presentation/screens/stock_screen.dart';
 import '../../features/invoicing/presentation/providers/invoice_providers.dart';
 import '../../features/invoicing/presentation/screens/invoice_list_screen.dart';
+import '../../features/invoicing/presentation/screens/return_editor_screen.dart';
+import '../../features/invoicing/presentation/screens/returns_screen.dart';
 import '../../features/parties/presentation/screens/parties_screen.dart';
 import '../../features/reports/presentation/reports_screen.dart';
 import '../../features/settings/presentation/screens/company_settings_screen.dart';
@@ -41,6 +44,7 @@ class AppRoutes {
   static const chartOfAccounts = '/accounting/chart-of-accounts';
   static const journalEntries = '/accounting/journal-entries';
   static const fiscalPeriods = '/accounting/fiscal-periods';
+  static const openingBalances = '/accounting/opening-balances';
   static const cash = '/cash';
   static const customers = '/parties/customers';
   static const suppliers = '/parties/suppliers';
@@ -48,6 +52,10 @@ class AppRoutes {
   static const stock = '/inventory/stock';
   static const salesInvoices = '/sales/invoices';
   static const purchaseInvoices = '/purchases/invoices';
+  static const salesReturns = '/sales/returns';
+  static const purchaseReturns = '/purchases/returns';
+  static const salesReturnNew = '/sales/returns/new';
+  static const purchaseReturnNew = '/purchases/returns/new';
   static const reports = '/reports';
   static const importData = '/data/import';
   static const backup = '/data/backup';
@@ -82,6 +90,29 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.login,
         builder: (context, state) => const LoginScreen(),
       ),
+      GoRoute(
+        path: AppRoutes.salesReturnNew,
+        builder: (context, state) => ErpShell(
+          currentPath: AppRoutes.salesReturns,
+          child: const ReturnEditorScreen(kind: InvoiceKind.sales),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.purchaseReturnNew,
+        builder: (context, state) => ErpShell(
+          currentPath: AppRoutes.purchaseReturns,
+          child: const ReturnEditorScreen(kind: InvoiceKind.purchase),
+        ),
+      ),
+      GoRoute(
+        path: '${AppRoutes.openingBalances}/:id',
+        builder: (context, state) => ErpShell(
+          currentPath: AppRoutes.openingBalances,
+          child: OpeningBalancesScreen(
+            documentId: state.pathParameters['id'],
+          ),
+        ),
+      ),
       for (final route in _shellRoutes)
         GoRoute(
           path: route.path,
@@ -98,6 +129,7 @@ const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.cash, child: CashScreen()),
   (path: AppRoutes.journalEntries, child: JournalEntriesScreen()),
   (path: AppRoutes.fiscalPeriods, child: FiscalPeriodsScreen()),
+  (path: AppRoutes.openingBalances, child: OpeningBalancesScreen()),
   (
     path: AppRoutes.customers,
     child: PartiesScreen(kind: PartyKind.customer),
@@ -115,6 +147,14 @@ const _shellRoutes = <({String path, Widget child})>[
   (
     path: AppRoutes.purchaseInvoices,
     child: InvoiceListScreen(kind: InvoiceKind.purchase),
+  ),
+  (
+    path: AppRoutes.salesReturns,
+    child: ReturnsScreen(kind: InvoiceKind.sales),
+  ),
+  (
+    path: AppRoutes.purchaseReturns,
+    child: ReturnsScreen(kind: InvoiceKind.purchase),
   ),
   (path: AppRoutes.chartOfAccounts, child: ChartOfAccountsScreen()),
   (path: AppRoutes.reports, child: ReportsScreen()),

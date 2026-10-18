@@ -8,6 +8,46 @@ jest.mock('argon2', () => ({
 import { AuthService } from './auth.service';
 
 describe('refresh session security', () => {
+  it('includes the current token version in newly issued access tokens', async () => {
+    const verify = jest.mocked(argon2.verify);
+    verify.mockResolvedValue(true);
+    const jwt = { signAsync: jest.fn().mockResolvedValue('access-token') };
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'user-1',
+          username: 'admin',
+          passwordHash: 'hash',
+          companyId: 'company-1',
+          isActive: true,
+          isSuperAdmin: true,
+          tokenVersion: 7,
+          deletedAt: null,
+          lockedUntil: null,
+          userRoles: [],
+        }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      userBranch: { findMany: jest.fn().mockResolvedValue([]) },
+      refreshToken: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const service = new AuthService(
+      prisma as any,
+      jwt as any,
+      { record: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+
+    try {
+      await service.login('admin', 'correct-password');
+      expect(jwt.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ tokenVersion: 7 }),
+        expect.any(Object),
+      );
+    } finally {
+      verify.mockReset();
+    }
+  });
+
   it('increments failed-login counters atomically and locks at the threshold', async () => {
     const verify = jest.mocked(argon2.verify);
     verify.mockResolvedValue(false);

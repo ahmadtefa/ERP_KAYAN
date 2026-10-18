@@ -66,6 +66,10 @@ class ApiClient {
     return _send(() => _dio.patch<dynamic>(path, data: body));
   }
 
+  Future<Map<String, dynamic>> put(String path, {Object? body}) async {
+    return _send(() => _dio.put<dynamic>(path, data: body));
+  }
+
   /// Deletes a record. Used for the few things that really can be removed —
   /// a role that nobody holds, for instance.
   Future<Map<String, dynamic>> delete(String path) async {

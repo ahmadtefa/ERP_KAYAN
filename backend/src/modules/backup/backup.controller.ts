@@ -51,6 +51,24 @@ export class BackupController {
     };
   }
 
+  /// The guided sample data is an explicit download, not a hidden restore
+  /// path. A person still reviews the JSON restore preview before replacing
+  /// their current company.
+  @Get('demo/download')
+  @AllowQueryToken()
+  async demoDownload(@Res() response: Response): Promise<void> {
+    const body = await this.service.demoBackup();
+    response.setHeader('Content-Type', 'application/json; charset=utf-8');
+    response.setHeader(
+      'Content-Disposition',
+      'attachment; filename="kayan-company-backup-demo.json"',
+    );
+    response.setHeader('Content-Length', String(body.length));
+    response.setHeader('Cache-Control', 'no-store');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.end(body);
+  }
+
   /// The backup itself, as a download.
   @Get('download')
   @AllowQueryToken()

@@ -58,7 +58,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           'isStockTracked',
           l10n.isStockTracked,
           kind: FieldKind.toggle,
-          helper: l10n.stockNotTracked,
+          helper: l10n.stockTrackingDoesNotAddQuantity,
         ),
         FieldSpec('notes', l10n.description, kind: FieldKind.multiline, maxLines: 2),
       ],

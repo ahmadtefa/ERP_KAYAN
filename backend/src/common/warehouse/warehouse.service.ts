@@ -260,6 +260,31 @@ export class WarehouseService {
     return created.id;
   }
 
+  /**
+   * Resolves the historical location for an accounting reversal. A warehouse
+   * that was used by a posted document may since have been deactivated; that
+   * must not make the original movement impossible to reverse. New postings
+   * still use `resolve()`, which rejects inactive warehouses.
+   */
+  async resolveForReversal(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    branchId: string,
+    warehouseId?: string | null,
+  ): Promise<string | null> {
+    if (!warehouseId) return this.resolve(tx, companyId, branchId);
+    const historical = await tx.warehouse.findFirst({
+      where: { id: warehouseId, companyId, branchId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!historical) {
+      throw new BadRequestException(
+        'The warehouse recorded on the original document is no longer available in this company and branch.',
+      );
+    }
+    return historical.id;
+  }
+
   /** What one warehouse holds, read from the movements that put it there. */
   async stock(
     companyId: string,

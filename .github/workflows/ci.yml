@@ -96,13 +96,40 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
+          echo "Running chart-of-accounts and opening-balance spreadsheet imports..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 node scripts/scenario-imports.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after import scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+          echo "Running return-costing and reversal scenario against the disposable PostgreSQL database..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 node scripts/scenario-returns.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after return scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
           echo "Running full accounting business scenario last; it intentionally rate-limits failed logins..."
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 node scripts/scenario-accounting.mjs http://127.0.0.1:3000/api/v1; then
+          if ! ENABLE_DISPOSABLE_RESET=true ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 node scripts/scenario-accounting.mjs http://127.0.0.1:3000/api/v1; then
             echo "::group::API logs after accounting scenario failure"
             cat /tmp/kayan-api.log
             echo "::endgroup::"
             exit 1
           fi
+      - name: Install PostgreSQL client tools for the isolated demo restore
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y postgresql-client
+      - name: Build and restore the complete demo JSON on clean disposable databases
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_demo?schema=public
+          ADMIN_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
+          KAYAN_RESTORE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_demo_restore?schema=public
+          KAYAN_BARE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_demo_bare?schema=public
+          OUT_DIR: /tmp/kayan-demo-backup-build
+        run: node scripts/build-demo-backup.mjs
+        working-directory: backend
       - name: Audit production dependencies
         run: npm audit --omit=dev
 
