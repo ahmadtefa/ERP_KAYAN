@@ -429,6 +429,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
 
 class _Header extends StatelessWidget {
   const _Header({
+    super.key,
     required this.kind,
     required this.invoiceDate,
     required this.onDateChanged,

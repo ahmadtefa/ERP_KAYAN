@@ -45,7 +45,7 @@ class ImportScreen extends ConsumerWidget {
                       style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<ImportKind>(
-                    value: state.kind,
+                    initialValue: state.kind,
                     decoration: InputDecoration(labelText: l10n.whatAreYouImporting),
                     items: [
                       DropdownMenuItem(value: ImportKind.customers, child: Text(l10n.customers)),

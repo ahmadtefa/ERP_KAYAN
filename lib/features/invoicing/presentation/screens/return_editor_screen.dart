@@ -9,7 +9,6 @@ import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
-import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/invoice_providers.dart';
 
@@ -86,7 +85,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
           .getObject('${widget.kind.basePath}/$id');
       if (!mounted) return;
       final lines = listOf(invoice['lines'])
-          .map(_ReturnLineDraft.new)
+          .map((source) => _ReturnLineDraft(source: source))
           .toList(growable: false);
       setState(() {
         _invoice = invoice;
@@ -213,7 +212,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
             padding: const EdgeInsets.all(20),
             children: [
               DropdownButtonFormField<String>(
-                value: _invoiceId,
+                initialValue: _invoiceId,
                 decoration: InputDecoration(labelText: l10n.originalInvoice),
                 items: [
                   for (final invoice in eligible)

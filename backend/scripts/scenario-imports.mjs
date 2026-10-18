@@ -62,7 +62,7 @@ async function main() {
     json: { username: USERNAME, password: PASSWORD },
   });
   token = login.data?.accessToken ?? '';
-  check('accounting import scenario can sign in', login.status === 200 && Boolean(token), `HTTP ${login.status}`);
+  check('accounting import scenario can sign in', login.status === 201 && Boolean(token), `HTTP ${login.status}`);
   if (!token) return;
 
   const chartTemplate = await api('/import/templates/chart-of-accounts');

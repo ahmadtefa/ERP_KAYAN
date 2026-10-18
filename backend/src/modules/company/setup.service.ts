@@ -9,6 +9,7 @@ import * as argon2 from 'argon2';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { normalizeLogo } from './company.service';
+import { PERMISSIONS } from '../../../prisma/permissions';
 import { InitialSetupDto } from './dto/company.dto';
 
 /**
@@ -261,6 +262,8 @@ export class SetupService {
         data: { userId: admin.id, branchId: hq.id },
       });
 
+      await this.seedFiscalPeriod(tx, company.id);
+
       if (dto.seedChartOfAccounts !== false) {
         await this.seedChartOfAccounts(tx, company.id);
       }
@@ -346,7 +349,50 @@ export class SetupService {
         create: { roleId: adminRole.id, permissionId: p.id },
       });
     }
+    // Keep first-run web setup aligned with prisma/seed.ts. Accountants need
+    // the books, parties, stock, and reports, plus read-only invoice access
+    // for reconciliation; invoice creation/posting and administration remain
+    // with the roles chosen by the company owner.
+    const accountantModules = ['accounting', 'parties', 'inventory', 'reports'];
+    const accountantReadOnly = ['sales.invoices.read', 'purchases.invoices.read'];
+    for (const p of all.filter(
+      (permission) =>
+        accountantModules.includes(permission.module) ||
+        accountantReadOnly.includes(permission.code),
+    )) {
+      await tx.rolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: accountantRole.id,
+            permissionId: p.id,
+          },
+        },
+        update: {},
+        create: { roleId: accountantRole.id, permissionId: p.id },
+      });
+    }
+
     return { admin: adminRole.id, accountant: accountantRole.id };
+  }
+
+  /// The same default fiscal year the development seed installs.
+  private async seedFiscalPeriod(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+  ): Promise<void> {
+    const year = new Date().getUTCFullYear();
+    await tx.fiscalPeriod.upsert({
+      where: { companyId_code: { companyId, code: `FY${year}` } },
+      update: {},
+      create: {
+        companyId,
+        code: `FY${year}`,
+        nameEn: `Fiscal year ${year}`,
+        nameAr: `السنة المالية ${year}`,
+        startDate: new Date(Date.UTC(year, 0, 1)),
+        endDate: new Date(Date.UTC(year, 11, 31)),
+      },
+    });
   }
 
   /// The same conventional starter chart the seed installs. It is a template
@@ -380,40 +426,7 @@ export class SetupService {
 
 /// Mirrors `PERMISSIONS` in prisma/seed.ts. Kept here so a web-first setup
 /// creates exactly the same catalogue as the desktop installer.
-export const SETUP_PERMISSIONS: Array<[string, string, string, string]> = [
-  ['accounting.accounts.read', 'View chart of accounts', 'عرض دليل الحسابات', 'accounting'],
-  ['accounting.accounts.create', 'Add accounts to the chart', 'إضافة حسابات للدليل', 'accounting'],
-  ['accounting.accounts.update', 'Edit accounts', 'تعديل الحسابات', 'accounting'],
-  ['accounting.accounts.delete', 'Delete accounts', 'حذف الحسابات', 'accounting'],
-  ['accounting.journal.read', 'View journal entries', 'عرض القيود اليومية', 'accounting'],
-  ['accounting.journal.create', 'Create journal entries', 'إنشاء قيود يومية', 'accounting'],
-  ['accounting.journal.post', 'Post and reverse entries', 'ترحيل وعكس القيود', 'accounting'],
-  ['accounting.openingbalances.manage', 'Open the books: opening balances', 'إدخال الأرصدة الافتتاحية', 'accounting'],
-  ['admin.users.manage', 'Manage users', 'إدارة المستخدمين', 'admin'],
-  ['admin.roles.manage', 'Manage roles', 'إدارة الأدوار', 'admin'],
-  ['admin.audit.read', 'View audit trail', 'عرض سجل التدقيق', 'admin'],
-  ['admin.backup', 'Take and restore backups', 'أخذ واسترجاع نسخة احتياطية', 'admin'],
-  ['admin.company.manage', 'Manage company profile and branches', 'إدارة بيانات الشركة والفروع', 'admin'],
-  ['parties.customers.read', 'View customers', 'عرض العملاء', 'parties'],
-  ['parties.customers.create', 'Add customers', 'إضافة عملاء', 'parties'],
-  ['parties.customers.update', 'Edit customers', 'تعديل العملاء', 'parties'],
-  ['parties.suppliers.read', 'View suppliers', 'عرض الموردين', 'parties'],
-  ['parties.suppliers.create', 'Add suppliers', 'إضافة موردين', 'parties'],
-  ['parties.suppliers.update', 'Edit suppliers', 'تعديل الموردين', 'parties'],
-  ['inventory.items.read', 'View items', 'عرض الأصناف', 'inventory'],
-  ['inventory.items.create', 'Add items', 'إضافة أصناف', 'inventory'],
-  ['inventory.items.update', 'Edit items', 'تعديل الأصناف', 'inventory'],
-  ['inventory.stock.read', 'View stock balances', 'عرض أرصدة المخزون', 'inventory'],
-  ['sales.invoices.read', 'View sales invoices', 'عرض فواتير البيع', 'sales'],
-  ['sales.invoices.create', 'Create sales invoices', 'إنشاء فواتير البيع', 'sales'],
-  ['sales.invoices.post', 'Post and reverse sales invoices', 'ترحيل وعكس فواتير البيع', 'sales'],
-  ['purchases.invoices.read', 'View purchase invoices', 'عرض فواتير الشراء', 'purchases'],
-  ['purchases.invoices.create', 'Create purchase invoices', 'إنشاء فواتير الشراء', 'purchases'],
-  ['purchases.invoices.post', 'Post and reverse purchase invoices', 'ترحيل وعكس فواتير الشراء', 'purchases'],
-  ['reports.read', 'View reports', 'عرض التقارير', 'reports'],
-  ['accounting.periods.read', 'View fiscal periods', 'عرض الفترات المالية', 'accounting'],
-  ['accounting.periods.manage', 'Manage fiscal periods', 'إدارة الفترات المالية', 'accounting'],
-];
+export const SETUP_PERMISSIONS = PERMISSIONS;
 
 /// Mirrors `ACCOUNTS` in prisma/seed.ts.
 const STARTER_ACCOUNTS: Array<{

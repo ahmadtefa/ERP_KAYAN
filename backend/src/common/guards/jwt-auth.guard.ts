@@ -60,10 +60,8 @@ export class JwtAuthGuard implements CanActivate {
       sub: string;
       username: string;
       companyId: string;
-      branchId: string | null;
-      isSuperAdmin: boolean;
+      branchId?: string | null;
       tokenVersion?: number;
-      permissions: string[];
     };
     try {
       payload = await this.jwt.verifyAsync<typeof payload>(token, {
@@ -74,16 +72,49 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or expired token');
     }
 
-    // Access tokens are short-lived, but account deactivation and deletion must
-    // take effect immediately rather than leaving a 15-minute access window.
+    // Authorization data is loaded from the database on every request so
+    // revocations and account/branch changes take effect immediately.
     const principal = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       select: {
         id: true,
+        username: true,
         companyId: true,
         isActive: true,
+        isSuperAdmin: true,
         deletedAt: true,
         tokenVersion: true,
+        userRoles: {
+          where: {
+            companyId: payload.companyId,
+            role: {
+              deletedAt: null,
+              OR: [{ companyId: payload.companyId }, { companyId: null }],
+            },
+          },
+          select: {
+            role: {
+              select: {
+                rolePermissions: {
+                  select: { permission: { select: { code: true } } },
+                },
+              },
+            },
+          },
+        },
+        // Do not let a stale/malformed assignment expose another tenant's
+        // branch or a branch that is inactive or soft-deleted.
+        branches: {
+          where: {
+            branch: {
+              companyId: payload.companyId,
+              isActive: true,
+              deletedAt: null,
+            },
+          },
+          select: { branchId: true },
+          orderBy: { branchId: 'asc' },
+        },
       },
     });
     if (
@@ -96,13 +127,28 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Account is inactive or unavailable');
     }
 
+    const permissions = [
+      ...new Set(
+        principal.userRoles.flatMap((userRole) =>
+          userRole.role.rolePermissions.map((rolePermission) =>
+            rolePermission.permission.code,
+          ),
+        ),
+      ),
+    ];
+    const branchId =
+      principal.branches.find((branch) => branch.branchId === payload.branchId)
+        ?.branchId ??
+      principal.branches[0]?.branchId ??
+      null;
+
     request.user = {
-      userId: payload.sub,
-      username: payload.username,
-      companyId: payload.companyId,
-      branchId: payload.branchId,
-      isSuperAdmin: payload.isSuperAdmin,
-      permissions: payload.permissions ?? [],
+      userId: principal.id,
+      username: principal.username,
+      companyId: principal.companyId,
+      branchId,
+      isSuperAdmin: principal.isSuperAdmin,
+      permissions,
     };
     return true;
   }
