@@ -6,7 +6,7 @@ import {
 import { basename, join } from 'node:path';
 import { readFile, unlink } from 'node:fs/promises';
 
-import { Prisma } from '@prisma/client';
+import { PeriodStatus, Prisma } from '@prisma/client';
 
 import {
   AuditPurgeRequest,
@@ -471,11 +471,27 @@ export class BackupService {
         for (const spec of TABLES) {
           const rows = file.tables[spec.model] ?? [];
           if (rows.length === 0) continue;
-          await this.insertTable(tx, spec, rows, requesterCompanyId, {
+          // Historical documents must pass the same open-period triggers as
+          // ordinary inserts. Periods are open only inside this transaction;
+          // restore their saved closed state after all dependent rows exist.
+          const restoreRows = spec.model === 'fiscalPeriod'
+            ? rows.map((row) => row.status === PeriodStatus.CLOSED
+                ? { ...row, status: PeriodStatus.OPEN }
+                : row)
+            : rows;
+          await this.insertTable(tx, spec, restoreRows, requesterCompanyId, {
             actorUserId: actor?.id ?? null,
             actorIsSuperAdmin: actor?.isSuperAdmin === true,
           });
           written[spec.model] = rows.length;
+        }
+
+        for (const period of file.tables.fiscalPeriod ?? []) {
+          if (period.status !== PeriodStatus.CLOSED) continue;
+          await tx.fiscalPeriod.updateMany({
+            where: { id: String(period.id), companyId: requesterCompanyId },
+            data: { status: PeriodStatus.CLOSED },
+          });
         }
 
         // The profile is part of a current company backup, but not of older

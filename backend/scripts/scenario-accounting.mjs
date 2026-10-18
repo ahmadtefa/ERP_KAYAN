@@ -939,60 +939,62 @@ async function main() {
     );
   }
 
-  // a user who may read but not write must be turned away by the API itself
+  // Exercise authorization over HTTP; setup failures must never silently skip
+  // these assertions (DTOs accept permission codes and fullNameEn/fullNameAr).
+  const readOnlyCodes = ['reports.read', 'sales.invoices.read', 'parties.customers.read'];
   const role = await must('create a read-only role', '/admin/roles', {
     method: 'POST',
-    json: { code: `E2E-RO-${stamp}`, nameEn: `Reader ${stamp}`, nameAr: `قارئ ${stamp}` },
+    json: { code: `E2E-RO-${stamp}`, nameEn: `Reader ${stamp}`, nameAr: `قارئ ${stamp}`, permissions: readOnlyCodes },
   });
-  const permissions = await api('/admin/permissions');
-  const permissionRaw = permissions.data?.items ?? permissions.data;
-  const permissionList = Array.isArray(permissionRaw)
-    ? permissionRaw
-    : (permissionRaw?.permissions ?? permissionRaw?.rows ?? []);
-  const readOnly = permissionList.filter((row) =>
-    ['reports.read', 'sales.invoices.read', 'parties.customers.read'].includes(row.code),
-  );
-  if (role && readOnly.length > 0) {
-    await api(`/admin/roles/${role.id}/permissions`, {
-      method: 'POST',
-      json: { permissionIds: readOnly.map((row) => row.id) },
-    });
-    const user = await api('/admin/users', {
-      method: 'POST',
-      json: {
-        username: `e2e-reader-${stamp}`,
-        nameEn: `Reader ${stamp}`,
-        nameAr: `قارئ ${stamp}`,
-        password: `Reader@${stamp}9x`,
-        roleIds: [role.id],
-      },
-    });
-    if (user.status < 300) {
-      const adminToken = token;
-      const readerLogin = await api('/auth/login', {
-        method: 'POST',
-        json: { username: `e2e-reader-${stamp}`, password: `Reader@${stamp}9x` },
-        noAuth: true,
-      });
-      check('the read-only user can sign in', Boolean(readerLogin.data?.accessToken), `status ${readerLogin.status}`);
-      token = readerLogin.data?.accessToken ?? '';
-      if (draft) {
-        await mustRefuse('the read-only user cannot post an invoice', `/sales/invoices/${draft.id}/post`, {
-          method: 'POST',
-        });
-      }
-      await mustRefuse('the read-only user cannot create an item', '/inventory/items', {
-        method: 'POST',
-        json: { code: `NOPE-${stamp}`, nameEn: 'Not allowed', nameAr: 'غير مسموح', unit: 'PCS' },
-      });
-      const readable = await api(`/reports/trial-balance?from=${from}&to=${today}`);
-      check(
-        'the read-only user can still read the reports they were granted',
-        readable.status === 200,
-        `status ${readable.status}`,
-      );
-      token = adminToken;
+  if (!role?.id) return false;
+  const reader = await must('create a read-only user', '/admin/users', {
+    method: 'POST',
+    json: {
+      username: `e2e-reader-${stamp}`, fullNameEn: `Reader ${stamp}`, fullNameAr: `قارئ ${stamp}`,
+      password: `Reader@${stamp}9x`, roleIds: [role.id], branchIds: [principal.branchId],
+    },
+  });
+  if (!reader?.id) return false;
+  const readerLogin = await api('/auth/login', {
+    method: 'POST', noAuth: true,
+    json: { username: `e2e-reader-${stamp}`, password: `Reader@${stamp}9x` },
+  });
+  check('the read-only user can sign in', readerLogin.status === 201 && Boolean(readerLogin.data?.accessToken), `status ${readerLogin.status}`);
+  if (!readerLogin.data?.accessToken) return false;
+  const adminToken = token;
+  const readerToken = readerLogin.data.accessToken;
+  try {
+    token = readerToken;
+    if (draft) {
+      const refused = await api(`/sales/invoices/${draft.id}/post`, { method: 'POST' });
+      check('the read-only user cannot post an invoice', refused.status === 403, `status ${refused.status}`);
     }
+    const refused = await api('/inventory/items', {
+      method: 'POST', json: { code: `NOPE-${stamp}`, nameEn: 'Not allowed', nameAr: 'غير مسموح', unit: 'PCS' },
+    });
+    check('the read-only user cannot create an item', refused.status === 403, `status ${refused.status}`);
+    const readable = await api(`/reports/trial-balance?from=${from}&to=${today}`);
+    check('the read-only user can still read the reports they were granted', readable.status === 200, `status ${readable.status}`);
+
+    token = adminToken;
+    await must('grant tenant backup access without super-admin access', `/admin/roles/${role.id}/permissions`, {
+      method: 'POST', json: { permissions: [...readOnlyCodes, 'admin.backup'] },
+    });
+    token = readerToken; // Deliberately reuse the token issued before the grant.
+    const companyBackup = await api('/backup/summary');
+    check('a new role grant takes effect on the existing access token', companyBackup.status === 200, `status ${companyBackup.status}`);
+    const fullBackup = await api('/backup/full');
+    check('a tenant backup operator cannot list machine-wide database backups', fullBackup.status === 403, `status ${fullBackup.status}`);
+
+    token = adminToken;
+    await must('revoke the readers role grants', `/admin/roles/${role.id}/permissions`, { method: 'POST', json: { permissions: [] } });
+    token = readerToken;
+    const revoked = await api(`/reports/trial-balance?from=${from}&to=${today}`);
+    check('revoked permissions take effect without waiting for JWT expiry', revoked.status === 403, `status ${revoked.status}`);
+    const currentReader = await api('/auth/me');
+    check('current-user response reflects live revoked permissions', currentReader.status === 200 && currentReader.data?.user?.permissions?.length === 0, `status ${currentReader.status}`);
+  } finally {
+    token = adminToken;
   }
 
   // Two separate invoices compete for the remaining stock at the same time.

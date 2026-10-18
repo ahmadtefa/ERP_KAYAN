@@ -526,6 +526,18 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
           String(row.permissionId).startsWith('target-perm-'),
         ),
       ).toBe(true);
+      const periodRows = txMock.fiscalPeriod.createMany.mock.calls.flatMap(([args]: any[]) => args.data);
+      expect(periodRows.every((row: any) => row.status === 'OPEN')).toBe(true);
+      const closed = demoBackup.tables.fiscalPeriod.filter((row) => row.status === 'CLOSED');
+      expect(closed.length).toBeGreaterThan(0);
+      for (const period of closed) {
+        expect(txMock.fiscalPeriod.updateMany).toHaveBeenCalledWith({
+          where: { id: period.id, companyId: COMPANY_ID }, data: { status: 'CLOSED' },
+        });
+      }
+      expect(txMock.fiscalPeriod.updateMany.mock.invocationCallOrder[0])
+        .toBeGreaterThan(txMock.journalLine.createMany.mock.invocationCallOrder[0]);
+
     });
 
     test('restores linked sales and purchase returns only after their original documents and lines', async () => {

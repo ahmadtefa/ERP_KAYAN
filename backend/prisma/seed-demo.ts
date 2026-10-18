@@ -512,7 +512,7 @@ async function main(): Promise<void> {
   };
 
   // ── the financial years ───────────────────────────────────────────────
-  await prisma.fiscalPeriod.create({
+  const fy2025 = await prisma.fiscalPeriod.create({
     data: {
       companyId: company.id,
       code: 'FY2025',
@@ -520,9 +520,9 @@ async function main(): Promise<void> {
       nameAr: 'السنة المالية ٢٠٢٥',
       startDate: day('2025-01-01'),
       endDate: day('2025-12-31'),
-      status: PeriodStatus.CLOSED,
-      closedAt: day('2026-01-15'),
-      closedBy: admin.id,
+      // Populate historical entries while open; the real database trigger
+      // must remain enabled during demo construction. Close only when done.
+      status: PeriodStatus.OPEN,
     },
   });
   const fy2026 = await prisma.fiscalPeriod.create({
@@ -1364,6 +1364,11 @@ async function main(): Promise<void> {
       `${mismatched.length} journal entries disagree with their own lines`,
     );
   }
+
+  await prisma.fiscalPeriod.update({
+    where: { id: fy2025.id },
+    data: { status: PeriodStatus.CLOSED, closedAt: day('2026-01-15'), closedBy: admin.id },
+  });
 
   console.log('---------------------------------------------');
   console.log(` company       : ${COMPANY.nameEn} (${COMPANY.code})`);
