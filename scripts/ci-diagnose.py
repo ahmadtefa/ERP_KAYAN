@@ -20,8 +20,12 @@ for line in process.stdout:
     lines.append(line.rstrip())
 code = process.wait()
 if code:
-    message = '\n'.join(lines)[-55000:]
-    for raw, escaped in [('%', '%25'), ('\r', '%0D'), ('\n', '%0A')]:
-        message = message.replace(raw, escaped)
-    print(f'::error title=Command failure::{message}')
+    # GitHub truncates individual annotation messages; split the tail rather
+    # than losing the actual exception behind dependency/progress output.
+    message = '\n'.join(lines)[-27000:]
+    chunks = [message[index:index + 3000] for index in range(0, len(message), 3000)]
+    for index, chunk in enumerate(chunks, start=1):
+        for raw, escaped in [('%', '%25'), ('\r', '%0D'), ('\n', '%0A')]:
+            chunk = chunk.replace(raw, escaped)
+        print(f'::error title=Command failure {index}/{len(chunks)}::{chunk}')
 sys.exit(code)
