@@ -13,6 +13,11 @@ describe('permission catalogue', () => {
     }
   });
 
+  it('uses the same complete catalogue for seed and first-run setup', () => {
+    expect(SETUP_PERMISSIONS).toEqual(PERMISSIONS);
+    expect(PERMISSIONS.some(([code]) => code === 'company.profile.manage')).toBe(true);
+  });
+
   it('includes opening-balance management in both seeded permission catalogues', () => {
     expect(PERMISSIONS.some(([code]) => code === 'accounting.openingbalances.manage')).toBe(true);
     expect(SETUP_PERMISSIONS.some(([code]) => code === 'accounting.openingbalances.manage')).toBe(true);

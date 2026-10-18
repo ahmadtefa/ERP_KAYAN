@@ -710,7 +710,7 @@ async function main() {
     check(
       'posting opening stock creates one branch balance and one warehouse-linked movement',
       String(openingDocument.data?.status).toLowerCase() === 'posted' &&
-        stockOpeningRow?.branchId === branchId &&
+        stockOpeningRow?.branchId === principal.branchId &&
         near(stockOpeningRow?.quantity, 5) && near(stockOpeningRow?.value, openingStockValue) &&
         openingMovements.length === 1 && openingMovements[0].direction === 'in' &&
         near(openingMovements[0].quantity, 5) && near(openingMovements[0].totalCost, openingStockValue) &&

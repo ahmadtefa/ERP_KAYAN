@@ -157,7 +157,7 @@ jobs:
       - name: Analyze
         run: python scripts/ci-diagnose.py flutter analyze
       - name: Run tests
-        run: flutter test
+        run: python scripts/ci-diagnose.py flutter test --reporter expanded
       - name: Build web
         run: flutter build web --release
       - name: Upload web build
@@ -199,6 +199,6 @@ jobs:
       - name: Analyze
         run: python scripts/ci-diagnose.py flutter analyze
       - name: Run tests
-        run: flutter test
+        run: python scripts/ci-diagnose.py flutter test --reporter expanded
       - name: Build Linux desktop
         run: flutter build linux --release

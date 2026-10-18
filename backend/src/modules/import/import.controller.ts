@@ -88,6 +88,19 @@ export class ImportController {
   ) {
     const slug = this.kind(kind);
     this.allowed(user, slug);
+    // Upsert can modify existing master records; create-only users must not
+    // bypass the update permission by uploading a spreadsheet.
+    if (!user.isSuperAdmin && query.mode === 'upsert') {
+      const updatePermission: Partial<Record<ImportKind, string>> = {
+        customers: 'parties.customers.update',
+        suppliers: 'parties.suppliers.update',
+        items: 'inventory.items.update',
+      };
+      const needed = updatePermission[slug];
+      if (needed && !user.permissions.includes(needed)) {
+        throw new ForbiddenException(`Missing permission: ${needed}`);
+      }
+    }
 
     if (!file) {
       throw new BadRequestException(

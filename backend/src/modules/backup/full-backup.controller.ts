@@ -10,10 +10,12 @@ import {
   Res,
   UploadedFile,
   UseInterceptors,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 
+import { SuperAdminGuard } from '../../common/guards/super-admin.guard';
 import { AllowQueryToken } from '../../common/decorators/allow-query-token.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
@@ -36,6 +38,7 @@ interface UploadedDump {
  */
 @Controller('backup/full')
 @RequirePermissions('admin.backup')
+@UseGuards(SuperAdminGuard)
 export class FullBackupController {
   constructor(
     private readonly service: FullBackupService,

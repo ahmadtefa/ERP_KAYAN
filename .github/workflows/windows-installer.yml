@@ -100,7 +100,7 @@ jobs:
         run: python scripts/ci-diagnose.py flutter analyze
 
       - name: Test Flutter
-        run: flutter test
+        run: python scripts/ci-diagnose.py flutter test --reporter expanded
 
       - name: Build Windows installer
         shell: powershell
@@ -142,6 +142,5 @@ jobs:
           name: KAYAN-ERP-Windows-x64-Installer
           path: |
             build/windows-installer/KAYAN-ERP-Setup.exe
-            build/windows-installer/KAYAN-ERP-Setup-*-x64.exe
           if-no-files-found: error
           retention-days: 14
