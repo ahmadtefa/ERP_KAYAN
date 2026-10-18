@@ -457,6 +457,13 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       expect(Object.keys(demoBackup.tables)).toHaveLength(42);
       expect(Object.values(demoBackup.tables).every((rows) => rows.length > 0)).toBe(true);
 
+      // JSON restore deliberately strips imported super-admin status. The
+      // demo administrator must still have a tenant role to read its books.
+      const demoAdmin = demoBackup.tables.user.find((row) => row.username === 'admin')!;
+      const adminRole = demoBackup.tables.role.find((row) => row.code === 'ADMIN')!;
+      expect(demoBackup.tables.userRole).toContainEqual(expect.objectContaining({ userId: demoAdmin.id, roleId: adminRole.id }));
+      expect(demoBackup.tables.rolePermission).toContainEqual(expect.objectContaining({ roleId: adminRole.id, permissionCode: 'reports.read' }));
+
       // Verify every journal entry in the demo backup is balanced.
       const entries = demoBackup.tables.journalEntry ?? [];
       expect(entries.length).toBeGreaterThan(100);

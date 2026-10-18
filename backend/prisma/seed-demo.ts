@@ -476,6 +476,7 @@ async function main(): Promise<void> {
   });
   await prisma.userRole.createMany({
     data: [
+      { companyId: company.id, userId: admin.id, roleId: adminRole.id },
       { companyId: company.id, userId: accountant.id, roleId: accountantRole.id },
       { companyId: company.id, userId: sales.id, roleId: salesRole.id },
     ],

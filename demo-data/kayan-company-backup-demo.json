@@ -10,7 +10,7 @@
     "role": 3,
     "rolePermission": 58,
     "user": 3,
-    "userRole": 2,
+    "userRole": 3,
     "userBranch": 3,
     "fiscalPeriod": 2,
     "account": 46,
@@ -484,6 +484,12 @@
       }
     ],
     "userRole": [
+      {
+        "userId": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": null
+      },
       {
         "userId": "4ad98007-8589-423f-8bfe-0777fb6f26e2",
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
