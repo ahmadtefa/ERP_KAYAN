@@ -97,7 +97,7 @@ jobs:
         run: flutter pub get
 
       - name: Analyze Flutter
-        run: flutter analyze
+        run: python scripts/ci-diagnose.py flutter analyze
 
       - name: Test Flutter
         run: flutter test
