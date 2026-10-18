@@ -128,7 +128,7 @@ jobs:
           KAYAN_RESTORE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_demo_restore?schema=public
           KAYAN_BARE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_demo_bare?schema=public
           OUT_DIR: /tmp/kayan-demo-backup-build
-        run: node scripts/build-demo-backup.mjs
+        run: python ../scripts/ci-diagnose.py node scripts/build-demo-backup.mjs
         working-directory: backend
       - name: Audit production dependencies
         run: npm audit --omit=dev

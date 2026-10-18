@@ -4,6 +4,7 @@ Actions log storage may be unreachable in restricted development environments;
 check annotations remain available through api.github.com. Never use for commands
 that print credentials or authentication responses.
 """
+import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,7 @@ if sys.platform == 'win32' and command[0].lower().endswith(('.bat', '.cmd')):
 process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 assert process.stdout is not None
 for line in process.stdout:
+    line = re.sub(r'''postgres(?:ql)?://[^\s"']+''', '[DATABASE URL REDACTED]', line, flags=re.IGNORECASE)
     print(line, end='', flush=True)
     lines.append(line.rstrip())
 code = process.wait()
