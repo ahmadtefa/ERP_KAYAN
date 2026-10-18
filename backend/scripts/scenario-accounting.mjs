@@ -1400,7 +1400,7 @@ async function main() {
     });
     check(
       'the preserved administrator can sign in again to complete first-run setup',
-      administratorAfterReset.status === 200 && Boolean(administratorAfterReset.data?.accessToken),
+      administratorAfterReset.status === 201 && Boolean(administratorAfterReset.data?.accessToken),
       `status ${administratorAfterReset.status}`,
     );
 
@@ -1448,7 +1448,7 @@ async function main() {
     });
     check(
       'the administrator can sign in with the credentials confirmed by first-run setup',
-      administratorAfterSetup.status === 200 && Boolean(administratorAfterSetup.data?.accessToken),
+      administratorAfterSetup.status === 201 && Boolean(administratorAfterSetup.data?.accessToken),
       `status ${administratorAfterSetup.status}`,
     );
   } else {

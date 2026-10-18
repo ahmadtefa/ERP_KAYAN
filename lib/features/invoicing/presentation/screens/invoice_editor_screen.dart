@@ -365,6 +365,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                   Expanded(
                     flex: 3,
                     child: TextField(
+                      key: ValueKey('landed-cost-description-$index'),
                       controller: _landedCosts[index].description,
                       decoration: InputDecoration(
                         labelText: l10n.description,
@@ -378,6 +379,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                   Expanded(
                     flex: 2,
                     child: TextField(
+                      key: ValueKey('landed-cost-amount-$index'),
                       controller: _landedCosts[index].amount,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: InputDecoration(

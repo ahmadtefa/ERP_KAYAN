@@ -119,14 +119,14 @@ void main() {
 
     await tester.tap(find.text('Add charge'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).at(0), 'Freight');
-    await tester.enterText(find.byType(TextField).at(1), '7.00');
+    await tester.enterText(find.byKey(const ValueKey('landed-cost-description-0')), 'Freight');
+    await tester.enterText(find.byKey(const ValueKey('landed-cost-amount-0')), '7.00');
     await tester.pump();
 
     await tester.tap(find.text('Add charge'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).at(2), 'Insurance');
-    await tester.enterText(find.byType(TextField).at(3), '3.00');
+    await tester.enterText(find.byKey(const ValueKey('landed-cost-description-1')), 'Insurance');
+    await tester.enterText(find.byKey(const ValueKey('landed-cost-amount-1')), '3.00');
     await tester.pump();
 
     await tester.tap(find.text('Save'));

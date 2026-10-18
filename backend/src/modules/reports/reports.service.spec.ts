@@ -38,3 +38,20 @@ describe('ReportsService date validation', () => {
     ).toThrow(BadRequestException);
   });
 });
+
+describe('account ledger manual journal navigation', () => {
+  it('links a source-less movement to its own journal entry instead of a null document', async () => {
+    const d = (value: number) => new (require('@prisma/client').Prisma.Decimal)(value);
+    const prisma = {
+      account: { findFirst: jest.fn().mockResolvedValue({ id: 'account' }) },
+      $queryRaw: jest.fn().mockResolvedValue([{ net: d(0) }]),
+      journalLine: { findMany: jest.fn().mockResolvedValue([{
+        journalEntryId: 'journal', debit: d(100), credit: d(0), description: null,
+        entry: { entryNumber: 'JV-1', entryDate: new Date('2026-10-18'), description: 'Manual', sourceType: null, sourceId: null, sourceNumber: null, reversalOfId: null },
+      }]) },
+    };
+    const result = await new ReportsService(prisma as any).accountLedger('company', 'account', { from: '2026-10-01', to: '2026-10-18' });
+    expect(result.movements[0].source).toEqual({ type: 'JOURNAL_ENTRY', id: 'journal', number: 'JV-1' });
+    expect(result.closing).toBe('100.0000');
+  });
+});
