@@ -46,6 +46,10 @@ export class CreatePurchaseInvoiceDto {
   @IsOptional() @IsString() @MaxLength(60) supplierReference?: string;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
 
+  /// Document-wide discount before tax and landed costs. Supply one field, not both.
+  @IsOptional() @IsString() discountPercent?: string;
+  @IsOptional() @IsString() discountAmount?: string;
+
   /// Named freight, shipping, duties, and other acquisition costs. Each charge
   /// is retained for editing and reporting; their sum is allocated across
   /// stock lines in exact proportion to line value.
