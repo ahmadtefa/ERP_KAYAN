@@ -41,6 +41,10 @@ export class CreateSalesInvoiceDto {
   @IsUUID() customerId!: string;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
 
+  /// Document-wide discount before tax. Supply one field, not both.
+  @IsOptional() @IsString() discountPercent?: string;
+  @IsOptional() @IsString() discountAmount?: string;
+
   /// The warehouse the goods leave. Omit to use the branch's default.
   @IsOptional() @IsUUID() warehouseId?: string;
 
