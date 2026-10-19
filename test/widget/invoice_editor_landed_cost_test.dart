@@ -117,6 +117,18 @@ void main() {
     await tester.tap(find.text('ITEM-1 — Tracked item').last);
     await tester.pumpAndSettle();
 
+    // A fixed invoice-wide discount travels independently of landed costs:
+    // the discount reduces the goods value, the charges are added after it.
+    await tester.tap(find.byKey(const ValueKey('document-discount')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Fixed amount').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('document-discount-value')),
+      '5',
+    );
+    await tester.pump();
+
     await tester.tap(find.text('Add charge'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const ValueKey('landed-cost-description-0')), 'Freight');
@@ -133,6 +145,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.postPath, '/purchases/invoices');
+    expect(api.postBody?['discountType'], 'AMOUNT');
+    expect(api.postBody?['discountAmount'], '5');
     expect(api.postBody?['landedCostAmount'], '10');
     expect(api.postBody?['landedCostCharges'], [
       {'description': 'Freight', 'amount': '7'},
