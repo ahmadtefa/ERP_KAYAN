@@ -62,10 +62,12 @@ export function applyInvoiceDiscount<T extends DiscountableInvoiceLine>(
     if (line.lineTotal.greaterThan(0)) {
       if (index === lastEligible) {
         allocated = remaining;
-      } else if (percent.greaterThan(0)) {
-        allocated = line.lineTotal.mul(percent).div(100).toDecimalPlaces(MONEY_SCALE);
       } else if (!subtotal.isZero()) {
+        // Allocate the rounded document discount proportionally in both modes.
+        // Cap each rounded slice at the remaining amount so many small lines
+        // cannot consume more than the document-level discount through rounding.
         allocated = requested.mul(line.lineTotal).div(subtotal).toDecimalPlaces(MONEY_SCALE);
+        if (allocated.greaterThan(remaining)) allocated = remaining;
       }
       if (allocated.greaterThan(line.lineTotal)) allocated = line.lineTotal;
       remaining = remaining.minus(allocated);
