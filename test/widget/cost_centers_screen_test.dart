@@ -82,7 +82,7 @@ void main() {
   ) async {
     await _pump(tester, manage: true);
 
-    expect(find.text('CC-1'), findsOneWidget);
+    expect(find.text('Head office'), findsOneWidget);
     expect(find.text('CC-3'), findsOneWidget);
     // The child is indented under its parent; the server sent the depth.
     expect(find.text('   CC-2'), findsOneWidget);
@@ -97,11 +97,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('   CC-2'), findsOneWidget);
-    expect(find.text('CC-1'), findsNothing);
+    expect(find.text('Head office'), findsNothing);
 
     await tester.enterText(search, '');
     await tester.pumpAndSettle();
-    expect(find.text('CC-1'), findsOneWidget);
+    expect(find.text('Head office'), findsOneWidget);
   });
 
   testWidgets('without the manage permission no write action is offered', (
@@ -110,7 +110,7 @@ void main() {
     await _pump(tester, manage: false);
 
     expect(find.text('New cost center'), findsNothing);
-    expect(find.text('CC-1'), findsOneWidget);
+    expect(find.text('Head office'), findsOneWidget);
     // The rows are still readable: read access is not the same as write access.
     expect(find.byType(DropdownButtonFormField<String>), findsNWidgets(3));
   });
