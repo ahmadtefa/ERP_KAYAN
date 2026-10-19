@@ -401,7 +401,7 @@ export class QuotationsService {
       if (unitPrice.isNegative()) throw new BadRequestException('unitPrice cannot be negative');
       if (taxRate.isNegative() || taxRate.greaterThan(100)) throw new BadRequestException('taxRate must be between 0 and 100');
       let itemId: string | null = null;
-      let unit: string | null = this.optionalText(line.unit);
+      let unit: string | null = this.optionalText(line.unit) ?? null;
       const suppliedItemId = this.optionalText(line.itemId);
       if (suppliedItemId) {
         const item = await this.prisma.item.findFirst({
