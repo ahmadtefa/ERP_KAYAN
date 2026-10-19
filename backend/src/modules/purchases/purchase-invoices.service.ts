@@ -107,7 +107,10 @@ export class PurchaseInvoicesService {
         branch: { select: { code: true, nameEn: true, nameAr: true } },
         lines: {
           orderBy: { lineNumber: 'asc' },
-          include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } },
+          include: {
+            item: { select: { code: true, nameEn: true, nameAr: true, unit: true } },
+            costCenter: { select: { code: true, nameEn: true, nameAr: true } },
+          },
         },
       },
     });
@@ -141,6 +144,9 @@ export class PurchaseInvoicesService {
         landedCostAmount: l.landedCostAmount.toFixed(MONEY_SCALE),
         inventoryCostTotal: l.inventoryCostTotal.toFixed(MONEY_SCALE),
         costCenterId: l.costCenterId ?? null,
+        costCenterCode: l.costCenter?.code ?? null,
+        costCenterNameEn: l.costCenter?.nameEn ?? null,
+        costCenterNameAr: l.costCenter?.nameAr ?? null,
         returnedCostTotal: l.returnedCostTotal.toFixed(MONEY_SCALE),
       })),
     };

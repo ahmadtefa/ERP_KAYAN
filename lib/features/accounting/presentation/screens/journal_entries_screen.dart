@@ -140,6 +140,16 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
             return [
               IconButton(
                 tooltip: Localizations.localeOf(context).languageCode == 'ar'
+                    ? 'عرض تفاصيل القيد'
+                    : 'View journal details',
+                icon: const Icon(Icons.visibility_outlined, size: 20),
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => _JournalDetailDialog(entry: row),
+                ),
+              ),
+              IconButton(
+                tooltip: Localizations.localeOf(context).languageCode == 'ar'
                     ? 'طباعة وتنزيل المستند'
                     : 'Print and download document',
                 icon: const Icon(Icons.print_outlined, size: 20),
@@ -178,6 +188,85 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
           },
         ),
       ),
+    );
+  }
+}
+
+
+class _JournalDetailDialog extends StatelessWidget {
+  const _JournalDetailDialog({required this.entry});
+
+  final Json entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final language = Localizations.localeOf(context).languageCode;
+    final lines = listOf(entry['lines']);
+
+    String centreLabel(Json row) {
+      final code = text(row, 'costCenterCode');
+      final name = language == 'ar'
+          ? text(row, 'costCenterNameAr')
+          : text(row, 'costCenterNameEn');
+      if (code.isEmpty && name.isEmpty) return '—';
+      return code.isEmpty ? name : '$code — $name';
+    }
+
+    String allocationsLabel(Json row) {
+      final allocations = listOf(row['allocations']);
+      if (allocations.isNotEmpty) {
+        return allocations.map((allocation) {
+          final code = text(allocation, 'costCenterCode');
+          final name = language == 'ar'
+              ? text(allocation, 'costCenterNameAr')
+              : text(allocation, 'costCenterNameEn');
+          final centre = code.isEmpty ? name : '$code — $name';
+          return '$centre: ${formatAmount(asString(allocation['amount']))}';
+        }).join('\n');
+      }
+      return centreLabel(row);
+    }
+
+    return AlertDialog(
+      title: Text('${l10n.entryNumber}: ${text(entry, 'entryNumber')}'),
+      content: SizedBox(
+        width: 920,
+        height: 480,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('${l10n.description}: ${text(entry, 'description')}'),
+            const SizedBox(height: 8),
+            Text('${l10n.debit}: ${formatAmount(asString(entry['totalDebit']))}    '
+                '${l10n.credit}: ${formatAmount(asString(entry['totalCredit']))}'),
+            const SizedBox(height: 12),
+            Expanded(
+              child: SingleChildScrollView(
+                child: RecordsTable(
+                  rows: lines,
+                  columns: [
+                    ColumnSpec('#', numeric: true,
+                      value: (row) => asNum(row['lineNumber'])?.toString() ?? ''),
+                    ColumnSpec(l10n.chartOfAccounts,
+                      value: (row) => '${text(row, 'accountCode')} — ${language == 'ar' ? text(row, 'accountNameAr') : text(row, 'accountNameEn')}'),
+                    ColumnSpec(l10n.description, value: (row) => text(row, 'description')),
+                    ColumnSpec(language == 'ar' ? 'مركز التكلفة / التوزيع' : 'Cost center / allocation',
+                      value: allocationsLabel),
+                    ColumnSpec(l10n.debit, numeric: true,
+                      value: (row) => formatAmount(asString(row['debit']))),
+                    ColumnSpec(l10n.credit, numeric: true,
+                      value: (row) => formatAmount(asString(row['credit']))),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(l10n.close)),
+      ],
     );
   }
 }

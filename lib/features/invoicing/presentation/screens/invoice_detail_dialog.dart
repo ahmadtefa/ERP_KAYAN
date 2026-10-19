@@ -49,6 +49,7 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final isSales = widget.kind.isSales;
+    final language = Localizations.localeOf(context).languageCode;
     return AlertDialog(
       title: Text(
         '${l10n.invoiceNumber} ${text(widget.summary, 'invoiceNumber')}',
@@ -118,6 +119,10 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
                               formatAmount(asString(invoice['subTotal'])),
                             ),
                             field(
+                              language == 'ar' ? 'الخصم' : 'Discount',
+                              formatAmount(asString(invoice['discountAmount'])),
+                            ),
+                            field(
                               l10n.taxAmount,
                               formatAmount(asString(invoice['taxAmount'])),
                             ),
@@ -174,6 +179,21 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
                         l10n.unitPrice,
                         numeric: true,
                         value: (r) => formatAmount(asString(r['unitPrice'])),
+                      ),
+                      ColumnSpec(
+                        language == 'ar' ? 'مركز التكلفة' : 'Cost center',
+                        value: (r) {
+                          final name = language == 'ar'
+                              ? text(r, 'costCenterNameAr')
+                              : text(r, 'costCenterNameEn');
+                          final code = text(r, 'costCenterCode');
+                          return code.isEmpty ? name : '$code — $name';
+                        },
+                      ),
+                      ColumnSpec(
+                        language == 'ar' ? 'الخصم' : 'Discount',
+                        numeric: true,
+                        value: (r) => formatAmount(asString(r['discountAmount'])),
                       ),
                       ColumnSpec(
                         l10n.taxAmount,

@@ -100,7 +100,10 @@ export class SalesInvoicesService {
         branch: { select: { code: true, nameEn: true, nameAr: true } },
         lines: {
           orderBy: { lineNumber: 'asc' },
-          include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } },
+          include: {
+            item: { select: { code: true, nameEn: true, nameAr: true, unit: true } },
+            costCenter: { select: { code: true, nameEn: true, nameAr: true } },
+          },
         },
       },
     });
@@ -130,6 +133,9 @@ export class SalesInvoicesService {
         discountPercent: l.discountPercent.toFixed(RATE_SCALE),
         discountAmount: l.discountAmount.toFixed(MONEY_SCALE),
         costCenterId: l.costCenterId ?? null,
+        costCenterCode: l.costCenter?.code ?? null,
+        costCenterNameEn: l.costCenter?.nameEn ?? null,
+        costCenterNameAr: l.costCenter?.nameAr ?? null,
         unitCost: l.unitCost.toFixed(MONEY_SCALE),
         costTotal: l.costTotal.toFixed(MONEY_SCALE),
       })),
