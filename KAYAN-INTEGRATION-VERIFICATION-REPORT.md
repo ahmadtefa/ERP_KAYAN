@@ -33,7 +33,7 @@ guessed "probably works".
 | Are budgets implemented? | **Yes**, server + screen + report tab, with actuals from posted entries only and no proration. |
 | Arabic and English? | **Strings complete** (562 keys each, identical sets). RTL rendering **not visually verified**. |
 | Are the tests green? | **Yes on `5da76f2`**: CI run `39260659445` (four jobs) and Windows run `39260659483` are green. Backend locally: 43 suites / 298 tests, 7 API scenarios, 25-check upgrade harness. |
-| Is the installer built from the current commit? | **Yes**: `5da76f2`, artifact `12192261692`, SHA-256 `2B0560CD…8EFA`, expires 2026-11-02, unsigned, installed-package smoke test passed. |
+| Is the installer built from the current commit? | **Yes.** The latest build is from `8cdd84d` (the commit that carries this report): artifact `12199953707`, SHA-256 `E08B3BCD…BAD6`, expires 2026-11-02T15:47:30Z, installed-package smoke test **passed**. Unsigned. |
 | Is LAN verified from a second computer? | **No — NOT VERIFIED.** |
 | Was a human click-through of the installed UI done? | **No — NOT VERIFIED.** |
 
@@ -44,12 +44,12 @@ guessed "probably works".
 | Branch | `arena/a5a099ec-erp-kayan` |
 | Code commit | `5da76f2` — `test(ui): assert the cost-center rows by name, not by a code that also labels a child` |
 | Report commit | the commit that adds this file (see `git log -1 -- KAYAN-INTEGRATION-VERIFICATION-REPORT.md`) |
-| Commits ahead of `main` | 22 code commits, **23** including the commit that adds this report (`git rev-list --count main..HEAD`) |
+| Commits ahead of `main` | 22 code commits; `git rev-list --count main..HEAD` = **24** with the two report commits |
 | Working tree | only this report was modified when the report commit was made |
 | `main` | `e1a2a7e`, untouched by this branch |
 | Merged into `main`? | **No** |
 | New production release published? | **No** |
-| Installer of this commit | artifact `12192261692`, built from `5da76f2` by run `39260659483` (section 9) |
+| Installer | latest: artifact `12199953707` from `8cdd84d` (run `39276354529`); earlier: `12192261692` from `5da76f2` (run `39260659483`). Both smoke-tested; sections 8–9 |
 
 The PR head was pushed to the same branch that PR #52 watches, so PR #52 contains every
 commit listed in section 2. The Windows installer workflow ran on **`5da76f2`** itself
@@ -336,6 +336,8 @@ Those come from CI only, and the CI run on this exact commit is green.
 | [Windows Installer run 39246795416](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39246795416) on `e3c577d` | **SUCCESS** — 32m56s (11:45:07Z → 12:18:03Z) |
 | [ERP KAYAN CI run 39260659445](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39260659445) on `5da76f2` | **SUCCESS** — all four jobs, including Flutter Web and Linux Desktop (analyze, 130 tests, build) |
 | [Windows Installer run 39260659483](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39260659483) on `5da76f2` | **SUCCESS** — 30m50s (13:29:57Z → 14:00:47Z); artifact `12192261692` |
+| [ERP KAYAN CI run 39276354174](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39276354174) on `8cdd84d` (report commit) | **SUCCESS** — same four jobs |
+| [Windows Installer run 39276354529](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39276354529) on `8cdd84d` | **SUCCESS** — artifact `12199953707`, smoke test passed |
 
 The Windows job also runs the backend test suite, `flutter analyze`, `flutter test` and the
 Flutter web build before packaging, so the installer is built from a tree that passed the same
@@ -385,11 +387,19 @@ What the smoke script actually exercises on the installed package (read from
 | Full PostgreSQL backup → mutate → checked restore → re-login → sentinel verified | annotation above |
 | `RepairTool.exe --diagnose` detects a stopped service, `--repair` fixes it, `--diagnose` is healthy afterwards, `KAYAN-REPAIR-OK` logged, company data preserved | `Smoke-test…` step success (the script `Fail`s if any of these assertions does not hold) |
 
-**Provenance.** The workflow checks out the PR head (`5da76f2`), so the packaged files are the
-program files of the current branch head. The only commit after it is this report, which lives at
-the repository root and is **not** copied into the installer (`build-installer.ps1` packages
-`backend/{dist,prisma,scripts,…}`, `build/web`, `distribution` files and the runtimes — not
-repository documentation).
+**A second, identical build from the report commit.**
+[Run 39276354529](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39276354529) rebuilt the
+installer from **`8cdd84d`** — the commit that adds this report — when that commit was pushed.
+It succeeded (all five checks green, smoke test `15:42:23Z → 15:47:29Z`) and produced artifact
+`12199953707`, 344,516,260 bytes, `KAYAN-ERP-Setup.exe` SHA-256
+`E08B3BCD0F9E179AFBB1CE7B9065F7E89AD9E5BB23A18E59E42948BF8AB0BAD6`, expiring
+2026-11-02T15:47:30Z. The same three notices were emitted.
+
+That build is the strongest provenance statement available: the package was produced from a
+commit whose tree differs from `5da76f2` only by this markdown file, and it passed the same
+installed-package checks. Any further edit to this file cannot change the package, because
+`build-installer.ps1` packages `backend/{dist,prisma,scripts,…}`, `build/web`, `distribution`
+files and the runtimes — not repository documentation.
 
 **Code signing: none.** There is no Authenticode signing step in `build-installer.ps1` or the
 workflow. Windows SmartScreen will warn on first run. This is stated in the Windows guide rather
@@ -416,11 +426,25 @@ The value above is the hash printed by the workflow itself
 (`::notice Installer SHA256::KAYAN-ERP-Setup.exe SHA256=2B0560CD…`) and is attached to the run's
 check-run annotation, not computed on this machine (the ZIP is not downloaded here).
 
-### Superseded artifacts of the same branch
+### The latest build — from `8cdd84d`, the commit that carries this report
+
+| Item | Value |
+|---|---|
+| Artifact | [`KAYAN-ERP-Windows-x64-Installer`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39276354529/artifacts/12199953707) (GitHub login required) |
+| Artifact id | `12199953707` |
+| Size | **344,516,260 bytes** |
+| Expires | **2026-11-02T15:47:30Z** |
+| `KAYAN-ERP-Setup.exe` SHA-256 | `E08B3BCD0F9E179AFBB1CE7B9065F7E89AD9E5BB23A18E59E42948BF8AB0BAD6` |
+| Source commit | `8cdd84d` (report-only commit; program files identical to `5da76f2`) |
+| Workflow run | `39276354529` — success; smoke test `Smoke-test the actual installed Windows application` passed |
+| Important caveat | **NOT a byte-identical copy of the `5da76f2` build.** Inno Setup embeds a build timestamp, so the EXE hash differs even though the program files and the source are the same. Never mix the two hashes. |
+
+### All artifacts of this branch
 
 | Artifact | Commit | Size | Expires | `KAYAN-ERP-Setup.exe` SHA-256 | Status |
 |---|---|---|---|---|---|
-| `12192261692` | `5da76f2` | 344,523,931 B | 2026-11-02T14:00:08Z | `2B0560CD16135D18FF4F12B2303660DE5B36B286BDD76C9D09489A2CE6AE8EFA` | **current** |
+| `12199953707` | `8cdd84d` | 344,516,260 B | 2026-11-02T15:47:30Z | `E08B3BCD0F9E179AFBB1CE7B9065F7E89AD9E5BB23A18E59E42948BF8AB0BAD6` | **latest** |
+| `12192261692` | `5da76f2` | 344,523,931 B | 2026-11-02T14:00:08Z | `2B0560CD16135D18FF4F12B2303660DE5B36B286BDD76C9D09489A2CE6AE8EFA` | valid, same program files |
 | `12187281839` | `abb8e3f` | 344,481,622 B | 2026-11-02T12:41:09Z | `C2A4783F302C014DA4FDB96D24C38B71B8066984CE1D1D3E68A9666901951A2D` | superseded (pre-Final-Pass) |
 | `12184754202` | `e3c577d` | 344,471,902 B | 2026-11-02T12:17:26Z | `7507EFE8E9FA9D7237BDBED4D06944942A32F80A6D1261360BA5B220F85C61B8` | superseded |
 
@@ -614,6 +638,7 @@ nothing was merged.
 | `scenario-accounting.mjs` | **79/79, 3 skipped** |
 | `verify-cost-center-upgrade.mjs` | **25/25** |
 | CI run [39260659445](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39260659445) on `5da76f2` | **SUCCESS** — Backend, Flutter Web (analyze, 130 tests, build), Linux Desktop (analyze, 130 tests, build), Regression scenario |
+| CI run [39276354174](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39276354174) and Windows run [39276354529](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39276354529) on `8cdd84d` (report commit) | **SUCCESS** — all five checks, including the installed-package smoke test |
 | New Flutter widget tests | 5 (invoice picker ×2, cost-center screen ×3) — **pass in CI**; `test/` declares **127** cases across 25 files |
 | Localization (static check) | **562** keys in `app_en.arb` and **562** in `app_ar.arb`, **identical sets**; the generated API carries **554 getters + 8 parameterized methods = 562**; `lib/` uses **493 distinct** keys and **all of them resolve** (the only name that looked missing, `accountTypeLabel`, is an extension method in `lib/shared/extensions/account_type_labels.dart`) |
 
@@ -626,12 +651,13 @@ attribution; the budget actual increases by the posted difference only after pos
 
 | Item | Value |
 |---|---|
-| Built from | **`5da76f2`** (the current head; the workflow checked out the PR head) |
-| Workflow run | [`39260659483`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39260659483) — **SUCCESS**, 30m50s (13:29:57Z → 14:00:47Z) |
-| Artifact | `12192261692` — `KAYAN-ERP-Windows-x64-Installer` (GitHub login required to download) |
-| Size | 344,523,931 bytes |
-| `KAYAN-ERP-Setup.exe` SHA-256 | `2B0560CD16135D18FF4F12B2303660DE5B36B286BDD76C9D09489A2CE6AE8EFA` |
-| Created / expires | 2026-10-19T14:00:19Z / **2026-11-02T14:00:08Z** |
+| Built from | **`5da76f2`** (the code head), and rebuilt from **`8cdd84d`** (the report commit) |
+| Workflow runs | [`39260659483`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39260659483) — SUCCESS, 30m50s; [`39276354529`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39276354529) — SUCCESS |
+| Artifact (latest) | `12199953707` — `KAYAN-ERP-Windows-x64-Installer` (GitHub login required to download) |
+| Size (latest) | 344,516,260 bytes |
+| `KAYAN-ERP-Setup.exe` SHA-256 (latest) | `E08B3BCD0F9E179AFBB1CE7B9065F7E89AD9E5BB23A18E59E42948BF8AB0BAD6` |
+| Artifact (first) | `12192261692`, 344,523,931 bytes, SHA-256 `2B0560CD16135D18FF4F12B2303660DE5B36B286BDD76C9D09489A2CE6AE8EFA` |
+| Created / expires (latest) | 2026-10-19T15:47:30Z / **2026-11-02T15:47:30Z** |
 | Smoke test of the installed package | **PASSED** (step `Smoke-test the actual installed Windows application`) |
 | Service / database / client / login | **exercised by the smoke test**: service running, database prepared and migrated, client started a healthy local API on port 3000, login returned a token — all confirmed by the run's annotations |
 | Company JSON and full PostgreSQL backup/restore | **exercised**: snapshot → mutation → restore → re-login → original sentinel verified, for both formats |
