@@ -83,6 +83,7 @@ model Company {
   fiscalPeriods FiscalPeriod[]
   quotations    Quotation[]
   quotationTermTemplates QuotationTermTemplate[]
+  quotationColumnTemplates QuotationColumnTemplate[]
 
   warehouses     Warehouse[]
   priceLists     PriceList[]
@@ -1555,6 +1556,29 @@ model QuotationTermTemplate {
   @@map("quotation_term_templates")
 }
 
+/// A named column layout an offer can start from: "Cabinets", "Service".
+/// The quotation itself owns a copy of the columns, so editing a template
+/// later never rewrites an offer that was already sent.
+model QuotationColumnTemplate {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @db.Uuid
+  name      String   @db.VarChar(120)
+  columns   Json
+  isDefault Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String?  @db.Uuid
+  updatedBy String?  @db.Uuid
+  deletedAt DateTime?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, name])
+  @@index([companyId, isActive])
+  @@map("quotation_column_templates")
+}
+
 enum QuotationStatus {
   DRAFT
   SENT
@@ -1602,6 +1626,15 @@ model Quotation {
   notes String?
   /// Terms and conditions, printed on the first page. Editable per quotation.
   terms String?
+
+  /// The offer's own headline, e.g. "Kitchen for the Nasr flat". Printed under
+  /// the company header and kept in the snapshot; null means no subject line.
+  subject String? @db.VarChar(200)
+
+  /// Which line columns this offer prints, in which order, and under which
+  /// labels. Null means the standard set, so older rows keep printing exactly
+  /// as they did. Copied into the snapshot when the offer is issued.
+  columns Json?
 
   /// The quotation-wide discount, applied after the per-table discounts.
   discountType    String? @db.VarChar(16)

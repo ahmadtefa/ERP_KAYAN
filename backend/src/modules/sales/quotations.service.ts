@@ -28,6 +28,13 @@ import {
   QuotationTableDto,
   UpdateQuotationDto,
 } from './dto/quotation.dto';
+import {
+  COLUMN_LABELS,
+  columnLabel,
+  normalizeColumns,
+  QuotationColumn,
+  standardColumns,
+} from './quotation-columns';
 
 const MONEY_SCALE = 4;
 const RATE_SCALE = 4;
@@ -146,6 +153,7 @@ export class QuotationsService {
         currency: quotation.currency,
         version: quotation.version,
         customer: quotation.customer,
+        subject: quotation.subject,
         subTotal: quotation.subTotal.toFixed(MONEY_SCALE),
         discountTotal: quotation.discountTotal.toFixed(MONEY_SCALE),
         totalAmount: quotation.totalAmount.toFixed(MONEY_SCALE),
@@ -201,6 +209,8 @@ export class QuotationsService {
           currency,
           notes: this.text(dto.notes),
           terms: this.text(dto.terms),
+          subject: this.text(dto.subject),
+          columns: this.columnData(dto.columns) as unknown as Prisma.InputJsonValue,
           discountType: prepared.documentDiscount.type,
           discountPercent: prepared.documentDiscount.percent,
           discountAmount: prepared.documentDiscount.amount,
@@ -210,7 +220,8 @@ export class QuotationsService {
           managerName: this.text(dto.managerName) ?? settings.managerName,
           responsibleName: this.text(dto.responsibleName) ?? settings.salesManagerName,
           responsiblePhone: this.text(dto.responsiblePhone) ?? settings.salesManagerPhone,
-          showTaxId: settings.showTaxIdOnQuotations,
+          // The offer's own switch wins; omitting it keeps the company default.
+          showTaxId: dto.showTaxId ?? settings.showTaxIdOnQuotations,
           createdBy: userId,
           updatedBy: userId,
           tables: {
@@ -291,6 +302,8 @@ export class QuotationsService {
           currency,
           notes: this.text(dto.notes),
           terms: this.text(dto.terms),
+          subject: this.text(dto.subject),
+          columns: this.columnData(dto.columns) as unknown as Prisma.InputJsonValue,
           discountType: prepared.documentDiscount.type,
           discountPercent: prepared.documentDiscount.percent,
           discountAmount: prepared.documentDiscount.amount,
@@ -300,6 +313,9 @@ export class QuotationsService {
           managerName: this.text(dto.managerName),
           responsibleName: this.text(dto.responsibleName),
           responsiblePhone: this.text(dto.responsiblePhone),
+          // Only touch the switch when the client sent it; otherwise a partial
+          // update would silently reset the offer's own choice.
+          ...(dto.showTaxId === undefined ? {} : { showTaxId: dto.showTaxId }),
           updatedBy: userId,
         },
       });
@@ -509,7 +525,6 @@ export class QuotationsService {
       throw new BadRequestException('A draft is edited directly; revision is for issued quotations');
     }
 
-    const settings = await this.settings.get(companyId);
     const created = await this.prisma.$transaction(async (tx) => {
       const quotationNumber = await this.numbers.next(tx, companyId, 'SALES_QUOTATION', 'QT');
       const revision = await tx.quotation.create({
@@ -525,6 +540,8 @@ export class QuotationsService {
           revisionOfId: quotation.id,
           notes: quotation.notes,
           terms: quotation.terms,
+          subject: quotation.subject,
+          columns: quotation.columns === null ? Prisma.DbNull : (quotation.columns as Prisma.InputJsonValue),
           discountType: quotation.discountType,
           discountPercent: quotation.discountPercent,
           discountAmount: quotation.discountAmount,
@@ -534,7 +551,9 @@ export class QuotationsService {
           managerName: quotation.managerName,
           responsibleName: quotation.responsibleName,
           responsiblePhone: quotation.responsiblePhone,
-          showTaxId: settings.showTaxIdOnQuotations,
+          // A revision continues the same offer, so it keeps the tax-number
+          // choice that offer was sent with rather than today's default.
+          showTaxId: quotation.showTaxId,
           createdBy: userId,
           updatedBy: userId,
           tables: {
@@ -1023,7 +1042,6 @@ export class QuotationsService {
   /// The exact content of an issued offer. Built once and stored.
   private async snapshotContent(companyId: string, quotation: QuotationWithRelations): Promise<QuotationSnapshot> {
     const company = await this.companyHeader(companyId);
-    const settings = await this.settings.get(companyId);
     return {
       quotationNumber: quotation.quotationNumber,
       quotationDate: quotation.quotationDate.toISOString().slice(0, 10),
@@ -1050,7 +1068,11 @@ export class QuotationsService {
         address: company.addressEn || company.address,
         addressAr: company.addressAr || company.address,
       },
-      showTaxId: settings.showTaxIdOnQuotations,
+      // The offer's own switch, not today's company default: an issued offer
+      // must keep printing what it printed when it was issued.
+      showTaxId: quotation.showTaxId,
+      subject: quotation.subject,
+      columns: this.columnsOf(quotation.columns),
       managerName: quotation.managerName,
       responsibleName: quotation.responsibleName,
       responsiblePhone: quotation.responsiblePhone,
@@ -1067,6 +1089,7 @@ export class QuotationsService {
         discountAmount: table.discountAmount.toFixed(MONEY_SCALE),
         netTotal: table.netTotal.toFixed(MONEY_SCALE),
         lines: table.lines.map((line) => ({
+          itemCode: line.item?.code ?? null,
           description: line.description,
           countryOfOrigin: line.countryOfOrigin,
           unit: line.unit,
@@ -1106,6 +1129,8 @@ export class QuotationsService {
       responsibleName: quotation.responsibleName,
       responsiblePhone: quotation.responsiblePhone,
       showTaxId: quotation.showTaxId,
+      subject: quotation.subject,
+      columns: this.columnsOf(quotation.columns),
       issuedAt: quotation.issuedAt?.toISOString() ?? null,
       sentAt: quotation.sentAt?.toISOString() ?? null,
       acceptedAt: quotation.acceptedAt?.toISOString() ?? null,
@@ -1206,17 +1231,37 @@ export class QuotationsService {
       content.customer.address ? `<div><span>${L('Address', 'العنوان')}</span><b>${this.escape(content.customer.address)}</b></div>` : '',
     ].filter(Boolean).join('');
 
+    // The offer's own column layout: order, labels and visibility all come
+    // from the quotation. An offer that never chose one prints the standard
+    // six, exactly as before.
+    const columns = (content.columns?.length ? content.columns : standardColumns())
+      .filter((column) => column.visible);
+    const columnCount = columns.reduce((sum, column) => sum + column.width, 0) || 1;
+    const span = columns.length + 1;
+    const headCells = columns.map((column) => {
+      const numeric = COLUMN_LABELS[column.key].numeric;
+      const width = `${Math.round((column.width / columnCount) * 100)}%`;
+      return `<th${numeric ? ' class="num"' : ''} style="width:${width}">${this.escape(
+        columnLabel(column, lang),
+      )}</th>`;
+    }).join('');
+
     const tables = content.tables.map((table) => {
-      const rows = table.lines.map((line, index) => `
+      const rows = table.lines.map((line, index) => {
+        const cells = columns.map((column) => {
+          const cell = this.columnCell(column, line);
+          const classes = [cell.numeric ? 'num' : '', cell.strong ? 'strong' : '', column.key === 'description' ? 'desc' : '']
+            .filter(Boolean)
+            .join(' ');
+          const text = cell.numeric && column.key !== 'quantity' ? money(cell.text) : this.escape(cell.text);
+          return `<td${classes ? ` class="${classes}"` : ''}>${text}</td>`;
+        }).join('');
+        return `
         <tr>
           <td class="idx">${index + 1}</td>
-          <td class="desc">${this.escape(line.description)}</td>
-          <td>${this.escape(line.countryOfOrigin ?? '')}</td>
-          <td>${this.escape(line.unit ?? '')}</td>
-          <td class="num">${this.qty(line.quantity)}</td>
-          <td class="num">${money(line.unitPrice)}</td>
-          <td class="num strong">${money(line.lineTotal)}</td>
-        </tr>`).join('');
+          ${cells}
+        </tr>`;
+      }).join('');
       return `
       <section class="block">
         <div class="section-title">${this.escape(table.title)}</div>
@@ -1224,22 +1269,17 @@ export class QuotationsService {
           <thead>
             <tr>
               <th class="idx">#</th>
-              <th>${L('Description', 'الوصف')}</th>
-              <th>${L('Origin', 'بلد المنشأ')}</th>
-              <th>${L('Unit', 'الوحدة')}</th>
-              <th class="num">${L('Qty', 'الكمية')}</th>
-              <th class="num">${L('Unit price', 'سعر الوحدة')}</th>
-              <th class="num">${L('Total', 'الإجمالي')}</th>
+              ${headCells}
             </tr>
           </thead>
           <tbody>${rows}</tbody>
           <tfoot>
-            <tr><th colspan="6">${L('Table subtotal', 'إجمالي الجدول')}</th><td class="num">${money(table.subTotal)}</td></tr>
+            <tr><th colspan="${span - 1}">${L('Table subtotal', 'إجمالي الجدول')}</th><td class="num">${money(table.subTotal)}</td></tr>
             ${Number(table.discountAmount) > 0
-              ? `<tr><th colspan="6">${L('Table discount', 'خصم الجدول')}${
+              ? `<tr><th colspan="${span - 1}">${L('Table discount', 'خصم الجدول')}${
                   Number(table.discountPercent) > 0 ? ` (${Number(table.discountPercent)}%)` : ''
                 }</th><td class="num">− ${money(table.discountAmount)}</td></tr>
-                <tr class="net"><th colspan="6">${L('Net after discount', 'الصافي بعد الخصم')}</th><td class="num">${money(table.netTotal)}</td></tr>`
+                <tr class="net"><th colspan="${span - 1}">${L('Net after discount', 'الصافي بعد الخصم')}</th><td class="num">${money(table.netTotal)}</td></tr>`
               : ''}
           </tfoot>
         </table>
@@ -1301,6 +1341,9 @@ export class QuotationsService {
   .brand .meta .row b { color:var(--ink); }
   .company-details { display:flex; flex-wrap:wrap; gap:3px 16px; font-size:8.5pt; color:var(--muted); margin-top:6px; }
   .company-details span { margin-inline-end:4px; }
+  .subject { margin:10px 0 0; border-inline-start:3px solid var(--accent); padding:4px 0 4px 10px; }
+  .subject span { font-size:8.5pt; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin-inline-end:8px; }
+  .subject b { font-size:12pt; }
   .parties { display:flex; gap:14px; margin:12px 0 14px; }
   .card { flex:1; border:1px solid var(--line); border-radius:6px; padding:9px 11px; }
   .card .label { font-size:8pt; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin-bottom:4px; }
@@ -1364,6 +1407,10 @@ ${autoPrint ? '' : `<div class="toolbar"><button onclick="window.print()">${L('P
     <div class="row">${L('Version', 'الإصدار')} <b>${content.version}</b></div>
   </div>
 </header>
+
+${content.subject?.trim()
+  ? `<div class="subject"><span>${L('Subject', 'الموضوع')}</span><b>${this.escape(content.subject.trim())}</b></div>`
+  : ''}
 
 <div class="parties">
   <div class="card">
@@ -1463,6 +1510,66 @@ ${autoPrint ? '<script>window.addEventListener("load",()=>window.print())</scrip
     return number.toDecimalPlaces(MONEY_SCALE);
   }
 
+  /// The columns an offer prints. A stored layout always wins; an offer that
+  /// never chose one prints the standard six, exactly as it did before this
+  /// feature existed.
+  private columnsOf(raw: unknown): QuotationColumn[] {
+    return normalizeColumns(raw);
+  }
+
+  /// Validates what the editor sent before it is stored. A layout with no
+  /// visible column would print an empty table, so it is refused rather than
+  /// quietly replaced.
+  private columnData(raw?: Array<{
+    key: string;
+    labelEn?: string | null;
+    labelAr?: string | null;
+    visible?: boolean;
+    width?: number;
+  }>): QuotationColumn[] {
+    if (!raw || raw.length === 0) return standardColumns();
+    const seen = new Set<string>();
+    for (const entry of raw) {
+      if (!COLUMN_LABELS[entry.key]) {
+        throw new BadRequestException(`Unknown quotation column "${entry.key}"`);
+      }
+      if (seen.has(entry.key)) {
+        throw new BadRequestException(`The column "${entry.key}" is listed twice`);
+      }
+      seen.add(entry.key);
+    }
+    const columns = normalizeColumns(raw);
+    if (!columns.some((column) => column.visible)) {
+      throw new BadRequestException('Keep at least one column visible');
+    }
+    return columns;
+  }
+
+  /// One cell of a printed line, in the column's own type.
+  private columnCell(column: QuotationColumn, line: QuotationSnapshotLine): {
+    text: string;
+    numeric: boolean;
+    strong: boolean;
+  } {
+    const numeric = COLUMN_LABELS[column.key].numeric;
+    switch (column.key) {
+      case 'itemCode':
+        return { text: line.itemCode ?? '', numeric: false, strong: false };
+      case 'countryOfOrigin':
+        return { text: line.countryOfOrigin ?? '', numeric: false, strong: false };
+      case 'unit':
+        return { text: line.unit ?? '', numeric: false, strong: false };
+      case 'quantity':
+        return { text: this.qty(line.quantity), numeric: true, strong: false };
+      case 'unitPrice':
+        return { text: line.unitPrice, numeric: true, strong: false };
+      case 'lineTotal':
+        return { text: line.lineTotal, numeric: true, strong: true };
+      default:
+        return { text: line.description, numeric: false, strong: false };
+    }
+  }
+
   private text(value: string | null | undefined): string | null {
     if (value === null || value === undefined) return null;
     const trimmed = value.trim();
@@ -1530,6 +1637,8 @@ interface QuotationSnapshot {
     addressAr: string | null;
   };
   showTaxId: boolean;
+  subject: string | null;
+  columns: QuotationColumn[];
   managerName: string | null;
   responsibleName: string | null;
   responsiblePhone: string | null;
@@ -1545,14 +1654,17 @@ interface QuotationSnapshot {
     discountPercent: string;
     discountAmount: string;
     netTotal: string;
-    lines: Array<{
-      description: string;
-      countryOfOrigin: string | null;
-      unit: string | null;
-      quantity: string;
-      unitPrice: string;
-      lineTotal: string;
-    }>;
+    lines: QuotationSnapshotLine[];
   }>;
   totals: { subTotal: string; discountTotal: string; totalAmount: string };
+}
+
+interface QuotationSnapshotLine {
+  itemCode: string | null;
+  description: string;
+  countryOfOrigin: string | null;
+  unit: string | null;
+  quantity: string;
+  unitPrice: string;
+  lineTotal: string;
 }

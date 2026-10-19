@@ -7,6 +7,8 @@ import { SalesInvoicesController } from './sales-invoices.controller';
 import { SalesInvoicesService } from './sales-invoices.service';
 import { SalesOrdersController } from './sales-orders.controller';
 import { SalesOrdersService } from './sales-orders.service';
+import { QuotationColumnTemplatesController } from './quotation-column-templates.controller';
+import { QuotationColumnTemplatesService } from './quotation-column-templates.service';
 import { QuotationTermsController } from './quotation-terms.controller';
 import { QuotationTermsService } from './quotation-terms.service';
 import { QuotationsController } from './quotations.controller';
@@ -20,6 +22,7 @@ import { QuotationsService } from './quotations.service';
     PriceListsController,
     QuotationsController,
     QuotationTermsController,
+    QuotationColumnTemplatesController,
   ],
   providers: [
     SalesInvoicesService,
@@ -27,6 +30,7 @@ import { QuotationsService } from './quotations.service';
     PriceListsService,
     QuotationsService,
     QuotationTermsService,
+    QuotationColumnTemplatesService,
   ],
   exports: [SalesInvoicesService, SalesOrdersService, PriceListsService, QuotationsService],
 })

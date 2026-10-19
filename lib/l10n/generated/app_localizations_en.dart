@@ -2186,4 +2186,62 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get removeSavedTerm => 'Remove this saved entry? Documents that already used it keep their own copy.';
+  @override
+  String get itemCode => 'Item code';
+
+  @override
+  String get subject => 'Subject';
+
+  @override
+  String get subjectHint => 'The headline of this offer, printed above the customer\'s name.';
+
+  @override
+  String get showTaxNumberOnOffer => 'Print the company tax number on this offer';
+
+  @override
+  String get showTaxNumberOnOfferHint => 'The company setting is only the default; this offer keeps its own choice.';
+
+  @override
+  String get quotationColumns => 'Line columns';
+
+  @override
+  String get columnLayout => 'Column layout';
+
+  @override
+  String get columnLayoutHint => 'Choose, rename, order and size the columns this offer prints.';
+
+  @override
+  String get columnLabelEn => 'English label';
+
+  @override
+  String get columnLabelAr => 'Arabic label';
+
+  @override
+  String get columnWidth => 'Width';
+
+  @override
+  String get addColumn => 'Add column';
+
+  @override
+  String get removeColumn => 'Remove column';
+
+  @override
+  String get columnTemplate => 'Saved layout';
+
+  @override
+  String get templateName => 'New layout name';
+
+  @override
+  String get saveColumnTemplate => 'Save as a layout';
+
+  @override
+  String get templateSaved => 'Layout saved to the library';
+
+  @override
+  String get keepOneColumnVisible => 'Keep at least one column visible.';
+  @override
+  String get printedOnOffer => 'Printed';
+
+  @override
+  String get notPrintedOnOffer => 'Not printed';
 }

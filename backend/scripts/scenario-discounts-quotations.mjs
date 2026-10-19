@@ -373,6 +373,18 @@ async function main() {
     managerName: 'Site Manager',
     responsibleName: 'Sales Engineer',
     responsiblePhone: '01111111111',
+    subject: `Kitchen offer ${stamp}`,
+    // This offer chooses its own tax-number behaviour; the company setting is
+    // only a default from now on.
+    showTaxId: false,
+    columns: [
+      { key: 'itemCode', labelEn: 'Code', labelAr: 'الكود', width: 2 },
+      { key: 'description', width: 4 },
+      { key: 'quantity', labelEn: 'Pieces', labelAr: 'القطع', width: 1 },
+      { key: 'unitPrice', width: 2 },
+      { key: 'lineTotal', width: 2 },
+      { key: 'countryOfOrigin', visible: false, width: 2 },
+    ],
     tables: [
       {
         title: 'Kitchen cabinets',
@@ -408,6 +420,37 @@ async function main() {
   check('the country of origin is copied from the item and never invented', quotation.tables[0].lines[0].countryOfOrigin === 'Egypt' && quotation.tables[1].lines[0].countryOfOrigin === 'Germany');
   check('a table is titled and ordered', quotation.tables[0].title === 'Kitchen cabinets' && quotation.tables[1].sortOrder === 2);
   check('the quotation starts as a draft', quotation.status === 'draft' && quotation.canEdit === true);
+  check('the offer keeps its own subject', quotation.subject === `Kitchen offer ${stamp}`, quotation.subject);
+  check('the offer keeps its own tax-number choice', quotation.showTaxId === false);
+  check(
+    'the offer stores its own column order and labels',
+    Array.isArray(quotation.columns) &&
+      quotation.columns.length === 6 &&
+      quotation.columns[0].key === 'itemCode' &&
+      quotation.columns[2].labelEn === 'Pieces' &&
+      quotation.columns[5].visible === false,
+    JSON.stringify(quotation.columns),
+  );
+
+  // ── saved column layouts ─────────────────────────────────────────────
+  const layout = await must('save a column layout', '/sales/quotation-column-templates', {
+    method: 'POST',
+    json: {
+      name: `Service layout ${stamp}`,
+      columns: [
+        { key: 'description', width: 5 },
+        { key: 'quantity', width: 1 },
+        { key: 'lineTotal', width: 2 },
+      ],
+    },
+  });
+  const layouts = await must('read the saved layouts', '/sales/quotation-column-templates');
+  check('the saved layout is offered', Array.isArray(layouts) && layouts.some((row) => row.id === layout?.id));
+  const editedLayout = await must('rename a saved layout', `/sales/quotation-column-templates/${layout.id}`, {
+    method: 'PUT',
+    json: { name: `Service layout renamed ${stamp}` },
+  });
+  check('a saved layout can be renamed', editedLayout?.name === `Service layout renamed ${stamp}`);
 
   const journalCountAfter = (await must('count journal entries again', '/accounting/journal-entries?pageSize=1'))?.total;
   check('a quotation posts nothing to the ledger', journalCountBefore === journalCountAfter, `${journalCountBefore} -> ${journalCountAfter}`);
@@ -443,6 +486,21 @@ async function main() {
   });
   const settingsOff = await must('read the setting back', '/accounting/settings');
   check('the setting is saved', settingsOff?.showTaxIdOnQuotations === false);
+
+  // The company default applies only when the offer does not choose. One
+  // draft left unset follows the default; one that sets true overrides it.
+  const followsDefault = await must('create a draft without a tax choice', '/sales/quotations', {
+    method: 'POST',
+    json: { ...quotationPayload, subject: `Default tax ${stamp}`, showTaxId: undefined, columns: undefined },
+  });
+  check('an unset offer follows the company default', followsDefault?.showTaxId === false);
+  const overridesDefault = await must('create a draft that keeps the tax number', '/sales/quotations', {
+    method: 'POST',
+    json: { ...quotationPayload, subject: `Tax on ${stamp}`, showTaxId: true },
+  });
+  check('an offer can override the company default', overridesDefault?.showTaxId === true);
+  await must('remove the two extra drafts', `/sales/quotations/${followsDefault.id}`, { method: 'DELETE' });
+  await must('remove the second extra draft', `/sales/quotations/${overridesDefault.id}`, { method: 'DELETE' });
   const company = await must('read the company profile', '/company/profile');
   check('turning the setting off does not delete the tax number', company?.taxId === companyTaxId, company?.taxId ?? 'missing');
 
@@ -453,6 +511,13 @@ async function main() {
   check('sending issues the quotation and snapshots it', issued?.status === 'sent' && Boolean(issued?.snapshotAt));
   check('the snapshot holds the tables and totals as issued', issued?.contentSnapshot?.tables?.length === 3 && near(issued?.contentSnapshot?.totals?.totalAmount, 1491.5));
   check('the snapshot remembers that the tax number was hidden', issued?.contentSnapshot?.showTaxId === false);
+  check('the snapshot carries the subject', issued?.contentSnapshot?.subject === `Kitchen offer ${stamp}`);
+  check(
+    'the snapshot carries the column layout as issued',
+    issued?.contentSnapshot?.columns?.[2]?.labelEn === 'Pieces' &&
+      issued?.contentSnapshot?.columns?.[5]?.visible === false,
+    JSON.stringify(issued?.contentSnapshot?.columns),
+  );
   check('an issued quotation can no longer be edited', issued?.canEdit === false);
   await rejected('editing an issued quotation is refused', `/sales/quotations/${quotation.id}`, {
     method: 'PUT',
@@ -465,7 +530,27 @@ async function main() {
   const printArText = String(printAr.data);
   check('the Arabic preview is right to left with Arabic labels', printAr.status === 200 && printArText.includes('dir="rtl"') && printArText.includes('عرض سعر') && printArText.includes('الإجمالي النهائي'));
   check('the hidden tax number is absent from both previews', !String(printEn.data).includes(companyTaxId) && !printArText.includes(companyTaxId));
+  check(
+    'the preview prints the offer subject and its own column labels',
+    String(printEn.data).includes(`Kitchen offer ${stamp}`) &&
+      String(printEn.data).includes('Pieces') &&
+      String(printEn.data).includes('Code'),
+  );
+  check(
+    'a hidden column does not print',
+    !String(printEn.data).includes('>Origin<') && !printArText.includes('بلد المنشأ'),
+  );
+  check('the English preview orders the columns as the offer does', String(printEn.data).indexOf('>Code<') < String(printEn.data).indexOf('>Description<'));
   check('the terms and the responsible person appear', printEnText(printEn.data) && printEnText(printEn.data).includes('Delivery within 30 days') && printEnText(printEn.data).includes('Sales Engineer'));
+
+  await must('retire the saved layout', `/sales/quotation-column-templates/${layout.id}`, { method: 'DELETE' });
+  const layoutsAfter = await must('read the layouts after retiring', '/sales/quotation-column-templates');
+  check('a retired layout leaves the picker', Array.isArray(layoutsAfter) && layoutsAfter.every((row) => row.id !== layout.id));
+  const issuedAfter = await must('read the issued offer again', `/sales/quotations/${quotation.id}`);
+  check(
+    'editing or retiring a layout never rewrites an issued offer',
+    issuedAfter?.contentSnapshot?.columns?.[2]?.labelEn === 'Pieces' && issuedAfter?.subject === `Kitchen offer ${stamp}`,
+  );
 
   // The PDF endpoint exists; when the machine has no browser it answers 422
   // with a helpful message instead of pretending to have made a file.

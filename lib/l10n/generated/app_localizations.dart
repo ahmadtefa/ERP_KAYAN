@@ -3909,4 +3909,82 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
     'on GitHub with a reproducible sample app and the gen-l10n configuration '
     'that was used.',
   );
+  /// In en, this message translates to:
+  /// **'Item code'**
+  String get itemCode;
+
+  /// In en, this message translates to:
+  /// **'Subject'**
+  String get subject;
+
+  /// In en, this message translates to:
+  /// **'The headline of this offer, printed above the customer\'s name.'**
+  String get subjectHint;
+
+  /// In en, this message translates to:
+  /// **'Print the company tax number on this offer'**
+  String get showTaxNumberOnOffer;
+
+  /// In en, this message translates to:
+  /// **'The company setting is only the default; this offer keeps its own choice.'**
+  String get showTaxNumberOnOfferHint;
+
+  /// In en, this message translates to:
+  /// **'Line columns'**
+  String get quotationColumns;
+
+  /// In en, this message translates to:
+  /// **'Column layout'**
+  String get columnLayout;
+
+  /// In en, this message translates to:
+  /// **'Choose, rename, order and size the columns this offer prints.'**
+  String get columnLayoutHint;
+
+  /// In en, this message translates to:
+  /// **'English label'**
+  String get columnLabelEn;
+
+  /// In en, this message translates to:
+  /// **'Arabic label'**
+  String get columnLabelAr;
+
+  /// In en, this message translates to:
+  /// **'Width'**
+  String get columnWidth;
+
+  /// In en, this message translates to:
+  /// **'Add column'**
+  String get addColumn;
+
+  /// In en, this message translates to:
+  /// **'Remove column'**
+  String get removeColumn;
+
+  /// In en, this message translates to:
+  /// **'Saved layout'**
+  String get columnTemplate;
+
+  /// In en, this message translates to:
+  /// **'New layout name'**
+  String get templateName;
+
+  /// In en, this message translates to:
+  /// **'Save as a layout'**
+  String get saveColumnTemplate;
+
+  /// In en, this message translates to:
+  /// **'Layout saved to the library'**
+  String get templateSaved;
+
+  /// In en, this message translates to:
+  /// **'Keep at least one column visible.'**
+  String get keepOneColumnVisible;
+  /// In en, this message translates to:
+  /// **'Printed'**
+  String get printedOnOffer;
+
+  /// In en, this message translates to:
+  /// **'Not printed'**
+  String get notPrintedOnOffer;
 }

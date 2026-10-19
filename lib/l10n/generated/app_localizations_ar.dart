@@ -2176,4 +2176,62 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get removeSavedTerm => 'إزالة هذا الشرط المحفوظ؟ تحتفظ المستندات التي استخدمته بنسختها الخاصة.';
+  @override
+  String get itemCode => 'كود الصنف';
+
+  @override
+  String get subject => 'الموضوع';
+
+  @override
+  String get subjectHint => 'عنوان هذا العرض، يُطبع فوق اسم العميل.';
+
+  @override
+  String get showTaxNumberOnOffer => 'طباعة الرقم الضريبي للشركة على هذا العرض';
+
+  @override
+  String get showTaxNumberOnOfferHint => 'إعداد الشركة مجرد افتراضي؛ يحتفظ كل عرض باختياره الخاص.';
+
+  @override
+  String get quotationColumns => 'أعمدة البنود';
+
+  @override
+  String get columnLayout => 'تخطيط الأعمدة';
+
+  @override
+  String get columnLayoutHint => 'اختر أعمدة هذا العرض وأعد تسميتها وترتيبها وتحديد عرضها.';
+
+  @override
+  String get columnLabelEn => 'العنوان بالإنجليزية';
+
+  @override
+  String get columnLabelAr => 'العنوان بالعربية';
+
+  @override
+  String get columnWidth => 'العرض';
+
+  @override
+  String get addColumn => 'إضافة عمود';
+
+  @override
+  String get removeColumn => 'حذف العمود';
+
+  @override
+  String get columnTemplate => 'تخطيط محفوظ';
+
+  @override
+  String get templateName => 'اسم التخطيط الجديد';
+
+  @override
+  String get saveColumnTemplate => 'حفظ كتخطيط';
+
+  @override
+  String get templateSaved => 'تم حفظ التخطيط في المكتبة';
+
+  @override
+  String get keepOneColumnVisible => 'أبقِ عمودًا واحدًا ظاهرًا على الأقل.';
+  @override
+  String get printedOnOffer => 'مطبوع';
+
+  @override
+  String get notPrintedOnOffer => 'غير مطبوع';
 }
