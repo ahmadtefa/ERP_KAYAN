@@ -29,6 +29,9 @@ export class PurchaseInvoiceLineDto {
   @IsOptional() @IsString() unitPrice?: string;
 
   @IsOptional() @IsString() taxRate?: string;
+
+  /// The department, administrative unit or project the cost was incurred for.
+  @IsOptional() @IsUUID() costCenterId?: string;
 }
 
 export class PurchaseLandedCostChargeDto {

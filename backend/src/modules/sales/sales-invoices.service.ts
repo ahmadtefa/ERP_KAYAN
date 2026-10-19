@@ -11,6 +11,7 @@ import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { PriceListsService } from './price-lists.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
+import { attributedLines } from '../accounting/cost-center-attribution';
 import { PostingService } from '../accounting/posting.service';
 import {
   CreateSalesInvoiceDto,
@@ -30,6 +31,7 @@ interface PreparedLine {
   taxRate: Prisma.Decimal;
   taxAmount: Prisma.Decimal;
   lineTotal: Prisma.Decimal;
+  costCenterId: string | null;
 }
 
 @Injectable()
@@ -124,6 +126,7 @@ export class SalesInvoicesService {
         taxRate: l.taxRate.toFixed(RATE_SCALE),
         taxAmount: l.taxAmount.toFixed(MONEY_SCALE),
         lineTotal: l.lineTotal.toFixed(MONEY_SCALE),
+        costCenterId: l.costCenterId ?? null,
         unitCost: l.unitCost.toFixed(MONEY_SCALE),
         costTotal: l.costTotal.toFixed(MONEY_SCALE),
       })),
@@ -189,6 +192,7 @@ export class SalesInvoicesService {
               taxRate: l.taxRate,
               taxAmount: l.taxAmount,
               lineTotal: l.lineTotal,
+              costCenterId: l.costCenterId,
             })),
           },
         },
@@ -377,10 +381,37 @@ export class SalesInvoicesService {
         sourceNumber: invoice.invoiceNumber,
         lines: [
           { accountId: accounts.accountsReceivable, debit: invoice.totalAmount, description: 'Customer balance' },
-          { accountId: accounts.salesRevenue, credit: invoice.subTotal, description: 'Sales revenue' },
+          // Revenue and its cost are attributed line by line to the cost
+          // centres the invoice named. Lines without a centre stay unallocated
+          // rather than being pushed onto one for the sake of a tidy report.
+          ...attributedLines(
+            accounts.salesRevenue,
+            'credit',
+            'Sales revenue',
+            invoice.lines.map((line) => ({
+              costCenterId: line.costCenterId,
+              amount: line.lineTotal,
+            })),
+          ),
           { accountId: accounts.vatPayable, credit: invoice.taxAmount, description: 'VAT on sales' },
-          { accountId: accounts.costOfGoodsSold, debit: costOfGoods, description: 'Cost of goods sold' },
-          { accountId: accounts.inventory, credit: costOfGoods, description: 'Inventory issued' },
+          ...attributedLines(
+            accounts.costOfGoodsSold,
+            'debit',
+            'Cost of goods sold',
+            invoice.lines.map((line) => ({
+              costCenterId: line.costCenterId,
+              amount: costByLine.get(line.id)?.costTotal ?? new Prisma.Decimal(0),
+            })),
+          ),
+          ...attributedLines(
+            accounts.inventory,
+            'credit',
+            'Inventory issued',
+            invoice.lines.map((line) => ({
+              costCenterId: line.costCenterId,
+              amount: costByLine.get(line.id)?.costTotal ?? new Prisma.Decimal(0),
+            })),
+          ),
         ],
       });
 
@@ -437,7 +468,12 @@ export class SalesInvoicesService {
 
     const original = await this.prisma.journalEntry.findFirst({
       where: { id: invoice.journalEntryId, companyId },
-      include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      include: {
+        lines: {
+          orderBy: { lineNumber: 'asc' },
+          include: { allocations: true },
+        },
+      },
     });
     if (!original) throw new NotFoundException('The original journal entry is missing');
     if (original.status === JournalStatus.REVERSED) {
@@ -561,6 +597,13 @@ export class SalesInvoicesService {
               credit: l.debit,
               description: l.description,
               costCenterId: l.costCenterId,
+              // A split line is given back exactly as it was taken.
+              allocations: {
+                create: (l.allocations ?? []).map((allocation) => ({
+                  costCenterId: allocation.costCenterId,
+                  amount: allocation.amount,
+                })),
+              },
             })),
           },
         },
@@ -696,6 +739,27 @@ export class SalesInvoicesService {
         ? typedTotal.minus(lineTotal).toDecimalPlaces(MONEY_SCALE)
         : typedTotal.mul(taxRate).div(100).toDecimalPlaces(MONEY_SCALE);
 
+      // A cost center must be this company's and active; the posting path
+      // repeats the check at the entry date, because an invoice can be
+      // prepared today and posted after the centre was retired.
+      let costCenterId: string | null = raw.costCenterId ?? null;
+      if (costCenterId) {
+        const center = await this.prisma.costCenter.findFirst({
+          where: { id: costCenterId, companyId, deletedAt: null },
+          select: { id: true, isActive: true, code: true },
+        });
+        if (!center) {
+          throw new BadRequestException(
+            `Line ${index + 1}: the cost center does not exist`,
+          );
+        }
+        if (!center.isActive) {
+          throw new BadRequestException(
+            `Line ${index + 1}: cost center ${center.code} is inactive`,
+          );
+        }
+      }
+
       prepared.push({
         lineNumber: index + 1,
         itemId: raw.itemId ?? null,
@@ -705,6 +769,7 @@ export class SalesInvoicesService {
         taxRate,
         taxAmount,
         lineTotal,
+        costCenterId,
       });
     }
 

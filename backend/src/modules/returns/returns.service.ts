@@ -16,6 +16,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
+import { attributedLines } from '../accounting/cost-center-attribution';
 import { PostingService } from '../accounting/posting.service';
 
 const MONEY_SCALE = 4;
@@ -151,6 +152,7 @@ export class ReturnsService {
           lineTotal: line.lineTotal.toFixed(MONEY_SCALE),
           unitCost: line.unitCost.toFixed(MONEY_SCALE),
           costTotal: line.costTotal.toFixed(MONEY_SCALE),
+          costCenterId: line.costCenterId ?? null,
         })),
       };
     }
@@ -424,6 +426,10 @@ export class ReturnsService {
       let costTotal = new Prisma.Decimal(0);
       let returnedSubTotal = new Prisma.Decimal(0);
       let returnedTaxTotal = new Prisma.Decimal(0);
+      // Revenue and cost given back, split the same way the original invoice
+      // split them, so a cost-center report nets the return against the sale.
+      const revenueParts: Array<{ costCenterId: string | null; amount: Prisma.Decimal }> = [];
+      const costParts: Array<{ costCenterId: string | null; amount: Prisma.Decimal }> = [];
       const warehouseId = await this.warehouses.resolve(
         tx,
         companyId,
@@ -492,6 +498,9 @@ export class ReturnsService {
             unitCost,
             costTotal: returnedCost,
             taxAmount: returnedTax,
+            // The return line keeps the dimension it gives back, so the
+            // document itself can be read by cost center too.
+            costCenterId: matching.costCenterId,
           },
         });
         returnedSubTotal = returnedSubTotal.plus(returnedLineTotal);
@@ -546,20 +555,27 @@ export class ReturnsService {
               },
             });
             costTotal = costTotal.plus(returnedCost);
+            costParts.push({ costCenterId: matching.costCenterId, amount: returnedCost });
           }
         }
+        revenueParts.push({
+          costCenterId: matching.costCenterId,
+          amount: returnedLineTotal,
+        });
       }
 
       postedTotalAmount = returnedSubTotal.plus(returnedTaxTotal);
 
       const journalLines = [
         // Revenue comes back down. It lands on the sales-returns account so a
-        // report can show gross sales and returns separately.
-        {
-          accountId: accounts.salesReturns,
-          debit: returnedSubTotal,
-          description: `Sales return (${document.originalInvoice?.invoiceNumber ?? ''})`,
-        },
+        // report can show gross sales and returns separately, and it carries
+        // the same cost centers the sale carried.
+        ...attributedLines(
+          accounts.salesReturns,
+          'debit',
+          `Sales return (${document.originalInvoice?.invoiceNumber ?? ''})`,
+          revenueParts,
+        ),
         ...(returnedTaxTotal.isZero()
           ? []
           : [
@@ -578,16 +594,18 @@ export class ReturnsService {
 
       if (!costTotal.isZero()) {
         journalLines.push(
-          {
-            accountId: accounts.inventory,
-            debit: costTotal,
-            description: 'Stock returned to inventory',
-          },
-          {
-            accountId: accounts.costOfGoodsSold,
-            credit: costTotal,
-            description: 'Cost of goods returned',
-          },
+          ...attributedLines(
+            accounts.inventory,
+            'debit',
+            'Stock returned to inventory',
+            costParts,
+          ),
+          ...attributedLines(
+            accounts.costOfGoodsSold,
+            'credit',
+            'Cost of goods returned',
+            costParts,
+          ),
         );
       }
 
@@ -884,6 +902,11 @@ export class ReturnsService {
       let subTotal = new Prisma.Decimal(0);
       let taxAmount = new Prisma.Decimal(0);
       let landedCostAmount = new Prisma.Decimal(0);
+      // The inventory value handed back to the supplier, per cost center.
+      const inventoryParts: Array<{
+        costCenterId: string | null;
+        amount: Prisma.Decimal;
+      }> = [];
 
       for (const line of document.lines) {
         const matching = await this.lockPurchaseLine(
@@ -950,11 +973,16 @@ export class ReturnsService {
             taxAmount: returnedTax,
             landedCostAmount: returnedLandedCost,
             inventoryCostTotal: returnedCost,
+            costCenterId: matching.costCenterId,
           },
         });
         subTotal = subTotal.plus(lineTotal);
         taxAmount = taxAmount.plus(returnedTax);
         landedCostAmount = landedCostAmount.plus(returnedLandedCost);
+        inventoryParts.push({
+          costCenterId: matching.costCenterId,
+          amount: returnedCost,
+        });
 
         if (line.itemId) {
           const item = await tx.item.findFirst({
@@ -1046,11 +1074,12 @@ export class ReturnsService {
             debit: postedTotalAmount,
             description: 'Supplier debit note',
           },
-          {
-            accountId: accounts.inventory,
-            credit: subTotal.plus(landedCostAmount),
-            description: 'Inventory and landed costs returned to supplier',
-          },
+          ...attributedLines(
+            accounts.inventory,
+            'credit',
+            'Inventory and landed costs returned to supplier',
+            inventoryParts,
+          ),
           ...(taxAmount.isZero()
             ? []
             : [
@@ -1351,10 +1380,12 @@ export class ReturnsService {
         returnedTaxTotal: Prisma.Decimal;
         description: string;
         itemId: string | null;
+        costCenterId: string | null;
       }>
     >(Prisma.sql`
       SELECT id, quantity, "returnedQuantity", "unitPrice", "lineTotal", "returnedSubTotal",
-             "costTotal", "returnedCostTotal", "taxAmount", "returnedTaxTotal", description, "itemId"
+             "costTotal", "returnedCostTotal", "taxAmount", "returnedTaxTotal", description, "itemId",
+             "costCenterId"
         FROM sales_invoice_lines
        WHERE "invoiceId" = ${originalInvoiceId}::uuid
          AND (${originalLineId}::uuid IS NULL OR id = ${originalLineId}::uuid)
@@ -1386,11 +1417,12 @@ export class ReturnsService {
         returnedTaxTotal: Prisma.Decimal;
         description: string;
         itemId: string | null;
+        costCenterId: string | null;
       }>
     >(Prisma.sql`
       SELECT id, quantity, "returnedQuantity", "unitPrice", "lineTotal", "returnedSubTotal",
              "inventoryCostTotal", "returnedCostTotal", "taxAmount", "returnedTaxTotal",
-             description, "itemId"
+             description, "itemId", "costCenterId"
         FROM purchase_invoice_lines
        WHERE "invoiceId" = ${originalInvoiceId}::uuid
          AND (${originalLineId}::uuid IS NULL OR id = ${originalLineId}::uuid)

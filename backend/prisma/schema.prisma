@@ -404,6 +404,7 @@ model JournalLine {
   entry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   account Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
   costCenter CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+  allocations JournalLineAllocation[]
 
   @@unique([journalEntryId, lineNumber])
   @@index([accountId])
@@ -416,13 +417,36 @@ model JournalLine {
 /// A cost center is an analytical dimension: "whose cost is this?". Flat by
 /// design - a cost center inherits nothing, and a report over it answers a
 /// question the chart of accounts cannot.
+enum CostCenterType {
+  DEPARTMENT
+  ADMINISTRATIVE_UNIT
+  PROJECT
+}
+
+/// The analytical dimension carried by a journal line: "whose cost is this?".
+///
+/// One centre may sit under another (a department under a division, a project
+/// under a department), which is what lets a report roll a group of centres up
+/// without losing the detail underneath. The hierarchy is validated in the
+/// service, and the self-relation is restricted at the database level so a
+/// parent cannot be deleted while a child still points at it.
 model CostCenter {
   id        String  @id @default(uuid()) @db.Uuid
   companyId String  @db.Uuid
   code      String
   nameEn    String
   nameAr    String
+  type      CostCenterType @default(DEPARTMENT)
   isActive  Boolean @default(true)
+
+  parentId String? @db.Uuid
+  parent   CostCenter?  @relation("CostCenterHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children CostCenter[] @relation("CostCenterHierarchy")
+
+  description       String?   @db.VarChar(500)
+  responsiblePerson String?   @db.VarChar(200)
+  startDate         DateTime? @db.Date
+  endDate           DateTime? @db.Date
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -430,12 +454,39 @@ model CostCenter {
   updatedBy String?   @db.Uuid
   deletedAt DateTime?
 
-  company Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  lines   JournalLine[]
+  company         Company                @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  lines           JournalLine[]
+  allocations     JournalLineAllocation[]
+  salesLines      SalesInvoiceLine[]
+  purchaseLines   PurchaseInvoiceLine[]
+  cashVouchers    CashVoucher[]    @relation("VoucherCostCenter")
 
   @@unique([companyId, code])
   @@index([companyId, isActive])
+  @@index([companyId, parentId])
   @@map("cost_centers")
+}
+
+/// A controlled split of one journal line across several cost centres.
+///
+/// A line either names a single centre in `JournalLine.costCenterId`, or it is
+/// split here. The two are never both set for the same line, which is what
+/// keeps a report from counting the same amount twice. The service enforces
+/// that the amounts add up to the line amount exactly, at the ledger's scale.
+model JournalLineAllocation {
+  id            String @id @default(uuid()) @db.Uuid
+  journalLineId String @db.Uuid
+  costCenterId  String @db.Uuid
+  amount        Decimal @db.Decimal(19, 4)
+
+  createdAt DateTime @default(now())
+
+  line       JournalLine @relation(fields: [journalLineId], references: [id], onDelete: Cascade)
+  costCenter CostCenter  @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+
+  @@unique([journalLineId, costCenterId])
+  @@index([costCenterId])
+  @@map("journal_line_allocations")
 }
 
 // --------------------------------------------------------- company settings
@@ -570,6 +621,11 @@ model CashVoucher {
   /// side of the entry.
   counterAccountId String? @db.Uuid
 
+  /// Optional cost center for the counter-account side of a receipt or
+  /// payment (an expense paid from a box, a project receipt). Partner
+  /// balances are never attributed.
+  costCenterId String? @db.Uuid
+
   description String?
   reference   String?
 
@@ -593,6 +649,7 @@ model CashVoucher {
   customer    Customer?            @relation(fields: [customerId], references: [id], onDelete: Restrict)
   supplier    Supplier?            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   counterAccount Account?          @relation("VoucherCounterAccount", fields: [counterAccountId], references: [id], onDelete: Restrict)
+  costCenter     CostCenter?       @relation("VoucherCostCenter", fields: [costCenterId], references: [id], onDelete: Restrict)
   reconciliation BankReconciliation? @relation(fields: [reconciliationId], references: [id], onDelete: SetNull)
   allocations CashVoucherAllocation[]
 
@@ -1278,8 +1335,14 @@ model SalesInvoiceLine {
   unitCost  Decimal @default(0) @db.Decimal(19, 4)
   costTotal Decimal @default(0) @db.Decimal(19, 4)
 
+  /// The analytical dimension of the line: the department, branch of activity
+  /// or project the revenue (and its cost of goods) belongs to. Optional, so
+  /// historical invoices keep meaning exactly what they meant before.
+  costCenterId String? @db.Uuid
+
   invoice SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item    Item?        @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  costCenter CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
   originalLine SalesInvoiceLine?  @relation("SalesReturnLines", fields: [originalLineId], references: [id], onDelete: Restrict)
   returnedBy   SalesInvoiceLine[] @relation("SalesReturnLines")
 
@@ -1377,8 +1440,13 @@ model PurchaseInvoiceLine {
   returnedSubTotal Decimal @default(0) @db.Decimal(19, 4)
   originalLineId   String? @db.Uuid
 
+  /// The analytical dimension of the line: which department or project the
+  /// cost was incurred for. Optional, and never guessed for old rows.
+  costCenterId String? @db.Uuid
+
   invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item    Item?           @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  costCenter CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
   originalLine PurchaseInvoiceLine?  @relation("PurchaseReturnLines", fields: [originalLineId], references: [id], onDelete: Restrict)
   returnedBy   PurchaseInvoiceLine[] @relation("PurchaseReturnLines")
 

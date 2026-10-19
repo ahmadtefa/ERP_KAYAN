@@ -76,6 +76,7 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   // Reviewing an entry is a different job from writing one: the whole point of
   // the permission is that the two can be held by different people.
   ['accounting.journal.approve', 'Approve journal entries', 'اعتماد القيود اليومية', 'accounting'],
+  ['accounting.costcenters.read', 'View cost centers', 'عرض مراكز التكلفة', 'accounting'],
   ['accounting.costcenters.manage', 'Manage cost centers', 'إدارة مراكز التكلفة', 'accounting'],
   [
     'accounting.openingbalances.manage',

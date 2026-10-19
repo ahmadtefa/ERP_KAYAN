@@ -9,6 +9,8 @@ import { AgingService } from './aging.service';
 import { FinancialStatementsService } from './financial-statements.service';
 import {
   AgingQueryDto,
+  CostCenterReportQueryDto,
+  CostCenterTransactionsQueryDto,
   OperationsQueryDto,
   PeriodQueryDto,
 } from './dto/report-query.dto';
@@ -75,9 +77,25 @@ export class ReportsController {
   }
 
   @Get('cost-centers')
-  @RequirePermissions('reports.read')
-  costCenters(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
+  @RequirePermissions('accounting.costcenters.read')
+  costCenters(@CurrentUser() user: AuthUser, @Query() query: CostCenterReportQueryDto) {
     return this.statements.costCenterReport(user.companyId, query);
+  }
+
+  /// The lines behind one centre's figure. `costCenterId=unallocated` lists the
+  /// lines that carry no centre at all, which is the other half of the report.
+  @Get('cost-centers/:costCenterId/transactions')
+  @RequirePermissions('accounting.costcenters.read')
+  costCenterTransactions(
+    @CurrentUser() user: AuthUser,
+    @Param('costCenterId') costCenterId: string,
+    @Query() query: CostCenterTransactionsQueryDto,
+  ) {
+    return this.statements.costCenterTransactions(
+      user.companyId,
+      costCenterId === 'unallocated' ? null : costCenterId,
+      query,
+    );
   }
 
   @Get('receivables-aging')

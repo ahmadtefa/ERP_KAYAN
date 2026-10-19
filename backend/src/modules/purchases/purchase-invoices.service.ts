@@ -17,6 +17,7 @@ import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { PriceListsService } from '../sales/price-lists.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
+import { attributedLines } from '../accounting/cost-center-attribution';
 import { PostingService } from '../accounting/posting.service';
 import { allocateLandedCostAmounts } from './landed-cost-allocation';
 import {
@@ -44,6 +45,7 @@ interface PreparedLine {
   lineTotal: Prisma.Decimal;
   landedCostAmount: Prisma.Decimal;
   inventoryCostTotal: Prisma.Decimal;
+  costCenterId: string | null;
 }
 
 @Injectable()
@@ -135,6 +137,7 @@ export class PurchaseInvoicesService {
         lineTotal: l.lineTotal.toFixed(MONEY_SCALE),
         landedCostAmount: l.landedCostAmount.toFixed(MONEY_SCALE),
         inventoryCostTotal: l.inventoryCostTotal.toFixed(MONEY_SCALE),
+        costCenterId: l.costCenterId ?? null,
         returnedCostTotal: l.returnedCostTotal.toFixed(MONEY_SCALE),
       })),
     };
@@ -209,6 +212,7 @@ export class PurchaseInvoicesService {
               lineTotal: l.lineTotal,
               landedCostAmount: l.landedCostAmount,
               inventoryCostTotal: l.inventoryCostTotal,
+              costCenterId: l.costCenterId,
             })),
           },
         },
@@ -324,6 +328,7 @@ export class PurchaseInvoicesService {
               lineTotal: line.lineTotal,
               landedCostAmount: line.landedCostAmount,
               inventoryCostTotal: line.inventoryCostTotal,
+              costCenterId: line.costCenterId,
             })),
           },
         },
@@ -471,7 +476,17 @@ export class PurchaseInvoicesService {
         sourceId: invoice.id,
         sourceNumber: invoice.invoiceNumber,
         lines: [
-          { accountId: accounts.inventory, debit: invoice.subTotal.plus(invoice.landedCostAmount), description: 'Inventory and landed costs received' },
+          // The received value (including landed cost) is attributed to the
+          // centres named on the lines; anything unnamed stays unallocated.
+          ...attributedLines(
+            accounts.inventory,
+            'debit',
+            'Inventory and landed costs received',
+            invoice.lines.map((line) => ({
+              costCenterId: line.costCenterId,
+              amount: line.inventoryCostTotal,
+            })),
+          ),
           { accountId: accounts.vatReceivable, debit: invoice.taxAmount, description: 'VAT on purchases' },
           { accountId: accounts.accountsPayable, credit: invoice.totalAmount, description: 'Supplier balance' },
         ],
@@ -520,7 +535,12 @@ export class PurchaseInvoicesService {
 
     const original = await this.prisma.journalEntry.findFirst({
       where: { id: invoice.journalEntryId, companyId },
-      include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      include: {
+        lines: {
+          orderBy: { lineNumber: 'asc' },
+          include: { allocations: true },
+        },
+      },
     });
     if (!original) throw new NotFoundException('The original journal entry is missing');
     if (original.status === JournalStatus.REVERSED) {
@@ -655,6 +675,12 @@ export class PurchaseInvoicesService {
               credit: l.debit,
               description: l.description,
               costCenterId: l.costCenterId,
+              allocations: {
+                create: (l.allocations ?? []).map((allocation) => ({
+                  costCenterId: allocation.costCenterId,
+                  amount: allocation.amount,
+                })),
+              },
             })),
           },
         },
@@ -802,6 +828,25 @@ export class PurchaseInvoicesService {
       const lineTotal = quantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
       const taxAmount = lineTotal.mul(taxRate).div(100).toDecimalPlaces(MONEY_SCALE);
 
+      // The centre must exist, belong to this company and still be active.
+      let costCenterId: string | null = raw.costCenterId ?? null;
+      if (costCenterId) {
+        const center = await this.prisma.costCenter.findFirst({
+          where: { id: costCenterId, companyId, deletedAt: null },
+          select: { id: true, isActive: true, code: true },
+        });
+        if (!center) {
+          throw new BadRequestException(
+            `Line ${index + 1}: the cost center does not exist`,
+          );
+        }
+        if (!center.isActive) {
+          throw new BadRequestException(
+            `Line ${index + 1}: cost center ${center.code} is inactive`,
+          );
+        }
+      }
+
       prepared.push({
         lineNumber: index + 1,
         itemId: raw.itemId,
@@ -813,6 +858,7 @@ export class PurchaseInvoicesService {
         lineTotal,
         landedCostAmount: new Prisma.Decimal(0),
         inventoryCostTotal: lineTotal,
+        costCenterId,
       });
     }
 

@@ -29,6 +29,10 @@ export class SalesInvoiceLineDto {
 
   /// Percent. When omitted the item's own rate is used.
   @IsOptional() @IsString() taxRate?: string;
+
+  /// The department, administrative unit or project this revenue belongs to.
+  /// Optional: an invoice that does not need cost analysis stays as it was.
+  @IsOptional() @IsUUID() costCenterId?: string;
 }
 
 export class CreateSalesInvoiceDto {
