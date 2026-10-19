@@ -6,11 +6,13 @@ import { SalesInvoicesController } from './sales-invoices.controller';
 import { SalesInvoicesService } from './sales-invoices.service';
 import { SalesOrdersController } from './sales-orders.controller';
 import { SalesOrdersService } from './sales-orders.service';
+import { QuotationsController } from './quotations.controller';
+import { QuotationsService } from './quotations.service';
 
 @Module({
   imports: [AccountingModule],
-  controllers: [SalesInvoicesController, SalesOrdersController, PriceListsController],
-  providers: [SalesInvoicesService, SalesOrdersService, PriceListsService],
+  controllers: [SalesInvoicesController, SalesOrdersController, PriceListsController, QuotationsController],
+  providers: [SalesInvoicesService, SalesOrdersService, PriceListsService, QuotationsService],
   exports: [SalesInvoicesService, SalesOrdersService, PriceListsService],
 })
 export class SalesModule {}
