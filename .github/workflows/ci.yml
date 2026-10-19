@@ -216,6 +216,14 @@ jobs:
             exit 1
           fi
 
+          echo "Running the quotation and discount scenario..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-discounts-quotations.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after quotation scenario failure"
+            cat /tmp/kayan-regressions-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
   flutter:
     name: Flutter Web (analyze, test, build)
     runs-on: ubuntu-latest

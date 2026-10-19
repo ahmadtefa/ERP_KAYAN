@@ -13,14 +13,17 @@ import 'state_views.dart';
 /// Picks an item, and shows what is actually in stock where it is actually
 /// tracked.
 ///
-/// Quantities come from the stock balance table, which this installation keeps
-/// per **branch and item** - the same place the invoice posting checks before
-/// it lets goods leave. No per-warehouse quantity is shown, because the server
-/// does not keep one; inventing a per-warehouse figure would be worse than
-/// saying what the number means.
+/// Two figures are shown, and they are not the same thing:
 ///
-/// Without `inventory.stock.read` the table simply has no quantity column and
-/// says why, instead of showing a made-up zero.
+///  - the branch balance, from `stock_balances`, which is per **branch and
+///    item** - the same figure the invoice posting checks before it lets goods
+///    leave;
+///  - where that stock sits, warehouse by warehouse, summed from the
+///    append-only movements. A movement that names no warehouse is shown as
+///    "unassigned" rather than being attributed to one.
+///
+/// Without `inventory.stock.read` both columns are absent and the dialog says
+/// why, instead of showing a made-up zero.
 Future<Json?> showItemPicker(
   BuildContext context, {
   String? title,
@@ -47,6 +50,7 @@ class ItemPickerDialog extends ConsumerStatefulWidget {
 class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
   final _search = TextEditingController();
   Future<List<Json>>? _stock;
+  Future<List<Json>>? _byWarehouse;
   bool _canSeeStock = false;
   String _query = '';
 
@@ -59,6 +63,10 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
       final branchId = widget.branchId ?? user?.branchId;
       _stock = ref.read(apiClientProvider).getList(
         '/inventory/stock',
+        query: {'branchId': ?branchId},
+      );
+      _byWarehouse = ref.read(apiClientProvider).getList(
+        '/inventory/stock/by-warehouse',
         query: {'branchId': ?branchId},
       );
     }
@@ -108,8 +116,13 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
               emptyMessage: l10n.noRecords,
               data: (rows) => FutureBuilder<List<Json>>(
                 future: _stock,
-                builder: (context, snapshot) {
+                builder: (context, snapshot) => FutureBuilder<List<Json>>(
+                  future: _byWarehouse,
+                  builder: (context, warehouseSnapshot) {
                   final stock = _stockByItem(snapshot.data ?? const []);
+                  final where = _warehousesByItem(
+                    warehouseSnapshot.data ?? const [],
+                  );
                   return SingleChildScrollView(
                     child: ResizableTable(
                       storageKey: 'item-picker',
@@ -146,6 +159,17 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
                               return stock[text(row, 'id')] ?? '0.0000';
                             },
                           ),
+                        if (_canSeeStock)
+                          ResizableColumn(
+                            l10n.perWarehouse,
+                            width: 210,
+                            value: (row) {
+                              if (!flag(row, 'isStockTracked', fallback: true)) {
+                                return '—';
+                              }
+                              return where[text(row, 'id')] ?? '—';
+                            },
+                          ),
                         ResizableColumn(
                           l10n.unitPrice,
                           width: 130,
@@ -161,7 +185,8 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
                       ],
                     ),
                   );
-                },
+                  },
+                ),
               ),
             ),
           ),
@@ -183,6 +208,31 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
           name.toLowerCase().contains(_query) ||
           text(row, 'barcode').toLowerCase().contains(_query);
     }).toList(growable: false);
+  }
+
+  /// "WH-1 3 · WH-2 4 · Unassigned 1", in the reader's language. Empty when the
+  /// item has no movements yet.
+  Map<String, String> _warehousesByItem(List<Json> rows) {
+    final language = Localizations.localeOf(context).languageCode;
+    final map = <String, String>{};
+    for (final row in rows) {
+      final itemId = text(row, 'itemId');
+      if (itemId.isEmpty) continue;
+      final parts = <String>[];
+      for (final warehouse in listOf(row['warehouses'])) {
+        final name = language == 'ar' && text(warehouse, 'nameAr').isNotEmpty
+            ? text(warehouse, 'nameAr')
+            : text(warehouse, 'nameEn');
+        final label = name.isNotEmpty
+            ? name
+            : (text(warehouse, 'code').isNotEmpty
+                  ? text(warehouse, 'code')
+                  : context.l10n.unassignedWarehouse);
+        parts.add('$label ${formatQuantity(text(warehouse, 'quantity'))}');
+      }
+      if (parts.isNotEmpty) map[itemId] = parts.join(' · ');
+    }
+    return map;
   }
 
   /// The stock endpoint returns one row per branch and item. The picker asks

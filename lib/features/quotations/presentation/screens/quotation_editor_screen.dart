@@ -868,7 +868,6 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   /// was applied.
   Future<void> _editColumns() async {
     final l10n = context.l10n;
-    final language = Localizations.localeOf(context).languageCode;
     final available = [
       ...?ref.read(quotationColumnTemplatesProvider).value,
     ];

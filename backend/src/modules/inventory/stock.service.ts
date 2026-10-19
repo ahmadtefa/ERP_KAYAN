@@ -61,6 +61,71 @@ export class StockService {
       : mapped;
   }
 
+  /// Where each item actually sits, warehouse by warehouse.
+  ///
+  /// `stock_balances` is kept per branch and item, so it cannot answer "how
+  /// much is in the main store". The append-only ledger can: this adds the
+  /// signed movements per warehouse. A movement without a warehouse (one
+  /// recorded before warehouses existed) is reported under `warehouseId: null`
+  /// rather than being attributed to a warehouse it never named.
+  async byWarehouse(
+    companyId: string,
+    filters: { branchId?: string; itemIds?: string[] },
+  ) {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        warehouseId: string | null;
+        itemId: string;
+        quantity: unknown;
+      }>
+    >(Prisma.sql`
+      SELECT "warehouseId", "itemId",
+             SUM(CASE WHEN "direction" = 'IN' THEN "quantity" ELSE -"quantity" END) AS quantity
+        FROM stock_movements
+       WHERE "companyId" = ${companyId}::uuid
+         AND (${filters.branchId ?? null}::uuid IS NULL OR "branchId" = ${filters.branchId ?? null}::uuid)
+         AND (${filters.itemIds && filters.itemIds.length ? filters.itemIds : null}::uuid[] IS NULL
+              OR "itemId" = ANY(${filters.itemIds && filters.itemIds.length ? filters.itemIds : null}::uuid[]))
+       GROUP BY "warehouseId", "itemId"
+       ORDER BY "itemId", "warehouseId"
+    `);
+
+    const warehouseIds = [...new Set(rows.map((row) => row.warehouseId).filter((id): id is string => !!id))];
+    const warehouses = warehouseIds.length
+      ? await this.prisma.warehouse.findMany({
+          where: { id: { in: warehouseIds }, companyId },
+          select: { id: true, code: true, nameEn: true, nameAr: true },
+        })
+      : [];
+    const nameOf = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
+
+    const byItem = new Map<
+      string,
+      Array<{ warehouseId: string | null; code: string | null; nameEn: string | null; nameAr: string | null; quantity: string }>
+    >();
+    for (const row of rows) {
+      const warehouse = row.warehouseId ? nameOf.get(row.warehouseId) : null;
+      const entry = {
+        warehouseId: row.warehouseId,
+        code: warehouse?.code ?? null,
+        nameEn: warehouse?.nameEn ?? null,
+        nameAr: warehouse?.nameAr ?? null,
+        quantity: new Prisma.Decimal(String(row.quantity ?? 0)).toFixed(MONEY_SCALE),
+      };
+      const list = byItem.get(row.itemId) ?? [];
+      list.push(entry);
+      byItem.set(row.itemId, list);
+    }
+
+    return [...byItem.entries()].map(([itemId, warehousesOfItem]) => ({
+      itemId,
+      warehouses: warehousesOfItem,
+      total: warehousesOfItem
+        .reduce((sum, entry) => sum.add(new Prisma.Decimal(entry.quantity)), new Prisma.Decimal(0))
+        .toFixed(MONEY_SCALE),
+    }));
+  }
+
   async itemLedger(companyId: string, itemId: string) {
     const item = await this.prisma.item.findFirst({
       where: { id: itemId, companyId, deletedAt: null },

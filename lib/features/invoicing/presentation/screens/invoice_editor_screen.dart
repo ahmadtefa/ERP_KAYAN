@@ -38,7 +38,7 @@ class _LineDraft {
 
   /// A line discount: a percentage or a fixed amount of money. The server
   /// resolves the other representation and stores both.
-  DiscountKind discountKind;
+  DiscountKind discountKind = DiscountKind.none;
   final TextEditingController discountValue;
 
   /// The line's own arithmetic, for the summary under the inputs.

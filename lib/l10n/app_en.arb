@@ -716,5 +716,7 @@
   "templateSaved": "Layout saved to the library",
   "keepOneColumnVisible": "Keep at least one column visible.",
   "printedOnOffer": "Printed",
-  "notPrintedOnOffer": "Not printed"
+  "notPrintedOnOffer": "Not printed",
+  "perWarehouse": "Warehouses",
+  "unassignedWarehouse": "Unassigned"
 }

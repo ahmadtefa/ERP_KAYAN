@@ -3987,4 +3987,11 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   /// In en, this message translates to:
   /// **'Not printed'**
   String get notPrintedOnOffer;
+  /// In en, this message translates to:
+  /// **'Warehouses'**
+  String get perWarehouse;
+
+  /// In en, this message translates to:
+  /// **'Unassigned'**
+  String get unassignedWarehouse;
 }

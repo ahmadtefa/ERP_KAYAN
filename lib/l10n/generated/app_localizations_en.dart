@@ -2244,4 +2244,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get notPrintedOnOffer => 'Not printed';
+  @override
+  String get perWarehouse => 'Warehouses';
+
+  @override
+  String get unassignedWarehouse => 'Unassigned';
+
 }

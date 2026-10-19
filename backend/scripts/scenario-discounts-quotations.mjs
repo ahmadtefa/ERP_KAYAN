@@ -85,11 +85,21 @@ async function rejected(label, path, options, expected = 400) {
 }
 
 async function main() {
-  const signedIn = await api('/auth/login', {
+  // The server rate limits sign-ins by address. An earlier scenario may have
+  // filled the window; waiting it out is what a real client should do.
+  let signedIn = await api('/auth/login', {
     method: 'POST',
     json: { username: USERNAME, password: PASSWORD },
     noAuth: true,
   });
+  for (let attempt = 1; signedIn.status === 429 && attempt <= 6; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 15000));
+    signedIn = await api('/auth/login', {
+      method: 'POST',
+      json: { username: USERNAME, password: PASSWORD },
+      noAuth: true,
+    });
+  }
   check('sign in', signedIn.status === 201, `status ${signedIn.status}`);
   token = signedIn.data?.accessToken;
   if (!token) return;

@@ -716,5 +716,7 @@
   "templateSaved": "تم حفظ التخطيط في المكتبة",
   "keepOneColumnVisible": "أبقِ عمودًا واحدًا ظاهرًا على الأقل.",
   "printedOnOffer": "مطبوع",
-  "notPrintedOnOffer": "غير مطبوع"
+  "notPrintedOnOffer": "غير مطبوع",
+  "perWarehouse": "المخازن",
+  "unassignedWarehouse": "غير مُخصّص"
 }

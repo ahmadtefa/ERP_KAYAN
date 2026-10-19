@@ -2234,4 +2234,10 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get notPrintedOnOffer => 'غير مطبوع';
+  @override
+  String get perWarehouse => 'المخازن';
+
+  @override
+  String get unassignedWarehouse => 'غير مُخصّص';
+
 }
