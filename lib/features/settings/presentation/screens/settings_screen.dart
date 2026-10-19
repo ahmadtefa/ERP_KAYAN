@@ -7,6 +7,7 @@ import '../providers/company_providers.dart';
 import '../providers/locale_provider.dart';
 import '../widgets/lan_access_card.dart';
 import '../widgets/reset_data_card.dart';
+import '../widgets/document_settings_card.dart';
 
 /// Application settings.
 ///
@@ -62,6 +63,8 @@ class SettingsScreen extends ConsumerWidget {
         ),
         const SizedBox(height: 16),
         const LanAccessCard(),
+        const SizedBox(height: 16),
+        const DocumentSettingsCard(),
         const SizedBox(height: 16),
         Card(
           child: Padding(

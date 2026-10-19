@@ -181,6 +181,9 @@ export class ReturnsService {
         description: line.description,
         quantity: line.quantity.toFixed(MONEY_SCALE),
         unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
+        netUnitPrice: line.quantity.isZero()
+          ? line.unitPrice.toFixed(MONEY_SCALE)
+          : line.lineTotal.div(line.quantity).toDecimalPlaces(MONEY_SCALE).toFixed(MONEY_SCALE),
         taxRate: line.taxRate.toFixed(MONEY_SCALE),
         taxAmount: line.taxAmount.toFixed(MONEY_SCALE),
         lineTotal: line.lineTotal.toFixed(MONEY_SCALE),
@@ -265,9 +268,6 @@ export class ReturnsService {
         raw.unitPrice === undefined
           ? originalLine.unitPrice
           : this.nonNegative(raw.unitPrice, `Line ${index + 1} unit price`);
-      if (!unitPrice.equals(originalLine.unitPrice)) {
-        throw new BadRequestException(`Line ${index + 1}: a sales return uses the original invoice unit price`);
-      }
       const lineTotal = this.allocateReturnedCost(
         originalLine.lineTotal,
         originalLine.returnedSubTotal,
@@ -276,6 +276,23 @@ export class ReturnsService {
         quantity,
         `Line ${index + 1} net value`,
       );
+      // The money credited is the line total above, which is already net of
+      // the line and document discounts the customer received. A caller may
+      // describe the price it saw either way: the catalogue unit price from
+      // the invoice, or the discounted price actually paid per unit. Neither
+      // changes the amount: the stored document keeps the invoice price and
+      // the discounted value lives in lineTotal.
+      const netUnitPrice = lineTotal.div(quantity).toDecimalPlaces(MONEY_SCALE);
+      if (
+        !unitPrice.equals(originalLine.unitPrice) &&
+        !unitPrice.equals(netUnitPrice)
+      ) {
+        throw new BadRequestException(
+          `Line ${index + 1}: a sales return uses the original invoice unit price ` +
+            `(${originalLine.unitPrice.toFixed(MONEY_SCALE)}) or the discounted price actually paid ` +
+            `(${netUnitPrice.toFixed(MONEY_SCALE)})`,
+        );
+      }
       const taxAmount = this.allocateReturnedCost(
         originalLine.taxAmount,
         originalLine.returnedTaxTotal,
@@ -733,9 +750,6 @@ export class ReturnsService {
         raw.unitPrice === undefined
           ? originalLine.unitPrice
           : this.nonNegative(raw.unitPrice, `Line ${index + 1} unit price`);
-      if (!unitPrice.equals(originalLine.unitPrice)) {
-        throw new BadRequestException(`Line ${index + 1}: a purchase return uses the original invoice unit price`);
-      }
       const lineTotal = this.allocateReturnedCost(
         originalLine.lineTotal,
         originalLine.returnedSubTotal,
@@ -744,6 +758,20 @@ export class ReturnsService {
         quantity,
         `Line ${index + 1} net value`,
       );
+      // Same rule as a sales return: the invoice price or the discounted
+      // price actually paid describe the same line, and neither changes the
+      // amount, which comes from the net line total.
+      const netUnitPrice = lineTotal.div(quantity).toDecimalPlaces(MONEY_SCALE);
+      if (
+        !unitPrice.equals(originalLine.unitPrice) &&
+        !unitPrice.equals(netUnitPrice)
+      ) {
+        throw new BadRequestException(
+          `Line ${index + 1}: a purchase return uses the original invoice unit price ` +
+            `(${originalLine.unitPrice.toFixed(MONEY_SCALE)}) or the discounted price actually paid ` +
+            `(${netUnitPrice.toFixed(MONEY_SCALE)})`,
+        );
+      }
       const taxAmount = this.allocateReturnedCost(
         originalLine.taxAmount,
         originalLine.returnedTaxTotal,

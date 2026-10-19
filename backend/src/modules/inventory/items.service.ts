@@ -144,6 +144,7 @@ export class ItemsService {
           taxRate: dto.taxRate === undefined ? null : this.rate(dto.taxRate, 'taxRate'),
           isStockTracked,
           categoryId: (dto.categoryId as string) ?? null,
+          countryOfOrigin: (dto.countryOfOrigin as string | undefined)?.trim() || null,
           notes: (dto.notes as string) ?? null,
           createdBy: userId,
           updatedBy: userId,
@@ -264,6 +265,9 @@ export class ItemsService {
     for (const key of ['nameEn', 'nameAr', 'unit', 'barcode', 'notes', 'isActive', 'isStockTracked'] as const) {
       if (dto[key] !== undefined) (data as any)[key] = dto[key];
     }
+    if (dto.countryOfOrigin !== undefined) {
+      data.countryOfOrigin = String(dto.countryOfOrigin).trim() || null;
+    }
     if (dto.salePrice !== undefined) data.salePrice = this.money(dto.salePrice, 'salePrice');
     if (dto.purchasePrice !== undefined) data.purchasePrice = this.money(dto.purchasePrice, 'purchasePrice');
     if (dto.reorderLevel !== undefined) data.reorderLevel = this.money(dto.reorderLevel, 'reorderLevel');
@@ -381,6 +385,7 @@ export class ItemsService {
     isStockTracked: boolean;
     isActive: boolean;
     categoryId: string | null;
+    countryOfOrigin?: string | null;
     notes: string | null;
     createdAt: Date;
   }) {
@@ -401,6 +406,7 @@ export class ItemsService {
       isStockTracked: item.isStockTracked,
       isActive: item.isActive,
       categoryId: item.categoryId,
+      countryOfOrigin: item.countryOfOrigin ?? null,
       notes: item.notes,
       createdAt: item.createdAt.toISOString(),
     };

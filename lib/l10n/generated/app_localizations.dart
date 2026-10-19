@@ -3298,6 +3298,603 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   /// **'Result'**
   String get resultLabel;
 
+  /// In en, this message translates to:
+  /// **'en'**
+  String get @@locale;
+
+  /// In en, this message translates to:
+  /// **'The account “{account}” will be deleted, as long as it has no movements or sub-accounts. Continue?'**
+  String get deleteAccountConfirm;
+
+  /// In en, this message translates to:
+  /// **'The unit “{unit}” will be deleted. Units with movements cannot be deleted.'**
+  String get deleteBranchConfirm;
+
+  /// In en, this message translates to:
+  /// **'The file “{file}” will be permanently removed from the server.'**
+  String get deleteBackupConfirm;
+
+  /// In en, this message translates to:
+  /// **'This will reset “{company}”.'**
+  String get resetForCompany;
+
+  /// In en, this message translates to:
+  /// **'The only way back is to restore the backup that is about to be taken. Type your password and the word {word} to go ahead.'**
+  String get resetConfirmBody;
+
+  /// In en, this message translates to:
+  /// **'Type {word}'**
+  String get resetWordLabel;
+
+  /// In en, this message translates to:
+  /// **'Type {word} exactly as it is written to confirm.'**
+  String get resetWrongWord;
+
+  /// In en, this message translates to:
+  /// **'The company’s data was cleared. “{file}” holds the old data.'**
+  String get resetDone;
+
+  /// In en, this message translates to:
+  /// **'Row density'**
+  String get rowDensity;
+
+  /// In en, this message translates to:
+  /// **'Compact'**
+  String get densityCompact;
+
+  /// In en, this message translates to:
+  /// **'Normal'**
+  String get densityNormal;
+
+  /// In en, this message translates to:
+  /// **'Spacious'**
+  String get densitySpacious;
+
+  /// In en, this message translates to:
+  /// **'Drag a column edge to widen it'**
+  String get dragColumnHint;
+
+  /// In en, this message translates to:
+  /// **'Nothing to show'**
+  String get noRecords;
+
+  /// In en, this message translates to:
+  /// **'Resize'**
+  String get resizeDialog;
+
+  /// In en, this message translates to:
+  /// **'Maximize'**
+  String get maximize;
+
+  /// In en, this message translates to:
+  /// **'Restore'**
+  String get restore;
+
+  /// In en, this message translates to:
+  /// **'Available in branch'**
+  String get availableInBranch;
+
+  /// In en, this message translates to:
+  /// **'The branch\'s actual on-hand balance, the same figure posting checks. Warehouse-level balances are not tracked.'**
+  String get branchStockHint;
+
+  /// In en, this message translates to:
+  /// **'Stock quantities need the inventory.stock.read permission, so they are not shown.'**
+  String get stockNotVisible;
+
+  /// In en, this message translates to:
+  /// **'Use'**
+  String get useItem;
+
+  /// In en, this message translates to:
+  /// **'Invoice discount'**
+  String get invoiceDiscount;
+
+  /// In en, this message translates to:
+  /// **'Applied before tax and allocated across the lines'**
+  String get discountBeforeTaxHint;
+
+  /// In en, this message translates to:
+  /// **'No discount'**
+  String get noDiscount;
+
+  /// In en, this message translates to:
+  /// **'Percentage'**
+  String get discountPercent;
+
+  /// In en, this message translates to:
+  /// **'Fixed amount'**
+  String get discountAmount;
+
+  /// In en, this message translates to:
+  /// **'Percent %'**
+  String get discountPercentValue;
+
+  /// In en, this message translates to:
+  /// **'Amount'**
+  String get discountAmountValue;
+
+  /// In en, this message translates to:
+  /// **'Line discount'**
+  String get lineDiscount;
+
+  /// In en, this message translates to:
+  /// **'Before discount'**
+  String get beforeDiscount;
+
+  /// In en, this message translates to:
+  /// **'Line discounts'**
+  String get lineDiscounts;
+
+  /// In en, this message translates to:
+  /// **'Net line'**
+  String get netLine;
+
+  /// In en, this message translates to:
+  /// **'Quotations'**
+  String get quotations;
+
+  /// In en, this message translates to:
+  /// **'Quotation'**
+  String get quotation;
+
+  /// In en, this message translates to:
+  /// **'New quotation'**
+  String get newQuotation;
+
+  /// In en, this message translates to:
+  /// **'Edit quotation'**
+  String get editQuotation;
+
+  /// In en, this message translates to:
+  /// **'Quotation number'**
+  String get quotationNumber;
+
+  /// In en, this message translates to:
+  /// **'Quotation date'**
+  String get quotationDate;
+
+  /// In en, this message translates to:
+  /// **'Valid until'**
+  String get validUntil;
+
+  /// In en, this message translates to:
+  /// **'Sent'**
+  String get sent;
+
+  /// In en, this message translates to:
+  /// **'Accepted'**
+  String get accepted;
+
+  /// In en, this message translates to:
+  /// **'Rejected'**
+  String get rejected;
+
+  /// In en, this message translates to:
+  /// **'Expired'**
+  String get expired;
+
+  /// In en, this message translates to:
+  /// **'Converted'**
+  String get converted;
+
+  /// In en, this message translates to:
+  /// **'Tables'**
+  String get quotationTables;
+
+  /// In en, this message translates to:
+  /// **'Add table'**
+  String get addTable;
+
+  /// In en, this message translates to:
+  /// **'Table title'**
+  String get tableTitle;
+
+  /// In en, this message translates to:
+  /// **'Table discount'**
+  String get tableDiscount;
+
+  /// In en, this message translates to:
+  /// **'Move up'**
+  String get moveUp;
+
+  /// In en, this message translates to:
+  /// **'Move down'**
+  String get moveDown;
+
+  /// In en, this message translates to:
+  /// **'Remove table'**
+  String get removeTable;
+
+  /// In en, this message translates to:
+  /// **'Add line'**
+  String get addQuotationLine;
+
+  /// In en, this message translates to:
+  /// **'Country of origin'**
+  String get countryOfOrigin;
+
+  /// In en, this message translates to:
+  /// **'Origin'**
+  String get origin;
+
+  /// In en, this message translates to:
+  /// **'Gross value'**
+  String get grossValue;
+
+  /// In en, this message translates to:
+  /// **'Net value'**
+  String get netValue;
+
+  /// In en, this message translates to:
+  /// **'Final total'**
+  String get finalTotal;
+
+  /// In en, this message translates to:
+  /// **'Total discounts'**
+  String get totalDiscounts;
+
+  /// In en, this message translates to:
+  /// **'Quotation discount'**
+  String get quotationDiscount;
+
+  /// In en, this message translates to:
+  /// **'Subtotal before discount'**
+  String get subtotalBeforeDiscount;
+
+  /// In en, this message translates to:
+  /// **'Summary'**
+  String get quotationSummary;
+
+  /// In en, this message translates to:
+  /// **'Table subtotal'**
+  String get tableSubtotal;
+
+  /// In en, this message translates to:
+  /// **'Terms and conditions'**
+  String get termsAndConditions;
+
+  /// In en, this message translates to:
+  /// **'Notes'**
+  String get notesLabel;
+
+  /// In en, this message translates to:
+  /// **'Company manager'**
+  String get managerName;
+
+  /// In en, this message translates to:
+  /// **'Responsible person'**
+  String get responsibleName;
+
+  /// In en, this message translates to:
+  /// **'Responsible telephone'**
+  String get responsiblePhone;
+
+  /// In en, this message translates to:
+  /// **'Follow up'**
+  String get followUp;
+
+  /// In en, this message translates to:
+  /// **'What was discussed'**
+  String get followUpNote;
+
+  /// In en, this message translates to:
+  /// **'Write what was discussed before saving the follow-up.'**
+  String get followUpRequired;
+
+  /// In en, this message translates to:
+  /// **'History'**
+  String get statusHistory;
+
+  /// In en, this message translates to:
+  /// **'Issue and mark sent'**
+  String get sendQuotation;
+
+  /// In en, this message translates to:
+  /// **'Accept'**
+  String get acceptQuotation;
+
+  /// In en, this message translates to:
+  /// **'Reject'**
+  String get rejectQuotation;
+
+  /// In en, this message translates to:
+  /// **'Start a revision'**
+  String get reviseQuotation;
+
+  /// In en, this message translates to:
+  /// **'Convert to invoice'**
+  String get convertToInvoice;
+
+  /// In en, this message translates to:
+  /// **'Convert'**
+  String get convert;
+
+  /// In en, this message translates to:
+  /// **'Converted invoice'**
+  String get convertedInvoice;
+
+  /// In en, this message translates to:
+  /// **'Create a draft sales invoice from this accepted quotation? Nothing is posted and no stock moves until the invoice is posted separately.'**
+  String get conversionConfirm;
+
+  /// In en, this message translates to:
+  /// **'The quotation total is before tax. The invoice applies the company tax rules, so its total may be higher.'**
+  String get conversionTaxNote;
+
+  /// In en, this message translates to:
+  /// **'No quotations yet'**
+  String get noQuotations;
+
+  /// In en, this message translates to:
+  /// **'Print preview'**
+  String get printPreview;
+
+  /// In en, this message translates to:
+  /// **'Download PDF'**
+  String get downloadPdf;
+
+  /// In en, this message translates to:
+  /// **'Quotation saved'**
+  String get quotationSaved;
+
+  /// In en, this message translates to:
+  /// **'Quotation issued and marked as sent'**
+  String get quotationSent;
+
+  /// In en, this message translates to:
+  /// **'Quotation accepted'**
+  String get quotationAccepted;
+
+  /// In en, this message translates to:
+  /// **'Quotation rejected'**
+  String get quotationRejected;
+
+  /// In en, this message translates to:
+  /// **'A new draft revision was created'**
+  String get quotationRevised;
+
+  /// In en, this message translates to:
+  /// **'Quotation converted to a draft invoice'**
+  String get quotationConverted;
+
+  /// In en, this message translates to:
+  /// **'Draft quotation removed'**
+  String get quotationDeleted;
+
+  /// In en, this message translates to:
+  /// **'Remove this draft quotation? Issued quotations are never deleted.'**
+  String get deleteQuotationConfirm;
+
+  /// In en, this message translates to:
+  /// **'Add at least one table with one line.'**
+  String get quotationNeedsTable;
+
+  /// In en, this message translates to:
+  /// **'Status'**
+  String get filterStatus;
+
+  /// In en, this message translates to:
+  /// **'From date'**
+  String get fromDate;
+
+  /// In en, this message translates to:
+  /// **'To date'**
+  String get toDate;
+
+  /// In en, this message translates to:
+  /// **'This is a draft: nothing is posted and stock is untouched. Issuing it freezes the content that the customer receives.'**
+  String get quotationDraftHint;
+
+  /// In en, this message translates to:
+  /// **'Optional'**
+  String get optional;
+
+  /// In en, this message translates to:
+  /// **'Currency'**
+  String get currency;
+
+  /// In en, this message translates to:
+  /// **'Clear'**
+  String get clear;
+
+  /// In en, this message translates to:
+  /// **'Filter by status, customer or date'**
+  String get quotationFilterHint;
+
+  /// In en, this message translates to:
+  /// **'Documents and quotations'**
+  String get documentSettings;
+
+  /// In en, this message translates to:
+  /// **'Maximum discount %'**
+  String get maximumDiscount;
+
+  /// In en, this message translates to:
+  /// **'Print the tax registration number on quotations'**
+  String get showTaxIdOnQuotations;
+
+  /// In en, this message translates to:
+  /// **'A display choice only. It never deletes the number, and it cannot override a legal requirement to show it.'**
+  String get taxIdLegalNote;
+
+  /// In en, this message translates to:
+  /// **'Sales manager'**
+  String get salesManagerName;
+
+  /// In en, this message translates to:
+  /// **'Sales manager telephone'**
+  String get salesManagerPhone;
+
+  /// In en, this message translates to:
+  /// **'Settings saved'**
+  String get settingsSaved;
+
+  /// In en, this message translates to:
+  /// **'Save settings'**
+  String get saveSettings;
+
+  /// In en, this message translates to:
+  /// **'Changing these needs the company administration permission.'**
+  String get readOnlySettings;
+
+  /// In en, this message translates to:
+  /// **'Enter a value between 0 and 100.'**
+  String get invalidSetting;
+
+  /// In en, this message translates to:
+  /// **'Network and remote access'**
+  String get networkAccessTitle;
+
+  /// In en, this message translates to:
+  /// **'The server did not answer its network report. Check that it is running.'**
+  String get networkUnavailable;
+
+  /// In en, this message translates to:
+  /// **'Available on the local network'**
+  String get lanReachable;
+
+  /// In en, this message translates to:
+  /// **'This computer only'**
+  String get localOnly;
+
+  /// In en, this message translates to:
+  /// **'Server'**
+  String get serverStatus;
+
+  /// In en, this message translates to:
+  /// **'ready, database up'**
+  String get serverReady;
+
+  /// In en, this message translates to:
+  /// **'database not reachable'**
+  String get databaseDown;
+
+  /// In en, this message translates to:
+  /// **'Listening on'**
+  String get listeningOn;
+
+  /// In en, this message translates to:
+  /// **'Local address'**
+  String get localAddress;
+
+  /// In en, this message translates to:
+  /// **'Network address'**
+  String get networkAddress;
+
+  /// In en, this message translates to:
+  /// **'Address if enabled'**
+  String get wouldBeAddress;
+
+  /// In en, this message translates to:
+  /// **'Address copied'**
+  String get addressCopied;
+
+  /// In en, this message translates to:
+  /// **'Copy address'**
+  String get copyAddress;
+
+  /// In en, this message translates to:
+  /// **'The server is bound to this computer only, so the addresses below do not answer from another device. To allow the other computers on the network, set HOST=0.0.0.0 in the installation settings file and restart the program.'**
+  String get lanNotEnabledHint;
+
+  /// In en, this message translates to:
+  /// **'Windows Firewall must also allow the program on private networks. The database port (5432) is never opened: other devices only reach the program, and still have to sign in.'**
+  String get lanFirewallHint;
+
+  /// In en, this message translates to:
+  /// **'Public (internet) address'**
+  String get publicAddressTitle;
+
+  /// In en, this message translates to:
+  /// **'Detect'**
+  String get detectPublicAddress;
+
+  /// In en, this message translates to:
+  /// **'Detected only when you press Detect. A public address alone does not make this server reachable from the internet: the router or the carrier may block incoming connections. For remote use, prefer a VPN or an HTTPS gateway; never expose the database.'**
+  String get publicAddressHint;
+
+  /// In en, this message translates to:
+  /// **'Checking…'**
+  String get publicAddressChecking;
+
+  /// In en, this message translates to:
+  /// **'The public address could not be detected.'**
+  String get publicAddressUnavailable;
+
+  /// In en, this message translates to:
+  /// **'an address alone does not prove that incoming connections reach this computer.'**
+  String get publicAddressNotProof;
+
+  /// In en, this message translates to:
+  /// **'Last checked'**
+  String get lastChecked;
+
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get remove;
+
+
+  /// No description provided for @termsLibrary.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved terms'**
+  String get termsLibrary;
+
+  /// No description provided for @insertSavedTerms.
+  ///
+  /// In en, this message translates to:
+  /// **'Insert saved terms'**
+  String get insertSavedTerms;
+
+  /// No description provided for @saveTermsToLibrary.
+  ///
+  /// In en, this message translates to:
+  /// **'Save terms to library'**
+  String get saveTermsToLibrary;
+
+  /// No description provided for @termsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Entry title'**
+  String get termsTitle;
+
+  /// No description provided for @termsBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Terms text'**
+  String get termsBody;
+
+  /// No description provided for @noSavedTerms.
+  ///
+  /// In en, this message translates to:
+  /// **'No saved terms yet. Write the terms below and save them for reuse.'**
+  String get noSavedTerms;
+
+  /// No description provided for @termsSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Terms saved to the library'**
+  String get termsSaved;
+
+  /// No description provided for @manageSavedTerms.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage saved terms'**
+  String get manageSavedTerms;
+
+  /// No description provided for @termsInserted.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved terms inserted. You can edit this copy freely.'**
+  String get termsInserted;
+
+  /// No description provided for @removeSavedTerm.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove this saved entry? Documents that already used it keep their own copy.'**
+  String get removeSavedTerm;
+
   // Lookup logic when only language code is specified.
   switch (locale.languageCode) {
     case 'ar':

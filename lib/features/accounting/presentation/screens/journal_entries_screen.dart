@@ -140,16 +140,6 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
             return [
               IconButton(
                 tooltip: Localizations.localeOf(context).languageCode == 'ar'
-                    ? 'عرض تفاصيل القيد'
-                    : 'View journal details',
-                icon: const Icon(Icons.visibility_outlined, size: 20),
-                onPressed: () => showDialog<void>(
-                  context: context,
-                  builder: (_) => _JournalDetailDialog(entry: row),
-                ),
-              ),
-              IconButton(
-                tooltip: Localizations.localeOf(context).languageCode == 'ar'
                     ? 'طباعة وتنزيل المستند'
                     : 'Print and download document',
                 icon: const Icon(Icons.print_outlined, size: 20),
@@ -192,87 +182,9 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
   }
 }
 
-
-class _JournalDetailDialog extends StatelessWidget {
-  const _JournalDetailDialog({required this.entry});
-
-  final Json entry;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = context.l10n;
-    final language = Localizations.localeOf(context).languageCode;
-    final lines = listOf(entry['lines']);
-
-    String centreLabel(Json row) {
-      final code = text(row, 'costCenterCode');
-      final name = language == 'ar'
-          ? text(row, 'costCenterNameAr')
-          : text(row, 'costCenterNameEn');
-      if (code.isEmpty && name.isEmpty) return '—';
-      return code.isEmpty ? name : '$code — $name';
-    }
-
-    String allocationsLabel(Json row) {
-      final allocations = listOf(row['allocations']);
-      if (allocations.isNotEmpty) {
-        return allocations.map((allocation) {
-          final code = text(allocation, 'costCenterCode');
-          final name = language == 'ar'
-              ? text(allocation, 'costCenterNameAr')
-              : text(allocation, 'costCenterNameEn');
-          final centre = code.isEmpty ? name : '$code — $name';
-          return '$centre: ${formatAmount(asString(allocation['amount']))}';
-        }).join('\n');
-      }
-      return centreLabel(row);
-    }
-
-    return AlertDialog(
-      title: Text('${l10n.entryNumber}: ${text(entry, 'entryNumber')}'),
-      content: SizedBox(
-        width: 920,
-        height: 480,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('${l10n.description}: ${text(entry, 'description')}'),
-            const SizedBox(height: 8),
-            Text('${l10n.debit}: ${formatAmount(asString(entry['totalDebit']))}    '
-                '${l10n.credit}: ${formatAmount(asString(entry['totalCredit']))}'),
-            const SizedBox(height: 12),
-            Expanded(
-              child: SingleChildScrollView(
-                child: RecordsTable(
-                  rows: lines,
-                  columns: [
-                    ColumnSpec('#', numeric: true,
-                      value: (row) => asNum(row['lineNumber'])?.toString() ?? ''),
-                    ColumnSpec(l10n.chartOfAccounts,
-                      value: (row) => '${text(row, 'accountCode')} — ${language == 'ar' ? text(row, 'accountNameAr') : text(row, 'accountNameEn')}'),
-                    ColumnSpec(l10n.description, value: (row) => text(row, 'description')),
-                    ColumnSpec(language == 'ar' ? 'مركز التكلفة / التوزيع' : 'Cost center / allocation',
-                      value: allocationsLabel),
-                    ColumnSpec(l10n.debit, numeric: true,
-                      value: (row) => formatAmount(asString(row['debit']))),
-                    ColumnSpec(l10n.credit, numeric: true,
-                      value: (row) => formatAmount(asString(row['credit']))),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(l10n.close)),
-      ],
-    );
-  }
-}
-
 class _AllocationDraft {
-  _AllocationDraft() : amount = TextEditingController();
+  _AllocationDraft({this.costCenterId, String amount = ''})
+    : amount = TextEditingController(text: amount);
 
   String? costCenterId;
   final TextEditingController amount;
@@ -284,19 +196,24 @@ class _EntryLineDraft {
   _EntryLineDraft()
     : accountId = null,
       costCenterId = null,
-      splitAllocation = false,
-      allocations = <_AllocationDraft>[],
       debit = TextEditingController(),
       credit = TextEditingController(),
       description = TextEditingController();
 
   String? accountId;
+
+  /// The centre this line belongs to, when the cost is somebody's. Optional:
+  /// a balance-sheet line usually has no owner. Ignored while [allocations] is
+  /// non-empty: a line is either one centre or a controlled split, never both.
   String? costCenterId;
-  bool splitAllocation;
-  final List<_AllocationDraft> allocations;
   final TextEditingController debit;
   final TextEditingController credit;
   final TextEditingController description;
+
+  /// A split of this line across several centres. The server checks that the
+  /// parts add up to the line amount exactly; the screen shows the same check
+  /// before saving so nobody has to guess why it was refused.
+  final List<_AllocationDraft> allocations = [];
 
   void dispose() {
     debit.dispose();
@@ -361,26 +278,43 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
       final debit = line.debit.text.trim();
       final credit = line.credit.text.trim();
       if (debit.isEmpty && credit.isEmpty) continue;
-      if (line.splitAllocation) {
-        final amount = Decimal.tryParse(debit.isNotEmpty && debit != '0' ? debit : credit) ?? Decimal.zero;
-        final allocated = line.allocations.fold(
-          Decimal.zero,
-          (sum, part) => sum + (Decimal.tryParse(part.amount.text.trim()) ?? Decimal.zero),
-        );
-        final ids = line.allocations.map((part) => part.costCenterId).toList();
-        final validParts = line.allocations.isNotEmpty &&
-            line.allocations.every((part) =>
-                part.costCenterId != null &&
-                (Decimal.tryParse(part.amount.text.trim()) ?? Decimal.zero) > Decimal.zero) &&
-            ids.toSet().length == ids.length;
-        if (!validParts || amount <= Decimal.zero || allocated != amount) {
-          showMessage(
-            context,
-            _journalText(context, 'توزيع السطر يجب أن يكون على مراكز مختلفة ومجموعه مطابقًا لمبلغ السطر', 'Split allocations must use distinct centres and add up exactly to the line amount'),
-            error: true,
-          );
+      final lineAmount = Decimal.tryParse(
+        debit.isNotEmpty && debit != '0' ? debit : credit,
+      );
+      if (line.allocations.isNotEmpty) {
+        var allocated = Decimal.zero;
+        final seen = <String>{};
+        final allocations = <Json>[];
+        for (final allocation in line.allocations) {
+          final centre = allocation.costCenterId;
+          final value = Decimal.tryParse(allocation.amount.text.trim());
+          if (centre == null || value == null || value <= Decimal.zero) {
+            showMessage(context, l10n.allocationMustReconcile, error: true);
+            return;
+          }
+          if (!seen.add(centre)) {
+            showMessage(context, l10n.duplicateCostCenter, error: true);
+            return;
+          }
+          allocated += value;
+          allocations.add({
+            'costCenterId': centre,
+            'amount': allocation.amount.text.trim(),
+          });
+        }
+        if (lineAmount == null || allocated != lineAmount) {
+          showMessage(context, l10n.allocationMustReconcile, error: true);
           return;
         }
+        lines.add({
+          'accountId': line.accountId,
+          if (debit.isNotEmpty && debit != '0') 'debit': debit,
+          if (credit.isNotEmpty && credit != '0') 'credit': credit,
+          if (line.description.text.trim().isNotEmpty)
+            'description': line.description.text.trim(),
+          'allocations': allocations,
+        });
+        continue;
       }
       lines.add({
         'accountId': line.accountId,
@@ -388,13 +322,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
         if (credit.isNotEmpty && credit != '0') 'credit': credit,
         if (line.description.text.trim().isNotEmpty)
           'description': line.description.text.trim(),
-        if (line.splitAllocation)
-          'allocations': [
-            for (final part in line.allocations)
-              {'costCenterId': part.costCenterId, 'amount': part.amount.text.trim()},
-          ]
-        else if (line.costCenterId != null)
-          'costCenterId': line.costCenterId,
+        if (line.costCenterId != null) 'costCenterId': line.costCenterId,
       });
     }
     if (lines.length < 2) {
@@ -425,141 +353,6 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
-  }
-
-  Future<void> _editAllocations(
-    _EntryLineDraft line,
-    List<Json> centres,
-    String language,
-  ) async {
-    if (!line.splitAllocation) {
-      setState(() {
-        line.splitAllocation = true;
-        line.costCenterId = null;
-        if (line.allocations.isEmpty) line.allocations.add(_AllocationDraft());
-      });
-    }
-    final amount = Decimal.tryParse(
-          line.debit.text.trim().isNotEmpty && line.debit.text.trim() != '0'
-              ? line.debit.text.trim()
-              : line.credit.text.trim(),
-        ) ??
-        Decimal.zero;
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) {
-          final allocated = line.allocations.fold(
-            Decimal.zero,
-            (sum, part) => sum + (Decimal.tryParse(part.amount.text.trim()) ?? Decimal.zero),
-          );
-          final valid = amount > Decimal.zero &&
-              line.allocations.isNotEmpty &&
-              line.allocations.every((part) =>
-                  part.costCenterId != null &&
-                  (Decimal.tryParse(part.amount.text.trim()) ?? Decimal.zero) > Decimal.zero) &&
-              line.allocations.map((part) => part.costCenterId).toSet().length == line.allocations.length &&
-              allocated == amount;
-          return AlertDialog(
-            title: Text(_journalText(context, 'توزيع مبلغ السطر', 'Allocate line amount')),
-            content: SizedBox(
-              width: 640,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: Text('${_journalText(context, 'مبلغ السطر', 'Line amount')}: ${formatAmount(amount.toString())}'),
-                    ),
-                    const SizedBox(height: 12),
-                    for (var i = 0; i < line.allocations.length; i++)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              flex: 3,
-                              child: DropdownButtonFormField<String>(
-                                initialValue: line.allocations[i].costCenterId,
-                                isExpanded: true,
-                                decoration: InputDecoration(
-                                  labelText: context.l10n.costCenter,
-                                  isDense: true,
-                                  border: const OutlineInputBorder(),
-                                ),
-                                items: [
-                                  for (final centre in centres)
-                                    if (text(centre, 'id') == line.allocations[i].costCenterId ||
-                                        !line.allocations.any((other) =>
-                                            !identical(other, line.allocations[i]) &&
-                                            other.costCenterId == text(centre, 'id')))
-                                      DropdownMenuItem(
-                                        value: text(centre, 'id'),
-                                        child: Text(costCenterLabel(centre, language), overflow: TextOverflow.ellipsis),
-                                      ),
-                                ],
-                                onChanged: (value) => setDialogState(() => line.allocations[i].costCenterId = value),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              flex: 2,
-                              child: TextField(
-                                controller: line.allocations[i].amount,
-                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                decoration: InputDecoration(
-                                  labelText: _journalText(context, 'المبلغ', 'Amount'),
-                                  isDense: true,
-                                  border: const OutlineInputBorder(),
-                                ),
-                                onChanged: (_) => setDialogState(() {}),
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: _journalText(context, 'حذف التوزيع', 'Remove allocation'),
-                              icon: const Icon(Icons.delete_outline),
-                              onPressed: line.allocations.length <= 1 ? null : () => setDialogState(() => line.allocations.removeAt(i).dispose()),
-                            ),
-                          ],
-                        ),
-                      ),
-                    Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: TextButton.icon(
-                        onPressed: () => setDialogState(() => line.allocations.add(_AllocationDraft())),
-                        icon: const Icon(Icons.add),
-                        label: Text(_journalText(context, 'إضافة مركز', 'Add centre')),
-                      ),
-                    ),
-                    const Divider(),
-                    Text('${_journalText(context, 'الموزع', 'Allocated')}: ${formatAmount(allocated.toString())}    ${_journalText(context, 'المتبقي', 'Remaining')}: ${formatAmount((amount - allocated).toString())}'),
-                  ],
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  setState(() => line.splitAllocation = false);
-                  Navigator.of(dialogContext).pop();
-                },
-                child: Text(_journalText(context, 'استخدام مركز واحد', 'Use one centre')),
-              ),
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: Text(context.l10n.cancel),
-              ),
-              FilledButton(
-                onPressed: valid ? () => Navigator.of(dialogContext).pop() : null,
-                child: Text(_journalText(context, 'تم', 'Done')),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-    if (mounted) setState(() {});
   }
 
   @override
@@ -647,7 +440,10 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                     Padding(
                       key: ValueKey(_lines[index]),
                       padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                        Row(
                         children: [
                           Expanded(
                             flex: 4,
@@ -684,48 +480,87 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                           // centres; a company that does not use the dimension
                           // sees the form it always saw.
                           if (costCenters.isNotEmpty) ...[
+                            if (_lines[index].allocations.isNotEmpty)
+                              Expanded(
+                                flex: 3,
+                                child: InputDecorator(
+                                  decoration: InputDecoration(
+                                    labelText: l10n.costCenter,
+                                    isDense: true,
+                                    border: const OutlineInputBorder(),
+                                  ),
+                                  child: Text(
+                                    '${l10n.splitAcrossCenters} '
+                                    '(${_lines[index].allocations.length})',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              )
+                            else
                             Expanded(
                               flex: 3,
-                              child: _lines[index].splitAllocation
-                                  ? OutlinedButton.icon(
-                                      onPressed: _saving
-                                          ? null
-                                          : () => _editAllocations(_lines[index], costCenters, language),
-                                      icon: const Icon(Icons.call_split_outlined, size: 18),
-                                      label: Text(
-                                        _journalText(context, 'توزيع (${_lines[index].allocations.length})', 'Split (${_lines[index].allocations.length})'),
+                              child: DropdownButtonFormField<String>(
+                                initialValue: _lines[index].costCenterId,
+                                isExpanded: true,
+                                decoration: InputDecoration(
+                                  labelText: l10n.costCenter,
+                                  isDense: true,
+                                  border: const OutlineInputBorder(),
+                                ),
+                                items: [
+                                  DropdownMenuItem(
+                                    value: '',
+                                    child: Text(
+                                      l10n.noAllocation,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  for (final center in costCenters)
+                                    DropdownMenuItem(
+                                      value: text(center, 'id'),
+                                      child: Text(
+                                        costCenterLabel(center, language),
                                         overflow: TextOverflow.ellipsis,
                                       ),
-                                    )
-                                  : DropdownButtonFormField<String>(
-                                      initialValue: _lines[index].costCenterId,
-                                      isExpanded: true,
-                                      decoration: InputDecoration(
-                                        labelText: l10n.costCenter,
-                                        isDense: true,
-                                        border: const OutlineInputBorder(),
-                                      ),
-                                      items: [
-                                        DropdownMenuItem(
-                                          value: '',
-                                          child: Text(l10n.noAllocation, overflow: TextOverflow.ellipsis),
-                                        ),
-                                        for (final center in costCenters)
-                                          DropdownMenuItem(
-                                            value: text(center, 'id'),
-                                            child: Text(costCenterLabel(center, language), overflow: TextOverflow.ellipsis),
-                                          ),
-                                      ],
-                                      onChanged: (value) => setState(
-                                        () => _lines[index].costCenterId = value == null || value.isEmpty ? null : value,
-                                      ),
                                     ),
+                                ],
+                                onChanged: (value) => setState(
+                                  () => _lines[index].costCenterId = value == null ||
+                                          value.isEmpty
+                                      ? null
+                                      : value,
+                                ),
+                              ),
                             ),
                             const SizedBox(width: 4),
                             IconButton(
-                              tooltip: _journalText(context, 'توزيع على عدة مراكز', 'Split across centres'),
-                              icon: const Icon(Icons.call_split_outlined, size: 20),
-                              onPressed: _saving ? null : () => _editAllocations(_lines[index], costCenters, language),
+                              tooltip: l10n.splitAcrossCenters,
+                              visualDensity: VisualDensity.compact,
+                              icon: Icon(
+                                _lines[index].allocations.isEmpty
+                                    ? Icons.call_split
+                                    : Icons.merge_type,
+                                size: 18,
+                              ),
+                              onPressed: () => setState(() {
+                                final line = _lines[index];
+                                if (line.allocations.isNotEmpty) {
+                                  for (final allocation in line.allocations) {
+                                    allocation.dispose();
+                                  }
+                                  line.allocations.clear();
+                                  return;
+                                }
+                                final amount = line.debit.text.trim().isNotEmpty
+                                    ? line.debit.text.trim()
+                                    : line.credit.text.trim();
+                                line.allocations.add(
+                                  _AllocationDraft(
+                                    costCenterId: line.costCenterId,
+                                    amount: amount,
+                                  ),
+                                );
+                              }),
                             ),
                             const SizedBox(width: 4),
                           ],
@@ -782,6 +617,10 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                           ),
                         ],
                       ),
+                      if (_lines[index].allocations.isNotEmpty)
+                        _allocationEditor(index, costCenters, language),
+                      ],
+                      ),
                     ),
                   const SizedBox(height: 8),
                   Align(
@@ -825,8 +664,127 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
       ),
     );
   }
+
+  /// The controlled split of one line: amounts per centre, the total, and what
+  /// is still unallocated. Duplicate centres and an inexact total are refused
+  /// here and again by the server.
+  Widget _allocationEditor(int index, List<Json> costCenters, String language) {
+    final l10n = context.l10n;
+    final line = _lines[index];
+    final lineAmount = Decimal.tryParse(
+      line.debit.text.trim().isNotEmpty
+          ? line.debit.text.trim()
+          : line.credit.text.trim(),
+    ) ?? Decimal.zero;
+    final allocated = line.allocations.fold(
+      Decimal.zero,
+      (sum, allocation) =>
+          sum + (Decimal.tryParse(allocation.amount.text.trim()) ?? Decimal.zero),
+    );
+    final remaining = lineAmount - allocated;
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(start: 24, top: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var position = 0;
+              position < line.allocations.length;
+              position++)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: DropdownButtonFormField<String>(
+                      key: ValueKey('allocation-$index-$position'),
+                      initialValue: _allocationChoice(
+                        costCenters,
+                        line.allocations[position].costCenterId,
+                      ),
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: l10n.costCenter,
+                        isDense: true,
+                        border: const OutlineInputBorder(),
+                      ),
+                      items: [
+                        for (final center in costCenters)
+                          DropdownMenuItem(
+                            value: text(center, 'id'),
+                            child: Text(
+                              costCenterLabel(center, language),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (value) => setState(
+                        () => line.allocations[position].costCenterId = value,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 160,
+                    child: TextField(
+                      controller: line.allocations[position].amount,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: l10n.amount,
+                        isDense: true,
+                        border: const OutlineInputBorder(),
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: l10n.remove,
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    onPressed: line.allocations.length == 1
+                        ? null
+                        : () => setState(
+                            () => line.allocations.removeAt(position).dispose(),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          Row(
+            children: [
+              TextButton.icon(
+                onPressed: () => setState(
+                  () => line.allocations.add(_AllocationDraft()),
+                ),
+                icon: const Icon(Icons.add, size: 18),
+                label: Text(l10n.addAllocation),
+              ),
+              const SizedBox(width: 16),
+              Text(
+                '${l10n.allocationTotal}: ${formatAmount(allocated.toString())}'
+                '  ·  ${l10n.remainingToAllocate}: '
+                '${formatAmount(remaining.toString())}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const Spacer(),
+              if (remaining != Decimal.zero)
+                Text(
+                  l10n.allocationMustReconcile,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                    fontSize: 12,
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String? _allocationChoice(List<Json> centres, String? id) {
+    if (id == null || id.isEmpty) return null;
+    return centres.any((center) => text(center, 'id') == id) ? id : null;
+  }
 }
-
-
-String _journalText(BuildContext context, String arabic, String english) =>
-    Localizations.localeOf(context).languageCode == 'ar' ? arabic : english;

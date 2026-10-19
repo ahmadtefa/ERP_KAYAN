@@ -35,6 +35,10 @@ export class CreateItemDto {
   @IsOptional() @IsString() taxRate?: string;
 
   @IsOptional() @IsBoolean() isStockTracked?: boolean;
+  /// Where the item was made, printed on quotations. Optional: the program
+  /// never guesses a country.
+  @IsOptional() @IsString() @MaxLength(80) countryOfOrigin?: string;
+
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
 
   /// Opening stock for a newly created item. Both must be given together;
@@ -58,6 +62,7 @@ export class UpdateItemDto {
   @IsOptional() @IsString() taxRate?: string;
   @IsOptional() @IsBoolean() isStockTracked?: boolean;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsString() @MaxLength(80) countryOfOrigin?: string;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
 }
 

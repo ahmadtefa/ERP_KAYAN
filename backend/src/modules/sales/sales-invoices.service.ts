@@ -6,6 +6,15 @@ import {
 import { InvoiceDocumentType, InvoiceStatus, JournalStatus, Prisma, StockDirection } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import {
+  allocateDocumentDiscount,
+  assertDiscountLimit,
+  DiscountError,
+  DiscountInput,
+  effectiveDiscountPercent,
+  ResolvedDiscount,
+  resolveDiscount,
+} from '../../common/pricing/discount';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { PriceListsService } from './price-lists.service';
@@ -13,7 +22,6 @@ import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { attributedLines } from '../accounting/cost-center-attribution';
 import { PostingService } from '../accounting/posting.service';
-import { applyInvoiceDiscount } from '../invoicing/invoice-discount';
 import {
   CreateSalesInvoiceDto,
   ListInvoicesDto,
@@ -31,8 +39,21 @@ interface PreparedLine {
   unitPrice: Prisma.Decimal;
   taxRate: Prisma.Decimal;
   taxAmount: Prisma.Decimal;
+  /// Net of both discounts: the taxable value and the revenue of this line.
   lineTotal: Prisma.Decimal;
+  /// Quantity x unit price before any discount.
+  grossLineTotal: Prisma.Decimal;
+  discountType: 'PERCENT' | 'AMOUNT' | null;
+  discountPercent: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
+  invoiceDiscountAmount: Prisma.Decimal;
   costCenterId: string | null;
+}
+
+interface PreparedInvoice {
+  lines: PreparedLine[];
+  documentDiscount: ResolvedDiscount;
+  lineDiscountTotal: Prisma.Decimal;
 }
 
 @Injectable()
@@ -100,10 +121,7 @@ export class SalesInvoicesService {
         branch: { select: { code: true, nameEn: true, nameAr: true } },
         lines: {
           orderBy: { lineNumber: 'asc' },
-          include: {
-            item: { select: { code: true, nameEn: true, nameAr: true, unit: true } },
-            costCenter: { select: { code: true, nameEn: true, nameAr: true } },
-          },
+          include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } },
         },
       },
     });
@@ -130,12 +148,12 @@ export class SalesInvoicesService {
         taxRate: l.taxRate.toFixed(RATE_SCALE),
         taxAmount: l.taxAmount.toFixed(MONEY_SCALE),
         lineTotal: l.lineTotal.toFixed(MONEY_SCALE),
+        grossLineTotal: (l.grossLineTotal ?? l.lineTotal).toFixed(MONEY_SCALE),
+        discountType: l.discountType ?? null,
         discountPercent: l.discountPercent.toFixed(RATE_SCALE),
         discountAmount: l.discountAmount.toFixed(MONEY_SCALE),
+        invoiceDiscountAmount: l.invoiceDiscountAmount.toFixed(MONEY_SCALE),
         costCenterId: l.costCenterId ?? null,
-        costCenterCode: l.costCenter?.code ?? null,
-        costCenterNameEn: l.costCenter?.nameEn ?? null,
-        costCenterNameAr: l.costCenter?.nameAr ?? null,
         unitCost: l.unitCost.toFixed(MONEY_SCALE),
         costTotal: l.costTotal.toFixed(MONEY_SCALE),
       })),
@@ -160,12 +178,13 @@ export class SalesInvoicesService {
     if (!customer) throw new BadRequestException('The customer does not exist');
     if (!customer.isActive) throw new BadRequestException('The customer is inactive');
 
-    const discount = applyInvoiceDiscount(
-      await this.prepareLines(companyId, dto.lines, dto.customerId),
-      dto.discountPercent,
-      dto.discountAmount,
+    const prepared = await this.prepareLines(
+      companyId,
+      dto.lines,
+      dto.customerId,
+      { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
     );
-    const lines = discount.lines;
+    const lines = prepared.lines;
     const totals = this.totalsOf(lines);
 
     const created = await this.prisma.$transaction(async (tx) => {
@@ -191,8 +210,10 @@ export class SalesInvoicesService {
             : (await this.dueDateFromTerms(companyId, dto.customerId, new Date(dto.invoiceDate))),
           customerId: dto.customerId,
           status: InvoiceStatus.DRAFT,
-          discountPercent: discount.discountPercent,
-          discountAmount: discount.discountAmount,
+          discountType: prepared.documentDiscount.type,
+          discountPercent: prepared.documentDiscount.percent,
+          discountAmount: prepared.documentDiscount.amount,
+          lineDiscountTotal: prepared.lineDiscountTotal,
           subTotal: totals.subTotal,
           taxAmount: totals.taxAmount,
           totalAmount: totals.totalAmount,
@@ -208,8 +229,11 @@ export class SalesInvoicesService {
               taxRate: l.taxRate,
               taxAmount: l.taxAmount,
               lineTotal: l.lineTotal,
+              grossLineTotal: l.grossLineTotal,
+              discountType: l.discountType,
               discountPercent: l.discountPercent,
               discountAmount: l.discountAmount,
+              invoiceDiscountAmount: l.invoiceDiscountAmount,
               costCenterId: l.costCenterId,
             })),
           },
@@ -234,8 +258,13 @@ export class SalesInvoicesService {
   }
 
   /**
-   * Replace a draft sales invoice. Posted documents are immutable because
-   * changing their values after ledger/stock posting would break reconciliation.
+   * Replace a draft sales invoice.
+   *
+   * A posted invoice is immutable: its stock, cost and journal entry already
+   * exist, and rewriting the lines afterwards would leave the ledger describing
+   * a document that no longer matches it. A draft owns nothing yet, so its
+   * lines may be replaced - under a row lock, in one transaction, and only
+   * while it is still a draft.
    */
   async updateDraft(
     companyId: string,
@@ -250,7 +279,6 @@ export class SalesInvoicesService {
 
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
-      include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
     if (!invoice) throw new NotFoundException('Sales invoice not found');
     if (invoice.documentType !== InvoiceDocumentType.INVOICE) {
@@ -270,12 +298,13 @@ export class SalesInvoicesService {
     if (!customer) throw new BadRequestException('The customer does not exist');
     if (!customer.isActive) throw new BadRequestException('The customer is inactive');
 
-    const discount = applyInvoiceDiscount(
-      await this.prepareLines(companyId, dto.lines, dto.customerId),
-      dto.discountPercent,
-      dto.discountAmount,
+    const prepared = await this.prepareLines(
+      companyId,
+      dto.lines,
+      dto.customerId,
+      { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
     );
-    const lines = discount.lines;
+    const lines = prepared.lines;
     const totals = this.totalsOf(lines);
     const invoiceDate = new Date(dto.invoiceDate);
     const dueDate = dto.dueDate
@@ -302,8 +331,10 @@ export class SalesInvoicesService {
           invoiceDate,
           dueDate,
           warehouseId: dto.warehouseId ?? invoice.warehouseId,
-          discountPercent: discount.discountPercent,
-          discountAmount: discount.discountAmount,
+          discountType: prepared.documentDiscount.type,
+          discountPercent: prepared.documentDiscount.percent,
+          discountAmount: prepared.documentDiscount.amount,
+          lineDiscountTotal: prepared.lineDiscountTotal,
           subTotal: totals.subTotal,
           taxAmount: totals.taxAmount,
           totalAmount: totals.totalAmount,
@@ -319,8 +350,11 @@ export class SalesInvoicesService {
               taxRate: line.taxRate,
               taxAmount: line.taxAmount,
               lineTotal: line.lineTotal,
+              grossLineTotal: line.grossLineTotal,
+              discountType: line.discountType,
               discountPercent: line.discountPercent,
               discountAmount: line.discountAmount,
+              invoiceDiscountAmount: line.invoiceDiscountAmount,
               costCenterId: line.costCenterId,
             })),
           },
@@ -334,17 +368,10 @@ export class SalesInvoicesService {
       action: 'UPDATE',
       entity: 'sales_invoices',
       entityId: id,
-      before: {
-        status: invoice.status,
-        totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),
-      },
-      after: {
-        status: InvoiceStatus.DRAFT,
-        totalAmount: totals.totalAmount.toFixed(MONEY_SCALE),
-        discountPercent: discount.discountPercent.toFixed(RATE_SCALE),
-        discountAmount: discount.discountAmount.toFixed(MONEY_SCALE),
-      },
+      before: { status: invoice.status, totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE) },
+      after: { status: InvoiceStatus.DRAFT, totalAmount: totals.totalAmount.toFixed(MONEY_SCALE) },
     });
+
     return this.findOne(companyId, id);
   }
 
@@ -781,8 +808,9 @@ export class SalesInvoicesService {
   private async prepareLines(
     companyId: string,
     input: SalesInvoiceLineDto[],
-    customerId?: string | null,
-  ): Promise<PreparedLine[]> {
+    customerId: string | null | undefined,
+    documentDiscount: DiscountInput,
+  ): Promise<PreparedInvoice> {
     const prepared: PreparedLine[] = [];
     // The company's own policy: the rate to apply when nobody said otherwise,
     // and whether the prices being typed already contain it.
@@ -865,12 +893,21 @@ export class SalesInvoicesService {
       // of it a second time.
       const typedTotal = quantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
       const grossUp = new Prisma.Decimal(1).plus(taxRate.div(100));
-      const lineTotal = settings.pricesIncludeTax && taxRate.greaterThan(0)
+
+      // When prices include tax, the typed total is a tax-inclusive number:
+      // take the tax back out first, then discount the goods value. Tax is
+      // then charged on the discounted value, which is what "discount applied
+      // before tax" means on these documents.
+      const grossLineTotal = settings.pricesIncludeTax && taxRate.greaterThan(0)
         ? typedTotal.div(grossUp).toDecimalPlaces(MONEY_SCALE)
         : typedTotal;
-      const taxAmount = settings.pricesIncludeTax && taxRate.greaterThan(0)
-        ? typedTotal.minus(lineTotal).toDecimalPlaces(MONEY_SCALE)
-        : typedTotal.mul(taxRate).div(100).toDecimalPlaces(MONEY_SCALE);
+
+      const lineDiscount = this.lineDiscount(
+        grossLineTotal,
+        raw,
+        index,
+        new Prisma.Decimal(settings.maxDiscountPercent),
+      );
 
       // A cost center must be this company's and active; the posting path
       // repeats the check at the entry date, because an invoice can be
@@ -900,13 +937,94 @@ export class SalesInvoicesService {
         quantity,
         unitPrice,
         taxRate,
-        taxAmount,
-        lineTotal,
+        // Replaced below, once the document-level discount has been spread.
+        taxAmount: new Prisma.Decimal(0),
+        lineTotal: lineDiscount.net,
+        grossLineTotal,
+        discountType: lineDiscount.type,
+        discountPercent: lineDiscount.percent,
+        discountAmount: lineDiscount.amount,
+        invoiceDiscountAmount: new Prisma.Decimal(0),
         costCenterId,
       });
     }
 
-    return prepared;
+    // The document-level discount is spread over the net line values, in exact
+    // proportion, before tax. The share is stored on each line so a posted
+    // invoice can reproduce its own arithmetic and a partial return can be
+    // credited at the price the customer actually paid.
+    let allocation: ReturnType<typeof allocateDocumentDiscount>;
+    try {
+      allocation = allocateDocumentDiscount(
+        prepared.map((line) => line.lineTotal),
+        documentDiscount,
+      );
+    } catch (error) {
+      throw new BadRequestException(this.discountMessage(error, 'Invoice'));
+    }
+
+    const grossTotal = prepared.reduce(
+      (sum, line) => sum.plus(line.grossLineTotal),
+      new Prisma.Decimal(0),
+    );
+    const lineDiscountTotal = prepared.reduce(
+      (sum, line) => sum.plus(line.discountAmount),
+      new Prisma.Decimal(0),
+    );
+    try {
+      assertDiscountLimit(
+        effectiveDiscountPercent(
+          grossTotal,
+          lineDiscountTotal.plus(allocation.discount.amount),
+        ),
+        new Prisma.Decimal(settings.maxDiscountPercent),
+        'Document',
+      );
+    } catch (error) {
+      throw new BadRequestException(this.discountMessage(error, 'Invoice'));
+    }
+
+    const lines = prepared.map((line, index) => {
+      const invoiceDiscountAmount = allocation.shares[index];
+      const lineTotal = line.lineTotal.minus(invoiceDiscountAmount);
+      return {
+        ...line,
+        invoiceDiscountAmount,
+        lineTotal,
+        taxAmount: lineTotal
+          .mul(line.taxRate)
+          .div(100)
+          .toDecimalPlaces(MONEY_SCALE),
+      };
+    });
+
+    return { lines, documentDiscount: allocation.discount, lineDiscountTotal };
+  }
+
+  /** Resolves one line's discount and enforces the company's ceiling. */
+  private lineDiscount(
+    base: Prisma.Decimal,
+    raw: SalesInvoiceLineDto,
+    index: number,
+    maximum: Prisma.Decimal,
+  ): ResolvedDiscount {
+    try {
+      const resolved = resolveDiscount(base, {
+        type: raw.discountType,
+        percent: raw.discountPercent,
+        amount: raw.discountAmount,
+      });
+      assertDiscountLimit(resolved.percent, maximum, `Line ${index + 1}`);
+      return resolved;
+    } catch (error) {
+      throw new BadRequestException(this.discountMessage(error, `Line ${index + 1}`));
+    }
+  }
+
+  private discountMessage(error: unknown, subject: string): string {
+    if (error instanceof DiscountError) return `${subject}: ${error.message}`;
+    if (error instanceof Error) return `${subject}: ${error.message}`;
+    return `${subject}: the discount could not be applied`;
   }
 
   private totalsOf(lines: PreparedLine[]) {
@@ -964,13 +1082,15 @@ export class SalesInvoicesService {
     status: InvoiceStatus;
     currency: string;
     subTotal: Prisma.Decimal;
-    discountPercent: Prisma.Decimal;
-    discountAmount: Prisma.Decimal;
     taxAmount: Prisma.Decimal;
     totalAmount: Prisma.Decimal;
     paidAmount: Prisma.Decimal;
     costOfGoods: Prisma.Decimal;
     createdAt: Date;
+    discountType?: string | null;
+    discountPercent?: Prisma.Decimal;
+    discountAmount?: Prisma.Decimal;
+    lineDiscountTotal?: Prisma.Decimal;
     customer?: { id?: string; code: string; nameEn: string; nameAr: string };
   }) {
     return {
@@ -982,11 +1102,11 @@ export class SalesInvoicesService {
       status: invoice.status.toLowerCase(),
       currency: invoice.currency,
       customer: invoice.customer,
+      discountType: invoice.discountType ?? null,
+      discountPercent: (invoice.discountPercent ?? new Prisma.Decimal(0)).toFixed(RATE_SCALE),
+      discountAmount: (invoice.discountAmount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
+      lineDiscountTotal: (invoice.lineDiscountTotal ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
       subTotal: invoice.subTotal.toFixed(MONEY_SCALE),
-      // Older service test doubles and pre-discount records may omit these
-      // fields; the schema defaults them to zero in persisted rows.
-      discountPercent: invoice.discountPercent?.toFixed(RATE_SCALE) ?? '0.0000',
-      discountAmount: invoice.discountAmount?.toFixed(MONEY_SCALE) ?? '0.0000',
       taxAmount: invoice.taxAmount.toFixed(MONEY_SCALE),
       totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),
       paidAmount: invoice.paidAmount.toFixed(MONEY_SCALE),

@@ -5,8 +5,12 @@ import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/data_dialog.dart';
+import '../../../../shared/widgets/download_feedback.dart';
 import '../../../../shared/widgets/records_table.dart';
+import '../../../../shared/widgets/resizable_table.dart';
 import '../../../../shared/widgets/state_views.dart';
+import '../../../data/presentation/providers/data_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
@@ -112,10 +116,15 @@ class _StockScreenState extends ConsumerState<StockScreen> {
   void _openLedger(Json row) {
     final itemId = asString(row['itemId']);
     if (itemId == null) return;
-    showDialog<void>(
-      context: context,
-      builder: (_) => _LedgerDialog(
+    showDataDialog<void>(
+      context,
+      storageKey: 'stock-ledger',
+      title: '${text(row, 'itemCode')} — ${text(row, 'itemNameEn')}',
+      icon: Icons.receipt_long_outlined,
+      initialSize: const Size(1000, 620),
+      child: _LedgerDialog(
         itemId: itemId,
+        row: row,
         title: '${text(row, 'itemCode')} — ${text(row, 'itemNameEn')}',
       ),
     );
@@ -179,9 +188,18 @@ class _Totals extends StatelessWidget {
 
 /// Replays every movement of one item, the way a stock card does.
 class _LedgerDialog extends ConsumerStatefulWidget {
-  const _LedgerDialog({required this.itemId, required this.title});
+  const _LedgerDialog({
+    required this.itemId,
+    required this.row,
+    required this.title,
+  });
 
   final String itemId;
+
+  /// The stock row the dialog was opened from: the balance, value and average
+  /// cost this branch is carrying. Shown as they are — never recomputed from
+  /// the movements, which would invent a number the ledger does not hold.
+  final Json row;
   final String title;
 
   @override
@@ -206,80 +224,176 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    return AlertDialog(
-      title: Text(widget.title),
-      content: SizedBox(
-        width: 720,
-        height: 420,
-        child: FutureBuilder<Json>(
-          future: _future,
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              final error = snapshot.error!;
-              return ErrorView(
-                message: error is Failure ? error.message : '$error',
-                onRetry: () => setState(() => _future = _load()),
-              );
-            }
-            if (!snapshot.hasData) return const LoadingView();
-            final data = snapshot.data!;
-            final movements = listOf(data['movements']);
-            if (movements.isEmpty) {
-              return EmptyView(message: l10n.noMovements);
-            }
-            return SingleChildScrollView(
-              child: RecordsTable(
-                rows: movements,
-                columns: [
-                  ColumnSpec(
-                    l10n.invoiceDate,
-                    value: (r) => text(r, 'date').split('T').first,
+    final theme = Theme.of(context);
+    final language = Localizations.localeOf(context).languageCode;
+    final links = ref.read(reportLinkProvider);
+    final filters = {'itemId': widget.itemId};
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 4, 18, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            spacing: 24,
+            runSpacing: 8,
+            children: [
+              _stat(l10n.onHand, formatQuantity(asString(widget.row['quantity']))),
+              _stat(l10n.averageCost, formatAmount(asString(widget.row['averageCost']))),
+              _stat(l10n.stockValue, formatAmount(asString(widget.row['value']))),
+              _stat(l10n.branch, text(widget.row, 'branchCode')),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => runPrint(
+                  context,
+                  links.listPrint(
+                    list: 'stock-ledger',
+                    language: language,
+                    filters: filters,
                   ),
-                  ColumnSpec(
-                    l10n.reference,
-                    value: (r) =>
-                        '${text(r, 'referenceType')} ${text(r, 'referenceNumber')}',
-                  ),
-                  ColumnSpec(
-                    l10n.direction,
-                    value: (r) => text(r, 'direction').toLowerCase() == 'in'
-                        ? l10n.movementIn
-                        : l10n.movementOut,
-                  ),
-                  ColumnSpec(
-                    l10n.quantity,
-                    numeric: true,
-                    value: (r) => formatQuantity(asString(r['quantity'])),
-                  ),
-                  ColumnSpec(
-                    l10n.unitPrice,
-                    numeric: true,
-                    value: (r) => formatAmount(asString(r['unitCost'])),
-                  ),
-                  ColumnSpec(
-                    l10n.lineTotal,
-                    numeric: true,
-                    value: (r) => formatAmount(asString(r['totalCost'])),
-                  ),
-                  ColumnSpec(
-                    l10n.runningBalance,
-                    numeric: true,
-                    value: (r) =>
-                        '${formatQuantity(asString(r['runningQuantity']))} / '
-                        '${formatAmount(asString(r['runningValue']))}',
-                  ),
-                ],
+                ),
+                icon: const Icon(Icons.print_outlined, size: 18),
+                label: Text(l10n.printPreview),
               ),
-            );
-          },
-        ),
+              OutlinedButton.icon(
+                onPressed: () => runDownload(
+                  context,
+                  links.listPdf(
+                    list: 'stock-ledger',
+                    language: language,
+                    filters: filters,
+                  ),
+                ),
+                icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                label: Text(l10n.exportPdf),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => runDownload(
+                  context,
+                  links.listFile(
+                    list: 'stock-ledger',
+                    format: 'xlsx',
+                    language: language,
+                    filters: filters,
+                  ),
+                ),
+                icon: const Icon(Icons.table_view_outlined, size: 18),
+                label: Text(l10n.exportExcel),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => runDownload(
+                  context,
+                  links.listFile(
+                    list: 'stock-ledger',
+                    format: 'csv',
+                    language: language,
+                    filters: filters,
+                  ),
+                ),
+                icon: const Icon(Icons.text_snippet_outlined, size: 18),
+                label: Text(l10n.exportCsv),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: FutureBuilder<Json>(
+              future: _future,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  final error = snapshot.error!;
+                  return ErrorView(
+                    message: error is Failure ? error.message : '$error',
+                    onRetry: () => setState(() => _future = _load()),
+                  );
+                }
+                if (!snapshot.hasData) return const LoadingView();
+                final data = snapshot.data!;
+                final movements = listOf(data['movements']);
+                if (movements.isEmpty) {
+                  return EmptyView(message: l10n.noMovements);
+                }
+                return SingleChildScrollView(
+                  child: ResizableTable(
+                    storageKey: 'stock-ledger',
+                    rows: movements,
+                    columns: [
+                      ResizableColumn(
+                        l10n.invoiceDate,
+                        width: 110,
+                        value: (r) => text(r, 'date').split('T').first,
+                      ),
+                      ResizableColumn(
+                        l10n.reference,
+                        width: 200,
+                        value: (r) =>
+                            '${text(r, 'referenceType')} ${text(r, 'referenceNumber')}',
+                      ),
+                      ResizableColumn(
+                        l10n.direction,
+                        width: 90,
+                        value: (r) => text(r, 'direction').toLowerCase() == 'in'
+                            ? l10n.movementIn
+                            : l10n.movementOut,
+                      ),
+                      ResizableColumn(
+                        l10n.quantity,
+                        width: 110,
+                        numeric: true,
+                        value: (r) => formatQuantity(asString(r['quantity'])),
+                      ),
+                      ResizableColumn(
+                        l10n.unitPrice,
+                        width: 120,
+                        numeric: true,
+                        value: (r) => formatAmount(asString(r['unitCost'])),
+                      ),
+                      ResizableColumn(
+                        l10n.lineTotal,
+                        width: 120,
+                        numeric: true,
+                        value: (r) => formatAmount(asString(r['totalCost'])),
+                      ),
+                      ResizableColumn(
+                        l10n.runningBalance,
+                        width: 190,
+                        numeric: true,
+                        value: (r) =>
+                            '${formatQuantity(asString(r['runningQuantity']))} / '
+                            '${formatAmount(asString(r['runningValue']))}',
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(l10n.close),
+            ),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(l10n.close),
-        ),
-      ],
+    );
+  }
+
+  Widget _stat(String label, String value) {
+    return Builder(
+      builder: (context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: Theme.of(context).textTheme.bodySmall),
+          Text(value, style: Theme.of(context).textTheme.titleSmall),
+        ],
+      ),
     );
   }
 }

@@ -19,7 +19,15 @@ import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { attributedLines } from '../accounting/cost-center-attribution';
 import { PostingService } from '../accounting/posting.service';
-import { applyInvoiceDiscount } from '../invoicing/invoice-discount';
+import {
+  allocateDocumentDiscount,
+  assertDiscountLimit,
+  DiscountError,
+  DiscountInput,
+  effectiveDiscountPercent,
+  ResolvedDiscount,
+  resolveDiscount,
+} from '../../common/pricing/discount';
 import { allocateLandedCostAmounts } from './landed-cost-allocation';
 import {
   CreatePurchaseInvoiceDto,
@@ -43,10 +51,22 @@ interface PreparedLine {
   unitPrice: Prisma.Decimal;
   taxRate: Prisma.Decimal;
   taxAmount: Prisma.Decimal;
+  /// Net of both discounts: the taxable value and the inventory base.
   lineTotal: Prisma.Decimal;
+  grossLineTotal: Prisma.Decimal;
+  discountType: 'PERCENT' | 'AMOUNT' | null;
+  discountPercent: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
+  invoiceDiscountAmount: Prisma.Decimal;
   landedCostAmount: Prisma.Decimal;
   inventoryCostTotal: Prisma.Decimal;
   costCenterId: string | null;
+}
+
+interface PreparedInvoice {
+  lines: PreparedLine[];
+  documentDiscount: ResolvedDiscount;
+  lineDiscountTotal: Prisma.Decimal;
 }
 
 @Injectable()
@@ -107,10 +127,7 @@ export class PurchaseInvoicesService {
         branch: { select: { code: true, nameEn: true, nameAr: true } },
         lines: {
           orderBy: { lineNumber: 'asc' },
-          include: {
-            item: { select: { code: true, nameEn: true, nameAr: true, unit: true } },
-            costCenter: { select: { code: true, nameEn: true, nameAr: true } },
-          },
+          include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } },
         },
       },
     });
@@ -139,14 +156,14 @@ export class PurchaseInvoicesService {
         taxRate: l.taxRate.toFixed(RATE_SCALE),
         taxAmount: l.taxAmount.toFixed(MONEY_SCALE),
         lineTotal: l.lineTotal.toFixed(MONEY_SCALE),
+        grossLineTotal: (l.grossLineTotal ?? l.lineTotal).toFixed(MONEY_SCALE),
+        discountType: l.discountType ?? null,
         discountPercent: l.discountPercent.toFixed(RATE_SCALE),
         discountAmount: l.discountAmount.toFixed(MONEY_SCALE),
+        invoiceDiscountAmount: l.invoiceDiscountAmount.toFixed(MONEY_SCALE),
         landedCostAmount: l.landedCostAmount.toFixed(MONEY_SCALE),
         inventoryCostTotal: l.inventoryCostTotal.toFixed(MONEY_SCALE),
         costCenterId: l.costCenterId ?? null,
-        costCenterCode: l.costCenter?.code ?? null,
-        costCenterNameEn: l.costCenter?.nameEn ?? null,
-        costCenterNameAr: l.costCenter?.nameAr ?? null,
         returnedCostTotal: l.returnedCostTotal.toFixed(MONEY_SCALE),
       })),
     };
@@ -171,12 +188,14 @@ export class PurchaseInvoicesService {
 
     const landedCosts = this.prepareLandedCosts(dto);
     const landedCostAmount = landedCosts.total;
-    const discount = applyInvoiceDiscount(
-      await this.prepareLines(companyId, dto.lines, dto.supplierId, landedCostAmount),
-      dto.discountPercent,
-      dto.discountAmount,
+    const prepared = await this.prepareLines(
+      companyId,
+      dto.lines,
+      dto.supplierId,
+      landedCostAmount,
+      { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
     );
-    const lines = discount.lines;
+    const lines = prepared.lines;
     const subTotal = lines.reduce((s, l) => s.plus(l.lineTotal), new Prisma.Decimal(0));
     const taxAmount = lines.reduce((s, l) => s.plus(l.taxAmount), new Prisma.Decimal(0));
     const totalAmount = subTotal.plus(taxAmount).plus(landedCostAmount);
@@ -202,8 +221,10 @@ export class PurchaseInvoicesService {
             : (await this.dueDateFromTerms(companyId, dto.supplierId, new Date(dto.invoiceDate))),
           supplierId: dto.supplierId,
           status: InvoiceStatus.DRAFT,
-          discountPercent: discount.discountPercent,
-          discountAmount: discount.discountAmount,
+          discountType: prepared.documentDiscount.type,
+          discountPercent: prepared.documentDiscount.percent,
+          discountAmount: prepared.documentDiscount.amount,
+          lineDiscountTotal: prepared.lineDiscountTotal,
           subTotal,
           taxAmount,
           totalAmount,
@@ -221,8 +242,11 @@ export class PurchaseInvoicesService {
               taxRate: l.taxRate,
               taxAmount: l.taxAmount,
               lineTotal: l.lineTotal,
+              grossLineTotal: l.grossLineTotal,
+              discountType: l.discountType,
               discountPercent: l.discountPercent,
               discountAmount: l.discountAmount,
+              invoiceDiscountAmount: l.invoiceDiscountAmount,
               landedCostAmount: l.landedCostAmount,
               inventoryCostTotal: l.inventoryCostTotal,
               costCenterId: l.costCenterId,
@@ -287,12 +311,14 @@ export class PurchaseInvoicesService {
 
     const landedCosts = this.prepareLandedCosts(dto);
     const landedCostAmount = landedCosts.total;
-    const discount = applyInvoiceDiscount(
-      await this.prepareLines(companyId, dto.lines, dto.supplierId, landedCostAmount),
-      dto.discountPercent,
-      dto.discountAmount,
+    const prepared = await this.prepareLines(
+      companyId,
+      dto.lines,
+      dto.supplierId,
+      landedCostAmount,
+      { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
     );
-    const lines = discount.lines;
+    const lines = prepared.lines;
     const subTotal = lines.reduce((sum, line) => sum.plus(line.lineTotal), new Prisma.Decimal(0));
     const taxAmount = lines.reduce((sum, line) => sum.plus(line.taxAmount), new Prisma.Decimal(0));
     const totalAmount = subTotal.plus(taxAmount).plus(landedCostAmount);
@@ -322,8 +348,10 @@ export class PurchaseInvoicesService {
           invoiceDate,
           dueDate,
           warehouseId: dto.warehouseId ?? invoice.warehouseId,
-          discountPercent: discount.discountPercent,
-          discountAmount: discount.discountAmount,
+          discountType: prepared.documentDiscount.type,
+          discountPercent: prepared.documentDiscount.percent,
+          discountAmount: prepared.documentDiscount.amount,
+          lineDiscountTotal: prepared.lineDiscountTotal,
           subTotal,
           taxAmount,
           totalAmount,
@@ -341,8 +369,11 @@ export class PurchaseInvoicesService {
               taxRate: line.taxRate,
               taxAmount: line.taxAmount,
               lineTotal: line.lineTotal,
+              grossLineTotal: line.grossLineTotal,
+              discountType: line.discountType,
               discountPercent: line.discountPercent,
               discountAmount: line.discountAmount,
+              invoiceDiscountAmount: line.invoiceDiscountAmount,
               landedCostAmount: line.landedCostAmount,
               inventoryCostTotal: line.inventoryCostTotal,
               costCenterId: line.costCenterId,
@@ -792,8 +823,10 @@ export class PurchaseInvoicesService {
     input: PurchaseInvoiceLineDto[],
     supplierId: string | null | undefined,
     landedCostAmount: Prisma.Decimal,
-  ): Promise<PreparedLine[]> {
+    documentDiscount: DiscountInput,
+  ): Promise<PreparedInvoice> {
     const prepared: PreparedLine[] = [];
+    const settings = await this.settings.get(companyId);
 
     for (const [index, raw] of input.entries()) {
       const item = await this.prisma.item.findFirst({
@@ -840,10 +873,17 @@ export class PurchaseInvoicesService {
       const taxRate: Prisma.Decimal =
         raw.taxRate !== undefined
           ? this.rate(raw.taxRate, `Line ${index + 1} taxRate`)
-          : (item.taxRate ?? new Prisma.Decimal((await this.settings.get(companyId)).taxRate));
+          : (item.taxRate ?? new Prisma.Decimal(settings.taxRate));
 
-      const lineTotal = quantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
-      const taxAmount = lineTotal.mul(taxRate).div(100).toDecimalPlaces(MONEY_SCALE);
+      // The discount is taken from the goods value, before tax, and the tax
+      // is then charged on what is actually being paid for the goods.
+      const grossLineTotal = quantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
+      const lineDiscount = this.lineDiscount(
+        grossLineTotal,
+        raw,
+        index,
+        new Prisma.Decimal(settings.maxDiscountPercent),
+      );
 
       // The centre must exist, belong to this company and still be active.
       let costCenterId: string | null = raw.costCenterId ?? null;
@@ -871,18 +911,63 @@ export class PurchaseInvoicesService {
         quantity,
         unitPrice,
         taxRate,
-        taxAmount,
-        lineTotal,
+        taxAmount: new Prisma.Decimal(0),
+        lineTotal: lineDiscount.net,
+        grossLineTotal,
+        discountType: lineDiscount.type,
+        discountPercent: lineDiscount.percent,
+        discountAmount: lineDiscount.amount,
+        invoiceDiscountAmount: new Prisma.Decimal(0),
         landedCostAmount: new Prisma.Decimal(0),
-        inventoryCostTotal: lineTotal,
+        inventoryCostTotal: lineDiscount.net,
         costCenterId,
       });
     }
 
+    let allocation: ReturnType<typeof allocateDocumentDiscount>;
+    try {
+      allocation = allocateDocumentDiscount(
+        prepared.map((line) => line.lineTotal),
+        documentDiscount,
+      );
+    } catch (error) {
+      throw new BadRequestException(this.discountMessage(error, 'Invoice'));
+    }
+
+    const grossTotal = prepared.reduce(
+      (sum, line) => sum.plus(line.grossLineTotal),
+      new Prisma.Decimal(0),
+    );
+    const lineDiscountTotal = prepared.reduce(
+      (sum, line) => sum.plus(line.discountAmount),
+      new Prisma.Decimal(0),
+    );
+    try {
+      assertDiscountLimit(
+        effectiveDiscountPercent(
+          grossTotal,
+          lineDiscountTotal.plus(allocation.discount.amount),
+        ),
+        new Prisma.Decimal(settings.maxDiscountPercent),
+        'Document',
+      );
+    } catch (error) {
+      throw new BadRequestException(this.discountMessage(error, 'Invoice'));
+    }
+
+    // The landed cost is spread over what the goods now cost after discounts:
+    // freight does not become cheaper because the supplier gave a discount, it
+    // is simply allocated over a smaller base.
+    const discounted = prepared.map((line, index) => ({
+      ...line,
+      invoiceDiscountAmount: allocation.shares[index],
+      lineTotal: line.lineTotal.minus(allocation.shares[index]),
+    }));
+
     let allocated: string[];
     try {
       allocated = allocateLandedCostAmounts(
-        prepared.map((line) => line.lineTotal.toFixed(MONEY_SCALE)),
+        discounted.map((line) => line.lineTotal.toFixed(MONEY_SCALE)),
         landedCostAmount.toFixed(MONEY_SCALE),
       );
     } catch (error) {
@@ -890,14 +975,42 @@ export class PurchaseInvoicesService {
         error instanceof Error ? error.message : 'Landed costs could not be allocated',
       );
     }
-    return prepared.map((line, index) => {
+
+    const lines = discounted.map((line, index) => {
       const lineLandedCost = new Prisma.Decimal(allocated[index]);
       return {
         ...line,
+        taxAmount: line.lineTotal.mul(line.taxRate).div(100).toDecimalPlaces(MONEY_SCALE),
         landedCostAmount: lineLandedCost,
         inventoryCostTotal: line.lineTotal.plus(lineLandedCost),
       };
     });
+    return { lines, documentDiscount: allocation.discount, lineDiscountTotal };
+  }
+
+  private lineDiscount(
+    base: Prisma.Decimal,
+    raw: PurchaseInvoiceLineDto,
+    index: number,
+    maximum: Prisma.Decimal,
+  ): ResolvedDiscount {
+    try {
+      const resolved = resolveDiscount(base, {
+        type: raw.discountType,
+        percent: raw.discountPercent,
+        amount: raw.discountAmount,
+      });
+      assertDiscountLimit(resolved.percent, maximum, `Line ${index + 1}`);
+      return resolved;
+    } catch (error) {
+      throw new BadRequestException(this.discountMessage(error, `Line ${index + 1}`));
+    }
+  }
+
+  private discountMessage(error: unknown, subject: string): string {
+    if (error instanceof DiscountError) return `${subject}: ${error.message}`;
+    if (error instanceof Error) return `${subject}: ${error.message}`;
+    return `${subject}: the discount could not be applied`;
   }
 
   private positive(value: string, field: string): Prisma.Decimal {
@@ -957,9 +1070,11 @@ export class PurchaseInvoicesService {
     dueDate: Date | null;
     status: InvoiceStatus;
     currency: string;
+    discountType?: string | null;
+    discountPercent?: Prisma.Decimal;
+    discountAmount?: Prisma.Decimal;
+    lineDiscountTotal?: Prisma.Decimal;
     subTotal: Prisma.Decimal;
-    discountPercent: Prisma.Decimal;
-    discountAmount: Prisma.Decimal;
     taxAmount: Prisma.Decimal;
     totalAmount: Prisma.Decimal;
     landedCostAmount: Prisma.Decimal;
@@ -978,11 +1093,11 @@ export class PurchaseInvoicesService {
       status: invoice.status.toLowerCase(),
       currency: invoice.currency,
       supplier: invoice.supplier,
+      discountType: invoice.discountType ?? null,
+      discountPercent: (invoice.discountPercent ?? new Prisma.Decimal(0)).toFixed(RATE_SCALE),
+      discountAmount: (invoice.discountAmount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
+      lineDiscountTotal: (invoice.lineDiscountTotal ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
       subTotal: invoice.subTotal.toFixed(MONEY_SCALE),
-      // Older service test doubles and pre-discount records may omit these
-      // fields; the schema defaults them to zero in persisted rows.
-      discountPercent: invoice.discountPercent?.toFixed(RATE_SCALE) ?? '0.0000',
-      discountAmount: invoice.discountAmount?.toFixed(MONEY_SCALE) ?? '0.0000',
       taxAmount: invoice.taxAmount.toFixed(MONEY_SCALE),
       totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),
       landedCostAmount: invoice.landedCostAmount.toFixed(MONEY_SCALE),

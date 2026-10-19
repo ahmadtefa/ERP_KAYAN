@@ -130,19 +130,19 @@ void main() {
 
       // Supplier, item, and the cost center the line belongs to.
       final dropdowns = find.byType(DropdownButtonFormField<String>);
-      expect(dropdowns, findsNWidgets(4));
+      expect(dropdowns, findsNWidgets(3));
 
       await tester.tap(dropdowns.at(0));
       await tester.pumpAndSettle();
       await tester.tap(find.text('SUP-1 — Test supplier').last);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byType(DropdownButtonFormField<String>).at(2));
+      await tester.tap(find.byType(DropdownButtonFormField<String>).at(1));
       await tester.pumpAndSettle();
       await tester.tap(find.text('ITEM-1 — Tracked item').last);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byType(DropdownButtonFormField<String>).at(3));
+      await tester.tap(find.byType(DropdownButtonFormField<String>).at(2));
       await tester.pumpAndSettle();
       await tester.tap(find.text('CC-1 — Project one').last);
       await tester.pumpAndSettle();
@@ -184,7 +184,7 @@ void main() {
 
     // Party and item only: a company that does not use the dimension is not
     // asked about it.
-    expect(find.byType(DropdownButtonFormField<String>), findsNWidgets(3));
+    expect(find.byType(DropdownButtonFormField<String>), findsNWidgets(2));
     expect(find.text('No allocation'), findsNothing);
   });
 }

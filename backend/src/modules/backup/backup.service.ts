@@ -203,6 +203,30 @@ const TABLES: TableSpec[] = [
   },
   { model: 'stockDocument', scope: 'company' },
   { model: 'stockDocumentLine', scope: 'child', parent: 'stockDocument', foreignKey: 'documentId' },
+  // Quotations point at the invoice they became, so they follow sales
+  // invoices. The content snapshot is a column on the quotation, so an issued
+  // offer survives the round trip exactly as it was sent.
+  {
+    model: 'quotation',
+    scope: 'company',
+    selfReferencing: true,
+    selfReferenceField: 'revisionOfId',
+  },
+  {
+    model: 'quotationTable',
+    scope: 'child',
+    companyWhere: (companyId) => ({ quotation: { companyId } }),
+  },
+  {
+    model: 'quotationLine',
+    scope: 'child',
+    companyWhere: (companyId) => ({ table: { quotation: { companyId } } }),
+  },
+  {
+    model: 'quotationEvent',
+    scope: 'child',
+    companyWhere: (companyId) => ({ quotation: { companyId } }),
+  },
   { model: 'openingBalance', scope: 'company' },
   { model: 'openingBalanceLine', scope: 'child', parent: 'openingBalance', foreignKey: 'openingBalanceId' },
   { model: 'cashAccount', scope: 'company' },
@@ -749,6 +773,13 @@ export class BackupService {
       await (client as any).branch.updateMany({
         where: { companyId },
         data: { parentBranchId: null },
+      }).catch(() => {});
+    } else if (spec.model === 'quotation') {
+      // Revisions point at one another. Break the chain before deleting so
+      // the delete cannot fail on its own foreign key.
+      await (client as any).quotation.updateMany({
+        where: { companyId },
+        data: { revisionOfId: null },
       }).catch(() => {});
     }
 

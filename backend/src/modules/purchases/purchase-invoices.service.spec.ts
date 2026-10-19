@@ -101,7 +101,7 @@ function makeService() {
   const numbers = { next: jest.fn().mockResolvedValue('PI-0001') };
   const posting = {};
   const accounts = {};
-  const settings = { get: jest.fn() };
+  const settings = { get: jest.fn(async () => ({ maxDiscountPercent: '100.0000', taxRate: '14.0000' })) };
   const warehouses = {};
   const prices = { resolvePrice: jest.fn() };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };

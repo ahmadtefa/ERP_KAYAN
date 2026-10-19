@@ -1755,4 +1755,435 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get resultLabel => 'Result';
+  @override
+  String get @@locale => 'en';
+
+  @override
+  String get deleteAccountConfirm => 'The account “{account}” will be deleted, as long as it has no movements or sub-accounts. Continue?';
+
+  @override
+  String get deleteBranchConfirm => 'The unit “{unit}” will be deleted. Units with movements cannot be deleted.';
+
+  @override
+  String get deleteBackupConfirm => 'The file “{file}” will be permanently removed from the server.';
+
+  @override
+  String get resetForCompany => 'This will reset “{company}”.';
+
+  @override
+  String get resetConfirmBody => 'The only way back is to restore the backup that is about to be taken. Type your password and the word {word} to go ahead.';
+
+  @override
+  String get resetWordLabel => 'Type {word}';
+
+  @override
+  String get resetWrongWord => 'Type {word} exactly as it is written to confirm.';
+
+  @override
+  String get resetDone => 'The company’s data was cleared. “{file}” holds the old data.';
+
+  @override
+  String get rowDensity => 'Row density';
+
+  @override
+  String get densityCompact => 'Compact';
+
+  @override
+  String get densityNormal => 'Normal';
+
+  @override
+  String get densitySpacious => 'Spacious';
+
+  @override
+  String get dragColumnHint => 'Drag a column edge to widen it';
+
+  @override
+  String get noRecords => 'Nothing to show';
+
+  @override
+  String get resizeDialog => 'Resize';
+
+  @override
+  String get maximize => 'Maximize';
+
+  @override
+  String get restore => 'Restore';
+
+  @override
+  String get availableInBranch => 'Available in branch';
+
+  @override
+  String get branchStockHint => 'The branch\'s actual on-hand balance, the same figure posting checks. Warehouse-level balances are not tracked.';
+
+  @override
+  String get stockNotVisible => 'Stock quantities need the inventory.stock.read permission, so they are not shown.';
+
+  @override
+  String get useItem => 'Use';
+
+  @override
+  String get invoiceDiscount => 'Invoice discount';
+
+  @override
+  String get discountBeforeTaxHint => 'Applied before tax and allocated across the lines';
+
+  @override
+  String get noDiscount => 'No discount';
+
+  @override
+  String get discountPercent => 'Percentage';
+
+  @override
+  String get discountAmount => 'Fixed amount';
+
+  @override
+  String get discountPercentValue => 'Percent %';
+
+  @override
+  String get discountAmountValue => 'Amount';
+
+  @override
+  String get lineDiscount => 'Line discount';
+
+  @override
+  String get beforeDiscount => 'Before discount';
+
+  @override
+  String get lineDiscounts => 'Line discounts';
+
+  @override
+  String get netLine => 'Net line';
+
+  @override
+  String get quotations => 'Quotations';
+
+  @override
+  String get quotation => 'Quotation';
+
+  @override
+  String get newQuotation => 'New quotation';
+
+  @override
+  String get editQuotation => 'Edit quotation';
+
+  @override
+  String get quotationNumber => 'Quotation number';
+
+  @override
+  String get quotationDate => 'Quotation date';
+
+  @override
+  String get validUntil => 'Valid until';
+
+  @override
+  String get sent => 'Sent';
+
+  @override
+  String get accepted => 'Accepted';
+
+  @override
+  String get rejected => 'Rejected';
+
+  @override
+  String get expired => 'Expired';
+
+  @override
+  String get converted => 'Converted';
+
+  @override
+  String get quotationTables => 'Tables';
+
+  @override
+  String get addTable => 'Add table';
+
+  @override
+  String get tableTitle => 'Table title';
+
+  @override
+  String get tableDiscount => 'Table discount';
+
+  @override
+  String get moveUp => 'Move up';
+
+  @override
+  String get moveDown => 'Move down';
+
+  @override
+  String get removeTable => 'Remove table';
+
+  @override
+  String get addQuotationLine => 'Add line';
+
+  @override
+  String get countryOfOrigin => 'Country of origin';
+
+  @override
+  String get origin => 'Origin';
+
+  @override
+  String get grossValue => 'Gross value';
+
+  @override
+  String get netValue => 'Net value';
+
+  @override
+  String get finalTotal => 'Final total';
+
+  @override
+  String get totalDiscounts => 'Total discounts';
+
+  @override
+  String get quotationDiscount => 'Quotation discount';
+
+  @override
+  String get subtotalBeforeDiscount => 'Subtotal before discount';
+
+  @override
+  String get quotationSummary => 'Summary';
+
+  @override
+  String get tableSubtotal => 'Table subtotal';
+
+  @override
+  String get termsAndConditions => 'Terms and conditions';
+
+  @override
+  String get notesLabel => 'Notes';
+
+  @override
+  String get managerName => 'Company manager';
+
+  @override
+  String get responsibleName => 'Responsible person';
+
+  @override
+  String get responsiblePhone => 'Responsible telephone';
+
+  @override
+  String get followUp => 'Follow up';
+
+  @override
+  String get followUpNote => 'What was discussed';
+
+  @override
+  String get followUpRequired => 'Write what was discussed before saving the follow-up.';
+
+  @override
+  String get statusHistory => 'History';
+
+  @override
+  String get sendQuotation => 'Issue and mark sent';
+
+  @override
+  String get acceptQuotation => 'Accept';
+
+  @override
+  String get rejectQuotation => 'Reject';
+
+  @override
+  String get reviseQuotation => 'Start a revision';
+
+  @override
+  String get convertToInvoice => 'Convert to invoice';
+
+  @override
+  String get convert => 'Convert';
+
+  @override
+  String get convertedInvoice => 'Converted invoice';
+
+  @override
+  String get conversionConfirm => 'Create a draft sales invoice from this accepted quotation? Nothing is posted and no stock moves until the invoice is posted separately.';
+
+  @override
+  String get conversionTaxNote => 'The quotation total is before tax. The invoice applies the company tax rules, so its total may be higher.';
+
+  @override
+  String get noQuotations => 'No quotations yet';
+
+  @override
+  String get printPreview => 'Print preview';
+
+  @override
+  String get downloadPdf => 'Download PDF';
+
+  @override
+  String get quotationSaved => 'Quotation saved';
+
+  @override
+  String get quotationSent => 'Quotation issued and marked as sent';
+
+  @override
+  String get quotationAccepted => 'Quotation accepted';
+
+  @override
+  String get quotationRejected => 'Quotation rejected';
+
+  @override
+  String get quotationRevised => 'A new draft revision was created';
+
+  @override
+  String get quotationConverted => 'Quotation converted to a draft invoice';
+
+  @override
+  String get quotationDeleted => 'Draft quotation removed';
+
+  @override
+  String get deleteQuotationConfirm => 'Remove this draft quotation? Issued quotations are never deleted.';
+
+  @override
+  String get quotationNeedsTable => 'Add at least one table with one line.';
+
+  @override
+  String get filterStatus => 'Status';
+
+  @override
+  String get fromDate => 'From date';
+
+  @override
+  String get toDate => 'To date';
+
+  @override
+  String get quotationDraftHint => 'This is a draft: nothing is posted and stock is untouched. Issuing it freezes the content that the customer receives.';
+
+  @override
+  String get optional => 'Optional';
+
+  @override
+  String get currency => 'Currency';
+
+  @override
+  String get clear => 'Clear';
+
+  @override
+  String get quotationFilterHint => 'Filter by status, customer or date';
+
+  @override
+  String get documentSettings => 'Documents and quotations';
+
+  @override
+  String get maximumDiscount => 'Maximum discount %';
+
+  @override
+  String get showTaxIdOnQuotations => 'Print the tax registration number on quotations';
+
+  @override
+  String get taxIdLegalNote => 'A display choice only. It never deletes the number, and it cannot override a legal requirement to show it.';
+
+  @override
+  String get salesManagerName => 'Sales manager';
+
+  @override
+  String get salesManagerPhone => 'Sales manager telephone';
+
+  @override
+  String get settingsSaved => 'Settings saved';
+
+  @override
+  String get saveSettings => 'Save settings';
+
+  @override
+  String get readOnlySettings => 'Changing these needs the company administration permission.';
+
+  @override
+  String get invalidSetting => 'Enter a value between 0 and 100.';
+
+  @override
+  String get networkAccessTitle => 'Network and remote access';
+
+  @override
+  String get networkUnavailable => 'The server did not answer its network report. Check that it is running.';
+
+  @override
+  String get lanReachable => 'Available on the local network';
+
+  @override
+  String get localOnly => 'This computer only';
+
+  @override
+  String get serverStatus => 'Server';
+
+  @override
+  String get serverReady => 'ready, database up';
+
+  @override
+  String get databaseDown => 'database not reachable';
+
+  @override
+  String get listeningOn => 'Listening on';
+
+  @override
+  String get localAddress => 'Local address';
+
+  @override
+  String get networkAddress => 'Network address';
+
+  @override
+  String get wouldBeAddress => 'Address if enabled';
+
+  @override
+  String get addressCopied => 'Address copied';
+
+  @override
+  String get copyAddress => 'Copy address';
+
+  @override
+  String get lanNotEnabledHint => 'The server is bound to this computer only, so the addresses below do not answer from another device. To allow the other computers on the network, set HOST=0.0.0.0 in the installation settings file and restart the program.';
+
+  @override
+  String get lanFirewallHint => 'Windows Firewall must also allow the program on private networks. The database port (5432) is never opened: other devices only reach the program, and still have to sign in.';
+
+  @override
+  String get publicAddressTitle => 'Public (internet) address';
+
+  @override
+  String get detectPublicAddress => 'Detect';
+
+  @override
+  String get publicAddressHint => 'Detected only when you press Detect. A public address alone does not make this server reachable from the internet: the router or the carrier may block incoming connections. For remote use, prefer a VPN or an HTTPS gateway; never expose the database.';
+
+  @override
+  String get publicAddressChecking => 'Checking…';
+
+  @override
+  String get publicAddressUnavailable => 'The public address could not be detected.';
+
+  @override
+  String get publicAddressNotProof => 'an address alone does not prove that incoming connections reach this computer.';
+
+  @override
+  String get lastChecked => 'Last checked';
+
+  @override
+  String get remove => 'Remove';
+
+  @override
+  String get termsLibrary => 'Saved terms';
+
+  @override
+  String get insertSavedTerms => 'Insert saved terms';
+
+  @override
+  String get saveTermsToLibrary => 'Save terms to library';
+
+  @override
+  String get termsTitle => 'Entry title';
+
+  @override
+  String get termsBody => 'Terms text';
+
+  @override
+  String get noSavedTerms => 'No saved terms yet. Write the terms below and save them for reuse.';
+
+  @override
+  String get termsSaved => 'Terms saved to the library';
+
+  @override
+  String get manageSavedTerms => 'Manage saved terms';
+
+  @override
+  String get termsInserted => 'Saved terms inserted. You can edit this copy freely.';
+
+  @override
+  String get removeSavedTerm => 'Remove this saved entry? Documents that already used it keep their own copy.';
 }

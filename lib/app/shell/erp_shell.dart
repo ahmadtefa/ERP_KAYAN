@@ -10,17 +10,29 @@ import '../router/app_router.dart';
 
 /// One entry in the navigation.
 ///
-/// [permission] is the server permission the module is built around. The
-/// navigation hides a module the account cannot open, instead of offering a
-/// button that only produces a 403. The server remains the authority: this is
-/// a courtesy, not the access rule.
+/// [permissions] is the set of server permissions that open the module. A
+/// module is shown when the account holds **any** of them, because a screen is
+/// often usable by more than one job: the cash screen, for instance, is opened
+/// by a cashier who only holds `cash.vouchers.read`, not by the accountant who
+/// also holds `cash.accounts.read`. Keying the menu to a single permission
+/// hid whole modules from people the server would have let in.
+///
+/// `null` means "no permission needed" (the settings screen, which every
+/// signed-in person can use). The server remains the authority: this is a
+/// courtesy, not the access rule.
 class _NavItem {
-  const _NavItem(this.path, this.icon, this.label, [this.permission]);
+  const _NavItem(this.path, this.icon, this.label, [this.permissions]);
 
   final String path;
   final IconData icon;
   final String label;
-  final String? permission;
+  final List<String>? permissions;
+
+  bool allows(String? Function(String) can) {
+    final required = permissions;
+    if (required == null || required.isEmpty) return true;
+    return required.any(can);
+  }
 }
 
 /// Adaptive chrome around every authenticated screen.
@@ -167,86 +179,97 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.cash,
         Icons.account_balance_wallet_outlined,
         l10n.cashAndBanks,
-        'cash.accounts.read',
+        const ['cash.accounts.read', 'cash.vouchers.read', 'cash.reports.read'],
       ),
       _NavItem(
         AppRoutes.journalEntries,
         Icons.menu_book_outlined,
         l10n.journalEntries,
-        'accounting.journal.read',
+        const ['accounting.journal.read'],
       ),
       _NavItem(
         AppRoutes.fiscalPeriods,
         Icons.event_available_outlined,
         l10n.fiscalPeriods,
-        'accounting.periods.read',
+        const ['accounting.periods.read'],
       ),
       _NavItem(
         AppRoutes.openingBalances,
         Icons.account_balance_wallet_outlined,
         l10n.openingBalancesTitle,
-        // The list/detail endpoints require journal.read; manage is only
-        // required for create/post/reverse operations. Keep the screen visible
-        // to accountants who can review opening balances but cannot post them.
-        'accounting.journal.read',
+        // Readable with the journal permission; changing them needs manage.
+        const ['accounting.openingbalances.manage', 'accounting.journal.read'],
       ),
       _NavItem(
         AppRoutes.customers,
         Icons.people_outline,
         l10n.customers,
-        'parties.customers.read',
+        const ['parties.customers.read'],
       ),
       _NavItem(
         AppRoutes.suppliers,
         Icons.local_shipping_outlined,
         l10n.suppliers,
-        'parties.suppliers.read',
+        const ['parties.suppliers.read'],
       ),
       _NavItem(
         AppRoutes.items,
         Icons.category_outlined,
         l10n.items,
-        'inventory.items.read',
+        const ['inventory.items.read'],
       ),
       _NavItem(
         AppRoutes.stock,
         Icons.inventory_2_outlined,
         l10n.stock,
-        'inventory.stock.read',
+        const ['inventory.stock.read'],
       ),
       _NavItem(
         AppRoutes.salesInvoices,
         Icons.point_of_sale_outlined,
         l10n.salesInvoices,
-        'sales.invoices.read',
+        const ['sales.invoices.read'],
+      ),
+      _NavItem(
+        AppRoutes.quotations,
+        Icons.request_quote_outlined,
+        l10n.quotations,
+        const ['sales.quotations.read'],
       ),
       _NavItem(
         AppRoutes.purchaseInvoices,
         Icons.shopping_cart_outlined,
         l10n.purchaseInvoices,
-        'purchases.invoices.read',
+        const ['purchases.invoices.read'],
       ),
       _NavItem(
         AppRoutes.salesReturns,
         Icons.assignment_return_outlined,
         l10n.salesReturns,
-        // Returns endpoints use the same read permission as sales invoices.
-        // Gating on the separate returns.read catalogue entry hid this screen
-        // from existing roles even though the API would allow them to view it.
-        'sales.invoices.read',
+        // The returns API itself is guarded by the invoice permissions, so a
+        // role that can use it must not lose the menu entry for lacking the
+        // separately-seeded `sales.returns.read` grant.
+        const [
+          'sales.returns.read',
+          'sales.invoices.read',
+          'sales.invoices.create',
+        ],
       ),
       _NavItem(
         AppRoutes.purchaseReturns,
         Icons.keyboard_return_outlined,
         l10n.purchaseReturns,
-        // Returns endpoints use the same read permission as purchase invoices.
-        'purchases.invoices.read',
+        const [
+          'purchases.returns.read',
+          'purchases.invoices.read',
+          'purchases.invoices.create',
+        ],
       ),
       _NavItem(
         AppRoutes.chartOfAccounts,
         Icons.account_tree_outlined,
         l10n.chartOfAccounts,
-        'accounting.accounts.read',
+        const ['accounting.accounts.read'],
       ),
       // The cost-center dimension and its plans sit beside the chart of
       // accounts: they are accounting master data, not a settings screen.
@@ -254,19 +277,19 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.costCenters,
         Icons.workspaces_outline,
         l10n.costCenters,
-        'accounting.costcenters.read',
+        const ['accounting.costcenters.read'],
       ),
       _NavItem(
         AppRoutes.budgets,
         Icons.savings_outlined,
         l10n.budgets,
-        'accounting.budgets.read',
+        const ['accounting.budgets.read'],
       ),
       _NavItem(
         AppRoutes.reports,
         Icons.bar_chart_outlined,
         l10n.reports,
-        'reports.read',
+        const ['reports.read'],
       ),
       // Import and the backup tools stay reachable for anyone signed in:
       // their own endpoints still check the resource they touch, and hiding
@@ -281,29 +304,29 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.backup,
         Icons.verified_user_outlined,
         l10n.backupTitle,
-        'admin.backup',
+        const ['admin.backup'],
       ),
       _NavItem(
         AppRoutes.administration,
         Icons.admin_panel_settings_outlined,
         l10n.administration,
-        'admin.users.manage',
+        const ['admin.users.manage'],
       ),
       _NavItem(
         AppRoutes.companySettings,
         Icons.business_outlined,
         l10n.companySettings,
-        'admin.company.manage',
+        const ['admin.company.manage'],
       ),
       _NavItem(AppRoutes.settings, Icons.settings_outlined, l10n.settings),
     ];
+    // While the session is still being restored there is no user yet. The
+    // router sends a signed-out visitor to the login screen, so the menu is
+    // never actually seen in this state; showing everything keeps the previous
+    // behaviour instead of flashing an empty rail.
+    if (user == null) return items;
     return items
-        .where(
-          (item) =>
-              item.permission == null ||
-              user == null ||
-              user.can(item.permission!),
-        )
+        .where((item) => item.allows(user.can))
         .toList(growable: false);
   }
 }

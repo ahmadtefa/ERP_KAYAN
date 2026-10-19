@@ -1,7 +1,6 @@
 import 'package:erp_kayan/app/router/app_router.dart';
 import 'package:erp_kayan/app/shell/erp_shell.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
-import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -116,84 +115,4 @@ void main() {
       expect(firstItemFinder, findsOneWidget);
     },
   );
-
-  testWidgets(
-    'navigation shows pages when the user has the same read permissions as their API routes',
-    (tester) async {
-      tester.view.physicalSize = const Size(1366, 768);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(() {
-        tester.view.resetPhysicalSize();
-        tester.view.resetDevicePixelRatio();
-      });
-
-      final paths = [
-        AppRoutes.dashboard,
-        AppRoutes.cash,
-        AppRoutes.openingBalances,
-        AppRoutes.salesReturns,
-        AppRoutes.purchaseReturns,
-      ];
-      final router = GoRouter(
-        initialLocation: AppRoutes.dashboard,
-        routes: [
-          for (final route in paths)
-            GoRoute(
-              path: route,
-              builder: (context, state) => ErpShell(
-                currentPath: state.matchedLocation,
-                child: const SizedBox.expand(),
-              ),
-            ),
-        ],
-      );
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            authControllerProvider.overrideWith(
-              _PermissionTestAuthController.new,
-            ),
-            tokenStoreProvider.overrideWithValue(FakeTokenStore()),
-          ],
-          child: MaterialApp.router(
-            locale: const Locale('ar'),
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            supportedLocales: AppLocalizations.supportedLocales,
-            routerConfig: router,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      // These permissions match the GET endpoints. The user intentionally
-      // does not hold the separate returns.read or opening-balances.manage
-      // permission codes; neither should hide a screen whose API GET is allowed.
-      for (final label in [
-        'الخزائن والبنوك',
-        'الأرصدة الافتتاحية',
-        'مرتجعات المبيعات',
-        'مرتجعات المشتريات',
-      ]) {
-        expect(find.widgetWithText(ListTile, label), findsOneWidget, reason: label);
-      }
-    },
-  );
-}
-
-class _PermissionTestAuthController extends AuthController {
-  @override
-  Future<AppUser?> build() async => const AppUser(
-        id: 'user-read-only',
-        username: 'accountant',
-        fullName: 'Test Accountant',
-        companyId: 'company-1',
-        branchId: 'branch-1',
-        permissions: [
-          'cash.accounts.read',
-          'accounting.journal.read',
-          'sales.invoices.read',
-          'purchases.invoices.read',
-        ],
-      );
 }

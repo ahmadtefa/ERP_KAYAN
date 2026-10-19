@@ -97,10 +97,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
   }
 
   void _openDetail(Json row) {
-    showDialog<void>(
-      context: context,
-      builder: (_) => InvoiceDetailDialog(kind: widget.kind, summary: row),
-    );
+    showInvoiceDetail(context, kind: widget.kind, summary: row);
   }
 
   @override
@@ -123,7 +120,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
           DropdownButton<String>(
             value: _status,
             items: [
-              DropdownMenuItem(value: '', child: Text(l10n.reports)),
+              DropdownMenuItem(value: '', child: Text(l10n.allStatuses)),
               DropdownMenuItem(value: 'draft', child: Text(l10n.draft)),
               DropdownMenuItem(value: 'posted', child: Text(l10n.posted)),
               DropdownMenuItem(value: 'reversed', child: Text(l10n.reversed)),

@@ -6,10 +6,10 @@ import '../../../core/json/amount_format.dart';
 import '../../../core/json/json_utils.dart';
 import '../../../shared/extensions/l10n_extension.dart';
 import '../../../shared/utils/account_name.dart';
+import '../../../shared/widgets/data_dialog.dart';
 import '../../../shared/widgets/records_table.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../../accounting/presentation/providers/chart_of_accounts_providers.dart';
-import '../../accounting/presentation/providers/cost_center_providers.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../common/presentation/screens/module_scaffold.dart';
 import '../../data/presentation/widgets/export_actions.dart';
@@ -1377,36 +1377,16 @@ class _ExpensesIncomeTab extends ConsumerWidget {
 /// Cost-center revenue, expenses and result, with the unattributed bucket and
 /// the ledger reconciliation the API returns. The figures come from posted
 /// entries only; the screen adds nothing to them.
-class _CostCentersTab extends ConsumerStatefulWidget {
+class _CostCentersTab extends ConsumerWidget {
   const _CostCentersTab();
 
   @override
-  ConsumerState<_CostCentersTab> createState() => _CostCentersTabState();
-}
-
-class _CostCentersTabState extends ConsumerState<_CostCentersTab> {
-  String _typeFilter = '';
-  String _centerFilter = '';
-  bool _includeInactive = true;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l10n = context.l10n;
     final period = ref.watch(periodProvider);
     final language = Localizations.localeOf(context).languageCode;
-    final centresAsync = ref.watch(costCentersProvider);
-    final centres = centresAsync.value ?? const <Json>[];
-    final filters = <String, String>{
-      'from': period.from,
-      'to': period.to,
-      'includeInactive': _includeInactive.toString(),
-      if (_typeFilter.isNotEmpty) 'type': _typeFilter,
-      if (_centerFilter.isNotEmpty) 'costCenterId': _centerFilter,
-    };
-    final query = filters.entries
-        .map((entry) => '${entry.key}=${Uri.encodeQueryComponent(entry.value)}')
-        .join('&');
-    final path = '/reports/cost-centers?$query';
+    final path =
+        '/reports/cost-centers?from=${period.from}&to=${period.to}&includeInactive=true';
     final async = ref.watch(reportProvider(path));
 
     return AsyncStateView<Json>(
@@ -1422,61 +1402,6 @@ class _CostCentersTabState extends ConsumerState<_CostCentersTab> {
             : <String, dynamic>{};
         return Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              child: Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 220,
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _typeFilter,
-                      isExpanded: true,
-                      decoration: InputDecoration(
-                        labelText: l10n.costCenterType,
-                        isDense: true,
-                        border: const OutlineInputBorder(),
-                      ),
-                      items: [
-                        DropdownMenuItem(value: '', child: Text(l10n.allTypes)),
-                        DropdownMenuItem(value: 'DEPARTMENT', child: Text(l10n.department)),
-                        DropdownMenuItem(value: 'ADMINISTRATIVE_UNIT', child: Text(l10n.administrativeUnit)),
-                        DropdownMenuItem(value: 'PROJECT', child: Text(l10n.project)),
-                      ],
-                      onChanged: (value) => setState(() => _typeFilter = value ?? ''),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 300,
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _centerFilter,
-                      isExpanded: true,
-                      decoration: InputDecoration(
-                        labelText: l10n.costCenter,
-                        isDense: true,
-                        border: const OutlineInputBorder(),
-                      ),
-                      items: [
-                        DropdownMenuItem(value: '', child: Text(_t(context, 'كل مراكز التكلفة', 'All cost centers'))),
-                        for (final centre in centres)
-                          DropdownMenuItem(
-                            value: text(centre, 'id'),
-                            child: Text(costCenterLabel(centre, language), overflow: TextOverflow.ellipsis),
-                          ),
-                      ],
-                      onChanged: (value) => setState(() => _centerFilter = value ?? ''),
-                    ),
-                  ),
-                  FilterChip(
-                    selected: _includeInactive,
-                    label: Text(_t(context, 'إظهار المراكز غير النشطة أيضًا', 'Include inactive centres')),
-                    onSelected: (selected) => setState(() => _includeInactive = selected),
-                  ),
-                ],
-              ),
-            ),
             _SummaryStrip(
               entries: [
                 MapEntry(l10n.revenue, formatAmount(asString(totals['revenue']))),
@@ -1592,51 +1517,45 @@ class _CostCentersTabState extends ConsumerState<_CostCentersTab> {
     if (!context.mounted) return;
     final l10n = context.l10n;
     final rows = listOf(data['items']);
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(title),
-        content: SizedBox(
-          width: 720,
-          height: 420,
-          child: rows.isEmpty
-              ? Center(child: Text(l10n.noTransactions))
-              : RecordsTable(
-                  rows: rows,
-                  columns: [
-                    ColumnSpec(
-                      l10n.entryNumber,
-                      emphasise: true,
-                      value: (row) => text(row, 'entryNumber'),
-                    ),
-                    ColumnSpec(l10n.invoiceDate, value: (row) => text(row, 'entryDate')),
-                    ColumnSpec(
-                      l10n.account,
-                      value: (row) => '${text(row, 'accountCode')} — '
-                          '${text(row, 'accountName')}',
-                    ),
-                    ColumnSpec(
-                      l10n.description,
-                      value: (row) => text(row, 'description'),
-                    ),
-                    ColumnSpec(
-                      l10n.amount,
-                      numeric: true,
-                      value: (row) => formatAmount(asString(row['amount'])),
-                    ),
-                    ColumnSpec(
-                      l10n.status,
-                      value: (row) => text(row, 'status'),
-                    ),
-                  ],
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: Text(l10n.close),
-          ),
-        ],
+    await showDataDialog<void>(
+      context,
+      storageKey: 'cost-center-transactions',
+      title: title,
+      icon: Icons.account_tree_outlined,
+      initialSize: const Size(900, 560),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: rows.isEmpty
+            ? Center(child: Text(l10n.noTransactions))
+            : RecordsTable(
+                rows: rows,
+                columns: [
+                  ColumnSpec(
+                    l10n.entryNumber,
+                    emphasise: true,
+                    value: (row) => text(row, 'entryNumber'),
+                  ),
+                  ColumnSpec(l10n.invoiceDate, value: (row) => text(row, 'entryDate')),
+                  ColumnSpec(
+                    l10n.account,
+                    value: (row) => '${text(row, 'accountCode')} — '
+                        '${text(row, 'accountName')}',
+                  ),
+                  ColumnSpec(
+                    l10n.description,
+                    value: (row) => text(row, 'description'),
+                  ),
+                  ColumnSpec(
+                    l10n.amount,
+                    numeric: true,
+                    value: (row) => formatAmount(asString(row['amount'])),
+                  ),
+                  ColumnSpec(
+                    l10n.status,
+                    value: (row) => text(row, 'status'),
+                  ),
+                ],
+              ),
       ),
     );
   }

@@ -232,6 +232,35 @@ class ReportLinkBuilder {
     return '$_base/exports/documents/$kind/$id/print?${_encode(query)}';
   }
 
+  /// Opens the branded quotation print preview in a new tab. It carries a
+  /// one-minute ticket, like every other browser-facing file.
+  Future<String> quotationPrint({
+    required String id,
+    required String language,
+    bool auto = true,
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      if (auto) 'auto': '1',
+      'ticket': await _downloadTicket(),
+    };
+    return '$_base/sales/quotations/$id/print?${_encode(query)}';
+  }
+
+  /// The quotation as the finished PDF the customer receives.
+  Future<DownloadRequest> quotationPdf({
+    required String id,
+    required String language,
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      'ticket': await _downloadTicket(),
+    };
+    return DownloadRequest(
+      url: '$_base/sales/quotations/$id/pdf?${_encode(query)}',
+    );
+  }
+
   /// A blank spreadsheet to fill in, for one kind of import.
   Future<DownloadRequest> importTemplate({
     required String kind,

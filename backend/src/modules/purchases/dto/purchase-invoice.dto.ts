@@ -4,6 +4,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsDateString,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -32,6 +33,11 @@ export class PurchaseInvoiceLineDto {
 
   /// The department, administrative unit or project the cost was incurred for.
   @IsOptional() @IsUUID() costCenterId?: string;
+
+  /// PERCENT or AMOUNT for this line's discount, applied before tax.
+  @IsOptional() @IsIn(['PERCENT', 'AMOUNT']) discountType?: string;
+  @IsOptional() @IsString() discountPercent?: string;
+  @IsOptional() @IsString() discountAmount?: string;
 }
 
 export class PurchaseLandedCostChargeDto {
@@ -46,10 +52,6 @@ export class CreatePurchaseInvoiceDto {
   @IsOptional() @IsString() @MaxLength(60) supplierReference?: string;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
 
-  /// Document-wide discount before tax and landed costs. Supply one field, not both.
-  @IsOptional() @IsString() discountPercent?: string;
-  @IsOptional() @IsString() discountAmount?: string;
-
   /// Named freight, shipping, duties, and other acquisition costs. Each charge
   /// is retained for editing and reporting; their sum is allocated across
   /// stock lines in exact proportion to line value.
@@ -63,6 +65,12 @@ export class CreatePurchaseInvoiceDto {
 
   /// The warehouse the goods arrive in. Omit to use the branch's default.
   @IsOptional() @IsUUID() warehouseId?: string;
+
+  /// A discount on the document as a whole, applied before tax and allocated
+  /// across the lines in exact proportion to their net value.
+  @IsOptional() @IsIn(['PERCENT', 'AMOUNT']) discountType?: string;
+  @IsOptional() @IsString() discountPercent?: string;
+  @IsOptional() @IsString() discountAmount?: string;
 
   @IsArray()
   @ArrayMinSize(1)

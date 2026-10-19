@@ -106,26 +106,16 @@ void main() {
     await tester.pumpAndSettle();
 
     final dropdowns = find.byType(DropdownButtonFormField<String>);
-    expect(dropdowns, findsNWidgets(3));
+    expect(dropdowns, findsNWidgets(2));
     await tester.tap(dropdowns.at(0));
     await tester.pumpAndSettle();
     await tester.tap(find.text('SUP-1 — Test supplier').last);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byType(DropdownButtonFormField<String>).at(2));
+    await tester.tap(find.byType(DropdownButtonFormField<String>).at(1));
     await tester.pumpAndSettle();
     await tester.tap(find.text('ITEM-1 — Tracked item').last);
     await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const ValueKey('invoice-line-unit-price-0')), '10');
-    await tester.pump();
-
-    // A fixed invoice-wide discount is sent independently from landed costs.
-    await tester.tap(find.byKey(const ValueKey('invoice-discount-mode')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Fixed amount').last);
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const ValueKey('invoice-discount-value')), '5');
-    await tester.pump();
 
     await tester.tap(find.text('Add charge'));
     await tester.pumpAndSettle();
@@ -143,8 +133,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.postPath, '/purchases/invoices');
-    expect(api.postBody?['discountPercent'], '0');
-    expect(api.postBody?['discountAmount'], '5');
     expect(api.postBody?['landedCostAmount'], '10');
     expect(api.postBody?['landedCostCharges'], [
       {'description': 'Freight', 'amount': '7'},

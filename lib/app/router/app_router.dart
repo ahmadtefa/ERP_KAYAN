@@ -22,6 +22,8 @@ import '../../features/invoicing/presentation/screens/invoice_list_screen.dart';
 import '../../features/invoicing/presentation/screens/return_editor_screen.dart';
 import '../../features/invoicing/presentation/screens/returns_screen.dart';
 import '../../features/parties/presentation/screens/parties_screen.dart';
+import '../../features/quotations/presentation/screens/quotation_editor_screen.dart';
+import '../../features/quotations/presentation/screens/quotation_list_screen.dart';
 import '../../features/reports/presentation/reports_screen.dart';
 import '../../features/settings/presentation/screens/company_settings_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
@@ -56,6 +58,8 @@ class AppRoutes {
   static const stock = '/inventory/stock';
   static const salesInvoices = '/sales/invoices';
   static const purchaseInvoices = '/purchases/invoices';
+  static const quotations = '/sales/quotations';
+  static const quotationNew = '/sales/quotations/new';
   static const salesReturns = '/sales/returns';
   static const purchaseReturns = '/purchases/returns';
   static const salesReturnNew = '/sales/returns/new';
@@ -109,6 +113,22 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: AppRoutes.quotationNew,
+        builder: (context, state) => const ErpShell(
+          currentPath: AppRoutes.quotations,
+          child: QuotationEditorScreen(),
+        ),
+      ),
+      GoRoute(
+        path: '${AppRoutes.quotations}/:id/edit',
+        builder: (context, state) => ErpShell(
+          currentPath: AppRoutes.quotations,
+          child: QuotationEditorScreen(
+            quotationId: state.pathParameters['id'],
+          ),
+        ),
+      ),
+      GoRoute(
         path: '${AppRoutes.openingBalances}/:id',
         builder: (context, state) => ErpShell(
           currentPath: AppRoutes.openingBalances,
@@ -152,6 +172,7 @@ const _shellRoutes = <({String path, Widget child})>[
     path: AppRoutes.purchaseInvoices,
     child: InvoiceListScreen(kind: InvoiceKind.purchase),
   ),
+  (path: AppRoutes.quotations, child: QuotationListScreen()),
   (
     path: AppRoutes.salesReturns,
     child: ReturnsScreen(kind: InvoiceKind.sales),

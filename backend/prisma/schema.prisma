@@ -81,13 +81,13 @@ model Company {
   salesInvoices    SalesInvoice[]
   purchaseInvoices PurchaseInvoice[]
   fiscalPeriods FiscalPeriod[]
+  quotations    Quotation[]
+  quotationTermTemplates QuotationTermTemplate[]
 
   warehouses     Warehouse[]
   priceLists     PriceList[]
   purchaseOrders PurchaseOrder[]
   salesOrders    SalesOrder[]
-  quotations     Quotation[]
-  quotationTermTemplates QuotationTermTemplate[]
 
   @@map("companies")
 }
@@ -539,6 +539,17 @@ model CompanySetting {
 
   /// Largest discount a sales line may carry, in percent.
   maxDiscountPercent Decimal @default(100) @db.Decimal(9, 4)
+
+  /// Whether a quotation prints the company's tax registration number.
+  /// A display choice only: the number itself is never deleted, and a company
+  /// that is legally required to show it can leave this on.
+  showTaxIdOnQuotations Boolean @default(true)
+
+  /// The people a quotation names. Optional, and never invented: a document
+  /// prints only what the company has actually filled in.
+  managerName       String?
+  salesManagerName  String?
+  salesManagerPhone String?
 
   updatedAt DateTime @updatedAt
   updatedBy String?  @db.Uuid
@@ -1129,6 +1140,11 @@ model Item {
 
   isStockTracked Boolean @default(true)
   isActive       Boolean @default(true)
+
+  /// Where the item was made, when the business knows and wants it printed on
+  /// quotations. Optional: the program never guesses a country.
+  countryOfOrigin String? @db.VarChar(80)
+
   notes          String?
 
   createdAt DateTime  @default(now())
@@ -1149,7 +1165,7 @@ model Item {
   priceListItems PriceListItem[]
   purchaseOrderLines PurchaseOrderLine[]
   salesOrderLines SalesOrderLine[]
-  quotationLines   QuotationLine[]
+  quotationLines QuotationLine[]
 
   @@unique([companyId, code])
   @@index([companyId, nameEn])
@@ -1273,6 +1289,15 @@ model SalesInvoice {
   discountPercent Decimal @default(0) @db.Decimal(9, 4)
   discountAmount  Decimal @default(0) @db.Decimal(19, 4)
 
+  /// PERCENT or AMOUNT. Null means no document-level discount was given.
+  /// The existing percent/amount pair keeps its meaning: the discount taken
+  /// from the document as a whole, applied before tax.
+  discountType String? @db.VarChar(16)
+
+  /// Sum of the line-level discounts, stored so the printed document can show
+  /// the two kinds of discount separately without recomputing history.
+  lineDiscountTotal Decimal @default(0) @db.Decimal(19, 4)
+
   subTotal     Decimal @default(0) @db.Decimal(19, 4)
   taxAmount    Decimal @default(0) @db.Decimal(19, 4)
   totalAmount  Decimal @default(0) @db.Decimal(19, 4)
@@ -1309,6 +1334,11 @@ model SalesInvoice {
   originalInvoice SalesInvoice?  @relation("SalesReturns", fields: [originalInvoiceId], references: [id], onDelete: Restrict)
   returns         SalesInvoice[] @relation("SalesReturns")
 
+  /// The quotation this invoice was raised from, when it was. A quotation
+  /// converts at most once; the unique key on the quotation side is what
+  /// makes a second conversion impossible even under two simultaneous clicks.
+  sourceQuotation Quotation?
+
   @@unique([companyId, invoiceNumber])
   @@index([companyId, invoiceDate])
   @@index([companyId, status])
@@ -1330,6 +1360,18 @@ model SalesInvoiceLine {
 
   discountPercent Decimal @default(0) @db.Decimal(9, 4)
   discountAmount  Decimal @default(0) @db.Decimal(19, 4)
+
+  /// PERCENT or AMOUNT, describing the line discount above. Null means none.
+  discountType String? @db.VarChar(16)
+
+  /// Quantity x unit price before any discount. Null on rows written before
+  /// item discounts existed, where lineTotal is already the whole value.
+  grossLineTotal Decimal? @db.Decimal(19, 4)
+
+  /// This line's exact share of the invoice-level discount, allocated pro
+  /// rata over eligible line values. Stored so a posted invoice reproduces its
+  /// own arithmetic and a return can credit the right amount.
+  invoiceDiscountAmount Decimal @default(0) @db.Decimal(19, 4)
 
   /// How much of this line has already been returned. A return may not take
   /// more than what is left, which is what stops the same goods being
@@ -1390,6 +1432,12 @@ model PurchaseInvoice {
 
   discountPercent Decimal @default(0) @db.Decimal(9, 4)
   discountAmount  Decimal @default(0) @db.Decimal(19, 4)
+
+  /// PERCENT or AMOUNT for the document-level discount above.
+  discountType String? @db.VarChar(16)
+
+  /// Sum of the line-level discounts on this document.
+  lineDiscountTotal Decimal @default(0) @db.Decimal(19, 4)
 
   subTotal    Decimal @default(0) @db.Decimal(19, 4)
   taxAmount   Decimal @default(0) @db.Decimal(19, 4)
@@ -1452,6 +1500,14 @@ model PurchaseInvoiceLine {
 
   discountPercent  Decimal @default(0) @db.Decimal(9, 4)
   discountAmount   Decimal @default(0) @db.Decimal(19, 4)
+
+  /// PERCENT or AMOUNT, describing the line discount above. Null means none.
+  discountType String? @db.VarChar(16)
+  /// Quantity x unit price before any discount.
+  grossLineTotal Decimal? @db.Decimal(19, 4)
+  /// This line's share of the document-level discount.
+  invoiceDiscountAmount Decimal @default(0) @db.Decimal(19, 4)
+
   returnedQuantity Decimal @default(0) @db.Decimal(19, 4)
   /// Net purchase value already credited by posted returns.
   returnedSubTotal Decimal @default(0) @db.Decimal(19, 4)
@@ -1472,6 +1528,198 @@ model PurchaseInvoiceLine {
   @@map("purchase_invoice_lines")
 }
 
+
+
+// --------------------------------------------------------------- quotations
+
+/// What a quotation is at this moment. DRAFT is the only state that can be
+/// edited in place; an issued quotation is a record of what the customer was
+/// given, and a change is made by raising a new revision.
+
+model QuotationTermTemplate {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @db.Uuid
+  title     String
+  body      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String?  @db.Uuid
+  updatedBy String?  @db.Uuid
+  deletedAt DateTime?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, isActive, sortOrder])
+  @@map("quotation_term_templates")
+}
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CONVERTED
+}
+
+enum QuotationEventType {
+  CREATED
+  UPDATED
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  REVISED
+  CONVERTED
+  FOLLOW_UP
+  NOTE
+}
+
+/// A priced offer to a customer.
+///
+/// It is deliberately not a sales invoice. Nothing here posts to the ledger,
+/// reserves stock or changes a customer balance; only converting it into an
+/// invoice, through the ordinary invoice posting workflow, can do that.
+model Quotation {
+  id              String         @id @default(uuid()) @db.Uuid
+  companyId       String         @db.Uuid
+  branchId        String         @db.Uuid
+  quotationNumber String
+  quotationDate   DateTime       @db.Date
+  validUntil      DateTime?      @db.Date
+  customerId      String         @db.Uuid
+  status          QuotationStatus @default(DRAFT)
+  currency        String         @default("EGP") @db.VarChar(3)
+
+  /// The revision chain: the first offer is version 1, and revising an issued
+  /// offer creates version 2 as a new draft while the old one keeps exactly
+  /// the content it was sent with.
+  version      Int     @default(1)
+  revisionOfId String? @db.Uuid
+
+  notes String?
+  /// Terms and conditions, printed on the first page. Editable per quotation.
+  terms String?
+
+  /// The quotation-wide discount, applied after the per-table discounts.
+  discountType    String? @db.VarChar(16)
+  discountPercent Decimal @default(0) @db.Decimal(9, 4)
+  discountAmount  Decimal @default(0) @db.Decimal(19, 4)
+
+  /// Frozen totals, recomputed whenever a draft is saved. Stored so a printed
+  /// quotation never has to be recalculated from a different price list.
+  subTotal      Decimal @default(0) @db.Decimal(19, 4)
+  discountTotal Decimal @default(0) @db.Decimal(19, 4)
+  totalAmount   Decimal @default(0) @db.Decimal(19, 4)
+
+  /// Who signs the offer. Taken from the company profile or typed on the
+  /// quotation, and snapshotted when it is issued.
+  managerName       String?
+  responsibleName   String?
+  responsiblePhone  String?
+
+  /// Whether the company's tax registration number is printed. Snapshotted
+  /// with the rest of the issued content, so a later settings change does not
+  /// rewrite history.
+  showTaxId Boolean @default(true)
+
+  /// The issued document: customer, company, tables, lines, totals, terms and
+  /// the names above, exactly as they were at that moment.
+  contentSnapshot Json?
+  snapshotAt      DateTime?
+
+  convertedInvoiceId String?   @unique @db.Uuid
+  convertedAt        DateTime?
+  issuedAt           DateTime?
+  sentAt             DateTime?
+  acceptedAt         DateTime?
+  rejectedAt         DateTime?
+  expiredAt          DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  updatedBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company          Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch           Branch          @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer         Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  convertedInvoice SalesInvoice?   @relation(fields: [convertedInvoiceId], references: [id], onDelete: Restrict)
+  revisionOf       Quotation?      @relation("QuotationRevisions", fields: [revisionOfId], references: [id], onDelete: Restrict)
+  revisions        Quotation[]     @relation("QuotationRevisions")
+  tables           QuotationTable[]
+  events           QuotationEvent[]
+
+  @@unique([companyId, quotationNumber])
+  @@index([companyId, quotationDate])
+  @@index([companyId, status])
+  @@index([customerId])
+  @@map("quotations")
+}
+
+/// One titled table inside a quotation. An offer for a kitchen may have a
+/// "Cabinets" table and an "Appliances" table, each with its own discount.
+model QuotationTable {
+  id            String @id @default(uuid()) @db.Uuid
+  quotationId   String @db.Uuid
+  title         String
+  sortOrder     Int
+  discountType    String? @db.VarChar(16)
+  discountPercent Decimal @default(0) @db.Decimal(9, 4)
+  discountAmount  Decimal @default(0) @db.Decimal(19, 4)
+  subTotal        Decimal @default(0) @db.Decimal(19, 4)
+  discountTotal   Decimal @default(0) @db.Decimal(19, 4)
+  netTotal        Decimal @default(0) @db.Decimal(19, 4)
+
+  quotation Quotation       @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  lines     QuotationLine[]
+
+  @@unique([quotationId, sortOrder])
+  @@map("quotation_tables")
+}
+
+model QuotationLine {
+  id            String @id @default(uuid()) @db.Uuid
+  tableId       String @db.Uuid
+  lineNumber    Int
+  itemId        String? @db.Uuid
+  description   String
+  /// Copied from the item at the time the line was written, or typed. Never
+  /// guessed: an unknown origin prints as blank.
+  countryOfOrigin String? @db.VarChar(80)
+  unit          String?
+  quantity      Decimal @db.Decimal(19, 4)
+  unitPrice     Decimal @db.Decimal(19, 4)
+  lineTotal     Decimal @db.Decimal(19, 4)
+
+  table QuotationTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  item  Item?          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([tableId, lineNumber])
+  @@index([itemId])
+  @@map("quotation_lines")
+}
+
+/// Follow-up history: every status change, note and contact attempt, with the
+/// person and the time. This is what makes "where is that offer?" answerable.
+model QuotationEvent {
+  id          String              @id @default(uuid()) @db.Uuid
+  quotationId String              @db.Uuid
+  type        QuotationEventType
+  fromStatus  QuotationStatus?
+  toStatus    QuotationStatus?
+  note        String?
+  userId      String?             @db.Uuid
+  createdAt   DateTime            @default(now())
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  @@index([quotationId, createdAt])
+  @@map("quotation_events")
+}
 
 /// A grouping of items for reporting and for picking: "spare parts",
 /// "food", "services". One level, because a shop's catalogue is not a tree.
@@ -1572,15 +1820,6 @@ enum OrderStatus {
   PARTIALLY_FULFILLED
   FULFILLED
   CANCELLED
-}
-
-enum QuotationStatus {
-  DRAFT
-  ISSUED
-  ACCEPTED
-  REJECTED
-  EXPIRED
-  CONVERTED
 }
 
 model PurchaseOrder {
@@ -1710,102 +1949,6 @@ model SalesOrderLine {
   @@index([orderId])
   @@map("sales_order_lines")
 }
-
-/// A customer-facing quotation is kept separate from a sales order until the
-/// customer accepts it. Issued quotations snapshot the company details and
-/// selected terms so later edits to templates or the company profile cannot
-/// rewrite a document already sent to a customer.
-model Quotation {
-  id                String          @id @default(uuid()) @db.Uuid
-  companyId         String          @db.Uuid
-  branchId          String          @db.Uuid
-  customerId        String          @db.Uuid
-  quotationNumber   String
-  quotationDate     DateTime        @db.Date
-  validUntil        DateTime?       @db.Date
-  status            QuotationStatus @default(DRAFT)
-  currency          String          @default("EGP") @db.VarChar(3)
-  discountPercent   Decimal         @default(0) @db.Decimal(9, 4)
-  discountAmount    Decimal         @default(0) @db.Decimal(19, 4)
-  subTotal          Decimal         @default(0) @db.Decimal(19, 4)
-  taxAmount         Decimal         @default(0) @db.Decimal(19, 4)
-  totalAmount       Decimal         @default(0) @db.Decimal(19, 4)
-  originCountry     String?
-  responsibleManager String?
-  showTaxId         Boolean         @default(false)
-  notes             String?
-  companySnapshot   Json
-  termsSnapshot     Json
-  convertedInvoiceId String?        @db.Uuid
-  issuedAt          DateTime?
-  issuedBy          String?         @db.Uuid
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  createdBy         String?         @db.Uuid
-  updatedBy         String?         @db.Uuid
-  deletedAt         DateTime?
-
-  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  lines QuotationLine[]
-
-  @@unique([companyId, quotationNumber])
-  @@index([companyId, quotationDate])
-  @@index([companyId, status])
-  @@map("quotations")
-}
-
-/// Lines are grouped by a user-editable table title. Each title can therefore
-/// appear in the quote's summary with its own subtotal.
-model QuotationLine {
-  id             String   @id @default(uuid()) @db.Uuid
-  quotationId    String   @db.Uuid
-  tableTitle     String   @default("Items")
-  lineNumber     Int
-  itemId         String?  @db.Uuid
-  description    String
-  unit           String?
-  quantity       Decimal  @db.Decimal(19, 4)
-  unitPrice      Decimal  @db.Decimal(19, 4)
-  discountPercent Decimal @default(0) @db.Decimal(9, 4)
-  discountAmount Decimal  @default(0) @db.Decimal(19, 4)
-  taxRate        Decimal  @default(0) @db.Decimal(9, 4)
-  taxAmount      Decimal  @default(0) @db.Decimal(19, 4)
-  lineTotal      Decimal  @default(0) @db.Decimal(19, 4)
-  createdAt      DateTime @default(now())
-
-  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
-  item Item? @relation(fields: [itemId], references: [id], onDelete: Restrict)
-
-  @@unique([quotationId, tableTitle, lineNumber])
-  @@index([quotationId])
-  @@index([itemId])
-  @@map("quotation_lines")
-}
-
-/// Reusable company-wide terms. A quotation stores a JSON snapshot of the
-/// chosen title/body pairs at issue time, so editing a template affects only
-/// future quotations.
-model QuotationTermTemplate {
-  id        String   @id @default(uuid()) @db.Uuid
-  companyId String   @db.Uuid
-  title     String
-  body      String
-  sortOrder Int      @default(0)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  createdBy String?  @db.Uuid
-  updatedBy String?  @db.Uuid
-  deletedAt DateTime?
-
-  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
-
-  @@index([companyId, isActive, sortOrder])
-  @@map("quotation_term_templates")
-}
-
 
 /// An agreed set of prices, for a customer or a supplier.
 ///

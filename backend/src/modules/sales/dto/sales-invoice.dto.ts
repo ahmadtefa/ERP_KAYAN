@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsDateString,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -33,6 +34,15 @@ export class SalesInvoiceLineDto {
   /// The department, administrative unit or project this revenue belongs to.
   /// Optional: an invoice that does not need cost analysis stays as it was.
   @IsOptional() @IsUUID() costCenterId?: string;
+
+  /// PERCENT or AMOUNT. When omitted, a percent is assumed if one is given,
+  /// which is the shape older clients send.
+  @IsOptional() @IsIn(['PERCENT', 'AMOUNT']) discountType?: string;
+
+  /// The line discount. Percent is 0-100; amount is money and may not exceed
+  /// the line value. The server resolves the other representation itself.
+  @IsOptional() @IsString() discountPercent?: string;
+  @IsOptional() @IsString() discountAmount?: string;
 }
 
 export class CreateSalesInvoiceDto {
@@ -41,12 +51,14 @@ export class CreateSalesInvoiceDto {
   @IsUUID() customerId!: string;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
 
-  /// Document-wide discount before tax. Supply one field, not both.
-  @IsOptional() @IsString() discountPercent?: string;
-  @IsOptional() @IsString() discountAmount?: string;
-
   /// The warehouse the goods leave. Omit to use the branch's default.
   @IsOptional() @IsUUID() warehouseId?: string;
+
+  /// A discount on the document as a whole, applied before tax and allocated
+  /// across the lines in exact proportion to their net value.
+  @IsOptional() @IsIn(['PERCENT', 'AMOUNT']) discountType?: string;
+  @IsOptional() @IsString() discountPercent?: string;
+  @IsOptional() @IsString() discountAmount?: string;
 
   @IsArray()
   @ArrayMinSize(1)
