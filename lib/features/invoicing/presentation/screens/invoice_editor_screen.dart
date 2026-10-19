@@ -74,6 +74,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   String? _notes;
   String _discountMode = 'percent';
   String _discountValue = '0';
+  final _discountController = TextEditingController(text: '0');
   late String _invoiceDate;
   final _landedCosts = <_LandedCostDraft>[];
   bool _saving = false;
@@ -153,6 +154,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         _discountValue = discountAmount > Decimal.zero
             ? discountAmount.toString()
             : discountPercent.toString();
+        _discountController.text = _discountValue;
         _invoiceDate = text(invoice, 'invoiceDate', fallback: _invoiceDate);
         _loadingExisting = false;
       });
@@ -172,6 +174,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     for (final charge in _landedCosts) {
       charge.dispose();
     }
+    _discountController.dispose();
     super.dispose();
   }
 
@@ -416,7 +419,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                 flex: 2,
                 child: TextFormField(
                   key: const ValueKey('invoice-discount-value'),
-                  initialValue: _discountValue,
+                  controller: _discountController,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
                     labelText: _discountMode == 'percent'
