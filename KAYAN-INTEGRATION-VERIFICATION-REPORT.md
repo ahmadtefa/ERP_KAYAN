@@ -758,3 +758,66 @@ node scripts/verify-cost-center-upgrade.mjs
 - `backend/src/modules/backup/backup.service.ts` (splits in JSON backups)
 - `backend/prisma/permissions.ts` (catalogue)
 - `backend/scripts/scenario-cost-centers.mjs`, `verify-cost-center-upgrade.mjs`
+
+---
+
+## 15. Follow-up implementation pass — 2026-10-19
+
+This section records changes made after the earlier verification sections. It does **not**
+retroactively change their test results.
+
+### 15.1 Cost-center report filters
+
+- The Flutter cost-center report now exposes a type filter, a specific-centre filter, and an
+  **Include inactive centres** toggle, alongside the existing shared date range.
+- These controls pass `type`, `costCenterId`, and `includeInactive` to
+  `GET /reports/cost-centers`; the report totals and table are fetched from the same filtered
+  request rather than filtering only the visible rows.
+- Implemented in `lib/features/reports/presentation/reports_screen.dart`.
+- Commit: `0a0da58` (`feat(reports): add cost-center report filters`).
+
+### 15.2 Multi-centre allocation editor on manual journal lines
+
+- The journal-entry editor now offers a split-allocation dialog when a company has active cost
+  centres. It allows multiple distinct centres and positive decimal amounts, displays the line
+  amount, allocated total and remaining amount, and disables **Done** until the allocation is
+  complete and exactly reconciles to the source line.
+- On submission, split lines send `allocations[]`; they do not send `costCenterId` at the same
+  time. The backend remains authoritative and repeats validation when posting.
+- The existing single-centre selection remains available. Choosing **Use one centre** switches
+  the line back to single-centre mode without deleting the saved split draft.
+- Implemented in `lib/features/accounting/presentation/screens/journal_entries_screen.dart`.
+- Commits: `033e6c1` and `953024f`.
+
+### 15.3 Verification status for this pass
+
+| Check | Status |
+|---|---|
+| Source changes committed to the PR #52 branch | **YES** |
+| Local Flutter analysis/test run | **NOT RUN** — this pass used the GitHub repository editor, not a local checkout |
+| CI on the cost-centre-filter commit `0a0da58` | Run `39297065511` was observed in progress; this is not recorded as a pass here |
+| Windows installer workflow | Run `39297065383` was observed in progress; no new installer is claimed by this section |
+| New widget tests specifically covering report filters and split allocation | **NOT ADDED YET** |
+| Human click-through, Arabic RTL visual check, second-computer LAN test | **NOT VERIFIED** |
+
+The current code changes should be treated as implemented but **not yet verified** until a workflow
+run that checks the current branch head completes successfully. The earlier green results in
+sections 1 and 14 apply to their recorded commits only.
+
+### 15.4 Remaining requested work — still open
+
+- Cost-centre attribution on stock adjustment/count screens, and displaying centre/splits in
+  journal and invoice details.
+- Invoice-level and line-level percentage/fixed discounts, including tax, accounting, inventory,
+  returns, reversals, and backup/restore parity.
+- Resizable/maximizable dialogs and usable table-column sizing/density/long-text behavior.
+- Complete quotation workflow, including multiple titled tables, origin country, discounts,
+  company branding/tax details, responsible manager, status/audit trail, invoice conversion, and
+  print/PDF.
+- Full print preview and export parity (Arabic RTL, pagination, active filters and permissions)
+  for the requested screens and reports.
+- Human Windows UI walkthrough, visual RTL verification, and LAN test from a second physical
+  computer.
+
+No merge to `main`, release publication, or destructive operation on real company data was made
+during this pass.
