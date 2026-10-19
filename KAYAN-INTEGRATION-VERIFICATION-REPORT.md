@@ -821,3 +821,12 @@ sections 1 and 14 apply to their recorded commits only.
 
 No merge to `main`, release publication, or destructive operation on real company data was made
 during this pass.
+
+### 15.5 Static-analysis correction found during CI
+
+The first CI attempt on the new journal allocation UI found one Flutter analyzer error: the project
+does not define an `AppLocalizations.done` getter. Replaced that call with the existing bilingual
+inline label helper. Fix commit: `355c229`.
+
+The failing run is **not** counted as a pass. A new CI/Windows workflow run must finish against the
+updated branch head before this implementation pass can be called verified.
