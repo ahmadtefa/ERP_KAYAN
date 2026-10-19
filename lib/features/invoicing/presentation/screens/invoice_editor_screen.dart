@@ -72,6 +72,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   String? _partyId;
   String? _supplierReference;
   String? _notes;
+  String _discountMode = 'percent';
+  String _discountValue = '0';
   late String _invoiceDate;
   final _landedCosts = <_LandedCostDraft>[];
   bool _saving = false;
@@ -145,6 +147,12 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
             ? null
             : text(invoice, 'supplierReference');
         _notes = text(invoice, 'notes').isEmpty ? null : text(invoice, 'notes');
+        final discountPercent = Decimal.tryParse(text(invoice, 'discountPercent')) ?? Decimal.zero;
+        final discountAmount = Decimal.tryParse(text(invoice, 'discountAmount')) ?? Decimal.zero;
+        _discountMode = discountAmount > Decimal.zero ? 'fixed' : 'percent';
+        _discountValue = discountAmount > Decimal.zero
+            ? discountAmount.toString()
+            : discountPercent.toString();
         _invoiceDate = text(invoice, 'invoiceDate', fallback: _invoiceDate);
         _loadingExisting = false;
       });
@@ -169,7 +177,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
 
   /// Totals computed with [Decimal], the same arithmetic the server uses, so
   /// what is previewed here is what will be stored.
-  ({Decimal subTotal, Decimal tax, Decimal landedCost, Decimal total}) get _totals {
+  ({Decimal subTotal, Decimal discount, Decimal tax, Decimal landedCost, Decimal total}) get _totals {
     var subTotal = Decimal.zero;
     var tax = Decimal.zero;
     for (final line in _lines) {
@@ -185,6 +193,16 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           .toDecimal(scaleOnInfinitePrecision: 8)
           .round(scale: 4);
     }
+    final enteredDiscount = Decimal.tryParse(_discountValue.trim()) ?? Decimal.zero;
+    final discount = _discountMode == 'percent'
+        ? (subTotal * enteredDiscount / Decimal.fromInt(100))
+            .toDecimal(scaleOnInfinitePrecision: 8).round(scale: 4)
+        : enteredDiscount;
+    final safeDiscount = discount > subTotal ? subTotal : discount;
+    final taxReduction = subTotal == Decimal.zero
+        ? Decimal.zero
+        : (tax * safeDiscount / subTotal)
+            .toDecimal(scaleOnInfinitePrecision: 8).round(scale: 4);
     var landedCost = Decimal.zero;
     if (!widget.kind.isSales) {
       for (final charge in _landedCosts) {
@@ -193,9 +211,10 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     }
     return (
       subTotal: subTotal,
-      tax: tax,
+      discount: safeDiscount,
+      tax: tax - taxReduction,
       landedCost: landedCost,
-      total: subTotal + tax + landedCost,
+      total: subTotal - safeDiscount + tax - taxReduction + landedCost,
     );
   }
 
@@ -254,6 +273,16 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       }
     }
 
+    final discountValue = Decimal.tryParse(_discountValue.trim()) ?? Decimal.zero;
+    if (discountValue < Decimal.zero ||
+        (_discountMode == 'percent' && discountValue > Decimal.fromInt(100)) ||
+        (_discountMode == 'fixed' && discountValue > _totals.subTotal)) {
+      showMessage(context, Localizations.localeOf(context).languageCode == 'ar'
+          ? 'قيمة الخصم غير صحيحة أو تتجاوز إجمالي البنود'
+          : 'Discount is invalid or exceeds the invoice subtotal', error: true);
+      return;
+    }
+
     final lines = <Json>[];
     for (final line in _lines) {
       final quantity = line.quantity.text.trim();
@@ -288,6 +317,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         if (!widget.kind.isSales && _supplierReference != null)
           'supplierReference': _supplierReference,
         if (_notes != null && _notes!.isNotEmpty) 'notes': _notes,
+        'discountPercent': _discountMode == 'percent' ? discountValue.toString() : '0',
+        'discountAmount': _discountMode == 'fixed' ? discountValue.toString() : '0',
         'lines': lines,
       };
       if (widget.invoiceId != null) {
@@ -359,6 +390,45 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
             notes: _notes,
             onNotesChanged: (value) => setState(() => _notes = value),
             parties: partiesAsync.value ?? const [],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 2,
+                child: DropdownButtonFormField<String>(
+                  value: _discountMode,
+                  decoration: InputDecoration(
+                    labelText: language == 'ar' ? 'نوع الخصم' : 'Discount type',
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: [
+                    DropdownMenuItem(value: 'percent', child: Text(language == 'ar' ? 'نسبة مئوية' : 'Percentage')),
+                    DropdownMenuItem(value: 'fixed', child: Text(language == 'ar' ? 'مبلغ ثابت' : 'Fixed amount')),
+                  ],
+                  onChanged: (value) => setState(() => _discountMode = value ?? 'percent'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: TextFormField(
+                  key: const ValueKey('invoice-discount-value'),
+                  initialValue: _discountValue,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: _discountMode == 'percent'
+                        ? (language == 'ar' ? 'الخصم %' : 'Discount %')
+                        : (language == 'ar' ? 'قيمة الخصم' : 'Discount amount'),
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (value) => setState(() => _discountValue = value),
+                ),
+              ),
+            ],
           ),
           if (!widget.kind.isSales) ...[
             const SizedBox(height: 12),
@@ -782,7 +852,7 @@ class _LineTotal extends StatelessWidget {
 class _Totals extends StatelessWidget {
   const _Totals({required this.totals, required this.showLandedCost});
 
-  final ({Decimal subTotal, Decimal tax, Decimal landedCost, Decimal total}) totals;
+  final ({Decimal subTotal, Decimal discount, Decimal tax, Decimal landedCost, Decimal total}) totals;
   final bool showLandedCost;
 
   @override
@@ -816,6 +886,10 @@ class _Totals extends StatelessWidget {
         child: Column(
           children: [
             row(l10n.subTotal, totals.subTotal),
+            if (totals.discount > Decimal.zero) row(
+              Localizations.localeOf(context).languageCode == 'ar' ? 'الخصم' : 'Discount',
+              totals.discount,
+            ),
             row(l10n.taxAmount, totals.tax),
             if (showLandedCost) row(l10n.landedCosts, totals.landedCost),
             const Divider(),
