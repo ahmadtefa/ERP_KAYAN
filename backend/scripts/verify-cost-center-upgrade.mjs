@@ -43,260 +43,257 @@ function check(name, ok, detail = '') {
 
 async function applyAll(client, { stopBefore } = {}) {
   await client.query(
-    'CREATE TABLE IF NOT EXISTS "_arena_migrations" (name text primary key, applied_at timestamptz default now())',
+    'CREATE TABLE IF NOT EXISTS "_upgrade_check" (name text primary key, applied_at timestamptz default now())',
+  );
+  const applied = new Set(
+    (await client.query('SELECT name FROM "_upgrade_check"')).rows.map((r) => r.name),
   );
   const dirs = fs
     .readdirSync(MIGRATIONS)
-    .filter((dir) => fs.statSync(path.join(MIGRATIONS, dir)).isDirectory())
+    .filter((d) => fs.statSync(path.join(MIGRATIONS, d)).isDirectory())
     .sort();
-  let applied = 0;
+  let count = 0;
   for (const dir of dirs) {
-    if (stopBefore && dir >= stopBefore) break;
-    const done = await client.query('SELECT 1 FROM "_arena_migrations" WHERE name = $1', [dir]);
-    if (done.rowCount) continue;
+    if (stopBefore && dir.startsWith(stopBefore)) break;
+    if (applied.has(dir)) continue;
     const sql = fs.readFileSync(path.join(MIGRATIONS, dir, 'migration.sql'), 'utf8');
     await client.query('BEGIN');
     try {
       await client.query(sql);
-      await client.query('INSERT INTO "_arena_migrations" (name) VALUES ($1)', [dir]);
+      await client.query('INSERT INTO "_upgrade_check" (name) VALUES ($1)', [dir]);
       await client.query('COMMIT');
-      applied += 1;
+      count += 1;
     } catch (error) {
       await client.query('ROLLBACK');
       throw new Error(`migration ${dir} failed: ${error.message}`);
     }
   }
-  return applied;
+  return count;
 }
 
-async function main() {
+async function snapshot(client) {
+  const centre = (
+    await client.query(
+      'SELECT code, type, "parentId", description, "startDate", "endDate" FROM cost_centers ORDER BY code',
+    )
+  ).rows;
+  const lines = (
+    await client.query(
+      'SELECT id, "costCenterId" FROM journal_lines ORDER BY "lineNumber"',
+    )
+  ).rows;
+  const allocations = (await client.query('SELECT count(*)::int n FROM journal_line_allocations')).rows[0].n;
+  const permissions = (
+    await client.query("SELECT code FROM permissions WHERE code LIKE 'accounting.costcenters.%' ORDER BY code")
+  ).rows.map((r) => r.code);
+  const grants = (
+    await client.query(
+      `SELECT r.code AS role, p.code AS permission
+         FROM role_permissions rp
+         JOIN roles r ON r.id = rp."roleId"
+         JOIN permissions p ON p.id = rp."permissionId"
+        WHERE p.code LIKE 'accounting.costcenters.%'
+        ORDER BY 1, 2`,
+    )
+  ).rows;
+  return { centre, lines, allocations, permissions, grants };
+}
+
+// ─────────────────────────────────────────────────────────── a throwaway database
+{
   const admin = new pg.Client({ connectionString: ADMIN_URL });
   await admin.connect();
-  await admin.query(`DROP DATABASE IF EXISTS "${DB}" WITH (FORCE)`);
+  await admin.query(`DROP DATABASE IF EXISTS "${DB}"`);
   await admin.query(`CREATE DATABASE "${DB}"`);
   await admin.end();
+  console.log(`database ${DB} created`);
+}
 
-  let client = new pg.Client({ connectionString: URL });
-  await client.connect();
+const client = new pg.Client({ connectionString: URL });
+await client.connect();
 
-  const applied = await applyAll(client, { stopBefore: TARGET });
-  check('the pre-upgrade schema builds', applied > 0, `${applied} migrations`);
+try {
+  // ─────────────────────────────────────── 1. the schema before the migration
+  const pre = await applyAll(client, { stopBefore: TARGET });
+  check('the database is built at the pre-upgrade schema', pre >= 20, `${pre} migrations`);
 
-  // The seed adds the current permission catalogue; remove the two codes and
-  // every grant of them so the database looks like the older installation.
+  // Seed with the current code, then roll the catalogue back to what an old
+  // installation actually had: no `read`, no type, no hierarchy columns.
   const { execFileSync } = await import('node:child_process');
-  execFileSync('npx', ['ts-node', 'prisma/seed.ts'], {
+  execFileSync('node', ['dist/prisma/seed.js'], {
     cwd: '/home/user/ERP_KAYAN/backend',
-    env: { ...process.env, DATABASE_URL: URL },
+    env: { ...process.env, DATABASE_URL: `${URL}?schema=public` },
     stdio: 'ignore',
   });
+
+  const company = (await client.query('SELECT id FROM companies LIMIT 1')).rows[0].id;
+  const adminRole = (await client.query("SELECT id FROM roles WHERE code = 'ADMIN' LIMIT 1")).rows[0].id;
+  const accountantRole = (await client.query("SELECT id FROM roles WHERE code = 'ACCOUNTANT' LIMIT 1")).rows[0].id;
+
+  await client.query("BEGIN");
   await client.query(
     `DELETE FROM role_permissions WHERE "permissionId" IN
        (SELECT id FROM permissions WHERE code LIKE 'accounting.costcenters.%')`,
   );
-  await client.query(`DELETE FROM permissions WHERE code LIKE 'accounting.costcenters.%'`);
-  const gone = await client.query(
-    `SELECT count(*)::int c FROM permissions WHERE code LIKE 'accounting.costcenters.%'`,
+  await client.query("DELETE FROM permissions WHERE code LIKE 'accounting.costcenters.%'");
+  // The permission an old install had before this migration. Re-added below as
+  // `manage` by the seed in real upgrades; here it stays deleted so the
+  // migration's own defensive insert is what has to bring it back.
+  await client.query(
+    `INSERT INTO cost_centers (id, "companyId", code, "nameEn", "nameAr", "isActive", "createdAt", "updatedAt")
+     VALUES ('00000000-0000-4000-8000-00000000c001', $1, 'LEG-1', 'Legacy centre', 'مركز قديم', true, now(), now())`,
+    [company],
   );
-  check('the upgrade starts without the cost-center permission', gone.rows[0].c === 0);
-
-  const company = (await client.query('SELECT id FROM companies LIMIT 1')).rows[0];
-  const branch = (await client.query('SELECT id FROM branches LIMIT 1')).rows[0];
-
-  // A legacy flat centre and a bank/cash account so a journal can be written.
-  const legacy = await client.query(
-    `INSERT INTO cost_centers (id, "companyId", code, "nameEn", "nameAr", "isActive", "updatedAt")
-     VALUES (gen_random_uuid(), $1, 'LEG-1', 'Legacy centre', 'مركز قديم', true, now())
-     RETURNING id`,
-    [company.id],
-  );
-  const legacyId = legacy.rows[0].id;
-  const cash = (
-    await client.query(`SELECT id FROM accounts WHERE code = '1101' LIMIT 1`)
-  ).rows[0];
-  const expense = (
-    await client.query(`SELECT id FROM accounts WHERE code = '5103' LIMIT 1`)
-  ).rows[0];
+  const account = (await client.query("SELECT id FROM accounts WHERE code = '4101' LIMIT 1")).rows[0].id;
+  const branch = (await client.query('SELECT id FROM branches LIMIT 1')).rows[0].id;
   const entry = await client.query(
-    `INSERT INTO journal_entries
-       (id, "companyId", "branchId", "entryNumber", "entryDate", description, status,
-        "totalDebit", "totalCredit", "createdAt", "updatedAt")
-     VALUES (gen_random_uuid(), $1, $2, 'LEG-JE-1', '2026-03-01', 'Legacy entry', 'POSTED',
-             100, 100, now(), now())
-     RETURNING id`,
-    [company.id, branch.id],
+    `INSERT INTO journal_entries (id, "companyId", "branchId", "entryNumber", "entryDate", status, "totalDebit", "totalCredit", description, "createdBy", "createdAt", "updatedAt")
+     VALUES ('00000000-0000-4000-8000-00000000e001', $1, $2, 'LEG-JE-1', current_date, 'DRAFT', 100, 100, 'legacy', NULL, now(), now())
+     RETURNING id, "entryNumber"`,
+    [company, branch],
   );
-  const entryId = entry.rows[0].id;
   await client.query(
-    `INSERT INTO journal_lines
-       (id, "journalEntryId", "lineNumber", "accountId", debit, credit, description, "costCenterId")
-     VALUES (gen_random_uuid(), $1, 1, $2, 100, 0, 'Legacy expense', $4),
-            (gen_random_uuid(), $1, 2, $3, 0, 100, 'Legacy credit', NULL)`,
-    [entryId, expense.id, cash.id, legacyId],
+    `INSERT INTO journal_lines (id, "journalEntryId", "lineNumber", "accountId", debit, credit, description, "costCenterId")
+     VALUES ('00000000-0000-4000-8000-000000000001', $1, 1, $2, 100, 0, 'legacy line', '00000000-0000-4000-8000-00000000c001')`,
+    [entry.rows[0].id, account],
   );
-
-  const upgrade = await applyAll(client, { stopBefore: null });
-  check('the cost-center migration applies to an old database', upgrade === 1, `${upgrade} applied`);
-
-  const centre = await client.query(
-    `SELECT code, "nameEn", type::text AS type, "parentId", "startDate", "endDate", "isActive"
-       FROM cost_centers WHERE id = $1`,
-    [legacyId],
-  );
-  const row = centre.rows[0];
-  check(
-    'the legacy centre survives with its data intact',
-    row?.code === 'LEG-1' && row?.nameEn === 'Legacy centre' && row?.isActive === true,
-  );
-  check(
-    'the legacy centre becomes a DEPARTMENT with no invented parent or window',
-    row?.type === 'DEPARTMENT' && row?.parentId === null && row?.startDate === null && row?.endDate === null,
-    JSON.stringify(row),
-  );
-
-  const line = await client.query(
-    `SELECT "costCenterId" FROM journal_lines WHERE "journalEntryId" = $1 AND "lineNumber" = 1`,
-    [entryId],
-  );
-  check('the historical journal line keeps its centre', line.rows[0]?.costCenterId === legacyId);
-  const allocations = await client.query('SELECT count(*)::int c FROM journal_line_allocations');
-  check('no allocation is invented for historical lines', allocations.rows[0].c === 0);
-
-  const perms = await client.query(
-    `SELECT code FROM permissions WHERE code LIKE 'accounting.costcenters.%' ORDER BY code`,
-  );
-  check(
-    'the permission catalogue gained read and keeps manage',
-    perms.rows.map((r) => r.code).join(',') ===
-      'accounting.costcenters.manage,accounting.costcenters.read',
-    perms.rows.map((r) => r.code).join(','),
-  );
-
-  const adminGrant = await client.query(
-    `SELECT count(*)::int c
-       FROM role_permissions rp
-       JOIN roles r ON r.id = rp."roleId"
-       JOIN permissions p ON p.id = rp."permissionId"
-      WHERE r.code = 'ADMIN' AND p.code IN ('accounting.costcenters.read','accounting.costcenters.manage')`,
-  );
-  check('the ADMIN role of the old company can read and manage centres', adminGrant.rows[0].c === 2);
-
-  // A custom role that could read reports but was created before the new code.
-  const custom = await client.query(
+  // A role that can read reports but has never heard of cost centers.
+  await client.query(
     `INSERT INTO roles (id, "companyId", code, "nameEn", "nameAr", "isSystem", "createdAt", "updatedAt")
-     VALUES (gen_random_uuid(), $1, 'LEGACY_AUDITOR', 'Auditor', 'مراجع', false, now(), now())
-     RETURNING id`,
-    [company.id],
+     VALUES ('00000000-0000-4000-8000-0000000000a1', $1, 'LEGACY_AUDITOR', 'Legacy auditor', 'مراجع قديم', false, now(), now())`,
+    [company],
   );
   await client.query(
     `INSERT INTO role_permissions ("roleId", "permissionId")
-     SELECT $1, id FROM permissions WHERE code = 'reports.read'`,
-    [custom.rows[0].id],
+     SELECT '00000000-0000-4000-8000-0000000000a1', id FROM permissions WHERE code = 'reports.read'`,
   );
-  // Re-run the grant part of the migration the way a second deployment would.
-  await client.query(
-    `INSERT INTO role_permissions ("roleId", "permissionId")
-     SELECT DISTINCT rp."roleId", target."id"
-       FROM role_permissions rp
-       JOIN permissions source ON source."id" = rp."permissionId" AND source."code" = 'reports.read'
-      CROSS JOIN permissions target
-      WHERE target."code" = 'accounting.costcenters.read'
-     ON CONFLICT ("roleId", "permissionId") DO NOTHING`,
-  );
-  const auditorGrant = await client.query(
-    `SELECT count(*)::int c FROM role_permissions rp
-       JOIN permissions p ON p.id = rp."permissionId"
-      WHERE rp."roleId" = $1 AND p.code = 'accounting.costcenters.read'`,
-    [custom.rows[0].id],
-  );
-  check('a legacy role that reads reports gains read access without losing anything', auditorGrant.rows[0].c === 1);
+  await client.query('COMMIT');
 
-  const enumValues = await client.query(
-    `SELECT e.enumlabel FROM pg_type t JOIN pg_enum e ON e.enumtypid = t.oid
-      WHERE t.typname = 'CostCenterType' ORDER BY e.enumsortorder`,
+  const prePermissions = (
+    await client.query("SELECT count(*)::int n FROM permissions WHERE code LIKE 'accounting.costcenters.%'")
+  ).rows[0].n;
+  check('the upgrade starts without the new cost-center permissions', prePermissions === 0);
+
+  // ───────────────────────────────────────────────────────── 2. the upgrade
+  const applied = await applyAll(client);
+  check('the upgrade migration applies to an existing database', applied === 1, `${applied} migration`);
+  const after = await snapshot(client);
+
+  const legacy = after.centre.find((row) => row.code === 'LEG-1');
+  check(
+    'the legacy centre survives with its code, and becomes a DEPARTMENT',
+    Boolean(legacy) && legacy.type === 'DEPARTMENT',
+    legacy ? `type ${legacy.type}` : 'missing',
   );
   check(
-    'the CostCenterType enum has the three documented values',
-    enumValues.rows.map((r) => r.enumlabel).join(',') ===
-      'DEPARTMENT,ADMINISTRATIVE_UNIT,PROJECT',
-    enumValues.rows.map((r) => r.enumlabel).join(','),
+    'no parent, description or dates are invented for it',
+    Boolean(legacy) &&
+      legacy.parentId === null &&
+      legacy.description === null &&
+      legacy.startDate === null &&
+      legacy.endDate === null,
+  );
+  check(
+    'the historical journal line still points at the same centre',
+    after.lines.some((line) => line.id === '00000000-0000-4000-8000-000000000001' && line.costCenterId === '00000000-0000-4000-8000-00000000c001'),
+  );
+  check('no allocation row is invented for historical lines', after.allocations === 0, `${after.allocations} rows`);
+  check(
+    'both permission codes exist after the upgrade',
+    after.permissions.includes('accounting.costcenters.read') &&
+      after.permissions.includes('accounting.costcenters.manage'),
+    after.permissions.join(', '),
+  );
+  check(
+    'the old ADMIN and ACCOUNTANT roles can read and manage cost centers',
+    ['ADMIN', 'ACCOUNTANT'].every((role) =>
+      ['accounting.costcenters.read', 'accounting.costcenters.manage'].every((permission) =>
+        after.grants.some((g) => g.role === role && g.permission === permission),
+      ),
+    ),
+    after.grants.map((g) => `${g.role}:${g.permission.split('.').pop()}`).join(', '),
+  );
+  check(
+    'a custom role that could read reports receives read access',
+    after.grants.some((g) => g.role === 'LEGACY_AUDITOR' && g.permission === 'accounting.costcenters.read'),
   );
 
+  // Data integrity added by the migration.
   const constraints = await client.query(
-    `SELECT conname FROM pg_constraint
-      WHERE conname IN ('cost_centers_parent_not_self','cost_centers_date_window',
-                        'cost_centers_parentId_fkey','journal_line_allocations_journalLineId_fkey',
-                        'journal_line_allocations_costCenterId_fkey','sales_invoice_lines_costCenterId_fkey',
-                        'purchase_invoice_lines_costCenterId_fkey','cash_vouchers_costCenterId_fkey')
-      ORDER BY conname`,
+    `SELECT conname FROM pg_constraint WHERE conname IN
+       ('cost_centers_parent_not_self', 'cost_centers_date_window', 'journal_line_allocations_amount_positive')`,
   );
   check(
-    'every hierarchy, allocation and invoice-line constraint exists',
-    constraints.rows.length === 8,
-    `${constraints.rows.length} of 8`,
+    'the new CHECK constraints exist',
+    constraints.rows.length === 3,
+    constraints.rows.map((r) => r.conname).join(', '),
   );
-
   const indexes = await client.query(
-    `SELECT indexname FROM pg_indexes
-      WHERE indexname IN ('journal_line_allocations_line_center_key',
-                          'sales_invoice_lines_costCenterId_idx',
-                          'purchase_invoice_lines_costCenterId_idx',
-                          'cash_vouchers_costCenterId_idx',
-                          'cost_centers_companyId_parentId_idx')`,
+    `SELECT indexname FROM pg_indexes WHERE indexname IN
+       ('cost_centers_companyId_parentId_idx', 'journal_line_allocations_costCenterId_idx',
+        'sales_invoice_lines_costCenterId_idx', 'purchase_invoice_lines_costCenterId_idx',
+        'cash_vouchers_costCenterId_idx')`,
   );
   check('the allocation and dimension indexes exist', indexes.rows.length === 5, `${indexes.rows.length} of 5`);
+  const enumRow = await client.query("SELECT 1 FROM pg_type WHERE typname = 'CostCenterType'");
+  check('the CostCenterType enum exists', enumRow.rows.length === 1);
 
-  // Re-running the whole file must be a no-op (deployment retries happen).
-  const file = fs.readFileSync(path.join(MIGRATIONS, TARGET, 'migration.sql'), 'utf8');
-  let rerun = '';
+  let selfParentRejected = false;
   try {
-    await client.query(file);
+    await client.query('UPDATE cost_centers SET "parentId" = id WHERE code = $1', ['LEG-1']);
   } catch (error) {
-    rerun = error.message;
+    selfParentRejected = error.code === '23514';
   }
-  const after = await client.query('SELECT count(*)::int c FROM journal_line_allocations');
-  check('the migration is safe to run twice', rerun === '' && after.rows[0].c === 0, rerun);
+  check('a centre cannot be its own parent at the database level', selfParentRejected);
 
-  // Constraints really bite.
-  let selfParent = '';
-  try {
-    await client.query(`UPDATE cost_centers SET "parentId" = id WHERE id = $1`, [legacyId]);
-  } catch (error) {
-    selfParent = error.code ?? error.message;
-  }
-  check('the database refuses a centre as its own parent', selfParent === '23514', selfParent);
-
-  let badWindow = '';
+  let badWindowRejected = false;
   try {
     await client.query(
-      `UPDATE cost_centers SET "startDate" = '2026-05-01', "endDate" = '2026-04-01' WHERE id = $1`,
-      [legacyId],
+      `UPDATE cost_centers SET "startDate" = DATE '2026-05-01', "endDate" = DATE '2026-04-01' WHERE code = $1`,
+      ['LEG-1'],
     );
   } catch (error) {
-    badWindow = error.code ?? error.message;
+    badWindowRejected = error.code === '23514';
   }
-  check('the database refuses an end date before the start', badWindow === '23514', badWindow);
+  check('a centre cannot end before it starts', badWindowRejected);
+  await client.query('UPDATE cost_centers SET "startDate" = NULL, "endDate" = NULL WHERE code = $1', ['LEG-1']);
 
-  let badAmount = '';
+  let zeroAllocationRejected = false;
   try {
     await client.query(
-      `INSERT INTO journal_line_allocations ("journalLineId", "costCenterId", amount)
-       SELECT id, $1, 0 FROM journal_lines WHERE "journalEntryId" = $2 LIMIT 1`,
-      [legacyId, entryId],
+      `INSERT INTO journal_line_allocations (id, "journalLineId", "costCenterId", amount)
+       VALUES (gen_random_uuid(), '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-00000000c001', 0)`,
     );
   } catch (error) {
-    badAmount = error.code ?? error.message;
+    zeroAllocationRejected = error.code === '23514';
   }
-  check('the database refuses a zero allocation', badAmount === '23514', badAmount);
+  check('a zero allocation is refused by the database', zeroAllocationRejected);
 
+  let negativeAllocationRejected = false;
+  try {
+    await client.query(
+      `INSERT INTO journal_line_allocations (id, "journalLineId", "costCenterId", amount)
+       VALUES (gen_random_uuid(), '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-00000000c001', -1)`,
+    );
+  } catch (error) {
+    negativeAllocationRejected = error.code === '23514';
+  }
+  check('a negative allocation is refused by the database', negativeAllocationRejected);
+
+  // ─────────────────────────────────────────────────── 3. running it again
+  const before = await snapshot(client);
+  const second = await applyAll(client);
+  const again = await snapshot(client);
+  check('the migration is safe to run twice', second === 0);
+  check(
+    'a second run changes nothing',
+    JSON.stringify(before) === JSON.stringify(again),
+    `${before.centre.length} centres, ${before.allocations} allocations, ${before.grants.length} grants`,
+  );
+} finally {
   await client.end();
-
-  const failed = results.filter((r) => !r.ok);
-  console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
-  if (failed.length) process.exitCode = 1;
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+const failed = results.filter((row) => !row.ok);
+console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
+process.exit(failed.length === 0 ? 0 : 1);

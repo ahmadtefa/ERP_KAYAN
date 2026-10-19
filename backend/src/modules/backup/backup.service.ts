@@ -95,6 +95,10 @@ interface TableSpec {
   /// For a child: the table it hangs from and the column that points at it.
   parent?: string;
   foreignKey?: string;
+  /// For a child whose parent has no companyId of its own (a journal line
+  /// allocation hangs from a journal line, which hangs from the entry). The
+  /// relation filter that reaches the company in one step.
+  companyWhere?: (companyId: string) => Record<string, unknown>;
   /// Rows of this table may point at another row of the same table (an account
   /// has a parent account). Those are written parents first.
   selfReferencing?: boolean;
@@ -156,6 +160,15 @@ const TABLES: TableSpec[] = [
     selfReferenceField: 'reversalOfId',
   },
   { model: 'journalLine', scope: 'child', parent: 'journalEntry', foreignKey: 'journalEntryId' },
+  {
+    // The split of one journal line across several cost centres. It is not a
+    // column on the line: a line can belong to several centres at once, and a
+    // backup that dropped these rows would silently move every split amount
+    // into "unallocated" when the file was restored.
+    model: 'journalLineAllocation',
+    scope: 'child',
+    companyWhere: (companyId) => ({ line: { entry: { companyId } } }),
+  },
   { model: 'salesOrder', scope: 'company' },
   { model: 'salesOrderLine', scope: 'child', parent: 'salesOrder', foreignKey: 'orderId' },
   { model: 'purchaseOrder', scope: 'company' },
@@ -318,6 +331,14 @@ export class BackupService {
       return (await delegate.findMany({ where: { companyId } })) as Array<
         Record<string, unknown>
       >;
+    }
+
+    // A child that reaches the company through two relations is filtered
+    // directly: its parent has no companyId to list.
+    if (spec.companyWhere) {
+      return (await delegate.findMany({
+        where: spec.companyWhere(companyId),
+      })) as Array<Record<string, unknown>>;
     }
 
     // A child table is reached through its parent's ids.
@@ -733,6 +754,11 @@ export class BackupService {
 
     if (spec.scope === 'company') {
       await delegate.deleteMany({ where: { companyId } });
+      return;
+    }
+
+    if (spec.companyWhere) {
+      await delegate.deleteMany({ where: spec.companyWhere(companyId) });
       return;
     }
 

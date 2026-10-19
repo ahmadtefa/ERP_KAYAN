@@ -1164,14 +1164,28 @@ async function main() {
     );
 
     // ─────────────────────────────────────────────── 16. migrations, checked
-    const migrations = await client.query(
-      'SELECT count(*)::int AS n, count(*) FILTER (WHERE finished_at IS NULL)::int AS pending FROM _prisma_migrations',
-    );
-    check(
-      'every migration is applied and none is left pending',
-      migrations.rows[0].pending === 0 && migrations.rows[0].n >= 9,
-      `${migrations.rows[0].n} migrations, ${migrations.rows[0].pending} pending`,
-    );
+    //
+    // `_prisma_migrations` exists only when the database was built by `prisma
+    // migrate`. A database built by apply-migrations.mjs on a machine without
+    // the Prisma engine binaries is still complete - every migration ran - but
+    // there is no bookkeeping table to read. Say so instead of failing: a
+    // skipped check is honest, a failure it did not find is not.
+    try {
+      const migrations = await client.query(
+        'SELECT count(*)::int AS n, count(*) FILTER (WHERE finished_at IS NULL)::int AS pending FROM _prisma_migrations',
+      );
+      check(
+        'every migration is applied and none is left pending',
+        migrations.rows[0].pending === 0 && migrations.rows[0].n >= 9,
+        `${migrations.rows[0].n} migrations, ${migrations.rows[0].pending} pending`,
+      );
+    } catch (error) {
+      if (error?.code !== '42P01') throw error;
+      skip(
+        'every migration is applied and none is left pending',
+        '_prisma_migrations is absent: this database was built by applying migration SQL directly, not by prisma migrate',
+      );
+    }
   } finally {
     await client.end();
   }

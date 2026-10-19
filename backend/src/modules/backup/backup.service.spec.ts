@@ -41,6 +41,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     'stockMovement',
     'journalEntry',
     'journalLine',
+    'journalLineAllocation',
     'salesOrder',
     'salesOrderLine',
     'purchaseOrder',
@@ -389,6 +390,53 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       expect(txMock.account.createMany).toHaveBeenCalled();
       expect(txMock.branch.createMany).toHaveBeenCalled();
       expect(txMock.journalEntry.createMany).toHaveBeenCalled();
+    });
+
+    test('carries cost-centre splits in a company backup and writes them back', async () => {
+      // A split is not a column on the journal line: without this table the
+      // file would look complete and restore every split amount as
+      // unallocated. The read must find the rows through line -> entry ->
+      // company, because a journal line has no companyId of its own.
+      const allocation = {
+        id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb01',
+        journalLineId: 'cccccccc-cccc-4ccc-8ccc-cccccccccc01',
+        costCenterId: '00000000-0000-4000-8000-000000009001',
+        amount: '150.0000',
+      };
+      prismaMock.journalLineAllocation.findMany.mockResolvedValueOnce([allocation]);
+
+      const file = await service.create(COMPANY_ID);
+      expect(file.tables.journalLineAllocation).toEqual([allocation]);
+      expect(prismaMock.journalLineAllocation.findMany).toHaveBeenCalledWith({
+        where: { line: { entry: { companyId: COMPANY_ID } } },
+      });
+
+      const restoreFile: BackupFile = {
+        format: 'kayan-backup',
+        version: 1,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'شركة كيان',
+        counts: {},
+        tables: {
+          journalEntry: [{ id: 'entry-1', companyId: COMPANY_ID }],
+          journalLine: [{ id: allocation.journalLineId, journalEntryId: 'entry-1' }],
+          journalLineAllocation: [allocation],
+        },
+      };
+      await service.restore(restoreFile, COMPANY_ID, { replace: true });
+
+      expect(txMock.journalLineAllocation.createMany).toHaveBeenCalledWith({
+        data: [allocation],
+        skipDuplicates: false,
+      });
+      const order = (model: string) =>
+        txMock[model].createMany.mock.invocationCallOrder[0];
+      expect(order('journalLine')).toBeLessThan(order('journalLineAllocation'));
+      expect(txMock.journalLineAllocation.deleteMany).toHaveBeenCalledWith({
+        where: { line: { entry: { companyId: COMPANY_ID } } },
+      });
     });
 
     test('refuses an older backup that omits a table containing live company data', async () => {
