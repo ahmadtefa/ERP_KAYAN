@@ -463,7 +463,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
               ),
               FilledButton(
                 onPressed: valid ? () => Navigator.of(dialogContext).pop() : null,
-                child: Text(context.l10n.done),
+                child: Text(_journalText(context, 'تم', 'Done')),
               ),
             ],
           );
