@@ -7,9 +7,9 @@ describe('document export catalogue', () => {
       'purchase-invoice',
       'sales-order',
       'purchase-order',
+      'sales-quotation',
       'cash-voucher',
       'journal-entry',
-      'sales-quotation',
     ]);
     for (const kind of DOCUMENT_KINDS) {
       expect(DOCUMENT_SPECS[kind].readPermission).toMatch(/\./);

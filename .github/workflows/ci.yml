@@ -63,7 +63,7 @@ jobs:
       - name: Type-check
         run: npx tsc --noEmit
       - name: Run unit tests
-        run: npm test -- --runInBand
+        run: python ../scripts/ci-diagnose.py npm test -- --runInBand
       - name: Build API
         run: npm run build
       - name: Apply migrations to ephemeral PostgreSQL

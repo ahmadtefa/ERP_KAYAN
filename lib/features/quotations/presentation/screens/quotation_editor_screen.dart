@@ -968,7 +968,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                           ? Center(child: Text(l10n.keepOneColumnVisible))
                           : ListView.separated(
                               itemCount: working.length,
-                              separatorBuilder: (_, __) =>
+                              separatorBuilder: (_, _) =>
                                   const Divider(height: 12),
                               itemBuilder: (context, index) {
                                 final column = working[index];
