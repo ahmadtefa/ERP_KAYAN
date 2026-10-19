@@ -13,6 +13,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
+import 'stock_screen.dart' show stockListProvider;
 
 class ItemsController extends JsonListController {
   @override
@@ -60,6 +61,19 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           kind: FieldKind.toggle,
           helper: l10n.stockTrackingDoesNotAddQuantity,
         ),
+        if (!isEdit) ...[
+          FieldSpec(
+            'openingQuantity',
+            l10n.openingQuantity,
+            kind: FieldKind.decimal,
+            helper: l10n.openingStockHint,
+          ),
+          FieldSpec(
+            'openingUnitCost',
+            l10n.openingUnitCost,
+            kind: FieldKind.decimal,
+          ),
+        ],
         FieldSpec('notes', l10n.description, kind: FieldKind.multiline, maxLines: 2),
       ],
       initial: existing,
@@ -76,6 +90,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       }
       await ref.read(itemsListProvider.notifier).reload();
       ref.invalidate(itemsProvider);
+      // Opening stock is written in the same transaction as the item, so the
+      // cached stock table must be refreshed as well.
+      ref.invalidate(stockListProvider);
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
       if (mounted) showMessage(context, e.message, error: true);
@@ -110,6 +127,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       }
       await ref.read(itemsListProvider.notifier).reload();
       ref.invalidate(itemsProvider);
+      // Opening stock is written in the same transaction as the item, so the
+      // cached stock table must be refreshed as well.
+      ref.invalidate(stockListProvider);
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
       if (mounted) showMessage(context, e.message, error: true);

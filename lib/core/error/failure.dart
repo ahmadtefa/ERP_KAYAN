@@ -36,6 +36,23 @@ class AuthFailure extends Failure {
     : super(cause: cause);
 }
 
+/// The session is over: the server refused the access token and the refresh
+/// token was refused too, so only a new sign-in can help. Separate from
+/// [AuthFailure] because a failed sign-in shows "invalid credentials" while
+/// this must say that the session ended and nothing was lost.
+class SessionExpiredFailure extends Failure {
+  const SessionExpiredFailure([super.message = 'Session expired', Object? cause])
+    : super(cause: cause);
+}
+
+/// The account is valid but not allowed to do this. Showing "invalid
+/// credentials" here would make a permission problem look like a wrong
+/// password and send people to reset a password that is perfectly good.
+class PermissionFailure extends Failure {
+  const PermissionFailure([super.message = 'Permission denied', Object? cause])
+    : super(cause: cause);
+}
+
 /// The server failed (5xx) or returned a malformed payload.
 class ServerFailure extends Failure {
   const ServerFailure([super.message = 'Server error', Object? cause])

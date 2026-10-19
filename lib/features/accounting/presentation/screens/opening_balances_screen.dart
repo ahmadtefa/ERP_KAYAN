@@ -7,6 +7,7 @@ import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../../../inventory/presentation/screens/stock_screen.dart';
 
 /// Lists imported opening-balance drafts and gives the accountant a review
 /// screen before posting them to the ledger and stock.
@@ -62,6 +63,10 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
       await ref
           .read(apiClientProvider)
           .post('/accounting/opening-balances/$id/post');
+      // Posting writes stock balances as well as the ledger. The stock
+      // screen caches its rows, so it would otherwise keep showing the
+      // quantities from before the opening balance until a restart.
+      ref.invalidate(stockListProvider);
       if (mounted) {
         showMessage(context, l10n.entryPosted);
         _refresh();

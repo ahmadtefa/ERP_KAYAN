@@ -33,6 +33,15 @@ export class AuthController {
     return this.auth.refresh(dto.refreshToken);
   }
 
+  /**
+   * Exchanges the caller's session for a one-minute ticket that a browser
+   * navigation (a download tab) may carry as `?ticket=`.
+   */
+  @Post('download-ticket')
+  issueDownloadTicket(@CurrentUser() user: AuthUser) {
+    return this.auth.issueDownloadTicket(user);
+  }
+
   @Post('logout')
   async logout(
     @CurrentUser() user: AuthUser,

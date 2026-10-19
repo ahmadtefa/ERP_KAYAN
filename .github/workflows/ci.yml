@@ -133,6 +133,89 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev
 
+  regressions:
+    name: Regression scenario (reported issues 1-9)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: erp_kayan_regressions
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d erp_kayan_regressions"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_regressions?schema=public
+      JWT_ACCESS_SECRET: ci-only-access-secret-not-for-real-use-0123456789
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-real-use-9876543210
+      JWT_ACCESS_TTL: 900
+      JWT_REFRESH_TTL: 604800
+      KAYAN_ADMIN_USERNAME: ci-admin
+      KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
+      PORT: 3000
+      NODE_ENV: test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate
+      - name: Apply migrations to a freshly created database
+        run: npx prisma migrate deploy
+      - name: Seed an isolated company and administrator
+        run: npx ts-node prisma/seed.ts
+      - name: Build API
+        run: npm run build
+      - name: Serve the web client and run the regression scenario
+        run: |
+          mkdir -p /tmp/kayan-web-probe/build/web
+          printf '<!doctype html><html><body><div id="app">KAYAN WEB PROBE</div></body></html>' > /tmp/kayan-web-probe/build/web/index.html
+          KAYAN_WEB_ROOT=/tmp/kayan-web-probe/build/web npm run start:prod > /tmp/kayan-regressions-api.log 2>&1 &
+          API_PID=$!
+          trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-regressions-health.json; then
+              break
+            fi
+            sleep 2
+          done
+          if [ ! -s /tmp/kayan-regressions-health.json ]; then
+            cat /tmp/kayan-regressions-api.log
+            exit 1
+          fi
+
+          echo "Checking that the server address opens the web client, not a JSON 404..."
+          curl -fsS http://127.0.0.1:3000/ > /tmp/kayan-root.html
+          curl -fsS http://127.0.0.1:3000/sales/invoices > /tmp/kayan-spa.html
+          grep -q "KAYAN WEB PROBE" /tmp/kayan-root.html
+          grep -q "KAYAN WEB PROBE" /tmp/kayan-spa.html
+          curl -fsS http://127.0.0.1:3000/api/v1/health > /dev/null
+          echo "Web client served at / and at a client-side route; API still routed."
+
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-regressions.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after regression scenario failure"
+            cat /tmp/kayan-regressions-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
   flutter:
     name: Flutter Web (analyze, test, build)
     runs-on: ubuntu-latest

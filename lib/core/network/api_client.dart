@@ -9,8 +9,14 @@ import '../storage/token_store.dart';
 ///
 /// Responsibilities:
 ///  * attach the bearer token to outgoing requests
+///  * renew an expired access token once, with a single refresh for every
+///    request that noticed the expiry at the same moment
 ///  * translate transport errors into typed [Failure]s
 ///  * never log credentials, tokens or financial payloads
+///
+/// The refresh token rotates on the server: two refreshes racing each other
+/// would make one of them look like a stolen token and end the session. That
+/// is why [_refreshSession] shares one in-flight future between every caller.
 class ApiClient {
   ApiClient(this._config, this._tokenStore, {Dio? dio})
     : _dio =
@@ -37,8 +43,35 @@ class ApiClient {
           }
           handler.next(options);
         },
-        onError: (e, handler) {
+        onError: (e, handler) async {
           _log.warning('HTTP error: ${e.type} ${e.response?.statusCode}');
+
+          // One renewal and one replay, never a retry loop. The refresh
+          // endpoint itself is excluded, and a request that already played
+          // this dance is not played again.
+          final options = e.requestOptions;
+          final isAuthRoute = options.path.startsWith('/auth/');
+          final alreadyRetried = options.extra[_retriedKey] == true;
+          if (e.response?.statusCode == 401 &&
+              !isAuthRoute &&
+              !alreadyRetried) {
+            final outcome = await _refreshSession();
+            final renewed = outcome.accessToken;
+            if (renewed != null) {
+              try {
+                options.headers['Authorization'] = 'Bearer $renewed';
+                options.extra[_retriedKey] = true;
+                handler.resolve(await _dio.fetch<dynamic>(options));
+                return;
+              } on DioException catch (retryError) {
+                handler.next(retryError);
+                return;
+              }
+            }
+            // A refused refresh already ended the session (tokens cleared,
+            // app notified). A refresh that merely could not reach the
+            // server must not sign anyone out; the original error stands.
+          }
           handler.next(e);
         },
       ),
@@ -52,6 +85,74 @@ class ApiClient {
   final TokenStore _tokenStore;
   final AppConfig _config;
   static final _log = AppLogger.of('ApiClient');
+
+  static const _retriedKey = 'kayan.authRetried';
+
+  /// One future shared by every request that hit an expired token at the
+  /// same time, so the rotating refresh token is presented exactly once.
+  Future<_RefreshOutcome>? _refreshInFlight;
+
+  /// Called once when the server definitively ends the session. The app uses
+  /// it to put the sign-in screen back instead of leaving a screen full of
+  /// failures that look like a broken program.
+  void Function()? onSessionExpired;
+
+  Future<_RefreshOutcome> _refreshSession() {
+    final pending = _refreshInFlight;
+    if (pending != null) return pending;
+
+    final future = _performRefresh();
+    _refreshInFlight = future;
+    return future.whenComplete(() {
+      if (identical(_refreshInFlight, future)) _refreshInFlight = null;
+    });
+  }
+
+  Future<_RefreshOutcome> _performRefresh() async {
+    final refreshToken = await _tokenStore.readRefreshToken();
+    if (refreshToken == null || refreshToken.isEmpty) {
+      return const _RefreshOutcome.invalid();
+    }
+    try {
+      final response = await _dio.post<dynamic>(
+        '/auth/refresh',
+        data: {'refreshToken': refreshToken},
+        options: Options(extra: const {'kayan.skipAuthRefresh': true}),
+      );
+      final data = response.data;
+      if (data is! Map) return const _RefreshOutcome.unavailable();
+      final accessToken = data['accessToken'];
+      final rotated = data['refreshToken'];
+      if (accessToken is! String || accessToken.isEmpty) {
+        return const _RefreshOutcome.unavailable();
+      }
+      await _tokenStore.saveTokens(
+        accessToken: accessToken,
+        refreshToken: rotated is String && rotated.isNotEmpty
+            ? rotated
+            : refreshToken,
+      );
+      _log.info('Access token renewed');
+      return _RefreshOutcome.success(accessToken);
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      if (status == 401 || status == 403) {
+        // The refresh token itself was refused or revoked. That is final:
+        // clear the dead session so the app does not keep replaying it, and
+        // let the UI return to sign-in with an explanation.
+        await _tokenStore.clear();
+        onSessionExpired?.call();
+        _log.info('Session ended: the refresh token was refused');
+        return const _RefreshOutcome.invalid();
+      }
+      // Offline or a server error: the session may still be perfectly good.
+      _log.warning('Could not renew the access token: ${e.type}');
+      return const _RefreshOutcome.unavailable();
+    } catch (error) {
+      _log.warning('Could not renew the access token: $error');
+      return const _RefreshOutcome.unavailable();
+    }
+  }
 
   Dio get raw => _dio;
 
@@ -172,8 +273,17 @@ class ApiClient {
         final message =
             _extractMessage(e.response?.data) ??
             'Request failed with status $status';
-        if (status == 401 || status == 403) {
-          return AuthFailure(message);
+        if (status == 401) {
+          // Sign-in and refresh themselves answer 401 for a wrong password
+          // or a dead refresh token; that is not an expired session.
+          final path = e.requestOptions.path;
+          if (path.endsWith('/auth/login') || path.endsWith('/auth/refresh')) {
+            return AuthFailure(message);
+          }
+          return SessionExpiredFailure(message);
+        }
+        if (status == 403) {
+          return PermissionFailure(message);
         }
         return ApiFailure(message, statusCode: status);
       case DioExceptionType.unknown:
@@ -190,4 +300,24 @@ class ApiClient {
     }
     return null;
   }
+}
+
+
+/// What one attempt to renew the access token produced.
+///
+/// `invalid` is the only outcome that ends the session: the server rejected
+/// the refresh token itself. `unavailable` means the server could not be
+/// reached, and signing the person out for a dropped connection would be
+/// both wrong and infuriating.
+class _RefreshOutcome {
+  const _RefreshOutcome.success(this.accessToken) : invalid = false;
+  const _RefreshOutcome.invalid()
+    : accessToken = null,
+      invalid = true;
+  const _RefreshOutcome.unavailable()
+    : accessToken = null,
+      invalid = false;
+
+  final String? accessToken;
+  final bool invalid;
 }

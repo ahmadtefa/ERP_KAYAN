@@ -59,13 +59,18 @@ export class HealthController {
       }
     }
 
+    // Only promise an address that is actually listening. A desktop copy
+    // binds to 127.0.0.1 on purpose, so handing out a LAN address here is a
+    // link that cannot open; the local address is the one that works.
+    const lanAccessible = host === '0.0.0.0';
     return {
       port,
       host,
-      isLanAccessible: host === '0.0.0.0',
-      addresses,
-      primaryUrl:
-        addresses.length > 0 ? addresses[0].url : `http://localhost:${port}`,
+      isLanAccessible: lanAccessible,
+      addresses: lanAccessible ? addresses : [],
+      primaryUrl: lanAccessible && addresses.length > 0
+        ? addresses[0].url
+        : `http://localhost:${port}`,
     };
   }
 }

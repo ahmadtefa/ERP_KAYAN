@@ -10,6 +10,8 @@ import '../extensions/l10n_extension.dart';
 String localizedError(BuildContext context, Object error) {
   final l10n = context.l10n;
   return switch (error) {
+    SessionExpiredFailure() => l10n.sessionExpired,
+    PermissionFailure() => l10n.permissionDenied,
     AuthFailure() => l10n.invalidCredentials,
     NetworkFailure() => l10n.networkError,
     ApiFailure(:final message) when message.isNotEmpty => message,

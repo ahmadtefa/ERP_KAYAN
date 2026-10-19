@@ -9,12 +9,18 @@ import '../../shared/extensions/l10n_extension.dart';
 import '../router/app_router.dart';
 
 /// One entry in the navigation.
+///
+/// [permission] is the server permission the module is built around. The
+/// navigation hides a module the account cannot open, instead of offering a
+/// button that only produces a 403. The server remains the authority: this is
+/// a courtesy, not the access rule.
 class _NavItem {
-  const _NavItem(this.path, this.icon, this.label);
+  const _NavItem(this.path, this.icon, this.label, [this.permission]);
 
   final String path;
   final IconData icon;
   final String label;
+  final String? permission;
 }
 
 /// Adaptive chrome around every authenticated screen.
@@ -154,58 +160,97 @@ class _ErpShellState extends ConsumerState<ErpShell> {
 
   List<_NavItem> _navigationItems(BuildContext context) {
     final l10n = context.l10n;
-    return [
+    final user = ref.watch(currentUserProvider);
+    final items = [
       _NavItem(AppRoutes.dashboard, Icons.dashboard_outlined, l10n.dashboard),
-      _NavItem(AppRoutes.cash, Icons.account_balance_wallet_outlined, l10n.cashAndBanks),
+      _NavItem(
+        AppRoutes.cash,
+        Icons.account_balance_wallet_outlined,
+        l10n.cashAndBanks,
+        'cash.accounts.read',
+      ),
       _NavItem(
         AppRoutes.journalEntries,
         Icons.menu_book_outlined,
         l10n.journalEntries,
+        'accounting.journal.read',
       ),
       _NavItem(
         AppRoutes.fiscalPeriods,
         Icons.event_available_outlined,
         l10n.fiscalPeriods,
+        'accounting.periods.read',
       ),
       _NavItem(
         AppRoutes.openingBalances,
         Icons.account_balance_wallet_outlined,
         l10n.openingBalancesTitle,
+        'accounting.openingbalances.manage',
       ),
-      _NavItem(AppRoutes.customers, Icons.people_outline, l10n.customers),
+      _NavItem(
+        AppRoutes.customers,
+        Icons.people_outline,
+        l10n.customers,
+        'parties.customers.read',
+      ),
       _NavItem(
         AppRoutes.suppliers,
         Icons.local_shipping_outlined,
         l10n.suppliers,
+        'parties.suppliers.read',
       ),
-      _NavItem(AppRoutes.items, Icons.category_outlined, l10n.items),
-      _NavItem(AppRoutes.stock, Icons.inventory_2_outlined, l10n.stock),
+      _NavItem(
+        AppRoutes.items,
+        Icons.category_outlined,
+        l10n.items,
+        'inventory.items.read',
+      ),
+      _NavItem(
+        AppRoutes.stock,
+        Icons.inventory_2_outlined,
+        l10n.stock,
+        'inventory.stock.read',
+      ),
       _NavItem(
         AppRoutes.salesInvoices,
         Icons.point_of_sale_outlined,
         l10n.salesInvoices,
+        'sales.invoices.read',
       ),
       _NavItem(
         AppRoutes.purchaseInvoices,
         Icons.shopping_cart_outlined,
         l10n.purchaseInvoices,
+        'purchases.invoices.read',
       ),
       _NavItem(
         AppRoutes.salesReturns,
         Icons.assignment_return_outlined,
         l10n.salesReturns,
+        'sales.returns.read',
       ),
       _NavItem(
         AppRoutes.purchaseReturns,
         Icons.keyboard_return_outlined,
         l10n.purchaseReturns,
+        'purchases.returns.read',
       ),
       _NavItem(
         AppRoutes.chartOfAccounts,
         Icons.account_tree_outlined,
         l10n.chartOfAccounts,
+        'accounting.accounts.read',
       ),
-      _NavItem(AppRoutes.reports, Icons.bar_chart_outlined, l10n.reports),
+      _NavItem(
+        AppRoutes.reports,
+        Icons.bar_chart_outlined,
+        l10n.reports,
+        'reports.read',
+      ),
+      // Import and the backup tools stay reachable for anyone signed in:
+      // their own endpoints still check the resource they touch, and hiding
+      // the import screen would strand the opening-balance review button
+      // that links to it.
       _NavItem(
         AppRoutes.importData,
         Icons.upload_file_outlined,
@@ -215,19 +260,30 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.backup,
         Icons.verified_user_outlined,
         l10n.backupTitle,
+        'admin.backup',
       ),
       _NavItem(
         AppRoutes.administration,
         Icons.admin_panel_settings_outlined,
         l10n.administration,
+        'admin.users.manage',
       ),
       _NavItem(
         AppRoutes.companySettings,
         Icons.business_outlined,
         l10n.companySettings,
+        'admin.company.manage',
       ),
       _NavItem(AppRoutes.settings, Icons.settings_outlined, l10n.settings),
     ];
+    return items
+        .where(
+          (item) =>
+              item.permission == null ||
+              user == null ||
+              user.can(item.permission!),
+        )
+        .toList(growable: false);
   }
 }
 

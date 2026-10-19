@@ -158,6 +158,36 @@ abstract class AppLocalizations {
   /// **'Cannot reach the server. Check your connection or the API address.'**
   String get networkError;
 
+  /// No description provided for @sessionExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'Your session has expired. Sign in again to continue.'**
+  String get sessionExpired;
+
+  /// No description provided for @permissionDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'You do not have permission to perform this action.'**
+  String get permissionDenied;
+
+  /// No description provided for @openingQuantity.
+  ///
+  /// In en, this message translates to:
+  /// **'Opening quantity'**
+  String get openingQuantity;
+
+  /// No description provided for @openingUnitCost.
+  ///
+  /// In en, this message translates to:
+  /// **'Opening unit cost'**
+  String get openingUnitCost;
+
+  /// No description provided for @openingStockHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional. Posts the stock and its inventory/equity entry with the item. Leave blank to enter opening stock later through Opening balances.'**
+  String get openingStockHint;
+
   /// No description provided for @loading.
   ///
   /// In en, this message translates to:

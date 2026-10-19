@@ -7,6 +7,11 @@ import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes } from 'node:crypto';
 import { AuditService } from '../../common/audit/audit.service';
+import { AuthUser } from '../../common/decorators/current-user.decorator';
+import {
+  DOWNLOAD_TICKET_TYPE,
+  downloadTicketTtl,
+} from '../../common/download-ticket';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 const MAX_FAILED_ATTEMPTS = 5;
@@ -48,6 +53,7 @@ export class AuthService {
             role: { include: { rolePermissions: { include: { permission: true } } } },
           },
         },
+        userPermissions: { include: { permission: true } },
       },
     });
 
@@ -110,11 +116,13 @@ export class AuthService {
         (ur.role.companyId === user.companyId || ur.role.companyId === null),
     );
     const permissions = [
-      ...new Set(
-        currentUserRoles.flatMap((ur) =>
+      ...new Set([
+        ...currentUserRoles.flatMap((ur) =>
           ur.role.rolePermissions.map((rp) => rp.permission.code),
         ),
-      ),
+        // Grants made to this one person on top of their roles.
+        ...user.userPermissions.map((grant) => grant.permission.code),
+      ]),
     ];
     const roles = [...new Set(currentUserRoles.map((ur) => ur.role.code))];
 
@@ -193,6 +201,9 @@ export class AuthService {
                 },
               },
             },
+            userPermissions: {
+              include: { permission: true },
+            },
           },
         },
       },
@@ -229,11 +240,12 @@ export class AuthService {
         (ur.role.companyId === user.companyId || ur.role.companyId === null),
     );
     const permissions = [
-      ...new Set(
-        currentUserRoles.flatMap((ur) =>
+      ...new Set([
+        ...currentUserRoles.flatMap((ur) =>
           ur.role.rolePermissions.map((rp) => rp.permission.code),
         ),
-      ),
+        ...user.userPermissions.map((grant) => grant.permission.code),
+      ]),
     ];
     const roles = [...new Set(currentUserRoles.map((ur) => ur.role.code))];
     const branchId =
@@ -268,6 +280,40 @@ export class AuthService {
       refreshToken: await this.issueRefreshToken(user.id),
       user: this.toSessionUser(user, roles, permissions, branchId),
     };
+  }
+
+  /// Mints the one-minute credential a browser navigation may carry.
+  ///
+  /// A download opens a tab and a tab cannot send an Authorization header.
+  /// Handing the tab the sign-in token would put a quarter-hour credential
+  /// into browser history; this ticket is scoped to navigation, expires in a
+  /// minute, and is signed with the same secret so there is one less secret to
+  /// rotate.
+  async issueDownloadTicket(
+    user: AuthUser,
+  ): Promise<{ ticket: string; expiresIn: number }> {
+    const record = await this.prisma.user.findUnique({
+      where: { id: user.userId },
+      select: { tokenVersion: true, isActive: true, deletedAt: true },
+    });
+    if (!record || !record.isActive || record.deletedAt !== null) {
+      throw new UnauthorizedException('Account is inactive or unavailable');
+    }
+    const expiresIn = downloadTicketTtl();
+    const ticket = await this.jwt.signAsync(
+      {
+        sub: user.userId,
+        companyId: user.companyId,
+        branchId: user.branchId,
+        tokenVersion: record.tokenVersion,
+        typ: DOWNLOAD_TICKET_TYPE,
+      },
+      {
+        secret: process.env.JWT_ACCESS_SECRET,
+        expiresIn,
+      },
+    );
+    return { ticket, expiresIn };
   }
 
   async logout(userId: string, refreshToken?: string): Promise<void> {

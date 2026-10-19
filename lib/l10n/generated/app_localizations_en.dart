@@ -41,6 +41,24 @@ class AppLocalizationsEn extends AppLocalizations {
       'Cannot reach the server. Check your connection or the API address.';
 
   @override
+  String get sessionExpired =>
+      'Your session has expired. Sign in again to continue.';
+
+  @override
+  String get permissionDenied =>
+      'You do not have permission to perform this action.';
+
+  @override
+  String get openingQuantity => 'Opening quantity';
+
+  @override
+  String get openingUnitCost => 'Opening unit cost';
+
+  @override
+  String get openingStockHint =>
+      'Optional. Posts the stock and its inventory/equity entry with the item. Leave blank to enter opening stock later through Opening balances.';
+
+  @override
   String get loading => 'Loading…';
 
   @override

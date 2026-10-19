@@ -1,6 +1,7 @@
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import { ALLOW_QUERY_TOKEN_KEY } from '../decorators/allow-query-token.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
@@ -32,16 +33,20 @@ const activePrincipal = {
     },
   ],
   branches: [{ branchId: 'branch-current' }],
+  userPermissions: [] as Array<{ permission: { code: string } }>,
 };
 
-function makeContext(authorization = 'Bearer access-token') {
+function makeContext(
+  authorization = 'Bearer access-token',
+  query: Record<string, unknown> = {},
+) {
   const request: {
     headers: Record<string, string>;
     query: Record<string, unknown>;
     user?: unknown;
   } = {
     headers: { authorization },
-    query: {},
+    query,
   };
   const context = {
     getHandler: jest.fn(),
@@ -57,11 +62,14 @@ type TestPrincipal = Omit<typeof activePrincipal, 'deletedAt'> & {
 
 function makeGuard(options?: {
   principal?: TestPrincipal | null;
-  tokenPayload?: typeof payload;
+  tokenPayload?: typeof payload & { typ?: string };
   verifyError?: Error;
+  allowQueryToken?: boolean;
 }) {
   const reflector = {
-    getAllAndOverride: jest.fn().mockReturnValue(false),
+    getAllAndOverride: jest.fn((key: string) =>
+      key === ALLOW_QUERY_TOKEN_KEY ? (options?.allowQueryToken ?? false) : false,
+    ),
   } as unknown as Reflector;
   const jwt = {
     verifyAsync: jest.fn().mockImplementation(() =>
@@ -125,6 +133,9 @@ describe('JwtAuthGuard account status and live authorization', () => {
           select: { branchId: true },
           orderBy: { branchId: 'asc' },
         },
+        userPermissions: {
+          select: { permission: { select: { code: true } } },
+        },
       },
     });
     expect(request.user).toEqual({
@@ -159,6 +170,24 @@ describe('JwtAuthGuard account status and live authorization', () => {
     await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
+  it('adds a personal grant to the permissions the roles give', async () => {
+    const principal = {
+      ...activePrincipal,
+      userPermissions: [{ permission: { code: 'cash.vouchers.create' } }],
+    };
+    const { guard } = makeGuard({ principal });
+    const { context, request } = makeContext();
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(request.user).toMatchObject({
+      permissions: [
+        'inventory.items.read',
+        'reports.read',
+        'cash.vouchers.create',
+      ],
+    });
+  });
+
   it('honors a permission revocation before the access token expires', async () => {
     const principal = {
       ...activePrincipal,
@@ -187,6 +216,33 @@ describe('JwtAuthGuard account status and live authorization', () => {
     await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
+  it('accepts a download ticket on a route that opted in to query credentials', async () => {
+    const ticketPayload = { ...payload, typ: 'download' };
+    const { guard } = makeGuard({ tokenPayload: ticketPayload, allowQueryToken: true });
+    const { context, request } = makeContext('', { ticket: 'ticket-token' });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(request.user).toMatchObject({
+      userId: payload.sub,
+      permissions: ['inventory.items.read', 'reports.read'],
+    });
+  });
+
+  it('does not accept a sign-in token where a download ticket is required', async () => {
+    const { guard } = makeGuard({ allowQueryToken: true });
+    const { context } = makeContext('', { token: 'access-token' });
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('does not accept a download ticket as a bearer token', async () => {
+    const ticketPayload = { ...payload, typ: 'download' };
+    const { guard } = makeGuard({ tokenPayload: ticketPayload });
+    const { context } = makeContext('Bearer ticket-token');
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
   it('rejects access tokens revoked by reset', async () => {
     const { guard } = makeGuard({ principal: { ...activePrincipal, tokenVersion: 1 } });
     await expect(guard.canActivate(makeContext().context)).rejects.toBeInstanceOf(UnauthorizedException);

@@ -41,6 +41,22 @@ class AppLocalizationsAr extends AppLocalizations {
       'تعذّر الوصول إلى الخادم. تحقق من الاتصال أو من عنوان الواجهة البرمجية.';
 
   @override
+  String get sessionExpired => 'انتهت صلاحية الجلسة. سجّل الدخول مرة أخرى للمتابعة.';
+
+  @override
+  String get permissionDenied => 'ليس لديك صلاحية لتنفيذ هذا الإجراء.';
+
+  @override
+  String get openingQuantity => 'الكمية الافتتاحية';
+
+  @override
+  String get openingUnitCost => 'تكلفة الوحدة الافتتاحية';
+
+  @override
+  String get openingStockHint =>
+      'اختياري. يرحّل المخزون وقيد المخزون/حقوق الملكية مع الصنف. اتركه فارغاً لإدخال المخزون الافتتاحي لاحقاً من الأرصدة الافتتاحية.';
+
+  @override
   String get loading => 'جارٍ التحميل…';
 
   @override

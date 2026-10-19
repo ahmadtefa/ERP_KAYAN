@@ -36,6 +36,14 @@ export class CreateItemDto {
 
   @IsOptional() @IsBoolean() isStockTracked?: boolean;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
+
+  /// Opening stock for a newly created item. Both must be given together;
+  /// the pair posts inventory / opening equity and writes the stock movement,
+  /// so the item is visible in the stock screen immediately. Entering opening
+  /// stock here is refused once the branch has an opening-balance document -
+  /// then the item belongs in that document instead.
+  @IsOptional() @IsString() openingQuantity?: string;
+  @IsOptional() @IsString() openingUnitCost?: string;
 }
 
 export class UpdateItemDto {

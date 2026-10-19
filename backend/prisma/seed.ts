@@ -248,11 +248,22 @@ async function main(): Promise<void> {
   // company rule. It is editable at any time from the roles screen, where the
   // owner decides who may do what.
   //
-  // The accountant keeps the books: the ledger, the parties, the stock and the
-  // reports. Sales and purchase invoices are added read-only, because
-  // reconciling receivables and payables needs to see them — raising and
-  // posting invoices belongs to whoever runs sales and purchasing.
-  const accountantModules = ['accounting', 'parties', 'inventory', 'reports'];
+  // The accountant keeps the books: the ledger, the parties, the stock, the
+  // cash and bank accounts, and the reports. Sales and purchase invoices are
+  // added read-only, because reconciling receivables and payables needs to see
+  // them — raising and posting invoices belongs to whoever runs sales and
+  // purchasing.
+  //
+  // Cash belongs here because a receipt or a payment is a bookkeeping entry:
+  // without it an accountant signed in with the seeded role cannot open the
+  // cash screen at all, which is what made those screens look broken.
+  const accountantModules = [
+    'accounting',
+    'parties',
+    'inventory',
+    'cash',
+    'reports',
+  ];
   const accountantReadOnly = ['sales.invoices.read', 'purchases.invoices.read'];
   for (const p of all.filter(
     (p) => accountantModules.includes(p.module) || accountantReadOnly.includes(p.code),

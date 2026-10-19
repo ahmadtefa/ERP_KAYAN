@@ -4,9 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { InvoiceStatus, Prisma, StockDirection } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { WarehouseService } from '../../common/warehouse/warehouse.service';
+import { AccountMapService } from '../accounting/account-map.service';
+import { PostingService } from '../accounting/posting.service';
 
 const MONEY_SCALE = 4;
 const RATE_SCALE = 4;
@@ -16,6 +19,9 @@ export class ItemsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly accounts: AccountMapService,
+    private readonly posting: PostingService,
+    private readonly warehouses: WarehouseService,
   ) {}
 
   async findAll(
@@ -58,7 +64,12 @@ export class ItemsService {
     return this.toResponse(item);
   }
 
-  async create(companyId: string, userId: string, body: object) {
+  async create(
+    companyId: string,
+    userId: string,
+    body: object,
+    branchId: string | null = null,
+  ) {
     const dto = body as Record<string, any>;
     const code = String(dto.code ?? '').trim();
     if (!code) throw new BadRequestException('code is required');
@@ -71,24 +82,153 @@ export class ItemsService {
       throw new ConflictException(`Item code ${code} is already used`);
     }
 
-    const created = await this.prisma.item.create({
-      data: {
-        companyId,
-        code,
-        nameEn: dto.nameEn as string,
-        nameAr: dto.nameAr as string,
-        unit: (dto.unit as string) ?? 'unit',
-        barcode: (dto.barcode as string) ?? null,
-        salePrice: this.money(dto.salePrice, 'salePrice'),
-        purchasePrice: this.money(dto.purchasePrice, 'purchasePrice'),
-        reorderLevel: this.money(dto.reorderLevel, 'reorderLevel'),
-        taxRate: dto.taxRate === undefined ? null : this.rate(dto.taxRate, 'taxRate'),
-        isStockTracked: (dto.isStockTracked as boolean) ?? true,
-        categoryId: (dto.categoryId as string) ?? null,
-        notes: (dto.notes as string) ?? null,
-        createdBy: userId,
-        updatedBy: userId,
-      },
+    const isStockTracked = (dto.isStockTracked as boolean) ?? true;
+    const openingQuantity = this.optionalMoney(dto.openingQuantity, 'openingQuantity');
+    const openingUnitCost = this.optionalMoney(dto.openingUnitCost, 'openingUnitCost');
+    const wantsOpeningStock =
+      openingQuantity !== null || openingUnitCost !== null;
+    if (wantsOpeningStock) {
+      if (!isStockTracked) {
+        throw new BadRequestException(
+          'Opening stock cannot be set on an item that is not stock-tracked',
+        );
+      }
+      if (openingQuantity === null || openingUnitCost === null) {
+        throw new BadRequestException(
+          'openingQuantity and openingUnitCost must be given together',
+        );
+      }
+      if (!openingQuantity.greaterThan(0)) {
+        throw new BadRequestException('openingQuantity must be greater than zero');
+      }
+      if (!branchId) {
+        throw new BadRequestException(
+          'Select a branch before adding opening stock',
+        );
+      }
+    }
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      if (wantsOpeningStock) {
+        // An opening-balance document already owns this branch's starting
+        // figures; adding a second opening entry for one item would count the
+        // same stock twice. Refuse rather than guess.
+        const existingOpening = await tx.openingBalance.findFirst({
+          where: {
+            companyId,
+            branchId: branchId!,
+            deletedAt: null,
+            status: { in: [InvoiceStatus.DRAFT, InvoiceStatus.POSTED] },
+          },
+          select: { documentNumber: true },
+        });
+        if (existingOpening) {
+          throw new BadRequestException(
+            `This branch already has an opening balance (${existingOpening.documentNumber}). ` +
+              'Add the item there instead of giving it opening stock here.',
+          );
+        }
+      }
+
+      const item = await tx.item.create({
+        data: {
+          companyId,
+          code,
+          nameEn: dto.nameEn as string,
+          nameAr: dto.nameAr as string,
+          unit: (dto.unit as string) ?? 'unit',
+          barcode: (dto.barcode as string) ?? null,
+          salePrice: this.money(dto.salePrice, 'salePrice'),
+          purchasePrice: this.money(dto.purchasePrice, 'purchasePrice'),
+          reorderLevel: this.money(dto.reorderLevel, 'reorderLevel'),
+          taxRate: dto.taxRate === undefined ? null : this.rate(dto.taxRate, 'taxRate'),
+          isStockTracked,
+          categoryId: (dto.categoryId as string) ?? null,
+          notes: (dto.notes as string) ?? null,
+          createdBy: userId,
+          updatedBy: userId,
+        },
+      });
+
+      if (wantsOpeningStock) {
+        const total = openingQuantity!
+          .mul(openingUnitCost!)
+          .toDecimalPlaces(MONEY_SCALE);
+        const accounts = await this.accounts.resolve(tx, companyId, [
+          'inventory',
+          'openingBalanceEquity',
+        ]);
+        const warehouseId = await this.warehouses.resolve(
+          tx,
+          companyId,
+          branchId!,
+        );
+        const asOf = new Date(new Date().toISOString().slice(0, 10));
+
+        await tx.stockMovement.create({
+          data: {
+            companyId,
+            branchId: branchId!,
+            warehouseId,
+            itemId: item.id,
+            movementDate: asOf,
+            direction: StockDirection.IN,
+            quantity: openingQuantity!,
+            unitCost: openingUnitCost!,
+            totalCost: total,
+            referenceType: 'ITEM_OPENING_STOCK',
+            referenceId: item.id,
+            referenceNumber: item.code,
+            notes: 'Opening stock entered with the item',
+            createdBy: userId,
+          },
+        });
+        await tx.stockBalance.upsert({
+          where: {
+            companyId_branchId_itemId: {
+              companyId,
+              branchId: branchId!,
+              itemId: item.id,
+            },
+          },
+          create: {
+            companyId,
+            branchId: branchId!,
+            itemId: item.id,
+            quantity: openingQuantity!,
+            value: total,
+          },
+          update: {
+            quantity: { increment: openingQuantity! },
+            value: { increment: total },
+          },
+        });
+
+        await this.posting.post(tx, {
+          companyId,
+          branchId: branchId!,
+          userId,
+          entryDate: asOf,
+          description: `Opening stock for ${item.code}`,
+          sourceType: 'OPENING_BALANCE',
+          sourceId: item.id,
+          sourceNumber: item.code,
+          lines: [
+            {
+              accountId: accounts.inventory,
+              debit: total,
+              description: `Opening stock ${item.code}`,
+            },
+            {
+              accountId: accounts.openingBalanceEquity,
+              credit: total,
+              description: `Opening stock ${item.code}`,
+            },
+          ],
+        });
+      }
+
+      return item;
     });
 
     await this.audit.record({
@@ -97,7 +237,12 @@ export class ItemsService {
       action: 'CREATE',
       entity: 'items',
       entityId: created.id,
-      after: { code: created.code, nameEn: created.nameEn },
+      after: {
+        code: created.code,
+        nameEn: created.nameEn,
+        openingQuantity: openingQuantity?.toFixed(MONEY_SCALE),
+        openingUnitCost: openingUnitCost?.toFixed(MONEY_SCALE),
+      },
     });
 
     return this.toResponse(created);
@@ -180,6 +325,18 @@ export class ItemsService {
     });
 
     return this.toResponse(updated);
+  }
+
+  /// Like `money`, but an absent/blank field means "not supplied" rather
+  /// than zero. Opening stock of zero is not an opening entry.
+  private optionalMoney(
+    value: unknown,
+    field: string,
+  ): Prisma.Decimal | null {
+    if (value === undefined || value === null || String(value).trim() === '') {
+      return null;
+    }
+    return this.money(value, field);
   }
 
   private money(value: unknown, field: string): Prisma.Decimal {

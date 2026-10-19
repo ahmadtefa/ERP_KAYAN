@@ -26,6 +26,8 @@ class LanAccessCard extends ConsumerWidget {
     final l10n = context.l10n;
     final isArabic = Localizations.localeOf(context).languageCode == 'ar';
     final networkAsync = ref.watch(networkInfoProvider);
+    final lanAccessible =
+        networkAsync.value?['isLanAccessible'] == true;
 
     return Card(
       child: Padding(
@@ -40,8 +42,12 @@ class LanAccessCard extends ConsumerWidget {
                 Expanded(
                   child: Text(
                     isArabic
-                        ? 'الدخول من جهاز آخر على شبكة الشركة (LAN)'
-                        : 'Local Network Access (LAN)',
+                        ? (lanAccessible
+                            ? 'الدخول من جهاز آخر على شبكة الشركة (LAN)'
+                            : 'فتح البرنامج في المتصفح (هذا الجهاز)')
+                        : (lanAccessible
+                            ? 'Local Network Access (LAN)'
+                            : 'Open in a browser (this computer)'),
                     style: theme.textTheme.titleMedium,
                   ),
                 ),
@@ -55,8 +61,12 @@ class LanAccessCard extends ConsumerWidget {
             const SizedBox(height: 8),
             Text(
               isArabic
-                  ? 'يمكن للأجهزة الأخرى (أجهزة كمبيوتر، هواتف، أجهزة لوحية) فتح برنامج KAYAN ERP مباشرة عبر متصفح الويب دون الحاجة لتثبيت أي برامج.'
-                  : 'Other devices (PCs, phones, tablets) can use KAYAN ERP directly through their web browser without installing anything.',
+                  ? (lanAccessible
+                      ? 'يمكن للأجهزة الأخرى (أجهزة كمبيوتر، هواتف، أجهزة لوحية) فتح برنامج KAYAN ERP مباشرة عبر متصفح الويب دون الحاجة لتثبيت أي برامج.'
+                      : 'هذه نسخة سطح مكتب: الخادم المرفق يعمل على هذا الجهاز فقط لأسباب أمنية. افتح الرابط أدناه في متصفح هذا الجهاز، أو استخدم تطبيق سطح المكتب.')
+                  : (lanAccessible
+                      ? 'Other devices (PCs, phones, tablets) can use KAYAN ERP directly through their web browser without installing anything.'
+                      : 'This is a desktop installation: its bundled server listens on this computer only, for security. Open the address below in a browser on this machine, or use the desktop app.'),
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 16),
@@ -65,11 +75,10 @@ class LanAccessCard extends ConsumerWidget {
               error: (_, _) => const SizedBox.shrink(),
               data: (data) {
                 final port = data['port'] ?? 3000;
+                final lan = data['isLanAccessible'] == true;
                 final addresses = data['addresses'] as List<dynamic>? ?? [];
                 final primaryUrl = data['primaryUrl'] as String? ??
-                    (addresses.isNotEmpty
-                        ? (addresses.first['url'] as String? ?? 'http://192.168.1.2:$port')
-                        : 'http://localhost:$port');
+                    'http://localhost:$port';
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -116,7 +125,7 @@ class LanAccessCard extends ConsumerWidget {
                         ],
                       ),
                     ),
-                    if (addresses.length > 1) ...[
+                    if (lan && addresses.length > 1) ...[
                       const SizedBox(height: 8),
                       Text(
                         isArabic ? 'عناوين إضافية للشبكة:' : 'Alternative addresses:',
@@ -137,36 +146,57 @@ class LanAccessCard extends ConsumerWidget {
                       style: theme.textTheme.titleSmall,
                     ),
                     const SizedBox(height: 6),
-                    _InstructionStep(
-                      number: '1',
-                      text: isArabic
-                          ? 'تأكد من اتصال الجهاز الآخر بنفس شبكة الراوتر (واي فاي Wi-Fi أو كابل إيثرنت).'
-                          : 'Connect the other device to the same local network (Wi-Fi or Ethernet).',
-                    ),
-                    _InstructionStep(
-                      number: '2',
-                      text: isArabic
-                          ? 'افتح متصفح الويب (Google Chrome أو Microsoft Edge) على الجهاز الآخر.'
-                          : 'Open a web browser (Chrome or Edge) on the other device.',
-                    ),
-                    _InstructionStep(
-                      number: '3',
-                      text: isArabic
-                          ? 'اكتب الرابط أعلاه بالكامل متضمنًا المنفذ (مثل: $primaryUrl).'
-                          : 'Enter the full address including port (e.g. $primaryUrl).',
-                    ),
-                    _InstructionStep(
-                      number: '4',
-                      text: isArabic
-                          ? 'سجّل الدخول بحساب المستخدم الخاص بك واستخدم النظام كالمعتاد.'
-                          : 'Sign in with your credentials and use the system normally.',
-                    ),
-                    _InstructionStep(
-                      number: '5',
-                      text: isArabic
-                          ? 'جدار الحماية (Windows Firewall): تم ضبط السماح للمنفذ $port تلقائياً أثناء التثبيت للشبكات الخاصة.'
-                          : 'Windows Firewall: Port $port is automatically allowed for private networks.',
-                    ),
+                    if (lan) ...[
+                      _InstructionStep(
+                        number: '1',
+                        text: isArabic
+                            ? 'تأكد من اتصال الجهاز الآخر بنفس شبكة الراوتر (واي فاي Wi-Fi أو كابل إيثرنت).'
+                            : 'Connect the other device to the same local network (Wi-Fi or Ethernet).',
+                      ),
+                      _InstructionStep(
+                        number: '2',
+                        text: isArabic
+                            ? 'افتح متصفح الويب (Google Chrome أو Microsoft Edge) على الجهاز الآخر.'
+                            : 'Open a web browser (Chrome or Edge) on the other device.',
+                      ),
+                      _InstructionStep(
+                        number: '3',
+                        text: isArabic
+                            ? 'اكتب الرابط أعلاه بالكامل متضمنًا المنفذ (مثل: $primaryUrl).'
+                            : 'Enter the full address including port (e.g. $primaryUrl).',
+                      ),
+                      _InstructionStep(
+                        number: '4',
+                        text: isArabic
+                            ? 'سجّل الدخول بحساب المستخدم الخاص بك واستخدم النظام كالمعتاد.'
+                            : 'Sign in with your credentials and use the system normally.',
+                      ),
+                      _InstructionStep(
+                        number: '5',
+                        text: isArabic
+                            ? 'إذا لم يتصل الجهاز الآخر، اسمح لبرنامج KAYAN ERP بالمرور عبر جدار الحماية على الشبكات الخاصة فقط.'
+                            : 'If another device cannot connect, allow KAYAN ERP through Windows Firewall on private networks only.',
+                      ),
+                    ] else ...[
+                      _InstructionStep(
+                        number: '1',
+                        text: isArabic
+                            ? 'افتح متصفح الويب (Google Chrome أو Microsoft Edge) على هذا الجهاز.'
+                            : 'Open a web browser (Chrome or Edge) on this computer.',
+                      ),
+                      _InstructionStep(
+                        number: '2',
+                        text: isArabic
+                            ? 'اكتب الرابط أعلاه بالكامل (مثل: $primaryUrl).'
+                            : 'Enter the address above exactly (e.g. $primaryUrl).',
+                      ),
+                      _InstructionStep(
+                        number: '3',
+                        text: isArabic
+                            ? 'سجّل الدخول بحساب المستخدم الخاص بك واستخدم النظام كالمعتاد.'
+                            : 'Sign in with your credentials and use the system normally.',
+                      ),
+                    ],
                   ],
                 );
               },

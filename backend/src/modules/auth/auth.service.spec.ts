@@ -25,6 +25,7 @@ describe('refresh session security', () => {
           deletedAt: null,
           lockedUntil: null,
           userRoles: [],
+          userPermissions: [],
         }),
         update: jest.fn().mockResolvedValue({}),
       },
@@ -223,6 +224,8 @@ describe('refresh session security', () => {
           },
         },
       ],
+      // A personal grant on top of the roles must reach the session too.
+      userPermissions: [{ permission: { code: 'cash.vouchers.create' } }],
     };
     const userBranchFindMany = jest.fn().mockResolvedValue([{ branchId: 'branch-1' }]);
     const jwt = { signAsync: jest.fn().mockResolvedValue('access-token') };
@@ -244,7 +247,11 @@ describe('refresh session security', () => {
       const result = await service.login('employee', 'correct-password');
 
       expect(result.user.roles).toEqual(['ACCOUNTANT', 'SYSTEM_VIEWER']);
-      expect(result.user.permissions).toEqual(['reports.read', 'inventory.items.read']);
+      expect(result.user.permissions).toEqual([
+        'reports.read',
+        'inventory.items.read',
+        'cash.vouchers.create',
+      ]);
       expect(result.user.branchId).toBe('branch-1');
       expect(userBranchFindMany).toHaveBeenCalledWith({
         where: {

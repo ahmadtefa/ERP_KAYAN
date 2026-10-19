@@ -386,6 +386,24 @@ export class OpeningBalancesService {
           );
         }
 
+        // An item created with its own opening stock already carries that
+        // quantity. Counting it again through this document would double the
+        // stock and the inventory account.
+        const openingStockAtCreate = await tx.stockMovement.findFirst({
+          where: {
+            companyId,
+            itemId: item.id,
+            referenceType: 'ITEM_OPENING_STOCK',
+          },
+          select: { id: true },
+        });
+        if (openingStockAtCreate) {
+          throw new BadRequestException(
+            `Item ${item.code} already has opening stock recorded when it was created. ` +
+              'Remove that opening stock or leave the item out of this document.',
+          );
+        }
+
         await tx.stockMovement.create({
           data: {
             companyId,

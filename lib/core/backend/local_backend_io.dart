@@ -409,6 +409,13 @@ class LocalBackend {
           // The desktop server is private to this machine.
           'KAYAN_UPLOAD_DIR':
               '${layout.dataDirectory.path}${Platform.pathSeparator}uploads',
+          // Say where the browser client is instead of hoping the server
+          // guesses it from its working directory: the address must open the
+          // program, not a JSON 404.
+          'KAYAN_WEB_ROOT':
+              '${File(layout.backendDirectory).parent.path}'
+              '${Platform.pathSeparator}build'
+              '${Platform.pathSeparator}web',
           'HOST': '127.0.0.1',
           'NODE_ENV': 'production',
           // The server writes to a file, where escape sequences are noise.

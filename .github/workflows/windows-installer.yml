@@ -57,6 +57,15 @@ jobs:
           python -m pip install --disable-pip-version-check Pillow
           python scripts/generate_app_icons.py
 
+      - name: Compile RepairTool.exe (early check)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = Join-Path $env:RUNNER_TEMP 'RepairTool.exe'
+          .\distribution\windows\build-repair-tool.ps1 -OutputPath $output -IconPath '.\windows\runner\resources\app_icon.ico'
+          $item = Get-Item -LiteralPath $output
+          Write-Host "RepairTool.exe compiled early: $($item.Length) bytes"
+
       - name: Enable Flutter Windows desktop
         run: flutter config --enable-windows-desktop
 

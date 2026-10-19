@@ -60,8 +60,13 @@ class AuthRepositoryImpl implements AuthRepository {
           : json;
       return Success(UserDto(userJson).toDomain());
     } on Failure catch (failure) {
-      // An invalid/expired token must not lock the app in a broken state.
-      await _tokenStore.clear();
+      // A refused token is dead and must not be replayed. A network failure
+      // is not a verdict on the token: clearing it would sign the person out
+      // for a dropped connection, so those credentials are kept for the next
+      // attempt.
+      if (failure is AuthFailure || failure is SessionExpiredFailure) {
+        await _tokenStore.clear();
+      }
       return ResultFailure(failure);
     } catch (e) {
       await _tokenStore.clear();

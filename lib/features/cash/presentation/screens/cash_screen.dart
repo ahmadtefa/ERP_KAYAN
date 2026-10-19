@@ -525,7 +525,12 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 ),
                 ColumnSpec(
                   l10n.voucherType,
-                  value: (r) => text(r, 'kind') == 'BANK' ? l10n.bank : l10n.cashBox,
+                  // The API stores and returns lowercase `cash`/`bank`, while
+                  // this screen creates accounts with `CASH`/`BANK`. Compare
+                  // without case so a bank is never labelled a cash box.
+                  value: (r) => text(r, 'kind').toUpperCase() == 'BANK'
+                      ? l10n.bank
+                      : l10n.cashBox,
                 ),
                 ColumnSpec(
                   isArabic ? l10n.fullNameAr : l10n.fullNameEn,

@@ -177,6 +177,7 @@ foreach ($relative in @(
   "install-runtime.ps1",
   "repair-runtime.ps1",
   "repair-kayan.bat",
+  "RepairTool.exe",
   "database-control.ps1",
   "erp_kayan.exe"
 )) {
@@ -247,16 +248,31 @@ if ($sentinelExit -ne 0 -or (($sentinelResult -join '').Trim() -ne 'preserved'))
 }
 Write-Host "PASS: the upgrade/reinstall retained the existing company-data probe."
 
-# Exercise the bundled repair tool against a stopped service and a re-corrupted
-# 0-ACE kayan.env file, proving that repair-runtime.ps1 restores both service
-# health and file permissions without losing company data.
+# Exercise the bundled RepairTool.exe against a stopped service and a
+# re-corrupted 0-ACE kayan.env file. The tool must (a) report the problems it
+# detected, (b) attempt the repair, and (c) confirm afterwards that no problems
+# remain -- while company data and credentials are preserved.
 Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
 [System.IO.File]::SetAccessControl($settings, $emptyAcl)
-$repairScript = Join-Path $installRoot "repair-runtime.ps1"
-$repair = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ('"' + $repairScript + '"'), "-Quiet") -WorkingDirectory $installRoot -Wait -PassThru -NoNewWindow
-if ($repair.ExitCode -ne 0) {
-  Fail "The bundled repair tool (repair-runtime.ps1) failed with exit code $($repair.ExitCode)."
+$repairTool = Join-Path $installRoot "RepairTool.exe"
+if (-not (Test-Path $repairTool)) { Fail "The installed package is missing RepairTool.exe." }
+$diagnoseBeforeLog = Join-Path $env:TEMP "kayan-repairtool-before.log"
+$diagnoseBefore = Start-Process -FilePath $repairTool -ArgumentList @("--diagnose") -WorkingDirectory $installRoot -Wait -PassThru -RedirectStandardOutput $diagnoseBeforeLog -RedirectStandardError "$diagnoseBeforeLog.err"
+if ($diagnoseBefore.ExitCode -eq 0) {
+  $beforeText = (Get-Content -LiteralPath $diagnoseBeforeLog -Raw -ErrorAction SilentlyContinue)
+  Fail "RepairTool.exe --diagnose reported a healthy installation while the PostgreSQL service was stopped. Output: $beforeText"
 }
+Write-Host "PASS: RepairTool.exe detected the stopped PostgreSQL service before repair (diagnose exit code $($diagnoseBefore.ExitCode))."
+
+$repair = Start-Process -FilePath $repairTool -ArgumentList @("--repair", "--quiet") -WorkingDirectory $installRoot -Wait -PassThru
+if ($repair.ExitCode -ne 0) {
+  Fail "The bundled RepairTool.exe failed with exit code $($repair.ExitCode). See $runtimeLog and $env:ProgramData\KAYAN-ERP\logs\repairtool.log"
+}
+$diagnoseAfter = Start-Process -FilePath $repairTool -ArgumentList @("--diagnose") -WorkingDirectory $installRoot -Wait -PassThru
+if ($diagnoseAfter.ExitCode -ne 0) {
+  Fail "RepairTool.exe --diagnose still reports problems after a successful repair (exit code $($diagnoseAfter.ExitCode)). See $env:ProgramData\KAYAN-ERP\logs\repairtool.log"
+}
+Write-Host "PASS: RepairTool.exe confirmed a healthy installation after the repair."
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if (-not $service -or $service.Status -ne "Running") {
   Fail "The bundled repair tool did not restart the PostgreSQL service."
@@ -271,7 +287,7 @@ Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
 if ($repairProbeExit -ne 0 -or (($repairProbe -join '').Trim() -ne 'preserved')) {
   Fail ("The company-data probe did not survive the bundled repair tool run. PostgreSQL output: " + ($repairProbe -join ' '))
 }
-Write-Host "PASS: bundled repair tool recovered the 0-ACE kayan.env and stopped PostgreSQL service while preserving company data."
+Write-Host "PASS: bundled RepairTool.exe recovered the 0-ACE kayan.env and stopped PostgreSQL service while preserving company data."
 
 # The important test: start the actual installed Flutter executable by itself.
 $clientPath = Join-Path $installRoot "erp_kayan.exe"

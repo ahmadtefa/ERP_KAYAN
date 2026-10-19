@@ -6,7 +6,15 @@ import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
+import '../../../accounting/presentation/providers/chart_of_accounts_providers.dart';
+import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../../../inventory/presentation/screens/items_screen.dart'
+    show itemsListProvider;
+import '../../../inventory/presentation/screens/stock_screen.dart'
+    show stockListProvider;
+import '../../../parties/presentation/screens/parties_screen.dart'
+    show customersListProvider, suppliersListProvider;
 import '../providers/data_providers.dart';
 
 /// Bringing customers, suppliers or items in from a spreadsheet.
@@ -435,6 +443,17 @@ class _ResultCard extends ConsumerWidget {
             mode: current.mode,
             dryRun: false,
           );
+      // An import writes records other screens have already cached. Refresh
+      // them now, so a customer, item or opening stock imported here appears
+      // in the invoice pickers, item list and stock screen without a restart.
+      ref.invalidate(customersProvider);
+      ref.invalidate(suppliersProvider);
+      ref.invalidate(itemsProvider);
+      ref.invalidate(customersListProvider);
+      ref.invalidate(suppliersListProvider);
+      ref.invalidate(itemsListProvider);
+      ref.invalidate(chartOfAccountsProvider);
+      ref.invalidate(stockListProvider);
       controller.succeeded(report);
     } catch (error) {
       controller.failed(describeApiError(error));

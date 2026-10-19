@@ -108,6 +108,12 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
         await client.post(_path, body: values);
       }
       await ref.read(_provider.notifier).reload();
+      // The invoice and voucher pickers read these cached lists. Without
+      // this a customer created here is missing from the invoice form until
+      // the program is restarted - the bug that made new parties look
+      // invisible.
+      ref.invalidate(customersProvider);
+      ref.invalidate(suppliersProvider);
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
       if (mounted) showMessage(context, e.message, error: true);
@@ -138,6 +144,12 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
         await client.patch('$_path/${row['id']}', body: {'isActive': true});
       }
       await ref.read(_provider.notifier).reload();
+      // The invoice and voucher pickers read these cached lists. Without
+      // this a customer created here is missing from the invoice form until
+      // the program is restarted - the bug that made new parties look
+      // invisible.
+      ref.invalidate(customersProvider);
+      ref.invalidate(suppliersProvider);
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
       if (mounted) showMessage(context, e.message, error: true);
