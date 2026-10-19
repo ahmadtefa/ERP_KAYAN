@@ -19,6 +19,7 @@ import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { attributedLines } from '../accounting/cost-center-attribution';
 import { PostingService } from '../accounting/posting.service';
+import { applyInvoiceDiscount } from '../invoicing/invoice-discount';
 import { allocateLandedCostAmounts } from './landed-cost-allocation';
 import {
   CreatePurchaseInvoiceDto,
@@ -135,6 +136,8 @@ export class PurchaseInvoicesService {
         taxRate: l.taxRate.toFixed(RATE_SCALE),
         taxAmount: l.taxAmount.toFixed(MONEY_SCALE),
         lineTotal: l.lineTotal.toFixed(MONEY_SCALE),
+        discountPercent: l.discountPercent.toFixed(RATE_SCALE),
+        discountAmount: l.discountAmount.toFixed(MONEY_SCALE),
         landedCostAmount: l.landedCostAmount.toFixed(MONEY_SCALE),
         inventoryCostTotal: l.inventoryCostTotal.toFixed(MONEY_SCALE),
         costCenterId: l.costCenterId ?? null,
@@ -162,12 +165,12 @@ export class PurchaseInvoicesService {
 
     const landedCosts = this.prepareLandedCosts(dto);
     const landedCostAmount = landedCosts.total;
-    const lines = await this.prepareLines(
-      companyId,
-      dto.lines,
-      dto.supplierId,
-      landedCostAmount,
+    const discount = applyInvoiceDiscount(
+      await this.prepareLines(companyId, dto.lines, dto.supplierId, landedCostAmount),
+      dto.discountPercent,
+      dto.discountAmount,
     );
+    const lines = discount.lines;
     const subTotal = lines.reduce((s, l) => s.plus(l.lineTotal), new Prisma.Decimal(0));
     const taxAmount = lines.reduce((s, l) => s.plus(l.taxAmount), new Prisma.Decimal(0));
     const totalAmount = subTotal.plus(taxAmount).plus(landedCostAmount);
@@ -193,6 +196,10 @@ export class PurchaseInvoicesService {
             : (await this.dueDateFromTerms(companyId, dto.supplierId, new Date(dto.invoiceDate))),
           supplierId: dto.supplierId,
           status: InvoiceStatus.DRAFT,
+          discountPercent: discount.discountPercent,
+          discountAmount: discount.discountAmount,
+          discountPercent: discount.discountPercent,
+          discountAmount: discount.discountAmount,
           subTotal,
           taxAmount,
           totalAmount,
@@ -210,6 +217,8 @@ export class PurchaseInvoicesService {
               taxRate: l.taxRate,
               taxAmount: l.taxAmount,
               lineTotal: l.lineTotal,
+              discountPercent: l.discountPercent,
+              discountAmount: l.discountAmount,
               landedCostAmount: l.landedCostAmount,
               inventoryCostTotal: l.inventoryCostTotal,
               costCenterId: l.costCenterId,
@@ -274,12 +283,12 @@ export class PurchaseInvoicesService {
 
     const landedCosts = this.prepareLandedCosts(dto);
     const landedCostAmount = landedCosts.total;
-    const lines = await this.prepareLines(
-      companyId,
-      dto.lines,
-      dto.supplierId,
-      landedCostAmount,
+    const discount = applyInvoiceDiscount(
+      await this.prepareLines(companyId, dto.lines, dto.supplierId, landedCostAmount),
+      dto.discountPercent,
+      dto.discountAmount,
     );
+    const lines = discount.lines;
     const subTotal = lines.reduce((sum, line) => sum.plus(line.lineTotal), new Prisma.Decimal(0));
     const taxAmount = lines.reduce((sum, line) => sum.plus(line.taxAmount), new Prisma.Decimal(0));
     const totalAmount = subTotal.plus(taxAmount).plus(landedCostAmount);
@@ -326,6 +335,8 @@ export class PurchaseInvoicesService {
               taxRate: line.taxRate,
               taxAmount: line.taxAmount,
               lineTotal: line.lineTotal,
+              discountPercent: line.discountPercent,
+              discountAmount: line.discountAmount,
               landedCostAmount: line.landedCostAmount,
               inventoryCostTotal: line.inventoryCostTotal,
               costCenterId: line.costCenterId,
@@ -941,6 +952,8 @@ export class PurchaseInvoicesService {
     status: InvoiceStatus;
     currency: string;
     subTotal: Prisma.Decimal;
+    discountPercent: Prisma.Decimal;
+    discountAmount: Prisma.Decimal;
     taxAmount: Prisma.Decimal;
     totalAmount: Prisma.Decimal;
     landedCostAmount: Prisma.Decimal;
@@ -960,6 +973,8 @@ export class PurchaseInvoicesService {
       currency: invoice.currency,
       supplier: invoice.supplier,
       subTotal: invoice.subTotal.toFixed(MONEY_SCALE),
+      discountPercent: invoice.discountPercent.toFixed(RATE_SCALE),
+      discountAmount: invoice.discountAmount.toFixed(MONEY_SCALE),
       taxAmount: invoice.taxAmount.toFixed(MONEY_SCALE),
       totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),
       landedCostAmount: invoice.landedCostAmount.toFixed(MONEY_SCALE),
