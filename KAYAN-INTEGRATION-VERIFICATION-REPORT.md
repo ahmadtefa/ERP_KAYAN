@@ -830,3 +830,25 @@ inline label helper. Fix commit: `355c229`.
 
 The failing run is **not** counted as a pass. A new CI/Windows workflow run must finish against the
 updated branch head before this implementation pass can be called verified.
+
+
+## 16. Navigation recovery and verification — 2026-10-19
+
+### 16.1 Read-only navigation permission alignment
+
+- Opening balances is now shown to users with `accounting.journal.read`, matching the GET endpoints. Creating, posting and reversing an opening-balance document still require `accounting.openingbalances.manage` on the API.
+- Sales returns navigation follows `sales.invoices.read`; purchase returns follows `purchases.invoices.read`. These are the actual read permissions on the return list/detail API routes. Create/post/reverse remain protected by their respective invoice create/post permissions.
+- Added a widget test that gives the user only the relevant read permissions and verifies cash/banks, opening balances, sales returns and purchase returns are visible.
+- Added an idempotent database migration to grant cash-account read permission to active roles that already have journal-read permission, without granting account management, voucher creation or posting.
+- Source commits: `f3123df`, `5f104ea`, `4394fe7`, plus the cash permission migration commit on this branch.
+
+### 16.2 CI and Windows installer state at report update
+
+- ERP KAYAN CI for branch head `4394fe7f38f27ce56fed11a80fd73bda32925200`: **PASS** (including Linux/Web analysis, tests/builds, backend PostgreSQL smoke test and regression scenario).
+- The regression scenario job reported **SUCCESS**.
+- Windows Installer workflow for the same head: **IN PROGRESS** at the time of this report update. No installer artifact is claimed until that workflow completes and the artifact is inspected.
+- The widget test and migration were checked by CI; a human Windows installed-app walkthrough, Arabic RTL visual verification, and second-computer LAN test are still not equivalent to automated CI and remain unverified.
+
+### 16.3 Scope still not completed by this pass
+
+The navigation fix does not itself implement invoice discounts, quotation screens/workflow, Excel accounting import, resizable/maximizable dialogs, complete export/print parity, or full backup/restore test coverage. Those remain explicit follow-up work and must not be reported as complete based only on this navigation change.
