@@ -61,7 +61,7 @@ void main() {
       ProviderScope(
         overrides: [
           apiClientProvider.overrideWithValue(api),
-          activeItemsProvider.overrideWith((ref) async => [
+          itemsProvider.overrideWith((ref) async => [
             {
               'id': 'item-1',
               'code': 'ITEM-1',
@@ -74,7 +74,7 @@ void main() {
               'salePrice': '100.0000',
             },
           ]),
-          activeCustomersProvider.overrideWith((ref) async => [
+          customersProvider.overrideWith((ref) async => [
             {
               'id': 'customer-1',
               'code': 'CUS-1',
