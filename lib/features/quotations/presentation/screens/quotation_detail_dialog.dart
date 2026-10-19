@@ -211,9 +211,17 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                               : text(quotation, 'validUntil'),
                         ),
                         field(l10n.customer, customer),
+                        if (text(quotation, 'subject').isNotEmpty)
+                          field(l10n.subject, text(quotation, 'subject')),
                         field(
                           l10n.currency,
                           text(quotation, 'currency', fallback: '—'),
+                        ),
+                        field(
+                          l10n.showTaxNumberOnOffer,
+                          quotation['showTaxId'] == false
+                              ? l10n.notPrintedOnOffer
+                              : l10n.printedOnOffer,
                         ),
                       ],
                     ),
@@ -283,6 +291,34 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                       ),
                       icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
                       label: Text(l10n.downloadPdf),
+                    ),
+                  if (canExport)
+                    OutlinedButton.icon(
+                      onPressed: () => runDownload(
+                        context,
+                        links.documentFile(
+                          kind: 'sales-quotation',
+                          id: widget.id,
+                          format: 'xlsx',
+                          language: language,
+                        ),
+                      ),
+                      icon: const Icon(Icons.grid_on_outlined, size: 18),
+                      label: Text(l10n.exportExcel),
+                    ),
+                  if (canExport)
+                    OutlinedButton.icon(
+                      onPressed: () => runDownload(
+                        context,
+                        links.documentFile(
+                          kind: 'sales-quotation',
+                          id: widget.id,
+                          format: 'csv',
+                          language: language,
+                        ),
+                      ),
+                      icon: const Icon(Icons.table_view_outlined, size: 18),
+                      label: Text(l10n.exportCsv),
                     ),
                   if (canManage && canEdit)
                     OutlinedButton.icon(
@@ -357,7 +393,12 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
               ),
               const Divider(height: 24),
               for (var index = 0; index < tables.length; index++)
-                _table(context, tables[index], index),
+                _table(
+                  context,
+                  tables[index],
+                  index,
+                  listOf(quotation['columns']),
+                ),
               if (text(quotation, 'terms').isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(l10n.termsAndConditions, style: theme.textTheme.titleSmall),
@@ -410,11 +451,79 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
     );
   }
 
-  Widget _table(BuildContext context, Json table, int index) {
+  /// The columns this offer prints: its own layout when it has one, the
+  /// standard six otherwise. The detail screen, the printed page and the
+  /// spreadsheet therefore show the same columns in the same order.
+  List<Json> _layout(List<Json> stored) {
+    if (stored.isNotEmpty) return stored.where((row) => row['visible'] != false).toList();
+    return const <Json>[
+      {'key': 'description', 'width': 4, 'visible': true},
+      {'key': 'countryOfOrigin', 'width': 2, 'visible': true},
+      {'key': 'unit', 'width': 1, 'visible': true},
+      {'key': 'quantity', 'width': 1, 'visible': true},
+      {'key': 'unitPrice', 'width': 2, 'visible': true},
+      {'key': 'lineTotal', 'width': 2, 'visible': true},
+    ];
+  }
+
+  String _columnName(BuildContext context, String key) {
+    final l10n = context.l10n;
+    return switch (key) {
+      'itemCode' => l10n.itemCode,
+      'description' => l10n.description,
+      'countryOfOrigin' => l10n.countryOfOrigin,
+      'unit' => l10n.unit,
+      'quantity' => l10n.quantity,
+      'unitPrice' => l10n.unitPrice,
+      _ => l10n.lineTotal,
+    };
+  }
+
+  String _columnLabel(
+    BuildContext context,
+    Json column,
+    String language,
+  ) {
+    final override = language == 'ar'
+        ? text(column, 'labelAr')
+        : text(column, 'labelEn');
+    if (override.isNotEmpty) return override;
+    return _columnName(context, text(column, 'key'));
+  }
+
+  String _cell(Json line, String key, String language) {
+    switch (key) {
+      case 'itemCode':
+        return text(line, 'itemCode').isEmpty ? '—' : text(line, 'itemCode');
+      case 'countryOfOrigin':
+        return text(line, 'countryOfOrigin').isEmpty
+            ? '—'
+            : text(line, 'countryOfOrigin');
+      case 'unit':
+        return text(line, 'unit');
+      case 'quantity':
+        return formatQuantity(text(line, 'quantity'));
+      case 'unitPrice':
+        return formatAmount(text(line, 'unitPrice'), locale: language);
+      case 'lineTotal':
+        return formatAmount(text(line, 'lineTotal'));
+      default:
+        return text(line, 'description');
+    }
+  }
+
+  Widget _table(
+    BuildContext context,
+    Json table,
+    int index,
+    List<Json> storedColumns,
+  ) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final language = Localizations.localeOf(context).languageCode;
     final lines = listOf(table['lines']);
+    final columns = _layout(storedColumns);
+    const numeric = {'quantity', 'unitPrice', 'lineTotal'};
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -444,12 +553,11 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                 dataTextStyle: theme.textTheme.bodySmall,
                 columns: [
                   DataColumn(label: Text('#')),
-                  DataColumn(label: Text(l10n.description)),
-                  DataColumn(label: Text(l10n.countryOfOrigin)),
-                  DataColumn(label: Text(l10n.quantity), numeric: true),
-                  DataColumn(label: Text(l10n.unit)),
-                  DataColumn(label: Text(l10n.unitPrice), numeric: true),
-                  DataColumn(label: Text(l10n.lineTotal), numeric: true),
+                  for (final column in columns)
+                    DataColumn(
+                      label: Text(_columnLabel(context, column, language)),
+                      numeric: numeric.contains(text(column, 'key')),
+                    ),
                 ],
                 rows: [
                   for (final line in lines)
@@ -458,27 +566,12 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                         DataCell(
                           Text(asNum(line['lineNumber'])?.toString() ?? ''),
                         ),
-                        DataCell(Text(text(line, 'description'))),
-                        DataCell(
-                          Text(
-                            text(line, 'countryOfOrigin').isEmpty
-                                ? '—'
-                                : text(line, 'countryOfOrigin'),
-                          ),
-                        ),
-                        DataCell(
-                          Text(formatQuantity(text(line, 'quantity'))),
-                        ),
-                        DataCell(Text(text(line, 'unit'))),
-                        DataCell(
-                          Text(
-                            formatAmount(
-                              text(line, 'unitPrice'),
-                              locale: language,
+                        for (final column in columns)
+                          DataCell(
+                            Text(
+                              _cell(line, text(column, 'key'), language),
                             ),
                           ),
-                        ),
-                        DataCell(Text(formatAmount(text(line, 'lineTotal')))),
                       ],
                     ),
                 ],

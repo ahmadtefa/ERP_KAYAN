@@ -52,6 +52,39 @@ class _QLineDraft {
   }
 }
 
+/// One line column as this offer prints it. The key names a line field; the
+/// labels override the built-in text, and a hidden column is kept so it can be
+/// turned back on without rebuilding the layout.
+class _QColumnDraft {
+  _QColumnDraft({
+    required this.key,
+    String labelEn = '',
+    String labelAr = '',
+    this.visible = true,
+    this.width = 2,
+  }) : labelEn = TextEditingController(text: labelEn),
+       labelAr = TextEditingController(text: labelAr);
+
+  final String key;
+  final TextEditingController labelEn;
+  final TextEditingController labelAr;
+  bool visible;
+  int width;
+
+  _QColumnDraft copy() => _QColumnDraft(
+    key: key,
+    labelEn: labelEn.text,
+    labelAr: labelAr.text,
+    visible: visible,
+    width: width,
+  );
+
+  void dispose() {
+    labelEn.dispose();
+    labelAr.dispose();
+  }
+}
+
 class _QTableDraft {
   _QTableDraft({String title = ''})
     : title = TextEditingController(text: title),
@@ -99,6 +132,9 @@ class QuotationEditorScreen extends ConsumerStatefulWidget {
 
 class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   final _tables = <_QTableDraft>[];
+  final _subject = TextEditingController();
+  final _columns = <_QColumnDraft>[];
+  bool _showTaxId = true;
   final _discountValue = TextEditingController();
   final _terms = TextEditingController();
   final _notes = TextEditingController();
@@ -121,6 +157,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
     _tables.add(_QTableDraft());
+    _columns.addAll(_standardColumns());
     if (widget.quotationId != null) {
       _loading = true;
       _load();
@@ -172,6 +209,14 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       if (_discountKind == DiscountKind.none) _discountValue.clear();
       _terms.text = text(quotation, 'terms');
       _notes.text = text(quotation, 'notes');
+      _subject.text = text(quotation, 'subject');
+      _showTaxId = quotation['showTaxId'] != false;
+      for (final column in _columns) {
+        column.dispose();
+      }
+      _columns
+        ..clear()
+        ..addAll(_columnsFrom(quotation['columns']));
       _managerName.text = text(quotation, 'managerName');
       _responsibleName.text = text(quotation, 'responsibleName');
       _responsiblePhone.text = text(quotation, 'responsiblePhone');
@@ -193,6 +238,75 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       showMessage(context, error.message, error: true);
     }
   }
+
+  /// The column catalogue, in the order the picker offers it.
+  static const _columnKeys = [
+    'itemCode',
+    'description',
+    'countryOfOrigin',
+    'unit',
+    'quantity',
+    'unitPrice',
+    'lineTotal',
+  ];
+
+  /// The six columns every offer printed before layouts were configurable.
+  List<_QColumnDraft> _standardColumns() => [
+    for (final entry in const [
+      ('description', 4),
+      ('countryOfOrigin', 2),
+      ('unit', 1),
+      ('quantity', 1),
+      ('unitPrice', 2),
+      ('lineTotal', 2),
+    ])
+      _QColumnDraft(key: entry.$1, width: entry.$2),
+  ];
+
+  /// Reads the stored layout. An offer saved before this feature has none, so
+  /// it starts from the standard six rather than from an empty table.
+  List<_QColumnDraft> _columnsFrom(Object? raw) {
+    final rows = listOf(raw);
+    if (rows.isEmpty) return _standardColumns();
+    return [
+      for (final row in rows)
+        if (_columnKeys.contains(text(row, 'key')))
+          _QColumnDraft(
+            key: text(row, 'key'),
+            labelEn: text(row, 'labelEn'),
+            labelAr: text(row, 'labelAr'),
+            visible: row['visible'] != false,
+            width: (asNum(row['width']) ?? 2).toInt(),
+          ),
+    ];
+  }
+
+  String _columnName(String key) {
+    final l10n = context.l10n;
+    return switch (key) {
+      'itemCode' => l10n.itemCode,
+      'description' => l10n.description,
+      'countryOfOrigin' => l10n.countryOfOrigin,
+      'unit' => l10n.unit,
+      'quantity' => l10n.quantity,
+      'unitPrice' => l10n.unitPrice,
+      _ => l10n.lineTotal,
+    };
+  }
+
+  /// The offer's layout as it will be stored: order, labels, visibility.
+  List<Map<String, dynamic>> _columnBody() => [
+    for (final column in _columns)
+      {
+        'key': column.key,
+        if (column.labelEn.text.trim().isNotEmpty)
+          'labelEn': column.labelEn.text.trim(),
+        if (column.labelAr.text.trim().isNotEmpty)
+          'labelAr': column.labelAr.text.trim(),
+        'visible': column.visible,
+        'width': column.width,
+      },
+  ];
 
   /// Copies a saved entry's text onto this quotation. The copy is what the
   /// document stores, so editing the library later cannot rewrite it.
@@ -262,6 +376,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       table.dispose();
     }
     _discountValue.dispose();
+    _subject.dispose();
+    for (final column in _columns) {
+      column.dispose();
+    }
     _terms.dispose();
     _notes.dispose();
     _managerName.dispose();
@@ -380,6 +498,11 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       return;
     }
 
+    if (!_columns.any((column) => column.visible)) {
+      showMessage(context, l10n.keepOneColumnVisible, error: true);
+      return;
+    }
+
     setState(() => _saving = true);
     try {
       final body = <String, dynamic>{
@@ -389,6 +512,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         'currency': _currency,
         'terms': _terms.text.trim(),
         'notes': _notes.text.trim(),
+        'subject': _subject.text.trim(),
+        'showTaxId': _showTaxId,
+        'columns': _columnBody(),
         'discountType': ?discountTypeOf(_discountKind),
         if (_discountKind == DiscountKind.percent &&
             _discountValue.text.trim().isNotEmpty)
@@ -598,6 +724,27 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                           ),
                         ),
                         const SizedBox(height: 12),
+                        TextField(
+                          key: const ValueKey('quotation-subject'),
+                          controller: _subject,
+                          maxLength: 200,
+                          decoration: InputDecoration(
+                            labelText: l10n.subject,
+                            helperText: l10n.subjectHint,
+                            border: const OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                        SwitchListTile(
+                          key: const ValueKey('quotation-show-tax-number'),
+                          contentPadding: EdgeInsets.zero,
+                          value: _showTaxId,
+                          onChanged: (value) =>
+                              setState(() => _showTaxId = value),
+                          title: Text(l10n.showTaxNumberOnOffer),
+                          subtitle: Text(l10n.showTaxNumberOnOfferHint),
+                        ),
+                        const SizedBox(height: 12),
                         Wrap(
                           spacing: 12,
                           runSpacing: 12,
@@ -642,6 +789,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                _columnsCard(context),
+                const SizedBox(height: 12),
                 for (var index = 0; index < _tables.length; index++)
                   _tableCard(index, language, items),
                 Center(
@@ -657,6 +806,415 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
               ],
             ),
     );
+  }
+
+  /// The line columns this offer prints, and the button that changes them.
+  Widget _columnsCard(BuildContext context) {
+    final l10n = context.l10n;
+    final theme = Theme.of(context);
+    final language = Localizations.localeOf(context).languageCode;
+    final visible = _columns.where((column) => column.visible).toList();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(l10n.quotationColumns, style: theme.textTheme.titleSmall),
+                  const SizedBox(height: 4),
+                  Text(
+                    visible.isEmpty
+                        ? l10n.keepOneColumnVisible
+                        : visible
+                              .map(
+                                (column) =>
+                                    '${_columnLabel(column, language)} '
+                                    '(${column.width})',
+                              )
+                              .join(' · '),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(l10n.columnLayoutHint, style: theme.textTheme.bodySmall),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              key: const ValueKey('edit-columns'),
+              onPressed: _editColumns,
+              icon: const Icon(Icons.view_column_outlined, size: 18),
+              label: Text(l10n.columnLayout),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The label the offer prints for a column: its own text when set, the
+  /// built-in translation otherwise.
+  String _columnLabel(_QColumnDraft column, String language) {
+    final override = language == 'ar' ? column.labelAr.text : column.labelEn.text;
+    if (override.trim().isNotEmpty) return override.trim();
+    return _columnName(column.key);
+  }
+
+  /// Changes the layout on a working copy, so Cancel really cancels. A saved
+  /// template is a starting point; the offer keeps its own copy of whatever
+  /// was applied.
+  Future<void> _editColumns() async {
+    final l10n = context.l10n;
+    final language = Localizations.localeOf(context).languageCode;
+    final available = [
+      ...?ref.read(quotationColumnTemplatesProvider).value,
+    ];
+    final working = [for (final column in _columns) column.copy()];
+    final templateName = TextEditingController();
+    String? templateId;
+    try {
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              title: Text(l10n.columnLayout),
+              content: SizedBox(
+                width: 760,
+                height: 560,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            key: const ValueKey('column-template'),
+                            initialValue: templateId,
+                            isExpanded: true,
+                            decoration: InputDecoration(
+                              labelText: l10n.columnTemplate,
+                              border: const OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            items: [
+                              for (final template in available)
+                                DropdownMenuItem(
+                                  value: text(template, 'id'),
+                                  child: Text(
+                                    text(template, 'name'),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: available.isEmpty
+                                ? null
+                                : (value) {
+                                    if (value == null) return;
+                                    final template = available.firstWhere(
+                                      (row) => text(row, 'id') == value,
+                                      orElse: () => const {},
+                                    );
+                                    if (template.isEmpty) return;
+                                    for (final column in working) {
+                                      column.dispose();
+                                    }
+                                    working
+                                      ..clear()
+                                      ..addAll(_columnsFrom(template['columns']));
+                                    setDialogState(() => templateId = value);
+                                  },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        PopupMenuButton<String>(
+                          key: const ValueKey('add-column'),
+                          tooltip: l10n.addColumn,
+                          enabled:
+                              working.length < _columnKeys.length,
+                          onSelected: (key) => setDialogState(
+                            () => working.add(_QColumnDraft(key: key)),
+                          ),
+                          itemBuilder: (context) => [
+                            for (final key in _columnKeys)
+                              if (!working.any((column) => column.key == key))
+                                PopupMenuItem(
+                                  value: key,
+                                  child: Text(_columnName(key)),
+                                ),
+                          ],
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.add, size: 18),
+                                const SizedBox(width: 4),
+                                Text(l10n.addColumn),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: working.isEmpty
+                          ? Center(child: Text(l10n.keepOneColumnVisible))
+                          : ListView.separated(
+                              itemCount: working.length,
+                              separatorBuilder: (_, __) =>
+                                  const Divider(height: 12),
+                              itemBuilder: (context, index) {
+                                final column = working[index];
+                                return Row(
+                                  children: [
+                                    Checkbox(
+                                      key: ValueKey(
+                                        'column-visible-${column.key}',
+                                      ),
+                                      value: column.visible,
+                                      onChanged: (value) => setDialogState(
+                                        () => column.visible = value ?? true,
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Text(
+                                        _columnName(column.key),
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.bodyMedium,
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 130,
+                                      child: TextField(
+                                        key: ValueKey(
+                                          'column-label-en-${column.key}',
+                                        ),
+                                        controller: column.labelEn,
+                                        decoration: InputDecoration(
+                                          labelText: l10n.columnLabelEn,
+                                          border: const OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    SizedBox(
+                                      width: 130,
+                                      child: TextField(
+                                        key: ValueKey(
+                                          'column-label-ar-${column.key}',
+                                        ),
+                                        controller: column.labelAr,
+                                        decoration: InputDecoration(
+                                          labelText: l10n.columnLabelAr,
+                                          border: const OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    SizedBox(
+                                      width: 78,
+                                      child: DropdownButtonFormField<int>(
+                                        key: ValueKey(
+                                          'column-width-${column.key}',
+                                        ),
+                                        initialValue: column.width,
+                                        decoration: InputDecoration(
+                                          labelText: l10n.columnWidth,
+                                          border: const OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                        items: [
+                                          for (var width = 1; width <= 6; width++)
+                                            DropdownMenuItem(
+                                              value: width,
+                                              child: Text('$width'),
+                                            ),
+                                        ],
+                                        onChanged: (value) => setDialogState(
+                                          () => column.width = value ?? 2,
+                                        ),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      key: ValueKey('column-up-${column.key}'),
+                                      tooltip: l10n.moveUp,
+                                      onPressed: index == 0
+                                          ? null
+                                          : () => setDialogState(() {
+                                              final moved = working.removeAt(
+                                                index,
+                                              );
+                                              working.insert(index - 1, moved);
+                                            }),
+                                      icon: const Icon(
+                                        Icons.arrow_upward,
+                                        size: 18,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      key: ValueKey(
+                                        'column-down-${column.key}',
+                                      ),
+                                      tooltip: l10n.moveDown,
+                                      onPressed: index == working.length - 1
+                                          ? null
+                                          : () => setDialogState(() {
+                                              final moved = working.removeAt(
+                                                index,
+                                              );
+                                              working.insert(index + 1, moved);
+                                            }),
+                                      icon: const Icon(
+                                        Icons.arrow_downward,
+                                        size: 18,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      key: ValueKey(
+                                        'column-delete-${column.key}',
+                                      ),
+                                      tooltip: l10n.removeColumn,
+                                      onPressed: working.length == 1
+                                          ? null
+                                          : () => setDialogState(
+                                              () => working
+                                                  .removeAt(index)
+                                                  .dispose(),
+                                            ),
+                                      icon: const Icon(
+                                        Icons.delete_outline,
+                                        size: 18,
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            key: const ValueKey('column-template-name'),
+                            controller: templateName,
+                            decoration: InputDecoration(
+                              labelText: l10n.templateName,
+                              border: const OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          key: const ValueKey('save-column-template'),
+                          onPressed: () async {
+                            final name = templateName.text.trim();
+                            if (name.isEmpty) {
+                              showMessage(
+                                dialogContext,
+                                l10n.templateName,
+                                error: true,
+                              );
+                              return;
+                            }
+                            final saved = await _saveColumnTemplate(
+                              name,
+                              working,
+                            );
+                            if (saved != null && dialogContext.mounted) {
+                              setDialogState(() {
+                                available.add(saved);
+                                templateName.clear();
+                              });
+                            }
+                          },
+                          icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                          label: Text(l10n.saveColumnTemplate),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: Text(l10n.cancel),
+                ),
+                FilledButton(
+                  key: const ValueKey('save-columns'),
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: Text(l10n.save),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+      if (saved != true) return;
+      for (final column in _columns) {
+        column.dispose();
+      }
+      setState(() {
+        _columns
+          ..clear()
+          ..addAll(working);
+      });
+      // The copies handed to the screen are now owned by it.
+      working.clear();
+    } finally {
+      for (final column in working) {
+        column.dispose();
+      }
+      templateName.dispose();
+    }
+  }
+
+  Future<Json?> _saveColumnTemplate(
+    String name,
+    List<_QColumnDraft> columns,
+  ) async {
+    final l10n = context.l10n;
+    try {
+      final created = await ref
+          .read(apiClientProvider)
+          .post(
+            '/sales/quotation-column-templates',
+            body: {
+              'name': name,
+              'columns': [
+                for (final column in columns)
+                  {
+                    'key': column.key,
+                    if (column.labelEn.text.trim().isNotEmpty)
+                      'labelEn': column.labelEn.text.trim(),
+                    if (column.labelAr.text.trim().isNotEmpty)
+                      'labelAr': column.labelAr.text.trim(),
+                    'visible': column.visible,
+                    'width': column.width,
+                  },
+              ],
+            },
+          );
+      ref.invalidate(quotationColumnTemplatesProvider);
+      if (mounted) showMessage(context, l10n.templateSaved);
+      return created;
+    } on Failure catch (error) {
+      if (mounted) showMessage(context, error.message, error: true);
+      return null;
+    }
   }
 
   Widget _tableCard(int index, String language, List<Json> items) {
@@ -675,6 +1233,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 Expanded(
                   flex: 2,
                   child: TextField(
+                    key: ValueKey('quotation-table-title-$index'),
                     controller: table.title,
                     decoration: InputDecoration(
                       labelText: l10n.tableTitle,
@@ -719,6 +1278,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 SizedBox(
                   width: 180,
                   child: DropdownButtonFormField<DiscountKind>(
+                    key: ValueKey('quotation-table-discount-$index'),
                     initialValue: table.discountKind,
                     isExpanded: true,
                     decoration: InputDecoration(
@@ -745,6 +1305,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 SizedBox(
                   width: 160,
                   child: TextField(
+                    key: ValueKey('quotation-table-discount-value-$index'),
                     controller: table.discountValue,
                     enabled: table.discountKind != DiscountKind.none,
                     keyboardType: const TextInputType.numberWithOptions(
@@ -773,7 +1334,14 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
             for (var lineIndex = 0;
                 lineIndex < table.lines.length;
                 lineIndex++)
-              _lineRow(table, table.lines[lineIndex], lineIndex, language, items),
+              _lineRow(
+                index,
+                table,
+                table.lines[lineIndex],
+                lineIndex,
+                language,
+                items,
+              ),
             Align(
               alignment: AlignmentDirectional.centerStart,
               child: TextButton.icon(
@@ -790,6 +1358,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   }
 
   Widget _lineRow(
+    int tableIndex,
     _QTableDraft table,
     _QLineDraft line,
     int index,
@@ -810,7 +1379,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                   children: [
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        key: ValueKey('quotation-item-${line.itemId}'),
+                        key: ValueKey('quotation-item-${line.itemId ?? 'null'}'),
                         initialValue: line.itemId,
                         isExpanded: true,
                         decoration: InputDecoration(
@@ -896,6 +1465,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 l10n.quantity,
                 width: 100,
                 numeric: true,
+                fieldKey: ValueKey('quotation-qty-$tableIndex-$index'),
               ),
               const SizedBox(width: 8),
               _smallField(
@@ -903,6 +1473,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 l10n.unitPrice,
                 width: 130,
                 numeric: true,
+                fieldKey: ValueKey('quotation-price-$tableIndex-$index'),
               ),
               const SizedBox(width: 16),
               Text(
@@ -922,10 +1493,12 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     String label, {
     required double width,
     bool numeric = false,
+    Key? fieldKey,
   }) {
     return SizedBox(
       width: width,
       child: TextField(
+        key: fieldKey,
         controller: controller,
         keyboardType: numeric
             ? const TextInputType.numberWithOptions(decimal: true)
