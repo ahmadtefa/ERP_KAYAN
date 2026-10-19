@@ -416,40 +416,47 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          Expanded(
-                            flex: 3,
-                            child: DropdownButtonFormField<String>(
-                              initialValue: _lines[index].costCenterId,
-                              isExpanded: true,
-                              decoration: InputDecoration(
-                                labelText: l10n.costCenter,
-                                isDense: true,
-                                border: const OutlineInputBorder(),
-                              ),
-                              items: [
-                                DropdownMenuItem(
-                                  value: '',
-                                  child: Text(
-                                    l10n.noAllocation,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
+                          // Offered only when the company actually keeps cost
+                          // centres; a company that does not use the dimension
+                          // sees the form it always saw.
+                          if (costCenters.isNotEmpty) ...[
+                            Expanded(
+                              flex: 3,
+                              child: DropdownButtonFormField<String>(
+                                initialValue: _lines[index].costCenterId,
+                                isExpanded: true,
+                                decoration: InputDecoration(
+                                  labelText: l10n.costCenter,
+                                  isDense: true,
+                                  border: const OutlineInputBorder(),
                                 ),
-                                for (final center in costCenters)
+                                items: [
                                   DropdownMenuItem(
-                                    value: text(center, 'id'),
+                                    value: '',
                                     child: Text(
-                                      costCenterLabel(center, language),
+                                      l10n.noAllocation,
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
-                              ],
-                              onChanged: (value) => setState(
-                                () => _lines[index].costCenterId =
-                                    value == null || value.isEmpty ? null : value,
+                                  for (final center in costCenters)
+                                    DropdownMenuItem(
+                                      value: text(center, 'id'),
+                                      child: Text(
+                                        costCenterLabel(center, language),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                ],
+                                onChanged: (value) => setState(
+                                  () => _lines[index].costCenterId = value == null ||
+                                          value.isEmpty
+                                      ? null
+                                      : value,
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
+                            const SizedBox(width: 8),
+                          ],
                           Expanded(
                             flex: 2,
                             child: TextField(

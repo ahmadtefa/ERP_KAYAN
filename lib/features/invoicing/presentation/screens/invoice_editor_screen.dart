@@ -317,7 +317,10 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     final partiesAsync = ref.watch(
       widget.kind.isSales ? activeCustomersProvider : activeSuppliersProvider,
     );
-    final costCenters = ref.watch(activeCostCentersProvider).value ?? const <Json>[];
+    // Every centre, including a deactivated one, so a draft that already
+    // names a centre still shows it. The server still refuses a new posting
+    // to an inactive centre, and says so.
+    final costCenters = ref.watch(costCentersProvider).value ?? const <Json>[];
     final language = Localizations.localeOf(context).languageCode;
 
     return Scaffold(
@@ -562,6 +565,13 @@ class _Header extends StatelessWidget {
   }
 }
 
+/// The value the dropdown may start on. A value outside the choices would make
+/// the widget assert, and the line's own value is kept in the payload anyway.
+String? _costCenterChoice(List<Json> centres, String? id) {
+  if (id == null || id.isEmpty) return null;
+  return centres.any((center) => text(center, 'id') == id) ? id : null;
+}
+
 class _LinesTable extends StatelessWidget {
   const _LinesTable({
     required this.kind,
@@ -635,41 +645,49 @@ class _LinesTable extends StatelessWidget {
                         },
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 3,
-                      child: DropdownButtonFormField<String>(
-                        initialValue: lines[index].costCenterId,
-                        isExpanded: true,
-                        decoration: InputDecoration(
-                          labelText: l10n.costCenter,
-                          isDense: true,
-                          border: const OutlineInputBorder(),
-                        ),
-                        items: [
-                          DropdownMenuItem(
-                            value: '',
-                            child: Text(
-                              l10n.noAllocation,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                    if (costCenters.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 3,
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _costCenterChoice(
+                            costCenters,
+                            lines[index].costCenterId,
                           ),
-                          for (final center in costCenters)
+                          isExpanded: true,
+                          decoration: InputDecoration(
+                            labelText: l10n.costCenter,
+                            isDense: true,
+                            border: const OutlineInputBorder(),
+                          ),
+                          items: [
                             DropdownMenuItem(
-                              value: text(center, 'id'),
+                              value: '',
                               child: Text(
-                                costCenterLabel(center, language),
+                                l10n.noAllocation,
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                        ],
-                        onChanged: (value) {
-                          lines[index].costCenterId =
-                              value == null || value.isEmpty ? null : value;
-                          onChanged();
-                        },
+                            for (final center in costCenters)
+                              DropdownMenuItem(
+                                value: text(center, 'id'),
+                                child: Text(
+                                  flag(center, 'isActive', fallback: true)
+                                      ? costCenterLabel(center, language)
+                                      : '${costCenterLabel(center, language)} '
+                                            '(${l10n.inactive})',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                          onChanged: (value) {
+                            lines[index].costCenterId =
+                                value == null || value.isEmpty ? null : value;
+                            onChanged();
+                          },
+                        ),
                       ),
-                    ),
+                    ],
                     const SizedBox(width: 8),
                     Expanded(
                       flex: 2,
