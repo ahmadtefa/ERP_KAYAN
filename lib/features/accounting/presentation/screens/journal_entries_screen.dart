@@ -287,7 +287,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
         if (!validParts || amount <= Decimal.zero || allocated != amount) {
           showMessage(
             context,
-            _t(context, 'توزيع السطر يجب أن يكون على مراكز مختلفة ومجموعه مطابقًا لمبلغ السطر', 'Split allocations must use distinct centres and add up exactly to the line amount'),
+            _journalText(context, 'توزيع السطر يجب أن يكون على مراكز مختلفة ومجموعه مطابقًا لمبلغ السطر', 'Split allocations must use distinct centres and add up exactly to the line amount'),
             error: true,
           );
           return;
@@ -372,7 +372,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
               line.allocations.map((part) => part.costCenterId).toSet().length == line.allocations.length &&
               allocated == amount;
           return AlertDialog(
-            title: Text(_t(context, 'توزيع مبلغ السطر', 'Allocate line amount')),
+            title: Text(_journalText(context, 'توزيع مبلغ السطر', 'Allocate line amount')),
             content: SizedBox(
               width: 640,
               child: SingleChildScrollView(
@@ -381,7 +381,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                   children: [
                     Align(
                       alignment: AlignmentDirectional.centerStart,
-                      child: Text('${_t(context, 'مبلغ السطر', 'Line amount')}: ${formatAmount(amount.toString())}'),
+                      child: Text('${_journalText(context, 'مبلغ السطر', 'Line amount')}: ${formatAmount(amount.toString())}'),
                     ),
                     const SizedBox(height: 12),
                     for (var i = 0; i < line.allocations.length; i++)
@@ -420,7 +420,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                                 controller: line.allocations[i].amount,
                                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                 decoration: InputDecoration(
-                                  labelText: _t(context, 'المبلغ', 'Amount'),
+                                  labelText: _journalText(context, 'المبلغ', 'Amount'),
                                   isDense: true,
                                   border: const OutlineInputBorder(),
                                 ),
@@ -428,7 +428,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                               ),
                             ),
                             IconButton(
-                              tooltip: _t(context, 'حذف التوزيع', 'Remove allocation'),
+                              tooltip: _journalText(context, 'حذف التوزيع', 'Remove allocation'),
                               icon: const Icon(Icons.delete_outline),
                               onPressed: line.allocations.length <= 1 ? null : () => setDialogState(() => line.allocations.removeAt(i).dispose()),
                             ),
@@ -440,11 +440,11 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                       child: TextButton.icon(
                         onPressed: () => setDialogState(() => line.allocations.add(_AllocationDraft())),
                         icon: const Icon(Icons.add),
-                        label: Text(_t(context, 'إضافة مركز', 'Add centre')),
+                        label: Text(_journalText(context, 'إضافة مركز', 'Add centre')),
                       ),
                     ),
                     const Divider(),
-                    Text('${_t(context, 'الموزع', 'Allocated')}: ${formatAmount(allocated.toString())}    ${_t(context, 'المتبقي', 'Remaining')}: ${formatAmount((amount - allocated).toString())}'),
+                    Text('${_journalText(context, 'الموزع', 'Allocated')}: ${formatAmount(allocated.toString())}    ${_journalText(context, 'المتبقي', 'Remaining')}: ${formatAmount((amount - allocated).toString())}'),
                   ],
                 ),
               ),
@@ -455,7 +455,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                   setState(() => line.splitAllocation = false);
                   Navigator.of(dialogContext).pop();
                 },
-                child: Text(_t(context, 'استخدام مركز واحد', 'Use one centre')),
+                child: Text(_journalText(context, 'استخدام مركز واحد', 'Use one centre')),
               ),
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(),
@@ -604,7 +604,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                                           : () => _editAllocations(_lines[index], costCenters, language),
                                       icon: const Icon(Icons.call_split_outlined, size: 18),
                                       label: Text(
-                                        _t(context, 'توزيع (${_lines[index].allocations.length})', 'Split (${_lines[index].allocations.length})'),
+                                        _journalText(context, 'توزيع (${_lines[index].allocations.length})', 'Split (${_lines[index].allocations.length})'),
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     )
@@ -634,7 +634,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                             ),
                             const SizedBox(width: 4),
                             IconButton(
-                              tooltip: _t(context, 'توزيع على عدة مراكز', 'Split across centres'),
+                              tooltip: _journalText(context, 'توزيع على عدة مراكز', 'Split across centres'),
                               icon: const Icon(Icons.call_split_outlined, size: 20),
                               onPressed: _saving ? null : () => _editAllocations(_lines[index], costCenters, language),
                             ),
@@ -737,3 +737,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
     );
   }
 }
+
+
+String _journalText(BuildContext context, String arabic, String english) =>
+    Localizations.localeOf(context).languageCode == 'ar' ? arabic : english;
