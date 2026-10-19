@@ -120,7 +120,7 @@ void main() {
     await tester.pump();
 
     // Per-offer tax flag: this quotation prints no tax number even though the
-    // company profile has one.
+    // company profile has one. The API field is showTaxId.
     await tester.tap(find.byKey(const ValueKey('quotation-show-tax-number')));
     await tester.pumpAndSettle();
 
@@ -175,7 +175,7 @@ void main() {
     expect(api.postPath, '/sales/quotations');
     final body = api.postBody!;
     expect(body['subject'], 'Renewal offer');
-    expect(body['showTaxNumber'], isFalse);
+    expect(body['showTaxId'], isFalse);
     expect(body['customerId'], 'customer-1');
 
     final columns = (body['columns'] as List).cast<Map>();
