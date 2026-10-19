@@ -86,6 +86,8 @@ model Company {
   priceLists     PriceList[]
   purchaseOrders PurchaseOrder[]
   salesOrders    SalesOrder[]
+  quotations     Quotation[]
+  quotationTermTemplates QuotationTermTemplate[]
 
   @@map("companies")
 }
@@ -133,6 +135,7 @@ model Branch {
   warehouses       Warehouse[]
   purchaseOrders   PurchaseOrder[]
   salesOrders      SalesOrder[]
+  quotations       Quotation[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -1014,6 +1017,7 @@ model Customer {
   priceList     PriceList?     @relation(fields: [priceListId], references: [id], onDelete: Restrict)
   salesInvoices SalesInvoice[]
   salesOrders   SalesOrder[]
+  quotations    Quotation[]
   cashVouchers  CashVoucher[]
   openingLines  OpeningBalanceLine[]
 
@@ -1145,6 +1149,7 @@ model Item {
   priceListItems PriceListItem[]
   purchaseOrderLines PurchaseOrderLine[]
   salesOrderLines SalesOrderLine[]
+  quotationLines   QuotationLine[]
 
   @@unique([companyId, code])
   @@index([companyId, nameEn])
@@ -1569,6 +1574,15 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum QuotationStatus {
+  DRAFT
+  ISSUED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CONVERTED
+}
+
 model PurchaseOrder {
   id          String      @id @default(uuid()) @db.Uuid
   companyId   String      @db.Uuid
@@ -1696,6 +1710,102 @@ model SalesOrderLine {
   @@index([orderId])
   @@map("sales_order_lines")
 }
+
+/// A customer-facing quotation is kept separate from a sales order until the
+/// customer accepts it. Issued quotations snapshot the company details and
+/// selected terms so later edits to templates or the company profile cannot
+/// rewrite a document already sent to a customer.
+model Quotation {
+  id                String          @id @default(uuid()) @db.Uuid
+  companyId         String          @db.Uuid
+  branchId          String          @db.Uuid
+  customerId        String          @db.Uuid
+  quotationNumber   String
+  quotationDate     DateTime        @db.Date
+  validUntil        DateTime?       @db.Date
+  status            QuotationStatus @default(DRAFT)
+  currency          String          @default("EGP") @db.VarChar(3)
+  discountPercent   Decimal         @default(0) @db.Decimal(9, 4)
+  discountAmount    Decimal         @default(0) @db.Decimal(19, 4)
+  subTotal          Decimal         @default(0) @db.Decimal(19, 4)
+  taxAmount         Decimal         @default(0) @db.Decimal(19, 4)
+  totalAmount       Decimal         @default(0) @db.Decimal(19, 4)
+  originCountry     String?
+  responsibleManager String?
+  showTaxId         Boolean         @default(false)
+  notes             String?
+  companySnapshot   Json
+  termsSnapshot     Json
+  convertedInvoiceId String?        @db.Uuid
+  issuedAt          DateTime?
+  issuedBy          String?         @db.Uuid
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  createdBy         String?         @db.Uuid
+  updatedBy         String?         @db.Uuid
+  deletedAt         DateTime?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  lines QuotationLine[]
+
+  @@unique([companyId, quotationNumber])
+  @@index([companyId, quotationDate])
+  @@index([companyId, status])
+  @@map("quotations")
+}
+
+/// Lines are grouped by a user-editable table title. Each title can therefore
+/// appear in the quote's summary with its own subtotal.
+model QuotationLine {
+  id             String   @id @default(uuid()) @db.Uuid
+  quotationId    String   @db.Uuid
+  tableTitle     String   @default("Items")
+  lineNumber     Int
+  itemId         String?  @db.Uuid
+  description    String
+  unit           String?
+  quantity       Decimal  @db.Decimal(19, 4)
+  unitPrice      Decimal  @db.Decimal(19, 4)
+  discountPercent Decimal @default(0) @db.Decimal(9, 4)
+  discountAmount Decimal  @default(0) @db.Decimal(19, 4)
+  taxRate        Decimal  @default(0) @db.Decimal(9, 4)
+  taxAmount      Decimal  @default(0) @db.Decimal(19, 4)
+  lineTotal      Decimal  @default(0) @db.Decimal(19, 4)
+  createdAt      DateTime @default(now())
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  item Item? @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([quotationId, tableTitle, lineNumber])
+  @@index([quotationId])
+  @@index([itemId])
+  @@map("quotation_lines")
+}
+
+/// Reusable company-wide terms. A quotation stores a JSON snapshot of the
+/// chosen title/body pairs at issue time, so editing a template affects only
+/// future quotations.
+model QuotationTermTemplate {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @db.Uuid
+  title     String
+  body      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String?  @db.Uuid
+  updatedBy String?  @db.Uuid
+  deletedAt DateTime?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, isActive, sortOrder])
+  @@map("quotation_term_templates")
+}
+
 
 /// An agreed set of prices, for a customer or a supplier.
 ///
