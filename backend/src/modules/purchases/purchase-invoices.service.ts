@@ -979,8 +979,10 @@ export class PurchaseInvoicesService {
       currency: invoice.currency,
       supplier: invoice.supplier,
       subTotal: invoice.subTotal.toFixed(MONEY_SCALE),
-      discountPercent: invoice.discountPercent.toFixed(RATE_SCALE),
-      discountAmount: invoice.discountAmount.toFixed(MONEY_SCALE),
+      // Older service test doubles and pre-discount records may omit these
+      // fields; the schema defaults them to zero in persisted rows.
+      discountPercent: invoice.discountPercent?.toFixed(RATE_SCALE) ?? '0.0000',
+      discountAmount: invoice.discountAmount?.toFixed(MONEY_SCALE) ?? '0.0000',
       taxAmount: invoice.taxAmount.toFixed(MONEY_SCALE),
       totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),
       landedCostAmount: invoice.landedCostAmount.toFixed(MONEY_SCALE),
