@@ -185,7 +185,10 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.openingBalances,
         Icons.account_balance_wallet_outlined,
         l10n.openingBalancesTitle,
-        'accounting.openingbalances.manage',
+        // The list/detail endpoints require journal.read; manage is only
+        // required for create/post/reverse operations. Keep the screen visible
+        // to accountants who can review opening balances but cannot post them.
+        'accounting.journal.read',
       ),
       _NavItem(
         AppRoutes.customers,
@@ -227,13 +230,17 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.salesReturns,
         Icons.assignment_return_outlined,
         l10n.salesReturns,
-        'sales.returns.read',
+        // Returns endpoints use the same read permission as sales invoices.
+        // Gating on the separate returns.read catalogue entry hid this screen
+        // from existing roles even though the API would allow them to view it.
+        'sales.invoices.read',
       ),
       _NavItem(
         AppRoutes.purchaseReturns,
         Icons.keyboard_return_outlined,
         l10n.purchaseReturns,
-        'purchases.returns.read',
+        // Returns endpoints use the same read permission as purchase invoices.
+        'purchases.invoices.read',
       ),
       _NavItem(
         AppRoutes.chartOfAccounts,
