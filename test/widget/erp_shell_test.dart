@@ -120,6 +120,13 @@ void main() {
   testWidgets(
     'navigation shows pages when the user has the same read permissions as their API routes',
     (tester) async {
+      tester.view.physicalSize = const Size(1366, 768);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
       final paths = [
         AppRoutes.dashboard,
         AppRoutes.cash,
