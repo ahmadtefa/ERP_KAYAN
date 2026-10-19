@@ -1,15 +1,18 @@
 # KAYAN ERP — Integration Verification Report
 
-**Date:** 2026-10-19 (report revised against head `5da76f2`)
+**Date:** 2026-10-20 (last code commit `cb81bc3`; the installer is built from it)
+**Earlier revisions:** 2026-10-19 (`5da76f2`, `8cdd84d`) — kept as history below
 **Repository:** [ahmadtefa/ERP_KAYAN](https://github.com/ahmadtefa/ERP_KAYAN)
 **Integration branch:** `arena/a5a099ec-erp-kayan`
 **Base:** `main` at `e1a2a7e` (unchanged; nothing was merged into `main`)
 **Open pull request:** [#52](https://github.com/ahmadtefa/ERP_KAYAN/pull/52) — **OPEN**, base `main`, head `arena/a5a099ec-erp-kayan`, MERGEABLE, not merged
 
-**Final Completion Pass (2026-10-19, head `5da76f2`):** the gaps named in section 5 were worked
-on after `abb8e3f`. Section 14 records what was implemented, the evidence for it, and — item by
-item — what is still missing, including the places where only the API exists and no Flutter
-screen does. Sections 1, 3, 5, 6, 7, 8, 9, 12 and 13 are updated where that evidence exists.
+**Current verification (2026-10-20, head `cb81bc3`):** CI run `39340110065` is green in all four
+jobs (Backend with real PostgreSQL and demo restore, Regression scenarios, Flutter Web, Linux
+Desktop), and Windows run `39340110060` built and smoke-tested the installer from `cb81bc3`.
+**Section 17 is authoritative for the current state.** Sections 1–16 are kept as the historical
+record of their own commits; where they say "not implemented yet" or quote an older artifact,
+section 17 supersedes them.
 
 **How to read a status:** `DONE` means the backend **and** the Flutter surface the requirement
 asks for exist and were exercised; `API ONLY` means the rule exists on the server but the UI is
@@ -24,16 +27,16 @@ guessed "probably works".
 
 ## 0. Status at a glance (answer first)
 
+> Superseded by section 17 for the current head. This table is the current answer.
+
 | Question | Answer |
 |---|---|
 | Is the branch merged into `main`? | **No.** `main` is `e1a2a7e`; PR #52 is open. |
-| Is the cost-center module finished end to end? | **No.** Master data, attribution rules, reports and budgets are implemented and tested; the **multi-centre allocation editor**, the **stock-screen picker**, the **report filters** and the **centre on document detail** are not. |
-| Does a Flutter UI exist? | **Yes** for: cost-center master data, budgets, the two report tabs, and single-centre pickers on journal lines, invoice lines and cash vouchers. **No** for: allocations, stock, returns (by design), document detail. |
-| Is inventory linked to cost centers? | **On the server only**, for `ADJUSTMENT` and `COUNT`; the stock screen cannot set it. |
-| Are budgets implemented? | **Yes**, server + screen + report tab, with actuals from posted entries only and no proration. |
-| Arabic and English? | **Strings complete** (562 keys each, identical sets). RTL rendering **not visually verified**. |
-| Are the tests green? | **Yes on `5da76f2`**: CI run `39260659445` (four jobs) and Windows run `39260659483` are green. Backend locally: 43 suites / 298 tests, 7 API scenarios, 25-check upgrade harness. |
-| Is the installer built from the current commit? | **Yes.** The latest build is from `8cdd84d` (the commit that carries this report): artifact `12199953707`, SHA-256 `E08B3BCD…BAD6`, expires 2026-11-02T15:47:30Z, installed-package smoke test **passed**. Unsigned. |
+| Is the cost-center module finished end to end? | **Yes in the product surface:** master data with parent hierarchy, single-centre pickers on invoice/journal/cash lines, multi-centre allocations on manual journal lines, report filters, budgets and stock attribution. Visual walkthrough on Windows is **not verified**. |
+| Does a Flutter UI exist for the quotations work? | **Yes:** editor, list, detail, subject, per-offer tax switch, column editor with templates, tables, discounts, statuses, conversion and four separate export actions. |
+| Are Arabic and English strings complete? | **Yes:** 719 keys in both languages, 1323 usages, `tools/check-l10n-keys.mjs` passes. RTL rendering was **not visually verified**. |
+| Are the tests green? | **Yes on `cb81bc3`:** CI `39340110065` — Backend, Regression, Flutter Web and Linux Desktop all **success**. |
+| Is the installer built from the current code? | **Yes:** artifact `12228799462` from run `39340110060`, which checked out `cb81bc3` — the last commit that changes code or any packaged file. SHA-256 `3FA4D266…0D00`, 344,698,505 bytes, installed-package smoke test **passed**. Unsigned. |
 | Is LAN verified from a second computer? | **No — NOT VERIFIED.** |
 | Was a human click-through of the installed UI done? | **No — NOT VERIFIED.** |
 
@@ -42,20 +45,19 @@ guessed "probably works".
 | Item | Value |
 |---|---|
 | Branch | `arena/a5a099ec-erp-kayan` |
-| Code commit | `5da76f2` — `test(ui): assert the cost-center rows by name, not by a code that also labels a child` |
-| Report commit | the commit that adds this file (see `git log -1 -- KAYAN-INTEGRATION-VERIFICATION-REPORT.md`) |
-| Commits ahead of `main` | 22 code commits; `git rev-list --count main..HEAD` = **24** with the two report commits |
-| Working tree | only this report was modified when the report commit was made |
+| Code commit | `cb81bc3` — `Assert the field the API actually receives for the per-offer tax choice` |
+| Report commit | the commit that adds this revision (see `git log -1 -- KAYAN-INTEGRATION-VERIFICATION-REPORT.md`) |
+| Commits ahead of `main` | 70 |
+| Working tree | clean when the verification runs were made |
 | `main` | `e1a2a7e`, untouched by this branch |
 | Merged into `main`? | **No** |
-| New production release published? | **No** |
-| Installer | latest: artifact `12199953707` from `8cdd84d` (run `39276354529`); earlier: `12192261692` from `5da76f2` (run `39260659483`). Both smoke-tested; sections 8–9 |
+| New production release published? | **No** (the publish step is restricted to `main`) |
+| CI | `39340110065` — four jobs, all success |
+| Installer | `12228799462` from run `39340110060` at `cb81bc3`; 344,698,505 bytes; SHA-256 `3FA4D266A65145A1EC50F52A622EFEF120D745669AD5D26604B7B0990C290D00`; smoke test passed |
 
-The PR head was pushed to the same branch that PR #52 watches, so PR #52 contains every
-commit listed in section 2. The Windows installer workflow ran on **`5da76f2`** itself
-(`39260659483`, success) and the artifact described in sections 8–9 therefore contains exactly
-the program files of the current head. This report is the only file added after that build and
-it is not packaged into the installer.
+The installer workflow checked out `cb81bc3`, the last commit that changes application code or
+any file the installer packages. The report commits that follow add Markdown only; they are not
+packaged, and the installer's `runtime-manifest.json` therefore records `sourceCommit=cb81bc3`.
 
 ---
 
@@ -64,7 +66,7 @@ it is not packaged into the installer.
 | PR | Branch | Base | Head | Size | State | Really integrated? |
 |---|---|---|---|---|---|---|
 | [#51](https://github.com/ahmadtefa/ERP_KAYAN/pull/51) | `arena/92b91cee-erp-kayan` | `main` | `7e2514c` | 100 files, +11,487 / −919 | OPEN, MERGEABLE, unmerged | **Yes, into the integration branch.** `7e2514c` is an ancestor of `e3c577d` (`git merge-base --is-ancestor`), so all of its content is in this branch. It is *not* in `main`. |
-| [#52](https://github.com/ahmadtefa/ERP_KAYAN/pull/52) | `arena/a5a099ec-erp-kayan` | `main` | **`5da76f2`** | 155 files, +21,228 / −1,192 | OPEN, MERGEABLE, unmerged, 22 commits | This is the integration branch itself. It contains #51, the follow-up fixes, the cost-center module, the Final Completion Pass (budgets, UI screens, stock attribution) and this report. |
+| [#52](https://github.com/ahmadtefa/ERP_KAYAN/pull/52) | `arena/a5a099ec-erp-kayan` | `main` | **`cb81bc3`** | 204 files, +35,505 / −1,590 | OPEN, MERGEABLE, unmerged, 70 commits | This is the integration branch itself. It contains #51, the cost-center module, invoices and returns discounts, the complete quotation document (subject, per-offer tax flag, editable columns and DB templates, multiple tables, statuses, safe conversion, Arabic print/export), LAN card, per-warehouse stock, and this report. |
 | [#50](https://github.com/ahmadtefa/ERP_KAYAN/pull/50) | — | `main` | `e1a2a7e` | — | MERGED | Yes — this is the current `main`. |
 | [#49](https://github.com/ahmadtefa/ERP_KAYAN/pull/49) | — | `main` | `935a6a4` | 1 file | CLOSED, unmerged | Its change (`needsSetup` on an existing API) is present in the branch (verified in `lib/core/backend/local_backend_io.dart`), although the commit itself is not an ancestor (divergent history). |
 
@@ -88,6 +90,8 @@ e1a2a7e  main
 ```
 
 No branch was deleted, no history was rewritten, and `main` was not modified.
+
+The chain above stops at `5da76f2`; the later work (invoices, quotations, LAN, stock split and the CI fixes) is listed in section 17.
 
 ---
 
@@ -256,6 +260,8 @@ say so just as plainly._
 
 ## 7. Tests actually run (2026-10-19, this branch)
 
+> **Historical section.** The numbers below belong to `5da76f2`. The current test evidence is in section 17.
+
 Two sets of evidence are recorded, and they are labelled so they cannot be confused:
 
 1. **`e3c577d`** — the integration work before the Final Completion Pass (first table below).
@@ -349,6 +355,8 @@ evidence used here is the job conclusion plus the check-run annotations quoted i
 
 ## 8. Installer build status and provenance
 
+> **Historical section.** The current installer is in section 17; the artifacts below are not deliverables of the current head.
+
 [Windows Installer run 39260659483](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39260659483)
 built the installer from **`5da76f2`** and **succeeded** in 30m50s. The job:
 
@@ -406,6 +414,8 @@ workflow. Windows SmartScreen will warn on first run. This is stated in the Wind
 than claimed otherwise.
 
 ## 9. `KAYAN-ERP-Setup.exe` — location, size, hash, expiration
+
+> **Historical section.** Sizes and hashes below belong to earlier commits. The current artifact is recorded in section 17.
 
 ### Current artifact — built from `5da76f2`
 
@@ -852,3 +862,139 @@ updated branch head before this implementation pass can be called verified.
 ### 16.3 Scope still not completed by this pass
 
 The navigation fix does not itself implement invoice discounts, quotation screens/workflow, Excel accounting import, resizable/maximizable dialogs, complete export/print parity, or full backup/restore test coverage. Those remain explicit follow-up work and must not be reported as complete based only on this navigation change.
+
+---
+
+## 17. Final verification pass — 2026-10-20, head `cb81bc3`
+
+### 17.1 What this pass changed
+
+Five defects kept CI red after the previous pass; all five were in tests or diagnostics, not in
+application behaviour:
+
+| Commit | Change | Why |
+|---|---|---|
+| `ac26531` | Added `subTotal`, `discountTotal`, `totalAmount` (`Prisma.Decimal`) to the printed-page fixture | `snapshotContent` formats those fields with `toFixed`; without them three tests threw `Cannot read properties of undefined` |
+| `ac26531` | Put `sales-quotation` after `purchase-order` in the export-catalogue expectation | It matches the order in `DOCUMENT_KINDS`; the assertion still checks the exact list |
+| `ac26531` | `separatorBuilder: (_, __)` → `(_, _)` | Removed the last `flutter analyze` issue (`unnecessary_underscores`), which was failing the Analyze step |
+| `ac26531` | Unit tests now run through `scripts/ci-diagnose.py` | A future failure publishes its tail as an annotation even when the Actions log archive is unreachable |
+| `e504e2d` | Widget test overrides `customersProvider`/`itemsProvider` | The quotation editor reads those providers, not the `active*` variants, so the dropdowns were empty |
+| `cb81bc3` | Widget test asserts `showTaxId` | The editor and the DTO use `showTaxId`; `showTaxNumber` was never sent |
+
+Production code was not changed to make a test pass, and no assertion was weakened.
+
+### 17.2 CI at the final code head
+
+| Run | Result | Jobs |
+|---|---|---|
+| [`39340110065`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39340110065) | **success** | Regression `118359257671`, Backend `118359257757`, Flutter Web `118359257742`, Linux Desktop `118359257857` |
+
+The Backend job executed, in order: install → `prisma generate` → `prisma validate` →
+`tsc --noEmit` → **`npm test`** → `npm run build` → `prisma migrate deploy` on ephemeral
+PostgreSQL → seed → start API and smoke-test health/login → install PostgreSQL client tools →
+build and restore the complete demo JSON on clean disposable databases → `npm audit`.
+
+The Regression job applied migrations to a freshly created database, seeded it, built the API,
+checked that `/` and a client-side route serve the web client, and ran
+`scenario-regressions.mjs` **and** `scenario-discounts-quotations.mjs`.
+
+The Flutter jobs ran `flutter analyze`, `flutter test --reporter expanded`, and the Web/Linux
+release builds.
+
+### 17.3 Requirement-by-requirement status
+
+| Requirement | Implementation | Evidence | Status |
+|---|---|---|---|
+| Quotation subject | `Quotation.subject`, editor field, snapshot, printed header | Backend test, widget test, scenario | **DONE + TESTED** |
+| Per-offer tax-number switch | `showTaxId` on the quotation, beats company setting, snapshotted | Backend print tests (on/off), scenario, widget body | **DONE + TESTED** |
+| Terms copied per offer + library | `terms` text and `quotation_term_templates`, copied on insert | Service/scenario; no dedicated UI test | **DONE (UI not unit-tested)** |
+| Editable columns and DB templates | ordered JSON columns with labels/visibility/width; `quotation_column_templates`; editor with add/hide/rename/move/width; save/apply template | Backend column tests; widget test sends the layout; scenario checks print order | **DONE + TESTED (server), UI covered by widget test** |
+| Multiple tables, table/document/line discounts, totals | tables with own discount, document discount, per-line discount, stored totals | Backend specs, scenario, widget payload | **DONE + TESTED** |
+| Statuses, event log, revision | `QuotationStatus`, `QuotationEvent`, `revisionOfId`, revision copies snapshot | Service and scenario | **DONE + TESTED** |
+| One-time concurrency-safe conversion | atomic `updateMany` claim on status + `convertedInvoiceId`; explicit second-attempt error | Service code; scenario; unit assertions | **DONE + TESTED** |
+| Arabic RTL print/PDF, XLSX and CSV | `printHtml`, `toXlsx`, `toCsv`, PDF engine, separate buttons | Backend print tests; export catalogue tests; no physical printer | **DONE; physical print NOT VERIFIED** |
+| Sales/purchase/return discounts, posting, reversal | line and document discounts, allocation, tax and stock impact; drafts re-open unchanged | `invoice-discount`, `sales-invoices`, `returns`, `landed-cost` specs; scenario | **DONE + TESTED** |
+| Navigation and permissions | quotation permissions `read/manage/export/convert`; guarded routes and buttons; navigation widget test | Permissions guard specs, catalogue spec, `erp_shell_test` | **DONE + TESTED** |
+| Resizable/maximisable dialogs, horizontal scroll | `data_dialog.dart`, `RecordsTable` | Code; no visual walkthrough | **DONE; visual NOT VERIFIED** |
+| LAN card | `/health/network`: binding state, real IPv4, port, copy, public IP on demand, guidance | Widget code; no second computer | **IMPLEMENTED; LAN NOT VERIFIED** |
+| Per-warehouse stock in the item picker | `GET /inventory/stock/by-warehouse`, grouped display next to total | Service/controller; scenario covers stock | **DONE + TESTED (API); UI visual not verified** |
+| Cost centres | hierarchy, line attribution, journal allocations, report filters, budgets, stock attribution | Service specs; widget tests for cost-centre picker; CI | **DONE + TESTED (automated)** |
+| Migrations, seed, backup/restore | 34 migrations; CI applies them to a new DB; demo JSON built and restored on clean DBs | Backend job steps 11–16 all success | **DONE + TESTED on disposable databases** |
+| Installer from final code | Windows run `39340110060` at `cb81bc3` | artifact `12228799462`, smoke test passed | **DONE + TESTED** |
+
+### 17.4 Exact commands and outcomes
+
+```bash
+# Backend (executed by CI, backend job 118359257757)
+cd backend
+npx prisma generate && npx prisma validate && npx tsc --noEmit
+npm test -- --runInBand
+npm run build
+npx prisma migrate deploy          # fresh PostgreSQL 16 service
+npx ts-node prisma/seed.ts
+npm run start:prod                 # health + login smoke test
+node scripts/build-demo-backup.mjs # demo JSON restored on clean databases
+npm audit --omit=dev
+
+# Regression job 118359257671
+node scripts/scenario-regressions.mjs          http://127.0.0.1:3000/api/v1
+node scripts/scenario-discounts-quotations.mjs http://127.0.0.1:3000/api/v1
+
+# Flutter jobs 118359257742 and 118359257857
+flutter analyze
+flutter test --reporter expanded
+flutter build web --release
+flutter build linux --release
+
+# Localization catalogue (run locally in this workspace)
+node tools/check-l10n-keys.mjs
+# -> l10n check passed: 719 keys in both languages, 1323 usages in the sources.
+```
+
+**Outcomes:** every CI step above returned success. Locally, the backend suite also ran with a
+faithful Prisma stand-in (the generated client in this container is incomplete and the engine
+cannot be downloaded): **47/47 suites, 327/327 tests**. That local run is diagnostic only; the
+authoritative run is the CI job on the real client.
+
+### 17.5 Installer — current artifact
+
+| Item | Value |
+|---|---|
+| Workflow run | [`39340110060`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39340110060) — success |
+| Source commit | `cb81bc316afe3933bd69915b72e8086224341bad` (last commit that changes code or a packaged file) |
+| Artifact | `12228799462` — `KAYAN-ERP-Windows-x64-Installer` |
+| Size | **344,698,505 bytes** |
+| SHA-256 | `3FA4D266A65145A1EC50F52A622EFEF120D745669AD5D26604B7B0990C290D00` |
+| Expires | 2026-11-02T23:43:53Z |
+| Link | <https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39340110060/artifacts/12228799462> |
+
+The installed-package smoke test verified, on the runner and from the actual installer:
+
+```text
+Windows installer smoke test passed: service, database preparation, client startup on port
+3000, login, company JSON and full PostgreSQL backup/restore all verified.
+Installed Windows PostgreSQL backup/restore passed: real archive, mutation, checked restore,
+safety copy, re-login and original sentinel verified.
+Installed Windows company JSON backup/restore passed: snapshot, mutation, restore, re-login
+and original sentinel verified.
+```
+
+The installer is **not code-signed**. Windows SmartScreen may warn.
+
+### 17.6 What this pass did not verify
+
+1. No connection from a **second physical computer** over LAN.
+2. No **physical printer** test and no manual Arabic RTL visual check.
+3. No **human click-through** of the installed Windows build.
+4. No **upgrade of a real existing production database**; CI proves fresh-database migrations
+   and restore on disposable databases, not an in-place customer upgrade.
+5. No code-signing certificate.
+
+### 17.7 Reports
+
+- `ERP_KAYAN_IMPLEMENTATION_REPORT.md` — 18-section implementation report for this pass.
+- `KAYAN-INTEGRATION-VERIFICATION-REPORT.md` — this file; section 17 is authoritative.
+- `ERP_KAYAN_FINAL_IMPLEMENTATION_REPORT.md` — retained as a historical report from an earlier
+  pass; it is not a description of `cb81bc3`.
+
+No merge, release, branch deletion or history rewrite was performed.
