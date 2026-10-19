@@ -137,12 +137,12 @@ void main() {
       await tester.tap(find.text('SUP-1 — Test supplier').last);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byType(DropdownButtonFormField<String>).at(3));
+      await tester.tap(find.byType(DropdownButtonFormField<String>).at(2));
       await tester.pumpAndSettle();
       await tester.tap(find.text('ITEM-1 — Tracked item').last);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byType(DropdownButtonFormField<String>).at(2));
+      await tester.tap(find.byType(DropdownButtonFormField<String>).at(3));
       await tester.pumpAndSettle();
       await tester.tap(find.text('CC-1 — Project one').last);
       await tester.pumpAndSettle();
