@@ -224,7 +224,6 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final theme = Theme.of(context);
     final language = Localizations.localeOf(context).languageCode;
     final links = ref.read(reportLinkProvider);
     final filters = {'itemId': widget.itemId};

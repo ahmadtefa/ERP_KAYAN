@@ -62,7 +62,6 @@ class _DataDialogState<T> extends State<DataDialog<T>> {
   late double _width = widget.initialSize.width;
   late double _height = widget.initialSize.height;
   bool _maximised = false;
-  bool _restored = false;
 
   String get _key => 'data-dialog.${widget.storageKey}';
 
@@ -85,7 +84,6 @@ class _DataDialogState<T> extends State<DataDialog<T>> {
       setState(() {
         _width = width;
         _height = height;
-        _restored = true;
       });
     } catch (_) {
       // A dialog that cannot remember its size is still a working dialog.

@@ -59,7 +59,7 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
       final branchId = widget.branchId ?? user?.branchId;
       _stock = ref.read(apiClientProvider).getList(
         '/inventory/stock',
-        query: {if (branchId != null) 'branchId': branchId},
+        query: {'branchId': ?branchId},
       );
     }
   }

@@ -17,10 +17,23 @@ final networkInfoProvider = FutureProvider<Map<String, dynamic>>((ref) async {
 
 /// The state of the public-address lookup. It is only ever filled by pressing
 /// the button: nothing leaves the machine on its own.
-final publicIpProvider =
-    StateProvider<({bool? ok, String? ip, DateTime? checkedAt, String? message})>(
-      (ref) => (ok: null, ip: null, checkedAt: null, message: null),
-    );
+typedef PublicIpState = ({
+  bool? ok,
+  String? ip,
+  DateTime? checkedAt,
+  String? message,
+});
+
+class PublicIpController extends Notifier<PublicIpState> {
+  @override
+  PublicIpState build() => (ok: null, ip: null, checkedAt: null, message: null);
+
+  void set(PublicIpState value) => state = value;
+}
+
+final publicIpProvider = NotifierProvider<PublicIpController, PublicIpState>(
+  PublicIpController.new,
+);
 
 /// What this installation can be reached at, and what still has to be done to
 /// reach it from another computer.
@@ -248,27 +261,27 @@ class LanAccessCard extends ConsumerWidget {
   Future<void> _detectPublicIp(BuildContext context, WidgetRef ref) async {
     final l10n = context.l10n;
     final notifier = ref.read(publicIpProvider.notifier);
-    notifier.state = (
+    notifier.set((
       ok: null,
       ip: null,
       checkedAt: DateTime.now(),
       message: l10n.publicAddressChecking,
-    );
+    ));
     try {
       final data = await ref.read(apiClientProvider).get('/health/public-ip');
-      notifier.state = (
+      notifier.set((
         ok: data['ok'] == true,
         ip: data['publicIp'] as String?,
         checkedAt: DateTime.tryParse('${data['checkedAt']}') ?? DateTime.now(),
         message: data['message'] as String?,
-      );
+      ));
     } on Failure catch (error) {
-      notifier.state = (
+      notifier.set((
         ok: false,
         ip: null,
         checkedAt: DateTime.now(),
         message: error.message,
-      );
+      ));
     }
   }
 }

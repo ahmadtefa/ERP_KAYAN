@@ -22,7 +22,6 @@ class _LineDraft {
     String unitPrice = '0',
     String taxRate = '0',
     String discountValue = '',
-    this.discountKind = DiscountKind.none,
   }) : quantity = TextEditingController(text: quantity),
       unitPrice = TextEditingController(text: unitPrice),
       taxRate = TextEditingController(text: taxRate),
@@ -762,9 +761,12 @@ class _LinesTable extends StatelessWidget {
               Padding(
                 key: ValueKey(lines[index]),
                 padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                     Expanded(
                       flex: 3,
                       child: Row(
@@ -996,7 +998,9 @@ class _LinesTable extends StatelessWidget {
                     ],
                   ),
                 ),
-              ),
+              ],
+            ),
+          ),
           ],
         ),
       ),

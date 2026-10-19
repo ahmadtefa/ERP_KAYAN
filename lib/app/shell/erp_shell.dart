@@ -28,7 +28,7 @@ class _NavItem {
   final String label;
   final List<String>? permissions;
 
-  bool allows(String? Function(String) can) {
+  bool allows(bool Function(String) can) {
     final required = permissions;
     if (required == null || required.isEmpty) return true;
     return required.any(can);

@@ -60,10 +60,9 @@ class _QuotationListScreenState extends ConsumerState<QuotationListScreen> {
         '${value.year.toString().padLeft(4, '0')}-'
         '${value.month.toString().padLeft(2, '0')}-'
         '${value.day.toString().padLeft(2, '0')}';
-    ref.read(quotationFiltersProvider.notifier).state = filters.copyWith(
-      from: iso(picked.start),
-      to: iso(picked.end),
-    );
+    ref
+        .read(quotationFiltersProvider.notifier)
+        .set(filters.copyWith(from: iso(picked.start), to: iso(picked.end)));
   }
 
   Future<void> _delete(Json row) async {
@@ -136,9 +135,7 @@ class _QuotationListScreenState extends ConsumerState<QuotationListScreen> {
               hint: l10n.searchHint,
               onChanged: (value) => ref
                   .read(quotationFiltersProvider.notifier)
-                  .state = ref
-                  .read(quotationFiltersProvider)
-                  .copyWith(search: value),
+                  .update((current) => current.copyWith(search: value)),
             ),
           ),
           DropdownButton<String>(
@@ -153,9 +150,7 @@ class _QuotationListScreenState extends ConsumerState<QuotationListScreen> {
             ],
             onChanged: (value) => ref
                 .read(quotationFiltersProvider.notifier)
-                .state = ref
-                .read(quotationFiltersProvider)
-                .copyWith(status: value ?? ''),
+                .update((current) => current.copyWith(status: value ?? '')),
           ),
           DropdownButton<String?>(
             value: filters.customerId,
@@ -171,10 +166,13 @@ class _QuotationListScreenState extends ConsumerState<QuotationListScreen> {
                 ),
             ],
             onChanged: (value) {
-              final current = ref.read(quotationFiltersProvider);
-              ref.read(quotationFiltersProvider.notifier).state = value == null
-                  ? current.copyWith(clearCustomer: true)
-                  : current.copyWith(customerId: value);
+              ref
+                  .read(quotationFiltersProvider.notifier)
+                  .update(
+                    (current) => value == null
+                        ? current.copyWith(clearCustomer: true)
+                        : current.copyWith(customerId: value),
+                  );
             },
           ),
           OutlinedButton.icon(
@@ -190,8 +188,9 @@ class _QuotationListScreenState extends ConsumerState<QuotationListScreen> {
             TextButton.icon(
               onPressed: () {
                 _search.clear();
-                ref.read(quotationFiltersProvider.notifier).state =
-                    const QuotationFilters();
+                ref
+                    .read(quotationFiltersProvider.notifier)
+                    .set(const QuotationFilters());
               },
               icon: const Icon(Icons.filter_alt_off_outlined, size: 18),
               label: Text(l10n.clear),
@@ -235,6 +234,11 @@ class _QuotationListScreenState extends ConsumerState<QuotationListScreen> {
                       l10n.customer,
                       flex: 2,
                       value: (row) => partyName(row['customer'], language),
+                    ),
+                    ColumnSpec(
+                      l10n.subject,
+                      flex: 2,
+                      value: (row) => text(row, 'subject'),
                     ),
                     ColumnSpec(
                       l10n.status,

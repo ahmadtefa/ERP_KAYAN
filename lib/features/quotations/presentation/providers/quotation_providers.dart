@@ -56,9 +56,22 @@ class QuotationFilters {
   }
 }
 
-final quotationFiltersProvider = StateProvider<QuotationFilters>(
-  (ref) => const QuotationFilters(),
-);
+class QuotationFiltersController extends Notifier<QuotationFilters> {
+  @override
+  QuotationFilters build() => const QuotationFilters();
+
+  /// Replace the filter set. The list, and the export link built from it,
+  /// then read exactly the same object.
+  void set(QuotationFilters value) => state = value;
+
+  void update(QuotationFilters Function(QuotationFilters) change) =>
+      state = change(state);
+}
+
+final quotationFiltersProvider =
+    NotifierProvider<QuotationFiltersController, QuotationFilters>(
+      QuotationFiltersController.new,
+    );
 
 /// The list exactly as the server answered it: every row matching the filters,
 /// not only the rows the screen happens to show.
@@ -89,4 +102,15 @@ const quotationStatuses = <String>[
 /// independent of each other.
 final quotationTermsProvider = FutureProvider<List<Json>>((ref) async {
   return ref.read(apiClientProvider).getList('/sales/quotation-terms');
+});
+
+/// Saved line-column layouts. Applying one copies its columns onto the offer;
+/// the offer then owns them, so editing the layout later changes nothing that
+/// was already sent.
+final quotationColumnTemplatesProvider = FutureProvider<List<Json>>((
+  ref,
+) async {
+  return ref
+      .read(apiClientProvider)
+      .getList('/sales/quotation-column-templates');
 });

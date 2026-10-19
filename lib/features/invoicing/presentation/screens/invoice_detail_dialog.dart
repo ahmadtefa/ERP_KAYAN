@@ -219,7 +219,7 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
                       l10n.beforeDiscount,
                       numeric: true,
                       value: (r) => formatAmount(
-                        asString(r['grossLineTotal']).isEmpty
+                        (asString(r['grossLineTotal']) ?? '').isEmpty
                             ? asString(r['lineTotal'])
                             : asString(r['grossLineTotal']),
                       ),
@@ -235,7 +235,7 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
                       l10n.invoiceDiscount,
                       numeric: true,
                       value: (r) => formatAmount(
-                        asString(r['invoiceDiscountAmount']).isEmpty
+                        (asString(r['invoiceDiscountAmount']) ?? '').isEmpty
                             ? '0'
                             : asString(r['invoiceDiscountAmount']),
                       ),
