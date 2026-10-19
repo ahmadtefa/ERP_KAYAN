@@ -401,7 +401,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
               Expanded(
                 flex: 2,
                 child: DropdownButtonFormField<String>(
-                  value: _discountMode,
+                  initialValue: _discountMode,
                   decoration: InputDecoration(
                     labelText: language == 'ar' ? 'نوع الخصم' : 'Discount type',
                     border: const OutlineInputBorder(),
