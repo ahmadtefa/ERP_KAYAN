@@ -13,6 +13,7 @@ import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { attributedLines } from '../accounting/cost-center-attribution';
 import { PostingService } from '../accounting/posting.service';
+import { applyInvoiceDiscount } from '../invoicing/invoice-discount';
 import {
   CreateSalesInvoiceDto,
   ListInvoicesDto,
@@ -126,6 +127,8 @@ export class SalesInvoicesService {
         taxRate: l.taxRate.toFixed(RATE_SCALE),
         taxAmount: l.taxAmount.toFixed(MONEY_SCALE),
         lineTotal: l.lineTotal.toFixed(MONEY_SCALE),
+        discountPercent: l.discountPercent.toFixed(RATE_SCALE),
+        discountAmount: l.discountAmount.toFixed(MONEY_SCALE),
         costCenterId: l.costCenterId ?? null,
         unitCost: l.unitCost.toFixed(MONEY_SCALE),
         costTotal: l.costTotal.toFixed(MONEY_SCALE),
@@ -151,7 +154,12 @@ export class SalesInvoicesService {
     if (!customer) throw new BadRequestException('The customer does not exist');
     if (!customer.isActive) throw new BadRequestException('The customer is inactive');
 
-    const lines = await this.prepareLines(companyId, dto.lines, dto.customerId);
+    const discount = applyInvoiceDiscount(
+      await this.prepareLines(companyId, dto.lines, dto.customerId),
+      dto.discountPercent,
+      dto.discountAmount,
+    );
+    const lines = discount.lines;
     const totals = this.totalsOf(lines);
 
     const created = await this.prisma.$transaction(async (tx) => {
@@ -177,6 +185,8 @@ export class SalesInvoicesService {
             : (await this.dueDateFromTerms(companyId, dto.customerId, new Date(dto.invoiceDate))),
           customerId: dto.customerId,
           status: InvoiceStatus.DRAFT,
+          discountPercent: discount.discountPercent,
+          discountAmount: discount.discountAmount,
           subTotal: totals.subTotal,
           taxAmount: totals.taxAmount,
           totalAmount: totals.totalAmount,
@@ -192,6 +202,8 @@ export class SalesInvoicesService {
               taxRate: l.taxRate,
               taxAmount: l.taxAmount,
               lineTotal: l.lineTotal,
+              discountPercent: l.discountPercent,
+              discountAmount: l.discountAmount,
               costCenterId: l.costCenterId,
             })),
           },
@@ -831,6 +843,8 @@ export class SalesInvoicesService {
     status: InvoiceStatus;
     currency: string;
     subTotal: Prisma.Decimal;
+    discountPercent: Prisma.Decimal;
+    discountAmount: Prisma.Decimal;
     taxAmount: Prisma.Decimal;
     totalAmount: Prisma.Decimal;
     paidAmount: Prisma.Decimal;
@@ -848,6 +862,8 @@ export class SalesInvoicesService {
       currency: invoice.currency,
       customer: invoice.customer,
       subTotal: invoice.subTotal.toFixed(MONEY_SCALE),
+      discountPercent: invoice.discountPercent.toFixed(RATE_SCALE),
+      discountAmount: invoice.discountAmount.toFixed(MONEY_SCALE),
       taxAmount: invoice.taxAmount.toFixed(MONEY_SCALE),
       totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),
       paidAmount: invoice.paidAmount.toFixed(MONEY_SCALE),
