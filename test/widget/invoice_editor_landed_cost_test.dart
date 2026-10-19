@@ -116,6 +116,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('ITEM-1 — Tracked item').last);
     await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('invoice-line-unit-price-0')), '10');
+    await tester.pump();
 
     // A fixed invoice-wide discount is sent independently from landed costs.
     await tester.tap(find.byKey(const ValueKey('invoice-discount-mode')));

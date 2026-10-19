@@ -782,6 +782,7 @@ class _LinesTable extends StatelessWidget {
                     Expanded(
                       flex: 2,
                       child: TextFormField(
+                        key: ValueKey('invoice-line-unit-price-$index'),
                         controller: lines[index].unitPrice,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
