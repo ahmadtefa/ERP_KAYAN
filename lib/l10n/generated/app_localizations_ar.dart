@@ -1557,4 +1557,192 @@ class AppLocalizationsAr extends AppLocalizations {
   String get logoTooLarge =>
       'ما زال حجم الشعار بعد التصغير أكبر من ٢ ميجابايت. اختر صورة أبسط.';
 
+  @override
+  String get costCenters => 'مراكز التكلفة';
+
+  @override
+  String get costCenter => 'مركز التكلفة';
+
+  @override
+  String get newCostCenter => 'مركز تكلفة جديد';
+
+  @override
+  String get editCostCenter => 'تعديل مركز التكلفة';
+
+  @override
+  String get costCenterCode => 'كود مركز التكلفة';
+
+  @override
+  String get costCenterType => 'نوع مركز التكلفة';
+
+  @override
+  String get department => 'إدارة';
+
+  @override
+  String get administrativeUnit => 'وحدة إدارية';
+
+  @override
+  String get project => 'مشروع';
+
+  @override
+  String get responsiblePerson => 'المسؤول';
+
+  @override
+  String get parentCostCenter => 'مركز التكلفة الأب';
+
+  @override
+  String get searchCostCenters => 'بحث في مراكز التكلفة';
+
+  @override
+  String get noCostCenters => 'لا توجد مراكز تكلفة بعد';
+
+  @override
+  String get costCenterSaved => 'تم حفظ مركز التكلفة';
+
+  @override
+  String get costCenterDeactivated => 'تم إيقاف مركز التكلفة';
+
+  @override
+  String get confirmDeactivateCostCenter => 'الإيقاف يمنع الترحيلات الجديدة، وتبقى الحركات السابقة مرتبطة بمركزها. هل تريد المتابعة؟';
+
+  @override
+  String get deleteCostCenter => 'حذف مركز التكلفة';
+
+  @override
+  String get confirmDeleteCostCenter => 'لا يمكن حذف مركز تكلفة مستخدم. إذا كانت له حركات، فأوقفه بدلاً من حذفه. هل تريد المتابعة؟';
+
+  @override
+  String get costCenterDeleted => 'تم حذف مركز التكلفة';
+
+  @override
+  String get allParents => 'كل المراكز الأب';
+
+  @override
+  String get allStatuses => 'كل الحالات';
+
+  @override
+  String get usage => 'الاستخدام';
+
+  @override
+  String get journalLinesUsing => 'سطور القيود';
+
+  @override
+  String get allocatedLinesUsing => 'سطور موزعة';
+
+  @override
+  String get costCenterReport => 'مراكز التكلفة';
+
+  @override
+  String get ownAmount => 'خاص به';
+
+  @override
+  String get rolledUp => 'شاملاً التابعين';
+
+  @override
+  String get unallocated => 'غير موزع';
+
+  @override
+  String get transactions => 'الحركات';
+
+  @override
+  String get noTransactions => 'لا توجد حركات في هذه الفترة';
+
+  @override
+  String get drillDown => 'التفاصيل';
+
+  @override
+  String get budgets => 'الموازنات';
+
+  @override
+  String get budget => 'الموازنة';
+
+  @override
+  String get newBudget => 'موازنة جديدة';
+
+  @override
+  String get editBudget => 'تعديل الموازنة';
+
+  @override
+  String get budgetAmount => 'مبلغ الموازنة';
+
+  @override
+  String get actualAmount => 'الفعلي';
+
+  @override
+  String get variance => 'الفرق';
+
+  @override
+  String get variancePercent => 'نسبة الفرق';
+
+  @override
+  String get budgetPeriod => 'فترة الموازنة';
+
+  @override
+  String get noBudgets => 'لا توجد موازنات بعد';
+
+  @override
+  String get budgetSaved => 'تم حفظ الموازنة';
+
+  @override
+  String get retireBudget => 'إيقاف الموازنة';
+
+  @override
+  String get confirmRetireBudget => 'الموازنة الموقوفة تحتفظ بسجلها وتخرج من القائمة النشطة. هل تريد المتابعة؟';
+
+  @override
+  String get budgetReport => 'الموازنة مقابل الفعلي';
+
+  @override
+  String get favorable => 'في الاتجاه الأفضل';
+
+  @override
+  String get unfavorable => 'في الاتجاه الأسوأ';
+
+  @override
+  String get budgetRetired => 'موقوفة';
+
+  @override
+  String get allocation => 'التوزيع';
+
+  @override
+  String get allocations => 'التوزيعات';
+
+  @override
+  String get allocated => 'الموزع';
+
+  @override
+  String get sourceAmount => 'مبلغ السطر';
+
+  @override
+  String get remainingToAllocate => 'المتبقي';
+
+  @override
+  String get splitAcrossCenters => 'توزيع على مراكز التكلفة';
+
+  @override
+  String get allocationMustReconcile => 'يجب أن يساوي مجموع التوزيعات مبلغ السطر تماماً.';
+
+  @override
+  String get duplicateCostCenter => 'مركز التكلفة هذا موجود بالفعل في التوزيع.';
+
+  @override
+  String get selectCostCenter => 'اختر مركز تكلفة';
+
+  @override
+  String get noAllocation => 'بدون مركز تكلفة';
+
+  @override
+  String get costCenterInactive => 'لا يمكن ترحيل قيود جديدة إلى مركز تكلفة موقوف.';
+
+  @override
+  String get addAllocation => 'إضافة مركز تكلفة';
+
+  @override
+  String get allocationTotal => 'إجمالي الموزع';
+
+  @override
+  String get deleteRecord => 'حذف';
+
+  @override
+  String get resultLabel => 'النتيجة';
 }

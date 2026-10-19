@@ -78,6 +78,8 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['accounting.journal.approve', 'Approve journal entries', 'اعتماد القيود اليومية', 'accounting'],
   ['accounting.costcenters.read', 'View cost centers', 'عرض مراكز التكلفة', 'accounting'],
   ['accounting.costcenters.manage', 'Manage cost centers', 'إدارة مراكز التكلفة', 'accounting'],
+  ['accounting.budgets.read', 'View budgets', 'عرض الموازنات', 'accounting'],
+  ['accounting.budgets.manage', 'Manage budgets', 'إدارة الموازنات', 'accounting'],
   [
     'accounting.openingbalances.manage',
     'Open the books: opening balances',

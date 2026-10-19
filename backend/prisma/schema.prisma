@@ -57,6 +57,7 @@ model Company {
   branches      Branch[]
   users         User[]
   accounts      Account[]
+  budgets       Budget[]
   journalEntry  JournalEntry[]
   roles         Role[]
   userRoles     UserRole[]
@@ -308,6 +309,7 @@ model Account {
   cashAccounts     CashAccount[]
   voucherCounter   CashVoucher[]   @relation("VoucherCounterAccount")
   openingLines     OpeningBalanceLine[]
+  budgets          Budget[]        @relation("BudgetAccount")
 
   @@unique([companyId, code])
   @@index([companyId, type])
@@ -460,6 +462,8 @@ model CostCenter {
   salesLines      SalesInvoiceLine[]
   purchaseLines   PurchaseInvoiceLine[]
   cashVouchers    CashVoucher[]    @relation("VoucherCostCenter")
+  budgets         Budget[]         @relation("CostCenterBudgets")
+  stockDocuments  StockDocument[]  @relation("StockDocumentCostCenter")
 
   @@unique([companyId, code])
   @@index([companyId, isActive])
@@ -848,6 +852,12 @@ model StockDocument {
   status         InvoiceStatus     @default(DRAFT)
   reason         String?
   notes          String?
+
+  /// The centre that bears the loss or gain of an adjustment or a count.
+  /// Transfers never carry one: a movement between two warehouses is not a
+  /// cost, and inventing an owner for it would be a lie.
+  costCenterId   String?           @db.Uuid
+
   journalEntryId String?           @db.Uuid
   postedAt       DateTime?
   postedBy       String?           @db.Uuid
@@ -861,10 +871,12 @@ model StockDocument {
   branch        Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
   fromWarehouse Warehouse?         @relation("StockDocumentFromWarehouse", fields: [fromWarehouseId], references: [id], onDelete: Restrict)
   toWarehouse   Warehouse?         @relation("StockDocumentToWarehouse", fields: [toWarehouseId], references: [id], onDelete: Restrict)
+  costCenter    CostCenter?        @relation("StockDocumentCostCenter", fields: [costCenterId], references: [id], onDelete: Restrict)
   lines         StockDocumentLine[]
 
   @@unique([companyId, documentNumber])
   @@index([companyId, kind, documentDate])
+  @@index([costCenterId])
   @@map("stock_documents")
 }
 
@@ -1749,4 +1761,42 @@ model PriceListItem {
   @@unique([priceListId, itemId, unit, minQuantity])
   @@index([priceListId])
   @@map("price_list_items")
+}
+
+// ------------------------------------------------------------------ budgets
+
+/// What a cost centre is allowed to spend, or expected to earn, on one account
+/// over one period.
+///
+/// Deliberately narrow: a budget names a revenue or an expense account (a
+/// balance-sheet account has no "spend" to compare against), one cost centre
+/// and one period. There is no proration and no currency conversion — actuals
+/// are read from posted ledger lines in the company's own currency, so the
+/// comparison can never invent a figure the books do not contain.
+model Budget {
+  id           String   @id @default(uuid()) @db.Uuid
+  companyId    String   @db.Uuid
+  costCenterId String   @db.Uuid
+  accountId    String   @db.Uuid
+  periodStart  DateTime @db.Date
+  periodEnd    DateTime @db.Date
+  amount       Decimal  @db.Decimal(18, 4)
+  currency     String   @db.VarChar(3)
+  notes        String?  @db.VarChar(500)
+  isActive     Boolean  @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  updatedBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  costCenter CostCenter @relation("CostCenterBudgets", fields: [costCenterId], references: [id], onDelete: Restrict)
+  account    Account    @relation("BudgetAccount", fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, periodStart, periodEnd])
+  @@index([companyId, costCenterId])
+  @@index([accountId])
+  @@map("budgets")
 }

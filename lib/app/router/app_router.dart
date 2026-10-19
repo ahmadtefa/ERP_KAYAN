@@ -2,7 +2,9 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/accounting/presentation/screens/budgets_screen.dart';
 import '../../features/accounting/presentation/screens/chart_of_accounts_screen.dart';
+import '../../features/accounting/presentation/screens/cost_centers_screen.dart';
 import '../../features/accounting/presentation/screens/fiscal_periods_screen.dart';
 import '../../features/admin/presentation/screens/admin_screen.dart';
 import '../../features/accounting/presentation/screens/journal_entries_screen.dart';
@@ -42,6 +44,8 @@ class AppRoutes {
   static const login = '/login';
   static const dashboard = '/dashboard';
   static const chartOfAccounts = '/accounting/chart-of-accounts';
+  static const costCenters = '/accounting/cost-centers';
+  static const budgets = '/accounting/budgets';
   static const journalEntries = '/accounting/journal-entries';
   static const fiscalPeriods = '/accounting/fiscal-periods';
   static const openingBalances = '/accounting/opening-balances';
@@ -157,6 +161,8 @@ const _shellRoutes = <({String path, Widget child})>[
     child: ReturnsScreen(kind: InvoiceKind.purchase),
   ),
   (path: AppRoutes.chartOfAccounts, child: ChartOfAccountsScreen()),
+  (path: AppRoutes.costCenters, child: CostCentersScreen()),
+  (path: AppRoutes.budgets, child: BudgetsScreen()),
   (path: AppRoutes.reports, child: ReportsScreen()),
   (path: AppRoutes.importData, child: ImportScreen()),
   (path: AppRoutes.backup, child: BackupScreen()),

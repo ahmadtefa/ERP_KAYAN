@@ -1567,4 +1567,192 @@ class AppLocalizationsEn extends AppLocalizations {
   String get logoTooLarge =>
       'The resized logo is still larger than 2 MB. Choose a simpler image.';
 
+  @override
+  String get costCenters => 'Cost centers';
+
+  @override
+  String get costCenter => 'Cost center';
+
+  @override
+  String get newCostCenter => 'New cost center';
+
+  @override
+  String get editCostCenter => 'Edit cost center';
+
+  @override
+  String get costCenterCode => 'Cost center code';
+
+  @override
+  String get costCenterType => 'Cost center type';
+
+  @override
+  String get department => 'Department';
+
+  @override
+  String get administrativeUnit => 'Administrative unit';
+
+  @override
+  String get project => 'Project';
+
+  @override
+  String get responsiblePerson => 'Responsible person';
+
+  @override
+  String get parentCostCenter => 'Parent cost center';
+
+  @override
+  String get searchCostCenters => 'Search cost centers';
+
+  @override
+  String get noCostCenters => 'No cost centers yet';
+
+  @override
+  String get costCenterSaved => 'Cost center saved';
+
+  @override
+  String get costCenterDeactivated => 'Cost center deactivated';
+
+  @override
+  String get confirmDeactivateCostCenter => 'Deactivating stops new postings. Existing transactions keep their centre. Continue?';
+
+  @override
+  String get deleteCostCenter => 'Delete cost center';
+
+  @override
+  String get confirmDeleteCostCenter => 'Only an unused cost center can be deleted. If it has transactions, deactivate it instead. Continue?';
+
+  @override
+  String get costCenterDeleted => 'Cost center deleted';
+
+  @override
+  String get allParents => 'All parents';
+
+  @override
+  String get allStatuses => 'All statuses';
+
+  @override
+  String get usage => 'Usage';
+
+  @override
+  String get journalLinesUsing => 'Journal lines';
+
+  @override
+  String get allocatedLinesUsing => 'Allocated lines';
+
+  @override
+  String get costCenterReport => 'Cost centers';
+
+  @override
+  String get ownAmount => 'Own';
+
+  @override
+  String get rolledUp => 'Including children';
+
+  @override
+  String get unallocated => 'Unallocated';
+
+  @override
+  String get transactions => 'Transactions';
+
+  @override
+  String get noTransactions => 'No transactions in this period';
+
+  @override
+  String get drillDown => 'Details';
+
+  @override
+  String get budgets => 'Budgets';
+
+  @override
+  String get budget => 'Budget';
+
+  @override
+  String get newBudget => 'New budget';
+
+  @override
+  String get editBudget => 'Edit budget';
+
+  @override
+  String get budgetAmount => 'Budget amount';
+
+  @override
+  String get actualAmount => 'Actual';
+
+  @override
+  String get variance => 'Variance';
+
+  @override
+  String get variancePercent => 'Variance %';
+
+  @override
+  String get budgetPeriod => 'Budget period';
+
+  @override
+  String get noBudgets => 'No budgets yet';
+
+  @override
+  String get budgetSaved => 'Budget saved';
+
+  @override
+  String get retireBudget => 'Retire budget';
+
+  @override
+  String get confirmRetireBudget => 'A retired budget keeps its history and leaves the active list. Continue?';
+
+  @override
+  String get budgetReport => 'Budget vs actual';
+
+  @override
+  String get favorable => 'Favorable';
+
+  @override
+  String get unfavorable => 'Unfavorable';
+
+  @override
+  String get budgetRetired => 'Retired';
+
+  @override
+  String get allocation => 'Allocation';
+
+  @override
+  String get allocations => 'Allocations';
+
+  @override
+  String get allocated => 'Allocated';
+
+  @override
+  String get sourceAmount => 'Line amount';
+
+  @override
+  String get remainingToAllocate => 'Remaining';
+
+  @override
+  String get splitAcrossCenters => 'Split across cost centers';
+
+  @override
+  String get allocationMustReconcile => 'Allocations must add up to the line amount exactly.';
+
+  @override
+  String get duplicateCostCenter => 'This cost center is already in the split.';
+
+  @override
+  String get selectCostCenter => 'Select a cost center';
+
+  @override
+  String get noAllocation => 'No cost center';
+
+  @override
+  String get costCenterInactive => 'Inactive cost centers cannot receive new postings.';
+
+  @override
+  String get addAllocation => 'Add cost center';
+
+  @override
+  String get allocationTotal => 'Allocated total';
+
+  @override
+  String get deleteRecord => 'Delete';
+
+  @override
+  String get resultLabel => 'Result';
 }

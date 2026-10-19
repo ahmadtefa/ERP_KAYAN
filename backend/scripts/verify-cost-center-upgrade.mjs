@@ -176,7 +176,18 @@ try {
 
   // ───────────────────────────────────────────────────────── 2. the upgrade
   const applied = await applyAll(client);
-  check('the upgrade migration applies to an existing database', applied === 1, `${applied} migration`);
+  const appliedNames = (
+    await client.query(
+      'SELECT name FROM "_upgrade_check" WHERE name >= $1 ORDER BY name',
+      [TARGET],
+    )
+  ).rows.map((row) => row.name);
+  check(
+    'the upgrade migrations apply to an existing database',
+    appliedNames.includes(TARGET) &&
+      appliedNames.includes('20261019160000_budgets_and_stock_cost_centers'),
+    appliedNames.join(', '),
+  );
   const after = await snapshot(client);
 
   const legacy = after.centre.find((row) => row.code === 'LEG-1');
@@ -223,6 +234,69 @@ try {
     `SELECT conname FROM pg_constraint WHERE conname IN
        ('cost_centers_parent_not_self', 'cost_centers_date_window', 'journal_line_allocations_amount_positive')`,
   );
+  // The budget table and the stock-document dimension arrive in the same
+  // upgrade; both are additive, and neither touches a historical row.
+  const budgetsTable = await client.query(
+    "SELECT to_regclass('public.budgets') AS name",
+  );
+  check('the budgets table exists after the upgrade', Boolean(budgetsTable.rows[0].name));
+
+  const budgetConstraints = await client.query(
+    `SELECT conname FROM pg_constraint WHERE conname IN
+       ('budgets_amount_not_negative', 'budgets_period_order')`,
+  );
+  check(
+    'the budget CHECK constraints exist',
+    budgetConstraints.rows.length === 2,
+    budgetConstraints.rows.map((row) => row.conname).join(', '),
+  );
+
+  const budgetIndex = await client.query(
+    "SELECT 1 FROM pg_indexes WHERE tablename = 'budgets' AND indexname = 'budgets_active_definition_key'",
+  );
+  check(
+    'one active budget per centre, account and period is enforced by an index',
+    budgetIndex.rows.length === 1,
+  );
+
+  const stockCentre = await client.query(
+    `SELECT is_nullable FROM information_schema.columns
+      WHERE table_name = 'stock_documents' AND column_name = 'costCenterId'`,
+  );
+  check(
+    'stock documents carry an optional cost centre',
+    stockCentre.rows[0]?.is_nullable === 'YES',
+  );
+
+  const budgetPermissions = (
+    await client.query(
+      "SELECT code FROM permissions WHERE code LIKE 'accounting.budgets.%' ORDER BY code",
+    )
+  ).rows.map((row) => row.code);
+  check(
+    'both budget permissions exist after the upgrade',
+    budgetPermissions.length === 2,
+    budgetPermissions.join(', '),
+  );
+  const budgetGrants = (
+    await client.query(
+      `SELECT r.code AS role, p.code AS permission
+         FROM role_permissions rp
+         JOIN roles r ON r.id = rp."roleId"
+         JOIN permissions p ON p.id = rp."permissionId"
+        WHERE p.code LIKE 'accounting.budgets.%'`,
+    )
+  ).rows;
+  check(
+    'ADMIN and ACCOUNTANT can read and manage budgets',
+    ['ADMIN', 'ACCOUNTANT'].every((role) =>
+      ['accounting.budgets.read', 'accounting.budgets.manage'].every((permission) =>
+        budgetGrants.some((g) => g.role === role && g.permission === permission),
+      ),
+    ),
+    budgetGrants.map((g) => `${g.role}:${g.permission.split('.').pop()}`).join(', '),
+  );
+
   check(
     'the new CHECK constraints exist',
     constraints.rows.length === 3,

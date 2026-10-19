@@ -67,3 +67,18 @@ export class CostCenterTransactionsQueryDto extends PeriodQueryDto {
 
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(500) pageSize?: number;
 }
+
+/// Budget against actual. The range picks which budgets are listed; every row
+/// compares its own budget period with the ledger, so the answer always says
+/// which period it used.
+export class BudgetReportQueryDto extends PeriodQueryDto {
+  /// DEPARTMENT, ADMINISTRATIVE_UNIT or PROJECT.
+  @IsOptional() @IsString() type?: string;
+
+  @IsOptional() @IsUUID() costCenterId?: string;
+
+  @IsOptional() @IsUUID() accountId?: string;
+
+  /// Keep retired budgets in the answer.
+  @IsOptional() @IsString() includeInactive?: string;
+}

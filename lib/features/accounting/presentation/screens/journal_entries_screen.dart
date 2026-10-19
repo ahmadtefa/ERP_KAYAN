@@ -14,6 +14,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/chart_of_accounts_providers.dart';
+import '../providers/cost_center_providers.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../../../data/presentation/widgets/document_export_actions.dart';
 
@@ -184,11 +185,16 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
 class _EntryLineDraft {
   _EntryLineDraft()
     : accountId = null,
+      costCenterId = null,
       debit = TextEditingController(),
       credit = TextEditingController(),
       description = TextEditingController();
 
   String? accountId;
+
+  /// The centre this line belongs to, when the cost is somebody's. Optional:
+  /// a balance-sheet line usually has no owner.
+  String? costCenterId;
   final TextEditingController debit;
   final TextEditingController credit;
   final TextEditingController description;
@@ -259,6 +265,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
         if (credit.isNotEmpty && credit != '0') 'credit': credit,
         if (line.description.text.trim().isNotEmpty)
           'description': line.description.text.trim(),
+        if (line.costCenterId != null) 'costCenterId': line.costCenterId,
       });
     }
     if (lines.length < 2) {
@@ -298,6 +305,8 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
     final postable = (accounts.value ?? const [])
         .where((account) => account.isPostable)
         .toList(growable: false);
+    final costCenters = ref.watch(activeCostCentersProvider).value ?? const <Json>[];
+    final language = Localizations.localeOf(context).languageCode;
 
     return Scaffold(
       appBar: AppBar(
@@ -403,6 +412,40 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                               ],
                               onChanged: (value) => setState(
                                 () => _lines[index].accountId = value,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 3,
+                            child: DropdownButtonFormField<String>(
+                              initialValue: _lines[index].costCenterId,
+                              isExpanded: true,
+                              decoration: InputDecoration(
+                                labelText: l10n.costCenter,
+                                isDense: true,
+                                border: const OutlineInputBorder(),
+                              ),
+                              items: [
+                                DropdownMenuItem(
+                                  value: '',
+                                  child: Text(
+                                    l10n.noAllocation,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                for (final center in costCenters)
+                                  DropdownMenuItem(
+                                    value: text(center, 'id'),
+                                    child: Text(
+                                      costCenterLabel(center, language),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (value) => setState(
+                                () => _lines[index].costCenterId =
+                                    value == null || value.isEmpty ? null : value,
                               ),
                             ),
                           ),

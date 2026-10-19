@@ -6,6 +6,7 @@ import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../accounting/presentation/providers/cost_center_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
@@ -22,6 +23,10 @@ class _LineDraft {
       taxRate = TextEditingController(text: taxRate);
 
   String? itemId;
+
+  /// Optional cost centre for the line. Left null on a balance-sheet-only
+  /// line; the server checks that the centre is one this company may use.
+  String? costCenterId;
   final TextEditingController quantity;
   final TextEditingController unitPrice;
   final TextEditingController taxRate;
@@ -124,7 +129,11 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           quantity: text(row, 'quantity', fallback: '1'),
           unitPrice: text(row, 'unitPrice', fallback: '0'),
           taxRate: text(row, 'taxRate', fallback: '0'),
-        )..itemId = text(row, 'itemId').isEmpty ? null : text(row, 'itemId');
+        )
+          ..itemId = text(row, 'itemId').isEmpty ? null : text(row, 'itemId')
+          ..costCenterId = text(row, 'costCenterId').isEmpty
+              ? null
+              : text(row, 'costCenterId');
         _lines.add(line);
       }
       if (_lines.isEmpty) _lines.add(_LineDraft());
@@ -260,6 +269,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         'quantity': quantity,
         'unitPrice': price,
         if (line.taxRate.text.trim().isNotEmpty) 'taxRate': line.taxRate.text.trim(),
+        if (line.costCenterId != null) 'costCenterId': line.costCenterId,
       });
     }
     if (lines.isEmpty) {
@@ -307,6 +317,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     final partiesAsync = ref.watch(
       widget.kind.isSales ? activeCustomersProvider : activeSuppliersProvider,
     );
+    final costCenters = ref.watch(activeCostCentersProvider).value ?? const <Json>[];
+    final language = Localizations.localeOf(context).languageCode;
 
     return Scaffold(
       appBar: AppBar(
@@ -416,6 +428,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
             kind: widget.kind,
             lines: _lines,
             items: itemsAsync.value ?? const [],
+            costCenters: costCenters,
+            language: language,
             onChanged: () => setState(() {}),
             onAdd: () => setState(() => _lines.add(_LineDraft())),
             onRemove: (index) => setState(() => _lines.removeAt(index).dispose()),
@@ -553,6 +567,8 @@ class _LinesTable extends StatelessWidget {
     required this.kind,
     required this.lines,
     required this.items,
+    required this.costCenters,
+    required this.language,
     required this.onChanged,
     required this.onAdd,
     required this.onRemove,
@@ -562,6 +578,8 @@ class _LinesTable extends StatelessWidget {
   final InvoiceKind kind;
   final List<_LineDraft> lines;
   final List<Json> items;
+  final List<Json> costCenters;
+  final String language;
   final VoidCallback onChanged;
   final VoidCallback onAdd;
   final void Function(int index) onRemove;
@@ -613,6 +631,41 @@ class _LinesTable extends StatelessWidget {
                           if (item.isNotEmpty) {
                             onItemDefaults(lines[index], item);
                           }
+                          onChanged();
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 3,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: lines[index].costCenterId,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          labelText: l10n.costCenter,
+                          isDense: true,
+                          border: const OutlineInputBorder(),
+                        ),
+                        items: [
+                          DropdownMenuItem(
+                            value: '',
+                            child: Text(
+                              l10n.noAllocation,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          for (final center in costCenters)
+                            DropdownMenuItem(
+                              value: text(center, 'id'),
+                              child: Text(
+                                costCenterLabel(center, language),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: (value) {
+                          lines[index].costCenterId =
+                              value == null || value.isEmpty ? null : value;
                           onChanged();
                         },
                       ),

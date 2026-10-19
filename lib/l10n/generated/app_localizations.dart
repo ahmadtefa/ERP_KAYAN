@@ -3046,6 +3046,258 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   /// **'تم تخصيص المبلغ على أقدم الفواتير المفتوحة'**
   String get settleOldestFirst;
 
+  /// In en, this message translates to:
+  /// **'Cost centers'**
+  String get costCenters;
+
+  /// In en, this message translates to:
+  /// **'Cost center'**
+  String get costCenter;
+
+  /// In en, this message translates to:
+  /// **'New cost center'**
+  String get newCostCenter;
+
+  /// In en, this message translates to:
+  /// **'Edit cost center'**
+  String get editCostCenter;
+
+  /// In en, this message translates to:
+  /// **'Cost center code'**
+  String get costCenterCode;
+
+  /// In en, this message translates to:
+  /// **'Cost center type'**
+  String get costCenterType;
+
+  /// In en, this message translates to:
+  /// **'Department'**
+  String get department;
+
+  /// In en, this message translates to:
+  /// **'Administrative unit'**
+  String get administrativeUnit;
+
+  /// In en, this message translates to:
+  /// **'Project'**
+  String get project;
+
+  /// In en, this message translates to:
+  /// **'Responsible person'**
+  String get responsiblePerson;
+
+  /// In en, this message translates to:
+  /// **'Parent cost center'**
+  String get parentCostCenter;
+
+  /// In en, this message translates to:
+  /// **'Search cost centers'**
+  String get searchCostCenters;
+
+  /// In en, this message translates to:
+  /// **'No cost centers yet'**
+  String get noCostCenters;
+
+  /// In en, this message translates to:
+  /// **'Cost center saved'**
+  String get costCenterSaved;
+
+  /// In en, this message translates to:
+  /// **'Cost center deactivated'**
+  String get costCenterDeactivated;
+
+  /// In en, this message translates to:
+  /// **'Deactivating stops new postings. Existing transactions keep their centre. Continue?'**
+  String get confirmDeactivateCostCenter;
+
+  /// In en, this message translates to:
+  /// **'Delete cost center'**
+  String get deleteCostCenter;
+
+  /// In en, this message translates to:
+  /// **'Only an unused cost center can be deleted. If it has transactions, deactivate it instead. Continue?'**
+  String get confirmDeleteCostCenter;
+
+  /// In en, this message translates to:
+  /// **'Cost center deleted'**
+  String get costCenterDeleted;
+
+  /// In en, this message translates to:
+  /// **'All parents'**
+  String get allParents;
+
+  /// In en, this message translates to:
+  /// **'All statuses'**
+  String get allStatuses;
+
+  /// In en, this message translates to:
+  /// **'Usage'**
+  String get usage;
+
+  /// In en, this message translates to:
+  /// **'Journal lines'**
+  String get journalLinesUsing;
+
+  /// In en, this message translates to:
+  /// **'Allocated lines'**
+  String get allocatedLinesUsing;
+
+  /// In en, this message translates to:
+  /// **'Cost centers'**
+  String get costCenterReport;
+
+  /// In en, this message translates to:
+  /// **'Own'**
+  String get ownAmount;
+
+  /// In en, this message translates to:
+  /// **'Including children'**
+  String get rolledUp;
+
+  /// In en, this message translates to:
+  /// **'Unallocated'**
+  String get unallocated;
+
+  /// In en, this message translates to:
+  /// **'Transactions'**
+  String get transactions;
+
+  /// In en, this message translates to:
+  /// **'No transactions in this period'**
+  String get noTransactions;
+
+  /// In en, this message translates to:
+  /// **'Details'**
+  String get drillDown;
+
+  /// In en, this message translates to:
+  /// **'Budgets'**
+  String get budgets;
+
+  /// In en, this message translates to:
+  /// **'Budget'**
+  String get budget;
+
+  /// In en, this message translates to:
+  /// **'New budget'**
+  String get newBudget;
+
+  /// In en, this message translates to:
+  /// **'Edit budget'**
+  String get editBudget;
+
+  /// In en, this message translates to:
+  /// **'Budget amount'**
+  String get budgetAmount;
+
+  /// In en, this message translates to:
+  /// **'Actual'**
+  String get actualAmount;
+
+  /// In en, this message translates to:
+  /// **'Variance'**
+  String get variance;
+
+  /// In en, this message translates to:
+  /// **'Variance %'**
+  String get variancePercent;
+
+  /// In en, this message translates to:
+  /// **'Budget period'**
+  String get budgetPeriod;
+
+  /// In en, this message translates to:
+  /// **'No budgets yet'**
+  String get noBudgets;
+
+  /// In en, this message translates to:
+  /// **'Budget saved'**
+  String get budgetSaved;
+
+  /// In en, this message translates to:
+  /// **'Retire budget'**
+  String get retireBudget;
+
+  /// In en, this message translates to:
+  /// **'A retired budget keeps its history and leaves the active list. Continue?'**
+  String get confirmRetireBudget;
+
+  /// In en, this message translates to:
+  /// **'Budget vs actual'**
+  String get budgetReport;
+
+  /// In en, this message translates to:
+  /// **'Favorable'**
+  String get favorable;
+
+  /// In en, this message translates to:
+  /// **'Unfavorable'**
+  String get unfavorable;
+
+  /// In en, this message translates to:
+  /// **'Retired'**
+  String get budgetRetired;
+
+  /// In en, this message translates to:
+  /// **'Allocation'**
+  String get allocation;
+
+  /// In en, this message translates to:
+  /// **'Allocations'**
+  String get allocations;
+
+  /// In en, this message translates to:
+  /// **'Allocated'**
+  String get allocated;
+
+  /// In en, this message translates to:
+  /// **'Line amount'**
+  String get sourceAmount;
+
+  /// In en, this message translates to:
+  /// **'Remaining'**
+  String get remainingToAllocate;
+
+  /// In en, this message translates to:
+  /// **'Split across cost centers'**
+  String get splitAcrossCenters;
+
+  /// In en, this message translates to:
+  /// **'Allocations must add up to the line amount exactly.'**
+  String get allocationMustReconcile;
+
+  /// In en, this message translates to:
+  /// **'This cost center is already in the split.'**
+  String get duplicateCostCenter;
+
+  /// In en, this message translates to:
+  /// **'Select a cost center'**
+  String get selectCostCenter;
+
+  /// In en, this message translates to:
+  /// **'No cost center'**
+  String get noAllocation;
+
+  /// In en, this message translates to:
+  /// **'Inactive cost centers cannot receive new postings.'**
+  String get costCenterInactive;
+
+  /// In en, this message translates to:
+  /// **'Add cost center'**
+  String get addAllocation;
+
+  /// In en, this message translates to:
+  /// **'Allocated total'**
+  String get allocationTotal;
+
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get deleteRecord;
+
+  /// In en, this message translates to:
+  /// **'Result'**
+  String get resultLabel;
+
   // Lookup logic when only language code is specified.
   switch (locale.languageCode) {
     case 'ar':

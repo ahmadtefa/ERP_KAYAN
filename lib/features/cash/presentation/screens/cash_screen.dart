@@ -9,6 +9,7 @@ import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
+import '../../../accounting/presentation/providers/cost_center_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
@@ -175,6 +176,17 @@ class _CashScreenState extends ConsumerState<CashScreen>
     if (kindValues == null || !mounted) return;
     final isReceipt = text(kindValues, 'kind') == 'RECEIPT';
 
+    // A payment's expense side is somebody's cost; a receipt's counter side
+    // can be somebody's revenue. The picker is optional, because a transfer
+    // between the company's own accounts has no owner.
+    List<Json> costCenters = const <Json>[];
+    try {
+      costCenters = await ref.read(activeCostCentersProvider.future);
+    } on Failure catch (error) {
+      if (mounted) showMessage(context, error.message, error: true);
+    }
+    if (!mounted) return;
+
     List<Json> parties = const <Json>[];
     try {
       parties = isReceipt
@@ -235,6 +247,23 @@ class _CashScreenState extends ConsumerState<CashScreen>
           required: true,
           helper: l10n.settleOldestFirst,
         ),
+        if (costCenters.isNotEmpty)
+          FieldSpec(
+            'costCenterId',
+            l10n.costCenter,
+            kind: FieldKind.select,
+            options: [
+              FieldOption('', l10n.noAllocation),
+              for (final center in costCenters)
+                FieldOption(
+                  text(center, 'id'),
+                  costCenterLabel(
+                    center,
+                    Localizations.localeOf(context).languageCode,
+                  ),
+                ),
+            ],
+          ),
         FieldSpec('description', l10n.description, maxLines: 2),
       ],
       initial: {

@@ -241,6 +241,20 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         l10n.chartOfAccounts,
         'accounting.accounts.read',
       ),
+      // The cost-center dimension and its plans sit beside the chart of
+      // accounts: they are accounting master data, not a settings screen.
+      _NavItem(
+        AppRoutes.costCenters,
+        Icons.workspaces_outline,
+        l10n.costCenters,
+        'accounting.costcenters.read',
+      ),
+      _NavItem(
+        AppRoutes.budgets,
+        Icons.savings_outlined,
+        l10n.budgets,
+        'accounting.budgets.read',
+      ),
       _NavItem(
         AppRoutes.reports,
         Icons.bar_chart_outlined,
