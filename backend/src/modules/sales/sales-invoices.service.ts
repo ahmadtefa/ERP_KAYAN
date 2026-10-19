@@ -234,6 +234,121 @@ export class SalesInvoicesService {
   }
 
   /**
+   * Replace a draft sales invoice. Posted documents are immutable because
+   * changing their values after ledger/stock posting would break reconciliation.
+   */
+  async updateDraft(
+    companyId: string,
+    branchId: string | null,
+    userId: string,
+    id: string,
+    dto: CreateSalesInvoiceDto,
+  ) {
+    if (!branchId) {
+      throw new BadRequestException('The signed-in user is not assigned to a branch');
+    }
+
+    const invoice = await this.prisma.salesInvoice.findFirst({
+      where: { id, companyId, deletedAt: null },
+      include: { lines: { orderBy: { lineNumber: 'asc' } } },
+    });
+    if (!invoice) throw new NotFoundException('Sales invoice not found');
+    if (invoice.documentType !== InvoiceDocumentType.INVOICE) {
+      throw new BadRequestException('Return documents cannot be edited as sales invoices');
+    }
+    if (invoice.status !== InvoiceStatus.DRAFT) {
+      throw new BadRequestException('Only a draft sales invoice can be edited');
+    }
+    if (invoice.branchId !== branchId) {
+      throw new BadRequestException('A draft can only be edited from its assigned branch');
+    }
+
+    const customer = await this.prisma.customer.findFirst({
+      where: { id: dto.customerId, companyId, deletedAt: null },
+      select: { id: true, isActive: true },
+    });
+    if (!customer) throw new BadRequestException('The customer does not exist');
+    if (!customer.isActive) throw new BadRequestException('The customer is inactive');
+
+    const discount = applyInvoiceDiscount(
+      await this.prepareLines(companyId, dto.lines, dto.customerId),
+      dto.discountPercent,
+      dto.discountAmount,
+    );
+    const lines = discount.lines;
+    const totals = this.totalsOf(lines);
+    const invoiceDate = new Date(dto.invoiceDate);
+    const dueDate = dto.dueDate
+      ? new Date(dto.dueDate)
+      : await this.dueDateFromTerms(companyId, dto.customerId, invoiceDate);
+
+    await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ status: InvoiceStatus }>>(Prisma.sql`
+        SELECT status
+          FROM sales_invoices
+         WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+         FOR UPDATE
+      `);
+      if (locked.length !== 1 || locked[0].status !== InvoiceStatus.DRAFT) {
+        throw new BadRequestException(
+          'This invoice was posted or changed by someone else. Reload it before editing.',
+        );
+      }
+
+      await tx.salesInvoice.update({
+        where: { id },
+        data: {
+          customerId: dto.customerId,
+          invoiceDate,
+          dueDate,
+          warehouseId: dto.warehouseId ?? invoice.warehouseId,
+          discountPercent: discount.discountPercent,
+          discountAmount: discount.discountAmount,
+          subTotal: totals.subTotal,
+          taxAmount: totals.taxAmount,
+          totalAmount: totals.totalAmount,
+          notes: dto.notes ?? null,
+          lines: {
+            deleteMany: {},
+            create: lines.map((line) => ({
+              lineNumber: line.lineNumber,
+              itemId: line.itemId,
+              description: line.description,
+              quantity: line.quantity,
+              unitPrice: line.unitPrice,
+              taxRate: line.taxRate,
+              taxAmount: line.taxAmount,
+              lineTotal: line.lineTotal,
+              discountPercent: line.discountPercent,
+              discountAmount: line.discountAmount,
+              costCenterId: line.costCenterId,
+            })),
+          },
+        },
+      });
+    });
+
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'UPDATE',
+      entity: 'sales_invoices',
+      entityId: id,
+      before: {
+        status: invoice.status,
+        totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),
+      },
+      after: {
+        status: InvoiceStatus.DRAFT,
+        totalAmount: totals.totalAmount.toFixed(MONEY_SCALE),
+        discountPercent: discount.discountPercent.toFixed(RATE_SCALE),
+        discountAmount: discount.discountAmount.toFixed(MONEY_SCALE),
+      },
+    });
+    return this.findOne(companyId, id);
+  }
+
+  /**
    * Posts a draft invoice.
    *
    * Everything happens in one transaction: the stock is issued at the current
