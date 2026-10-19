@@ -150,10 +150,10 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         _notes = text(invoice, 'notes').isEmpty ? null : text(invoice, 'notes');
         final discountPercent = Decimal.tryParse(text(invoice, 'discountPercent')) ?? Decimal.zero;
         final discountAmount = Decimal.tryParse(text(invoice, 'discountAmount')) ?? Decimal.zero;
-        _discountMode = discountAmount > Decimal.zero ? 'fixed' : 'percent';
-        _discountValue = discountAmount > Decimal.zero
-            ? discountAmount.toString()
-            : discountPercent.toString();
+        _discountMode = discountPercent > Decimal.zero ? 'percent' : 'fixed';
+        _discountValue = discountPercent > Decimal.zero
+            ? discountPercent.toString()
+            : discountAmount.toString();
         _discountController.text = _discountValue;
         _invoiceDate = text(invoice, 'invoiceDate', fallback: _invoiceDate);
         _loadingExisting = false;
