@@ -929,6 +929,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     var multiplier = 1.0;
     var weight = 'w600';
     var family = 'Tahoma';
+    final headerTextController = TextEditingController(text: _design.headerText ?? '');
+    final footerTextController = TextEditingController(text: _design.footerText ?? '');
+    var showHeader = _design.showHeader;
+    var showFooter = _design.showFooter;
 
     void loadElement(String key) {
       final raw = working[key];
@@ -1029,6 +1033,38 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                         border: const OutlineInputBorder(),
                       ),
                     ),
+                    const SizedBox(height: 16),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: showHeader,
+                      title: Text(arabic ? 'إظهار رأس العرض' : 'Show custom header'),
+                      onChanged: (value) => setDialogState(() => showHeader = value ?? true),
+                    ),
+                    TextField(
+                      controller: headerTextController,
+                      minLines: 1,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'نص رأس العرض' : 'Header text',
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: showFooter,
+                      title: Text(arabic ? 'إظهار تذييل العرض' : 'Show custom footer'),
+                      onChanged: (value) => setDialogState(() => showFooter = value ?? true),
+                    ),
+                    TextField(
+                      controller: footerTextController,
+                      minLines: 1,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'نص تذييل العرض' : 'Footer text',
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1040,6 +1076,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
               ),
               FilledButton(
                 onPressed: () {
+                  working['headerText'] = headerTextController.text.trim();
+                  working['footerText'] = footerTextController.text.trim();
+                  working['showHeader'] = showHeader;
+                  working['showFooter'] = showFooter;
                   working[selected] = {
                     'fontSizeMultiplier': multiplier,
                     'fontWeight': weight,
@@ -2139,6 +2179,8 @@ class _QuotationTermsDialog extends ConsumerWidget {
       }
     } finally {
       colorController.dispose();
+      headerTextController.dispose();
+      footerTextController.dispose();
     }
   }
 

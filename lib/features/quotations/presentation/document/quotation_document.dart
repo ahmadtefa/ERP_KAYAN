@@ -53,6 +53,10 @@ class QuotationDocumentDesign {
     this.finalTotal,
     this.footer,
     this.header,
+    this.headerText,
+    this.footerText,
+    this.showHeader = true,
+    this.showFooter = true,
   });
 
   final QuotationDocumentElementStyle? title;
@@ -66,6 +70,10 @@ class QuotationDocumentDesign {
   final QuotationDocumentElementStyle? finalTotal;
   final QuotationDocumentElementStyle? footer;
   final QuotationDocumentElementStyle? header;
+  final String? headerText;
+  final String? footerText;
+  final bool showHeader;
+  final bool showFooter;
 
   /// الأنماط الافتراضية (بدون تجاوزات).
   static QuotationDocumentDesign defaultDesign() => const QuotationDocumentDesign();
@@ -84,6 +92,10 @@ class QuotationDocumentDesign {
       finalTotal: other.finalTotal ?? finalTotal,
       footer: other.footer ?? footer,
       header: other.header ?? header,
+      headerText: other.headerText ?? headerText,
+      footerText: other.footerText ?? footerText,
+      showHeader: other.showHeader,
+      showFooter: other.showFooter,
     );
   }
 
@@ -113,6 +125,10 @@ class QuotationDocumentDesign {
       finalTotal: styleOf('finalTotal'),
       footer: styleOf('footer'),
       header: styleOf('header'),
+      headerText: raw['headerText'] as String?,
+      footerText: raw['footerText'] as String?,
+      showHeader: raw['showHeader'] != false,
+      showFooter: raw['showFooter'] != false,
     );
   }
 
@@ -139,6 +155,10 @@ class QuotationDocumentDesign {
     set('finalTotal', finalTotal);
     set('footer', footer);
     set('header', header);
+    if (headerText != null && headerText!.trim().isNotEmpty) result['headerText'] = headerText;
+    if (footerText != null && footerText!.trim().isNotEmpty) result['footerText'] = footerText;
+    if (!showHeader) result['showHeader'] = false;
+    if (!showFooter) result['showFooter'] = false;
     return result;
   }
 }
