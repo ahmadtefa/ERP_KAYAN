@@ -270,7 +270,7 @@ export function renderQuotationDocument(
         declarations.push(`color:${color}`);
       }
       return declarations.length ? `${selector} { ${declarations.join('; ')}; }` : '';
-    }).filter(Boolean).join('\\n');
+    }).filter(Boolean).join('\n');
   })();
 
   const companyName = rtl
