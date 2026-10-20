@@ -19,7 +19,7 @@ export interface QuotationColumn {
   width: number;
   /// Whether the column holds a monetary quantity. Built-in money keys are
   /// numeric; user-defined columns default to text.
-  numeric: boolean;
+  numeric?: boolean;
 }
 
 /// Built-in column keys offered by the picker. Users are not limited to
