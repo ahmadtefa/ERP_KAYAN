@@ -169,7 +169,7 @@ void main() {
     expect(find.byType(AppBar), findsNothing);
   });
 
-  testWidgets('shows a monogram when the company has no mark', (tester) async {
+  testWidgets('does not show a fake logo tile when no company mark is available', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 2200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -178,7 +178,7 @@ void main() {
     );
 
     expect(find.byType(Image), findsNothing);
-    expect(find.text('ك'), findsOneWidget);
+    expect(find.text('ك'), findsNothing);
   });
 
   testWidgets('writes a long description in full, without clipping', (
