@@ -426,7 +426,7 @@ async function main() {
   // Table 2: 300 + 600 = 900, 100 off, net 800.
   // Subtotal 1700, table discounts 180, quotation-wide 5% of 1520 = 76.
   check('table totals before and after discount', near(quotation.tables[0].subTotal, 800) && near(quotation.tables[0].netTotal, 720) && near(quotation.tables[1].netTotal, 800));
-  check('the summary totals reconcile exactly', near(quotation.subTotal, 1700) && near(quotation.discountTotal, 256) && near(quotation.totalAmount, 1444), JSON.stringify({ sub: quotation.subTotal, disc: quotation.discountTotal, total: quotation.totalAmount }));
+  check('the summary totals reconcile exactly including 14% VAT', near(quotation.subTotal, 1700) && near(quotation.discountTotal, 256) && near(quotation.taxAmount, 202.16) && near(quotation.totalAmount, 1646.16), JSON.stringify({ sub: quotation.subTotal, disc: quotation.discountTotal, tax: quotation.taxAmount, total: quotation.totalAmount }));
   check('the country of origin is copied from the item and never invented', quotation.tables[0].lines[0].countryOfOrigin === 'Egypt' && quotation.tables[1].lines[0].countryOfOrigin === 'Germany');
   check('a table is titled and ordered', quotation.tables[0].title === 'Kitchen cabinets' && quotation.tables[1].sortOrder === 2);
   check('the quotation starts as a draft', quotation.status === 'draft' && quotation.canEdit === true);
@@ -485,8 +485,9 @@ async function main() {
     },
   });
   check('a draft can be reordered and extended', edited?.tables?.[0]?.title === 'Appliances' && edited?.tables?.[2]?.title === 'Delivery');
-  // 1750 gross - 180 table discounts - 5% of 1570 (78.50) = 1491.50.
-  check('the totals follow the edit', near(edited.subTotal, 1750) && near(edited.totalAmount, 1491.5), JSON.stringify({ sub: edited?.subTotal, total: edited?.totalAmount }));
+  // 1750 gross - 180 table discounts - 5% of 1570 (78.50) = 1491.50 net;
+  // 14% VAT on that net is 208.81, so the customer-facing total is 1700.31.
+  check('the totals follow the edit including VAT', near(edited.subTotal, 1750) && near(edited.taxAmount, 208.81) && near(edited.totalAmount, 1700.31), JSON.stringify({ sub: edited?.subTotal, tax: edited?.taxAmount, total: edited?.totalAmount }));
 
   // Tax-number setting: off for this company, then a quotation issued after
   // that keeps the hidden choice in its snapshot.
@@ -519,7 +520,7 @@ async function main() {
     json: { note: 'Sent by email' },
   });
   check('sending issues the quotation and snapshots it', issued?.status === 'sent' && Boolean(issued?.snapshotAt));
-  check('the snapshot holds the tables and totals as issued', issued?.contentSnapshot?.tables?.length === 3 && near(issued?.contentSnapshot?.totals?.totalAmount, 1491.5));
+  check('the snapshot holds the tables and tax-inclusive totals as issued', issued?.contentSnapshot?.tables?.length === 3 && near(issued?.contentSnapshot?.totals?.totalAmount, 1700.31));
   check('the snapshot remembers that the tax number was hidden', issued?.contentSnapshot?.showTaxId === false);
   check('the snapshot carries the subject', issued?.contentSnapshot?.subject === `Kitchen offer ${stamp}`);
   check(
@@ -672,8 +673,8 @@ async function main() {
     check('the company backup restores', restored.status === 200 || restored.status === 201, `status ${restored.status} ${JSON.stringify(restoredBody)?.slice(0, 200)}`);
     const afterRestore = await must('read the quotation after the restore', `/sales/quotations/${quotation.id}`);
     check('the quotation survives the round trip with its totals and snapshot',
-      near(afterRestore?.totalAmount, 1491.5) && afterRestore?.status === 'converted'
-        && afterRestore?.contentSnapshot?.totals?.totalAmount === '1491.5000');
+      near(afterRestore?.totalAmount, 1700.31) && afterRestore?.status === 'converted'
+        && afterRestore?.contentSnapshot?.totals?.totalAmount === '1700.3100');
     const invoiceAfter = await must('read the converted invoice after the restore', `/sales/invoices/${converted.invoice.id}`);
     check('the invoice discount detail survives the round trip',
       near(invoiceAfter?.discountAmount, 78.5)
