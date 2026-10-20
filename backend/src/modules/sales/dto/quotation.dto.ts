@@ -76,6 +76,15 @@ export class QuotationLineDto {
 export class QuotationTableDto {
   @IsString() @MinLength(1) @MaxLength(200) title!: string;
 
+  /// Each table may have its own ordered column layout. Omitted means inherit
+  /// the quotation-level layout for compatibility with existing quotations.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(12)
+  @ValidateNested({ each: true })
+  @Type(() => QuotationColumnDto)
+  columns?: QuotationColumnDto[];
+
   @IsOptional() @IsIn(['PERCENT', 'AMOUNT']) discountType?: string;
   @IsOptional() @IsString() discountPercent?: string;
   @IsOptional() @IsString() discountAmount?: string;
