@@ -47,7 +47,7 @@ class AuthRepositoryImpl implements AuthRepository {
       // never to the screen.
       _log.severe('Sign-in answer could not be read: ${e.message}');
       await _tokenStore.clear();
-      return ResultFailure(IncompleteSignInFailure('Sign-in answer', e));
+      return const ResultFailure(IncompleteSignInFailure());
     } catch (e) {
       _log.severe('Sign-in error', e);
       return ResultFailure(ServerFailure('Sign-in failed', e));

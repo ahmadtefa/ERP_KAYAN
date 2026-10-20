@@ -65,13 +65,11 @@ class ServerFailure extends Failure {
 /// setting up. Distinct from [ServerFailure] so the screen can say what to
 /// check instead of "an unexpected error occurred".
 class IncompleteSignInFailure extends Failure {
+  // The underlying FormatException is logged by the repository, where it is
+  // useful; it is deliberately not carried here.
   const IncompleteSignInFailure([
-    // `cause` has to travel through an explicit super call, so this cannot be
-    // a super parameter.
-    // ignore: use_super_parameters
-    String message = 'The sign-in answer is incomplete',
-    Object? cause,
-  ]) : super(message, cause: cause);
+    super.message = 'The sign-in answer is incomplete',
+  ]);
 }
 
 /// Input validation failed before any network call was attempted.

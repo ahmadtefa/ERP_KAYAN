@@ -13,7 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// In-memory store: the preferences plug-in has no bindings in a widget test,
 /// and the point here is the controller and the scaler, not the file format.
 class _MemoryTokenStore extends TokenStore {
-  _MemoryTokenStore({this.storedScale = 1});
+  _MemoryTokenStore([this.storedScale = 1]);
 
   double storedScale;
   int saves = 0;
@@ -149,7 +149,7 @@ void main() {
       double initial = 1.0,
       Locale locale = const Locale('en'),
     }) async {
-      final store = _MemoryTokenStore(scale: initial);
+      final store = _MemoryTokenStore(initial);
       await tester.pumpWidget(
         ProviderScope(
           overrides: [tokenStoreProvider.overrideWithValue(store)],
@@ -276,14 +276,14 @@ void main() {
     }
 
     testWidgets('the stored size is used on the next launch', (tester) async {
-      await tester.pumpWidget(consumerApp(_MemoryTokenStore(scale: 1.25)));
+      await tester.pumpWidget(consumerApp(_MemoryTokenStore(1.25)));
       await tester.pumpAndSettle();
 
       expect(_effectiveScale(tester), closeTo(1.25, 0.001));
     });
 
     testWidgets('changing the size rebuilds the whole app', (tester) async {
-      final store = _MemoryTokenStore(scale: 1.0);
+      final store = _MemoryTokenStore(1.0);
       await tester.pumpWidget(consumerApp(store));
       await tester.pumpAndSettle();
       expect(_effectiveScale(tester), closeTo(1.0, 0.001));
