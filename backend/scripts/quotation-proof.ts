@@ -149,6 +149,9 @@ async function main() {
   };
   writeFileSync(join(folder, 'summary.json'), JSON.stringify(summary, null, 2));
   console.log(JSON.stringify(summary, null, 2));
+  // Surfaces the measured sheet in the CI run's annotations, where it can be
+  // read without downloading the artifact.
+  console.log(`::notice title=Quotation PDF proof::${JSON.stringify(summary)}`);
 
   const notA4 = pages.some(
     ({ width, height }) =>
