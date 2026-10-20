@@ -419,6 +419,14 @@ class QuotationDocument {
     final sections = <QuotationDocumentSection>[];
     for (final rawTable in rawTables) {
       final table = Map<String, dynamic>.from(rawTable);
+      final tableColumns = _columns(
+        listOf(table['columns']).isNotEmpty
+            ? listOf(table['columns'])
+            : rawColumns.isNotEmpty
+                ? rawColumns
+                : listOf(quotation['columns']),
+        language,
+      );
       final rawLines = listOf(table['lines']);
       final rows = <QuotationDocumentRow>[];
       for (var index = 0; index < rawLines.length; index += 1) {
@@ -428,7 +436,7 @@ class QuotationDocument {
             number: text(line, 'lineNumber').isEmpty
                 ? '${index + 1}'
                 : text(line, 'lineNumber'),
-            cells: [for (final column in columns) _cell(line, column.key)],
+            cells: [for (final column in tableColumns) _cell(line, column.key)],
           ),
         );
       }
@@ -436,7 +444,7 @@ class QuotationDocument {
         QuotationDocumentSection(
           title: text(table, 'title'),
           rows: rows,
-          columns: columns,
+          columns: tableColumns,
           subTotal: text(table, 'subTotal'),
           discountAmount: text(table, 'discountAmount'),
           discountPercent: text(table, 'discountPercent'),
