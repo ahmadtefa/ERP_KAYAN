@@ -155,8 +155,15 @@ void main() {
     expect(find.text('Hardware'), findsNWidgets(2));
     expect(find.text('Software'), findsNWidgets(2));
     expect(find.text('إجمالي القسم'), findsNWidgets(2));
+
+    // The closing summary names every table with its total and ends in one
+    // grand-total row — the table discounts are not repeated there.
+    expect(find.text('ملخص الجداول'), findsOneWidget);
+    expect(find.text('البيان'), findsOneWidget);
+    expect(find.text('إجمالي الجدول'), findsOneWidget);
     expect(find.text('خصم العرض'), findsOneWidget);
-    expect(find.text('خصومات الجداول'), findsOneWidget);
+    expect(find.text('خصومات الجداول'), findsNothing);
+    expect(find.text('المجموع الكلي'), findsOneWidget);
     expect(find.text('1,420.00 EGP'), findsOneWidget);
     expect(find.text('مُرسل'), findsOneWidget);
 
