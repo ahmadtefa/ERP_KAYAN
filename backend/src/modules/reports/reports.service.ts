@@ -412,7 +412,11 @@ export class ReportsService {
               id: l.entry.sourceId,
               number: l.entry.sourceNumber,
             }
-          : null,
+          : {
+              type: 'JOURNAL_ENTRY',
+              id: l.journalEntryId,
+              number: l.entry.entryNumber,
+            },
         isReversal: Boolean(l.entry.reversalOfId),
       };
     });

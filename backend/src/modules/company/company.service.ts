@@ -7,6 +7,7 @@ import {
 import { BranchKind } from '@prisma/client';
 import { readFile, unlink } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
+import sharp, { type Metadata } from 'sharp';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -27,6 +28,9 @@ import {
 /// shown next to numbers, not designed on. Anything else is refused before it
 /// touches the database.
 export const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+export const LOGO_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+const LOGO_MAX_PIXELS = 16_000_000;
+const LOGO_MAX_DIMENSION = 1024;
 export const LOGO_TYPES: Record<string, { mime: string; magic: number[][] }> = {
   'image/png': { mime: 'image/png', magic: [[0x89, 0x50, 0x4e, 0x47]] },
   'image/jpeg': { mime: 'image/jpeg', magic: [[0xff, 0xd8, 0xff]] },
@@ -35,6 +39,22 @@ export const LOGO_TYPES: Record<string, { mime: string; magic: number[][] }> = {
     magic: [[0x52, 0x49, 0x46, 0x46]], // RIFF....WEBP checked below
   },
 };
+
+/// Multipart libraries may default a byte-backed upload to
+/// `application/octet-stream`. When that happens, infer a candidate from the
+/// filename; validateLogo still checks the actual image signature, so an
+/// extension can never make non-image bytes acceptable.
+export function logoMimeForUpload(mime: string, fileName: string): string {
+  const normalized = (mime ?? '').split(';')[0].trim().toLowerCase();
+  if (LOGO_TYPES[normalized]) return normalized;
+  const byExtension: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+  };
+  return byExtension[extname(fileName ?? '').toLowerCase()] ?? normalized;
+}
 
 export interface BranchResponse {
   id: string;
@@ -185,19 +205,7 @@ export class CompanyService {
     data: Buffer,
     mime: string,
   ): Promise<Record<string, unknown>> {
-    const checked = validateLogo(data, mime);
-    const dimensions = logoDimensions(data, checked.mime);
-    if (
-      !dimensions ||
-      dimensions.width > 2048 ||
-      dimensions.height > 2048 ||
-      dimensions.width < 32 ||
-      dimensions.height < 32
-    ) {
-      throw new BadRequestException(
-        'Use a valid PNG, JPEG or WebP logo between 32px and 2048px',
-      );
-    }
+    const checked = await normalizeLogo(data, mime);
     const before = await this.prisma.company.findUnique({
       where: { id: companyId },
       select: { id: true, logoPath: true, deletedAt: true },
@@ -714,20 +722,21 @@ function toBranchResponse(row: {
 export function validateLogo(
   data: Buffer,
   mime: string,
+  maxBytes = LOGO_MAX_BYTES,
 ): { data: Uint8Array<ArrayBuffer>; mime: string } {
   const normalised = (mime ?? '').split(';')[0].trim().toLowerCase();
   const spec = LOGO_TYPES[normalised];
   if (!spec) {
     throw new BadRequestException(
-      'The logo must be a PNG, JPEG or WebP image.',
+      'يجب أن يكون الشعار صورة PNG أو JPEG أو WebP / The logo must be PNG, JPEG or WebP.',
     );
   }
   if (data.length === 0) {
-    throw new BadRequestException('The logo file is empty.');
+    throw new BadRequestException('ملف الشعار فارغ / The logo file is empty.');
   }
-  if (data.length > LOGO_MAX_BYTES) {
+  if (data.length > maxBytes) {
     throw new BadRequestException(
-      `The logo is larger than ${Math.round(LOGO_MAX_BYTES / 1024 / 1024)} MB.`,
+      `حجم الشعار يتجاوز ${Math.round(maxBytes / 1024 / 1024)} ميجابايت / The logo exceeds ${Math.round(maxBytes / 1024 / 1024)} MB.`,
     );
   }
   const matches = spec.magic.some((signature) =>
@@ -735,14 +744,14 @@ export function validateLogo(
   );
   if (!matches) {
     throw new BadRequestException(
-      'The file content does not match its type. Choose a real PNG, JPEG or WebP image.',
+      'محتوى الملف لا يطابق نوع الصورة. اختر ملف PNG أو JPEG أو WebP حقيقيًا / The file content does not match its image type.',
     );
   }
   if (normalised === 'image/webp') {
     // RIFF container: bytes 8-11 must read WEBP.
     const tag = data.subarray(8, 12).toString('latin1');
     if (tag !== 'WEBP') {
-      throw new BadRequestException('The file is not a real WebP image.');
+      throw new BadRequestException('ملف WebP غير صالح / The file is not a valid WebP image.');
     }
   }
   // Prisma's Bytes column wants a Uint8Array; same bytes, right type.
@@ -776,4 +785,67 @@ export function logoDimensions(
     }
   }
   return null;
+}
+
+/// Validates, resizes and recompresses a source image before it is persisted.
+/// The upload cap and pixel cap are applied before decoding to bound memory use;
+/// stored logos are always small WebP files regardless of the source format.
+export async function normalizeLogo(
+  data: Buffer,
+  mime: string,
+): Promise<{ data: Uint8Array<ArrayBuffer>; mime: string }> {
+  const source = validateLogo(data, mime, LOGO_UPLOAD_MAX_BYTES);
+  const input = Buffer.from(source.data);
+  let metadata: Metadata;
+  try {
+    metadata = await sharp(input, {
+      failOn: 'error',
+      limitInputPixels: LOGO_MAX_PIXELS,
+    }).metadata();
+  } catch {
+    throw new BadRequestException(
+      'تعذّر فتح الصورة. اختر ملف PNG أو JPEG أو WebP سليمًا / The image could not be decoded.',
+    );
+  }
+
+  const width = metadata.width ?? 0;
+  const height = metadata.height ?? 0;
+  if (
+    width < 32 || height < 32 || width * height > LOGO_MAX_PIXELS ||
+    (metadata.pages ?? 1) > 1
+  ) {
+    throw new BadRequestException(
+      'يجب أن تكون أبعاد الشعار ٣٢ × ٣٢ بكسل على الأقل، وألا تتجاوز الصورة المتحركة ١٦ مليون بكسل / Use a non-animated image of at least 32 × 32 pixels and no more than 16 megapixels.',
+    );
+  }
+
+  for (const [bound, quality] of [
+    [LOGO_MAX_DIMENSION, 82],
+    [768, 76],
+    [512, 68],
+    [384, 58],
+    [256, 48],
+  ]) {
+    try {
+      const encoded = await sharp(input, {
+        failOn: 'error',
+        limitInputPixels: LOGO_MAX_PIXELS,
+      })
+        .rotate()
+        .resize(bound, bound, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality, effort: 5 })
+        .toBuffer();
+      if (encoded.length <= LOGO_MAX_BYTES) {
+        return { data: Uint8Array.from(encoded), mime: 'image/webp' };
+      }
+    } catch {
+      throw new BadRequestException(
+        'تعذّر ضغط الشعار. اختر صورة صالحة وحاول مرة أخرى / The logo could not be resized.',
+      );
+    }
+  }
+
+  throw new BadRequestException(
+    'تعذّر ضغط الشعار إلى الحجم المسموح. اختر صورة أصغر / The logo remains too large after compression; choose a smaller image.',
+  );
 }

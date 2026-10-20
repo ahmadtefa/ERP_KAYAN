@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -273,7 +274,15 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
               l10n.lastLogin,
               value: (r) => _moment(text(r, 'lastLoginAt')) ?? l10n.never,
             ),
-            ColumnSpec(l10n.status, value: (r) => _status(r)),
+            ColumnSpec(
+              l10n.status,
+              value: (r) => _status(r),
+              tone: (r) => !flag(r, 'isActive', fallback: true)
+                  ? AppTone.neutral
+                  : flag(r, 'isSuperAdmin')
+                  ? AppTone.info
+                  : AppTone.success,
+            ),
           ],
           actions: (row) => [
             IconButton(
@@ -472,6 +481,7 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
             ColumnSpec(
               l10n.status,
               value: (r) => flag(r, 'isSystem') ? l10n.systemRole : l10n.customRole,
+              tone: (r) => flag(r, 'isSystem') ? AppTone.neutral : AppTone.info,
             ),
           ],
           actions: (row) => [

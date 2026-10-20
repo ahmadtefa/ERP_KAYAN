@@ -2,11 +2,16 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
+import '../../../../shared/widgets/surface_card.dart';
 
-/// Two rounded bars per month (sales vs purchases) with the ledger result
-/// drawn as a line over them. Pure painter - no chart package.
+/// Two bars per month (sales vs purchases) with the ledger result drawn as a
+/// line over them. Pure painter - no chart package.
+///
+/// The chart renders the plot only: the surrounding title, subtitle and card
+/// come from the screen so the panel never duplicates its own header.
 class MonthlyBarsChart extends StatelessWidget {
   const MonthlyBarsChart({
     super.key,
@@ -21,83 +26,68 @@ class MonthlyBarsChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final salesColor = theme.colorScheme.primary;
-    const purchaseColor = Color(0xFFB36A18);
-    final resultColor = theme.colorScheme.tertiary;
+    final scheme = theme.colorScheme;
+    final salesColor = scheme.primary;
+    final purchaseColor = theme.brightness == Brightness.light
+        ? const Color(0xFF8A6A2F)
+        : const Color(0xFFD8B678);
+    final resultColor = scheme.tertiary;
     final maxValue = months.fold<double>(0, (max, row) {
       final double sales = asNum(row['sales'])?.toDouble() ?? 0.0;
       final double purchases = asNum(row['purchases'])?.toDouble() ?? 0.0;
       return math.max(max, math.max(sales, purchases));
     });
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Wrap(
+          spacing: AppSpacing.xl,
+          runSpacing: AppSpacing.sm,
+          children: [
+            _Legend(
+              color: salesColor,
+              label: arabic ? 'المبيعات' : 'Sales',
+            ),
+            _Legend(
+              color: purchaseColor,
+              label: arabic ? 'المشتريات' : 'Purchases',
+            ),
+            _Legend(
+              color: resultColor,
+              label: arabic ? 'النتيجة' : 'Net result',
+            ),
+          ],
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            arabic ? 'المبيعات والمشتريات الشهرية' : 'Monthly sales & purchases',
-            style: theme.textTheme.titleLarge
-                ?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            arabic
-                ? 'مقارنة آخر اثني عشر شهراً'
-                : 'A twelve-month comparison',
-            style: theme.textTheme.bodyMedium
-                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 18,
-            runSpacing: 8,
-            children: [
-              _Legend(color: salesColor, label: arabic ? 'المبيعات' : 'Sales'),
-              _Legend(
-                  color: purchaseColor, label: arabic ? 'المشتريات' : 'Purchases'),
-              _Legend(
-                  color: resultColor,
-                  label: arabic ? 'النتيجة' : 'Net result'),
-            ],
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 240,
-            width: double.infinity,
-            child: months.isEmpty
-                ? Center(
-                    child: Text(
-                      arabic
-                          ? 'ستظهر البيانات هنا عند توفر الحركات.'
-                          : 'Numbers appear here once documents exist.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  )
-                : CustomPaint(
-                    painter: _MonthlyBarsPainter(
-                      months: months,
-                      maxValue: maxValue <= 0 ? 1 : maxValue,
-                      salesColor: salesColor,
-                      purchaseColor: purchaseColor,
-                      resultColor: resultColor,
-                      gridColor: theme.colorScheme.outlineVariant
-                          .withValues(alpha: 0.6),
-                      labelColor: theme.colorScheme.onSurfaceVariant,
+        const SizedBox(height: AppSpacing.md),
+        SizedBox(
+          height: 236,
+          width: double.infinity,
+          child: months.isEmpty
+              ? Center(
+                  child: Text(
+                    arabic
+                        ? 'ستظهر البيانات هنا عند توفر الحركات.'
+                        : 'Numbers appear here once documents exist.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
-          ),
-        ],
-      ),
+                )
+              : CustomPaint(
+                  painter: _MonthlyBarsPainter(
+                    months: months,
+                    maxValue: maxValue <= 0 ? 1 : maxValue,
+                    salesColor: salesColor,
+                    purchaseColor: purchaseColor,
+                    resultColor: resultColor,
+                    gridColor: scheme.outlineVariant.withValues(alpha: 0.6),
+                    labelColor: scheme.onSurfaceVariant,
+                  ),
+                ),
+        ),
+      ],
     );
   }
 }
@@ -127,7 +117,12 @@ class _MonthlyBarsPainter extends CustomPainter {
     const bottom = 30.0;
     const left = 6.0;
     const right = 6.0;
-    final rect = Rect.fromLTRB(left, top, size.width - right, size.height - bottom);
+    final rect = Rect.fromLTRB(
+      left,
+      top,
+      size.width - right,
+      size.height - bottom,
+    );
     final grid = Paint()
       ..color = gridColor
       ..strokeWidth = 1;
@@ -159,13 +154,11 @@ class _MonthlyBarsPainter extends CustomPainter {
         height: rect.height * purchases.clamp(0.0, 1.0),
       );
       canvas.drawRRect(
-        RRect.fromRectAndRadius(
-            salesRect, const Radius.circular(3)),
+        RRect.fromRectAndRadius(salesRect, const Radius.circular(3)),
         Paint()..color = salesColor.withValues(alpha: 0.9),
       );
       canvas.drawRRect(
-        RRect.fromRectAndRadius(
-            purchaseRect, const Radius.circular(3)),
+        RRect.fromRectAndRadius(purchaseRect, const Radius.circular(3)),
         Paint()..color = purchaseColor.withValues(alpha: 0.9),
       );
 
@@ -176,11 +169,14 @@ class _MonthlyBarsPainter extends CustomPainter {
         final painter = TextPainter(
           text: TextSpan(
             text: short,
-            style: TextStyle(color: labelColor, fontSize: 9),
+            style: TextStyle(color: labelColor, fontSize: 9.5),
           ),
           textDirection: TextDirection.ltr,
         )..layout();
-        painter.paint(canvas, Offset(centerX - painter.width / 2, rect.bottom + 8));
+        painter.paint(
+          canvas,
+          Offset(centerX - painter.width / 2, rect.bottom + 8),
+        );
       }
     }
 
@@ -188,10 +184,12 @@ class _MonthlyBarsPainter extends CustomPainter {
     final points = <Offset>[];
     for (var i = 0; i < count; i += 1) {
       final result = (asNum(months[i]['result'])?.toDouble() ?? 0) / maxValue;
-      points.add(Offset(
-        rect.left + slot * i + slot / 2,
-        rect.bottom - result.clamp(-1.0, 1.0) * rect.height,
-      ));
+      points.add(
+        Offset(
+          rect.left + slot * i + slot / 2,
+          rect.bottom - result.clamp(-1.0, 1.0) * rect.height,
+        ),
+      );
     }
     final path = Path()..moveTo(points.first.dx, points.first.dy);
     for (var i = 1; i < points.length; i += 1) {
@@ -216,7 +214,9 @@ class _MonthlyBarsPainter extends CustomPainter {
       old.months != months ||
       old.maxValue != maxValue ||
       old.salesColor != salesColor ||
-      old.purchaseColor != purchaseColor;
+      old.purchaseColor != purchaseColor ||
+      old.gridColor != gridColor ||
+      old.labelColor != labelColor;
 }
 
 class _Legend extends StatelessWidget {
@@ -226,17 +226,20 @@ class _Legend extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 9,
-            height: 9,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 7),
-          Text(label, style: Theme.of(context).textTheme.bodySmall),
-        ],
-      );
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(
+        width: 10,
+        height: 10,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(AppRadii.xs),
+        ),
+      ),
+      const SizedBox(width: AppSpacing.sm),
+      Text(label, style: Theme.of(context).textTheme.bodySmall),
+    ],
+  );
 }
 
 /// Ranked list - top customers or top products.
@@ -258,82 +261,32 @@ class TopListPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
-        ),
+    return SurfaceCard(
+      title: title,
+      icon: Icons.leaderboard_outlined,
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.md,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: theme.textTheme.titleMedium
-                ?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 12),
-          if (rows.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                emptyText,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            )
-          else
-            for (var index = 0; index < rows.length; index += 1)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 13,
-                      backgroundColor:
-                          theme.colorScheme.primary.withValues(alpha: 0.12),
-                      child: Text(
-                        '${index + 1}',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.primary,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        _localName(rows[index], arabic),
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium
-                            ?.copyWith(fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                    if (quantitySuffix != null)
-                      Text(
-                        '${formatQuantity(asString(rows[index]['quantity']))} $quantitySuffix',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    const SizedBox(width: 10),
-                    Text(
-                      formatAmount(asString(rows[index]['total'])),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-        ],
-      ),
+      child: rows.isEmpty
+          ? _PanelEmpty(text: emptyText)
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var index = 0; index < rows.length; index += 1)
+                  _RankRow(
+                    rank: index + 1,
+                    name: _localName(rows[index], arabic),
+                    quantity: quantitySuffix == null
+                        ? null
+                        : '${formatQuantity(asString(rows[index]['quantity']))} '
+                              '$quantitySuffix',
+                    amount: formatAmount(asString(rows[index]['total'])),
+                  ),
+              ],
+            ),
     );
   }
 }
@@ -354,83 +307,86 @@ class RecentDocumentsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
-        ),
+    final scheme = theme.colorScheme;
+    return SurfaceCard(
+      title: arabic ? 'آخر العمليات' : 'Recent activity',
+      icon: Icons.history_rounded,
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.md,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            arabic ? 'آخر العمليات' : 'Recent activity',
-            style: theme.textTheme.titleMedium
-                ?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 10),
-          if (rows.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                emptyText,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            )
-          else
-            for (final row in rows)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 7),
-                child: Row(
-                  children: [
-                    Icon(
-                      _kindIcon(text(row, 'kind')),
-                      size: 19,
-                      color: theme.colorScheme.primary,
+      child: rows.isEmpty
+          ? _PanelEmpty(text: emptyText)
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final row in rows)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AppSpacing.xs + 2,
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            text(row, 'number'),
-                            style: theme.textTheme.bodyMedium
-                                ?.copyWith(fontWeight: FontWeight.w700),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 28,
+                          height: 28,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: scheme.primary.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(AppRadii.sm),
                           ),
-                          Text(
-                            _localName(row, arabic),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
+                          child: Icon(
+                            _kindIcon(text(row, 'kind')),
+                            size: 16,
+                            color: scheme.primary,
                           ),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                text(row, 'number'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Text(
+                                _localName(row, arabic),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Text(
+                          text(row, 'date'),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.md),
+                        Text(
+                          formatAmount(asString(row['amount'])),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ],
                     ),
-                    Text(
-                      text(row, 'date'),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      formatAmount(asString(row['amount'])),
-                      style: theme.textTheme.bodyMedium
-                          ?.copyWith(fontWeight: FontWeight.w800),
-                    ),
-                  ],
-                ),
-              ),
-        ],
-      ),
+                  ),
+              ],
+            ),
     );
   }
 }
@@ -451,66 +407,55 @@ class CashAccountsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
-        ),
+    final scheme = theme.colorScheme;
+    return SurfaceCard(
+      title: arabic ? 'أرصدة النقدية والبنوك' : 'Cash & bank balances',
+      icon: Icons.account_balance_wallet_outlined,
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.md,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            arabic ? 'أرصدة النقدية والبنوك' : 'Cash & bank balances',
-            style: theme.textTheme.titleMedium
-                ?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 10),
-          if (rows.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                emptyText,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            )
-          else
-            for (final row in rows)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
-                  children: [
-                    Icon(
-                      text(row, 'kind') == 'BANK'
-                          ? Icons.account_balance_outlined
-                          : Icons.payments_outlined,
-                      size: 19,
-                      color: theme.colorScheme.primary,
+      child: rows.isEmpty
+          ? _PanelEmpty(text: emptyText)
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final row in rows)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AppSpacing.sm,
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        _localName(row, arabic),
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium,
-                      ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          text(row, 'kind') == 'BANK'
+                              ? Icons.account_balance_outlined
+                              : Icons.payments_outlined,
+                          size: 18,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: Text(
+                            _localName(row, arabic),
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ),
+                        Text(
+                          formatAmount(asString(row['balance'])),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ],
                     ),
-                    Text(
-                      formatAmount(asString(row['balance'])),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-        ],
-      ),
+                  ),
+              ],
+            ),
     );
   }
 }
@@ -533,19 +478,21 @@ class QuickActionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Material(
-      color: theme.colorScheme.surface,
-      borderRadius: BorderRadius.circular(18),
+      color: scheme.surface,
+      borderRadius: AppRadii.control,
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: AppRadii.control,
         onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(14),
+        child: Ink(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.md,
+          ),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
-            ),
+            borderRadius: AppRadii.control,
+            border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.8)),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -553,18 +500,122 @@ class QuickActionTile extends StatelessWidget {
               Badge(
                 isLabelVisible: badge != null && badge != '0',
                 label: Text(badge ?? ''),
-                child: Icon(icon, color: theme.colorScheme.primary, size: 26),
+                backgroundColor: AppColors.warning,
+                child: Icon(icon, color: scheme.primary, size: 24),
               ),
-              const SizedBox(height: 9),
+              const SizedBox(height: AppSpacing.sm),
               Text(
                 label,
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurface,
+                ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _RankRow extends StatelessWidget {
+  const _RankRow({
+    required this.rank,
+    required this.name,
+    required this.amount,
+    this.quantity,
+  });
+
+  final int rank;
+  final String name;
+  final String amount;
+  final String? quantity;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs + 2),
+      child: Row(
+        children: [
+          Container(
+            width: 22,
+            height: 22,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(AppRadii.sm),
+            ),
+            child: Text(
+              '$rank',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: scheme.primary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium,
+            ),
+          ),
+          if (quantity != null) ...[
+            Text(
+              quantity!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+          ],
+          Text(
+            amount,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PanelEmpty extends StatelessWidget {
+  const _PanelEmpty({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+      child: Row(
+        children: [
+          Icon(
+            Icons.inbox_outlined,
+            size: 18,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              text,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -583,9 +634,9 @@ String _localName(Json row, bool arabic) {
 }
 
 IconData _kindIcon(String kind) => switch (kind) {
-      'SALES_INVOICE' => Icons.receipt_long_outlined,
-      'PURCHASE_INVOICE' => Icons.shopping_bag_outlined,
-      'CASH_RECEIPT' => Icons.south_west_rounded,
-      'CASH_PAYMENT' => Icons.north_east_rounded,
-      _ => Icons.description_outlined,
-    };
+  'SALES_INVOICE' => Icons.receipt_long_outlined,
+  'PURCHASE_INVOICE' => Icons.shopping_bag_outlined,
+  'CASH_RECEIPT' => Icons.south_west_rounded,
+  'CASH_PAYMENT' => Icons.north_east_rounded,
+  _ => Icons.description_outlined,
+};

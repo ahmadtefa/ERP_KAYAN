@@ -402,10 +402,25 @@ class LocalBackend {
         workingDirectory: layout.backendDirectory,
         environment: {
           ...settings.asEnvironment(port),
-          // The desktop server is private to this machine.
+          // Installed Program Files is read-only for ordinary users.
+          'KAYAN_BACKUP_DIR':
+              settings.asEnvironment(port)['KAYAN_BACKUP_DIR'] ??
+              '${layout.dataDirectory.path}${Platform.pathSeparator}backups',
           'KAYAN_UPLOAD_DIR':
               '${layout.dataDirectory.path}${Platform.pathSeparator}uploads',
-          'HOST': '127.0.0.1',
+          // Say where the browser client is instead of hoping the server
+          // guesses it from its working directory: the address must open the
+          // program, not a JSON 404.
+          'KAYAN_WEB_ROOT':
+              '${File(layout.backendDirectory).parent.path}'
+              '${Platform.pathSeparator}build'
+              '${Platform.pathSeparator}web',
+          // The listening interface comes from the installation's settings
+          // file, not from a literal here. The literal used to override the
+          // file, so setting HOST=0.0.0.0 did nothing and a second computer on
+          // the same network could never connect. The default is every
+          // interface (the installation is a company server); an operator who
+          // wants this copy private sets HOST=127.0.0.1 in the settings file.
           'NODE_ENV': 'production',
           // The server writes to a file, where escape sequences are noise.
           'NO_COLOR': '1',
@@ -925,7 +940,9 @@ class RuntimeSettings {
   final int port;
 
   static const Map<String, String> _defaults = {
-    'HOST': '127.0.0.1',
+    // Reachable from the other devices on the company network by default; the
+    // database itself stays on 127.0.0.1 and is never exposed by this.
+    'HOST': '0.0.0.0',
     'NODE_ENV': 'production',
     'JWT_ACCESS_TTL': '900',
     'JWT_REFRESH_TTL': '1209600',
@@ -968,12 +985,22 @@ class RuntimeSettings {
 # Written automatically the first time the program started, on this machine
 # only. It is never part of the program's files and never leaves this computer.
 #
-# The one line you may need to change is DATABASE_URL: it says which PostgreSQL
-# the program reads and writes. The defaults match a PostgreSQL installed on
-# this machine with the setup scripts in the project.
+# Two lines may need changing.
+#
+# DATABASE_URL says which PostgreSQL the program reads and writes. The default
+# matches the PostgreSQL the installer sets up on this machine.
+#
+# HOST decides which network interface the built-in server listens on:
+#   0.0.0.0   - every interface. Other computers, phones and tablets on the
+#               same network can open http://<this computer's address>:3000
+#   127.0.0.1 - this computer only; nothing else can connect.
+# The database itself listens on 127.0.0.1 only, in both cases, and every API
+# call still needs a signed-in user. Windows Firewall may ask whether to allow
+# the program; allow it for private networks only, never for public networks.
 #
 # After editing, close the program completely and open it again.
 
+HOST=0.0.0.0
 DATABASE_URL="${_defaults['DATABASE_URL']}"
 ADMIN_DATABASE_URL="${_defaults['ADMIN_DATABASE_URL']}"
 JWT_ACCESS_SECRET="${secret()}"
@@ -988,7 +1015,7 @@ JWT_REFRESH_TTL=1209600
   Map<String, String> asEnvironment(int chosenPort) => {
     ..._values,
     'PORT': '$chosenPort',
-    'HOST': _values['HOST'] ?? '127.0.0.1',
+    'HOST': _values['HOST'] ?? _defaults['HOST']!,
   };
 
   String? get databaseUrl => _values['DATABASE_URL'];

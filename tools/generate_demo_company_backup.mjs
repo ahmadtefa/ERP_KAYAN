@@ -5,7 +5,7 @@
  * - format: "kayan-backup"
  * - version: 1
  * - Balanced journal entries (totalDebit === totalCredit)
- * - Demo login: admin / KayanDemo@123; accountant / KayanDemo@123
+ * - Demo login: admin / Admin@12345; accountant / Admin@12345
  * - Complete Chart of Accounts with parent hierarchy
  * - Branches, fiscal period, roles, users, items, stock, sales, and purchases
  */
@@ -128,10 +128,23 @@ export function generateDemoBackup() {
   ];
 
   const rolePermissions = [
-    // Standard module permissions
-    { roleId: ROLE_ADMIN_ID, permissionId: '00000000-0000-4000-8000-000000000001' },
-    { roleId: ROLE_ADMIN_ID, permissionId: '00000000-0000-4000-8000-000000000002' },
-    { roleId: ROLE_ACCT_ID, permissionId: '00000000-0000-4000-8000-000000000001' },
+    // Permission IDs are installation-local. Carry the stable permission code
+    // beside each ID so a company JSON restore can remap it safely.
+    {
+      roleId: ROLE_ADMIN_ID,
+      permissionId: '00000000-0000-4000-8000-000000000001',
+      permissionCode: 'accounting.accounts.read',
+    },
+    {
+      roleId: ROLE_ADMIN_ID,
+      permissionId: '00000000-0000-4000-8000-000000000002',
+      permissionCode: 'accounting.accounts.create',
+    },
+    {
+      roleId: ROLE_ACCT_ID,
+      permissionId: '00000000-0000-4000-8000-000000000001',
+      permissionCode: 'accounting.accounts.read',
+    },
   ];
 
   const users = [
@@ -142,7 +155,7 @@ export function generateDemoBackup() {
       email: 'admin@kayan-erp.local',
       fullNameEn: 'System Administrator',
       fullNameAr: 'مدير النظام المالي',
-      passwordHash: '$argon2id$v=19$m=65536,t=3,p=4$zjBzVt2OX2fgSMsKrj2UKw$DSc4SpQimkeMakfzd4hPlnsBD/mTeIXfPxWoyBQHqZ4',
+      passwordHash: '$argon2id$v=19$m=65536,t=3,p=4$+74on6554NwUppnFg5r85w$10AECDDGGLlb3m1D2/eA+LiIQVn3AH9kvXc2jJ/ZDZ0',
       isActive: true,
       isSuperAdmin: true,
       failedLoginCount: 0,
@@ -156,7 +169,7 @@ export function generateDemoBackup() {
       email: 'accountant@kayan-erp.local',
       fullNameEn: 'Chief Accountant',
       fullNameAr: 'محاسب عام',
-      passwordHash: '$argon2id$v=19$m=65536,t=3,p=4$zjBzVt2OX2fgSMsKrj2UKw$DSc4SpQimkeMakfzd4hPlnsBD/mTeIXfPxWoyBQHqZ4',
+      passwordHash: '$argon2id$v=19$m=65536,t=3,p=4$+74on6554NwUppnFg5r85w$10AECDDGGLlb3m1D2/eA+LiIQVn3AH9kvXc2jJ/ZDZ0',
       isActive: true,
       isSuperAdmin: false,
       failedLoginCount: 0,
@@ -621,6 +634,21 @@ export function generateDemoBackup() {
     companyId: COMPANY_ID,
     companyCode: 'DEMO',
     companyName: 'شركة كيان للحلول والتجارة (بيانات تجريبية)',
+    companyProfile: {
+      nameEn: 'KAYAN Demo Trading Company',
+      nameAr: 'شركة كيان للحلول والتجارة (بيانات تجريبية)',
+      taxId: '000000000000000',
+      commercialRegistration: null,
+      addressEn: 'Dokki, Giza, Egypt',
+      addressAr: 'الدقي، الجيزة، مصر',
+      phone: '+20 2 0000 0000',
+      email: 'demo@kayan-erp.local',
+      address: 'Dokki, Giza, Egypt',
+      currency: 'EGP',
+      timezone: 'Africa/Cairo',
+      logoBase64: null,
+      logoMime: null,
+    },
     counts,
     tables,
   };
@@ -631,7 +659,7 @@ export function generateDemoBackup() {
 // user rows exist but whose password hashes can never be used to sign in.
 const backup = generateDemoBackup();
 for (const user of backup.tables.user) {
-  if (!(await argon2.verify(user.passwordHash, 'KayanDemo@123'))) {
+  if (!(await argon2.verify(user.passwordHash, 'Admin@12345'))) {
     throw new Error('Demo password hash is invalid for user ' + user.username);
   }
 }

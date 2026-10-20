@@ -36,10 +36,40 @@ class AuthFailure extends Failure {
     : super(cause: cause);
 }
 
+/// The session is over: the server refused the access token and the refresh
+/// token was refused too, so only a new sign-in can help. Separate from
+/// [AuthFailure] because a failed sign-in shows "invalid credentials" while
+/// this must say that the session ended and nothing was lost.
+class SessionExpiredFailure extends Failure {
+  const SessionExpiredFailure([super.message = 'Session expired', Object? cause])
+    : super(cause: cause);
+}
+
+/// The account is valid but not allowed to do this. Showing "invalid
+/// credentials" here would make a permission problem look like a wrong
+/// password and send people to reset a password that is perfectly good.
+class PermissionFailure extends Failure {
+  const PermissionFailure([super.message = 'Permission denied', Object? cause])
+    : super(cause: cause);
+}
+
 /// The server failed (5xx) or returned a malformed payload.
 class ServerFailure extends Failure {
   const ServerFailure([super.message = 'Server error', Object? cause])
     : super(cause: cause);
+}
+
+/// The server accepted the sign-in and issued a session, but the account
+/// details in its answer could not be read - typically a version mismatch
+/// between the program and the API, or a company that was never finished
+/// setting up. Distinct from [ServerFailure] so the screen can say what to
+/// check instead of "an unexpected error occurred".
+class IncompleteSignInFailure extends Failure {
+  // The underlying FormatException is logged by the repository, where it is
+  // useful; it is deliberately not carried here.
+  const IncompleteSignInFailure([
+    super.message = 'The sign-in answer is incomplete',
+  ]);
 }
 
 /// Input validation failed before any network call was attempted.

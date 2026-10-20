@@ -46,3 +46,39 @@ export class OperationsQueryDto extends PeriodQueryDto {
   /// How many months the monthly comparison covers (dashboard charts).
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(120) months?: number;
 }
+
+/// The cost-center report filters by hierarchy type and by one centre, so
+/// those filters have to be declared here: the global validation pipe rejects
+/// an undeclared query parameter instead of silently ignoring it.
+export class CostCenterReportQueryDto extends PeriodQueryDto {
+  /// DEPARTMENT, ADMINISTRATIVE_UNIT or PROJECT.
+  @IsOptional() @IsString() type?: string;
+
+  @IsOptional() @IsUUID() costCenterId?: string;
+
+  /// Keep deactivated centres in the answer (they still hold history).
+  @IsOptional() @IsString() includeInactive?: string;
+}
+
+/// The drill-down is paginated; both bounds are declared so a client can ask
+/// for a smaller page without being refused.
+export class CostCenterTransactionsQueryDto extends PeriodQueryDto {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(500) pageSize?: number;
+}
+
+/// Budget against actual. The range picks which budgets are listed; every row
+/// compares its own budget period with the ledger, so the answer always says
+/// which period it used.
+export class BudgetReportQueryDto extends PeriodQueryDto {
+  /// DEPARTMENT, ADMINISTRATIVE_UNIT or PROJECT.
+  @IsOptional() @IsString() type?: string;
+
+  @IsOptional() @IsUUID() costCenterId?: string;
+
+  @IsOptional() @IsUUID() accountId?: string;
+
+  /// Keep retired budgets in the answer.
+  @IsOptional() @IsString() includeInactive?: string;
+}

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/theme/design_tokens.dart';
 import '../../core/json/json_utils.dart';
 import '../extensions/l10n_extension.dart';
 
@@ -191,8 +192,9 @@ class _FormSheetState extends State<_FormSheet> {
     return AlertDialog(
       title: Text(widget.title),
       content: SizedBox(
-        width: 420,
+        width: 440,
         child: SingleChildScrollView(
+          padding: const EdgeInsets.only(top: AppSpacing.xs),
           child: Form(
             key: _formKey,
             autovalidateMode: AutovalidateMode.onUserInteraction,
@@ -220,7 +222,7 @@ class _FormSheetState extends State<_FormSheet> {
   }
 
   Widget _buildField(FieldSpec field) {
-    final padding = const EdgeInsets.only(bottom: 12);
+    final padding = const EdgeInsets.only(bottom: AppSpacing.md);
     switch (field.kind) {
       case FieldKind.toggle:
         return Padding(
@@ -243,7 +245,6 @@ class _FormSheetState extends State<_FormSheet> {
             decoration: InputDecoration(
               labelText: field.label,
               helperText: field.helper,
-              border: const OutlineInputBorder(),
             ),
             items: [
               for (final option in field.options)
@@ -265,13 +266,26 @@ class _FormSheetState extends State<_FormSheet> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(field.label, style: Theme.of(context).textTheme.labelLarge),
+            Text(
+              field.label,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
             if (field.helper != null)
-              Text(field.helper!, style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 6),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  field.helper!,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            const SizedBox(height: AppSpacing.sm),
             Wrap(
-              spacing: 8,
-              runSpacing: 4,
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.xs,
               children: [
                 for (final option in field.options)
                   FilterChip(
@@ -306,7 +320,6 @@ class _FormSheetState extends State<_FormSheet> {
             decoration: InputDecoration(
               labelText: field.label,
               helperText: field.helper,
-              border: const OutlineInputBorder(),
               suffixIcon: const Icon(Icons.calendar_today_outlined),
             ),
             onTap: widget.readOnly ? null : () => _pickDate(field),
@@ -330,7 +343,6 @@ class _FormSheetState extends State<_FormSheet> {
             decoration: InputDecoration(
               labelText: field.label,
               helperText: field.helper,
-              border: const OutlineInputBorder(),
             ),
             validator: (value) => _validate(field, value),
           ),

@@ -41,6 +41,22 @@ class AppLocalizationsAr extends AppLocalizations {
       'تعذّر الوصول إلى الخادم. تحقق من الاتصال أو من عنوان الواجهة البرمجية.';
 
   @override
+  String get sessionExpired => 'انتهت صلاحية الجلسة. سجّل الدخول مرة أخرى للمتابعة.';
+
+  @override
+  String get permissionDenied => 'ليس لديك صلاحية لتنفيذ هذا الإجراء.';
+
+  @override
+  String get openingQuantity => 'الكمية الافتتاحية';
+
+  @override
+  String get openingUnitCost => 'تكلفة الوحدة الافتتاحية';
+
+  @override
+  String get openingStockHint =>
+      'اختياري. يرحّل المخزون وقيد المخزون/حقوق الملكية مع الصنف. اتركه فارغاً لإدخال المخزون الافتتاحي لاحقاً من الأرصدة الافتتاحية.';
+
+  @override
   String get loading => 'جارٍ التحميل…';
 
   @override
@@ -59,6 +75,19 @@ class AppLocalizationsAr extends AppLocalizations {
   String get chartOfAccounts => 'دليل الحسابات';
 
   @override
+  String get openingBalancesTitle => 'الأرصدة الافتتاحية';
+
+  @override
+  String get reviewOpeningBalances => 'مراجعة الأرصدة الافتتاحية';
+
+  @override
+  String get noOpeningBalanceDocuments => 'لا توجد مسودات أرصدة افتتاحية بعد';
+
+  @override
+  String get openingBalanceDraftHint =>
+      'الأرصدة المستوردة تبقى مسودات حتى تراجعها وترحّلها.';
+
+  @override
   String get journalEntries => 'القيود اليومية';
 
   @override
@@ -75,6 +104,42 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get settings => 'الإعدادات';
+
+  @override
+  String get sessionStorageLabel => 'حفظ الجلسة';
+
+  @override
+  String get sessionStorageDurable => 'محفوظة على هذا الجهاز';
+
+  @override
+  String get sessionStorageMemoryOnly => 'في الذاكرة فقط';
+
+  @override
+  String get sessionStorageMemoryHint => 'هذه الصفحة ليست عبر HTTPS، لذا يحفظ المتصفح الجلسة حتى إعادة التحميل فقط. شغّل البرنامج عبر HTTPS لبقاء المستخدمين مسجّلين.';
+
+  @override
+  String get signInIncomplete => 'قبِل الخادم تسجيل الدخول لكنه لم يُرسل بيانات الحساب. يعني ذلك عادةً أن البرنامج والخادم بإصدارين مختلفين، أو أن تهيئة الشركة لم تكتمل. التفاصيل التقنية في سجل البرنامج.';
+
+  @override
+  String get fontSize => 'حجم الخط';
+
+  @override
+  String get fontSizeDescription => 'يطبّق على البرنامج كله: الأزرار والقوائم والشريط الجانبي والجداول ومربعات الحوار والتقارير، ويُحفظ للدخول القادم.';
+
+  @override
+  String get fontSizeSmaller => 'تصغير الخط';
+
+  @override
+  String get fontSizeLarger => 'تكبير الخط';
+
+  @override
+  String get fontSizeReset => 'الحجم الافتراضي';
+
+  @override
+  String get fontSizePreview => 'معاينة: فاتورة 1,250.00 ج.م · خصم 12.5%';
+
+  @override
+  String get sessionNotPersisted => 'الجلسة محفوظة في الذاكرة فقط: المتصفح لا يخزّنها على عنوان http:// غير آمن. إعادة تحميل الصفحة تسجّل الخروج. شغّل البرنامج عبر HTTPS لحفظ الجلسة.';
 
   @override
   String get language => 'اللغة';
@@ -99,6 +164,9 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get branch => 'الفرع';
+
+  @override
+  String get warehouse => 'المخزن';
 
   @override
   String get notAvailable => 'غير محدد';
@@ -265,6 +333,10 @@ class AppLocalizationsAr extends AppLocalizations {
   String get stockNotTracked => 'خدمة / بدون مخزون';
 
   @override
+  String get stockTrackingDoesNotAddQuantity =>
+      'تتبع المخزون لا يضيف كمية تلقائياً. أدخل الرصيد من الأرصدة الافتتاحية ثم راجع المسودة ورحّلها.';
+
+  @override
   String get noStock => 'لا يوجد مخزون';
 
   @override
@@ -323,6 +395,87 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get newPurchaseInvoice => 'فاتورة شراء جديدة';
+
+  @override
+  String get landedCosts => 'تكاليف الشراء الإضافية';
+
+  @override
+  String get landedCostAllocationHint => 'أضف كل تكلفة للشحن أو النقل أو الجمارك أو غيرها؛ ويُوزّع الإجمالي على أصناف المخزون حسب قيمة كل بند.';
+
+  @override
+  String get landedCostCannotBeNegative => 'لا يمكن أن تكون تكاليف الشراء الإضافية سالبة';
+
+  @override
+  String get addLandedCost => 'إضافة تكلفة';
+
+  @override
+  String get removeLandedCost => 'حذف التكلفة';
+
+  @override
+  String get otherLandedCosts => 'تكاليف شراء أخرى';
+
+  @override
+  String get landedCostDescriptionRequired => 'أدخل وصفًا لكل تكلفة شراء إضافية';
+
+  @override
+  String get landedCostAmountInvalid => 'أدخل مبلغًا صحيحًا غير سالب لكل تكلفة شراء إضافية';
+
+  @override
+  String get editDraftInvoice => 'تعديل مسودة الفاتورة';
+
+  @override
+  String get onlyDraftInvoiceCanBeEdited => 'يمكن تعديل الفواتير المسودة فقط';
+
+  @override
+  String get salesReturns => 'مرتجعات المبيعات';
+
+  @override
+  String get purchaseReturns => 'مرتجعات المشتريات';
+
+  @override
+  String get newSalesReturn => 'مرتجع مبيعات جديد';
+
+  @override
+  String get newPurchaseReturn => 'مرتجع مشتريات جديد';
+
+  @override
+  String get noReturns => 'لا توجد مرتجعات بعد';
+
+  @override
+  String get returnDate => 'تاريخ المرتجع';
+
+  @override
+  String get returnReason => 'سبب المرتجع';
+
+  @override
+  String get originalInvoice => 'الفاتورة الأصلية';
+
+  @override
+  String get selectOriginalInvoice => 'اختر فاتورة مُرحّلة';
+
+  @override
+  String get remainingToReturn => 'الكمية المتبقية للمرتجع';
+
+  @override
+  String get quantityToReturn => 'الكمية المرتجعة';
+
+  @override
+  String get createReturn => 'إنشاء مرتجع';
+
+  @override
+  String get returnCreated => 'تم حفظ المرتجع كمسودة';
+
+  @override
+  String get confirmPostReturn => 'سيؤدي ترحيل المرتجع إلى تحديث المخزون ورصيد العميل أو المورد. هل تريد المتابعة؟';
+
+  @override
+  String get returnPosted => 'تم ترحيل المرتجع';
+
+  @override
+  String get returnReversed => 'تم عكس المرتجع';
+
+  @override
+  String get returnLines => 'بنود المرتجع';
 
   @override
   String get invoiceNumber => 'الرقم';
@@ -1058,7 +1211,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get removeLogo => 'إزالة الشعار';
 
   @override
-  String get logoHint => 'اختياري — PNG أو JPEG أو WebP حتى 2 ميجابايت';
+  String get logoHint => 'اختياري — PNG أو JPEG أو WebP؛ يُصغّر إلى ١٠٢٤ × ١٠٢٤ بكسل، حتى ٢ ميجابايت';
 
   @override
   String get logoUpdated => 'تم تحديث الشعار';
@@ -1417,5 +1570,722 @@ class AppLocalizationsAr extends AppLocalizations {
 
 @override
   String get deactivateAccount => 'تعطيل الحساب';
+
+  @override
+  String get demoBackupTitle => 'جرّب الشركة التجريبية';
+
+  @override
+  String get demoBackupHint =>
+      'نزّل نسخة تجريبية واقعية للشركة، ثم اخترها من قسم الاستعادة. راجع المعاينة قبل استبدال أي بيانات.';
+
+  @override
+  String get downloadDemoBackup => 'تنزيل النسخة التجريبية';
+
+  @override
+  String get demoLoginHint =>
+      'بعد الاستعادة، سجّل الدخول باسم admin وكلمة المرور Admin@12345.';
+
+  @override
+  String get logoInvalid =>
+      'اختر صورة PNG أو JPEG أو WebP صالحة، وبأبعاد لا تقل عن ٣٢ × ٣٢ بكسل.';
+
+  @override
+  String get logoTooLarge =>
+      'ما زال حجم الشعار بعد التصغير أكبر من ٢ ميجابايت. اختر صورة أبسط.';
+
+  @override
+  String get costCenters => 'مراكز التكلفة';
+
+  @override
+  String get costCenter => 'مركز التكلفة';
+
+  @override
+  String get newCostCenter => 'مركز تكلفة جديد';
+
+  @override
+  String get editCostCenter => 'تعديل مركز التكلفة';
+
+  @override
+  String get costCenterCode => 'كود مركز التكلفة';
+
+  @override
+  String get costCenterType => 'نوع مركز التكلفة';
+
+  @override
+  String get department => 'إدارة';
+
+  @override
+  String get administrativeUnit => 'وحدة إدارية';
+
+  @override
+  String get project => 'مشروع';
+
+  @override
+  String get responsiblePerson => 'المسؤول';
+
+  @override
+  String get parentCostCenter => 'مركز التكلفة الأب';
+
+  @override
+  String get searchCostCenters => 'بحث في مراكز التكلفة';
+
+  @override
+  String get noCostCenters => 'لا توجد مراكز تكلفة بعد';
+
+  @override
+  String get costCenterSaved => 'تم حفظ مركز التكلفة';
+
+  @override
+  String get costCenterDeactivated => 'تم إيقاف مركز التكلفة';
+
+  @override
+  String get confirmDeactivateCostCenter => 'الإيقاف يمنع الترحيلات الجديدة، وتبقى الحركات السابقة مرتبطة بمركزها. هل تريد المتابعة؟';
+
+  @override
+  String get deleteCostCenter => 'حذف مركز التكلفة';
+
+  @override
+  String get confirmDeleteCostCenter => 'لا يمكن حذف مركز تكلفة مستخدم. إذا كانت له حركات، فأوقفه بدلاً من حذفه. هل تريد المتابعة؟';
+
+  @override
+  String get costCenterDeleted => 'تم حذف مركز التكلفة';
+
+  @override
+  String get allParents => 'كل المراكز الأب';
+
+  @override
+  String get allStatuses => 'كل الحالات';
+
+  @override
+  String get usage => 'الاستخدام';
+
+  @override
+  String get journalLinesUsing => 'سطور القيود';
+
+  @override
+  String get allocatedLinesUsing => 'سطور موزعة';
+
+  @override
+  String get costCenterReport => 'مراكز التكلفة';
+
+  @override
+  String get ownAmount => 'خاص به';
+
+  @override
+  String get rolledUp => 'شاملاً التابعين';
+
+  @override
+  String get unallocated => 'غير موزع';
+
+  @override
+  String get transactions => 'الحركات';
+
+  @override
+  String get noTransactions => 'لا توجد حركات في هذه الفترة';
+
+  @override
+  String get drillDown => 'التفاصيل';
+
+  @override
+  String get budgets => 'الموازنات';
+
+  @override
+  String get budget => 'الموازنة';
+
+  @override
+  String get newBudget => 'موازنة جديدة';
+
+  @override
+  String get editBudget => 'تعديل الموازنة';
+
+  @override
+  String get budgetAmount => 'مبلغ الموازنة';
+
+  @override
+  String get actualAmount => 'الفعلي';
+
+  @override
+  String get variance => 'الفرق';
+
+  @override
+  String get variancePercent => 'نسبة الفرق';
+
+  @override
+  String get budgetPeriod => 'فترة الموازنة';
+
+  @override
+  String get noBudgets => 'لا توجد موازنات بعد';
+
+  @override
+  String get budgetSaved => 'تم حفظ الموازنة';
+
+  @override
+  String get retireBudget => 'إيقاف الموازنة';
+
+  @override
+  String get confirmRetireBudget => 'الموازنة الموقوفة تحتفظ بسجلها وتخرج من القائمة النشطة. هل تريد المتابعة؟';
+
+  @override
+  String get budgetReport => 'الموازنة مقابل الفعلي';
+
+  @override
+  String get favorable => 'في الاتجاه الأفضل';
+
+  @override
+  String get unfavorable => 'في الاتجاه الأسوأ';
+
+  @override
+  String get budgetRetired => 'موقوفة';
+
+  @override
+  String get allocation => 'التوزيع';
+
+  @override
+  String get allocations => 'التوزيعات';
+
+  @override
+  String get allocated => 'الموزع';
+
+  @override
+  String get sourceAmount => 'مبلغ السطر';
+
+  @override
+  String get remainingToAllocate => 'المتبقي';
+
+  @override
+  String get splitAcrossCenters => 'توزيع على مراكز التكلفة';
+
+  @override
+  String get allocationMustReconcile => 'يجب أن يساوي مجموع التوزيعات مبلغ السطر تماماً.';
+
+  @override
+  String get duplicateCostCenter => 'مركز التكلفة هذا موجود بالفعل في التوزيع.';
+
+  @override
+  String get selectCostCenter => 'اختر مركز تكلفة';
+
+  @override
+  String get noAllocation => 'بدون مركز تكلفة';
+
+  @override
+  String get costCenterInactive => 'لا يمكن ترحيل قيود جديدة إلى مركز تكلفة موقوف.';
+
+  @override
+  String get addAllocation => 'إضافة مركز تكلفة';
+
+  @override
+  String get allocationTotal => 'إجمالي الموزع';
+
+  @override
+  String get deleteRecord => 'حذف';
+
+  @override
+  String get resultLabel => 'النتيجة';
+  @override
+  String get @@locale => 'ar';
+
+  @override
+  String get deleteAccountConfirm => 'سيتم حذف الحساب «{account}» نهائياً إن لم يكن له حركات أو حسابات فرعية. متابعة؟';
+
+  @override
+  String get deleteBranchConfirm => 'سيتم حذف الوحدة «{unit}». الوحدات ذات الحركات لا يمكن حذفها.';
+
+  @override
+  String get deleteBackupConfirm => 'سيتم حذف الملف «{file}» من الخادم نهائياً.';
+
+  @override
+  String get resetForCompany => 'ستتم إعادة ضبط بيانات «{company}».';
+
+  @override
+  String get resetConfirmBody => 'العودة تكون فقط باستعادة النسخة التي ستؤخذ الآن. اكتب كلمة المرور وكلمة {word} للمتابعة.';
+
+  @override
+  String get resetWordLabel => 'اكتب {word}';
+
+  @override
+  String get resetWrongWord => 'اكتب {word} تماماً كما هي للتأكيد.';
+
+  @override
+  String get resetDone => 'تم حذف بيانات الشركة. تحتوي «{file}» على البيانات القديمة.';
+
+  @override
+  String get rowDensity => 'كثافة الصفوف';
+
+  @override
+  String get densityCompact => 'مضغوط';
+
+  @override
+  String get densityNormal => 'عادي';
+
+  @override
+  String get densitySpacious => 'واسع';
+
+  @override
+  String get dragColumnHint => 'اسحب حافة العمود لتوسيعه';
+
+  @override
+  String get noRecords => 'لا توجد بيانات للعرض';
+
+  @override
+  String get resizeDialog => 'تغيير الحجم';
+
+  @override
+  String get maximize => 'تكبير';
+
+  @override
+  String get restore => 'استعادة الحجم';
+
+  @override
+  String get availableInBranch => 'المتاح في الفرع';
+
+  @override
+  String get branchStockHint => 'رصيد الفرع الفعلي، وهو نفس الرصيد الذي يتحقق منه الترحيل. لا تُحفظ أرصدة على مستوى المخزن.';
+
+  @override
+  String get stockNotVisible => 'عرض الكميات يتطلب صلاحية inventory.stock.read، لذلك لا تظهر.';
+
+  @override
+  String get useItem => 'اختيار';
+
+  @override
+  String get invoiceDiscount => 'خصم الفاتورة';
+
+  @override
+  String get discountBeforeTaxHint => 'يُطبق قبل الضريبة ويُوزع على البنود';
+
+  @override
+  String get noDiscount => 'بدون خصم';
+
+  @override
+  String get discountPercent => 'نسبة مئوية';
+
+  @override
+  String get discountAmount => 'مبلغ ثابت';
+
+  @override
+  String get discountPercentValue => 'النسبة %';
+
+  @override
+  String get discountAmountValue => 'المبلغ';
+
+  @override
+  String get lineDiscount => 'خصم البند';
+
+  @override
+  String get beforeDiscount => 'قبل الخصم';
+
+  @override
+  String get lineDiscounts => 'خصومات البنود';
+
+  @override
+  String get netLine => 'صافي البند';
+
+  @override
+  String get quotations => 'عروض الأسعار';
+
+  @override
+  String get quotation => 'عرض سعر';
+
+  @override
+  String get newQuotation => 'عرض سعر جديد';
+
+  @override
+  String get editQuotation => 'تعديل عرض السعر';
+
+  @override
+  String get quotationNumber => 'رقم عرض السعر';
+
+  @override
+  String get quotationDate => 'تاريخ عرض السعر';
+
+  @override
+  String get validUntil => 'صالح حتى';
+
+  @override
+  String get sent => 'مُرسل';
+
+  @override
+  String get accepted => 'مقبول';
+
+  @override
+  String get rejected => 'مرفوض';
+
+  @override
+  String get expired => 'منتهي';
+
+  @override
+  String get converted => 'محوّل إلى فاتورة';
+
+  @override
+  String get quotationTables => 'الجداول';
+
+  @override
+  String get addTable => 'إضافة جدول';
+
+  @override
+  String get tableTitle => 'عنوان الجدول';
+
+  @override
+  String get tableDiscount => 'خصم الجدول';
+
+  @override
+  String get moveUp => 'تحريك لأعلى';
+
+  @override
+  String get moveDown => 'تحريك لأسفل';
+
+  @override
+  String get removeTable => 'حذف الجدول';
+
+  @override
+  String get addQuotationLine => 'إضافة بند';
+
+  @override
+  String get countryOfOrigin => 'بلد المنشأ';
+
+  @override
+  String get origin => 'بلد المنشأ';
+
+  @override
+  String get grossValue => 'القيمة قبل الخصم';
+
+  @override
+  String get netValue => 'القيمة الصافية';
+
+  @override
+  String get finalTotal => 'الإجمالي النهائي';
+
+  @override
+  String get totalDiscounts => 'إجمالي الخصومات';
+
+  @override
+  String get quotationDiscount => 'خصم العرض';
+
+  @override
+  String get subtotalBeforeDiscount => 'الإجمالي قبل الخصم';
+
+  @override
+  String get quotationSummary => 'الملخص';
+
+  @override
+  String get tableSubtotal => 'إجمالي الجدول';
+
+  @override
+  String get termsAndConditions => 'الشروط والأحكام';
+
+  @override
+  String get notesLabel => 'ملاحظات';
+
+  @override
+  String get managerName => 'مدير الشركة';
+
+  @override
+  String get responsibleName => 'المسؤول';
+
+  @override
+  String get responsiblePhone => 'هاتف المسؤول';
+
+  @override
+  String get followUp => 'متابعة';
+
+  @override
+  String get followUpNote => 'ما تمت مناقشته';
+
+  @override
+  String get followUpRequired => 'اكتب ما تمت مناقشته قبل حفظ المتابعة.';
+
+  @override
+  String get statusHistory => 'السجل';
+
+  @override
+  String get sendQuotation => 'إصدار وتسجيل الإرسال';
+
+  @override
+  String get acceptQuotation => 'قبول';
+
+  @override
+  String get rejectQuotation => 'رفض';
+
+  @override
+  String get reviseQuotation => 'بدء إصدار جديد';
+
+  @override
+  String get convertToInvoice => 'تحويل إلى فاتورة';
+
+  @override
+  String get convert => 'تحويل';
+
+  @override
+  String get convertedInvoice => 'الفاتورة الناتجة';
+
+  @override
+  String get conversionConfirm => 'إنشاء فاتورة بيع مسودة من عرض السعر المقبول؟ لا يتم أي ترحيل أو حركة مخزون حتى يتم ترحيل الفاتورة بشكل منفصل.';
+
+  @override
+  String get conversionTaxNote => 'إجمالي عرض السعر قبل الضريبة. تُطبق الفاتورة قواعد ضريبة الشركة، لذا قد يكون إجماليها أعلى.';
+
+  @override
+  String get noQuotations => 'لا توجد عروض أسعار بعد';
+
+  @override
+  String get printPreview => 'معاينة الطباعة';
+
+  @override
+  String get downloadPdf => 'تنزيل PDF';
+
+  @override
+  String get quotationSaved => 'تم حفظ عرض السعر';
+
+  @override
+  String get quotationSent => 'تم إصدار عرض السعر وتسجيل إرساله';
+
+  @override
+  String get quotationAccepted => 'تم قبول عرض السعر';
+
+  @override
+  String get quotationRejected => 'تم رفض عرض السعر';
+
+  @override
+  String get quotationRevised => 'تم إنشاء مسودة إصدار جديد';
+
+  @override
+  String get quotationConverted => 'تم تحويل عرض السعر إلى فاتورة مسودة';
+
+  @override
+  String get quotationDeleted => 'تم حذف مسودة عرض السعر';
+
+  @override
+  String get deleteQuotationConfirm => 'حذف مسودة عرض السعر؟ لا تُحذف عروض الأسعار الصادرة أبداً.';
+
+  @override
+  String get quotationNeedsTable => 'أضف جدولاً واحداً على الأقل يحتوي على بند واحد.';
+
+  @override
+  String get filterStatus => 'الحالة';
+
+  @override
+  String get fromDate => 'من تاريخ';
+
+  @override
+  String get toDate => 'إلى تاريخ';
+
+  @override
+  String get quotationDraftHint => 'هذه مسودة: لا يتم ترحيل أي شيء ولا يتأثر المخزون. عند الإصدار يُثبت المحتوى الذي يستلمه العميل.';
+
+  @override
+  String get optional => 'اختياري';
+
+  @override
+  String get currency => 'العملة';
+
+  @override
+  String get clear => 'مسح';
+
+  @override
+  String get quotationFilterHint => 'تصفية حسب الحالة أو العميل أو التاريخ';
+
+  @override
+  String get documentSettings => 'المستندات وعروض الأسعار';
+
+  @override
+  String get maximumDiscount => 'أقصى نسبة خصم %';
+
+  @override
+  String get showTaxIdOnQuotations => 'طباعة الرقم الضريبي على عروض الأسعار';
+
+  @override
+  String get taxIdLegalNote => 'خيار عرض فقط. لا يحذف الرقم أبداً، ولا يمكنه تجاوز أي إلزام قانوني بإظهاره.';
+
+  @override
+  String get salesManagerName => 'مدير المبيعات';
+
+  @override
+  String get salesManagerPhone => 'هاتف مدير المبيعات';
+
+  @override
+  String get settingsSaved => 'تم حفظ الإعدادات';
+
+  @override
+  String get saveSettings => 'حفظ الإعدادات';
+
+  @override
+  String get readOnlySettings => 'تعديل هذه الإعدادات يتطلب صلاحية إدارة الشركة.';
+
+  @override
+  String get invalidSetting => 'أدخل قيمة بين 0 و100.';
+
+  @override
+  String get networkAccessTitle => 'الاتصال بالشبكة والوصول عن بُعد';
+
+  @override
+  String get networkUnavailable => 'لم يستجب الخادم لتقرير الشبكة. تحقق من أنه يعمل.';
+
+  @override
+  String get lanReachable => 'متاح على الشبكة المحلية';
+
+  @override
+  String get localOnly => 'هذا الجهاز فقط';
+
+  @override
+  String get serverStatus => 'الخادم';
+
+  @override
+  String get serverReady => 'جاهز، وقاعدة البيانات تعمل';
+
+  @override
+  String get databaseDown => 'قاعدة البيانات غير متاحة';
+
+  @override
+  String get listeningOn => 'يستمع على';
+
+  @override
+  String get localAddress => 'العنوان المحلي';
+
+  @override
+  String get networkAddress => 'عنوان الشبكة';
+
+  @override
+  String get wouldBeAddress => 'العنوان في حال التفعيل';
+
+  @override
+  String get addressCopied => 'تم نسخ العنوان';
+
+  @override
+  String get copyAddress => 'نسخ العنوان';
+
+  @override
+  String get lanNotEnabledHint => 'الخادم مرتبط بهذا الجهاز فقط، لذا لا تستجيب العناوين أدناه من جهاز آخر. للسماح لأجهزة الشبكة، اضبط HOST=0.0.0.0 في ملف إعدادات التثبيت ثم أعد تشغيل البرنامج.';
+
+  @override
+  String get lanFirewallHint => 'يجب أيضاً أن يسمح جدار حماية Windows للبرنامج على الشبكات الخاصة. منفذ قاعدة البيانات (5432) لا يُفتح أبداً: الأجهزة الأخرى تصل إلى البرنامج فقط، ويجب عليها تسجيل الدخول.';
+
+  @override
+  String get publicAddressTitle => 'العنوان العام (الإنترنت)';
+
+  @override
+  String get detectPublicAddress => 'اكتشاف';
+
+  @override
+  String get publicAddressHint => 'لا يُكتشف إلا عند الضغط على «اكتشاف». وجود عنوان عام لا يعني أن الخادم يمكن الوصول إليه من الإنترنت: قد يمنع الراوتر أو مزود الخدمة الاتصالات الواردة. للاستخدام عن بُعد يُفضّل استخدام VPN أو بوابة HTTPS؛ ولا تعرض قاعدة البيانات أبداً.';
+
+  @override
+  String get publicAddressChecking => 'جارٍ الفحص…';
+
+  @override
+  String get publicAddressUnavailable => 'تعذر اكتشاف العنوان العام.';
+
+  @override
+  String get publicAddressNotProof => 'العنوان وحده لا يثبت أن الاتصالات الواردة تصل إلى هذا الجهاز.';
+
+  @override
+  String get lastChecked => 'آخر تحقق';
+
+  @override
+  String get remove => 'إزالة';
+
+  @override
+  String get termsLibrary => 'الشروط المحفوظة';
+
+  @override
+  String get insertSavedTerms => 'إدراج شروط محفوظة';
+
+  @override
+  String get saveTermsToLibrary => 'حفظ الشروط في المكتبة';
+
+  @override
+  String get termsTitle => 'عنوان الشرط';
+
+  @override
+  String get termsBody => 'نص الشروط';
+
+  @override
+  String get noSavedTerms => 'لا توجد شروط محفوظة بعد. اكتب الشروط أدناه واحفظها لإعادة استخدامها.';
+
+  @override
+  String get termsSaved => 'تم حفظ الشروط في المكتبة';
+
+  @override
+  String get manageSavedTerms => 'إدارة الشروط المحفوظة';
+
+  @override
+  String get termsInserted => 'تم إدراج الشروط المحفوظة. يمكنك تعديل هذه النسخة بحرية.';
+
+  @override
+  String get removeSavedTerm => 'إزالة هذا الشرط المحفوظ؟ تحتفظ المستندات التي استخدمته بنسختها الخاصة.';
+  @override
+  String get itemCode => 'كود الصنف';
+
+  @override
+  String get subject => 'الموضوع';
+
+  @override
+  String get subjectHint => 'عنوان هذا العرض، يُطبع فوق اسم العميل.';
+
+  @override
+  String get showTaxNumberOnOffer => 'طباعة الرقم الضريبي للشركة على هذا العرض';
+
+  @override
+  String get showTaxNumberOnOfferHint => 'إعداد الشركة مجرد افتراضي؛ يحتفظ كل عرض باختياره الخاص.';
+
+  @override
+  String get quotationColumns => 'أعمدة البنود';
+
+  @override
+  String get columnLayout => 'تخطيط الأعمدة';
+
+  @override
+  String get columnLayoutHint => 'اختر أعمدة هذا العرض وأعد تسميتها وترتيبها وتحديد عرضها.';
+
+  @override
+  String get columnLabelEn => 'العنوان بالإنجليزية';
+
+  @override
+  String get columnLabelAr => 'العنوان بالعربية';
+
+  @override
+  String get columnWidth => 'العرض';
+
+  @override
+  String get columnNumeric => 'رقمي';
+
+  @override
+  String get addCustomColumn => 'عمود مخصص…';
+
+  @override
+  String get columnKey => 'مفتاح العمود';
+
+  @override
+  String get columnAlreadyExists => 'يوجد عمود بهذا المفتاح بالفعل.';
+
+  @override
+  String get addColumn => 'إضافة عمود';
+
+  @override
+  String get removeColumn => 'حذف العمود';
+
+  @override
+  String get columnTemplate => 'تخطيط محفوظ';
+
+  @override
+  String get templateName => 'اسم التخطيط الجديد';
+
+  @override
+  String get saveColumnTemplate => 'حفظ كتخطيط';
+
+  @override
+  String get templateSaved => 'تم حفظ التخطيط في المكتبة';
+
+  @override
+  String get keepOneColumnVisible => 'أبقِ عمودًا واحدًا ظاهرًا على الأقل.';
+  @override
+  String get printedOnOffer => 'مطبوع';
+
+  @override
+  String get notPrintedOnOffer => 'غير مطبوع';
+  @override
+  String get perWarehouse => 'المخازن';
+
+  @override
+  String get unassignedWarehouse => 'غير مُخصّص';
 
 }

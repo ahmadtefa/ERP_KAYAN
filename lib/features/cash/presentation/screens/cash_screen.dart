@@ -8,7 +8,9 @@ import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
+import '../../../../shared/widgets/status_pill.dart';
 import '../../../../shared/widgets/state_views.dart';
+import '../../../accounting/presentation/providers/cost_center_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
@@ -175,6 +177,17 @@ class _CashScreenState extends ConsumerState<CashScreen>
     if (kindValues == null || !mounted) return;
     final isReceipt = text(kindValues, 'kind') == 'RECEIPT';
 
+    // A payment's expense side is somebody's cost; a receipt's counter side
+    // can be somebody's revenue. The picker is optional, because a transfer
+    // between the company's own accounts has no owner.
+    List<Json> costCenters = const <Json>[];
+    try {
+      costCenters = await ref.read(activeCostCentersProvider.future);
+    } on Failure catch (error) {
+      if (mounted) showMessage(context, error.message, error: true);
+    }
+    if (!mounted) return;
+
     List<Json> parties = const <Json>[];
     try {
       parties = isReceipt
@@ -235,6 +248,23 @@ class _CashScreenState extends ConsumerState<CashScreen>
           required: true,
           helper: l10n.settleOldestFirst,
         ),
+        if (costCenters.isNotEmpty)
+          FieldSpec(
+            'costCenterId',
+            l10n.costCenter,
+            kind: FieldKind.select,
+            options: [
+              FieldOption('', l10n.noAllocation),
+              for (final center in costCenters)
+                FieldOption(
+                  text(center, 'id'),
+                  costCenterLabel(
+                    center,
+                    Localizations.localeOf(context).languageCode,
+                  ),
+                ),
+            ],
+          ),
         FieldSpec('description', l10n.description, maxLines: 2),
       ],
       initial: {
@@ -525,7 +555,12 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 ),
                 ColumnSpec(
                   l10n.voucherType,
-                  value: (r) => text(r, 'kind') == 'BANK' ? l10n.bank : l10n.cashBox,
+                  // The API stores and returns lowercase `cash`/`bank`, while
+                  // this screen creates accounts with `CASH`/`BANK`. Compare
+                  // without case so a bank is never labelled a cash box.
+                  value: (r) => text(r, 'kind').toUpperCase() == 'BANK'
+                      ? l10n.bank
+                      : l10n.cashBox,
                 ),
                 ColumnSpec(
                   isArabic ? l10n.fullNameAr : l10n.fullNameEn,
@@ -639,7 +674,11 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   emphasise: true,
                   value: (r) => formatAmount(amount(r, 'amount')),
                 ),
-                ColumnSpec(l10n.status, value: (r) => text(r, 'status')),
+                ColumnSpec(
+                  l10n.status,
+                  value: (r) => text(r, 'status'),
+                  tone: (r) => toneForStatus(text(r, 'status')),
+                ),
               ],
               actions: (row) => [
                 IconButton(
@@ -740,7 +779,11 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   emphasise: true,
                   value: (r) => formatAmount(amount(r, 'amount')),
                 ),
-                ColumnSpec(l10n.status, value: (r) => text(r, 'status')),
+                ColumnSpec(
+                  l10n.status,
+                  value: (r) => text(r, 'status'),
+                  tone: (r) => toneForStatus(text(r, 'status')),
+                ),
               ],
               actions: (row) => [
                 if (text(row, 'status').toUpperCase() == 'DRAFT')

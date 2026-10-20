@@ -26,7 +26,7 @@ export class ItemsController {
   @Post()
   @RequirePermissions('inventory.items.create')
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateItemDto) {
-    return this.service.create(user.companyId, user.userId, dto);
+    return this.service.create(user.companyId, user.userId, dto, user.branchId);
   }
 
   @Patch(':id')

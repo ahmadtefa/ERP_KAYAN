@@ -239,6 +239,11 @@ export class FullBackupService {
   /// install-postgres-portable.bat provisions beside it.
   private bundledToolDirs(): string[] {
     const dirs: string[] = [];
+    // Current Windows installer layout (backend/postgres/bin) must win
+    // over legacy portable locations and unrelated PostgreSQL on PATH.
+    dirs.push(join(process.cwd(), 'postgres', 'bin'));
+    dirs.push(join(process.cwd(), 'backend', 'postgres', 'bin'));
+    dirs.push(join(__dirname, '..', '..', '..', '..', 'postgres', 'bin'));
     // backend\pg — next to the running server, however it was started.
     dirs.push(join(process.cwd(), 'pg', 'bin'));
     dirs.push(join(process.cwd(), 'pg'));
