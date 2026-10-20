@@ -252,6 +252,39 @@ describe('quotation document template', () => {
     expect(html).toContain('CUST-TAX-77');
   });
 
+  it('renders each table with its own column layout and falls back for legacy tables', () => {
+    const base = snapshot();
+    const content = snapshot({
+      tables: [
+        {
+          ...base.tables[0],
+          columns: [{
+            key: 'serialNumber',
+            labelEn: 'Serial no.',
+            labelAr: 'الرقم التسلسلي',
+            visible: true,
+            width: 3,
+          }],
+          lines: [{
+            ...base.tables[0].lines[0],
+            customValues: { serialNumber: 'SN-001' },
+          }],
+        },
+        base.tables[1],
+      ],
+    });
+    const html = renderQuotationDocument(content, COMPANY, 'en', false);
+    const hardwareStart = html.indexOf('<h3>Hardware</h3>');
+    const softwareStart = html.indexOf('<h3>Software</h3>');
+    const hardwareSection = html.slice(hardwareStart, softwareStart);
+    const softwareSection = html.slice(softwareStart);
+
+    expect(hardwareSection).toContain('Serial no.');
+    expect(hardwareSection).toContain('SN-001');
+    expect(hardwareSection).not.toContain('<th>Description</th>');
+    expect(softwareSection).toContain('<th>Description</th>');
+  });
+
   it('leaves the logo area empty instead of showing a fake logo tile', () => {
     const html = renderQuotationDocument(
       snapshot(),
