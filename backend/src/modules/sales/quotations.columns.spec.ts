@@ -104,6 +104,45 @@ describe('QuotationsService subject and column layout', () => {
     ]);
   });
 
+  it('accepts safe custom column keys and independent columns for a table', async () => {
+    const { instance, tx } = service();
+    await instance.create(
+      COMPANY_ID,
+      BRANCH_ID,
+      USER_ID,
+      baseDto({
+        columns: [{ key: 'description', labelEn: 'Global description' }],
+        tables: [{
+          title: 'Serialised goods',
+          columns: [{
+            key: 'serialNumber',
+            labelEn: 'Serial number',
+            labelAr: 'الرقم التسلسلي',
+            width: 3,
+          }],
+          lines: [{
+            description: 'Router',
+            quantity: '1',
+            unitPrice: '100',
+            customValues: { serialNumber: 'SN-001' },
+          }],
+        }],
+      }) as never,
+    );
+    const data = tx.quotation.create.mock.calls[0][0].data as Record<string, any>;
+    expect(data.columns[0].key).toBe('description');
+    expect(data.tables.create[0].columns).toEqual([
+      {
+        key: 'serialNumber',
+        labelEn: 'Serial number',
+        labelAr: 'الرقم التسلسلي',
+        visible: true,
+        width: 3,
+        numeric: false,
+      },
+    ]);
+  });
+
   it('keeps the company default when the offer says nothing about the tax number', async () => {
     const { instance, tx } = service();
     await instance.create(COMPANY_ID, BRANCH_ID, USER_ID, baseDto() as never);
