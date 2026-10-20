@@ -1549,7 +1549,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                             final saved = await _saveColumnTemplate(
                               name,
                               working,
-                              design: _design.toJson(),
+                              design: templateDesign ?? _design.toJson(),
                             );
                             if (saved != null && dialogContext.mounted) {
                               setDialogState(() {
