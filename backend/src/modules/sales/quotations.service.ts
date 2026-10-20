@@ -70,6 +70,7 @@ interface PreparedQuotationLine {
   quantity: Prisma.Decimal;
   unitPrice: Prisma.Decimal;
   lineTotal: Prisma.Decimal;
+  customValues: Record<string, string>;
 }
 
 interface PreparedQuotationTable {
@@ -1023,6 +1024,7 @@ export class QuotationsService {
           quantity,
           unitPrice,
           lineTotal,
+          customValues: rawLine.customValues ?? {},
         });
       }
 
