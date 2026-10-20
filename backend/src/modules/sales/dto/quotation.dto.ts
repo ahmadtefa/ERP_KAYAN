@@ -171,8 +171,6 @@ export class QuotationColumnTemplateDto {
 
   @IsOptional() @Type(() => Object) design?: Record<string, unknown>;
 
-  @IsOptional() @Type(() => Object) design?: Record<string, unknown>;
-
   @IsOptional() @IsBoolean() isDefault?: boolean;
 }
 
@@ -186,6 +184,8 @@ export class UpdateQuotationColumnTemplateDto {
   @ValidateNested({ each: true })
   @Type(() => QuotationColumnDto)
   columns?: QuotationColumnDto[];
+
+  @IsOptional() @Type(() => Object) design?: Record<string, unknown>;
 
   @IsOptional() @IsBoolean() isDefault?: boolean;
 }
