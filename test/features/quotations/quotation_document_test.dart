@@ -187,6 +187,31 @@ void main() {
       expect(columns[2].numeric, isTrue);
     });
 
+    test('round-trips quotation element styling and custom header/footer', () {
+      final design = QuotationDocumentDesign.fromJson({
+        'company': {
+          'fontSizeMultiplier': 1.25,
+          'fontWeight': 'w700',
+          'fontFamily': 'Tahoma',
+          'color': '#123456',
+        },
+        'headerText': 'Confidential',
+        'footerText': 'Thank you',
+        'showHeader': false,
+        'showFooter': true,
+      });
+
+      final saved = design.toJson();
+      expect(saved['company']['fontSizeMultiplier'], 1.25);
+      expect(saved['company']['fontWeight'], 'w700');
+      expect(saved['company']['fontFamily'], 'Tahoma');
+      expect(saved['company']['color'], '#123456');
+      expect(saved['headerText'], 'Confidential');
+      expect(saved['footerText'], 'Thank you');
+      expect(saved['showHeader'], false);
+      expect(saved.containsKey('showFooter'), isFalse);
+    });
+
     test('falls back to the standard layout for a draft without columns', () {
       final document = QuotationDocument.fromJson(
         {
