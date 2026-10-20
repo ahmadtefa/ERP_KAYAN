@@ -92,7 +92,7 @@ export class QuotationColumnTemplatesService {
              "updatedBy" = ${userId}::uuid
        WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
          AND "deletedAt" IS NULL
-      RETURNING id, name, columns, "isDefault", "isActive", "createdAt", "updatedAt"
+      RETURNING id, name, columns, design, "isDefault", "isActive", "createdAt", "updatedAt"
     `);
     if (!rows[0]) throw new NotFoundException('Quotation column template not found');
     if (dto.isDefault === true) {
