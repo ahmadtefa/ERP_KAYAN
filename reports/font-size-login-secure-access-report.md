@@ -10,9 +10,9 @@
 | البند | القيمة |
 | --- | --- |
 | الفرع | `arena/a5a099ec-erp-kayan` (لم يُغيَّر، ولم يُنشأ طلب سحب آخر) |
-| HEAD | `a178e70` (آخر التزام للكود: `d4c1f62`) |
+| HEAD | `2e2e2cd` (آخر التزام للكود: `d4c1f62`) |
 | أب الالتزامات | `3928497` (آخر حالة مدفوعة قبل هذا العمل) |
-| الالتزامات المضافة | `4b73a15` → `f91fbf2` → `fe2b252` → `d4c1f62` → `a178e70` (تقرير) |
+| الالتزامات المضافة | `4b73a15` → `f91fbf2` → `fe2b252` → `d4c1f62` (الكود) → `a178e70`، `477dd0e`، `2e2e2cd` (تقرير) |
 | الشجرة | نظيفة (`git status` بلا تغييرات) |
 | الريموت | مطابق للـ HEAD (`git push` ناجح) |
 | طلب السحب | OPEN، `mergeable=MERGEABLE`، لم يُدمج ولم يُصدر Release |
@@ -186,8 +186,10 @@
 
 | البناء | المعرف | النتيجة |
 | --- | --- | --- |
-| ERP KAYAN CI — الويب + Linux + الخادم + Regression | `39392257017` | ✅ نجاح كامل |
-| Windows Installer (HEAD `a178e70`) | `39395664477` | ✅ نجاح كامل |
+| ERP KAYAN CI — الويب + Linux + الخادم + Regression (HEAD `2e2e2cd`) | `39399940878` | ✅ نجاح كامل |
+| ERP KAYAN CI (HEAD الكودي `d4c1f62`) | `39392257017` | ✅ نجاح كامل |
+| Windows Installer (HEAD `2e2e2cd`) | `39399940858` | ✅ نجاح كامل — `KAYAN-ERP-Windows-x64-Installer` |
+| Windows Installer (`a178e70`) | `39395664477` | ✅ نجاح كامل |
 | Windows Installer (HEAD `d4c1f62`) | `39392257145` | ✅ نجاح كامل — `KAYAN-ERP-Setup.exe` (SHA256=`B26DD0E6…B56F`)، واختبار تركيب/تشغيل/دخول/نسخ واستعادة داخل نسخة ويندوز المثبّتة نجح |
 | ERP KAYAN CI (محاولات سابقة فاشلة، للشفافية) | `39390660830`، `39391166580`، `39391749518` | ❌ أخطاء تحليل ثم اختباران؛ أُصلحت كلها قبل النجاح أعلاه |
 
@@ -223,11 +225,13 @@
 ## 10. الروابط وأرقام التشغيل
 
 - طلب السحب: https://github.com/ahmadtefa/ERP_KAYAN/pull/52
-- CI (ناجح): https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39392257017
-- Windows Installer (HEAD النهائي): https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39395664477
+- CI (HEAD النهائي): https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39399940878
+- CI (HEAD الكودي `d4c1f62`): https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39392257017
+- Windows Installer (HEAD النهائي): https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39399940858
+- Windows Installer (`a178e70`): https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39395664477
 - Windows Installer (HEAD الكودي `d4c1f62`): https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39392257145
 - CI (HEAD النهائي): https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39395664453
 - محاولات CI الفاشلة أثناء العمل: `39390660830`، `39391166580`، `39391749518`
-- HEAD: `a178e70` على `arena/a5a099ec-erp-kayan` (الكود القابل للبناء عند `d4c1f62`)
+- HEAD: `2e2e2cd` على `arena/a5a099ec-erp-kayan` (الكود القابل للبناء عند `d4c1f62`)
 
 **لم يُدمج طلب السحب، ولم يُصدر Release.** الاختبار الخارجي الحقيقي يبقى بندًا مفتوحًا حتى تُنفَّذ خطوات §8 على خادم حقيقي.
