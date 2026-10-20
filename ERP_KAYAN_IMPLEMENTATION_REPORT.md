@@ -17,7 +17,7 @@
 
 اكتمل بناء الوظائف المطلوبة للعروض والخصومات والأعمدة والقوالب والتصدير والشبكة ورصيد
 المخازن، وأُصلحت أسباب فشل CI الأخيرة، وأصبحت **وظائف CI الأربع خضراء** على `cb81bc3`،
-وبُنيت حزمة Windows من الكود النهائي في التشغيل `39340110060`.
+وبُنيت حزمة Windows من الـcommit الذي يحمل هذه التقارير في التشغيل `39343786112`.
 
 المتبقي الوحيد الذي لا يمكن لأي أتمتة أن تعوّضه هو التحقق البشري: جهاز ثانٍ على الشبكة،
 وطباعة ورقية، وجولة نقر على نسخة Windows مثبتة. هذه بنود **لم تُتحقق**، وليست بنودًا منجزة.
@@ -28,7 +28,7 @@
 | هل CI أخضر على آخر commit للكود؟ | **نعم.** التشغيل `39340110065` — أربع وظائف ناجحة. |
 | هل اختبارات الخادم كاملة نجحت؟ | **نعم** في CI، بما فيها الترحيلات وseed وsmoke والنسخ الاحتياطي والاستعادة و`npm audit`. |
 | هل تحليل Flutter واختباراته وبناء Web/Linux نجحت؟ | **نعم** في CI. |
-| هل مثبّت Windows بُني من الكود النهائي؟ | **نعم.** artifact جديد من التشغيل `39340110060`. |
+| هل مثبّت Windows بُني من الكود النهائي؟ | **نعم.** artifact جديد من التشغيل `39343786112` على `57cd41e` (شجرته مطابقة لكود `cb81bc3`). |
 | هل جُرِّب المثبّت فعليًا؟ | **نعم آليًا**: خطوة smoke-test تُثبّت التطبيق وتشغّله على runner Windows. |
 | هل جُرِّب من جهاز ثانٍ أو طُبع ورقيًا؟ | **لا — لم يُتحقق.** |
 
@@ -251,6 +251,7 @@ flutter build linux --release
 | التشغيل | النتيجة | المدة | الوظائف |
 |---|---|---|---|
 | [`39340110065`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39340110065) | **success** | 2m49s | Regression، Backend، Flutter Web، Linux Desktop |
+| [`39343786197`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39343786197) | **success** | 3m0s | Regression، Backend، Flutter Web، Linux Desktop (على commit التقارير) |
 
 **وظائف التشغيل ومعرّفاتها:**
 
@@ -285,13 +286,13 @@ flutter build linux --release
 
 | العنصر | القيمة |
 |---|---|
-| التشغيل | [`39340110060`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39340110060) — **success** |
-| commit المصدر | `cb81bc316afe3933bd69915b72e8086224341bad` (آخر commit يغيّر كود التطبيق) |
-| Artifact | `#12228799462` — `KAYAN-ERP-Windows-x64-Installer` |
-| الحجم | **344,698,505 بايت** (≈328.7 MiB) |
-| SHA-256 | `3FA4D266A65145A1EC50F52A622EFEF120D745669AD5D26604B7B0990C290D00` |
-| الانتهاء | 2026-11-02T23:43:53Z |
-| الرابط | <https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39340110060/artifacts/12228799462> |
+| التشغيل | [`39343786112`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39343786112) — **success** |
+| commit المصدر | `57cd41ead5def6ca0959fe585dc3bbff32129c5c` (commit التقارير؛ كوده مطابق لـ`cb81bc3`) |
+| Artifact | `#12230884927` — `KAYAN-ERP-Windows-x64-Installer` |
+| الحجم | **344,727,358 بايت** (≈328.8 MiB) |
+| SHA-256 | `21530778C88640FD6059A7FCAE1998734AF9F4807787C2263E29A481C45E216B` |
+| الانتهاء | 2026-11-03T00:19:30Z |
+| الرابط | <https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39343786112/artifacts/12230884927> |
 
 **مخرجات smoke test (من الـannotations الرسمية):**
 
@@ -299,11 +300,12 @@ flutter build linux --release
 - `Installed Windows PostgreSQL backup/restore passed: real archive, mutation, checked restore, safety copy, re-login and original sentinel verified.`
 - `Installed Windows company JSON backup/restore passed: snapshot, mutation, restore, re-login and original sentinel verified.`
 
-**حول المصدر:** المثبّت بُني من `cb81bc3`، وهو آخر commit يغيّر أي كود أو ملف يُحزَّم.
-commitا التقرير التاليان يضيفان `*.md` فقط، وهي غير مشمولة في حزمة المثبّت؛ ولذلك يبقى
-`runtime-manifest.json` داخل الحزمة حاملًا `sourceCommit=cb81bc3`. هذا هو تعريف «الكود
-النهائي» المستخدم هنا، وهو مذكور صراحةً بدل الإيحاء بأن الملف بُني من commit توثيقي.
-
+**حول المصدر:** المثبّت بُني من `57cd41e`، وهو الـcommit الذي يحمل كامل كود التطبيق وكامل
+هذين التقريرين. الفرق بينه وبين `cb81bc3` هو ملفات `*.md` فقط (تم التحقق:
+`git diff cb81bc3..57cd41e -- . ':(exclude)*.md'` فارغ)، وهذه الملفات غير مشمولة في حزمة
+المثبّت. التشغيل يعلن `head_sha=57cd41e`؛ وفي أحداث `pull_request` يستخدم checkout مرجع الدمج
+المؤقت، وشجرته مطابقة لأن `main` ثابت والـPR قابل للدمج. سطر البصمة هذا أُضيف في commit
+توثيقي لاحق لا يغيّر أي كود.
 
 **ما الذي يثبته:** الخادم (Node مضمّن)، PostgreSQL محمول، واجهة الويب، خدمة Windows، وأدوات
 الإصلاح والنسخ الاحتياطي. المثبّت **غير موقّع رقميًا**، وقد يظهر تحذير SmartScreen.
