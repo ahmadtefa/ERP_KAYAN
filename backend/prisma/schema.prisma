@@ -1711,6 +1711,9 @@ model QuotationTable {
   id            String @id @default(uuid()) @db.Uuid
   quotationId   String @db.Uuid
   title         String
+  /// Optional independent column layout for this table. Null keeps legacy
+  /// quotations on the quotation-level layout.
+  columns       Json?
   sortOrder     Int
   discountType    String? @db.VarChar(16)
   discountPercent Decimal @default(0) @db.Decimal(9, 4)
