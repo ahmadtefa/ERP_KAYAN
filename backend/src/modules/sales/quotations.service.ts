@@ -233,6 +233,7 @@ export class QuotationsService {
           totalAmount: prepared.totalAmount,
           taxRate: prepared.taxRate,
           taxAmount: prepared.taxAmount,
+          design: dto.design as Prisma.InputJsonValue ?? {},
           managerName: this.text(dto.managerName) ?? settings.managerName,
           responsibleName: this.text(dto.responsibleName) ?? settings.salesManagerName,
           responsiblePhone: this.text(dto.responsiblePhone) ?? settings.salesManagerPhone,
@@ -260,6 +261,7 @@ export class QuotationsService {
                   quantity: line.quantity,
                   unitPrice: line.unitPrice,
                   lineTotal: line.lineTotal,
+                  customValues: line.customValues as Prisma.InputJsonValue ?? {},
                 })),
               },
             })),
@@ -333,6 +335,7 @@ export class QuotationsService {
           totalAmount: prepared.totalAmount,
           taxRate: prepared.taxRate,
           taxAmount: prepared.taxAmount,
+          design: dto.design as Prisma.InputJsonValue ?? {},
           managerName: this.text(dto.managerName),
           responsibleName: this.text(dto.responsibleName),
           responsiblePhone: this.text(dto.responsiblePhone),
@@ -372,6 +375,7 @@ export class QuotationsService {
                 quantity: line.quantity,
                 unitPrice: line.unitPrice,
                 lineTotal: line.lineTotal,
+                customValues: line.customValues as Prisma.InputJsonValue ?? {},
               })),
             },
           },
@@ -599,6 +603,7 @@ export class QuotationsService {
                   quantity: line.quantity,
                   unitPrice: line.unitPrice,
                   lineTotal: line.lineTotal,
+                  customValues: line.customValues as Prisma.InputJsonValue ?? {},
                 })),
               },
             })),
@@ -1142,6 +1147,7 @@ export class QuotationsService {
           quantity: line.quantity.toFixed(MONEY_SCALE),
           unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
           lineTotal: line.lineTotal.toFixed(MONEY_SCALE),
+          customValues: line.customValues ?? {},
         })),
       })),
       totals: {
@@ -1151,6 +1157,7 @@ export class QuotationsService {
         taxRate: (quotation.taxRate ?? new Prisma.Decimal(0)).toFixed(RATE_SCALE),
         taxAmount: (quotation.taxAmount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
       },
+      design: quotation.design ?? {},
     };
   }
 

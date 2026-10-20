@@ -64,6 +64,34 @@ class _Sheet extends StatelessWidget {
   final double scale;
   final String? logoUrl;
 
+  /// يطبق نمط التصميم المخزن على نمط نص أساسي، مع keeping الحجم الأساسي.
+  TextStyle _styled(TextStyle base, QuotationDocumentElementStyle? style) {
+    if (style == null) return base;
+    return base.copyWith(
+      fontSize: (base.fontSize ?? 12) * style.fontSizeMultiplier,
+      fontWeight: style.fontWeight ?? base.fontWeight,
+      color: style.color != null
+          ? _parseColor(style.color!)
+          : base.color,
+      textAlign: style.textAlign ?? base.textAlign,
+    );
+  }
+
+  Color? _parseColor(String hex) {
+    try {
+      final clean = hex.replaceAll('#', '');
+      if (clean.length == 6) {
+        return Color(int.parse('0xFF$clean', radix: 16));
+      }
+      if (clean.length == 8) {
+        return Color(int.parse('0x$clean', radix: 16));
+      }
+    } on Exception {
+      return null;
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final d = document;
@@ -133,6 +161,7 @@ class _Sheet extends StatelessWidget {
     // The company's name sits at the start of the line (the right in Arabic)
     // and the mark at the end (the left), as a letterhead does in both
     // languages.
+    final design = document.design;
     return Container(
       padding: EdgeInsets.only(bottom: 12 * scale),
       decoration: const BoxDecoration(
@@ -147,11 +176,14 @@ class _Sheet extends StatelessWidget {
               children: [
                 Text(
                   company.name,
-                  style: TextStyle(
-                    color: _Doc.royal,
-                    fontSize: 20 * scale,
-                    fontWeight: FontWeight.w700,
-                    height: 1.25,
+                  style: _styled(
+                    TextStyle(
+                      color: _Doc.royal,
+                      fontSize: 20 * scale,
+                      fontWeight: FontWeight.w700,
+                      height: 1.25,
+                    ),
+                    design?.company,
                   ),
                 ),
                 if (company.secondaryName.trim().isNotEmpty)
@@ -202,6 +234,7 @@ class _Sheet extends StatelessWidget {
   }
 
   Widget _titleBand() {
+    final design = document.design;
     return Column(
       children: [
         Container(
@@ -212,12 +245,15 @@ class _Sheet extends StatelessWidget {
         SizedBox(height: 12 * scale),
         Text(
           document.arabic ? 'عرض سعر' : 'QUOTATION',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: _Doc.royal,
-            fontSize: 28 * scale,
-            fontWeight: FontWeight.w700,
-            height: 1.2,
+          textAlign: design?.title?.textAlign ?? TextAlign.center,
+          style: _styled(
+            TextStyle(
+              color: _Doc.royal,
+              fontSize: 28 * scale,
+              fontWeight: FontWeight.w700,
+              height: 1.2,
+            ),
+            design?.title,
           ),
         ),
         SizedBox(height: 4 * scale),
@@ -466,10 +502,13 @@ class _Sheet extends StatelessWidget {
               Expanded(
                 child: Text(
                   section.title,
-                  style: TextStyle(
-                    color: _Doc.royal,
-                    fontSize: 13.5 * scale,
-                    fontWeight: FontWeight.w700,
+                  style: _styled(
+                    TextStyle(
+                      color: _Doc.royal,
+                      fontSize: 13.5 * scale,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    document.design?.sectionTitle,
                   ),
                 ),
               ),
@@ -781,6 +820,7 @@ class _Sheet extends StatelessWidget {
     final totals = document.totals;
     final tableDiscount = num.tryParse(totals.tableDiscountTotal) ?? 0;
     final quotationDiscount = num.tryParse(totals.quotationDiscount) ?? 0;
+    final design = document.design;
 
     Widget row(String label, String value) => Container(
           padding: EdgeInsets.symmetric(vertical: 6 * scale, horizontal: 9 * scale),
@@ -792,16 +832,22 @@ class _Sheet extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: TextStyle(color: _Doc.muted, fontSize: 8.8 * scale),
+                  style: _styled(
+                    TextStyle(color: _Doc.muted, fontSize: 8.8 * scale),
+                    design?.totalsLabel,
+                  ),
                 ),
               ),
               Text(
                 value,
-                style: TextStyle(
-                  color: _Doc.ink,
-                  fontSize: 9.3 * scale,
-                  fontWeight: FontWeight.w600,
-                  fontFeatures: const [FontFeature.tabularFigures()],
+                style: _styled(
+                  TextStyle(
+                    color: _Doc.ink,
+                    fontSize: 9.3 * scale,
+                    fontWeight: FontWeight.w600,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                  design?.totalsValue,
                 ),
               ),
             ],
@@ -845,20 +891,26 @@ class _Sheet extends StatelessWidget {
                 Expanded(
                   child: Text(
                     document.arabic ? 'الإجمالي النهائي' : 'Final total',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 10 * scale,
-                      fontWeight: FontWeight.w700,
+                    style: _styled(
+                      TextStyle(
+                        color: Colors.white,
+                        fontSize: 10 * scale,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      design?.finalTotal,
                     ),
                   ),
                 ),
                 Text(
                   _money(totals.totalAmount),
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 12 * scale,
-                    fontWeight: FontWeight.w700,
-                    fontFeatures: const [FontFeature.tabularFigures()],
+                  style: _styled(
+                    TextStyle(
+                      color: Colors.white,
+                      fontSize: 12 * scale,
+                      fontWeight: FontWeight.w700,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                    design?.finalTotal,
                   ),
                 ),
               ],
@@ -980,6 +1032,7 @@ class _Sheet extends StatelessWidget {
           : 'This offer is not a tax invoice.',
     ].join(' · ');
 
+    final design = document.design;
     return Container(
       padding: EdgeInsets.only(top: 9 * scale),
       decoration: BoxDecoration(
@@ -990,10 +1043,13 @@ class _Sheet extends StatelessWidget {
         children: [
           Text(
             company.name,
-            style: TextStyle(
-              color: _Doc.royal,
-              fontSize: 8.5 * scale,
-              fontWeight: FontWeight.w700,
+            style: _styled(
+              TextStyle(
+                color: _Doc.royal,
+                fontSize: 8.5 * scale,
+                fontWeight: FontWeight.w700,
+              ),
+              design?.footer,
             ),
           ),
           if (contact.isNotEmpty)
@@ -1001,14 +1057,20 @@ class _Sheet extends StatelessWidget {
               padding: EdgeInsets.only(top: 2 * scale),
               child: Text(
                 contact,
-                style: TextStyle(color: _Doc.muted, fontSize: 7.5 * scale),
+                style: _styled(
+                  TextStyle(color: _Doc.muted, fontSize: 7.5 * scale),
+                  design?.footer,
+                ),
               ),
             ),
           Padding(
             padding: EdgeInsets.only(top: 2 * scale),
             child: Text(
               legal,
-              style: TextStyle(color: _Doc.muted, fontSize: 7.2 * scale),
+              style: _styled(
+                TextStyle(color: _Doc.muted, fontSize: 7.2 * scale),
+                design?.footer,
+              ),
             ),
           ),
         ],

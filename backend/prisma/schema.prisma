@@ -1654,6 +1654,10 @@ model Quotation {
   discountTotal Decimal @default(0) @db.Decimal(19, 4)
   totalAmount   Decimal @default(0) @db.Decimal(19, 4)
 
+  /// تصميم المستند (أنماط الخطوط، الألوان، المحاذاة لكل عنصر) يُحفظ مع
+  /// العرض ويُستعاد عند الطباعة أو المعاينة.
+  design        Json? @default("{}")
+
   /// Who signs the offer. Taken from the company profile or typed on the
   /// quotation, and snapshotted when it is issued.
   managerName       String?
@@ -1734,6 +1738,10 @@ model QuotationLine {
   quantity      Decimal @db.Decimal(19, 4)
   unitPrice     Decimal @db.Decimal(19, 4)
   lineTotal     Decimal @db.Decimal(19, 4)
+  /// Values for user-defined columns, keyed by column key. Kept in one JSON
+  /// column so adding a user-named column never requires a new database
+  /// column.
+  customValues  Json? @default("{}")
 
   table QuotationTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
   item  Item?          @relation(fields: [itemId], references: [id], onDelete: Restrict)

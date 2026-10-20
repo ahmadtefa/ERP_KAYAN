@@ -1,0 +1,1 @@
+-- Quotation document design.\n\n-- Additive only: a single JSON column stores per-element styling (font\n-- size, weight, color, alignment). Existing quotations keep printing with\n-- the default design (empty object).\nALTER TABLE \"quotations\" ADD COLUMN \"design\" JSON NOT NULL DEFAULT '{}';\n

@@ -1,0 +1,1 @@
+-- Quotation line custom column values.\n--\n-- Additive only: a single JSON column holds values for user-defined columns.\n-- Existing lines keep printing exactly as before (empty custom values object).\nALTER TABLE \"quotation_lines\" ADD COLUMN \"customValues\" JSON NOT NULL DEFAULT '{}';\n

@@ -18,6 +18,9 @@ export interface QuotationSnapshotLine {
   quantity: string;
   unitPrice: string;
   lineTotal: string;
+  /// Values for user-defined columns that are not one of the built-in keys.
+  /// Keyed by the column's key, holding the cell's display text.
+  customValues?: Record<string, string> | null;
 }
 
 export interface QuotationSnapshot {
@@ -153,7 +156,8 @@ function columnCell(
   column: QuotationColumn,
   line: QuotationSnapshotLine,
 ): { text: string; numeric: boolean; strong: boolean } {
-  const numeric = COLUMN_LABELS[column.key].numeric;
+  const builtIn = COLUMN_LABELS[column.key];
+  const numeric = builtIn ? builtIn.numeric : column.numeric ?? false;
   switch (column.key) {
     case 'itemCode':
       return { text: line.itemCode ?? '', numeric: false, strong: false };
@@ -172,7 +176,11 @@ function columnCell(
     case 'lineTotal':
       return { text: amount(line.lineTotal), numeric: true, strong: true };
     default:
-      return { text: line.description, numeric: false, strong: false };
+      return {
+        text: line.customValues?.[column.key] ?? '',
+        numeric,
+        strong: false,
+      };
   }
 }
 
@@ -263,7 +271,8 @@ export function renderQuotationDocument(
   const span = columns.length + 1;
   const headCells = columns
     .map((column) => {
-      const numeric = COLUMN_LABELS[column.key].numeric;
+      const builtIn = COLUMN_LABELS[column.key];
+      const numeric = builtIn ? builtIn.numeric : column.numeric ?? false;
       const width = `${Math.round((column.width / columnCount) * 100)}%`;
       return `<th${numeric ? ` class="num"` : ''} style="width:${width}">${escapeHtml(
         columnLabel(column, lang),
