@@ -63,7 +63,9 @@ Future<void> downloadFile(DownloadRequest request) async {
           ? null
           : RegExp(r'filename="?([^";]+)"?').firstMatch(disposition)?.group(1);
       final suggested = _safeFileName(
-        request.fileName ?? fromHeader ?? uri.pathSegments.lastOrNull ?? 'download.pdf',
+        request.fileName ??
+            fromHeader ??
+            (uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'download.pdf'),
       );
       final path = await _chooseSavePath(suggested);
       if (path == null) {
@@ -136,7 +138,7 @@ Future<String?> _chooseSavePath(String suggestedName) async {
 
 String _safeFileName(String name) {
   final cleaned = name
-      .replaceAll(RegExp(r'[<>:"/\\|?*\\x00-\\x1F]'), '_')
+      .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_')
       .trim();
   return cleaned.isEmpty ? 'quotation.pdf' : cleaned;
 }
