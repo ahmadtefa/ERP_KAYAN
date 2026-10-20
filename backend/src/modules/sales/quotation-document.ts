@@ -616,6 +616,8 @@ export function renderQuotationDocument(
     body { background: #fff; }
     .toolbar { display: none; }
     .sheet { width: auto; min-height: 0; margin: 0; }
+    .custom-header { position: fixed; top: -8mm; left: 0; right: 0; }
+    .custom-footer { position: fixed; bottom: -8mm; left: 0; right: 0; }
     .items thead { display: table-header-group; }
     /* One subtotal per section, not one per printed fragment. */
     .items tfoot { display: table-row-group; }

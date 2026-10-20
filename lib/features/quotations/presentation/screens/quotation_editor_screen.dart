@@ -923,6 +923,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     final working = Map<String, dynamic>.from(_design.toJson());
     final colorController = TextEditingController();
     final backgroundController = TextEditingController();
+    final borderController = TextEditingController();
     var palette = 'blue';
     final headerTextController = TextEditingController(text: _design.headerText ?? '');
     final footerTextController = TextEditingController(text: _design.footerText ?? '');
@@ -945,6 +946,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       textAlign = style['textAlign'] as String? ?? 'start';
       colorController.text = style['color'] as String? ?? '#1e60aa';
       backgroundController.text = style['backgroundColor'] as String? ?? '';
+      borderController.text = style['borderColor'] as String? ?? ''; 
     }
     loadElement(selected);
 
@@ -1102,6 +1104,15 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                         border: const OutlineInputBorder(),
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: borderController,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'لون الحدود (HEX)' : 'Border colour (HEX)',
+                        hintText: '#d1d5db',
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
                     const SizedBox(height: 16),
                     CheckboxListTile(
                       contentPadding: EdgeInsets.zero,
@@ -1158,6 +1169,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                     if (backgroundController.text.trim().startsWith('#') && backgroundController.text.trim().length == 7) 'backgroundColor': backgroundController.text.trim(),
                     'lineHeight': lineHeight,
                     'textAlign': textAlign,
+                    if (borderController.text.trim().startsWith('#') && borderController.text.trim().length == 7) 'borderColor': borderController.text.trim(),
                   };
                   Navigator.of(dialogContext).pop(true);
                 },
@@ -1173,6 +1185,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     } finally {
       colorController.dispose();
       backgroundController.dispose();
+      borderController.dispose();
       headerTextController.dispose();
       footerTextController.dispose();
     }

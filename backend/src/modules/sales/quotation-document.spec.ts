@@ -188,6 +188,8 @@ describe('quotation document template', () => {
     expect(html).toContain('line-height:1.50');
     expect(html).toContain('text-align:center');
     expect(html).toContain('border-color:#123456');
+    expect(html).toContain('.custom-header { position: fixed; top: -8mm; left: 0; right: 0; }');
+    expect(html).toContain('.custom-footer { position: fixed; bottom: -8mm; left: 0; right: 0; }');
     expect(html).toContain('<div class="custom-header">&lt;b&gt;Confidential&lt;/b&gt;</div>');
     expect(html).toContain('<div class="custom-footer">Thank you</div>');
     expect(html).not.toContain('<div class="custom-header"><b>Confidential</b></div>');
