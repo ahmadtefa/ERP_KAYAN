@@ -535,10 +535,11 @@ async function main() {
   });
 
   const printEn = await api(`/sales/quotations/${quotation.id}/print?lang=en`);
-  check('the English preview is a branded corporate page', printEn.status === 200 && String(printEn.data).includes('QUOTATION') && String(printEn.data).includes('Kitchen cabinets') && String(printEn.data).includes('Final total'));
+  check('the English preview is a branded corporate page', printEn.status === 200 && String(printEn.data).includes('QUOTATION') && String(printEn.data).includes('Kitchen cabinets') && String(printEn.data).includes('Grand total'));
   const printAr = await api(`/sales/quotations/${quotation.id}/print?lang=ar`);
   const printArText = String(printAr.data);
-  check('the Arabic preview is right to left with Arabic labels', printAr.status === 200 && printArText.includes('dir="rtl"') && printArText.includes('عرض سعر') && printArText.includes('الإجمالي النهائي'));
+  check('the Arabic preview is right to left with Arabic labels', printAr.status === 200 && printArText.includes('dir="rtl"') && printArText.includes('عرض سعر') && printArText.includes('المجموع الكلي'));
+  check('the summary names every table with its total and ends in the grand total', printArText.includes('البيان') && printArText.includes('إجمالي الجدول') && String(printEn.data).includes('Table total'));
   check('the hidden tax number is absent from both previews', !String(printEn.data).includes(companyTaxId) && !printArText.includes(companyTaxId));
   check(
     'the preview prints the offer subject and its own column labels',
