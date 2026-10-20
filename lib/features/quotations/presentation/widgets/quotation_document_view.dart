@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/json/amount_format.dart';
-import '../../../../features/settings/presentation/providers/text_scale_provider.dart';
 import '../../../../shared/widgets/status_pill.dart';
 import '../document/quotation_document.dart';
 
@@ -15,23 +13,28 @@ import '../document/quotation_document.dart';
 ///
 /// The user's program-wide text size (Settings) is applied on top of the
 /// layout scale, so the offer is never stuck at an unreadable size.
-class QuotationDocumentView extends ConsumerWidget {
+class QuotationDocumentView extends StatelessWidget {
   const QuotationDocumentView({
     super.key,
     required this.document,
     this.logoUrl,
+    this.textScale = 1.0,
   });
 
   final QuotationDocument document;
   final String? logoUrl;
+
+  /// The user's program-wide text size (Settings), applied on top of the
+  /// layout scale. Defaults to the design's own size so the view works
+  /// standalone (e.g. in tests) without a `ProviderScope` ancestor.
+  final double textScale;
 
   /// The reference layout is 860 points wide; narrower windows shrink the
   /// whole sheet instead of letting a column overflow.
   static const _referenceWidth = 860.0;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final textScale = ref.watch(effectiveTextScaleProvider);
+  Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth.isFinite
