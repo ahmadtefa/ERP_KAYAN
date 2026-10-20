@@ -109,6 +109,20 @@ function fixture(): QuotationSnapshot {
   };
 }
 
+/// The text the PDF operators show, for the two ways pdf-lib writes it: a hex
+/// string (`<31202F2032> Tj`) or a literal string (`(1 / 2) Tj`).
+function pdfText(content: string): string {
+  const parts: string[] = [];
+  for (const match of content.matchAll(/<([0-9A-Fa-f\s]+)>\s*Tj/g)) {
+    parts.push(Buffer.from(match[1].replace(/\s+/g, ''), 'hex').toString('latin1'));
+  }
+  for (const match of content.matchAll(/\((?:\\.|[^\\)])*\)\s*Tj/g)) {
+    const raw = match[0].slice(1, match[0].lastIndexOf(')'));
+    parts.push(raw.replace(/\\([()\\])/g, '$1'));
+  }
+  return parts.join('\n');
+}
+
 async function main() {
   const folder = join(process.cwd(), 'artifacts');
   mkdirSync(folder, { recursive: true });
@@ -165,7 +179,7 @@ async function main() {
         return '';
       })
       .join('\n');
-    if (text.includes(`${index + 1} / ${document.getPageCount()}`)) {
+    if (pdfText(text).includes(`${index + 1} / ${document.getPageCount()}`)) {
       stamped.push(index + 1);
     }
   });
