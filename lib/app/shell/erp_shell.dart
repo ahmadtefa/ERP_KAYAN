@@ -397,7 +397,7 @@ class _Sidebar extends StatelessWidget {
                 primary: false,
                 // All items stay built: permission tests and keyboard users
                 // must be able to reach a module without scrolling first.
-                cacheExtent: 4000,
+                scrollCacheExtent: 4000,
                 padding: EdgeInsets.fromLTRB(
                   extended ? 10 : 8,
                   10,
