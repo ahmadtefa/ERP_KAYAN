@@ -76,6 +76,7 @@ interface PreparedQuotationLine {
 interface PreparedQuotationTable {
   title: string;
   sortOrder: number;
+  columns: QuotationColumn[] | null;
   discount: ResolvedDiscount;
   subTotal: Prisma.Decimal;
   netTotal: Prisma.Decimal;
@@ -246,6 +247,7 @@ export class QuotationsService {
             create: prepared.tables.map((table) => ({
               title: table.title,
               sortOrder: table.sortOrder,
+              columns: table.columns ? table.columns as unknown as Prisma.InputJsonValue : Prisma.DbNull,
               discountType: table.discount.type,
               discountPercent: table.discount.percent,
               discountAmount: table.discount.amount,
@@ -588,6 +590,7 @@ export class QuotationsService {
             create: quotation.tables.map((table) => ({
               title: table.title,
               sortOrder: table.sortOrder,
+              columns: table.columns === null ? Prisma.DbNull : table.columns as Prisma.InputJsonValue,
               discountType: table.discountType,
               discountPercent: table.discountPercent,
               discountAmount: table.discountAmount,
@@ -1044,6 +1047,7 @@ export class QuotationsService {
       preparedTables.push({
         title,
         sortOrder: tableIndex + 1,
+        columns: rawTable.columns ? this.columnData(rawTable.columns) : null,
         discount,
         subTotal,
         netTotal: discount.net,
@@ -1137,6 +1141,7 @@ export class QuotationsService {
       tables: quotation.tables.map((table) => ({
         title: table.title,
         sortOrder: table.sortOrder,
+        columns: table.columns ? this.columnsOf(table.columns) : null,
         subTotal: table.subTotal.toFixed(MONEY_SCALE),
         discountPercent: table.discountPercent.toFixed(RATE_SCALE),
         discountAmount: table.discountAmount.toFixed(MONEY_SCALE),
@@ -1217,6 +1222,7 @@ export class QuotationsService {
         id: table.id,
         title: table.title,
         sortOrder: table.sortOrder,
+        columns: table.columns ? this.columnsOf(table.columns) : null,
         discountType: table.discountType,
         discountPercent: table.discountPercent.toFixed(RATE_SCALE),
         discountAmount: table.discountAmount.toFixed(MONEY_SCALE),
