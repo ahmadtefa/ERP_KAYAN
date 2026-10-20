@@ -229,6 +229,50 @@ export function renderQuotationDocument(
         ).toString('base64')}`
       : null;
 
+  const designCss = (() => {
+    const design = content.design;
+    if (!design || typeof design !== 'object' || Array.isArray(design)) return '';
+    const fontFamilies: Record<string, string> = {
+      Tahoma: "'Tahoma', 'Segoe UI', Arial, sans-serif",
+      Arial: "Arial, 'Tahoma', sans-serif",
+      'Segoe UI': "'Segoe UI', Tahoma, Arial, sans-serif",
+    };
+    const weights = new Set(['w400', 'w500', 'w600', 'w700', 'w800']);
+    const rules: Array<[string, string, number]> = [
+      ['company', '.brand h1', 12.5],
+      ['title', '.title-band h2', 23],
+      ['customer', '.panel h3', 10.5],
+      ['sectionTitle', '.section-head h3', 11],
+      ['tableHeader', '.items thead th', 8],
+      ['tableCell', '.items tbody td', 8.5],
+      ['totalsLabel', '.totals td:first-child', 8.5],
+      ['totalsValue', '.totals td:last-child', 8.5],
+      ['finalTotal', '.totals tr.grand td', 11],
+      ['header', '.masthead', 9.5],
+      ['footer', '.page-footer', 7.5],
+    ];
+    return rules.map(([key, selector, baseSize]) => {
+      const raw = design[key];
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return '';
+      const style = raw as Record<string, unknown>;
+      const declarations: string[] = [];
+      const multiplier = Number(style.fontSizeMultiplier);
+      if (Number.isFinite(multiplier)) {
+        const safeMultiplier = Math.max(0.7, Math.min(1.6, multiplier));
+        declarations.push(`font-size:${(baseSize * safeMultiplier).toFixed(2)}pt`);
+      }
+      const weight = String(style.fontWeight ?? '').split('.').pop() ?? '';
+      if (weights.has(weight)) declarations.push(`font-weight:${weight.slice(1)}`);
+      const family = String(style.fontFamily ?? '');
+      if (fontFamilies[family]) declarations.push(`font-family:${fontFamilies[family]}`);
+      const color = String(style.color ?? '');
+      if (/^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$/.test(color)) {
+        declarations.push(`color:${color}`);
+      }
+      return declarations.length ? `${selector} { ${declarations.join('; ')}; }` : '';
+    }).filter(Boolean).join('\\n');
+  })();
+
   const companyName = rtl
     ? content.company.nameAr || content.company.nameEn
     : content.company.nameEn || content.company.nameAr;

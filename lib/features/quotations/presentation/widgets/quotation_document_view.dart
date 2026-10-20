@@ -70,6 +70,7 @@ class _Sheet extends StatelessWidget {
     return base.copyWith(
       fontSize: (base.fontSize ?? 12) * style.fontSizeMultiplier,
       fontWeight: style.fontWeight ?? base.fontWeight,
+      fontFamily: style.fontFamily ?? base.fontFamily,
       color: style.color != null
           ? _parseColor(style.color!)
           : base.color,

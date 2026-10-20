@@ -845,6 +845,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                _designCard(context),
                 _columnsCard(context),
                 const SizedBox(height: 12),
                 for (var index = 0; index < _tables.length; index++)
@@ -865,6 +866,1280 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         ],
       ),
     );
+  }
+
+  Widget _designCard(BuildContext context) {
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            const Icon(Icons.palette_outlined),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    arabic ? 'تنسيق عناصر عرض السعر' : 'Quotation element styling',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    arabic
+                        ? 'حجم الخط وسمكه ولونه ونوعه لكل عنصر بشكل مستقل'
+                        : 'Set font size, weight, colour and family for each element',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              key: const ValueKey('edit-quotation-design'),
+              onPressed: _editDesign,
+              icon: const Icon(Icons.tune, size: 18),
+              label: Text(arabic ? 'تخصيص التصميم' : 'Customize'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editDesign() async {
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final elements = <({String key, String ar, String en})>[
+      (key: 'company', ar: 'اسم الشركة', en: 'Company name'),
+      (key: 'title', ar: 'عنوان العرض', en: 'Quotation title'),
+      (key: 'customer', ar: 'بيانات العميل', en: 'Customer details'),
+      (key: 'sectionTitle', ar: 'عناوين الجداول', en: 'Table titles'),
+      (key: 'tableHeader', ar: 'رؤوس الأعمدة', en: 'Table headers'),
+      (key: 'tableCell', ar: 'خلايا الجداول', en: 'Table cells'),
+      (key: 'totalsLabel', ar: 'عناوين الإجماليات', en: 'Totals labels'),
+      (key: 'totalsValue', ar: 'قيم الإجماليات', en: 'Totals values'),
+      (key: 'finalTotal', ar: 'الإجمالي النهائي', en: 'Grand total'),
+      (key: 'header', ar: 'رأس العرض', en: 'Header'),
+      (key: 'footer', ar: 'تذييل العرض', en: 'Footer'),
+    ];
+    final working = Map<String, dynamic>.from(_design.toJson());
+    final colorController = TextEditingController();
+    var selected = 'company';
+    var multiplier = 1.0;
+    var weight = 'w600';
+    var family = 'Tahoma';
+
+    void loadElement(String key) {
+      final raw = working[key];
+      final style = raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+      multiplier = (style['fontSizeMultiplier'] as num?)?.toDouble() ?? 1.0;
+      weight = (style['fontWeight'] as String?)?.split('.').last ?? 'w600';
+      family = style['fontFamily'] as String? ?? 'Tahoma';
+      colorController.text = style['color'] as String? ?? '#1e60aa';
+    }
+    loadElement(selected);
+
+    try {
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            title: Text(arabic ? 'تخصيص تصميم العرض' : 'Customize quotation design'),
+            content: SizedBox(
+              width: 520,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: selected,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'العنصر المطلوب تنسيقه' : 'Element to style',
+                        border: const OutlineInputBorder(),
+                      ),
+                      items: [
+                        for (final item in elements)
+                          DropdownMenuItem(
+                            value: item.key,
+                            child: Text(arabic ? item.ar : item.en),
+                          ),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setDialogState(() {
+                          selected = value;
+                          loadElement(value);
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      arabic
+                          ? 'حجم الخط: ${(multiplier * 100).round()}%'
+                          : 'Font size: ${(multiplier * 100).round()}%',
+                    ),
+                    Slider(
+                      value: multiplier.clamp(0.7, 1.6).toDouble(),
+                      min: 0.7,
+                      max: 1.6,
+                      divisions: 18,
+                      label: '${(multiplier * 100).round()}%',
+                      onChanged: (value) => setDialogState(() => multiplier = value),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      value: weight,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'سمك الخط' : 'Font weight',
+                        border: const OutlineInputBorder(),
+                      ),
+                      items: [
+                        DropdownMenuItem(value: 'w400', child: Text(arabic ? 'عادي' : 'Regular')),
+                        DropdownMenuItem(value: 'w500', child: Text(arabic ? 'متوسط' : 'Medium')),
+                        DropdownMenuItem(value: 'w600', child: Text(arabic ? 'شبه عريض' : 'Semi-bold')),
+                        DropdownMenuItem(value: 'w700', child: Text(arabic ? 'عريض' : 'Bold')),
+                        DropdownMenuItem(value: 'w800', child: Text(arabic ? 'عريض جدًا' : 'Extra bold')),
+                      ],
+                      onChanged: (value) => setDialogState(() => weight = value ?? 'w600'),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: family,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'نوع الخط' : 'Font family',
+                        border: const OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'Tahoma', child: Text('Tahoma')),
+                        DropdownMenuItem(value: 'Arial', child: Text('Arial')),
+                        DropdownMenuItem(value: 'Segoe UI', child: Text('Segoe UI')),
+                      ],
+                      onChanged: (value) => setDialogState(() => family = value ?? 'Tahoma'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: colorController,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'لون النص (HEX)' : 'Text colour (HEX)',
+                        hintText: '#1e60aa',
+                        helperText: arabic ? 'مثال: #1e60aa' : 'Example: #1e60aa',
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: Text(arabic ? 'إلغاء' : 'Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  working[selected] = {
+                    'fontSizeMultiplier': multiplier,
+                    'fontWeight': weight,
+                    'fontFamily': family,
+                    if (RegExp(r'^#[0-9a-fA-F]{6}(BuildContext context) {
+    final l10n = context.l10n;
+    final theme = Theme.of(context);
+    final language = Localizations.localeOf(context).languageCode;
+    final visible = _columns.where((column) => column.visible).toList();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(l10n.quotationColumns, style: theme.textTheme.titleSmall),
+                  const SizedBox(height: 4),
+                  Text(
+                    visible.isEmpty
+                        ? l10n.keepOneColumnVisible
+                        : visible
+                              .map(
+                                (column) =>
+                                    '${_columnLabel(column, language)} '
+                                    '(${column.width})',
+                              )
+                              .join(' · '),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(l10n.columnLayoutHint, style: theme.textTheme.bodySmall),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              key: const ValueKey('edit-columns'),
+              onPressed: _editColumns,
+              icon: const Icon(Icons.view_column_outlined, size: 18),
+              label: Text(l10n.columnLayout),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The label the offer prints for a column: its own text when set, the
+  /// built-in translation otherwise.
+  String _columnLabel(_QColumnDraft column, String language) {
+    final override = language == 'ar' ? column.labelAr.text : column.labelEn.text;
+    if (override.trim().isNotEmpty) return override.trim();
+    return _columnName(column.key);
+  }
+
+  /// Changes the layout on a working copy, so Cancel really cancels. A saved
+  /// template is a starting point; the offer keeps its own copy of whatever
+  /// was applied.
+  Future<void> _editColumns() async {
+    final l10n = context.l10n;
+    final available = [
+      ...?ref.read(quotationColumnTemplatesProvider).value,
+    ];
+    final working = [for (final column in _columns) column.copy()];
+    final templateName = TextEditingController();
+    String? templateId;
+    try {
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              title: Text(l10n.columnLayout),
+              content: SizedBox(
+                width: 760,
+                height: 560,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            key: const ValueKey('column-template'),
+                            initialValue: templateId,
+                            isExpanded: true,
+                            decoration: InputDecoration(
+                              labelText: l10n.columnTemplate,
+                              border: const OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            items: [
+                              for (final template in available)
+                                DropdownMenuItem(
+                                  value: text(template, 'id'),
+                                  child: Text(
+                                    text(template, 'name'),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: available.isEmpty
+                                ? null
+                                : (value) {
+                                    if (value == null) return;
+                                    final template = available.firstWhere(
+                                      (row) => text(row, 'id') == value,
+                                      orElse: () => const {},
+                                    );
+                                    if (template.isEmpty) return;
+                                    for (final column in working) {
+                                      column.dispose();
+                                    }
+                                    working
+                                      ..clear()
+                                      ..addAll(_columnsFrom(template['columns']));
+                                    setDialogState(() => templateId = value);
+                                  },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        PopupMenuButton<String>(
+                          key: const ValueKey('add-column'),
+                          tooltip: l10n.addColumn,
+                          onSelected: (key) {
+                            if (key == '_custom') {
+                              _addCustomColumnDialog(setDialogState, working);
+                              return;
+                            }
+                            setDialogState(() {
+                              if (!working.any((c) => c.key == key)) {
+                                working.add(_QColumnDraft(key: key));
+                              }
+                            });
+                          },
+                          itemBuilder: (context) => [
+                            for (final key in _columnKeys)
+                              if (!working.any((column) => column.key == key))
+                                PopupMenuItem(
+                                  value: key,
+                                  child: Text(_columnName(key)),
+                                ),
+                            const PopupMenuItem(
+                              value: '_custom',
+                              child: Text('أعمدة مخصصة / Custom column…'),
+                            ),
+                          ],
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.add, size: 18),
+                                const SizedBox(width: 4),
+                                Text(l10n.addColumn),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: working.isEmpty
+                          ? Center(child: Text(l10n.keepOneColumnVisible))
+                          : ListView.separated(
+                              itemCount: working.length,
+                              separatorBuilder: (_, _) =>
+                                  const Divider(height: 12),
+                              itemBuilder: (context, index) {
+                                final column = working[index];
+                                return Row(
+                                  children: [
+                                    Checkbox(
+                                      key: ValueKey(
+                                        'column-visible-${column.key}',
+                                      ),
+                                      value: column.visible,
+                                      onChanged: (value) => setDialogState(
+                                        () => column.visible = value ?? true,
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Text(
+                                        _columnName(column.key),
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.bodyMedium,
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 130,
+                                      child: TextField(
+                                        key: ValueKey(
+                                          'column-label-en-${column.key}',
+                                        ),
+                                        controller: column.labelEn,
+                                        decoration: InputDecoration(
+                                          labelText: l10n.columnLabelEn,
+                                          border: const OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    SizedBox(
+                                      width: 130,
+                                      child: TextField(
+                                        key: ValueKey(
+                                          'column-label-ar-${column.key}',
+                                        ),
+                                        controller: column.labelAr,
+                                        decoration: InputDecoration(
+                                          labelText: l10n.columnLabelAr,
+                                          border: const OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    SizedBox(
+                                      width: 78,
+                                      child: DropdownButtonFormField<int>(
+                                        key: ValueKey(
+                                          'column-width-${column.key}',
+                                        ),
+                                        initialValue: column.width,
+                                        decoration: InputDecoration(
+                                          labelText: l10n.columnWidth,
+                                          border: const OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                        items: [
+                                          for (var width = 1; width <= 6; width++)
+                                            DropdownMenuItem(
+                                              value: width,
+                                              child: Text('$width'),
+                                            ),
+                                        ],
+                                        onChanged: (value) => setDialogState(
+                                          () => column.width = value ?? 2,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Checkbox(
+                                      key: ValueKey(
+                                        'column-numeric-${column.key}',
+                                      ),
+                                      value: column.numeric,
+                                      onChanged: (value) => setDialogState(
+                                        () => column.numeric = value ?? false,
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 60,
+                                      child: Text(
+                                        l10n.columnNumeric,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      key: ValueKey('column-up-${column.key}'),
+                                      tooltip: l10n.moveUp,
+                                      onPressed: index == 0
+                                          ? null
+                                          : () => setDialogState(() {
+                                              final moved = working.removeAt(
+                                                index,
+                                              );
+                                              working.insert(index - 1, moved);
+                                            }),
+                                      icon: const Icon(
+                                        Icons.arrow_upward,
+                                        size: 18,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      key: ValueKey(
+                                        'column-down-${column.key}',
+                                      ),
+                                      tooltip: l10n.moveDown,
+                                      onPressed: index == working.length - 1
+                                          ? null
+                                          : () => setDialogState(() {
+                                              final moved = working.removeAt(
+                                                index,
+                                              );
+                                              working.insert(index + 1, moved);
+                                            }),
+                                      icon: const Icon(
+                                        Icons.arrow_downward,
+                                        size: 18,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      key: ValueKey(
+                                        'column-delete-${column.key}',
+                                      ),
+                                      tooltip: l10n.removeColumn,
+                                      onPressed: working.length == 1
+                                          ? null
+                                          : () => setDialogState(
+                                              () => working
+                                                  .removeAt(index)
+                                                  .dispose(),
+                                            ),
+                                      icon: const Icon(
+                                        Icons.delete_outline,
+                                        size: 18,
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            key: const ValueKey('column-template-name'),
+                            controller: templateName,
+                            decoration: InputDecoration(
+                              labelText: l10n.templateName,
+                              border: const OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          key: const ValueKey('save-column-template'),
+                          onPressed: () async {
+                            final name = templateName.text.trim();
+                            if (name.isEmpty) {
+                              showMessage(
+                                dialogContext,
+                                l10n.templateName,
+                                error: true,
+                              );
+                              return;
+                            }
+                            final saved = await _saveColumnTemplate(
+                              name,
+                              working,
+                            );
+                            if (saved != null && dialogContext.mounted) {
+                              setDialogState(() {
+                                available.add(saved);
+                                templateName.clear();
+                              });
+                            }
+                          },
+                          icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                          label: Text(l10n.saveColumnTemplate),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: Text(l10n.cancel),
+                ),
+                FilledButton(
+                  key: const ValueKey('save-columns'),
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: Text(l10n.save),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+      if (saved != true) return;
+      for (final column in _columns) {
+        column.dispose();
+      }
+      setState(() {
+        _columns
+          ..clear()
+          ..addAll(working);
+      });
+      // The copies handed to the screen are now owned by it.
+      working.clear();
+    } finally {
+      for (final column in working) {
+        column.dispose();
+      }
+      templateName.dispose();
+    }
+  }
+
+  /// Opens a dialog that lets the user define a new column with a free-text
+  /// key and label. The column is added to [working] when the user saves.
+  void _addCustomColumnDialog(
+    void Function(void Function()) setDialogState,
+    List<_QColumnDraft> working,
+  ) {
+    final keyController = TextEditingController();
+    final labelEnController = TextEditingController();
+    final labelArController = TextEditingController();
+    final l10n = context.l10n;
+    showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l10n.addCustomColumn),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: keyController,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: l10n.columnKey,
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: labelEnController,
+              decoration: InputDecoration(
+                labelText: l10n.columnLabelEn,
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: labelArController,
+              decoration: InputDecoration(
+                labelText: l10n.columnLabelAr,
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () {
+              final key = keyController.text.trim();
+              if (key.isEmpty) {
+                showMessage(
+                  dialogContext,
+                  l10n.columnKey,
+                  error: true,
+                );
+                return;
+              }
+              if (working.any((c) => c.key == key)) {
+                showMessage(
+                  dialogContext,
+                  l10n.columnAlreadyExists,
+                  error: true,
+                );
+                return;
+              }
+              setDialogState(() {
+                working.add(_QColumnDraft(
+                  key: key,
+                  labelEn: labelEnController.text.trim(),
+                  labelAr: labelArController.text.trim(),
+                ));
+              });
+              keyController.dispose();
+              labelEnController.dispose();
+              labelArController.dispose();
+              Navigator.of(dialogContext).pop(true);
+            },
+            child: Text(l10n.add),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<Json?> _saveColumnTemplate(
+    String name,
+    List<_QColumnDraft> columns,
+  ) async {
+    final l10n = context.l10n;
+    try {
+      final created = await ref
+          .read(apiClientProvider)
+          .post(
+            '/sales/quotation-column-templates',
+            body: {
+              'name': name,
+              'columns': [
+                for (final column in columns)
+                  {
+                    'key': column.key,
+                    if (column.labelEn.text.trim().isNotEmpty)
+                      'labelEn': column.labelEn.text.trim(),
+                    if (column.labelAr.text.trim().isNotEmpty)
+                      'labelAr': column.labelAr.text.trim(),
+                    'visible': column.visible,
+                    'width': column.width,
+                  },
+              ],
+            },
+          );
+      ref.invalidate(quotationColumnTemplatesProvider);
+      if (mounted) showMessage(context, l10n.templateSaved);
+      return created;
+    } on Failure catch (error) {
+      if (mounted) showMessage(context, error.message, error: true);
+      return null;
+    }
+  }
+
+  Widget _tableCard(int index, String language, List<Json> items) {
+    final l10n = context.l10n;
+    final table = _tables[index];
+    return Card(
+      key: ValueKey('quotation-table-$index'),
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    key: ValueKey('quotation-table-title-$index'),
+                    controller: table.title,
+                    decoration: InputDecoration(
+                      labelText: l10n.tableTitle,
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                IconButton(
+                  tooltip: l10n.moveUp,
+                  onPressed: index == 0
+                      ? null
+                      : () => setState(() {
+                          final moved = _tables.removeAt(index);
+                          _tables.insert(index - 1, moved);
+                        }),
+                  icon: const Icon(Icons.arrow_upward, size: 18),
+                ),
+                IconButton(
+                  tooltip: l10n.moveDown,
+                  onPressed: index == _tables.length - 1
+                      ? null
+                      : () => setState(() {
+                          final moved = _tables.removeAt(index);
+                          _tables.insert(index + 1, moved);
+                        }),
+                  icon: const Icon(Icons.arrow_downward, size: 18),
+                ),
+                IconButton(
+                  tooltip: l10n.removeTable,
+                  onPressed: _tables.length == 1
+                      ? null
+                      : () => setState(() => _tables.removeAt(index).dispose()),
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                SizedBox(
+                  width: 180,
+                  child: DropdownButtonFormField<DiscountKind>(
+                    key: ValueKey('quotation-table-discount-$index'),
+                    initialValue: table.discountKind,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: l10n.tableDiscount,
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      for (final kind in DiscountKind.values)
+                        DropdownMenuItem(
+                          value: kind,
+                          child: Text(discountKindLabel(context, kind)),
+                        ),
+                    ],
+                    onChanged: (value) => setState(() {
+                      table.discountKind = value ?? DiscountKind.none;
+                      if (table.discountKind == DiscountKind.none) {
+                        table.discountValue.clear();
+                      }
+                    }),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 160,
+                  child: TextField(
+                    key: ValueKey('quotation-table-discount-value-$index'),
+                    controller: table.discountValue,
+                    enabled: table.discountKind != DiscountKind.none,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: table.discountKind == DiscountKind.percent
+                          ? l10n.discountPercentValue
+                          : l10n.discountAmountValue,
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Text(
+                  '${l10n.tableSubtotal}: '
+                  '${formatAmount(table.gross.toString())}  •  '
+                  '${l10n.netValue}: ${formatAmount(table.net.toString())}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+            const Divider(height: 24),
+            for (var lineIndex = 0;
+                lineIndex < table.lines.length;
+                lineIndex++)
+              _lineRow(
+                index,
+                table,
+                table.lines[lineIndex],
+                lineIndex,
+                language,
+                items,
+              ),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                onPressed: () =>
+                    setState(() => table.lines.add(_QLineDraft())),
+                icon: const Icon(Icons.add, size: 18),
+                label: Text(l10n.addQuotationLine),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _lineRow(
+    int tableIndex,
+    _QTableDraft table,
+    _QLineDraft line,
+    int index,
+    String language,
+    List<Json> items,
+  ) {
+    final l10n = context.l10n;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 3,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        key: ValueKey('quotation-item-${line.itemId ?? 'null'}'),
+                        initialValue: line.itemId,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          labelText: l10n.item,
+                          border: const OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: [
+                          for (final item in items)
+                            DropdownMenuItem(
+                              value: text(item, 'id'),
+                              child: Text(
+                                '${text(item, 'code')} — '
+                                '${text(item, 'nameEn')}',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: (value) {
+                          setState(() {
+                            line.itemId = value;
+                            final item = items.firstWhere(
+                              (row) => text(row, 'id') == value,
+                              orElse: () => const {},
+                            );
+                            if (item.isNotEmpty) {
+                              _applyItem(line, item, language);
+                            }
+                          });
+                        },
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: l10n.selectItem,
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.search, size: 18),
+                      onPressed: () async {
+                        final picked = await showItemPicker(
+                          context,
+                          title: l10n.selectItem,
+                        );
+                        if (picked == null || !mounted) return;
+                        setState(() {
+                          line.itemId = text(picked, 'id');
+                          _applyItem(line, picked, language);
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 3,
+                child: TextField(
+                  controller: line.description,
+                  decoration: InputDecoration(
+                    labelText: l10n.description,
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+              IconButton(
+                tooltip: l10n.removeLine,
+                onPressed: table.lines.length == 1
+                    ? null
+                    : () => setState(() => table.lines.removeAt(index).dispose()),
+                icon: const Icon(Icons.delete_outline, size: 18),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              _smallField(line.origin, l10n.countryOfOrigin, width: 140),
+              const SizedBox(width: 8),
+              _smallField(line.unit, l10n.unit, width: 90),
+              const SizedBox(width: 8),
+              _smallField(
+                line.quantity,
+                l10n.quantity,
+                width: 100,
+                numeric: true,
+                fieldKey: ValueKey('quotation-qty-$tableIndex-$index'),
+              ),
+              const SizedBox(width: 8),
+              _smallField(
+                line.unitPrice,
+                l10n.unitPrice,
+                width: 130,
+                numeric: true,
+                fieldKey: ValueKey('quotation-price-$tableIndex-$index'),
+              ),
+              const SizedBox(width: 16),
+              Text(
+                '${l10n.lineTotal}: '
+                '${formatAmount(line.lineTotal.toString())}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ],
+          ),
+          // حقول الأعمدة المخصصة التي ليست من المفاتيح المضمّنة.
+          if (_customColumnKeys.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                for (final column in _customColumnKeys)
+                  SizedBox(
+                    width: 150,
+                    child: TextField(
+                      key: ValueKey(
+                        'quotation-custom-${column.key}-$tableIndex-$index',
+                      ),
+                      controller: _customValueController(line, column.key),
+                      decoration: InputDecoration(
+                        labelText: language == 'ar'
+                            ? column.labelAr.text.trim().isNotEmpty
+                                ? column.labelAr.text
+                                : column.key
+                            : column.labelEn.text.trim().isNotEmpty
+                                ? column.labelEn.text
+                                : column.key,
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (value) =>
+                          line.customValues[column.key] = value,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// الأعمدة الظاهرة التي يعرفها المستخدم (ليست من المفاتيح المضمّنة).
+  List<_QColumnDraft> get _customColumnKeys =>
+      _columns.where((c) => c.visible && !_builtinColumnKeys.contains(c.key))
+          .toList();
+
+  /// المفاتيح المضمّنة التي لها حقول خاصة بها في السطر.
+  static const _builtinColumnKeys = {
+    'itemCode',
+    'description',
+    'countryOfOrigin',
+    'unit',
+    'quantity',
+    'unitPrice',
+    'lineTotal',
+  };
+
+  /// يعيد المتحكم في حقل قيمة العمود المخصص لسطر معين، ينشئه عند الحاجة.
+  TextEditingController _customValueController(
+    _QLineDraft line,
+    String key,
+  ) {
+    final initial = line.customValues[key] ?? '';
+    return line.customValueController(key, initial);
+  }
+
+  Widget _smallField(
+    TextEditingController controller,
+    String label, {
+    required double width,
+    bool numeric = false,
+    Key? fieldKey,
+  }) {
+    return SizedBox(
+      width: width,
+      child: TextField(
+        key: fieldKey,
+        controller: controller,
+        keyboardType: numeric
+            ? const TextInputType.numberWithOptions(decimal: true)
+            : null,
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          isDense: true,
+        ),
+        onChanged: (_) => setState(() {}),
+      ),
+    );
+  }
+
+  Widget _summary(BuildContext context) {
+    final l10n = context.l10n;
+    final document = _documentDiscount;
+    final shares = allocateByWeight(_tableNets, document.amount);
+    final gross = _tables.fold(Decimal.zero, (sum, table) => sum + table.gross);
+    final tableDiscounts =
+        _tables.fold(Decimal.zero, (sum, table) => sum + table.discount.amount);
+    final finalTotal = document.net;
+    final theme = Theme.of(context);
+
+    Widget row(List<String> cells, {bool strong = false, bool header = false}) {
+      final style = header
+          ? theme.textTheme.labelLarge
+          : strong
+          ? theme.textTheme.titleMedium
+          : theme.textTheme.bodyMedium;
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            for (var index = 0; index < cells.length; index++)
+              Expanded(
+                flex: index == 0 ? 3 : 2,
+                child: Text(
+                  cells[index],
+                  textAlign: index == 0 ? TextAlign.start : TextAlign.end,
+                  style: style,
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(l10n.quotationSummary, style: theme.textTheme.titleMedium),
+            const SizedBox(height: 8),
+            row(
+              [
+                l10n.quotationTables,
+                l10n.grossValue,
+                l10n.tableDiscount,
+                l10n.netValue,
+              ],
+              header: true,
+            ),
+            const Divider(height: 8),
+            for (var index = 0; index < _tables.length; index++)
+              row([
+                '${index + 1}. ${_tables[index].title.text.trim().isEmpty ? l10n.tableTitle : _tables[index].title.text.trim()}',
+                formatAmount(_tables[index].gross.toString()),
+                formatAmount(_tables[index].discount.amount.toString()),
+                formatAmount(_tables[index].net.toString()),
+              ]),
+            const Divider(),
+            row([
+              l10n.subtotalBeforeDiscount,
+              '',
+              '',
+              formatAmount(gross.toString()),
+            ]),
+            row([
+              l10n.totalDiscounts,
+              '',
+              '',
+              formatAmount(
+                (tableDiscounts + document.amount).toString(),
+              ),
+            ]),
+            if (document.amount > Decimal.zero)
+              row([
+                l10n.quotationDiscount,
+                document.kind == DiscountKind.percent
+                    ? '${l10n.discountPercent} ${document.percent}%'
+                    : l10n.discountAmount,
+                '',
+                '− ${formatAmount(document.amount.toString())}',
+              ]),
+            const Divider(),
+            row([
+              l10n.finalTotal,
+              '',
+              '',
+              formatAmount(finalTotal.toString()),
+            ], strong: true),
+            if (shares.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  l10n.discountBeforeTaxHint,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The saved-terms manager. Deleting an entry only removes it from the picker:
+/// every quotation keeps its own copy of the text it was issued with.
+class _QuotationTermsDialog extends ConsumerWidget {
+  const _QuotationTermsDialog({required this.onUse});
+
+  final void Function(Json term) onUse;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    final terms = ref.watch(quotationTermsProvider);
+    return AlertDialog(
+      title: Text(l10n.manageSavedTerms),
+      content: SizedBox(
+        width: 560,
+        height: 380,
+        child: terms.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (error, _) => Text(error is Failure ? error.message : '$error'),
+          data: (rows) {
+            if (rows.isEmpty) return Center(child: Text(l10n.noSavedTerms));
+            return ListView.separated(
+              itemCount: rows.length,
+              separatorBuilder: (context, index) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final term = rows[index];
+                return ListTile(
+                  title: Text(text(term, 'title')),
+                  subtitle: Text(
+                    text(term, 'body'),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          onUse(term);
+                        },
+                        child: Text(l10n.insertSavedTerms),
+                      ),
+                      IconButton(
+                        tooltip: l10n.remove,
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () async {
+                          final ok = await showDialog<bool>(
+                            context: context,
+                            builder: (confirm) => AlertDialog(
+                              title: Text(l10n.remove),
+                              content: Text(l10n.removeSavedTerm),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(confirm).pop(false),
+                                  child: Text(l10n.cancel),
+                                ),
+                                FilledButton(
+                                  onPressed: () => Navigator.of(confirm).pop(true),
+                                  child: Text(l10n.remove),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (ok != true) return;
+                          try {
+                            await ref
+                                .read(apiClientProvider)
+                                .delete('/sales/quotation-terms/${text(term, 'id')}');
+                            ref.invalidate(quotationTermsProvider);
+                          } on Failure catch (error) {
+                            if (context.mounted) {
+                              showMessage(context, error.message, error: true);
+                            }
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.close),
+        ),
+      ],
+    );
+  }
+}
+).hasMatch(colorController.text.trim()))
+                      'color': colorController.text.trim(),
+                  };
+                  Navigator.of(dialogContext).pop(true);
+                },
+                child: Text(arabic ? 'حفظ التنسيق' : 'Save style'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (saved == true && mounted) {
+        setState(() => _design = QuotationDocumentDesign.fromJson(working));
+      }
+    } finally {
+      colorController.dispose();
+    }
   }
 
   /// The line columns this offer prints, and the button that changes them.
