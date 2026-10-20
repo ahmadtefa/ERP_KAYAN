@@ -135,6 +135,7 @@ class _Sheet extends StatelessWidget {
               padding: EdgeInsets.only(bottom: 8 * scale),
               child: Text(
                 d.design!.headerText!,
+                textAlign: _textAlign(d.design?.header),
                 style: _styled(TextStyle(fontSize: 8 * scale, color: _Doc.muted), d.design?.header),
               ),
             ),
@@ -164,6 +165,7 @@ class _Sheet extends StatelessWidget {
               padding: EdgeInsets.only(top: 6 * scale),
               child: Text(
                 d.design!.footerText!,
+                textAlign: _textAlign(d.design?.footer),
                 style: _styled(TextStyle(fontSize: 8 * scale, color: _Doc.muted), d.design?.footer),
               ),
             ),
@@ -203,6 +205,7 @@ class _Sheet extends StatelessWidget {
               children: [
                 Text(
                   company.name,
+                  textAlign: _textAlign(design?.company),
                   style: _styled(
                     TextStyle(
                       color: _Doc.royal,
@@ -560,7 +563,9 @@ class _Sheet extends StatelessWidget {
           ),
           child: Text(
             value,
-            textAlign: numeric ? TextAlign.end : TextAlign.start,
+            textAlign: _textAlign(document.design?.tableCell) == TextAlign.start
+                ? (numeric ? TextAlign.end : TextAlign.start)
+                : _textAlign(document.design?.tableCell),
             style: (override ?? style).copyWith(
               fontWeight: strong ? FontWeight.w700 : null,
               fontFeatures: numeric
