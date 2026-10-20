@@ -151,6 +151,7 @@ describe('quotation document template', () => {
     expect(html).toContain('QUOTATION');
     expect(html).toContain('كيان للحلول المتكاملة');
     expect(html).toContain('data:image/png;base64,');
+    expect(html).not.toContain('class="monogram"');
     expect(html).toContain('QT-2026-0007');
     expect(html).toContain('دلتا للهندسة');
     expect(html).toContain('CUST-TAX-77');
