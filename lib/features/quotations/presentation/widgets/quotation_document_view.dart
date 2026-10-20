@@ -1008,7 +1008,7 @@ class _Sheet extends StatelessWidget {
   String _percent(String raw) {
     final value = num.tryParse(raw);
     if (value == null || value <= 0) return '';
-    return ' (${value}%)';
+    return ' ($value%)';
   }
 
   static String _statusLabel(String status, bool arabic) {

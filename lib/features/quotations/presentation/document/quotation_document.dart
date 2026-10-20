@@ -52,7 +52,7 @@ class QuotationDocumentSection {
   final String discountPercent;
   final String netTotal;
 
-  bool get hasDiscount => _positive(discountAmount);
+  bool get hasDiscount => (num.tryParse(discountAmount) ?? 0) > 0;
 }
 
 class QuotationDocumentTotals {
@@ -390,8 +390,6 @@ class QuotationDocument {
         return text(line, 'description');
     }
   }
-
-  static bool _positive(String raw) => (num.tryParse(raw) ?? 0) > 0;
 
   static const _numeric = {'quantity', 'unitPrice', 'lineTotal'};
 

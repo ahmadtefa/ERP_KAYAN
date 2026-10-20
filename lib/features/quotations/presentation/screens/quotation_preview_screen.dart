@@ -6,7 +6,6 @@ import '../../../../core/image/company_logo_url.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
-import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../data/presentation/providers/data_providers.dart';
 import '../../../settings/presentation/providers/company_providers.dart';
 import '../document/quotation_document.dart';
@@ -53,8 +52,8 @@ class QuotationPreviewScreen extends ConsumerWidget {
     final l10n = context.l10n;
     final id = text(quotation, 'id');
     final appConfig = ref.watch(appConfigProvider);
-    final profile =
-        ref.watch(companyProfileProvider).valueOrNull ?? const <String, dynamic>{};
+    final profile = ref.watch(companyProfileProvider).asData?.value ??
+        const <String, dynamic>{};
     final logoUrl = resolveCompanyLogoUrl(
       appConfig.apiBaseUrl,
       profile['logoUrl'],
