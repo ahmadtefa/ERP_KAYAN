@@ -279,9 +279,13 @@ abstract final class AppTheme {
             if (states.contains(WidgetState.disabled)) {
               return 0;
             }
-            if (states.contains(WidgetState.pressed)) return 0.5;
+            if (states.contains(WidgetState.pressed)) {
+              return 0.5;
+            }
             if (states.contains(WidgetState.hovered) ||
-                states.contains(WidgetState.focused)) return 4;
+                states.contains(WidgetState.focused)) {
+              return 4;
+            }
             return 2;
           }),
           shadowColor: WidgetStatePropertyAll(
