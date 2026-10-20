@@ -362,6 +362,7 @@ export class QuotationsService {
             quotationId: id,
             title: table.title,
             sortOrder: table.sortOrder,
+            columns: table.columns ? table.columns as unknown as Prisma.InputJsonValue : Prisma.DbNull,
             discountType: table.discount.type,
             discountPercent: table.discount.percent,
             discountAmount: table.discount.amount,
@@ -1319,7 +1320,7 @@ export class QuotationsService {
     const seen = new Set<string>();
     for (const entry of raw) {
       const key = typeof entry.key === 'string' ? entry.key.trim() : '';
-      if (!key || key.length > 80 || /[\\u0000-\\u001f\\u007f]/.test(key)) {
+      if (!key || key.length > 80 || /[\u0000-\u001f\u007f]/.test(key)) {
         throw new BadRequestException('Every quotation column needs a safe name of 1–80 characters');
       }
       if (seen.has(key)) {
