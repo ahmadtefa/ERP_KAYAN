@@ -13,6 +13,9 @@ class QuotationDocumentElementStyle {
     this.color,
     this.fontFamily,
     this.backgroundColor,
+    this.lineHeight,
+    this.textAlign,
+    this.borderColor,
   });
 
   /// مضاعف لحجم الخط الأساسي للعنصر (1.0 = الحجم الافتراضي).
@@ -24,6 +27,9 @@ class QuotationDocumentElementStyle {
   /// A locally installed font family; no web font download is required.
   final String? fontFamily;
   final String? backgroundColor;
+  final double? lineHeight;
+  final String? textAlign;
+  final String? borderColor;
 
   /// ينشئ نسخة من هذا النمط مع تعديلات جزئية.
   QuotationDocumentElementStyle copyWith({
@@ -32,6 +38,9 @@ class QuotationDocumentElementStyle {
     String? color,
     String? fontFamily,
     String? backgroundColor,
+    double? lineHeight,
+    String? textAlign,
+    String? borderColor,
   }) {
     return QuotationDocumentElementStyle(
       fontSizeMultiplier: fontSizeMultiplier ?? this.fontSizeMultiplier,
@@ -39,6 +48,9 @@ class QuotationDocumentElementStyle {
       color: color ?? this.color,
       fontFamily: fontFamily ?? this.fontFamily,
       backgroundColor: backgroundColor ?? this.backgroundColor,
+      lineHeight: lineHeight ?? this.lineHeight,
+      textAlign: textAlign ?? this.textAlign,
+      borderColor: borderColor ?? this.borderColor,
     );
   }
 }
@@ -116,6 +128,9 @@ class QuotationDocumentDesign {
         color: v['color'] as String?,
         fontFamily: v['fontFamily'] as String?,
         backgroundColor: v['backgroundColor'] as String?,
+        lineHeight: (v['lineHeight'] as num?)?.toDouble(),
+        textAlign: v['textAlign'] as String?,
+        borderColor: v['borderColor'] as String?,
       );
     }
     return QuotationDocumentDesign(
@@ -148,6 +163,9 @@ class QuotationDocumentDesign {
         if (s.color != null) 'color': s.color,
         if (s.fontFamily != null) 'fontFamily': s.fontFamily,
         if (s.backgroundColor != null) 'backgroundColor': s.backgroundColor,
+        if (s.lineHeight != null) 'lineHeight': s.lineHeight,
+        if (s.textAlign != null) 'textAlign': s.textAlign,
+        if (s.borderColor != null) 'borderColor': s.borderColor,
       };
     }
     set('title', title);

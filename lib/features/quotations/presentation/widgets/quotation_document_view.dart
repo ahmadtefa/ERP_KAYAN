@@ -71,6 +71,7 @@ class _Sheet extends StatelessWidget {
       fontSize: (base.fontSize ?? 12) * style.fontSizeMultiplier,
       fontWeight: style.fontWeight ?? base.fontWeight,
       fontFamily: style.fontFamily ?? base.fontFamily,
+      height: style.lineHeight ?? base.height,
       backgroundColor: style.backgroundColor != null
           ? _parseColor(style.backgroundColor!)
           : base.backgroundColor,
@@ -79,6 +80,13 @@ class _Sheet extends StatelessWidget {
           : base.color,
     );
   }
+
+  TextAlign _textAlign(QuotationDocumentElementStyle? style) => switch (style?.textAlign) {
+        'center' => TextAlign.center,
+        'end' => TextAlign.end,
+        'justify' => TextAlign.justify,
+        _ => TextAlign.start,
+      };
 
   Color? _parseColor(String hex) {
     try {

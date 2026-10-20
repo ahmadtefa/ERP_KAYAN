@@ -265,6 +265,14 @@ export function renderQuotationDocument(
       if (weights.has(weight)) declarations.push(`font-weight:${weight.slice(1)}`);
       const family = String(style.fontFamily ?? '');
       if (fontFamilies[family]) declarations.push(`font-family:${fontFamilies[family]}`);
+      const lineHeight = Number(style.lineHeight);
+      if (Number.isFinite(lineHeight)) declarations.push(`line-height:${Math.max(1, Math.min(2, lineHeight)).toFixed(2)}`);
+      const alignment = String(style.textAlign ?? '');
+      if (['start', 'center', 'end', 'justify'].includes(alignment)) {
+        declarations.push(`text-align:${alignment === 'start' ? (rtl ? 'right' : 'left') : alignment === 'end' ? (rtl ? 'left' : 'right') : alignment}`);
+      }
+      const borderColor = String(style.borderColor ?? '');
+      if (/^#[0-9a-fA-F]{6}$/.test(borderColor)) declarations.push(`border-color:${borderColor}`);
       const background = String(style.backgroundColor ?? '');
       if (/^#[0-9a-fA-F]{6}$/.test(background)) declarations.push(`background-color:${background}`);
       const color = String(style.color ?? '');

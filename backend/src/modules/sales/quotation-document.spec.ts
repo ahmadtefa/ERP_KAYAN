@@ -169,7 +169,7 @@ describe('quotation document template', () => {
     const html = renderQuotationDocument(
       snapshot({
         design: {
-          company: { fontSizeMultiplier: 1.2, fontWeight: 'w700', fontFamily: 'Tahoma', color: '#123456' },
+          company: { fontSizeMultiplier: 1.2, fontWeight: 'w700', fontFamily: 'Tahoma', color: '#123456', lineHeight: 1.5, textAlign: 'center', borderColor: '#123456' },
           tableHeader: { color: '#ffffff', backgroundColor: '#18794e' },
           finalTotal: { color: '#ffffff', backgroundColor: '#18794e' },
           headerText: '<b>Confidential</b>',
@@ -185,6 +185,9 @@ describe('quotation document template', () => {
 
     expect(html).toContain('.brand h1 { font-size:15.00pt; font-weight:700; font-family:');
     expect(html).toContain('background-color:#18794e');
+    expect(html).toContain('line-height:1.50');
+    expect(html).toContain('text-align:center');
+    expect(html).toContain('border-color:#123456');
     expect(html).toContain('<div class="custom-header">&lt;b&gt;Confidential&lt;/b&gt;</div>');
     expect(html).toContain('<div class="custom-footer">Thank you</div>');
     expect(html).not.toContain('<div class="custom-header"><b>Confidential</b></div>');

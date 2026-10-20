@@ -930,6 +930,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     var multiplier = 1.0;
     var weight = 'w600';
     var family = 'Tahoma';
+    var lineHeight = 1.3;
+    var textAlign = 'start';
     var showHeader = _design.showHeader;
     var showFooter = _design.showFooter;
 
@@ -939,6 +941,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       multiplier = (style['fontSizeMultiplier'] as num?)?.toDouble() ?? 1.0;
       weight = (style['fontWeight'] as String?)?.split('.').last ?? 'w600';
       family = style['fontFamily'] as String? ?? 'Tahoma';
+      lineHeight = (style['lineHeight'] as num?)?.toDouble() ?? 1.3;
+      textAlign = style['textAlign'] as String? ?? 'start';
       colorController.text = style['color'] as String? ?? '#1e60aa';
       backgroundController.text = style['backgroundColor'] as String? ?? '';
     }
@@ -1058,6 +1062,29 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                       onChanged: (value) => setDialogState(() => family = value ?? 'Tahoma'),
                     ),
                     const SizedBox(height: 12),
+                    Text('${arabic ? 'تباعد الأسطر' : 'Line spacing'}: ${lineHeight.toStringAsFixed(1)}'),
+                    Slider(
+                      value: lineHeight.clamp(1.0, 2.0).toDouble(),
+                      min: 1.0,
+                      max: 2.0,
+                      divisions: 10,
+                      onChanged: (value) => setDialogState(() => lineHeight = value),
+                    ),
+                    DropdownButtonFormField<String>(
+                      initialValue: textAlign,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'محاذاة النص' : 'Text alignment',
+                        border: const OutlineInputBorder(),
+                      ),
+                      items: [
+                        DropdownMenuItem(value: 'start', child: Text(arabic ? 'بداية السطر' : 'Start')),
+                        DropdownMenuItem(value: 'center', child: Text(arabic ? 'توسيط' : 'Center')),
+                        DropdownMenuItem(value: 'end', child: Text(arabic ? 'نهاية السطر' : 'End')),
+                        DropdownMenuItem(value: 'justify', child: Text(arabic ? 'ضبط النص' : 'Justify')),
+                      ],
+                      onChanged: (value) => setDialogState(() => textAlign = value ?? 'start'),
+                    ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: colorController,
                       decoration: InputDecoration(
@@ -1129,6 +1156,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                     'fontFamily': family,
                     if (colour.startsWith('#') && colour.length == 7) 'color': colour,
                     if (backgroundController.text.trim().startsWith('#') && backgroundController.text.trim().length == 7) 'backgroundColor': backgroundController.text.trim(),
+                    'lineHeight': lineHeight,
+                    'textAlign': textAlign,
                   };
                   Navigator.of(dialogContext).pop(true);
                 },

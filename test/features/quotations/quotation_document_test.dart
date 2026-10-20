@@ -195,6 +195,9 @@ void main() {
           'fontFamily': 'Tahoma',
           'color': '#123456',
           'backgroundColor': '#18794e',
+          'lineHeight': 1.6,
+          'textAlign': 'center',
+          'borderColor': '#aabbcc',
         },
         'headerText': 'Confidential',
         'footerText': 'Thank you',
@@ -208,6 +211,9 @@ void main() {
       expect(saved['company']['fontFamily'], 'Tahoma');
       expect(saved['company']['color'], '#123456');
       expect(saved['company']['backgroundColor'], '#18794e');
+      expect(saved['company']['lineHeight'], 1.6);
+      expect(saved['company']['textAlign'], 'center');
+      expect(saved['company']['borderColor'], '#aabbcc');
       expect(saved['headerText'], 'Confidential');
       expect(saved['footerText'], 'Thank you');
       expect(saved['showHeader'], false);
