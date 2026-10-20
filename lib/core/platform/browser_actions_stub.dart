@@ -67,6 +67,13 @@ Future<void> downloadFile(DownloadRequest request) async {
             fromHeader ??
             (uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'download.pdf'),
       );
+      if (suggested.toLowerCase().endsWith('.pdf') &&
+          (payload.length < 5 ||
+              String.fromCharCodes(payload.take(5)) != '%PDF-')) {
+        throw const DownloadFailure(
+          'The server response is not a valid PDF file. The file was not saved.',
+        );
+      }
       final path = await _chooseSavePath(suggested);
       if (path == null) {
         throw const DownloadFailure('Saving the file was cancelled.');
