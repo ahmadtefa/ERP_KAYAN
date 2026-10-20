@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -397,7 +398,7 @@ class _Sidebar extends StatelessWidget {
                 primary: false,
                 // All items stay built: permission tests and keyboard users
                 // must be able to reach a module without scrolling first.
-                scrollCacheExtent: 4000,
+                scrollCacheExtent: const ScrollCacheExtent.pixels(4000),
                 padding: EdgeInsets.fromLTRB(
                   extended ? 10 : 8,
                   10,
