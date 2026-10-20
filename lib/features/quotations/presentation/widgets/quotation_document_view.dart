@@ -1053,5 +1053,4 @@ abstract final class _Doc {
   static const wash = Color(0xFFEFF4FF);
   static const rows = Color(0xFFFBFCFE);
   static const signature = Color(0xFF95A0B0);
-  static const accent = Color(0xFFE67E22);
 }
