@@ -1799,7 +1799,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
             '/sales/quotation-column-templates',
             body: {
               'name': name,
-              if (design != null) 'design': design,
+              'design': ?design,
               'columns': [
                 for (final column in columns)
                   {
