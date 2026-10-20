@@ -1312,14 +1312,18 @@ export class QuotationsService {
     if (!raw || raw.length === 0) return standardColumns();
     const seen = new Set<string>();
     for (const entry of raw) {
-      if (!COLUMN_LABELS[entry.key]) {
-        throw new BadRequestException(`Unknown quotation column "${entry.key}"`);
+      const key = typeof entry.key === 'string' ? entry.key.trim() : '';
+      if (!key || key.length > 80 || /[\\u0000-\\u001f\\u007f]/.test(key)) {
+        throw new BadRequestException('Every quotation column needs a safe name of 1–80 characters');
       }
-      if (seen.has(entry.key)) {
-        throw new BadRequestException(`The column "${entry.key}" is listed twice`);
+      if (seen.has(key)) {
+        throw new BadRequestException(`The column "${key}" is listed twice`);
       }
-      seen.add(entry.key);
+      seen.add(key);
     }
+    // Custom columns are intentionally allowed. Their label is stored with
+    // the quotation and their values are read from line.customValues; only
+    // built-in keys receive special formatting and item-field mapping.
     const columns = normalizeColumns(raw);
     if (!columns.some((column) => column.visible)) {
       throw new BadRequestException('Keep at least one column visible');
