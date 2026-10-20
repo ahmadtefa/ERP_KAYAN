@@ -164,6 +164,26 @@ describe('quotation document template', () => {
     expect(html).toContain('Mona Adel');
   });
 
+  it('lays the letterhead out as name, centred title, mark', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false);
+    const header = html.slice(
+      html.indexOf('<header class="masthead">'),
+      html.indexOf('</header>'),
+    );
+    // One row: the company name at the start, the title in the middle and
+    // the logo at the opposite end.
+    expect(header.indexOf('<div class="brand">')).toBeGreaterThan(-1);
+    expect(header.indexOf('<div class="title">')).toBeGreaterThan(
+      header.indexOf('<div class="brand">'),
+    );
+    expect(header.indexOf('<div class="mark">')).toBeGreaterThan(
+      header.indexOf('<div class="title">'),
+    );
+    expect(header).toContain('<h2>عرض سعر</h2>');
+    expect(header).toContain('QT-2026-0007');
+    expect(header).toContain('<img src="data:image/png;base64,');
+  });
+
   it('renders every section title once in the header and once in the summary', () => {
     const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false);
     const hardware = html.split('Hardware').length - 1;
@@ -175,23 +195,92 @@ describe('quotation document template', () => {
       html.indexOf('<section class="summary">'),
       html.indexOf('</section>', html.indexOf('<section class="summary">')),
     );
-    // two section rows, the summary header and the four total rows
-    expect(summary.match(/<tr[\s>]/g)).toHaveLength(7);
+    // the header row, one row per section, the quotation-discount row and
+    // the grand-total row in the table footer
+    expect(summary.match(/<tr[\s>]/g)).toHaveLength(5);
     expect(summary).toContain('Hardware');
     expect(summary).toContain('Software');
-    expect(summary).toContain('− 50.00 EGP');
+  });
+
+  it('summarises every table by name with its total, then the grand total', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false);
+    const summaryStart = html.indexOf('<section class="summary">');
+    const summary = html.slice(
+      summaryStart,
+      html.indexOf('</section>', summaryStart),
+    );
+
+    // Two columns: the description and the table total.
+    expect(summary).toContain('البيان');
+    expect(summary).toContain('إجمالي الجدول');
+
+    // One row per table, carrying that table's net total (its own discount
+    // is already applied once, on the table itself).
+    const hardwareRow = summary.slice(
+      summary.indexOf('<td>Hardware</td>'),
+      summary.indexOf('</tr>', summary.indexOf('<td>Hardware</td>')),
+    );
+    expect(hardwareRow).toContain('1,000.00 EGP');
+    const softwareRow = summary.slice(
+      summary.indexOf('<td>Software</td>'),
+      summary.indexOf('</tr>', summary.indexOf('<td>Software</td>')),
+    );
+    expect(softwareRow).toContain('450.00 EGP');
+
+    // The offer-level discount appears once, between the section rows and
+    // the grand total; the table discounts do not repeat here.
+    expect(summary).toContain('خصم العرض');
+    expect(summary).toContain('− 30.00 EGP');
+    expect(summary).not.toContain('− 50.00 EGP');
+    expect(summary).not.toContain('خصومات الجداول');
+
+    // The grand total is the final row of the same table, and it is the
+    // stored total — never a sum that discounts are applied to again.
+    const grand = summary.slice(summary.indexOf('<tr class="grand">'));
+    expect(grand).toContain('المجموع الكلي');
+    expect(grand).toContain('1,420.00 EGP');
+    expect(html.indexOf('<tr class="grand">')).toBeGreaterThan(
+      html.indexOf('<td>Software</td>'),
+    );
+  });
+
+  it('summarises a single-table offer and hides the summary for none', () => {
+    const oneTable = {
+      tables: [snapshot().tables[0]],
+      totals: { subTotal: '1000.0000', discountTotal: '0.0000', totalAmount: '1000.0000' },
+    };
+    const single = renderQuotationDocument(snapshot(oneTable), COMPANY, 'ar', false);
+    const summaryStart = single.indexOf('<section class="summary">');
+    const summary = single.slice(
+      summaryStart,
+      single.indexOf('</section>', summaryStart),
+    );
+    expect(summary.match(/<tr[\s>]/g)).toHaveLength(3); // header + section + grand
+    expect(summary).toContain('Hardware');
+    expect(summary).not.toContain('خصم العرض');
+    expect(summary).toContain('1,000.00 EGP');
+
+    const empty = renderQuotationDocument(
+      snapshot({ tables: [], totals: { subTotal: '0.0000', discountTotal: '0.0000', totalAmount: '0.0000' } }),
+      COMPANY,
+      'ar',
+      false,
+    );
+    expect(empty).not.toContain('ملخص الجداول');
   });
 
   it('keeps the arithmetic of the stored totals and shows every discount once', () => {
     const html = renderQuotationDocument(snapshot(), COMPANY, 'en', false);
-    expect(html).toContain('1,500.00 EGP');
-    expect(html).toContain('− 50.00 EGP');
+    expect(html).toContain('− 50.00 EGP'); // the table's own discount, on the table
     expect(html).toContain('− 30.00 EGP'); // the quotation-level part of the discounts
     expect(html).toContain('1,420.00 EGP');
     // The table discount is not repeated as "total discounts".
     expect(html).not.toContain('Total discounts');
     // Final total appears once: in the grand total row.
     expect(html.split('1,420.00 EGP').length - 1).toBe(1);
+    // The section rows (1,000 net + 450 net) minus the offer discount (30)
+    // equal the stored grand total; the page never re-derives it.
+    expect(1000 + 450 - 30).toBe(1420);
   });
 
   it('places the company contact details in the footer, not the header', () => {

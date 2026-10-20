@@ -177,6 +177,12 @@ export function quotationDocumentFileName(
 /// as a data URI and the only script is the optional auto-print call. A
 /// browser therefore lays out the Arabic itself, with the letters joined and
 /// in the right order, which a server-side PDF library cannot promise.
+///
+/// Layout follows the quotation design reference: a letterhead row with the
+/// company name at the start, the «عرض سعر» title in the middle and the logo
+/// at the opposite end; two fact panels; numbered section tables; a closing
+/// summary table that names every table with its total and ends in the
+/// grand-total row; terms, signatures and a contact footer.
 export function renderQuotationDocument(
   content: QuotationSnapshot,
   company: QuotationDocumentCompanyMark,
@@ -318,6 +324,10 @@ export function renderQuotationDocument(
     })
     .join('');
 
+  // The only arithmetic on this page: split the stored document-level
+  // discount into "already taken inside the tables" and "taken on the offer".
+  // Nothing is re-added and nothing is re-deducted: every row below copies a
+  // stored figure or this display split of one.
   const tableDiscountTotal = content.tables.reduce(
     (sum, table) => sum + Number(table.discountAmount),
     0,
@@ -328,38 +338,24 @@ export function renderQuotationDocument(
       10000,
   );
 
+  // One summary row per table: the table's own total (its net, which already
+  // carries its discount once), then the offer-level discount when one
+  // exists, and finally the stored grand total as the last row.
   const summaryRows = content.tables
     .map(
       (table) => `<tr>
         <td>${escapeHtml(table.title)}</td>
-        <td class="num">${money(table.subTotal)}</td>
-        <td class="num">${
-          Number(table.discountAmount) > 0
-            ? `− ${money(table.discountAmount)}`
-            : '—'
-        }</td>
         <td class="num strong">${money(table.netTotal)}</td>
       </tr>`,
     )
     .join('');
-
-  const totalsRows = [
-    `<tr><td>${L('Subtotal before discount', 'الإجمالي قبل الخصم')}</td><td class="num">${money(
-      content.totals.subTotal,
-    )}</td></tr>`,
-    tableDiscountTotal > 0
-      ? `<tr><td>${L('Table discounts', 'خصومات الجداول')}</td><td class="num">− ${money(
-          tableDiscountTotal.toFixed(2),
-        )}</td></tr>`
-      : '',
+  const summaryDiscountRow =
     quotationDiscount > 0
-      ? `<tr><td>${L('Quotation discount', 'خصم العرض')}</td><td class="num">− ${money(
-          quotationDiscount.toFixed(2),
-        )}</td></tr>`
-      : '',
-  ]
-    .filter(Boolean)
-    .join('');
+      ? `<tr class="discount"><td>${L(
+          'Quotation discount',
+          'خصم العرض',
+        )}</td><td class="num">− ${money(quotationDiscount.toFixed(2))}</td></tr>`
+      : '';
 
   const terms = content.terms?.trim()
     ? `<section class="terms">
@@ -449,20 +445,27 @@ export function renderQuotationDocument(
     background: #fff;
     color: ${INK};
   }
-  .masthead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8mm; padding-bottom: 5mm; border-bottom: 0.6mm solid ${ROYAL}; }
-  .brand { flex: 1; }
-  .brand h1 { margin: 0; color: ${ROYAL}; font-size: 16.5pt; font-weight: 700; line-height: 1.3; }
+  /* Letterhead: name at the start, the title in the middle, the mark at the
+     far end — one row, as on the printed stationery. */
+  .masthead {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 6mm;
+    padding: 2mm 0 4mm;
+    border-bottom: 0.6mm solid ${ROYAL};
+  }
+  .brand h1 { margin: 0; color: ${ROYAL}; font-size: 16pt; font-weight: 700; line-height: 1.25; }
   .brand .secondary { margin-top: 1mm; color: ${MUTED}; font-size: 8pt; letter-spacing: 0.06em; text-transform: uppercase; }
-  .mark { width: 38mm; display: flex; justify-content: flex-end; }
+  .masthead .title { text-align: center; }
+  .masthead .title h2 { margin: 0; color: ${ROYAL}; font-size: 22pt; font-weight: 700; letter-spacing: 0.01em; line-height: 1.15; }
+  .masthead .title .english { margin-top: 1mm; color: ${MUTED}; font-size: 8pt; letter-spacing: 0.18em; text-transform: uppercase; }
+  .masthead .title .number { margin-top: 1.5mm; color: ${ROYAL_DEEP}; font-size: 10pt; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .mark { display: flex; justify-content: flex-end; }
   .mark img { max-width: 38mm; max-height: 20mm; object-fit: contain; }
   .monogram { width: 18mm; height: 18mm; border-radius: 3mm; background: ${ROYAL}; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18pt; font-weight: 700; }
-  .title-band { text-align: center; padding: 6mm 0 5mm; }
-  .title-band .rule { width: 18mm; height: 0.8mm; background: ${ROYAL_TINT}; margin: 0 auto 3mm; }
-  .title-band h2 { margin: 0; color: ${ROYAL}; font-size: 23pt; font-weight: 700; letter-spacing: 0.01em; }
-  .title-band .english { margin-top: 1mm; color: ${MUTED}; font-size: 8.5pt; letter-spacing: 0.18em; text-transform: uppercase; }
-  .title-band .number { margin-top: 2mm; color: ${ROYAL_DEEP}; font-size: 10pt; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .panels { display: flex; gap: 4mm; margin-bottom: 5mm; }
-  .panel { flex: 1; border: 0.3mm solid ${LINE}; border-radius: 1.5mm; padding: 3.5mm 4mm; background: ${SURFACE}; }
+  .panels { display: flex; gap: 4mm; margin-top: 5mm; margin-bottom: 5mm; }
+  .panel { flex: 1; border: 0.3mm solid ${LINE}; border-top: 0.8mm solid ${ROYAL}; border-radius: 1.5mm; padding: 3.5mm 4mm; background: #fff; }
   .panel .eyebrow { color: ${ROYAL}; font-size: 7.5pt; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 1.5mm; }
   .panel h3 { margin: 0 0 1mm; font-size: 10.5pt; }
   .panel .code { color: ${MUTED}; font-size: 8pt; margin-bottom: 2mm; }
@@ -480,7 +483,7 @@ export function renderQuotationDocument(
   table { width: 100%; border-collapse: collapse; }
   .items { font-size: 8.5pt; border: 0.3mm solid ${LINE}; }
   .items th, .items td { padding: 1.8mm 2mm; vertical-align: top; border-bottom: 0.25mm solid ${LINE}; }
-  .items thead th { background: ${WASH}; color: ${ROYAL}; font-size: 8pt; font-weight: 700; text-align: start; border-bottom: 0.4mm solid ${ROYAL_TINT}; }
+  .items thead th { background: ${ROYAL}; color: #fff; font-size: 8pt; font-weight: 700; text-align: start; border-bottom: 0.4mm solid ${ROYAL_DEEP}; }
   .items thead th.num { text-align: ${numAlign}; }
   .items tbody tr:nth-child(even) { background: #fbfcff; }
   .items tfoot th { background: ${SURFACE}; text-align: start; font-weight: 600; }
@@ -488,21 +491,21 @@ export function renderQuotationDocument(
   .items tfoot .discount th, .items tfoot .discount td { color: ${MUTED}; }
   .items tfoot .net th, .items tfoot .net td { background: ${WASH}; color: ${ROYAL}; font-weight: 700; }
   .idx { width: 7mm; color: ${MUTED}; text-align: center; }
+  .items thead .idx { color: #fff; }
   .desc { word-break: break-word; }
   .num { text-align: ${numAlign}; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .strong { font-weight: 600; }
+  /* Closing summary: every table by name with its total, then the grand
+     total as the final row of the same table. */
   .summary { margin-top: 2mm; margin-bottom: 6mm; break-inside: avoid; }
-  .summary h3 { margin: 0 0 2.5mm; color: ${ROYAL}; font-size: 11pt; }
-  .summary table { font-size: 8.5pt; border: 0.3mm solid ${LINE}; }
-  .summary thead th { background: ${WASH}; color: ${ROYAL}; text-align: start; padding: 2mm; border-bottom: 0.4mm solid ${ROYAL_TINT}; }
-  .summary tbody td { padding: 1.8mm 2mm; border-bottom: 0.25mm solid ${LINE}; }
+  .summary h3 { margin: 0 0 2.5mm; color: ${ROYAL}; font-size: 11pt; break-after: avoid; }
+  .summary table { font-size: 9pt; border: 0.3mm solid ${LINE}; }
+  .summary thead th { background: ${ROYAL}; color: #fff; text-align: start; padding: 2mm 2.5mm; border-bottom: 0.4mm solid ${ROYAL_DEEP}; }
   .summary thead th.num { text-align: ${numAlign}; }
-  .totals { display: flex; justify-content: ${rtl ? 'flex-start' : 'flex-end'}; margin-top: 4mm; }
-  .totals table { width: 82mm; border: 0.3mm solid ${LINE}; }
-  .totals td { padding: 2mm 2.5mm; border-bottom: 0.25mm solid ${LINE}; }
-  .totals td:first-child { color: ${MUTED}; }
-  .totals tr.grand td { background: ${ROYAL}; color: #fff; font-weight: 700; font-size: 11pt; border-bottom: none; }
-  .totals tr.grand td:first-child { color: #fff; }
+  .summary tbody td { padding: 1.8mm 2.5mm; border-bottom: 0.25mm solid ${LINE}; }
+  .summary tbody tr:nth-child(even) { background: #fbfcff; }
+  .summary tbody .discount td { color: ${MUTED}; }
+  .summary tr.grand td { background: ${ROYAL}; color: #fff; font-weight: 700; font-size: 11pt; border-bottom: none; padding: 2.4mm 2.5mm; }
   .terms, .notes { margin-top: 4mm; break-inside: avoid; }
   .terms h3, .notes h3 { margin: 0 0 1.5mm; color: ${ROYAL}; font-size: 10pt; }
   .terms div, .notes div { color: ${MUTED}; font-size: 8.5pt; line-height: 1.6; }
@@ -546,6 +549,11 @@ ${
       <h1>${escapeHtml(companyName)}</h1>
       ${secondaryName ? `<div class="secondary">${escapeHtml(secondaryName)}</div>` : ''}
     </div>
+    <div class="title">
+      <h2>${L('QUOTATION', 'عرض سعر')}</h2>
+      <div class="english">${L('Quotation', 'QUOTATION')}</div>
+      <div class="number">${escapeHtml(content.quotationNumber)}</div>
+    </div>
     <div class="mark">${
       logo
         ? `<img src="${logo}" alt="${escapeHtml(companyName)}">`
@@ -554,13 +562,6 @@ ${
           )}</div>`
     }</div>
   </header>
-
-  <div class="title-band">
-    <div class="rule"></div>
-    <h2>${L('QUOTATION', 'عرض سعر')}</h2>
-    <div class="english">${L('Quotation', 'QUOTATION')}</div>
-    <div class="number">${escapeHtml(content.quotationNumber)}</div>
-  </div>
 
   <div class="panels">
     <section class="panel">
@@ -604,29 +605,31 @@ ${
 
   ${tables}
 
-  <section class="summary">
-    <h3>${L('Section summary', 'ملخص الأقسام')}</h3>
+  ${
+    content.tables.length > 0
+      ? `<section class="summary">
+    <h3>${L('Tables summary', 'ملخص الجداول')}</h3>
     <table>
       <thead>
         <tr>
-          <th>${L('Section', 'القسم')}</th>
-          <th class="num">${L('Before discount', 'قبل الخصم')}</th>
-          <th class="num">${L('Discount', 'الخصم')}</th>
-          <th class="num">${L('Net', 'الصافي')}</th>
+          <th>${L('Description', 'البيان')}</th>
+          <th class="num">${L('Table total', 'إجمالي الجدول')}</th>
         </tr>
       </thead>
-      <tbody>${summaryRows}</tbody>
-    </table>
-    <div class="totals">
-      <table>
-        ${totalsRows}
+      <tbody>
+        ${summaryRows}
+        ${summaryDiscountRow}
+      </tbody>
+      <tfoot>
         <tr class="grand">
-          <td>${L('Final total', 'الإجمالي النهائي')}</td>
+          <td>${L('Grand total', 'المجموع الكلي')}</td>
           <td class="num">${money(content.totals.totalAmount)}</td>
         </tr>
-      </table>
-    </div>
-  </section>
+      </tfoot>
+    </table>
+  </section>`
+      : ''
+  }
 
   ${terms}
   ${notes}

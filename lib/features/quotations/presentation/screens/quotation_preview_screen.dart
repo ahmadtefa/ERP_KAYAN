@@ -35,6 +35,12 @@ Future<void> showQuotationPreview(
 /// an issued offer, the live record for a draft. The print page and the PDF
 /// are still produced by the server, so the browser handles the Arabic shaping
 /// and the customer gets a real file, not a painted screen.
+///
+/// The two actions are always on screen — in the app bar on a wide window and
+/// under the title on a narrow one — because a hidden export button is an
+/// export that does not exist as far as the person at the desk is concerned.
+/// The server remains the authority on who may export: a refusal comes back
+/// as the server's own message, never as a false success.
 class QuotationPreviewScreen extends ConsumerWidget {
   const QuotationPreviewScreen({
     super.key,
@@ -45,7 +51,14 @@ class QuotationPreviewScreen extends ConsumerWidget {
 
   final Json quotation;
   final String language;
+
+  /// Kept for the caller's permission checks; the buttons themselves stay
+  /// visible and the server decides, so no window size or role can silently
+  /// take the export away.
   final bool canExport;
+
+  static const printButtonKey = Key('quotation-preview-print');
+  static const downloadPdfButtonKey = Key('quotation-preview-download-pdf');
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -66,34 +79,42 @@ class QuotationPreviewScreen extends ConsumerWidget {
     // have the full width instead of squeezing the app bar.
     final compact = MediaQuery.sizeOf(context).width < 640;
 
+    Widget printButton() => TextButton.icon(
+          key: printButtonKey,
+          onPressed: () => runPrint(
+            context,
+            links.quotationPrint(id: id, language: language),
+          ),
+          icon: const Icon(Icons.print_outlined, size: 18),
+          label: Text(l10n.print),
+        );
+
+    Widget downloadButton() => FilledButton.icon(
+          key: downloadPdfButtonKey,
+          onPressed: () => runDownload(
+            context,
+            links.quotationPdf(id: id, language: language),
+          ),
+          icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+          label: Text(l10n.downloadPdf),
+        );
+
+    final showActions = id.isNotEmpty;
+
     return Scaffold(
       backgroundColor: AppColors.surfaceSunken,
       appBar: AppBar(
         backgroundColor: AppColors.surface,
         title: Text(l10n.printPreview),
-        actions: [
-          if (!compact && canExport && id.isNotEmpty) ...[
-            TextButton.icon(
-              onPressed: () => runPrint(
-                context,
-                links.quotationPrint(id: id, language: language),
-              ),
-              icon: const Icon(Icons.print_outlined, size: 18),
-              label: Text(l10n.print),
-            ),
-            Padding(
-              padding: const EdgeInsetsDirectional.only(end: AppSpacing.sm),
-              child: FilledButton.icon(
-                onPressed: () => runDownload(
-                  context,
-                  links.quotationPdf(id: id, language: language),
+        actions: compact || !showActions
+            ? const []
+            : [
+                printButton(),
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(end: AppSpacing.sm),
+                  child: downloadButton(),
                 ),
-                icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
-                label: Text(l10n.downloadPdf),
-              ),
-            ),
-          ],
-        ],
+              ],
       ),
       body: SingleChildScrollView(
         padding: EdgeInsets.all(compact ? AppSpacing.md : AppSpacing.xxl),
@@ -103,39 +124,12 @@ class QuotationPreviewScreen extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (compact && canExport && id.isNotEmpty) ...[
+                if (compact && showActions) ...[
                   Row(
                     children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => runPrint(
-                            context,
-                            links.quotationPrint(
-                              id: id,
-                              language: language,
-                            ),
-                          ),
-                          icon: const Icon(Icons.print_outlined, size: 18),
-                          label: Text(l10n.print),
-                        ),
-                      ),
+                      Expanded(child: printButton()),
                       const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: () => runDownload(
-                            context,
-                            links.quotationPdf(
-                              id: id,
-                              language: language,
-                            ),
-                          ),
-                          icon: const Icon(
-                            Icons.picture_as_pdf_outlined,
-                            size: 18,
-                          ),
-                          label: Text(l10n.downloadPdf),
-                        ),
-                      ),
+                      Expanded(child: downloadButton()),
                     ],
                   ),
                   const SizedBox(height: AppSpacing.md),

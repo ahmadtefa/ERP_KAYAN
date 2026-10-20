@@ -233,13 +233,26 @@ void main() {
   });
 
   group('resolveCompanyLogoUrl', () {
-    test('makes the relative mark address absolute', () {
+    test('joins the mark path to the API root, prefix included', () {
+      // The server answers at /api/v1/companies/logo/:id — resolving the
+      // path against the bare origin would fetch the web client instead of
+      // the image, and the logo would never appear anywhere.
       expect(
         resolveCompanyLogoUrl(
           'http://localhost:3000/api/v1',
           '/companies/logo/c1?v=17',
         ),
-        'http://localhost:3000/companies/logo/c1?v=17',
+        'http://localhost:3000/api/v1/companies/logo/c1?v=17',
+      );
+    });
+
+    test('does not double a prefix the path already carries', () {
+      expect(
+        resolveCompanyLogoUrl(
+          'http://localhost:3000/api/v1',
+          '/api/v1/companies/logo/c1',
+        ),
+        'http://localhost:3000/api/v1/companies/logo/c1',
       );
     });
 
@@ -250,6 +263,13 @@ void main() {
           'https://cdn.example.com/logo.png',
         ),
         'https://cdn.example.com/logo.png',
+      );
+    });
+
+    test('resolves against a bare host without inventing a prefix', () {
+      expect(
+        resolveCompanyLogoUrl('http://localhost:3000', '/companies/logo/c1'),
+        'http://localhost:3000/companies/logo/c1',
       );
     });
 
@@ -264,7 +284,16 @@ void main() {
           'id': 'company-1',
           'hasLogo': true,
         }),
-        'http://localhost:3000/companies/logo/company-1',
+        'http://localhost:3000/api/v1/companies/logo/company-1',
+      );
+      expect(
+        companyLogoUrl('http://localhost:3000/api/v1', const {
+          'id': 'company-1',
+          'hasLogo': true,
+          'updatedAt': '2026-10-20T10:00:00.000Z',
+        }),
+        'http://localhost:3000/api/v1/companies/logo/company-1'
+        '?v=2026-10-20T10:00:00.000Z',
       );
       expect(
         companyLogoUrl('http://localhost:3000/api/v1', const {
@@ -273,6 +302,34 @@ void main() {
         }),
         isNull,
       );
+    });
+
+    test('prefers the versioned logoUrl the server sent', () {
+      expect(
+        companyLogoUrl('http://lan-pc:3000/api/v1', const {
+          'id': 'company-1',
+          'hasLogo': true,
+          'logoUrl': '/companies/logo/company-1?v=1761000000000',
+          'updatedAt': 'ignored',
+        }),
+        'http://lan-pc:3000/api/v1/companies/logo/company-1?v=1761000000000',
+      );
+    });
+
+    test('a changed logo version stamp changes the address', () {
+      // The stamp is what makes a saved logo reappear immediately instead
+      // of a cached copy of the old one.
+      final before = companyLogoUrl('http://localhost:3000/api/v1', const {
+        'id': 'company-1',
+        'hasLogo': true,
+        'logoUrl': '/companies/logo/company-1?v=1',
+      });
+      final after = companyLogoUrl('http://localhost:3000/api/v1', const {
+        'id': 'company-1',
+        'hasLogo': true,
+        'logoUrl': '/companies/logo/company-1?v=2',
+      });
+      expect(before, isNot(after));
     });
 
     test('leaves a relative path when the base is unusable', () {

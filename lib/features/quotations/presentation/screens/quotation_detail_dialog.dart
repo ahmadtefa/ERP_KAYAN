@@ -306,27 +306,29 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                     icon: const Icon(Icons.visibility_outlined, size: 18),
                     label: Text(l10n.printPreview),
                   ),
-                  if (canExport)
-                    OutlinedButton.icon(
-                      onPressed: () => runPrint(
-                        context,
-                        links.quotationPrint(
-                          id: widget.id,
-                          language: language,
-                        ),
+                  // Print and Download PDF stay on screen for everyone who
+                  // can open the offer: a missing export button reads as a
+                  // missing feature. The server still decides who may export,
+                  // and a refusal is shown as its own message.
+                  OutlinedButton.icon(
+                    onPressed: () => runPrint(
+                      context,
+                      links.quotationPrint(
+                        id: widget.id,
+                        language: language,
                       ),
-                      icon: const Icon(Icons.print_outlined, size: 18),
-                      label: Text(l10n.printPreview),
                     ),
-                  if (canExport)
-                    OutlinedButton.icon(
-                      onPressed: () => runDownload(
-                        context,
-                        links.quotationPdf(id: widget.id, language: language),
-                      ),
-                      icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
-                      label: Text(l10n.downloadPdf),
+                    icon: const Icon(Icons.print_outlined, size: 18),
+                    label: Text(l10n.print),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => runDownload(
+                      context,
+                      links.quotationPdf(id: widget.id, language: language),
                     ),
+                    icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                    label: Text(l10n.downloadPdf),
+                  ),
                   if (canExport)
                     OutlinedButton.icon(
                       onPressed: () => runDownload(
