@@ -167,7 +167,7 @@
 | `backend/src/modules/auth/auth.login.spec.ts` | 6 | الحالات: صحيح، كلمة خاطئة، حساب غير موجود (نفس الرد)، معطّل/محذوف، مقفل، وتوكن تجديد ميت |
 | `backend/src/modules/health/health.controller.spec.ts` | 3 (محدّث) | `/health/network` يبلّغ `secureContext` و`sessionStorage` بدقة |
 
-**المجموع الجديد: 43 اختبار Flutter + 11 اختبار خادم.**
+**المجموع الجديد: 47 اختبار Flutter + 11 اختبار خادم.**
 
 ### 6.3 ما لم يُختبر صراحةً
 
