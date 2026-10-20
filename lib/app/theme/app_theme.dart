@@ -275,7 +275,16 @@ abstract final class AppTheme {
             return scheme.primary;
           }),
           foregroundColor: WidgetStatePropertyAll(scheme.onPrimary),
-          elevation: const WidgetStatePropertyAll(0),
+          elevation: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) return 0;
+            if (states.contains(WidgetState.pressed)) return 0.5;
+            if (states.contains(WidgetState.hovered) ||
+                states.contains(WidgetState.focused)) return 4;
+            return 2;
+          }),
+          shadowColor: WidgetStatePropertyAll(
+            AppColors.navy.withValues(alpha: 0.24),
+          ),
           overlayColor: WidgetStatePropertyAll(
             Colors.white.withValues(alpha: 0.12),
           ),
