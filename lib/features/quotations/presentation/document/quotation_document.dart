@@ -542,6 +542,8 @@ class QuotationDocument {
 
   static String _cell(Json line, String key) {
     switch (key) {
+      case 'description':
+        return text(line, 'description');
       case 'itemCode':
         return text(line, 'itemCode').ifEmpty('—');
       case 'countryOfOrigin':
