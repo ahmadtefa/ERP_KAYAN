@@ -189,9 +189,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
     _columns.addAll(_standardColumns());
-    final firstTable = _QTableDraft();
-    firstTable.columns.addAll(_columnsFrom(_columnBody()));
-    _tables.add(firstTable);
+    _tables.add(_QTableDraft());
     if (widget.quotationId != null) {
       _loading = true;
       _load();
@@ -210,7 +208,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       _tables.clear();
       for (final tableRow in listOf(quotation['tables'])) {
         final table = _QTableDraft(title: text(tableRow, 'title'));
-        table.columns.addAll(_columnsFrom(tableRow['columns'] ?? quotation['columns']));
+        if (tableRow['columns'] != null) {
+          table.columns.addAll(_columnsFrom(tableRow['columns']));
+        }
         table.discountKind = discountKindOf(text(tableRow, 'discountType'));
         table.discountValue.text = table.discountKind == DiscountKind.percent
             ? text(tableRow, 'discountPercent', fallback: '')
@@ -243,11 +243,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         if (table.lines.isEmpty) table.lines.add(_QLineDraft());
         _tables.add(table);
       }
-      if (_tables.isEmpty) {
-        final table = _QTableDraft();
-        table.columns.addAll(_columnsFrom(quotation['columns']));
-        _tables.add(table);
-      }
+      if (_tables.isEmpty) _tables.add(_QTableDraft());
       _discountKind = discountKindOf(text(quotation, 'discountType'));
       _discountValue.text = _discountKind == DiscountKind.percent
           ? text(quotation, 'discountPercent', fallback: '')
@@ -544,7 +540,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       final discountText = table.discountValue.text.trim();
       tables.add({
         'title': title,
-        'columns': _columnBodyFor(table.columns.isEmpty ? _columns : table.columns),
+        if (table.columns.isNotEmpty)
+          'columns': _columnBodyFor(table.columns),
         'discountType': ?discountTypeOf(table.discountKind),
         if (table.discountKind == DiscountKind.percent &&
             discountText.isNotEmpty)
@@ -870,11 +867,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 Center(
                   child: TextButton.icon(
                     onPressed: () =>
-                        setState(() {
-                      final table = _QTableDraft();
-                      table.columns.addAll(_columnsFrom(_columnBody()));
-                      _tables.add(table);
-                    }),
+                        setState(() => _tables.add(_QTableDraft())),
                     icon: const Icon(Icons.add),
                     label: Text(l10n.addTable),
                   ),
@@ -1277,7 +1270,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     final available = [
       ...?ref.read(quotationColumnTemplatesProvider).value,
     ];
-    final working = [for (final column in targetColumns) column.copy()];
+    final working = [
+      for (final column in (target != null && target.isEmpty ? _columns : targetColumns))
+        column.copy(),
+    ];
     final templateName = TextEditingController();
     String? templateId;
     String templateDisplayName = '';
