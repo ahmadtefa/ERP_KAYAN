@@ -10,6 +10,7 @@ type TemplateRow = {
   id: string;
   name: string;
   columns: unknown;
+  design: unknown;
   isDefault: boolean;
   isActive: boolean;
   createdAt: Date;
@@ -32,7 +33,7 @@ export class QuotationColumnTemplatesService {
 
   async list(companyId: string) {
     const rows = await this.prisma.$queryRaw<TemplateRow[]>(Prisma.sql`
-      SELECT id, name, columns, "isDefault", "isActive", "createdAt", "updatedAt"
+      SELECT id, name, columns, design, "isDefault", "isActive", "createdAt", "updatedAt"
         FROM quotation_column_templates
        WHERE "companyId" = ${companyId}::uuid
          AND "deletedAt" IS NULL
@@ -45,12 +46,12 @@ export class QuotationColumnTemplatesService {
     const columns = normalizeColumns(dto.columns);
     const rows = await this.prisma.$queryRaw<TemplateRow[]>(Prisma.sql`
       INSERT INTO quotation_column_templates
-        (id, "companyId", name, columns, "isDefault", "isActive",
+        (id, "companyId", name, columns, design, "isDefault", "isActive",
          "createdAt", "updatedAt", "createdBy", "updatedBy")
       VALUES (gen_random_uuid(), ${companyId}::uuid, ${dto.name.trim()},
-              ${JSON.stringify(columns)}::jsonb, ${dto.isDefault === true}, true,
+              ${JSON.stringify(columns)}::jsonb, ${JSON.stringify(dto.design ?? {})}::jsonb, ${dto.isDefault === true}, true,
               now(), now(), ${userId}::uuid, ${userId}::uuid)
-      RETURNING id, name, columns, "isDefault", "isActive", "createdAt", "updatedAt"
+      RETURNING id, name, columns, design, "isDefault", "isActive", "createdAt", "updatedAt"
     `);
     if (dto.isDefault === true) {
       await this.prisma.$executeRaw(Prisma.sql`
@@ -85,6 +86,7 @@ export class QuotationColumnTemplatesService {
       UPDATE quotation_column_templates
          SET name = ${dto.name?.trim() ?? existing.name},
              columns = ${JSON.stringify(columns)}::jsonb,
+             design = ${JSON.stringify(dto.design ?? existing.design ?? {})}::jsonb,
              "isDefault" = ${dto.isDefault ?? existing.isDefault},
              "updatedAt" = now(),
              "updatedBy" = ${userId}::uuid
@@ -139,7 +141,7 @@ export class QuotationColumnTemplatesService {
 
   private async findOne(companyId: string, id: string) {
     const rows = await this.prisma.$queryRaw<TemplateRow[]>(Prisma.sql`
-      SELECT id, name, columns, "isDefault", "isActive", "createdAt", "updatedAt"
+      SELECT id, name, columns, design, "isDefault", "isActive", "createdAt", "updatedAt"
         FROM quotation_column_templates
        WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
          AND "deletedAt" IS NULL
@@ -148,6 +150,7 @@ export class QuotationColumnTemplatesService {
     return {
       ...rows[0],
       columns: normalizeColumns(rows[0].columns),
+      design: rows[0].design ?? {},
     } as TemplateRow & { columns: QuotationColumn[] };
   }
 
@@ -156,6 +159,7 @@ export class QuotationColumnTemplatesService {
       id: row.id,
       name: row.name,
       columns: normalizeColumns(row.columns),
+      design: row.design && typeof row.design === 'object' && !Array.isArray(row.design) ? row.design : {},
       isDefault: row.isDefault,
       isActive: row.isActive,
       createdAt: row.createdAt,

@@ -1564,6 +1564,7 @@ model QuotationColumnTemplate {
   companyId String   @db.Uuid
   name      String   @db.VarChar(120)
   columns   Json
+  design    Json     @default("{}")
   isDefault Boolean  @default(false)
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())

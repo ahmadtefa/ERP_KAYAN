@@ -169,6 +169,10 @@ export class QuotationColumnTemplateDto {
   @Type(() => QuotationColumnDto)
   columns!: QuotationColumnDto[];
 
+  @IsOptional() @Type(() => Object) design?: Record<string, unknown>;
+
+  @IsOptional() @Type(() => Object) design?: Record<string, unknown>;
+
   @IsOptional() @IsBoolean() isDefault?: boolean;
 }
 

@@ -1257,6 +1257,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     final working = [for (final column in _columns) column.copy()];
     final templateName = TextEditingController();
     String? templateId;
+    Map<String, dynamic>? templateDesign;
     try {
       final saved = await showDialog<bool>(
         context: context,
@@ -1307,6 +1308,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                     working
                                       ..clear()
                                       ..addAll(_columnsFrom(template['columns']));
+                                    final rawDesign = template['design'];
+                                    templateDesign = rawDesign is Map
+                                        ? Map<String, dynamic>.from(rawDesign)
+                                        : null;
                                     setDialogState(() => templateId = value);
                                   },
                           ),
@@ -1544,6 +1549,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                             final saved = await _saveColumnTemplate(
                               name,
                               working,
+                              design: _design.toJson(),
                             );
                             if (saved != null && dialogContext.mounted) {
                               setDialogState(() {
@@ -1583,6 +1589,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         _columns
           ..clear()
           ..addAll(working);
+        if (templateDesign != null) {
+          _design = QuotationDocumentDesign.fromJson(templateDesign);
+        }
       });
       // The copies handed to the screen are now owned by it.
       working.clear();
@@ -1685,8 +1694,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
 
   Future<Json?> _saveColumnTemplate(
     String name,
-    List<_QColumnDraft> columns,
-  ) async {
+    List<_QColumnDraft> columns, {
+    Map<String, dynamic>? design,
+  }) async {
     final l10n = context.l10n;
     try {
       final created = await ref
@@ -1695,6 +1705,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
             '/sales/quotation-column-templates',
             body: {
               'name': name,
+              if (design != null) 'design': design,
               'columns': [
                 for (final column in columns)
                   {
