@@ -171,7 +171,7 @@ class QuotationDocumentDesign {
 
 FontWeight? _fontWeightOf(dynamic v) {
   if (v is! String) return null;
-  return switch (v) {
+  return switch (v.split('.').last) {
     'w100' => FontWeight.w100,
     'w200' => FontWeight.w200,
     'w300' => FontWeight.w300,

@@ -164,6 +164,31 @@ describe('quotation document template', () => {
     expect(html).toContain('Mona Adel');
   });
 
+  it('applies safe per-element styling and escaped custom header/footer', () => {
+    const html = renderQuotationDocument(
+      snapshot({
+        design: {
+          company: { fontSizeMultiplier: 1.2, fontWeight: 'w700', fontFamily: 'Tahoma', color: '#123456' },
+          tableHeader: { color: '#ffffff', backgroundColor: '#18794e' },
+          finalTotal: { color: '#ffffff', backgroundColor: '#18794e' },
+          headerText: '<b>Confidential</b>',
+          footerText: 'Thank you',
+          showHeader: true,
+          showFooter: true,
+        },
+      }),
+      COMPANY,
+      'en',
+      false,
+    );
+
+    expect(html).toContain('.brand h1 { font-size:15.00pt; font-weight:700; font-family:');
+    expect(html).toContain('background-color:#18794e');
+    expect(html).toContain('<div class="custom-header">&lt;b&gt;Confidential&lt;/b&gt;</div>');
+    expect(html).toContain('<div class="custom-footer">Thank you</div>');
+    expect(html).not.toContain('<div class="custom-header"><b>Confidential</b></div>');
+  });
+
   it('renders every section title once in the header and once in the summary', () => {
     const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false);
     const hardware = html.split('Hardware').length - 1;

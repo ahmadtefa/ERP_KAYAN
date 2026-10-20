@@ -194,6 +194,7 @@ void main() {
           'fontWeight': 'w700',
           'fontFamily': 'Tahoma',
           'color': '#123456',
+          'backgroundColor': '#18794e',
         },
         'headerText': 'Confidential',
         'footerText': 'Thank you',
@@ -206,6 +207,7 @@ void main() {
       expect(saved['company']['fontWeight'], 'w700');
       expect(saved['company']['fontFamily'], 'Tahoma');
       expect(saved['company']['color'], '#123456');
+      expect(saved['company']['backgroundColor'], '#18794e');
       expect(saved['headerText'], 'Confidential');
       expect(saved['footerText'], 'Thank you');
       expect(saved['showHeader'], false);
