@@ -578,43 +578,56 @@ class _NavEntry extends StatelessWidget {
       );
     }
 
+    // The selected background lives on a Material, not on a DecoratedBox:
+    // ListTile paints its ink on the nearest Material ancestor, and a box
+    // colour in between would hide the splash. The accent bar is a sibling,
+    // so the Row places it on the start side in both text directions.
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 1),
-      child: Container(
-        decoration: BoxDecoration(
-          color: selected ? const Color(0x1FFFFFFF) : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          border: BorderDirectional(
-            start: BorderSide(
-              color: selected ? AppColors.accent : Colors.transparent,
+      child: Material(
+        color: selected ? const Color(0x1FFFFFFF) : Colors.transparent,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        clipBehavior: Clip.antiAlias,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
               width: 2.5,
+              child: ColoredBox(
+                color: selected ? AppColors.accent : Colors.transparent,
+              ),
             ),
-          ),
-        ),
-        child: ListTile(
-          dense: true,
-          visualDensity: const VisualDensity(vertical: -2, horizontal: -1),
-          selected: selected,
-          selectedTileColor: Colors.transparent,
-          hoverColor: const Color(0x0FFFFFFF),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.md),
-          ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 9),
-          minLeadingWidth: 18,
-          horizontalTitleGap: 10,
-          leading: Icon(item.icon, size: 18, color: foreground),
-          title: Text(
-            item.label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: foreground,
-              fontSize: 12.5,
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            Expanded(
+              child: ListTile(
+                dense: true,
+                visualDensity: const VisualDensity(
+                  vertical: -2,
+                  horizontal: -1,
+                ),
+                selected: selected,
+                selectedTileColor: Colors.transparent,
+                hoverColor: const Color(0x0FFFFFFF),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 9),
+                minLeadingWidth: 18,
+                horizontalTitleGap: 10,
+                leading: Icon(item.icon, size: 18, color: foreground),
+                title: Text(
+                  item.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: foreground,
+                    fontSize: 12.5,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+                onTap: () => context.go(item.path),
+              ),
             ),
-          ),
-          onTap: () => context.go(item.path),
+          ],
         ),
       ),
     );
