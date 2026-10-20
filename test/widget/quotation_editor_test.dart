@@ -142,6 +142,17 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('save-columns')));
     await tester.pumpAndSettle();
 
+    // A table can override the quotation-level column layout without
+    // changing the other tables or the shared default.
+    await tester.tap(find.byKey(const ValueKey('edit-table-columns-0')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('column-label-en-description')),
+      'Table scope',
+    );
+    await tester.tap(find.byKey(const ValueKey('save-columns')));
+    await tester.pumpAndSettle();
+
     // Table title and its own fixed discount.
     await tester.enterText(
       find.byKey(const ValueKey('quotation-table-title-0')),
@@ -193,6 +204,16 @@ void main() {
     expect(tables.single['title'], 'Main table');
     expect(tables.single['discountType'], 'AMOUNT');
     expect(tables.single['discountAmount'], '10');
+    final tableColumns = (tables.single['columns'] as List).cast<Map>();
+    expect(
+      tableColumns.firstWhere((column) => column['key'] == 'description')['labelEn'],
+      'Table scope',
+    );
+    expect(
+      byKey['description']!['labelEn'],
+      'Scope',
+      reason: 'customizing one table must not mutate the quotation default',
+    );
 
     final lines = (tables.single['lines'] as List).cast<Map>();
     expect(lines, hasLength(1));
