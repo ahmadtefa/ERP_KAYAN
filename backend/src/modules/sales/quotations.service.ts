@@ -35,6 +35,10 @@ import {
   QuotationColumn,
   standardColumns,
 } from './quotation-columns';
+import {
+  QuotationSnapshot,
+  renderQuotationDocument,
+} from './quotation-document';
 
 const MONEY_SCALE = 4;
 const RATE_SCALE = 4;
@@ -811,7 +815,15 @@ export class QuotationsService {
   // --------------------------------------------------------------- printing
 
   /** The HTML behind the print preview and the PDF. Uses the snapshot once issued. */
-  async printHtml(companyId: string, id: string, lang: 'en' | 'ar', autoPrint = false) {
+  /// The document as HTML, together with the number a saved file must carry.
+  /// The print route serves the HTML; the PDF route renders it in a browser
+  /// and names the file after the real quotation, not the database id.
+  async printDocument(
+    companyId: string,
+    id: string,
+    lang: 'en' | 'ar',
+    autoPrint = false,
+  ): Promise<{ html: string; quotationNumber: string }> {
     const quotation = await this.prisma.quotation.findFirst({
       where: { id, companyId, deletedAt: null },
       include: QUOTATION_INCLUDE,
@@ -822,7 +834,15 @@ export class QuotationsService {
       quotation.status !== QuotationStatus.DRAFT && quotation.contentSnapshot
         ? (quotation.contentSnapshot as unknown as QuotationSnapshot)
         : await this.snapshotContent(companyId, quotation);
-    return this.renderHtml(content, company, lang, autoPrint);
+    return {
+      html: renderQuotationDocument(content, company, lang, autoPrint),
+      quotationNumber: content.quotationNumber,
+    };
+  }
+
+  async printHtml(companyId: string, id: string, lang: 'en' | 'ar', autoPrint = false) {
+    const document = await this.printDocument(companyId, id, lang, autoPrint);
+    return document.html;
   }
 
   private async companyHeader(companyId: string) {
@@ -1190,286 +1210,6 @@ export class QuotationsService {
     return response;
   }
 
-  private renderHtml(
-    content: QuotationSnapshot,
-    company: Awaited<ReturnType<QuotationsService['companyHeader']>>,
-    lang: 'en' | 'ar',
-    autoPrint: boolean,
-  ): string {
-    const rtl = lang === 'ar';
-    const L = (en: string, ar: string) => (rtl ? ar : en);
-    const money = (value: string) =>
-      `${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${content.currency}`;
-    const logo = company.logoData?.length
-      ? `data:${company.logoMime ?? 'image/png'};base64,${Buffer.from(company.logoData).toString('base64')}`
-      : null;
-    const companyName = rtl
-      ? content.company.nameAr || content.company.nameEn
-      : content.company.nameEn || content.company.nameAr;
-    const companyAddress = rtl
-      ? content.company.addressAr || content.company.address
-      : content.company.address || content.company.addressAr;
-    const customerName = rtl
-      ? content.customer.nameAr || content.customer.nameEn
-      : content.customer.nameEn || content.customer.nameAr;
-
-    const details = [
-      content.showTaxId && content.company.taxId
-        ? `<div><span>${L('Tax registration', 'الرقم الضريبي')}</span><b>${this.escape(content.company.taxId)}</b></div>`
-        : '',
-      content.company.commercialRegistration
-        ? `<div><span>${L('Commercial registration', 'السجل التجاري')}</span><b>${this.escape(content.company.commercialRegistration)}</b></div>`
-        : '',
-      content.company.phone ? `<div><span>${L('Phone', 'الهاتف')}</span><b>${this.escape(content.company.phone)}</b></div>` : '',
-      content.company.email ? `<div><span>${L('Email', 'البريد الإلكتروني')}</span><b>${this.escape(content.company.email)}</b></div>` : '',
-    ].filter(Boolean).join('');
-
-    const customerDetails = [
-      content.customer.phone ? `<div><span>${L('Phone', 'الهاتف')}</span><b>${this.escape(content.customer.phone)}</b></div>` : '',
-      content.customer.email ? `<div><span>${L('Email', 'البريد الإلكتروني')}</span><b>${this.escape(content.customer.email)}</b></div>` : '',
-      content.customer.taxNumber ? `<div><span>${L('Tax number', 'الرقم الضريبي')}</span><b>${this.escape(content.customer.taxNumber)}</b></div>` : '',
-      content.customer.address ? `<div><span>${L('Address', 'العنوان')}</span><b>${this.escape(content.customer.address)}</b></div>` : '',
-    ].filter(Boolean).join('');
-
-    // The offer's own column layout: order, labels and visibility all come
-    // from the quotation. An offer that never chose one prints the standard
-    // six, exactly as before.
-    const columns = (content.columns?.length ? content.columns : standardColumns())
-      .filter((column) => column.visible);
-    const columnCount = columns.reduce((sum, column) => sum + column.width, 0) || 1;
-    const span = columns.length + 1;
-    const headCells = columns.map((column) => {
-      const numeric = COLUMN_LABELS[column.key].numeric;
-      const width = `${Math.round((column.width / columnCount) * 100)}%`;
-      return `<th${numeric ? ' class="num"' : ''} style="width:${width}">${this.escape(
-        columnLabel(column, lang),
-      )}</th>`;
-    }).join('');
-
-    const tables = content.tables.map((table) => {
-      const rows = table.lines.map((line, index) => {
-        const cells = columns.map((column) => {
-          const cell = this.columnCell(column, line);
-          const classes = [cell.numeric ? 'num' : '', cell.strong ? 'strong' : '', column.key === 'description' ? 'desc' : '']
-            .filter(Boolean)
-            .join(' ');
-          const text = cell.numeric && column.key !== 'quantity' ? money(cell.text) : this.escape(cell.text);
-          return `<td${classes ? ` class="${classes}"` : ''}>${text}</td>`;
-        }).join('');
-        return `
-        <tr>
-          <td class="idx">${index + 1}</td>
-          ${cells}
-        </tr>`;
-      }).join('');
-      return `
-      <section class="block">
-        <div class="section-title">${this.escape(table.title)}</div>
-        <table class="items">
-          <thead>
-            <tr>
-              <th class="idx">#</th>
-              ${headCells}
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-          <tfoot>
-            <tr><th colspan="${span - 1}">${L('Table subtotal', 'إجمالي الجدول')}</th><td class="num">${money(table.subTotal)}</td></tr>
-            ${Number(table.discountAmount) > 0
-              ? `<tr><th colspan="${span - 1}">${L('Table discount', 'خصم الجدول')}${
-                  Number(table.discountPercent) > 0 ? ` (${Number(table.discountPercent)}%)` : ''
-                }</th><td class="num">− ${money(table.discountAmount)}</td></tr>
-                <tr class="net"><th colspan="${span - 1}">${L('Net after discount', 'الصافي بعد الخصم')}</th><td class="num">${money(table.netTotal)}</td></tr>`
-              : ''}
-          </tfoot>
-        </table>
-      </section>`;
-    }).join('');
-
-    const summaryRows = content.tables.map((table) => `
-      <tr>
-        <td>${this.escape(table.title)}</td>
-        <td class="num">${money(table.subTotal)}</td>
-        <td class="num">${Number(table.discountAmount) > 0 ? `− ${money(table.discountAmount)}` : money('0')}</td>
-        <td class="num strong">${money(table.netTotal)}</td>
-      </tr>`).join('');
-    const quotationDiscount = content.totals.discountTotal
-      ? Number(content.totals.discountTotal) - content.tables.reduce((sum, table) => sum + Number(table.discountAmount), 0)
-      : 0;
-
-    const terms = content.terms?.trim()
-      ? `<section class="terms"><h3>${L('Terms and conditions', 'الشروط والأحكام')}</h3>
-         <div class="terms-body">${this.escape(content.terms).replace(/\n/g, '<br>')}</div></section>`
-      : '';
-    const notes = content.notes?.trim()
-      ? `<section class="notes"><h3>${L('Notes', 'ملاحظات')}</h3><div>${this.escape(content.notes).replace(/\n/g, '<br>')}</div></section>`
-      : '';
-
-    const signature = [
-      content.managerName
-        ? `<div class="sign"><div class="line"></div><div>${L('Company manager', 'مدير الشركة')}</div><b>${this.escape(content.managerName)}</b></div>`
-        : '',
-      content.responsibleName
-        ? `<div class="sign"><div class="line"></div><div>${L('Responsible person', 'المسؤول')}</div><b>${this.escape(content.responsibleName)}</b>${
-            content.responsiblePhone ? `<div class="small">${this.escape(content.responsiblePhone)}</div>` : ''
-          }</div>`
-        : '',
-    ].filter(Boolean).join('');
-
-    return `<!doctype html>
-<html lang="${lang}" dir="${rtl ? 'rtl' : 'ltr'}">
-<head>
-<meta charset="utf-8">
-<title>${this.escape(content.quotationNumber)} — ${this.escape(companyName)}</title>
-<style>
-  :root { --ink:#152033; --muted:#5b6879; --line:#d9dee6; --accent:#1f4e8c; --wash:#f3f6fb; }
-  @page { size: A4; margin: 14mm 12mm 20mm; }
-  * { box-sizing: border-box; }
-  html, body { margin:0; padding:0; }
-  body { font-family: 'Segoe UI', Tahoma, 'Noto Naskh Arabic', Arial, sans-serif; color: var(--ink); font-size: 10.5pt; }
-  .toolbar { display:flex; gap:8px; justify-content:flex-end; padding:10px 4px; }
-  .toolbar button { font: inherit; padding:8px 16px; border-radius:6px; border:1px solid #c3cbd6; background:#fff; cursor:pointer; }
-  .toolbar button.primary { background: var(--accent); border-color: var(--accent); color:#fff; }
-  .brand { display:flex; align-items:flex-start; gap:14px; border-bottom:3px solid var(--accent); padding-bottom:12px; }
-  .brand .logo { height:64px; width:auto; max-width:180px; object-fit:contain; }
-  .brand .who { flex:1; }
-  .brand h1 { margin:0; font-size:16pt; letter-spacing:.2px; }
-  .brand .muted { color: var(--muted); font-size:9pt; }
-  .brand .meta { text-align:${rtl ? 'left' : 'right'}; min-width:190px; }
-  .brand .meta .title { font-size:17pt; font-weight:700; color:var(--accent); letter-spacing:1px; }
-  .brand .meta .row { font-size:9pt; color:var(--muted); }
-  .brand .meta .row b { color:var(--ink); }
-  .company-details { display:flex; flex-wrap:wrap; gap:3px 16px; font-size:8.5pt; color:var(--muted); margin-top:6px; }
-  .company-details span { margin-inline-end:4px; }
-  .subject { margin:10px 0 0; border-inline-start:3px solid var(--accent); padding:4px 0 4px 10px; }
-  .subject span { font-size:8.5pt; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin-inline-end:8px; }
-  .subject b { font-size:12pt; }
-  .parties { display:flex; gap:14px; margin:12px 0 14px; }
-  .card { flex:1; border:1px solid var(--line); border-radius:6px; padding:9px 11px; }
-  .card .label { font-size:8pt; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin-bottom:4px; }
-  .card h4 { margin:0 0 2px; font-size:11pt; }
-  .card .row { font-size:9pt; color:var(--muted); }
-  .card .row b { color:var(--ink); font-weight:600; }
-  .section-title { background: var(--wash); border:1px solid var(--line); border-bottom:none; padding:6px 9px; font-weight:700; font-size:10.5pt; }
-  .block { margin-bottom: 10mm; break-inside: auto; }
-  table { width:100%; border-collapse:collapse; }
-  .items { font-size:9.5pt; }
-  .items th, .items td { border:1px solid var(--line); padding:5px 6px; vertical-align:top; }
-  .items thead th { background:var(--accent); color:#fff; font-weight:600; text-align:start; font-size:9pt; }
-  .items thead th.num { text-align:${rtl ? 'left' : 'right'}; }
-  .items tbody tr:nth-child(even) { background:#fafbfe; }
-  .items tfoot th { background:var(--wash); text-align:start; }
-  .items tfoot .net th, .items tfoot .net td { background:#e9eff9; font-weight:700; }
-  .idx { width:28px; color:var(--muted); }
-  .desc { min-width:150px; word-break:break-word; }
-  .num { text-align:${rtl ? 'left' : 'right'}; white-space:nowrap; font-variant-numeric: tabular-nums; }
-  .strong { font-weight:600; }
-  .summary { margin-top: 6mm; }
-  .summary h3, .terms h3, .notes h3 { font-size:11pt; margin:0 0 6px; color:var(--accent); }
-  .summary table th, .summary table td { border:1px solid var(--line); padding:5px 7px; }
-  .summary thead th { background:var(--wash); text-align:start; }
-  .totals { display:flex; justify-content:flex-end; margin-top:6px; }
-  .totals table { width: 62mm; }
-  .totals table td { border:1px solid var(--line); padding:5px 7px; }
-  .totals table tr.grand td { background:var(--accent); color:#fff; font-weight:700; font-size:11pt; }
-  .terms, .notes { margin-top: 7mm; break-inside: avoid; }
-  .terms-body, .notes div { font-size:9pt; color:var(--muted); line-height:1.55; }
-  .signs { display:flex; gap:16mm; margin-top: 14mm; break-inside: avoid; }
-  .sign { flex:1; font-size:9pt; }
-  .sign .line { border-bottom:1px solid #95a0b0; height:14mm; margin-bottom:4px; }
-  .sign b { display:block; font-size:10pt; margin-top:2px; }
-  .sign .small { color:var(--muted); }
-  .footer { position:fixed; bottom:0; inset-inline:0; border-top:1px solid var(--line); padding-top:4px;
-            font-size:8pt; color:var(--muted); display:flex; justify-content:space-between; gap:10px; }
-  @media print {
-    .toolbar { display:none; }
-    .items thead { display: table-header-group; }
-    .items tr { break-inside: avoid; }
-    .block { break-inside: auto; }
-    .summary, .terms, .signs { break-inside: avoid; }
-  }
-</style>
-</head>
-<body>
-${autoPrint ? '' : `<div class="toolbar"><button onclick="window.print()">${L('Print', 'طباعة')}</button><button class="primary" onclick="window.print()">${L('Save as PDF', 'حفظ PDF')}</button></div>`}
-<header class="brand">
-  ${logo ? `<img class="logo" src="${logo}" alt="">` : ''}
-  <div class="who">
-    <h1>${this.escape(companyName)}</h1>
-    ${companyAddress ? `<div class="muted">${this.escape(companyAddress)}</div>` : ''}
-    <div class="company-details">${details}</div>
-  </div>
-  <div class="meta">
-    <div class="title">${L('QUOTATION', 'عرض سعر')}</div>
-    <div class="row">${L('No.', 'رقم')} <b>${this.escape(content.quotationNumber)}</b></div>
-    <div class="row">${L('Date', 'التاريخ')} <b>${content.quotationDate}</b></div>
-    ${content.validUntil ? `<div class="row">${L('Valid until', 'صالح حتى')} <b>${content.validUntil}</b></div>` : ''}
-    <div class="row">${L('Version', 'الإصدار')} <b>${content.version}</b></div>
-  </div>
-</header>
-
-${content.subject?.trim()
-  ? `<div class="subject"><span>${L('Subject', 'الموضوع')}</span><b>${this.escape(content.subject.trim())}</b></div>`
-  : ''}
-
-<div class="parties">
-  <div class="card">
-    <div class="label">${L('Prepared for', 'مقدم إلى')}</div>
-    <h4>${this.escape(customerName)}</h4>
-    <div class="row">${L('Customer code', 'كود العميل')} <b>${this.escape(content.customer.code)}</b></div>
-    ${customerDetails}
-  </div>
-  <div class="card">
-    <div class="label">${L('Offer details', 'بيانات العرض')}</div>
-    <div class="row">${L('Currency', 'العملة')} <b>${content.currency}</b></div>
-    <div class="row">${L('Tables', 'الجداول')} <b>${content.tables.length}</b></div>
-    <div class="row">${L('Status', 'الحالة')} <b>${this.statusLabel(content.status, rtl)}</b></div>
-  </div>
-</div>
-
-${tables}
-
-<section class="summary">
-  <h3>${L('Summary', 'الملخص')}</h3>
-  <table>
-    <thead><tr>
-      <th>${L('Table', 'الجدول')}</th>
-      <th class="num">${L('Before discount', 'قبل الخصم')}</th>
-      <th class="num">${L('Discount', 'الخصم')}</th>
-      <th class="num">${L('Net', 'الصافي')}</th>
-    </tr></thead>
-    <tbody>${summaryRows}</tbody>
-  </table>
-  <div class="totals">
-    <table>
-      <tr><td>${L('Subtotal', 'الإجمالي')}</td><td class="num">${money(content.totals.subTotal)}</td></tr>
-      <tr><td>${L('Table discounts', 'خصومات الجداول')}</td><td class="num">− ${money(
-        content.tables.reduce((sum, table) => sum + Number(table.discountAmount), 0).toFixed(4),
-      )}</td></tr>
-      ${quotationDiscount > 0
-        ? `<tr><td>${L('Quotation discount', 'خصم العرض')}</td><td class="num">− ${money(quotationDiscount.toFixed(4))}</td></tr>`
-        : ''}
-      ${Number(content.totals.discountTotal) > 0
-        ? `<tr><td>${L('Total discounts', 'إجمالي الخصومات')}</td><td class="num">− ${money(content.totals.discountTotal)}</td></tr>`
-        : ''}
-      <tr class="grand"><td>${L('Final total', 'الإجمالي النهائي')}</td><td class="num">${money(content.totals.totalAmount)}</td></tr>
-    </table>
-  </div>
-</section>
-
-${terms}
-${notes}
-${signature ? `<section class="signs">${signature}</section>` : ''}
-
-<footer class="footer">
-  <span>${this.escape(companyName)}${content.company.phone ? ` · ${this.escape(content.company.phone)}` : ''}${content.company.email ? ` · ${this.escape(content.company.email)}` : ''}</span>
-  <span>${L('This offer is not a tax invoice.', 'هذا العرض ليس فاتورة ضريبية.')}</span>
-</footer>
-${autoPrint ? '<script>window.addEventListener("load",()=>window.print())</script>' : ''}
-</body>
-</html>`;
-  }
-
   // ------------------------------------------------------------------ types
 
   /// Deliberately narrow: only what the document needs to print itself.
@@ -1545,31 +1285,6 @@ ${autoPrint ? '<script>window.addEventListener("load",()=>window.print())</scrip
     return columns;
   }
 
-  /// One cell of a printed line, in the column's own type.
-  private columnCell(column: QuotationColumn, line: QuotationSnapshotLine): {
-    text: string;
-    numeric: boolean;
-    strong: boolean;
-  } {
-    const numeric = COLUMN_LABELS[column.key].numeric;
-    switch (column.key) {
-      case 'itemCode':
-        return { text: line.itemCode ?? '', numeric: false, strong: false };
-      case 'countryOfOrigin':
-        return { text: line.countryOfOrigin ?? '', numeric: false, strong: false };
-      case 'unit':
-        return { text: line.unit ?? '', numeric: false, strong: false };
-      case 'quantity':
-        return { text: this.qty(line.quantity), numeric: true, strong: false };
-      case 'unitPrice':
-        return { text: line.unitPrice, numeric: true, strong: false };
-      case 'lineTotal':
-        return { text: line.lineTotal, numeric: true, strong: true };
-      default:
-        return { text: line.description, numeric: false, strong: false };
-    }
-  }
-
   private text(value: string | null | undefined): string | null {
     if (value === null || value === undefined) return null;
     const trimmed = value.trim();
@@ -1581,90 +1296,4 @@ ${autoPrint ? '<script>window.addEventListener("load",()=>window.print())</scrip
     if (error instanceof Error) return `${subject}: ${error.message}`;
     return `${subject}: the discount could not be applied`;
   }
-
-  private statusLabel(status: string, rtl: boolean): string {
-    const labels: Record<string, [string, string]> = {
-      DRAFT: ['Draft', 'مسودة'],
-      SENT: ['Sent', 'مُرسل'],
-      ACCEPTED: ['Accepted', 'مقبول'],
-      REJECTED: ['Rejected', 'مرفوض'],
-      EXPIRED: ['Expired', 'منتهي'],
-      CONVERTED: ['Converted', 'محوّل إلى فاتورة'],
-    };
-    const label = labels[status.toUpperCase()];
-    if (!label) return status;
-    return rtl ? label[1] : label[0];
-  }
-
-  private qty(value: string): string {
-    const number = Number(value);
-    return number.toLocaleString('en-US', { maximumFractionDigits: 4 });
-  }
-
-  private escape(value: string): string {
-    return value
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-}
-
-interface QuotationSnapshot {
-  quotationNumber: string;
-  quotationDate: string;
-  validUntil: string | null;
-  currency: string;
-  version: number;
-  status: string;
-  customer: {
-    code: string;
-    nameEn: string;
-    nameAr: string;
-    phone: string | null;
-    email: string | null;
-    taxNumber: string | null;
-    address: string | null;
-  };
-  company: {
-    nameEn: string;
-    nameAr: string;
-    taxId: string | null;
-    commercialRegistration: string | null;
-    phone: string | null;
-    email: string | null;
-    address: string | null;
-    addressAr: string | null;
-  };
-  showTaxId: boolean;
-  subject: string | null;
-  columns: QuotationColumn[];
-  managerName: string | null;
-  responsibleName: string | null;
-  responsiblePhone: string | null;
-  notes: string | null;
-  terms: string | null;
-  discountType: string | null;
-  discountPercent: string;
-  discountAmount: string;
-  tables: Array<{
-    title: string;
-    sortOrder: number;
-    subTotal: string;
-    discountPercent: string;
-    discountAmount: string;
-    netTotal: string;
-    lines: QuotationSnapshotLine[];
-  }>;
-  totals: { subTotal: string; discountTotal: string; totalAmount: string };
-}
-
-interface QuotationSnapshotLine {
-  itemCode: string | null;
-  description: string;
-  countryOfOrigin: string | null;
-  unit: string | null;
-  quantity: string;
-  unitPrice: string;
-  lineTotal: string;
 }

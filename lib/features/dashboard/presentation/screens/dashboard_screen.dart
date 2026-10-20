@@ -1,11 +1,10 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../app/theme/design_tokens.dart';
+import '../../../../core/image/company_logo_url.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../l10n/generated/app_localizations.dart';
@@ -42,6 +41,12 @@ class DashboardScreen extends ConsumerWidget {
     final company = companyAsync.asData?.value == null
         ? <String, dynamic>{}
         : Map<String, dynamic>.from(companyAsync.asData!.value as Map);
+    // The profile reports a path, not an address; the running client is the
+    // only one that knows the host it talks to.
+    final companyLogoUrl = resolveCompanyLogoUrl(
+      ref.watch(appConfigProvider).apiBaseUrl,
+      company['logoUrl'],
+    );
     final branches =
         branchesAsync.asData?.value
             .map((e) => Map<String, dynamic>.from(e))
@@ -118,6 +123,7 @@ class DashboardScreen extends ConsumerWidget {
             children: [
               _CompanyContext(
                 company: company,
+                logoUrl: companyLogoUrl,
                 name: companyName.isEmpty
                     ? (arabic ? 'مساحة عمل الشركة' : 'Company workspace')
                     : companyName,
@@ -753,6 +759,7 @@ String _localName(
 class _CompanyContext extends StatelessWidget {
   const _CompanyContext({
     required this.company,
+    required this.logoUrl,
     required this.name,
     required this.branch,
     required this.arabic,
@@ -760,6 +767,7 @@ class _CompanyContext extends StatelessWidget {
   });
 
   final Map<String, dynamic> company;
+  final String? logoUrl;
   final String name;
   final String branch;
   final bool arabic;
@@ -771,28 +779,23 @@ class _CompanyContext extends StatelessWidget {
     final secondaryName = _localName(company, !arabic, 'nameAr', 'nameEn');
     final taxId = (company['taxId'] as String?)?.trim() ?? '';
     final code = (company['code'] as String?)?.trim() ?? '';
-    final rawLogo = (company['logoBase64'] as String?)?.trim();
-    Widget logo = const Icon(Icons.apartment_rounded, size: 24, color: Colors.white);
-    if (rawLogo != null && rawLogo.isNotEmpty) {
-      try {
-        logo = Image.memory(
-          base64Decode(rawLogo),
-          width: 46,
-          height: 46,
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => const Icon(
-            Icons.apartment_rounded,
-            size: 24,
-            color: Colors.white,
-          ),
-        );
-      } catch (_) {
-        logo = const Icon(
+    Widget logo = const Icon(
+      Icons.apartment_rounded,
+      size: 24,
+      color: Colors.white,
+    );
+    if (logoUrl != null && logoUrl!.isNotEmpty) {
+      logo = Image.network(
+        logoUrl!,
+        width: 46,
+        height: 46,
+        fit: BoxFit.contain,
+        errorBuilder: (_, _, _) => const Icon(
           Icons.apartment_rounded,
           size: 24,
           color: Colors.white,
-        );
-      }
+        ),
+      );
     }
 
     return Container(

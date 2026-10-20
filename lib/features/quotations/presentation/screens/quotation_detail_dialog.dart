@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/router/app_router.dart';
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
@@ -11,10 +12,12 @@ import '../../../../shared/widgets/data_dialog.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/state_views.dart';
+import '../../../../shared/widgets/status_pill.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/providers/data_providers.dart';
 import '../providers/quotation_providers.dart';
+import 'quotation_preview_screen.dart';
 import '../quotation_status.dart';
 
 /// Opens one quotation with its tables, history and lifecycle actions.
@@ -156,7 +159,7 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               SizedBox(
-                width: 180,
+                width: 150,
                 child: Text(label, style: theme.textTheme.bodySmall),
               ),
               Expanded(child: Text(value)),
@@ -165,7 +168,12 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
         );
 
         return Padding(
-          padding: const EdgeInsets.fromLTRB(18, 4, 18, 18),
+          padding: const EdgeInsetsDirectional.fromSTEB(
+            AppSpacing.xl,
+            AppSpacing.xs,
+            AppSpacing.xl,
+            AppSpacing.xl,
+          ),
           child: ListView(
             children: [
               Wrap(
@@ -173,13 +181,9 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                 runSpacing: 8,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Chip(
-                    label: Text(quotationStatusLabel(context, status)),
-                    backgroundColor: quotationStatusColor(context, status)
-                        .withValues(alpha: 0.12),
-                    side: BorderSide(
-                      color: quotationStatusColor(context, status),
-                    ),
+                  StatusPill(
+                    label: quotationStatusLabel(context, status),
+                    tone: toneForStatus(status),
                   ),
                   if (asNum(quotation['version']) != null &&
                       asNum(quotation['version'])! > 1)
@@ -192,11 +196,10 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                 ],
               ),
               const SizedBox(height: 8),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final wide = constraints.maxWidth >= 660;
+                  final left = Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         field(
@@ -224,10 +227,8 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                               : l10n.printedOnOffer,
                         ),
                       ],
-                    ),
-                  ),
-                  Expanded(
-                    child: Column(
+                  );
+                  final right = Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         field(
@@ -262,15 +263,49 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                           ),
                         ],
                       ],
+                  );
+                  return Container(
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceMuted,
+                      border: Border.all(color: AppColors.border),
+                      borderRadius: AppRadii.card,
                     ),
-                  ),
-                ],
+                    child: wide
+                        ? Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(child: left),
+                              const SizedBox(width: AppSpacing.xxl),
+                              Expanded(child: right),
+                            ],
+                          )
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              left,
+                              const SizedBox(height: AppSpacing.lg),
+                              right,
+                            ],
+                          ),
+                  );
+                },
               ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
+                  FilledButton.icon(
+                    onPressed: () => showQuotationPreview(
+                      context,
+                      quotation: quotation,
+                      language: language,
+                      canExport: canExport,
+                    ),
+                    icon: const Icon(Icons.visibility_outlined, size: 18),
+                    label: Text(l10n.printPreview),
+                  ),
                   if (canExport)
                     OutlinedButton.icon(
                       onPressed: () => runPrint(
@@ -391,7 +426,7 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                     ),
                 ],
               ),
-              const Divider(height: 24),
+              const Divider(height: 28, color: AppColors.border),
               for (var index = 0; index < tables.length; index++)
                 _table(
                   context,
@@ -411,7 +446,7 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                 const SizedBox(height: 4),
                 Text(text(quotation, 'notes')),
               ],
-              const Divider(height: 24),
+              const Divider(height: 28, color: AppColors.border),
               Text(l10n.statusHistory, style: theme.textTheme.titleSmall),
               const SizedBox(height: 4),
               if (events.isEmpty)

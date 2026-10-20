@@ -30,11 +30,14 @@ export class PdfService {
     return this.findBrowser() !== null;
   }
 
-  /// A4 landscape, which is the shape a report with six money columns needs.
+  /// A4 portrait, the sheet the quotation's `@page` rule asks for.
+  ///
+  /// Chromium prints the page with the size its stylesheet declares; this
+  /// constant is kept for the callers that ask what shape the output has.
   private readonly paper = {
-    width: '297mm',
-    height: '210mm',
-    margin: '10mm',
+    width: '210mm',
+    height: '297mm',
+    margin: '12mm',
   };
 
   async render(html: string): Promise<Buffer> {

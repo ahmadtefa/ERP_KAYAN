@@ -1,14 +1,15 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/image/company_logo_image.dart';
+import '../../../../core/image/company_logo_url.dart';
 import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/page_header.dart';
 import '../../../../shared/widgets/state_views.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 import '../providers/company_providers.dart';
 
 /// Company profile, logo and units — the records every report and document
@@ -162,7 +163,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
           children: [
             _LogoRow(
               hasLogo: widget.profile['hasLogo'] == true,
-              logoBase64: widget.profile['logoBase64'] as String?,
+              logoUrl: widget.profile['logoUrl'] as String?,
             ),
             const SizedBox(height: 16),
             Row(
@@ -237,10 +238,13 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
 }
 
 class _LogoRow extends ConsumerStatefulWidget {
-  const _LogoRow({required this.hasLogo, this.logoBase64});
+  const _LogoRow({required this.hasLogo, this.logoUrl});
 
   final bool hasLogo;
-  final String? logoBase64;
+
+  /// The relative path the profile reports; [CompanyLogoUrl] resolves it
+  /// against the address this client talks to.
+  final String? logoUrl;
 
   @override
   ConsumerState<_LogoRow> createState() => _LogoRowState();
@@ -336,8 +340,10 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final hasImage =
-        widget.logoBase64 != null && widget.logoBase64!.trim().isNotEmpty;
+    final url = resolveCompanyLogoUrl(
+      ref.watch(appConfigProvider).apiBaseUrl,
+      widget.logoUrl,
+    );
     return Row(
       children: [
         CircleAvatar(
@@ -345,22 +351,22 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
           backgroundColor: Theme.of(context)
               .colorScheme
               .surfaceContainerHighest,
-          child: hasImage
-              ? ClipOval(
-                  child: Image.memory(
-                    base64Decode(widget.logoBase64!),
+          child: url == null
+              ? Icon(
+                  widget.hasLogo ? Icons.business : Icons.business_outlined,
+                  size: 28,
+                )
+              : ClipOval(
+                  child: Image.network(
+                    url,
                     width: 56,
                     height: 56,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => const Icon(
-                      Icons.business,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) => Icon(
+                      widget.hasLogo ? Icons.business : Icons.business_outlined,
                       size: 28,
                     ),
                   ),
-                )
-              : Icon(
-                  widget.hasLogo ? Icons.business : Icons.business_outlined,
-                  size: 28,
                 ),
         ),
         const SizedBox(width: 12),

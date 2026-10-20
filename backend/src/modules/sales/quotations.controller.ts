@@ -21,6 +21,7 @@ import {
   QuotationNoteDto,
   UpdateQuotationDto,
 } from './dto/quotation.dto';
+import { quotationDocumentFileName } from './quotation-document';
 import { QuotationsService } from './quotations.service';
 
 /// Quotation endpoints.
@@ -169,12 +170,20 @@ export class QuotationsController {
     @Res() response: Response,
   ): Promise<void> {
     const lang = query.lang === 'ar' ? 'ar' : 'en';
-    const html = await this.service.printHtml(user.companyId, id, lang, false);
-    const file = await this.pdf.render(html);
+    const document = await this.service.printDocument(
+      user.companyId,
+      id,
+      lang,
+      false,
+    );
+    const file = await this.pdf.render(document.html);
     response.setHeader('Content-Type', 'application/pdf');
     response.setHeader(
       'Content-Disposition',
-      `attachment; filename="quotation-${id}.pdf"`,
+      `attachment; filename="${quotationDocumentFileName(
+        document.quotationNumber,
+        id,
+      )}"`,
     );
     response.setHeader('Cache-Control', 'no-store');
     response.send(file);
