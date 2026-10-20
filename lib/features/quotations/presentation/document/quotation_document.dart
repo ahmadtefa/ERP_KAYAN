@@ -411,10 +411,6 @@ class QuotationDocument {
     }
 
     final rawColumns = listOf(source['columns']);
-    final columns = _columns(
-      rawColumns.isEmpty ? listOf(quotation['columns']) : rawColumns,
-      language,
-    );
     final rawTables = listOf(source['tables']);
     final sections = <QuotationDocumentSection>[];
     for (final rawTable in rawTables) {
