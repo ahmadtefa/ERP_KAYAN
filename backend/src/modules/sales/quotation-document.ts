@@ -57,6 +57,8 @@ export interface QuotationSnapshot {
   responsiblePhone: string | null;
   notes: string | null;
   terms: string | null;
+  /// Persisted per-element presentation settings; absent on legacy quotations.
+  design?: Record<string, unknown> | null;
   discountType: string | null;
   discountPercent: string;
   discountAmount: string;
@@ -159,6 +161,8 @@ function columnCell(
   const builtIn = COLUMN_LABELS[column.key];
   const numeric = builtIn ? builtIn.numeric : column.numeric ?? false;
   switch (column.key) {
+    case 'description':
+      return { text: line.description, numeric: false, strong: false };
     case 'itemCode':
       return { text: line.itemCode ?? '', numeric: false, strong: false };
     case 'countryOfOrigin':
