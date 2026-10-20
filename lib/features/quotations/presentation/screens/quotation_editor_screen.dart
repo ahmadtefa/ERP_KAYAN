@@ -1257,6 +1257,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     final working = [for (final column in _columns) column.copy()];
     final templateName = TextEditingController();
     String? templateId;
+    String templateDisplayName = '';
     Map<String, dynamic>? templateDesign;
     try {
       final saved = await showDialog<bool>(
@@ -1312,7 +1313,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                     templateDesign = rawDesign is Map
                                         ? Map<String, dynamic>.from(rawDesign)
                                         : null;
-                                    setDialogState(() => templateId = value);
+                                    setDialogState(() {
+                                      templateId = value;
+                                      templateDisplayName = text(template, 'name');
+                                    });
                                   },
                           ),
                         ),
@@ -1560,6 +1564,96 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                           },
                           icon: const Icon(Icons.bookmark_add_outlined, size: 18),
                           label: Text(l10n.saveColumnTemplate),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        OutlinedButton.icon(
+                          key: const ValueKey('update-column-template'),
+                          onPressed: templateId == null ? null : () async {
+                            final name = templateName.text.trim().isEmpty ? templateDisplayName : templateName.text.trim();
+                            try {
+                              await ref.read(apiClientProvider).put(
+                                '/sales/quotation-column-templates/$templateId',
+                                body: {
+                                  'name': name,
+                                  'design': templateDesign ?? _design.toJson(),
+                                  'columns': [for (final column in working) {
+                                    'key': column.key,
+                                    if (column.labelEn.text.trim().isNotEmpty) 'labelEn': column.labelEn.text.trim(),
+                                    if (column.labelAr.text.trim().isNotEmpty) 'labelAr': column.labelAr.text.trim(),
+                                    'visible': column.visible,
+                                    'width': column.width,
+                                    'numeric': column.numeric,
+                                  }],
+                                },
+                              );
+                              ref.invalidate(quotationColumnTemplatesProvider);
+                              if (dialogContext.mounted) showMessage(dialogContext, l10n.templateSaved);
+                            } on Failure catch (error) {
+                              if (dialogContext.mounted) showMessage(dialogContext, error.message, error: true);
+                            }
+                          },
+                          icon: const Icon(Icons.save_outlined, size: 18),
+                          label: Text(l10n.save),
+                        ),
+                        OutlinedButton.icon(
+                          key: const ValueKey('duplicate-column-template'),
+                          onPressed: templateId == null ? null : () async {
+                            final base = templateName.text.trim().isEmpty ? templateDisplayName : templateName.text.trim();
+                            final duplicateName = '$base - Copy';
+                            final savedTemplate = await _saveColumnTemplate(
+                              duplicateName,
+                              working,
+                              design: templateDesign ?? _design.toJson(),
+                            );
+                            if (savedTemplate != null && dialogContext.mounted) {
+                              setDialogState(() {
+                                available.add(savedTemplate);
+                                templateId = text(savedTemplate, 'id');
+                                templateDisplayName = text(savedTemplate, 'name');
+                                templateName.text = templateDisplayName;
+                              });
+                            }
+                          },
+                          icon: const Icon(Icons.copy_outlined, size: 18),
+                          label: Text(arabic ? 'نسخ القالب' : 'Duplicate'),
+                        ),
+                        OutlinedButton.icon(
+                          key: const ValueKey('delete-column-template'),
+                          onPressed: templateId == null ? null : () async {
+                            final confirm = await showDialog<bool>(
+                              context: dialogContext,
+                              builder: (confirmContext) => AlertDialog(
+                                title: Text(arabic ? 'حذف القالب؟' : 'Delete template?'),
+                                content: Text(templateDisplayName),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(confirmContext, false), child: Text(l10n.cancel)),
+                                  FilledButton(onPressed: () => Navigator.pop(confirmContext, true), child: Text(l10n.delete)),
+                                ],
+                              ),
+                            );
+                            if (confirm != true || templateId == null) return;
+                            try {
+                              await ref.read(apiClientProvider).delete('/sales/quotation-column-templates/$templateId');
+                              ref.invalidate(quotationColumnTemplatesProvider);
+                              setDialogState(() {
+                                available.removeWhere((item) => text(item, 'id') == templateId);
+                                templateId = null;
+                                templateDisplayName = '';
+                                templateDesign = null;
+                                templateName.clear();
+                              });
+                            } on Failure catch (error) {
+                              if (dialogContext.mounted) showMessage(dialogContext, error.message, error: true);
+                            }
+                          },
+                          icon: const Icon(Icons.delete_outline, size: 18),
+                          label: Text(l10n.delete),
                         ),
                       ],
                     ),
