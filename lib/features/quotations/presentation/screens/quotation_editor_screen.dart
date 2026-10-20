@@ -2125,13 +2125,13 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
             ],
           ),
           // حقول الأعمدة المخصصة التي ليست من المفاتيح المضمّنة.
-          if (_customColumnKeys.isNotEmpty) ...[
+          if (_customColumnKeysFor(table).isNotEmpty) ...[
             const SizedBox(height: 6),
             Wrap(
               spacing: 8,
               runSpacing: 6,
               children: [
-                for (final column in _customColumnKeys)
+                for (final column in _customColumnKeysFor(table))
                   SizedBox(
                     width: 150,
                     child: TextField(
@@ -2162,9 +2162,11 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     );
   }
 
-  /// الأعمدة الظاهرة التي يعرفها المستخدم (ليست من المفاتيح المضمّنة).
-  List<_QColumnDraft> get _customColumnKeys =>
-      _columns.where((c) => c.visible && !_builtinColumnKeys.contains(c.key))
+  /// Visible user-defined columns for this table; legacy/empty layouts
+  /// inherit the quotation-level layout.
+  List<_QColumnDraft> _customColumnKeysFor(_QTableDraft table) =>
+      (table.columns.isEmpty ? _columns : table.columns)
+          .where((c) => c.visible && !_builtinColumnKeys.contains(c.key))
           .toList();
 
   /// المفاتيح المضمّنة التي لها حقول خاصة بها في السطر.
