@@ -522,12 +522,18 @@ class _Sheet extends StatelessWidget {
 
   Widget _table(QuotationDocumentSection section) {
     final columns = section.columns;
-    final style = TextStyle(fontSize: 9 * scale, color: _Doc.ink, height: 1.4);
-    final headerStyle = TextStyle(
-      fontSize: 8.5 * scale,
-      color: _Doc.royal,
-      fontWeight: FontWeight.w700,
-      height: 1.3,
+    final style = _styled(
+      TextStyle(fontSize: 9 * scale, color: _Doc.ink, height: 1.4),
+      document.design?.tableCell,
+    );
+    final headerStyle = _styled(
+      TextStyle(
+        fontSize: 8.5 * scale,
+        color: _Doc.royal,
+        fontWeight: FontWeight.w700,
+        height: 1.3,
+      ),
+      document.design?.tableHeader,
     );
 
     Widget cell(
