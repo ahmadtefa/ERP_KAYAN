@@ -246,11 +246,10 @@ class _CompanyManagementPanelState
     // carries the version stamp that changes whenever the logo changes, so a
     // fresh upload shows up immediately instead of a cached copy.
     final savedLogoUrl = companyLogoUrl(base, {
-      if (_company != null) ..._company!,
+      ...?_company,
       if (_company?['id'] == null && user != null) 'id': user.companyId,
       'hasLogo': _company?['hasLogo'] == true || _company?['logoUrl'] != null,
     });
-    final showSavedLogo = _logo == null && savedLogoUrl != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -301,15 +300,15 @@ class _CompanyManagementPanelState
                         height: 76,
                         child: _logo != null
                             ? Image.memory(_logo!.bytes, fit: BoxFit.contain)
-                            : (showSavedLogo
-                                  ? Image.network(
-                                      savedLogoUrl!,
+                            : (savedLogoUrl == null
+                                  ? const Icon(Icons.business, size: 48)
+                                  : Image.network(
+                                      savedLogoUrl,
                                       key: ValueKey(savedLogoUrl),
                                       fit: BoxFit.contain,
                                       errorBuilder: (_, _, _) =>
                                           const Icon(Icons.business, size: 48),
-                                    )
-                                  : const Icon(Icons.business, size: 48)),
+                                    )),
                       ),
                     ),
                     const SizedBox(width: 12),

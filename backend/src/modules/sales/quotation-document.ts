@@ -82,7 +82,6 @@ export interface QuotationDocumentCompanyMark {
 /// royal blue #00288E, ink #0B1C30, wash #EFF4FF, surface #F8F9FF.
 const ROYAL = '#00288e';
 const ROYAL_DEEP = '#001b60';
-const ROYAL_TINT = '#3755c3';
 const INK = '#0b1c30';
 const MUTED = '#444653';
 const LINE = '#d3e4fe';

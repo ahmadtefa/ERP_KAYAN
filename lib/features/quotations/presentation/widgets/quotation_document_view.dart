@@ -971,7 +971,6 @@ class _Sheet extends StatelessWidget {
 abstract final class _Doc {
   static const royal = Color(0xFF00288E);
   static const royalDeep = Color(0xFF001B60);
-  static const royalTint = Color(0xFF3755C3);
   static const ink = Color(0xFF0B1C30);
   static const muted = Color(0xFF444653);
   static const line = Color(0xFFD3E4FE);
