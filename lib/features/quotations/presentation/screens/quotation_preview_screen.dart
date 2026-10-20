@@ -62,13 +62,17 @@ class QuotationPreviewScreen extends ConsumerWidget {
       language: language,
     );
 
+    // On a narrow window the two actions move below the title, where they
+    // have the full width instead of squeezing the app bar.
+    final compact = MediaQuery.sizeOf(context).width < 640;
+
     return Scaffold(
       backgroundColor: AppColors.surfaceSunken,
       appBar: AppBar(
         backgroundColor: AppColors.surface,
         title: Text(l10n.printPreview),
         actions: [
-          if (canExport && id.isNotEmpty) ...[
+          if (!compact && canExport && id.isNotEmpty) ...[
             TextButton.icon(
               onPressed: () => runPrint(
                 context,
@@ -91,64 +95,59 @@ class QuotationPreviewScreen extends ConsumerWidget {
           ],
         ],
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < 640;
-          return SingleChildScrollView(
-            padding: EdgeInsets.all(compact ? AppSpacing.md : AppSpacing.xxl),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 900),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (canExport && id.isNotEmpty && compact) ...[
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () => runPrint(
-                                context,
-                                links.quotationPrint(
-                                  id: id,
-                                  language: language,
-                                ),
-                              ),
-                              icon: const Icon(Icons.print_outlined, size: 18),
-                              label: Text(l10n.print),
+      body: SingleChildScrollView(
+        padding: EdgeInsets.all(compact ? AppSpacing.md : AppSpacing.xxl),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 900),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (compact && canExport && id.isNotEmpty) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => runPrint(
+                            context,
+                            links.quotationPrint(
+                              id: id,
+                              language: language,
                             ),
                           ),
-                          const SizedBox(width: AppSpacing.sm),
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: () => runDownload(
-                                context,
-                                links.quotationPdf(
-                                  id: id,
-                                  language: language,
-                                ),
-                              ),
-                              icon: const Icon(
-                                Icons.picture_as_pdf_outlined,
-                                size: 18,
-                              ),
-                              label: Text(l10n.downloadPdf),
-                            ),
-                          ),
-                        ],
+                          icon: const Icon(Icons.print_outlined, size: 18),
+                          label: Text(l10n.print),
+                        ),
                       ),
-                      const SizedBox(height: AppSpacing.md),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () => runDownload(
+                            context,
+                            links.quotationPdf(
+                              id: id,
+                              language: language,
+                            ),
+                          ),
+                          icon: const Icon(
+                            Icons.picture_as_pdf_outlined,
+                            size: 18,
+                          ),
+                          label: Text(l10n.downloadPdf),
+                        ),
+                      ),
                     ],
-                    QuotationDocumentView(
-                      document: document,
-                      logoUrl: logoUrl,
-                    ),
-                  ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                ],
+                QuotationDocumentView(
+                  document: document,
+                  logoUrl: logoUrl,
                 ),
-              ),
+              ],
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
   }
