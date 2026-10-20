@@ -19,6 +19,7 @@ void main() {
 
     test('stepping walks the offered sizes and stops at the ends', () {
       expect(stepTextScale(1.0, 1), 1.05);
+      expect(stepTextScale(1.05, -1), 1.0);
       expect(stepTextScale(1.05, 1), 1.15);
       expect(stepTextScale(1.15, -1), 1.05);
       expect(stepTextScale(0.9, -1), isNull);
@@ -29,7 +30,9 @@ void main() {
       // A value stored by an older build, or typed by hand, must not trap the
       // person between two steps.
       expect(stepTextScale(1.02, 1), 1.05);
-      expect(stepTextScale(1.02, -1), 0.9);
+      expect(stepTextScale(1.02, -1), 1.0);
+      expect(stepTextScale(1.1, 1), 1.15);
+      expect(stepTextScale(1.1, -1), 1.05);
     });
 
     test('a value above the last step can still come back down', () {

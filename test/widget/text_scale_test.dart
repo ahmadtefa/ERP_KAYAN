@@ -1,4 +1,5 @@
 import 'package:erp_kayan/app/theme/app_theme.dart';
+import 'package:erp_kayan/core/preferences/text_scale.dart';
 import 'package:erp_kayan/app/theme/text_scale.dart';
 import 'package:erp_kayan/core/storage/token_store.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
@@ -172,8 +173,12 @@ void main() {
       final store = await pumpCard(tester, initial: 1.15);
 
       expect(find.text('115%'), findsWidgets);
-      expect(find.byType(ChoiceChip), findsNWidgets(5));
-      expect(find.text('100%'), findsOneWidget); // an unselected chip
+      expect(
+        find.byType(ChoiceChip),
+        findsNWidgets(kTextScaleSteps.length),
+      );
+      // The design's own size is a chip, not only a reset target.
+      expect(find.text('100%'), findsOneWidget);
       expect(store.saves, 0);
     });
 

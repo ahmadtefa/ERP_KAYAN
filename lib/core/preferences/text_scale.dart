@@ -10,7 +10,10 @@ const double kMinTextScale = 0.9;
 const double kMaxTextScale = 1.4;
 
 /// The steps offered in the settings screen, from smallest to largest.
-const List<double> kTextScaleSteps = <double>[0.9, 1.05, 1.15, 1.25, 1.4];
+///
+/// The design's own size is one of them, so "100%" is a size a person can
+/// pick, not only a state they can return to with the reset button.
+const List<double> kTextScaleSteps = <double>[0.9, 1.0, 1.05, 1.15, 1.25, 1.4];
 
 /// Keeps a stored value inside the supported range and to two decimals.
 ///
