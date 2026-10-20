@@ -474,7 +474,7 @@ export function renderQuotationDocument(
   html, body { margin: 0; padding: 0; }
   body {
     direction: ${rtl ? 'rtl' : 'ltr'};
-    font-family: 'Segoe UI', 'Tahoma', 'Arial', 'sans-serif';
+    font-family: 'Tahoma', 'Segoe UI', 'Arial', sans-serif;
     color: ${INK};
     font-size: 9.5pt;
     line-height: 1.45;
@@ -493,11 +493,10 @@ export function renderQuotationDocument(
   }
   .masthead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8mm; padding-bottom: 5mm; border-bottom: 0.6mm solid ${PRIMARY}; }
   .brand { flex: 1; }
-  .brand h1 { margin: 0; color: ${PRIMARY}; font-size: 16.5pt; font-weight: 800; line-height: 1.3; }
-  .brand .secondary { margin-top: 1mm; color: ${SECONDARY}; font-size: 8pt; letter-spacing: 0.06em; text-transform: uppercase; }
-  .mark { width: 42mm; display: flex; justify-content: flex-end; }
-  .mark img { max-height: 14mm; width: auto; object-fit: contain; }
-  .monogram { width: 18mm; height: 18mm; border-radius: 3mm; background: ${PRIMARY}; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 16pt; font-weight: 800; }
+  .brand h1 { margin: 0; color: ${PRIMARY_DEEP}; font-family: 'Tahoma', 'Segoe UI', Arial, sans-serif; font-size: 12.5pt; font-weight: 600; line-height: 1.35; }
+  .brand .secondary { margin-top: 1mm; color: ${MUTED}; font-family: 'Tahoma', 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; font-weight: 400; letter-spacing: 0.02em; text-transform: none; }
+  .mark { width: 30mm; min-height: 14mm; display: flex; justify-content: flex-end; align-items: flex-start; }
+  .mark img { max-width: 30mm; max-height: 14mm; width: auto; height: auto; object-fit: contain; }
   .title-band { text-align: center; padding: 6mm 0 5mm; }
   .title-band .rule { width: 18mm; height: 0.8mm; background: ${SECONDARY}; margin: 0 auto 3mm; }
   .title-band h2 { margin: 0; color: ${PRIMARY_DEEP}; font-size: 23pt; font-weight: 800; letter-spacing: 0.01em; }
@@ -591,7 +590,7 @@ ${
     </div>
     <div class="mark">${logo
       ? `<img src="${logo}" alt="${escapeHtml(companyName)}">`
-      : `<div class="monogram">${escapeHtml((companyName || 'K').trim().charAt(0))}</div>`
+      : ''
     }</div>
   </header>
 
