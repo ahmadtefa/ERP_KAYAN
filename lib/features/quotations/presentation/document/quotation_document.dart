@@ -12,6 +12,7 @@ class QuotationDocumentElementStyle {
     this.fontWeight,
     this.color,
     this.fontFamily,
+    this.backgroundColor,
   });
 
   /// مضاعف لحجم الخط الأساسي للعنصر (1.0 = الحجم الافتراضي).
@@ -22,6 +23,7 @@ class QuotationDocumentElementStyle {
   final String? color;
   /// A locally installed font family; no web font download is required.
   final String? fontFamily;
+  final String? backgroundColor;
 
   /// ينشئ نسخة من هذا النمط مع تعديلات جزئية.
   QuotationDocumentElementStyle copyWith({
@@ -29,12 +31,14 @@ class QuotationDocumentElementStyle {
     FontWeight? fontWeight,
     String? color,
     String? fontFamily,
+    String? backgroundColor,
   }) {
     return QuotationDocumentElementStyle(
       fontSizeMultiplier: fontSizeMultiplier ?? this.fontSizeMultiplier,
       fontWeight: fontWeight ?? this.fontWeight,
       color: color ?? this.color,
       fontFamily: fontFamily ?? this.fontFamily,
+      backgroundColor: backgroundColor ?? this.backgroundColor,
     );
   }
 }
@@ -111,6 +115,7 @@ class QuotationDocumentDesign {
         fontWeight: _fontWeightOf(v['fontWeight']),
         color: v['color'] as String?,
         fontFamily: v['fontFamily'] as String?,
+        backgroundColor: v['backgroundColor'] as String?,
       );
     }
     return QuotationDocumentDesign(
@@ -142,6 +147,7 @@ class QuotationDocumentDesign {
         if (s.fontWeight != null) 'fontWeight': s.fontWeight.toString().split('.').last,
         if (s.color != null) 'color': s.color,
         if (s.fontFamily != null) 'fontFamily': s.fontFamily,
+        if (s.backgroundColor != null) 'backgroundColor': s.backgroundColor,
       };
     }
     set('title', title);

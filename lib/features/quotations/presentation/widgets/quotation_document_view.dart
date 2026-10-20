@@ -71,6 +71,9 @@ class _Sheet extends StatelessWidget {
       fontSize: (base.fontSize ?? 12) * style.fontSizeMultiplier,
       fontWeight: style.fontWeight ?? base.fontWeight,
       fontFamily: style.fontFamily ?? base.fontFamily,
+      backgroundColor: style.backgroundColor != null
+          ? _parseColor(style.backgroundColor!)
+          : base.backgroundColor,
       color: style.color != null
           ? _parseColor(style.color!)
           : base.color,
@@ -557,7 +560,7 @@ class _Sheet extends StatelessWidget {
 
     Widget headerRow() {
       return Container(
-        color: _Doc.wash,
+        color: _parseColor(document.design?.tableHeader?.backgroundColor ?? '') ?? _Doc.wash,
         child: Row(
           children: [
             _indexCell('#', width: 22 * scale, style: headerStyle),
@@ -877,7 +880,7 @@ class _Sheet extends StatelessWidget {
               '+ ${_money(totals.taxAmount)}',
             ),
           Container(
-            color: _Doc.royal,
+            color: _parseColor(design?.finalTotal?.backgroundColor ?? '') ?? _Doc.royal,
             padding: EdgeInsets.symmetric(
               vertical: 9 * scale,
               horizontal: 9 * scale,

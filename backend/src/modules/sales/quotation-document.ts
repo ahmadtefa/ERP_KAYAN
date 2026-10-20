@@ -248,8 +248,8 @@ export function renderQuotationDocument(
       ['totalsLabel', '.totals td:first-child', 8.5],
       ['totalsValue', '.totals td:last-child', 8.5],
       ['finalTotal', '.totals tr.grand td', 11],
-      ['header', '.masthead', 9.5],
-      ['footer', '.page-footer', 7.5],
+      ['header', '.masthead, .custom-header', 9.5],
+      ['footer', '.page-footer, .custom-footer', 7.5],
     ];
     return rules.map(([key, selector, baseSize]) => {
       const raw = design[key];
@@ -265,6 +265,8 @@ export function renderQuotationDocument(
       if (weights.has(weight)) declarations.push(`font-weight:${weight.slice(1)}`);
       const family = String(style.fontFamily ?? '');
       if (fontFamilies[family]) declarations.push(`font-family:${fontFamilies[family]}`);
+      const background = String(style.backgroundColor ?? '');
+      if (/^#[0-9a-fA-F]{6}$/.test(background)) declarations.push(`background-color:${background}`);
       const color = String(style.color ?? '');
       if (/^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$/.test(color)) {
         declarations.push(`color:${color}`);

@@ -922,6 +922,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     ];
     final working = Map<String, dynamic>.from(_design.toJson());
     final colorController = TextEditingController();
+    final backgroundController = TextEditingController();
+    var palette = 'blue';
     final headerTextController = TextEditingController(text: _design.headerText ?? '');
     final footerTextController = TextEditingController(text: _design.footerText ?? '');
     var selected = 'company';
@@ -938,6 +940,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       weight = (style['fontWeight'] as String?)?.split('.').last ?? 'w600';
       family = style['fontFamily'] as String? ?? 'Tahoma';
       colorController.text = style['color'] as String? ?? '#1e60aa';
+      backgroundController.text = style['backgroundColor'] as String? ?? '';
     }
     loadElement(selected);
 
@@ -954,6 +957,49 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    DropdownButtonFormField<String>(
+                      initialValue: palette,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'قالب الألوان الجاهز' : 'Colour preset',
+                        border: const OutlineInputBorder(),
+                      ),
+                      items: [
+                        DropdownMenuItem(value: 'blue', child: Text(arabic ? 'أزرق احترافي' : 'Professional blue')),
+                        DropdownMenuItem(value: 'green', child: Text(arabic ? 'أخضر شركات' : 'Business green')),
+                        DropdownMenuItem(value: 'burgundy', child: Text(arabic ? 'عنابي' : 'Burgundy')),
+                        DropdownMenuItem(value: 'graphite', child: Text(arabic ? 'رمادي فحمي' : 'Graphite')),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        final primary = switch (value) {
+                          'green' => '#18794e',
+                          'burgundy' => '#8b1e3f',
+                          'graphite' => '#374151',
+                          _ => '#1e60aa',
+                        };
+                        for (final key in ['company', 'title', 'customer', 'sectionTitle', 'totalsLabel', 'totalsValue', 'header', 'footer']) {
+                          final raw = working[key];
+                          final style = raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+                          style['color'] = primary;
+                          working[key] = style;
+                        }
+                        final headerRaw = working['tableHeader'];
+                        final headerStyle = headerRaw is Map ? Map<String, dynamic>.from(headerRaw) : <String, dynamic>{};
+                        headerStyle['color'] = '#ffffff';
+                        headerStyle['backgroundColor'] = primary;
+                        working['tableHeader'] = headerStyle;
+                        final totalRaw = working['finalTotal'];
+                        final totalStyle = totalRaw is Map ? Map<String, dynamic>.from(totalRaw) : <String, dynamic>{};
+                        totalStyle['color'] = '#ffffff';
+                        totalStyle['backgroundColor'] = primary;
+                        working['finalTotal'] = totalStyle;
+                        setDialogState(() {
+                          palette = value;
+                          loadElement(selected);
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       initialValue: selected,
                       isExpanded: true,
@@ -1021,6 +1067,15 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                         border: const OutlineInputBorder(),
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: backgroundController,
+                      decoration: InputDecoration(
+                        labelText: arabic ? 'لون الخلفية (HEX)' : 'Background colour (HEX)',
+                        hintText: '#eff4ff',
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
                     const SizedBox(height: 16),
                     CheckboxListTile(
                       contentPadding: EdgeInsets.zero,
@@ -1074,6 +1129,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                     'fontWeight': weight,
                     'fontFamily': family,
                     if (colour.startsWith('#') && colour.length == 7) 'color': colour,
+                    if (backgroundController.text.trim().startsWith('#') && backgroundController.text.trim().length == 7) 'backgroundColor': backgroundController.text.trim(),
                   };
                   Navigator.of(dialogContext).pop(true);
                 },
@@ -1088,6 +1144,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       }
     } finally {
       colorController.dispose();
+      backgroundController.dispose();
       headerTextController.dispose();
       footerTextController.dispose();
     }
