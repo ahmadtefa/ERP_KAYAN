@@ -164,6 +164,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
             _LogoRow(
               hasLogo: widget.profile['hasLogo'] == true,
               logoUrl: widget.profile['logoUrl'] as String?,
+              companyId: widget.profile['id'] as String?,
             ),
             const SizedBox(height: 16),
             Row(
@@ -238,13 +239,18 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
 }
 
 class _LogoRow extends ConsumerStatefulWidget {
-  const _LogoRow({required this.hasLogo, this.logoUrl});
+  const _LogoRow({
+    required this.hasLogo,
+    this.logoUrl,
+    this.companyId,
+  });
 
   final bool hasLogo;
 
-  /// The relative path the profile reports; [CompanyLogoUrl] resolves it
+  /// The relative path the profile reports; [companyLogoUrl] resolves it
   /// against the address this client talks to.
   final String? logoUrl;
+  final String? companyId;
 
   @override
   ConsumerState<_LogoRow> createState() => _LogoRowState();
@@ -340,9 +346,13 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final url = resolveCompanyLogoUrl(
+    final url = companyLogoUrl(
       ref.watch(appConfigProvider).apiBaseUrl,
-      widget.logoUrl,
+      {
+        'id': widget.companyId,
+        'logoUrl': widget.logoUrl,
+        'hasLogo': widget.hasLogo,
+      },
     );
     return Row(
       children: [

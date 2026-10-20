@@ -43,9 +43,9 @@ class DashboardScreen extends ConsumerWidget {
         : Map<String, dynamic>.from(companyAsync.asData!.value as Map);
     // The profile reports a path, not an address; the running client is the
     // only one that knows the host it talks to.
-    final companyLogoUrl = resolveCompanyLogoUrl(
+    final brandMark = companyLogoUrl(
       ref.watch(appConfigProvider).apiBaseUrl,
-      company['logoUrl'],
+      company,
     );
     final branches =
         branchesAsync.asData?.value
@@ -123,7 +123,7 @@ class DashboardScreen extends ConsumerWidget {
             children: [
               _CompanyContext(
                 company: company,
-                logoUrl: companyLogoUrl,
+                logoUrl: brandMark,
                 name: companyName.isEmpty
                     ? (arabic ? 'مساحة عمل الشركة' : 'Company workspace')
                     : companyName,

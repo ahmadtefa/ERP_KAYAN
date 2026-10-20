@@ -24,3 +24,15 @@ String? resolveCompanyLogoUrl(String apiBaseUrl, Object? raw) {
   );
   return origin.resolve(value.startsWith('/') ? value : '/$value').toString();
 }
+
+/// The mark for a company as an absolute address, from the two shapes the
+/// API has used: the explicit `logoUrl` it returns today, or - for a payload
+/// that only carries the flag and the id - the public endpoint itself.
+String? companyLogoUrl(String apiBaseUrl, Map<String, dynamic> company) {
+  final direct = resolveCompanyLogoUrl(apiBaseUrl, company['logoUrl']);
+  if (direct != null) return direct;
+
+  final id = company['id']?.toString().trim() ?? '';
+  if (id.isEmpty || company['hasLogo'] != true) return null;
+  return resolveCompanyLogoUrl(apiBaseUrl, '/companies/logo/$id');
+}

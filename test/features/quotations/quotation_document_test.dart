@@ -258,6 +258,23 @@ void main() {
       expect(resolveCompanyLogoUrl('http://localhost:3000/api/v1', '  '), isNull);
     });
 
+    test('falls back to the public endpoint when only the flag is reported', () {
+      expect(
+        companyLogoUrl('http://localhost:3000/api/v1', const {
+          'id': 'company-1',
+          'hasLogo': true,
+        }),
+        'http://localhost:3000/companies/logo/company-1',
+      );
+      expect(
+        companyLogoUrl('http://localhost:3000/api/v1', const {
+          'id': 'company-1',
+          'hasLogo': false,
+        }),
+        isNull,
+      );
+    });
+
     test('leaves a relative path when the base is unusable', () {
       expect(
         resolveCompanyLogoUrl('not a url', '/companies/logo/c1'),

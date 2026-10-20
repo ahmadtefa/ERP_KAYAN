@@ -54,10 +54,7 @@ class QuotationPreviewScreen extends ConsumerWidget {
     final appConfig = ref.watch(appConfigProvider);
     final profile = ref.watch(companyProfileProvider).asData?.value ??
         const <String, dynamic>{};
-    final logoUrl = resolveCompanyLogoUrl(
-      appConfig.apiBaseUrl,
-      profile['logoUrl'],
-    );
+    final logoUrl = companyLogoUrl(appConfig.apiBaseUrl, profile);
     final links = ref.read(reportLinkProvider);
     final document = QuotationDocument.fromJson(
       quotation,
