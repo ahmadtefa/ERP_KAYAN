@@ -451,11 +451,10 @@ export function renderQuotationDocument(
   }
   .masthead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8mm; padding-bottom: 5mm; border-bottom: 0.6mm solid ${ROYAL}; }
   .brand { flex: 1; }
-  .brand h1 { margin: 0; color: ${ROYAL}; font-size: 16.5pt; font-weight: 700; line-height: 1.3; }
+  .brand h1 { margin: 0; color: ${ROYAL}; font-size: 12.5pt; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
   .brand .secondary { margin-top: 1mm; color: ${MUTED}; font-size: 8pt; letter-spacing: 0.06em; text-transform: uppercase; }
   .mark { width: 38mm; display: flex; justify-content: flex-end; }
   .mark img { max-width: 38mm; max-height: 20mm; object-fit: contain; }
-  .monogram { width: 18mm; height: 18mm; border-radius: 3mm; background: ${ROYAL}; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18pt; font-weight: 700; }
   .title-band { text-align: center; padding: 6mm 0 5mm; }
   .title-band .rule { width: 18mm; height: 0.8mm; background: ${ROYAL_TINT}; margin: 0 auto 3mm; }
   .title-band h2 { margin: 0; color: ${ROYAL}; font-size: 23pt; font-weight: 700; letter-spacing: 0.01em; }
@@ -546,13 +545,7 @@ ${
       <h1>${escapeHtml(companyName)}</h1>
       ${secondaryName ? `<div class="secondary">${escapeHtml(secondaryName)}</div>` : ''}
     </div>
-    <div class="mark">${
-      logo
-        ? `<img src="${logo}" alt="${escapeHtml(companyName)}">`
-        : `<div class="monogram">${escapeHtml(
-            (companyName || 'K').trim().charAt(0),
-          )}</div>`
-    }</div>
+    ${logo ? `<div class="mark"><img src="${logo}" alt="${escapeHtml(companyName)}"></div>` : ''}
   </header>
 
   <div class="title-band">
