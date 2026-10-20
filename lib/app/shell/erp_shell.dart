@@ -572,7 +572,7 @@ class _NavEntry extends StatelessWidget {
         child: Tooltip(
           message: item.label,
           child: Material(
-            color: selected ? const Color(0x1FFFFFFF) : Colors.transparent,
+            color: selected ? const Color(0x33367BF5) : Colors.transparent,
             borderRadius: BorderRadius.circular(AppRadii.md),
             child: InkWell(
               borderRadius: BorderRadius.circular(AppRadii.md),
@@ -596,7 +596,7 @@ class _NavEntry extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 1),
       child: Material(
-        color: selected ? const Color(0x1FFFFFFF) : Colors.transparent,
+        color: selected ? const Color(0x33367BF5) : Colors.transparent,
         borderRadius: BorderRadius.circular(AppRadii.md),
         clipBehavior: Clip.antiAlias,
         child: Container(
