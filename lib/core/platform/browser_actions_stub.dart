@@ -58,7 +58,7 @@ Future<void> downloadFile(DownloadRequest request) async {
           statusCode: response.statusCode,
         );
       }
-      final disposition = response.headers.value(HttpHeaders.contentDispositionHeader);
+      final disposition = response.headers.value('content-disposition');
       final fromHeader = disposition == null
           ? null
           : RegExp(r'filename="?([^";]+)"?').firstMatch(disposition)?.group(1);
