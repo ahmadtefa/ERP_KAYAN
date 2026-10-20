@@ -248,7 +248,7 @@ export function renderQuotationDocument(
       ['totalsLabel', '.totals td:first-child', 8.5],
       ['totalsValue', '.totals td:last-child', 8.5],
       ['finalTotal', '.totals tr.grand td', 11],
-      ['header', '.masthead, .custom-header', 9.5],
+      ['header', '.custom-header', 9.5],
       ['footer', '.page-footer, .custom-footer', 7.5],
     ];
     return rules.map(([key, selector, baseSize]) => {
