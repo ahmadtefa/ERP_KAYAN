@@ -119,6 +119,14 @@ class _Sheet extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (d.design?.showHeader != false && (d.design?.headerText?.trim().isNotEmpty ?? false))
+            Padding(
+              padding: EdgeInsets.only(bottom: 8 * scale),
+              child: Text(
+                d.design!.headerText!,
+                style: _styled(TextStyle(fontSize: 8 * scale, color: _Doc.muted), d.design?.header),
+              ),
+            ),
           _masthead(),
           SizedBox(height: 22 * scale),
           _titleBand(),
@@ -140,6 +148,14 @@ class _Sheet extends StatelessWidget {
             _signatures(),
           SizedBox(height: 22 * scale),
           _footer(),
+          if (d.design?.showFooter != false && (d.design?.footerText?.trim().isNotEmpty ?? false))
+            Padding(
+              padding: EdgeInsets.only(top: 6 * scale),
+              child: Text(
+                d.design!.footerText!,
+                style: _styled(TextStyle(fontSize: 8 * scale, color: _Doc.muted), d.design?.footer),
+              ),
+            ),
         ],
       ),
     );

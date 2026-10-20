@@ -535,6 +535,7 @@ export function renderQuotationDocument(
     background: #fff;
     color: ${INK};
   }
+  .custom-header, .custom-footer { white-space: pre-wrap; color: ${MUTED}; font-size: 8pt; padding: 2mm 0; }
   .masthead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8mm; padding-bottom: 5mm; border-bottom: 0.6mm solid ${PRIMARY}; }
   .brand { flex: 1; }
   .brand h1 { margin: 0; color: ${PRIMARY_DEEP}; font-family: 'Tahoma', 'Segoe UI', Arial, sans-serif; font-size: 12.5pt; font-weight: 600; line-height: 1.35; }
@@ -627,6 +628,7 @@ ${
        </div>`
 }
 <div class="sheet">
+  ${content.design?.showHeader !== false && typeof content.design?.headerText === 'string' && content.design.headerText.trim() ? '<div class="custom-header">' + escapeHtml(content.design.headerText) + '</div>' : ''}
   <header class="masthead">
     <div class="brand">
       <h1>${escapeHtml(companyName)}</h1>
@@ -708,6 +710,7 @@ ${
     ${contactLine ? `<div>${contactLine}</div>` : ''}
     <div class="legal">${legalLine}</div>
   </footer>
+  ${content.design?.showFooter !== false && typeof content.design?.footerText === 'string' && content.design.footerText.trim() ? '<div class="custom-footer">' + escapeHtml(content.design.footerText) + '</div>' : ''}
 </div>
 ${autoPrint ? '<script>window.addEventListener("load",()=>window.print())</script>' : ''}
 </body>
