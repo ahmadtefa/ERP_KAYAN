@@ -96,11 +96,11 @@ describe('QuotationsService subject and column layout', () => {
     expect(data.subject).toBe('Kitchen offer');
     expect(data.showTaxId).toBe(false);
     expect(data.columns).toEqual([
-      { key: 'itemCode', labelEn: null, labelAr: null, visible: true, width: 2 },
-      { key: 'quantity', labelEn: 'Pieces', labelAr: null, visible: true, width: 1 },
-      { key: 'unitPrice', labelEn: null, labelAr: null, visible: true, width: 2 },
-      { key: 'lineTotal', labelEn: null, labelAr: null, visible: true, width: 2 },
-      { key: 'description', labelEn: null, labelAr: null, visible: true, width: 4 },
+      { key: 'itemCode', labelEn: 'Item code', labelAr: 'كود الصنف', visible: true, width: 2, numeric: false },
+      { key: 'quantity', labelEn: 'Pieces', labelAr: 'الكمية', visible: true, width: 1, numeric: true },
+      { key: 'unitPrice', labelEn: 'Unit price', labelAr: 'سعر الوحدة', visible: true, width: 2, numeric: true },
+      { key: 'lineTotal', labelEn: 'Total', labelAr: 'الإجمالي', visible: true, width: 2, numeric: true },
+      { key: 'description', labelEn: 'Description', labelAr: 'الوصف', visible: true, width: 4, numeric: false },
     ]);
   });
 
@@ -112,12 +112,12 @@ describe('QuotationsService subject and column layout', () => {
     // No layout chosen: the standard six, stored explicitly so a later
     // catalogue change cannot silently alter this offer.
     expect(data.columns).toEqual([
-      { key: 'description', labelEn: null, labelAr: null, visible: true, width: 4 },
-      { key: 'countryOfOrigin', labelEn: null, labelAr: null, visible: true, width: 2 },
-      { key: 'unit', labelEn: null, labelAr: null, visible: true, width: 1 },
-      { key: 'quantity', labelEn: null, labelAr: null, visible: true, width: 1 },
-      { key: 'unitPrice', labelEn: null, labelAr: null, visible: true, width: 2 },
-      { key: 'lineTotal', labelEn: null, labelAr: null, visible: true, width: 2 },
+      { key: 'description', labelEn: null, labelAr: null, visible: true, width: 4, numeric: false },
+      { key: 'countryOfOrigin', labelEn: null, labelAr: null, visible: true, width: 2, numeric: false },
+      { key: 'unit', labelEn: null, labelAr: null, visible: true, width: 1, numeric: false },
+      { key: 'quantity', labelEn: null, labelAr: null, visible: true, width: 1, numeric: true },
+      { key: 'unitPrice', labelEn: null, labelAr: null, visible: true, width: 2, numeric: true },
+      { key: 'lineTotal', labelEn: null, labelAr: null, visible: true, width: 2, numeric: true },
     ]);
   });
 
@@ -173,6 +173,7 @@ describe('QuotationsService subject and column layout', () => {
         subTotal: new Prisma.Decimal('100'),
         discountTotal: new Prisma.Decimal('0'),
         totalAmount: new Prisma.Decimal('100'),
+        design: {},
         managerName: null,
         responsibleName: null,
         responsiblePhone: null,
@@ -212,6 +213,7 @@ describe('QuotationsService subject and column layout', () => {
                 quantity: new Prisma.Decimal('1'),
                 unitPrice: new Prisma.Decimal('100'),
                 lineTotal: new Prisma.Decimal('100'),
+                customValues: {},
               },
             ],
           },

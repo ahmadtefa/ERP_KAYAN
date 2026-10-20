@@ -181,6 +181,30 @@ jobs:
         run: npx prisma migrate deploy
       - name: Seed an isolated company and administrator
         run: npx ts-node prisma/seed.ts
+      - name: Verify quotation migrations are present in the runtime database
+        run: |
+          node <<'NODE'
+          const { Client } = require('pg');
+          (async () => {
+            const client = new Client({ connectionString: process.env.DATABASE_URL });
+            await client.connect();
+            try {
+              const result = await client.query(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'quotations' AND column_name IN ('design', 'columns') ORDER BY column_name"
+              );
+              const columns = result.rows.map((row) => row.column_name);
+              console.log('Quotation columns verified:', columns.join(', '));
+              if (!columns.includes('design') || !columns.includes('columns')) {
+                throw new Error('The runtime database is missing quotation design/layout columns after migration and seed.');
+              }
+            } finally {
+              await client.end();
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
       - name: Build API
         run: npm run build
       - name: Serve the web client and run the regression scenario

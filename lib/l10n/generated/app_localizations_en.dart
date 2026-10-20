@@ -2256,6 +2256,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get columnWidth => 'Width';
 
   @override
+  String get columnNumeric => 'Numeric';
+
+  @override
+  String get addCustomColumn => 'Custom column…';
+
+  @override
+  String get columnKey => 'Column key';
+
+  @override
+  String get columnAlreadyExists => 'A column with this key already exists.';
+
+  @override
   String get addColumn => 'Add column';
 
   @override

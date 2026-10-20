@@ -169,7 +169,7 @@ void main() {
     expect(find.byType(AppBar), findsNothing);
   });
 
-  testWidgets('does not show a fake logo tile when the company has no mark', (tester) async {
+  testWidgets('does not show a fake logo tile when no company mark is available', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 2200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 

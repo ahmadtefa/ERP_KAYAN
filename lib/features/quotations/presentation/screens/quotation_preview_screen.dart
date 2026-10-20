@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/image/company_logo_url.dart';
 import '../../../../core/json/json_utils.dart';
+import '../../../../features/settings/presentation/providers/text_scale_provider.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../../../data/presentation/providers/data_providers.dart';
@@ -55,6 +56,7 @@ class QuotationPreviewScreen extends ConsumerWidget {
     final profile = ref.watch(companyProfileProvider).asData?.value ??
         const <String, dynamic>{};
     final logoUrl = companyLogoUrl(appConfig.apiBaseUrl, profile);
+    final textScale = ref.watch(effectiveTextScaleProvider);
     final links = ref.read(reportLinkProvider);
     final document = QuotationDocument.fromJson(
       quotation,
@@ -143,6 +145,7 @@ class QuotationPreviewScreen extends ConsumerWidget {
                 QuotationDocumentView(
                   document: document,
                   logoUrl: logoUrl,
+                  textScale: textScale,
                 ),
               ],
             ),

@@ -221,7 +221,7 @@ describe('quotation document template', () => {
     expect(html).toContain('CUST-TAX-77');
   });
 
-  it('handles a missing logo with a monogram and no image tag', () => {
+  it('leaves the logo area empty instead of showing a fake logo tile', () => {
     const html = renderQuotationDocument(
       snapshot(),
       { logoData: null, logoMime: null },
@@ -229,7 +229,7 @@ describe('quotation document template', () => {
       false,
     );
     expect(html).not.toContain('<img');
-    expect(html).toContain('class="monogram"');
+    expect(html).not.toContain('class="monogram"');
   });
 
   it('escapes user text and keeps long descriptions intact', () => {
@@ -290,5 +290,36 @@ describe('quotation document template', () => {
     expect(quotationDocumentFileName('', 'fallback-id')).toBe(
       'quotation-fallback-id.pdf',
     );
+  });
+
+  it('shows the stored VAT once and folds it into the final total', () => {
+    const html = renderQuotationDocument(
+      snapshot({
+        totals: {
+          subTotal: '1000.0000',
+          discountTotal: '100.0000',
+          totalAmount: '990.0000',
+          taxRate: '10.0000',
+          taxAmount: '90.0000',
+        },
+      }),
+      COMPANY,
+      'ar',
+      false,
+    );
+    expect(html).toContain('الضريبة المضافة');
+    expect(html).toContain('+ 90.00 EGP');
+    expect(html).toContain('10.00%');
+    expect(html.split('الضريبة المضافة').length - 1).toBe(1);
+    expect(html.split('+ 90.00 EGP').length - 1).toBe(1);
+    expect(html).toContain('990.00 EGP');
+    expect(html.split('990.00 EGP').length - 1).toBe(1);
+  });
+
+  it('omits the VAT line when no tax is stored on the offer', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false);
+    expect(html).not.toContain('الضريبة المضافة');
+    expect(html).not.toContain('Tax (VAT)');
+    expect(html.split('1,420.00 EGP').length - 1).toBe(1);
   });
 });
