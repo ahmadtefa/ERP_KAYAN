@@ -1251,6 +1251,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   /// was applied.
   Future<void> _editColumns() async {
     final l10n = context.l10n;
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
     final available = [
       ...?ref.read(quotationColumnTemplatesProvider).value,
     ];
@@ -1633,7 +1634,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                 content: Text(templateDisplayName),
                                 actions: [
                                   TextButton(onPressed: () => Navigator.pop(confirmContext, false), child: Text(l10n.cancel)),
-                                  FilledButton(onPressed: () => Navigator.pop(confirmContext, true), child: Text(l10n.delete)),
+                                  FilledButton(onPressed: () => Navigator.pop(confirmContext, true), child: Text(arabic ? 'حذف' : 'Delete')),
                                 ],
                               ),
                             );
@@ -1653,7 +1654,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                             }
                           },
                           icon: const Icon(Icons.delete_outline, size: 18),
-                          label: Text(l10n.delete),
+                          label: Text(arabic ? 'حذف' : 'Delete'),
                         ),
                       ],
                     ),
