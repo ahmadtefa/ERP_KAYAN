@@ -1641,6 +1641,13 @@ model Quotation {
   discountPercent Decimal @default(0) @db.Decimal(9, 4)
   discountAmount  Decimal @default(0) @db.Decimal(19, 4)
 
+  /// VAT rate in percent that was in force when the offer was prepared, and
+  /// the VAT charged on the discounted net value. Both are snapshotted so an
+  /// issued offer keeps printing exactly as it did. Tax is applied exactly
+  /// once, after every discount, never on top of an already-taxed value.
+  taxRate     Decimal @default(0) @db.Decimal(9, 4)
+  taxAmount   Decimal @default(0) @db.Decimal(19, 4)
+
   /// Frozen totals, recomputed whenever a draft is saved. Stored so a printed
   /// quotation never has to be recalculated from a different price list.
   subTotal      Decimal @default(0) @db.Decimal(19, 4)

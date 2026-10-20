@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/json/amount_format.dart';
+import '../../../../features/settings/presentation/providers/text_scale_provider.dart';
 import '../../../../shared/widgets/status_pill.dart';
 import '../document/quotation_document.dart';
 
@@ -10,7 +12,10 @@ import '../document/quotation_document.dart';
 /// the in-app preview and the exported PDF show one document rather than two
 /// interpretations of it. Every number comes from [QuotationDocument], which
 /// copies the figures the API stored: nothing is recalculated here.
-class QuotationDocumentView extends StatelessWidget {
+///
+/// The user's program-wide text size (Settings) is applied on top of the
+/// layout scale, so the offer is never stuck at an unreadable size.
+class QuotationDocumentView extends ConsumerWidget {
   const QuotationDocumentView({
     super.key,
     required this.document,
@@ -25,13 +30,15 @@ class QuotationDocumentView extends StatelessWidget {
   static const _referenceWidth = 860.0;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final textScale = ref.watch(effectiveTextScaleProvider);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : _referenceWidth;
-        final scale = (width / _referenceWidth).clamp(0.72, 1.0).toDouble();
+        final scale =
+            ((width / _referenceWidth).clamp(0.72, 1.0) * textScale).toDouble();
         return Directionality(
           textDirection: document.arabic
               ? TextDirection.rtl
@@ -817,6 +824,13 @@ class _Sheet extends StatelessWidget {
               document.arabic ? 'خصم العرض' : 'Quotation discount',
               '− ${_money(totals.quotationDiscount)}',
             ),
+          if (totals.hasTax)
+            row(
+              document.arabic
+                  ? 'الضريبة المضافة${totals.taxRate.isNotEmpty ? ' (${totals.taxRate}%)' : ''}'
+                  : 'Tax (VAT)${totals.taxRate.isNotEmpty ? ' (${totals.taxRate}%)' : ''}',
+              '+ ${_money(totals.taxAmount)}',
+            ),
           Container(
             color: _Doc.royal,
             padding: EdgeInsets.symmetric(
@@ -1025,14 +1039,19 @@ class _Sheet extends StatelessWidget {
 }
 
 /// The document palette, shared with the server template (`quotation-document.ts`).
+/// Identity colours follow the Stitch reference:
+///   primary   #1e60aa  (brand, headings, rules)
+///   secondary #0088cc  (secondary text, sub-brand)
+///   accent    #e67e22  (totals emphasis)
 abstract final class _Doc {
-  static const royal = Color(0xFF00288E);
-  static const royalDeep = Color(0xFF001B60);
-  static const royalTint = Color(0xFF3755C3);
-  static const ink = Color(0xFF0B1C30);
-  static const muted = Color(0xFF444653);
+  static const royal = Color(0xFF1E60AA);
+  static const royalDeep = Color(0xFF164D84);
+  static const royalTint = Color(0xFF0088CC);
+  static const ink = Color(0xFF111827);
+  static const muted = Color(0xFF4B5563);
   static const line = Color(0xFFD3E4FE);
   static const wash = Color(0xFFEFF4FF);
   static const rows = Color(0xFFFBFCFE);
   static const signature = Color(0xFF95A0B0);
+  static const accent = Color(0xFFE67E22);
 }

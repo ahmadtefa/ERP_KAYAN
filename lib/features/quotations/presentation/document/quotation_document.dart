@@ -62,6 +62,8 @@ class QuotationDocumentTotals {
     required this.tableDiscountTotal,
     required this.quotationDiscount,
     required this.totalAmount,
+    this.taxRate = '',
+    this.taxAmount = '',
   });
 
   final String subTotal;
@@ -69,6 +71,12 @@ class QuotationDocumentTotals {
   final String tableDiscountTotal;
   final String quotationDiscount;
   final String totalAmount;
+  /// The company's VAT rate in force when the offer was prepared, in percent.
+  final String taxRate;
+  /// VAT charged exactly once on the discounted net value.
+  final String taxAmount;
+
+  bool get hasTax => (num.tryParse(taxAmount) ?? 0) > 0;
 }
 
 class QuotationDocumentParty {
@@ -307,6 +315,8 @@ class QuotationDocument {
             ? '0'
             : quotationDiscount.toStringAsFixed(2),
         totalAmount: totalAmount,
+        taxRate: text(totalsRaw, 'taxRate', fallback: text(quotation, 'taxRate')),
+        taxAmount: text(totalsRaw, 'taxAmount', fallback: text(quotation, 'taxAmount')),
       ),
       terms: text(source, 'terms', fallback: text(quotation, 'terms')),
       notes: text(source, 'notes', fallback: text(quotation, 'notes')),
