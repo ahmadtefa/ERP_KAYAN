@@ -276,7 +276,9 @@ abstract final class AppTheme {
           }),
           foregroundColor: WidgetStatePropertyAll(scheme.onPrimary),
           elevation: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.disabled)) return 0;
+            if (states.contains(WidgetState.disabled)) {
+              return 0;
+            }
             if (states.contains(WidgetState.pressed)) return 0.5;
             if (states.contains(WidgetState.hovered) ||
                 states.contains(WidgetState.focused)) return 4;
