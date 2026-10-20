@@ -65,6 +65,8 @@ export interface QuotationSnapshot {
   tables: Array<{
     title: string;
     sortOrder: number;
+    /// Null/omitted inherits the quotation-level layout for legacy tables.
+    columns?: QuotationColumn[] | null;
     subTotal: string;
     discountPercent: string;
     discountAmount: string;
@@ -321,25 +323,24 @@ export function renderQuotationDocument(
     .filter(Boolean)
     .join('');
 
-  const columns = (
-    content.columns?.length ? content.columns : standardColumns()
-  ).filter((column) => column.visible);
-  const columnCount =
-    columns.reduce((sum, column) => sum + column.width, 0) || 1;
-  const span = columns.length + 1;
-  const headCells = columns
-    .map((column) => {
-      const builtIn = COLUMN_LABELS[column.key];
-      const numeric = builtIn ? builtIn.numeric : column.numeric ?? false;
-      const width = `${Math.round((column.width / columnCount) * 100)}%`;
-      return `<th${numeric ? ` class="num"` : ''} style="width:${width}">${escapeHtml(
-        columnLabel(column, lang),
-      )}</th>`;
-    })
-    .join('');
-
   const tables = content.tables
     .map((table, index) => {
+      const columns = (
+        table.columns?.length ? table.columns : content.columns?.length ? content.columns : standardColumns()
+      ).filter((column) => column.visible);
+      const columnCount =
+        columns.reduce((sum, column) => sum + column.width, 0) || 1;
+      const span = columns.length + 1;
+      const headCells = columns
+        .map((column) => {
+          const builtIn = COLUMN_LABELS[column.key];
+          const numeric = builtIn ? builtIn.numeric : column.numeric ?? false;
+          const width = `${Math.round((column.width / columnCount) * 100)}%`;
+          return `<th${numeric ? ` class="num"` : ''} style="width:${width}">${escapeHtml(
+            columnLabel(column, lang),
+          )}</th>`;
+        })
+        .join('');
       const rows = table.lines
         .map((line, lineIndex) => {
           const cells = columns
