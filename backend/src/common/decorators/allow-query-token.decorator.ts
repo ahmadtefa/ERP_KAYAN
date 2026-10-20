@@ -2,8 +2,8 @@ import { SetMetadata } from '@nestjs/common';
 
 export const ALLOW_QUERY_TOKEN_KEY = 'allowQueryToken';
 
-/// Lets a route accept the access token as `?token=` instead of a bearer
-/// header.
+/// Lets a route accept a one-minute download ticket as `?ticket=` instead of a
+/// bearer header.
 ///
 /// A file download is a browser navigation, not an XHR: the browser opens a
 /// tab and the tab cannot carry an Authorization header. Without this the only
@@ -11,7 +11,8 @@ export const ALLOW_QUERY_TOKEN_KEY = 'allowQueryToken';
 /// them to the page as a blob, which fails on large files.
 ///
 /// Apply it to download and print routes only, and never to a route that
-/// changes data: a token in a URL can end up in a browser history entry or a
-/// server log, which is acceptable for a file that is already the user's own
-/// report and not for anything else.
+/// changes data. The ticket is minted by `POST /auth/download-ticket`, works
+/// on these routes alone, and dies after a minute; a sign-in token is refused
+/// here even though it would verify, because a quarter-hour credential in a
+/// URL can be replayed against the whole API.
 export const AllowQueryToken = () => SetMetadata(ALLOW_QUERY_TOKEN_KEY, true);

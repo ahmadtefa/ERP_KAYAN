@@ -4,8 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
+import '../../../../core/json/discount_math.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/discount_kind_label.dart';
+import '../../../../shared/widgets/item_picker_dialog.dart';
+import '../../../accounting/presentation/providers/cost_center_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
@@ -17,19 +21,60 @@ class _LineDraft {
     String quantity = '1',
     String unitPrice = '0',
     String taxRate = '0',
+    String discountValue = '',
   }) : quantity = TextEditingController(text: quantity),
       unitPrice = TextEditingController(text: unitPrice),
-      taxRate = TextEditingController(text: taxRate);
+      taxRate = TextEditingController(text: taxRate),
+      discountValue = TextEditingController(text: discountValue);
 
   String? itemId;
+
+  /// Optional cost centre for the line. Left null on a balance-sheet-only
+  /// line; the server checks that the centre is one this company may use.
+  String? costCenterId;
   final TextEditingController quantity;
   final TextEditingController unitPrice;
   final TextEditingController taxRate;
+
+  /// A line discount: a percentage or a fixed amount of money. The server
+  /// resolves the other representation and stores both.
+  DiscountKind discountKind = DiscountKind.none;
+  final TextEditingController discountValue;
+
+  /// The line's own arithmetic, for the summary under the inputs.
+  ({Decimal gross, ResolvedDiscount discount}) get pricing {
+    final quantityValue = Decimal.tryParse(quantity.text.trim()) ?? Decimal.zero;
+    final price = Decimal.tryParse(unitPrice.text.trim()) ?? Decimal.zero;
+    final gross = quantityValue * price;
+    return (
+      gross: gross,
+      discount: resolveDiscount(
+        gross,
+        discountKind,
+        Decimal.tryParse(discountValue.text.trim()),
+      ),
+    );
+  }
 
   void dispose() {
     quantity.dispose();
     unitPrice.dispose();
     taxRate.dispose();
+    discountValue.dispose();
+  }
+}
+
+class _LandedCostDraft {
+  _LandedCostDraft({String description = '', String amount = '0'})
+      : description = TextEditingController(text: description),
+        amount = TextEditingController(text: amount);
+
+  final TextEditingController description;
+  final TextEditingController amount;
+
+  void dispose() {
+    description.dispose();
+    amount.dispose();
   }
 }
 
@@ -38,9 +83,10 @@ class _LineDraft {
 /// The screen only ever creates a draft. Posting is a separate, deliberate
 /// step from the list, because posting moves stock and writes to the ledger.
 class InvoiceEditorScreen extends ConsumerStatefulWidget {
-  const InvoiceEditorScreen({super.key, required this.kind});
+  const InvoiceEditorScreen({super.key, required this.kind, this.invoiceId});
 
   final InvoiceKind kind;
+  final String? invoiceId;
 
   @override
   ConsumerState<InvoiceEditorScreen> createState() =>
@@ -53,7 +99,11 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   String? _supplierReference;
   String? _notes;
   late String _invoiceDate;
+  final _landedCosts = <_LandedCostDraft>[];
+  final _documentDiscount = TextEditingController();
+  DiscountKind _documentDiscountKind = DiscountKind.none;
   bool _saving = false;
+  bool _loadingExisting = false;
 
   @override
   void initState() {
@@ -64,6 +114,90 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
     _lines.add(_LineDraft());
+    if (widget.invoiceId != null) {
+      _loadingExisting = true;
+      _loadExisting();
+    }
+  }
+
+  Future<void> _loadExisting() async {
+    try {
+      final invoice = await ref
+          .read(apiClientProvider)
+          .getObject('${widget.kind.basePath}/${widget.invoiceId}');
+      if (!mounted) return;
+      if (text(invoice, 'status').toLowerCase() != 'draft') {
+        showMessage(context, context.l10n.onlyDraftInvoiceCanBeEdited, error: true);
+        Navigator.of(context).pop();
+        return;
+      }
+      for (final line in _lines) {
+        line.dispose();
+      }
+      _lines.clear();
+      for (final charge in _landedCosts) {
+        charge.dispose();
+      }
+      _landedCosts.clear();
+      for (final row in listOf(invoice['landedCostCharges'])) {
+        _landedCosts.add(_LandedCostDraft(
+          description: text(row, 'description'),
+          amount: text(row, 'amount', fallback: '0'),
+        ));
+      }
+      final legacyLandedCost = Decimal.tryParse(text(invoice, 'landedCostAmount')) ?? Decimal.zero;
+      if (_landedCosts.isEmpty && legacyLandedCost > Decimal.zero) {
+        _landedCosts.add(_LandedCostDraft(
+          description: context.l10n.otherLandedCosts,
+          amount: legacyLandedCost.toString(),
+        ));
+      }
+      for (final row in listOf(invoice['lines'])) {
+        final line = _LineDraft(
+          quantity: text(row, 'quantity', fallback: '1'),
+          unitPrice: text(row, 'unitPrice', fallback: '0'),
+          taxRate: text(row, 'taxRate', fallback: '0'),
+        )
+          ..itemId = text(row, 'itemId').isEmpty ? null : text(row, 'itemId')
+          ..costCenterId = text(row, 'costCenterId').isEmpty
+              ? null
+              : text(row, 'costCenterId');
+        final discountKind = discountKindOf(text(row, 'discountType'));
+        if (discountKind == DiscountKind.percent) {
+          line.discountValue.text = text(row, 'discountPercent', fallback: '');
+          if (line.discountValue.text == '0.0000') line.discountValue.text = '';
+        } else if (discountKind == DiscountKind.amount) {
+          line.discountValue.text = text(row, 'discountAmount', fallback: '');
+          if (line.discountValue.text == '0.0000') line.discountValue.text = '';
+        }
+        line.discountKind = discountKind;
+        _lines.add(line);
+      }
+      if (_lines.isEmpty) _lines.add(_LineDraft());
+      _documentDiscountKind =
+          discountKindOf(text(invoice, 'discountType'));
+      _documentDiscount.text = _documentDiscountKind == DiscountKind.percent
+          ? text(invoice, 'discountPercent', fallback: '')
+          : text(invoice, 'discountAmount', fallback: '');
+      if (_documentDiscount.text == '0.0000') _documentDiscount.text = '';
+      if (_documentDiscountKind == DiscountKind.none) _documentDiscount.clear();
+      setState(() {
+        _partyId = text(invoice, widget.kind.partyKey).isNotEmpty
+            ? text(Map<String, dynamic>.from(invoice[widget.kind.partyKey] as Map), 'id')
+            : null;
+        _supplierReference = text(invoice, 'supplierReference').isEmpty
+            ? null
+            : text(invoice, 'supplierReference');
+        _notes = text(invoice, 'notes').isEmpty ? null : text(invoice, 'notes');
+        _invoiceDate = text(invoice, 'invoiceDate', fallback: _invoiceDate);
+        _loadingExisting = false;
+      });
+    } on Failure catch (error) {
+      if (mounted) {
+        setState(() => _loadingExisting = false);
+        showMessage(context, error.message, error: true);
+      }
+    }
   }
 
   @override
@@ -71,28 +205,70 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     for (final line in _lines) {
       line.dispose();
     }
+    for (final charge in _landedCosts) {
+      charge.dispose();
+    }
+    _documentDiscount.dispose();
     super.dispose();
   }
 
   /// Totals computed with [Decimal], the same arithmetic the server uses, so
-  /// what is previewed here is what will be stored.
-  ({Decimal subTotal, Decimal tax, Decimal total}) get _totals {
+  /// what is previewed here is what will be stored. The document discount is
+  /// spread over the net line values with the same largest-remainder method.
+  ({
+    Decimal gross,
+    Decimal lineDiscount,
+    Decimal invoiceDiscount,
+    Decimal subTotal,
+    Decimal tax,
+    Decimal landedCost,
+    Decimal total,
+  }) get _totals {
+    final nets = <Decimal>[];
+    final rates = <Decimal>[];
+    var gross = Decimal.zero;
+    var lineDiscount = Decimal.zero;
+    for (final line in _lines) {
+      final pricing = line.pricing;
+      if (line.quantity.text.trim().isEmpty || line.unitPrice.text.trim().isEmpty) {
+        continue;
+      }
+      gross += pricing.gross;
+      lineDiscount += pricing.discount.amount;
+      nets.add(pricing.discount.net);
+      rates.add(Decimal.tryParse(line.taxRate.text.trim()) ?? Decimal.zero);
+    }
+    final netBeforeDocument = nets.fold(Decimal.zero, (sum, value) => sum + value);
+    final document = resolveDiscount(
+      netBeforeDocument,
+      _documentDiscountKind,
+      Decimal.tryParse(_documentDiscount.text.trim()),
+    );
+    final shares = allocateByWeight(nets, document.amount);
     var subTotal = Decimal.zero;
     var tax = Decimal.zero;
-    for (final line in _lines) {
-      final quantity = Decimal.tryParse(line.quantity.text.trim());
-      final price = Decimal.tryParse(line.unitPrice.text.trim());
-      if (quantity == null || price == null) continue;
-      final lineTotal = quantity * price;
-      subTotal += lineTotal;
-      final rate = Decimal.tryParse(line.taxRate.text.trim()) ?? Decimal.zero;
-      // Dividing in the decimal package yields a Rational, so it is turned
-      // back into a 4-decimal value before it is added up.
-      tax += (lineTotal * rate / Decimal.fromInt(100))
-          .toDecimal(scaleOnInfinitePrecision: 8)
-          .round(scale: 4);
+    for (var index = 0; index < nets.length; index++) {
+      final net = nets[index] - shares[index];
+      subTotal += net;
+      tax += (net * rates[index] / Decimal.fromInt(100))
+          .toDecimal(scaleOnInfinitePrecision: 12)
+          .round(scale: moneyScale);
     }
-    return (subTotal: subTotal, tax: tax, total: subTotal + tax);
+    var landedCost = Decimal.zero;
+    if (!widget.kind.isSales) {
+      for (final charge in _landedCosts) {
+        landedCost += Decimal.tryParse(charge.amount.text.trim()) ?? Decimal.zero;
+      }
+    }
+    return (
+      gross: gross,
+      lineDiscount: lineDiscount,
+      invoiceDiscount: document.amount,
+      subTotal: subTotal,
+      tax: tax,
+      landedCost: landedCost,
+      total: subTotal + tax + landedCost,
+    );
   }
 
   void _applyItemDefaults(_LineDraft line, Json item) {
@@ -122,6 +298,34 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       return;
     }
 
+    final landedCostCharges = <Json>[];
+    var landedCost = Decimal.zero;
+    if (!widget.kind.isSales) {
+      for (final charge in _landedCosts) {
+        final description = charge.description.text.trim();
+        final rawAmount = charge.amount.text.trim();
+        final amount = Decimal.tryParse(rawAmount);
+        if (description.isEmpty &&
+            (rawAmount.isEmpty || (amount != null && amount == Decimal.zero))) {
+          continue;
+        }
+        if (description.isEmpty) {
+          showMessage(context, l10n.landedCostDescriptionRequired, error: true);
+          return;
+        }
+        if (amount == null) {
+          showMessage(context, l10n.landedCostAmountInvalid, error: true);
+          return;
+        }
+        if (amount < Decimal.zero) {
+          showMessage(context, l10n.landedCostCannotBeNegative, error: true);
+          return;
+        }
+        landedCost += amount;
+        landedCostCharges.add({'description': description, 'amount': amount.toString()});
+      }
+    }
+
     final lines = <Json>[];
     for (final line in _lines) {
       final quantity = line.quantity.text.trim();
@@ -132,11 +336,19 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         showMessage(context, l10n.mustBePositive, error: true);
         return;
       }
+      final discountText = line.discountValue.text.trim();
       lines.add({
         if (line.itemId != null) 'itemId': line.itemId,
         'quantity': quantity,
         'unitPrice': price,
         if (line.taxRate.text.trim().isNotEmpty) 'taxRate': line.taxRate.text.trim(),
+        if (line.costCenterId != null) 'costCenterId': line.costCenterId,
+        if (line.discountKind != DiscountKind.none)
+          'discountType': discountTypeOf(line.discountKind),
+        if (line.discountKind == DiscountKind.percent && discountText.isNotEmpty)
+          'discountPercent': discountText,
+        if (line.discountKind == DiscountKind.amount && discountText.isNotEmpty)
+          'discountAmount': discountText,
       });
     }
     if (lines.isEmpty) {
@@ -146,20 +358,34 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
 
     setState(() => _saving = true);
     try {
-      await ref
-          .read(apiClientProvider)
-          .post(
-            widget.kind.basePath,
-            body: {
-              'invoiceDate': _invoiceDate,
-              if (widget.kind.isSales) 'customerId': _partyId,
-              if (!widget.kind.isSales) 'supplierId': _partyId,
-              if (!widget.kind.isSales && _supplierReference != null)
-                'supplierReference': _supplierReference,
-              if (_notes != null && _notes!.isNotEmpty) 'notes': _notes,
-              'lines': lines,
-            },
-          );
+      final body = <String, dynamic>{
+        'invoiceDate': _invoiceDate,
+        if (widget.kind.isSales) 'customerId': _partyId,
+        if (!widget.kind.isSales) 'supplierId': _partyId,
+        if (!widget.kind.isSales) 'landedCostAmount': landedCost.toString(),
+        if (!widget.kind.isSales) 'landedCostCharges': landedCostCharges,
+        if (!widget.kind.isSales && _supplierReference != null)
+          'supplierReference': _supplierReference,
+        if (_notes != null && _notes!.isNotEmpty) 'notes': _notes,
+        if (_documentDiscountKind != DiscountKind.none) ...{
+          'discountType': discountTypeOf(_documentDiscountKind),
+          if (_documentDiscountKind == DiscountKind.percent &&
+              _documentDiscount.text.trim().isNotEmpty)
+            'discountPercent': _documentDiscount.text.trim(),
+          if (_documentDiscountKind == DiscountKind.amount &&
+              _documentDiscount.text.trim().isNotEmpty)
+            'discountAmount': _documentDiscount.text.trim(),
+        },
+        'lines': lines,
+      };
+      if (widget.invoiceId != null) {
+        await ref.read(apiClientProvider).put(
+          '${widget.kind.basePath}/${widget.invoiceId}',
+          body: body,
+        );
+      } else {
+        await ref.read(apiClientProvider).post(widget.kind.basePath, body: body);
+      }
       await ref.read(invoiceListProvider(widget.kind).notifier).reload();
       if (mounted) {
         Navigator.of(context).pop(true);
@@ -179,17 +405,26 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     final partiesAsync = ref.watch(
       widget.kind.isSales ? activeCustomersProvider : activeSuppliersProvider,
     );
+    // Every centre, including a deactivated one, so a draft that already
+    // names a centre still shows it. The server still refuses a new posting
+    // to an inactive centre, and says so.
+    final costCenters = ref.watch(costCentersProvider).value ?? const <Json>[];
+    final language = Localizations.localeOf(context).languageCode;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.kind.isSales ? l10n.newSalesInvoice : l10n.newPurchaseInvoice,
+          widget.invoiceId != null
+              ? l10n.editDraftInvoice
+              : widget.kind.isSales
+                  ? l10n.newSalesInvoice
+                  : l10n.newPurchaseInvoice,
         ),
         actions: [
           Padding(
             padding: const EdgeInsetsDirectional.only(end: 16),
             child: FilledButton.icon(
-              onPressed: _saving ? null : _save,
+              onPressed: _saving || _loadingExisting ? null : _save,
               icon: const Icon(Icons.save_outlined),
               label: Text(l10n.save),
             ),
@@ -200,6 +435,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           _Header(
+            key: ValueKey('${widget.invoiceId ?? 'new'}-$_loadingExisting'),
             kind: widget.kind,
             invoiceDate: _invoiceDate,
             onDateChanged: (value) => setState(() => _invoiceDate = value),
@@ -210,8 +446,67 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
                 setState(() => _supplierReference = value),
             notes: _notes,
             onNotesChanged: (value) => setState(() => _notes = value),
+            discountKind: _documentDiscountKind,
+            discountController: _documentDiscount,
+            onDiscountKindChanged: (value) =>
+                setState(() => _documentDiscountKind = value),
+            onDiscountChanged: () => setState(() {}),
             parties: partiesAsync.value ?? const [],
           ),
+          if (!widget.kind.isSales) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(child: Text(l10n.landedCosts, style: Theme.of(context).textTheme.titleMedium)),
+                TextButton.icon(
+                  onPressed: () => setState(() => _landedCosts.add(_LandedCostDraft())),
+                  icon: const Icon(Icons.add),
+                  label: Text(l10n.addLandedCost),
+                ),
+              ],
+            ),
+            Text(l10n.landedCostAllocationHint, style: Theme.of(context).textTheme.bodySmall),
+            for (var index = 0; index < _landedCosts.length; index++) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: TextField(
+                      key: ValueKey('landed-cost-description-$index'),
+                      controller: _landedCosts[index].description,
+                      decoration: InputDecoration(
+                        labelText: l10n.description,
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: TextField(
+                      key: ValueKey('landed-cost-amount-$index'),
+                      controller: _landedCosts[index].amount,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: InputDecoration(
+                        labelText: l10n.amount,
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: l10n.removeLandedCost,
+                    onPressed: () => setState(() => _landedCosts.removeAt(index).dispose()),
+                    icon: const Icon(Icons.delete_outline),
+                  ),
+                ],
+              ),
+            ],
+          ],
           const SizedBox(height: 16),
           Row(
             children: [
@@ -229,13 +524,15 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
             kind: widget.kind,
             lines: _lines,
             items: itemsAsync.value ?? const [],
+            costCenters: costCenters,
+            language: language,
             onChanged: () => setState(() {}),
             onAdd: () => setState(() => _lines.add(_LineDraft())),
             onRemove: (index) => setState(() => _lines.removeAt(index).dispose()),
             onItemDefaults: _applyItemDefaults,
           ),
           const SizedBox(height: 16),
-          _Totals(totals: _totals),
+          _Totals(totals: _totals, showLandedCost: !widget.kind.isSales),
         ],
       ),
     );
@@ -244,6 +541,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
 
 class _Header extends StatelessWidget {
   const _Header({
+    super.key,
     required this.kind,
     required this.invoiceDate,
     required this.onDateChanged,
@@ -253,6 +551,10 @@ class _Header extends StatelessWidget {
     required this.onSupplierReferenceChanged,
     required this.notes,
     required this.onNotesChanged,
+    required this.discountKind,
+    required this.discountController,
+    required this.onDiscountKindChanged,
+    required this.onDiscountChanged,
     required this.parties,
   });
 
@@ -265,6 +567,10 @@ class _Header extends StatelessWidget {
   final ValueChanged<String?> onSupplierReferenceChanged;
   final String? notes;
   final ValueChanged<String?> onNotesChanged;
+  final DiscountKind discountKind;
+  final TextEditingController discountController;
+  final ValueChanged<DiscountKind> onDiscountKindChanged;
+  final VoidCallback onDiscountChanged;
   final List<Json> parties;
 
   @override
@@ -353,6 +659,59 @@ class _Header extends StatelessWidget {
               ),
               onChanged: onNotesChanged,
             ),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 220,
+                  child: DropdownButtonFormField<DiscountKind>(
+                    key: const ValueKey('document-discount'),
+                    initialValue: discountKind,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: l10n.invoiceDiscount,
+                      helperText: l10n.discountBeforeTaxHint,
+                      border: const OutlineInputBorder(),
+                    ),
+                    items: [
+                      for (final kind in DiscountKind.values)
+                        DropdownMenuItem(
+                          value: kind,
+                          child: Text(discountKindLabel(context, kind)),
+                        ),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      onDiscountKindChanged(value);
+                      if (value == DiscountKind.none) {
+                        discountController.clear();
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 200,
+                  child: TextField(
+                    key: const ValueKey('document-discount-value'),
+                    controller: discountController,
+                    enabled: discountKind != DiscountKind.none,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: discountKind == DiscountKind.percent
+                          ? l10n.discountPercentValue
+                          : l10n.discountAmountValue,
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    onChanged: (_) => onDiscountChanged(),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -360,11 +719,20 @@ class _Header extends StatelessWidget {
   }
 }
 
+/// The value the dropdown may start on. A value outside the choices would make
+/// the widget assert, and the line's own value is kept in the payload anyway.
+String? _costCenterChoice(List<Json> centres, String? id) {
+  if (id == null || id.isEmpty) return null;
+  return centres.any((center) => text(center, 'id') == id) ? id : null;
+}
+
 class _LinesTable extends StatelessWidget {
   const _LinesTable({
     required this.kind,
     required this.lines,
     required this.items,
+    required this.costCenters,
+    required this.language,
     required this.onChanged,
     required this.onAdd,
     required this.onRemove,
@@ -374,6 +742,8 @@ class _LinesTable extends StatelessWidget {
   final InvoiceKind kind;
   final List<_LineDraft> lines;
   final List<Json> items;
+  final List<Json> costCenters;
+  final String language;
   final VoidCallback onChanged;
   final VoidCallback onAdd;
   final void Function(int index) onRemove;
@@ -391,12 +761,19 @@ class _LinesTable extends StatelessWidget {
               Padding(
                 key: ValueKey(lines[index]),
                 padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                     Expanded(
                       flex: 3,
-                      child: DropdownButtonFormField<String>(
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                        key: ValueKey('item-choice-${lines[index].itemId}'),
                         initialValue: lines[index].itemId,
                         isExpanded: true,
                         decoration: InputDecoration(
@@ -427,12 +804,74 @@ class _LinesTable extends StatelessWidget {
                           }
                           onChanged();
                         },
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: l10n.selectItem,
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.search, size: 18),
+                            onPressed: () async {
+                              final picked = await showItemPicker(
+                                context,
+                                title: l10n.selectItem,
+                              );
+                              if (picked == null) return;
+                              lines[index].itemId = text(picked, 'id');
+                              onItemDefaults(lines[index], picked);
+                              onChanged();
+                            },
+                          ),
+                        ],
                       ),
                     ),
+                    if (costCenters.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 3,
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _costCenterChoice(
+                            costCenters,
+                            lines[index].costCenterId,
+                          ),
+                          isExpanded: true,
+                          decoration: InputDecoration(
+                            labelText: l10n.costCenter,
+                            isDense: true,
+                            border: const OutlineInputBorder(),
+                          ),
+                          items: [
+                            DropdownMenuItem(
+                              value: '',
+                              child: Text(
+                                l10n.noAllocation,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            for (final center in costCenters)
+                              DropdownMenuItem(
+                                value: text(center, 'id'),
+                                child: Text(
+                                  flag(center, 'isActive', fallback: true)
+                                      ? costCenterLabel(center, language)
+                                      : '${costCenterLabel(center, language)} '
+                                            '(${l10n.inactive})',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                          onChanged: (value) {
+                            lines[index].costCenterId =
+                                value == null || value.isEmpty ? null : value;
+                            onChanged();
+                          },
+                        ),
+                      ),
+                    ],
                     const SizedBox(width: 8),
                     Expanded(
                       flex: 2,
                       child: TextFormField(
+                        key: ValueKey('line-quantity-$index'),
                         controller: lines[index].quantity,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
@@ -449,6 +888,7 @@ class _LinesTable extends StatelessWidget {
                     Expanded(
                       flex: 2,
                       child: TextFormField(
+                        key: ValueKey('line-price-$index'),
                         controller: lines[index].unitPrice,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
@@ -489,7 +929,78 @@ class _LinesTable extends StatelessWidget {
                     ),
                   ],
                 ),
-              ),
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(start: 12, top: 4),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 170,
+                        child: DropdownButtonFormField<DiscountKind>(
+                          key: ValueKey('line-discount-$index'),
+                          initialValue: lines[index].discountKind,
+                          isDense: true,
+                          isExpanded: true,
+                          decoration: InputDecoration(
+                            labelText: l10n.lineDiscount,
+                            border: const OutlineInputBorder(),
+                          ),
+                          items: [
+                            for (final kind in DiscountKind.values)
+                              DropdownMenuItem(
+                                value: kind,
+                                child: Text(discountKindLabel(context, kind)),
+                              ),
+                          ],
+                          onChanged: (value) {
+                            if (value == null) return;
+                            lines[index].discountKind = value;
+                            if (value == DiscountKind.none) {
+                              lines[index].discountValue.clear();
+                            }
+                            onChanged();
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 150,
+                        child: TextFormField(
+                          key: ValueKey('line-discount-value-$index'),
+                          controller: lines[index].discountValue,
+                          enabled:
+                              lines[index].discountKind != DiscountKind.none,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: InputDecoration(
+                            labelText: lines[index].discountKind ==
+                                    DiscountKind.percent
+                                ? l10n.discountPercentValue
+                                : l10n.discountAmountValue,
+                            isDense: true,
+                            border: const OutlineInputBorder(),
+                          ),
+                          onChanged: (_) => onChanged(),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          '${l10n.beforeDiscount}: '
+                          '${formatAmount(lines[index].pricing.gross.toString())}'
+                          '  −  ${formatAmount(lines[index].pricing.discount.amount.toString())}'
+                          '  =  ${l10n.netLine}: '
+                          '${formatAmount(lines[index].pricing.discount.net.toString())}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
           ],
         ),
       ),
@@ -506,24 +1017,68 @@ class _LineTotal extends StatelessWidget {
   Widget build(BuildContext context) {
     final quantity = Decimal.tryParse(line.quantity.text.trim());
     final price = Decimal.tryParse(line.unitPrice.text.trim());
-    final text = quantity == null || price == null
-        ? '—'
-        : formatAmount((quantity * price).toString());
+    if (quantity == null || price == null) {
+      return const InputDecorator(
+        decoration: InputDecoration(
+          labelText: '',
+          isDense: true,
+          border: OutlineInputBorder(),
+        ),
+        child: Text('—', textAlign: TextAlign.end),
+      );
+    }
+    final pricing = line.pricing;
+    final hasDiscount = pricing.discount.amount > Decimal.zero;
     return InputDecorator(
       decoration: const InputDecoration(
         labelText: '',
         isDense: true,
         border: OutlineInputBorder(),
       ),
-      child: Text(text, textAlign: TextAlign.end),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (hasDiscount) ...[
+            Text(
+              formatAmount(pricing.gross.toString()),
+              textAlign: TextAlign.end,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    decoration: TextDecoration.lineThrough,
+                  ),
+            ),
+            Text(
+              '− ${formatAmount(pricing.discount.amount.toString())}',
+              textAlign: TextAlign.end,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const Divider(height: 4),
+          ],
+          Text(
+            formatAmount(pricing.discount.net.toString()),
+            textAlign: TextAlign.end,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _Totals extends StatelessWidget {
-  const _Totals({required this.totals});
+  const _Totals({required this.totals, required this.showLandedCost});
 
-  final ({Decimal subTotal, Decimal tax, Decimal total}) totals;
+  final ({
+    Decimal gross,
+    Decimal lineDiscount,
+    Decimal invoiceDiscount,
+    Decimal subTotal,
+    Decimal tax,
+    Decimal landedCost,
+    Decimal total,
+  }) totals;
+
+  final bool showLandedCost;
 
   @override
   Widget build(BuildContext context) {
@@ -555,8 +1110,14 @@ class _Totals extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            row(l10n.beforeDiscount, totals.gross),
+            if (totals.lineDiscount != Decimal.zero)
+              row(l10n.lineDiscounts, totals.lineDiscount),
+            if (totals.invoiceDiscount != Decimal.zero)
+              row(l10n.invoiceDiscount, totals.invoiceDiscount),
             row(l10n.subTotal, totals.subTotal),
             row(l10n.taxAmount, totals.tax),
+            if (showLandedCost) row(l10n.landedCosts, totals.landedCost),
             const Divider(),
             row(l10n.totalAmount, totals.total, strong: true),
           ],

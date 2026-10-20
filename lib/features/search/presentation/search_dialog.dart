@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../app/theme/design_tokens.dart';
 import '../../../core/json/amount_format.dart';
 import '../../../core/json/json_utils.dart';
 import '../../dashboard/presentation/providers/dashboard_providers.dart';
@@ -47,7 +48,10 @@ class _GlobalSearchDialogState extends ConsumerState<_GlobalSearchDialog> {
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
     final resultsAsync = ref.watch(globalSearchProvider(_query));
     return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      insetPadding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xxl,
+        vertical: AppSpacing.xxxl,
+      ),
       clipBehavior: Clip.antiAlias,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 640, maxHeight: 560),
@@ -55,45 +59,52 @@ class _GlobalSearchDialogState extends ConsumerState<_GlobalSearchDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 12, 8),
+              padding: const EdgeInsetsDirectional.fromSTEB(
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.sm,
+                AppSpacing.sm,
+              ),
               child: Row(
                 children: [
+                  Icon(
+                    Icons.travel_explore_outlined,
+                    size: 20,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
                   Expanded(
                     child: Text(
                       arabic ? 'بحث شامل' : 'Global search',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(fontWeight: FontWeight.w800),
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                   IconButton(
                     tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
                     onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close_rounded),
+                    icon: const Icon(Icons.close_rounded, size: 20),
                   ),
                 ],
               ),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
               child: TextField(
                 controller: _controller,
                 autofocus: true,
                 onChanged: _onChanged,
                 onSubmitted: (value) => setState(() => _query = value),
                 decoration: InputDecoration(
-                  prefixIcon: const Icon(Icons.search_rounded),
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
                   hintText: arabic
                       ? 'رقم مستند، اسم عميل أو مورد، صنف...'
                       : 'Document number, customer, supplier, item...',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
                 ),
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: AppSpacing.sm),
             Expanded(
               child: _query.trim().length < 2
                   ? Center(
@@ -139,8 +150,8 @@ class _GlobalSearchDialogState extends ConsumerState<_GlobalSearchDialog> {
                         }
                         return ListView.separated(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
+                            horizontal: AppSpacing.sm,
+                            vertical: AppSpacing.xs,
                           ),
                           itemCount: rows.length,
                           separatorBuilder: (_, _) =>
@@ -174,7 +185,10 @@ class _GlobalSearchDialogState extends ConsumerState<_GlobalSearchDialog> {
                                           .textTheme
                                           .bodyMedium
                                           ?.copyWith(
-                                            fontWeight: FontWeight.w800,
+                                            fontWeight: FontWeight.w700,
+                                            fontFeatures: const [
+                                              FontFeature.tabularFigures(),
+                                            ],
                                           ),
                                     ),
                               onTap: () {

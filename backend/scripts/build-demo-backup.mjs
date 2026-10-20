@@ -389,15 +389,31 @@ async function main() {
       throw new Error(`the restore API did not start:\n${restore.log()}`);
     }
 
-    // The token from the demo server is accepted here: both servers were
-    // started with the same signing secret, and the permission carried on it
-    // is `admin.backup`.
+    // A source-database JWT is not authorization on a fresh installation:
+    // the destination must have its own real administrator first. Exercise
+    // public first-run setup and login, exactly as the installed client does.
+    const foreignToken = await fetch(`${restoreBase}/backup/full`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    check('a token from the source database is rejected on the fresh destination', foreignToken.status === 401, `HTTP ${foreignToken.status}`);
+    const setup = await fetch(`${restoreBase}/setup/initial`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        companyCode: 'RESTORE-CI', companyNameEn: 'Disposable restore target', companyNameAr: 'شركة اختبار الاسترجاع',
+        facilityKind: 'HEADQUARTERS', unitCode: 'MAIN', unitNameEn: 'Head Office', unitNameAr: 'المركز الرئيسي',
+        adminUsername: 'restore-ci', adminPassword: 'CI-Restore-Password-12345', seedChartOfAccounts: true,
+      }),
+    });
+    if (!setup.ok) throw new Error(`Destination first-run setup failed: HTTP ${setup.status} ${await setup.text()}`);
+    const targetToken = await loginAs(restoreBase, 'restore-ci', 'CI-Restore-Password-12345');
+    if (!targetToken) throw new Error('Destination administrator could not sign in before the full restore');
+
     const form = new FormData();
     form.append('confirm', 'true');
     form.append('file', new Blob([bytes]), name || 'kayan-demo.dump');
     const response = await fetch(`${restoreBase}/backup/full/restore`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${targetToken}` },
       body: form,
     });
     const result = await response.json().catch(() => null);
@@ -578,11 +594,11 @@ async function main() {
 }
 
 /// Signs in as the demo company's administrator.
-async function loginAs(base) {
+async function loginAs(base, username = 'admin', password = 'Admin@12345') {
   const response = await fetch(`${base}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'admin', password: 'Admin@12345' }),
+    body: JSON.stringify({ username, password }),
   });
   const body = await response.json().catch(() => ({}));
   return body?.accessToken ?? '';

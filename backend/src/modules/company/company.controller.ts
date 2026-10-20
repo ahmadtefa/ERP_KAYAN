@@ -19,7 +19,11 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { CompanyService, LOGO_MAX_BYTES } from './company.service';
+import {
+  CompanyService,
+  LOGO_UPLOAD_MAX_BYTES,
+  logoMimeForUpload,
+} from './company.service';
 import {
   CreateBranchDto,
   UpdateBranchDto,
@@ -27,6 +31,7 @@ import {
 } from './dto/company.dto';
 
 interface UploadedLogo {
+  originalname: string;
   mimetype: string;
   size: number;
   buffer: Buffer;
@@ -69,20 +74,20 @@ export class CompanyController {
   @Post('logo')
   @RequirePermissions('admin.company.manage')
   @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: LOGO_MAX_BYTES } }),
+    FileInterceptor('file', { limits: { fileSize: LOGO_UPLOAD_MAX_BYTES, files: 1 } }),
   )
   setLogo(
     @CurrentUser() user: AuthUser,
     @UploadedFile() file: UploadedLogo | undefined,
   ) {
     if (!file?.buffer?.length) {
-      throw new BadRequestException('No logo file was uploaded.');
+      throw new BadRequestException('لم يتم اختيار ملف للشعار / No logo file was uploaded.');
     }
     return this.service.setLogo(
       user.companyId,
       user.userId,
       file.buffer,
-      file.mimetype,
+      logoMimeForUpload(file.mimetype, file.originalname),
     );
   }
 

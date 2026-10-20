@@ -37,6 +37,8 @@ const PERMISSION: Record<ImportKind, string> = {
   customers: 'parties.customers.create',
   suppliers: 'parties.suppliers.create',
   items: 'inventory.items.create',
+  'chart-of-accounts': 'accounting.accounts.create',
+  'opening-balances': 'accounting.openingbalances.manage',
 };
 
 export const IMPORT_PERMISSIONS = PERMISSION;
@@ -86,6 +88,19 @@ export class ImportController {
   ) {
     const slug = this.kind(kind);
     this.allowed(user, slug);
+    // Upsert can modify existing master records; create-only users must not
+    // bypass the update permission by uploading a spreadsheet.
+    if (!user.isSuperAdmin && query.mode === 'upsert') {
+      const updatePermission: Partial<Record<ImportKind, string>> = {
+        customers: 'parties.customers.update',
+        suppliers: 'parties.suppliers.update',
+        items: 'inventory.items.update',
+      };
+      const needed = updatePermission[slug];
+      if (needed && !user.permissions.includes(needed)) {
+        throw new ForbiddenException(`Missing permission: ${needed}`);
+      }
+    }
 
     if (!file) {
       throw new BadRequestException(
@@ -96,7 +111,7 @@ export class ImportController {
     return this.service.run(slug, user.companyId, user.userId, file, {
       dryRun: query.dryRun === 'true' || query.dryRun === '1',
       mode: query.mode === 'upsert' ? 'upsert' : 'insert',
-    });
+    }, user.branchId, user.isSuperAdmin);
   }
 
   private kind(value: string): ImportKind {

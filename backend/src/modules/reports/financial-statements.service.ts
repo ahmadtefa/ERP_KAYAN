@@ -478,93 +478,345 @@ export class FinancialStatementsService {
   }
 
   /**
-   * Cost center report: revenue and expense carried by each cost center, so
-   * the profit of a shop or a project can be read without a second ledger.
+   * Cost-center report: revenue and expense carried by each centre, with the
+   * children of a centre rolled up into it.
+   *
+   * Attribution rules, which are what make this report reconcile with the
+   * ledger:
+   *   * a line that names one centre is attributed to it in full;
+   *   * a line split between several centres contributes each allocation's own
+   *     amount, never the whole line again;
+   *   * a line with no centre lands in "Unallocated" instead of disappearing.
+   *
+   * `own*` is what was posted to the centre itself and `total*` adds its
+   * descendants, so a parent can be read as a subtotal without the company
+   * total double-counting it. `reconciliation` proves that everything
+   * attributed plus everything unallocated equals the ledger's own totals for
+   * the period.
    */
-  async costCenterReport(companyId: string, query: { from?: string; to?: string }) {
+  async costCenterReport(
+    companyId: string,
+    query: {
+      from?: string;
+      to?: string;
+      type?: string;
+      costCenterId?: string;
+      includeInactive?: boolean | string;
+    },
+  ) {
     const { from, to } = rangeOf(query);
+    const includeInactive =
+      query.includeInactive === true || query.includeInactive === 'true';
 
     const rows = await this.prisma.$queryRaw<
       Array<{
         costCenterId: string | null;
-        code: string | null;
-        nameEn: string | null;
-        nameAr: string | null;
         type: AccountType;
-        debit: Prisma.Decimal;
-        credit: Prisma.Decimal;
+        isDebit: boolean;
+        amount: Prisma.Decimal;
       }>
     >(Prisma.sql`
-      SELECT cc.id          AS "costCenterId",
-             cc.code        AS code,
-             cc."nameEn"    AS "nameEn",
-             cc."nameAr"    AS "nameAr",
-             a.type         AS type,
-             COALESCE(SUM(l.debit), 0)  AS debit,
-             COALESCE(SUM(l.credit), 0) AS credit
+      SELECT COALESCE(al."costCenterId", l."costCenterId") AS "costCenterId",
+             a.type                                         AS type,
+             (l.debit > 0)                                  AS "isDebit",
+             COALESCE(al.amount, l.debit + l.credit)        AS amount
         FROM journal_lines l
         JOIN journal_entries e ON e.id = l."journalEntryId"
         JOIN accounts a ON a.id = l."accountId"
-        LEFT JOIN cost_centers cc ON cc.id = l."costCenterId"
+        LEFT JOIN journal_line_allocations al ON al."journalLineId" = l.id
        WHERE e."companyId" = ${companyId}::uuid
          AND e.status IN ('POSTED', 'REVERSED')
          AND e."entryDate" >= ${from}::date
          AND e."entryDate" <= ${to}::date
          AND a.type IN ('REVENUE', 'EXPENSE')
-       GROUP BY cc.id, cc.code, cc."nameEn", cc."nameAr", a.type
     `);
 
-    const byCostCenter = new Map<
-      string,
-      {
-        costCenterId: string | null;
-        code: string | null;
-        nameEn: string;
-        nameAr: string;
-        revenue: Prisma.Decimal;
-        expenses: Prisma.Decimal;
-      }
-    >();
+    // Every live centre is read, active or not: deactivating a centre stops
+    // new postings, it does not turn its history into unattributed cost. The
+    // active flag only hides a row from the list unless asked for.
+    const centers = await this.prisma.costCenter.findMany({
+      where: { companyId, deletedAt: null },
+      select: {
+        id: true,
+        code: true,
+        nameEn: true,
+        nameAr: true,
+        type: true,
+        parentId: true,
+        isActive: true,
+      },
+      orderBy: { code: 'asc' },
+    });
+
+    const byId = new Map(centers.map((center) => [center.id, center]));
+
+    // Own figures per centre, plus the unattributed bucket.
+    const own = new Map<string, { revenue: Prisma.Decimal; expenses: Prisma.Decimal }>();
+    const unallocated = {
+      revenue: new Prisma.Decimal(0),
+      expenses: new Prisma.Decimal(0),
+    };
+    const ledger = {
+      revenue: new Prisma.Decimal(0),
+      expenses: new Prisma.Decimal(0),
+    };
 
     for (const row of rows) {
-      const key = row.costCenterId ?? 'unallocated';
-      const current = byCostCenter.get(key) ?? {
-        costCenterId: row.costCenterId,
-        code: row.code,
-        nameEn: row.nameEn ?? 'Unallocated',
-        nameAr: row.nameAr ?? 'غير موزع على مراكز تكلفة',
+      const amount = new Prisma.Decimal(row.amount);
+      const revenueDelta = row.isDebit ? amount.negated() : amount;
+      const expenseDelta = row.isDebit ? amount : amount.negated();
+
+      if (row.type === AccountType.REVENUE) {
+        ledger.revenue = ledger.revenue.plus(revenueDelta);
+      } else {
+        ledger.expenses = ledger.expenses.plus(expenseDelta);
+      }
+
+      // A line pointing at a deleted centre cannot be attributed to a live
+      // one; it is reported as unallocated rather than silently dropped.
+      const known = row.costCenterId ? byId.get(row.costCenterId) : undefined;
+      if (!known) {
+        if (row.type === AccountType.REVENUE) unallocated.revenue = unallocated.revenue.plus(revenueDelta);
+        else unallocated.expenses = unallocated.expenses.plus(expenseDelta);
+        continue;
+      }
+
+      const current = own.get(known.id) ?? {
         revenue: new Prisma.Decimal(0),
         expenses: new Prisma.Decimal(0),
       };
-      if (row.type === AccountType.REVENUE) {
-        current.revenue = current.revenue.plus(new Prisma.Decimal(row.credit).minus(row.debit));
-      } else {
-        current.expenses = current.expenses.plus(new Prisma.Decimal(row.debit).minus(row.credit));
-      }
-      byCostCenter.set(key, current);
+      if (row.type === AccountType.REVENUE) current.revenue = current.revenue.plus(revenueDelta);
+      else current.expenses = current.expenses.plus(expenseDelta);
+      own.set(known.id, current);
     }
 
-    const items = [...byCostCenter.values()]
-      .map((item) => ({
-        costCenterId: item.costCenterId,
-        code: item.code ?? '',
-        nameEn: item.nameEn,
-        nameAr: item.nameAr,
-        revenue: item.revenue.toFixed(MONEY_SCALE),
-        expenses: item.expenses.toFixed(MONEY_SCALE),
-        result: item.revenue.minus(item.expenses).toFixed(MONEY_SCALE),
-      }))
-      .sort((a, b) => new Prisma.Decimal(b.revenue).minus(a.revenue).toNumber());
+    const childrenOf = new Map<string, string[]>();
+    for (const center of centers) {
+      if (!center.parentId) continue;
+      const list = childrenOf.get(center.parentId) ?? [];
+      list.push(center.id);
+      childrenOf.set(center.parentId, list);
+    }
+
+    // Every centre's subtree total, computed once, with a visited guard so a
+    // corrupted hierarchy can never make this run forever.
+    const subtree = new Map<string, { revenue: Prisma.Decimal; expenses: Prisma.Decimal }>();
+    const totalsFor = (id: string, seen = new Set<string>()): { revenue: Prisma.Decimal; expenses: Prisma.Decimal } => {
+      const cached = subtree.get(id);
+      if (cached) return cached;
+      if (seen.has(id)) return { revenue: new Prisma.Decimal(0), expenses: new Prisma.Decimal(0) };
+      seen.add(id);
+      const base = own.get(id) ?? {
+        revenue: new Prisma.Decimal(0),
+        expenses: new Prisma.Decimal(0),
+      };
+      let revenue = base.revenue;
+      let expenses = base.expenses;
+      for (const childId of childrenOf.get(id) ?? []) {
+        const child = totalsFor(childId, seen);
+        revenue = revenue.plus(child.revenue);
+        expenses = expenses.plus(child.expenses);
+      }
+      const result = { revenue, expenses };
+      subtree.set(id, result);
+      return result;
+    };
+
+    const typeFilter = query.type ? String(query.type).toUpperCase() : null;
+    const matchesFilter = (center: { id: string; type: string }) =>
+      (typeFilter ? center.type === typeFilter : true) &&
+      (query.costCenterId ? center.id === query.costCenterId : true);
+
+    const visible = centers
+      .filter((center) => includeInactive || center.isActive)
+      .filter(matchesFilter);
+    const items = visible
+      .map((center) => {
+        const ownFigures = own.get(center.id) ?? {
+          revenue: new Prisma.Decimal(0),
+          expenses: new Prisma.Decimal(0),
+        };
+        const rolled = totalsFor(center.id);
+        return {
+          costCenterId: center.id,
+          code: center.code,
+          nameEn: center.nameEn,
+          nameAr: center.nameAr,
+          type: center.type,
+          parentId: center.parentId,
+          isActive: center.isActive,
+          ownRevenue: ownFigures.revenue.toFixed(MONEY_SCALE),
+          ownExpenses: ownFigures.expenses.toFixed(MONEY_SCALE),
+          ownResult: ownFigures.revenue.minus(ownFigures.expenses).toFixed(MONEY_SCALE),
+          revenue: rolled.revenue.toFixed(MONEY_SCALE),
+          expenses: rolled.expenses.toFixed(MONEY_SCALE),
+          result: rolled.revenue.minus(rolled.expenses).toFixed(MONEY_SCALE),
+          hasActivity: !ownFigures.revenue.isZero() || !ownFigures.expenses.isZero(),
+        };
+      })
+      // Roots first, then the rest, each group by code: a reader can follow the
+      // tree without the API having to nest JSON.
+      .sort((a, b) => a.code.localeCompare(b.code));
+
+    // The totals of the rows the caller asked for. Summing each centre's OWN
+    // figures counts every line exactly once (a line belongs to one centre),
+    // and stays correct when a type or a single centre filters the list - a
+    // roll-up of visible roots would either double count or lose a subtree
+    // whose parent was filtered out.
+    const visibleOwn = visible.reduce(
+      (sum, center) => {
+        const figures = own.get(center.id) ?? {
+          revenue: new Prisma.Decimal(0),
+          expenses: new Prisma.Decimal(0),
+        };
+        return {
+          revenue: sum.revenue.plus(figures.revenue),
+          expenses: sum.expenses.plus(figures.expenses),
+        };
+      },
+      { revenue: new Prisma.Decimal(0), expenses: new Prisma.Decimal(0) },
+    );
+
+    // Attribution over the whole chart, for the reconciliation block: every
+    // live centre's own figures plus the lines nothing could claim.
+    const allOwn = centers.reduce(
+      (sum, center) => {
+        const figures = own.get(center.id) ?? {
+          revenue: new Prisma.Decimal(0),
+          expenses: new Prisma.Decimal(0),
+        };
+        return {
+          revenue: sum.revenue.plus(figures.revenue),
+          expenses: sum.expenses.plus(figures.expenses),
+        };
+      },
+      { revenue: new Prisma.Decimal(0), expenses: new Prisma.Decimal(0) },
+    );
 
     return {
       from: from.toISOString().slice(0, 10),
       to: to.toISOString().slice(0, 10),
       items,
-      totals: {
-        revenue: items.reduce((sum, row) => sum.plus(row.revenue), new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
-        expenses: items.reduce((sum, row) => sum.plus(row.expenses), new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
-        result: items.reduce((sum, row) => sum.plus(row.result), new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
+      unallocated: {
+        revenue: unallocated.revenue.toFixed(MONEY_SCALE),
+        expenses: unallocated.expenses.toFixed(MONEY_SCALE),
       },
+      totals: {
+        revenue: visibleOwn.revenue.toFixed(MONEY_SCALE),
+        expenses: visibleOwn.expenses.toFixed(MONEY_SCALE),
+        result: visibleOwn.revenue.minus(visibleOwn.expenses).toFixed(MONEY_SCALE),
+      },
+      // Every figure above is derived from posted (or posted-then-reversed)
+      // lines in the period. This block states the ledger's own totals so a
+      // reader - or a test - can prove nothing was dropped or counted twice.
+      reconciliation: {
+        ledgerRevenue: ledger.revenue.toFixed(MONEY_SCALE),
+        ledgerExpenses: ledger.expenses.toFixed(MONEY_SCALE),
+        attributedRevenue: allOwn.revenue.plus(unallocated.revenue).toFixed(MONEY_SCALE),
+        attributedExpenses: allOwn.expenses.plus(unallocated.expenses).toFixed(MONEY_SCALE),
+        balanced:
+          ledger.revenue.equals(allOwn.revenue.plus(unallocated.revenue)) &&
+          ledger.expenses.equals(allOwn.expenses.plus(unallocated.expenses)),
+      },
+    };
+  }
+
+  /**
+   * The journal lines behind a cost center's figures: the drill-down a reader
+   * needs to trust the report. Only posted entries (including reversals, which
+   * net themselves out) are shown, exactly as the report counts them.
+   */
+  async costCenterTransactions(
+    companyId: string,
+    costCenterId: string | null,
+    query: { from?: string; to?: string; page?: number; pageSize?: number },
+  ) {
+    const { from, to } = rangeOf(query);
+    const page = Math.max(query.page ?? 1, 1);
+    const pageSize = Math.min(Math.max(query.pageSize ?? 100, 1), 500);
+
+    const where: Prisma.JournalLineWhereInput = {
+      entry: {
+        companyId,
+        status: { in: ['POSTED', 'REVERSED'] },
+        entryDate: { gte: from, lte: to },
+      },
+      // The report only reads revenue and expense accounts, so the drill-down
+      // has to agree with it: a list that also showed receivables and stock
+      // would not add up to the figure the reader clicked.
+      account: { type: { in: ['REVENUE', 'EXPENSE'] } },
+      ...(costCenterId === null
+        ? { costCenterId: null, allocations: { none: {} } }
+        : {
+            OR: [
+              { costCenterId },
+              { allocations: { some: { costCenterId } } },
+            ],
+          }),
+    };
+
+    const [lines, total] = await this.prisma.$transaction([
+      this.prisma.journalLine.findMany({
+        where,
+        orderBy: [
+          { entry: { entryDate: 'desc' } },
+          { entry: { entryNumber: 'desc' } },
+          { lineNumber: 'asc' },
+        ],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          account: { select: { code: true, nameEn: true, nameAr: true, type: true } },
+          entry: {
+            select: {
+              id: true,
+              entryNumber: true,
+              entryDate: true,
+              description: true,
+              sourceType: true,
+              sourceNumber: true,
+              status: true,
+            },
+          },
+          allocations: { select: { costCenterId: true, amount: true } },
+        },
+      }),
+      this.prisma.journalLine.count({ where }),
+    ]);
+
+    return {
+      from: from.toISOString().slice(0, 10),
+      to: to.toISOString().slice(0, 10),
+      costCenterId,
+      total,
+      page,
+      pageSize,
+      items: lines.map((line) => {
+        // The amount this particular centre carries: its own allocation when
+        // the line was split, otherwise the whole line.
+        const allocation = costCenterId
+          ? line.allocations.find((row) => row.costCenterId === costCenterId)
+          : null;
+        const amount = allocation ? allocation.amount : line.debit.plus(line.credit);
+        return {
+          journalEntryId: line.entry.id,
+          entryNumber: line.entry.entryNumber,
+          entryDate: line.entry.entryDate.toISOString().slice(0, 10),
+          description: line.entry.description ?? line.description,
+          sourceType: line.entry.sourceType,
+          sourceNumber: line.entry.sourceNumber,
+          status: line.entry.status.toLowerCase(),
+          accountCode: line.account.code,
+          accountNameEn: line.account.nameEn,
+          accountNameAr: line.account.nameAr,
+          accountType: line.account.type,
+          debit: line.debit.toFixed(MONEY_SCALE),
+          credit: line.credit.toFixed(MONEY_SCALE),
+          amount: amount.toFixed(MONEY_SCALE),
+          isDebit: line.debit.greaterThan(0),
+          isAllocated: Boolean(allocation),
+        };
+      }),
     };
   }
 }

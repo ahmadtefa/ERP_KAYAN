@@ -3,14 +3,24 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InvoiceStatus, JournalStatus, Prisma, StockDirection } from '@prisma/client';
+import { InvoiceDocumentType, InvoiceStatus, JournalStatus, Prisma, StockDirection } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import {
+  allocateDocumentDiscount,
+  assertDiscountLimit,
+  DiscountError,
+  DiscountInput,
+  effectiveDiscountPercent,
+  ResolvedDiscount,
+  resolveDiscount,
+} from '../../common/pricing/discount';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { PriceListsService } from './price-lists.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
+import { attributedLines } from '../accounting/cost-center-attribution';
 import { PostingService } from '../accounting/posting.service';
 import {
   CreateSalesInvoiceDto,
@@ -29,7 +39,21 @@ interface PreparedLine {
   unitPrice: Prisma.Decimal;
   taxRate: Prisma.Decimal;
   taxAmount: Prisma.Decimal;
+  /// Net of both discounts: the taxable value and the revenue of this line.
   lineTotal: Prisma.Decimal;
+  /// Quantity x unit price before any discount.
+  grossLineTotal: Prisma.Decimal;
+  discountType: 'PERCENT' | 'AMOUNT' | null;
+  discountPercent: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
+  invoiceDiscountAmount: Prisma.Decimal;
+  costCenterId: string | null;
+}
+
+interface PreparedInvoice {
+  lines: PreparedLine[];
+  documentDiscount: ResolvedDiscount;
+  lineDiscountTotal: Prisma.Decimal;
 }
 
 @Injectable()
@@ -49,7 +73,11 @@ export class SalesInvoicesService {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
 
-    const where: Prisma.SalesInvoiceWhereInput = { companyId, deletedAt: null };
+    const where: Prisma.SalesInvoiceWhereInput = {
+      companyId,
+      deletedAt: null,
+      documentType: InvoiceDocumentType.INVOICE,
+    };
     if (query.customerId) where.customerId = query.customerId;
     if (query.status) {
       const status = query.status.toUpperCase() as InvoiceStatus;
@@ -115,10 +143,17 @@ export class SalesInvoicesService {
         unit: l.item?.unit ?? null,
         description: l.description,
         quantity: l.quantity.toFixed(MONEY_SCALE),
+        returnedQuantity: l.returnedQuantity.toFixed(MONEY_SCALE),
         unitPrice: l.unitPrice.toFixed(MONEY_SCALE),
         taxRate: l.taxRate.toFixed(RATE_SCALE),
         taxAmount: l.taxAmount.toFixed(MONEY_SCALE),
         lineTotal: l.lineTotal.toFixed(MONEY_SCALE),
+        grossLineTotal: (l.grossLineTotal ?? l.lineTotal).toFixed(MONEY_SCALE),
+        discountType: l.discountType ?? null,
+        discountPercent: l.discountPercent.toFixed(RATE_SCALE),
+        discountAmount: l.discountAmount.toFixed(MONEY_SCALE),
+        invoiceDiscountAmount: l.invoiceDiscountAmount.toFixed(MONEY_SCALE),
+        costCenterId: l.costCenterId ?? null,
         unitCost: l.unitCost.toFixed(MONEY_SCALE),
         costTotal: l.costTotal.toFixed(MONEY_SCALE),
       })),
@@ -143,7 +178,13 @@ export class SalesInvoicesService {
     if (!customer) throw new BadRequestException('The customer does not exist');
     if (!customer.isActive) throw new BadRequestException('The customer is inactive');
 
-    const lines = await this.prepareLines(companyId, dto.lines, dto.customerId);
+    const prepared = await this.prepareLines(
+      companyId,
+      dto.lines,
+      dto.customerId,
+      { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
+    );
+    const lines = prepared.lines;
     const totals = this.totalsOf(lines);
 
     const created = await this.prisma.$transaction(async (tx) => {
@@ -169,6 +210,10 @@ export class SalesInvoicesService {
             : (await this.dueDateFromTerms(companyId, dto.customerId, new Date(dto.invoiceDate))),
           customerId: dto.customerId,
           status: InvoiceStatus.DRAFT,
+          discountType: prepared.documentDiscount.type,
+          discountPercent: prepared.documentDiscount.percent,
+          discountAmount: prepared.documentDiscount.amount,
+          lineDiscountTotal: prepared.lineDiscountTotal,
           subTotal: totals.subTotal,
           taxAmount: totals.taxAmount,
           totalAmount: totals.totalAmount,
@@ -184,6 +229,12 @@ export class SalesInvoicesService {
               taxRate: l.taxRate,
               taxAmount: l.taxAmount,
               lineTotal: l.lineTotal,
+              grossLineTotal: l.grossLineTotal,
+              discountType: l.discountType,
+              discountPercent: l.discountPercent,
+              discountAmount: l.discountAmount,
+              invoiceDiscountAmount: l.invoiceDiscountAmount,
+              costCenterId: l.costCenterId,
             })),
           },
         },
@@ -204,6 +255,124 @@ export class SalesInvoicesService {
     });
 
     return this.findOne(companyId, created.id);
+  }
+
+  /**
+   * Replace a draft sales invoice.
+   *
+   * A posted invoice is immutable: its stock, cost and journal entry already
+   * exist, and rewriting the lines afterwards would leave the ledger describing
+   * a document that no longer matches it. A draft owns nothing yet, so its
+   * lines may be replaced - under a row lock, in one transaction, and only
+   * while it is still a draft.
+   */
+  async updateDraft(
+    companyId: string,
+    branchId: string | null,
+    userId: string,
+    id: string,
+    dto: CreateSalesInvoiceDto,
+  ) {
+    if (!branchId) {
+      throw new BadRequestException('The signed-in user is not assigned to a branch');
+    }
+
+    const invoice = await this.prisma.salesInvoice.findFirst({
+      where: { id, companyId, deletedAt: null },
+    });
+    if (!invoice) throw new NotFoundException('Sales invoice not found');
+    if (invoice.documentType !== InvoiceDocumentType.INVOICE) {
+      throw new BadRequestException('Return documents cannot be edited as sales invoices');
+    }
+    if (invoice.status !== InvoiceStatus.DRAFT) {
+      throw new BadRequestException('Only a draft sales invoice can be edited');
+    }
+    if (invoice.branchId !== branchId) {
+      throw new BadRequestException('A draft can only be edited from its assigned branch');
+    }
+
+    const customer = await this.prisma.customer.findFirst({
+      where: { id: dto.customerId, companyId, deletedAt: null },
+      select: { id: true, isActive: true },
+    });
+    if (!customer) throw new BadRequestException('The customer does not exist');
+    if (!customer.isActive) throw new BadRequestException('The customer is inactive');
+
+    const prepared = await this.prepareLines(
+      companyId,
+      dto.lines,
+      dto.customerId,
+      { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
+    );
+    const lines = prepared.lines;
+    const totals = this.totalsOf(lines);
+    const invoiceDate = new Date(dto.invoiceDate);
+    const dueDate = dto.dueDate
+      ? new Date(dto.dueDate)
+      : await this.dueDateFromTerms(companyId, dto.customerId, invoiceDate);
+
+    await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ status: InvoiceStatus }>>(Prisma.sql`
+        SELECT status
+          FROM sales_invoices
+         WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+         FOR UPDATE
+      `);
+      if (locked.length !== 1 || locked[0].status !== InvoiceStatus.DRAFT) {
+        throw new BadRequestException(
+          'This invoice was posted or changed by someone else. Reload it before editing.',
+        );
+      }
+
+      await tx.salesInvoice.update({
+        where: { id },
+        data: {
+          customerId: dto.customerId,
+          invoiceDate,
+          dueDate,
+          warehouseId: dto.warehouseId ?? invoice.warehouseId,
+          discountType: prepared.documentDiscount.type,
+          discountPercent: prepared.documentDiscount.percent,
+          discountAmount: prepared.documentDiscount.amount,
+          lineDiscountTotal: prepared.lineDiscountTotal,
+          subTotal: totals.subTotal,
+          taxAmount: totals.taxAmount,
+          totalAmount: totals.totalAmount,
+          notes: dto.notes ?? null,
+          lines: {
+            deleteMany: {},
+            create: lines.map((line) => ({
+              lineNumber: line.lineNumber,
+              itemId: line.itemId,
+              description: line.description,
+              quantity: line.quantity,
+              unitPrice: line.unitPrice,
+              taxRate: line.taxRate,
+              taxAmount: line.taxAmount,
+              lineTotal: line.lineTotal,
+              grossLineTotal: line.grossLineTotal,
+              discountType: line.discountType,
+              discountPercent: line.discountPercent,
+              discountAmount: line.discountAmount,
+              invoiceDiscountAmount: line.invoiceDiscountAmount,
+              costCenterId: line.costCenterId,
+            })),
+          },
+        },
+      });
+    });
+
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'UPDATE',
+      entity: 'sales_invoices',
+      entityId: id,
+      before: { status: invoice.status, totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE) },
+      after: { status: InvoiceStatus.DRAFT, totalAmount: totals.totalAmount.toFixed(MONEY_SCALE) },
+    });
+
+    return this.findOne(companyId, id);
   }
 
   /**
@@ -372,10 +541,37 @@ export class SalesInvoicesService {
         sourceNumber: invoice.invoiceNumber,
         lines: [
           { accountId: accounts.accountsReceivable, debit: invoice.totalAmount, description: 'Customer balance' },
-          { accountId: accounts.salesRevenue, credit: invoice.subTotal, description: 'Sales revenue' },
+          // Revenue and its cost are attributed line by line to the cost
+          // centres the invoice named. Lines without a centre stay unallocated
+          // rather than being pushed onto one for the sake of a tidy report.
+          ...attributedLines(
+            accounts.salesRevenue,
+            'credit',
+            'Sales revenue',
+            invoice.lines.map((line) => ({
+              costCenterId: line.costCenterId,
+              amount: line.lineTotal,
+            })),
+          ),
           { accountId: accounts.vatPayable, credit: invoice.taxAmount, description: 'VAT on sales' },
-          { accountId: accounts.costOfGoodsSold, debit: costOfGoods, description: 'Cost of goods sold' },
-          { accountId: accounts.inventory, credit: costOfGoods, description: 'Inventory issued' },
+          ...attributedLines(
+            accounts.costOfGoodsSold,
+            'debit',
+            'Cost of goods sold',
+            invoice.lines.map((line) => ({
+              costCenterId: line.costCenterId,
+              amount: costByLine.get(line.id)?.costTotal ?? new Prisma.Decimal(0),
+            })),
+          ),
+          ...attributedLines(
+            accounts.inventory,
+            'credit',
+            'Inventory issued',
+            invoice.lines.map((line) => ({
+              costCenterId: line.costCenterId,
+              amount: costByLine.get(line.id)?.costTotal ?? new Prisma.Decimal(0),
+            })),
+          ),
         ],
       });
 
@@ -432,7 +628,12 @@ export class SalesInvoicesService {
 
     const original = await this.prisma.journalEntry.findFirst({
       where: { id: invoice.journalEntryId, companyId },
-      include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      include: {
+        lines: {
+          orderBy: { lineNumber: 'asc' },
+          include: { allocations: true },
+        },
+      },
     });
     if (!original) throw new NotFoundException('The original journal entry is missing');
     if (original.status === JournalStatus.REVERSED) {
@@ -447,6 +648,20 @@ export class SalesInvoicesService {
       if (claimedInvoice.count !== 1) {
         throw new BadRequestException('This invoice has already been reversed');
       }
+      const activeReturns = await tx.salesInvoice.count({
+        where: {
+          companyId,
+          originalInvoiceId: invoice.id,
+          documentType: InvoiceDocumentType.CREDIT_NOTE,
+          status: InvoiceStatus.POSTED,
+          deletedAt: null,
+        },
+      });
+      if (activeReturns > 0) {
+        throw new BadRequestException(
+          'Reverse the posted sales returns before reversing their source invoice.',
+        );
+      }
       const claimedJournal = await tx.journalEntry.updateMany({
         where: { id: original.id, companyId, status: JournalStatus.POSTED },
         data: { status: JournalStatus.REVERSED },
@@ -455,13 +670,33 @@ export class SalesInvoicesService {
         throw new BadRequestException('The original journal entry has already been reversed');
       }
 
+      const warehouseId = await this.warehouses.resolveForReversal(
+        tx,
+        companyId,
+        invoice.branchId,
+        invoice.warehouseId,
+      );
+      if (!invoice.warehouseId && warehouseId) {
+        await tx.salesInvoice.update({
+          where: { id: invoice.id },
+          data: { warehouseId },
+        });
+      }
+
       for (const line of invoice.lines) {
-        if (!line.itemId || line.costTotal.isZero()) continue;
+        if (!line.itemId) continue;
+        const item = await tx.item.findFirst({
+          where: { id: line.itemId, companyId, deletedAt: null },
+          select: { id: true, isStockTracked: true },
+        });
+        if (!item) throw new BadRequestException('A sales invoice item no longer exists');
+        if (!item.isStockTracked) continue;
 
         await tx.stockMovement.create({
           data: {
             companyId,
             branchId: invoice.branchId,
+            warehouseId,
             itemId: line.itemId,
             movementDate: new Date(),
             direction: StockDirection.IN,
@@ -522,6 +757,13 @@ export class SalesInvoicesService {
               credit: l.debit,
               description: l.description,
               costCenterId: l.costCenterId,
+              // A split line is given back exactly as it was taken.
+              allocations: {
+                create: (l.allocations ?? []).map((allocation) => ({
+                  costCenterId: allocation.costCenterId,
+                  amount: allocation.amount,
+                })),
+              },
             })),
           },
         },
@@ -566,8 +808,9 @@ export class SalesInvoicesService {
   private async prepareLines(
     companyId: string,
     input: SalesInvoiceLineDto[],
-    customerId?: string | null,
-  ): Promise<PreparedLine[]> {
+    customerId: string | null | undefined,
+    documentDiscount: DiscountInput,
+  ): Promise<PreparedInvoice> {
     const prepared: PreparedLine[] = [];
     // The company's own policy: the rate to apply when nobody said otherwise,
     // and whether the prices being typed already contain it.
@@ -650,12 +893,42 @@ export class SalesInvoicesService {
       // of it a second time.
       const typedTotal = quantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
       const grossUp = new Prisma.Decimal(1).plus(taxRate.div(100));
-      const lineTotal = settings.pricesIncludeTax && taxRate.greaterThan(0)
+
+      // When prices include tax, the typed total is a tax-inclusive number:
+      // take the tax back out first, then discount the goods value. Tax is
+      // then charged on the discounted value, which is what "discount applied
+      // before tax" means on these documents.
+      const grossLineTotal = settings.pricesIncludeTax && taxRate.greaterThan(0)
         ? typedTotal.div(grossUp).toDecimalPlaces(MONEY_SCALE)
         : typedTotal;
-      const taxAmount = settings.pricesIncludeTax && taxRate.greaterThan(0)
-        ? typedTotal.minus(lineTotal).toDecimalPlaces(MONEY_SCALE)
-        : typedTotal.mul(taxRate).div(100).toDecimalPlaces(MONEY_SCALE);
+
+      const lineDiscount = this.lineDiscount(
+        grossLineTotal,
+        raw,
+        index,
+        new Prisma.Decimal(settings.maxDiscountPercent),
+      );
+
+      // A cost center must be this company's and active; the posting path
+      // repeats the check at the entry date, because an invoice can be
+      // prepared today and posted after the centre was retired.
+      let costCenterId: string | null = raw.costCenterId ?? null;
+      if (costCenterId) {
+        const center = await this.prisma.costCenter.findFirst({
+          where: { id: costCenterId, companyId, deletedAt: null },
+          select: { id: true, isActive: true, code: true },
+        });
+        if (!center) {
+          throw new BadRequestException(
+            `Line ${index + 1}: the cost center does not exist`,
+          );
+        }
+        if (!center.isActive) {
+          throw new BadRequestException(
+            `Line ${index + 1}: cost center ${center.code} is inactive`,
+          );
+        }
+      }
 
       prepared.push({
         lineNumber: index + 1,
@@ -664,12 +937,94 @@ export class SalesInvoicesService {
         quantity,
         unitPrice,
         taxRate,
-        taxAmount,
-        lineTotal,
+        // Replaced below, once the document-level discount has been spread.
+        taxAmount: new Prisma.Decimal(0),
+        lineTotal: lineDiscount.net,
+        grossLineTotal,
+        discountType: lineDiscount.type,
+        discountPercent: lineDiscount.percent,
+        discountAmount: lineDiscount.amount,
+        invoiceDiscountAmount: new Prisma.Decimal(0),
+        costCenterId,
       });
     }
 
-    return prepared;
+    // The document-level discount is spread over the net line values, in exact
+    // proportion, before tax. The share is stored on each line so a posted
+    // invoice can reproduce its own arithmetic and a partial return can be
+    // credited at the price the customer actually paid.
+    let allocation: ReturnType<typeof allocateDocumentDiscount>;
+    try {
+      allocation = allocateDocumentDiscount(
+        prepared.map((line) => line.lineTotal),
+        documentDiscount,
+      );
+    } catch (error) {
+      throw new BadRequestException(this.discountMessage(error, 'Invoice'));
+    }
+
+    const grossTotal = prepared.reduce(
+      (sum, line) => sum.plus(line.grossLineTotal),
+      new Prisma.Decimal(0),
+    );
+    const lineDiscountTotal = prepared.reduce(
+      (sum, line) => sum.plus(line.discountAmount),
+      new Prisma.Decimal(0),
+    );
+    try {
+      assertDiscountLimit(
+        effectiveDiscountPercent(
+          grossTotal,
+          lineDiscountTotal.plus(allocation.discount.amount),
+        ),
+        new Prisma.Decimal(settings.maxDiscountPercent),
+        'Document',
+      );
+    } catch (error) {
+      throw new BadRequestException(this.discountMessage(error, 'Invoice'));
+    }
+
+    const lines = prepared.map((line, index) => {
+      const invoiceDiscountAmount = allocation.shares[index];
+      const lineTotal = line.lineTotal.minus(invoiceDiscountAmount);
+      return {
+        ...line,
+        invoiceDiscountAmount,
+        lineTotal,
+        taxAmount: lineTotal
+          .mul(line.taxRate)
+          .div(100)
+          .toDecimalPlaces(MONEY_SCALE),
+      };
+    });
+
+    return { lines, documentDiscount: allocation.discount, lineDiscountTotal };
+  }
+
+  /** Resolves one line's discount and enforces the company's ceiling. */
+  private lineDiscount(
+    base: Prisma.Decimal,
+    raw: SalesInvoiceLineDto,
+    index: number,
+    maximum: Prisma.Decimal,
+  ): ResolvedDiscount {
+    try {
+      const resolved = resolveDiscount(base, {
+        type: raw.discountType,
+        percent: raw.discountPercent,
+        amount: raw.discountAmount,
+      });
+      assertDiscountLimit(resolved.percent, maximum, `Line ${index + 1}`);
+      return resolved;
+    } catch (error) {
+      throw new BadRequestException(this.discountMessage(error, `Line ${index + 1}`));
+    }
+  }
+
+  private discountMessage(error: unknown, subject: string): string {
+    if (error instanceof DiscountError) return `${subject}: ${error.message}`;
+    if (error instanceof Error) return `${subject}: ${error.message}`;
+    return `${subject}: the discount could not be applied`;
   }
 
   private totalsOf(lines: PreparedLine[]) {
@@ -720,6 +1075,7 @@ export class SalesInvoicesService {
 
   private toSummary(invoice: {
     id: string;
+    branchId: string;
     invoiceNumber: string;
     invoiceDate: Date;
     dueDate: Date | null;
@@ -731,16 +1087,25 @@ export class SalesInvoicesService {
     paidAmount: Prisma.Decimal;
     costOfGoods: Prisma.Decimal;
     createdAt: Date;
+    discountType?: string | null;
+    discountPercent?: Prisma.Decimal;
+    discountAmount?: Prisma.Decimal;
+    lineDiscountTotal?: Prisma.Decimal;
     customer?: { id?: string; code: string; nameEn: string; nameAr: string };
   }) {
     return {
       id: invoice.id,
+      branchId: invoice.branchId,
       invoiceNumber: invoice.invoiceNumber,
       invoiceDate: invoice.invoiceDate.toISOString().slice(0, 10),
       dueDate: invoice.dueDate?.toISOString().slice(0, 10) ?? null,
       status: invoice.status.toLowerCase(),
       currency: invoice.currency,
       customer: invoice.customer,
+      discountType: invoice.discountType ?? null,
+      discountPercent: (invoice.discountPercent ?? new Prisma.Decimal(0)).toFixed(RATE_SCALE),
+      discountAmount: (invoice.discountAmount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
+      lineDiscountTotal: (invoice.lineDiscountTotal ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
       subTotal: invoice.subTotal.toFixed(MONEY_SCALE),
       taxAmount: invoice.taxAmount.toFixed(MONEY_SCALE),
       totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),

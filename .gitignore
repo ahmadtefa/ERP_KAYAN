@@ -62,3 +62,7 @@ backend/backups/
 # Maven (accidentally created, not part of this project)
 .mvn/
 backend/.engines-offline/
+
+# Generated Prisma client copied for the offline runtime
+backend/prisma/.prisma/
+backend/.gen.cjs

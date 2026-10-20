@@ -7,6 +7,8 @@ import { ChartOfAccountsController } from './chart-of-accounts.controller';
 import { ChartOfAccountsService } from './chart-of-accounts.service';
 import { CostCentersController } from './cost-centers.controller';
 import { CostCentersService } from './cost-centers.service';
+import { BudgetsController } from './budgets.controller';
+import { BudgetsService } from './budgets.service';
 import { DocumentNumberService } from './document-number.service';
 import { FiscalPeriodsController } from './fiscal-periods.controller';
 import { FiscalPeriodsService } from './fiscal-periods.service';
@@ -25,6 +27,7 @@ import { YearEndCloseService } from './year-end-close.service';
     JournalEntriesController,
     FiscalPeriodsController,
     CostCentersController,
+    BudgetsController,
     OpeningBalancesController,
     YearEndCloseController,
     AccountingSettingsController,
@@ -37,6 +40,7 @@ import { YearEndCloseService } from './year-end-close.service';
     AccountMapService,
     PostingService,
     CostCentersService,
+    BudgetsService,
     OpeningBalancesService,
     YearEndCloseService,
   ],
@@ -48,6 +52,8 @@ import { YearEndCloseService } from './year-end-close.service';
     PostingService,
     FiscalPeriodsService,
     CostCentersService,
+    BudgetsService,
+    OpeningBalancesService,
   ],
 })
 export class AccountingModule {}

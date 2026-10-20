@@ -1,11 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
+import '../../../accounting/presentation/providers/chart_of_accounts_providers.dart';
+import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../../../inventory/presentation/screens/items_screen.dart'
+    show itemsListProvider;
+import '../../../inventory/presentation/screens/stock_screen.dart'
+    show stockListProvider;
+import '../../../parties/presentation/screens/parties_screen.dart'
+    show customersListProvider, suppliersListProvider;
 import '../providers/data_providers.dart';
 
 /// Bringing customers, suppliers or items in from a spreadsheet.
@@ -43,27 +52,31 @@ class ImportScreen extends ConsumerWidget {
                   Text(l10n.whatAreYouImporting,
                       style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 12),
-                  SegmentedButton<ImportKind>(
-                    segments: [
-                      ButtonSegment(
-                        value: ImportKind.customers,
-                        label: Text(l10n.customers),
-                        icon: const Icon(Icons.people_outline),
-                      ),
-                      ButtonSegment(
-                        value: ImportKind.suppliers,
-                        label: Text(l10n.suppliers),
-                        icon: const Icon(Icons.local_shipping_outlined),
-                      ),
-                      ButtonSegment(
-                        value: ImportKind.items,
-                        label: Text(l10n.items),
-                        icon: const Icon(Icons.category_outlined),
-                      ),
+                  DropdownButtonFormField<ImportKind>(
+                    initialValue: state.kind,
+                    decoration: InputDecoration(labelText: l10n.whatAreYouImporting),
+                    items: [
+                      DropdownMenuItem(value: ImportKind.customers, child: Text(l10n.customers)),
+                      DropdownMenuItem(value: ImportKind.suppliers, child: Text(l10n.suppliers)),
+                      DropdownMenuItem(value: ImportKind.items, child: Text(l10n.items)),
+                      DropdownMenuItem(value: ImportKind.chartOfAccounts, child: Text(l10n.chartOfAccounts)),
+                      DropdownMenuItem(value: ImportKind.openingBalances, child: Text(l10n.openingBalancesTitle)),
                     ],
-                    selected: {state.kind},
-                    onSelectionChanged: (choice) => controller.chooseKind(choice.first),
+                    onChanged: (choice) {
+                      if (choice != null) controller.chooseKind(choice);
+                    },
                   ),
+                  if (state.kind == ImportKind.openingBalances) ...[
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: TextButton.icon(
+                        onPressed: () => context.go('/accounting/opening-balances'),
+                        icon: const Icon(Icons.fact_check_outlined),
+                        label: Text(l10n.reviewOpeningBalances),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 20),
                   Text(l10n.templateFirst,
                       style: Theme.of(context).textTheme.titleSmall),
@@ -94,8 +107,10 @@ class ImportScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
           _FileCard(state: state),
-          const SizedBox(height: 16),
-          _ModeCard(state: state),
+          if (state.kind.supportsUpsert) ...[
+            const SizedBox(height: 16),
+            _ModeCard(state: state),
+          ],
           if (state.failure != null) ...[
             const SizedBox(height: 16),
             _FailureCard(message: state.failure!),
@@ -385,12 +400,27 @@ class _ResultCard extends ConsumerWidget {
                 icon: const Icon(Icons.save_alt_outlined),
                 label: Text(l10n.importForReal),
               )
+            else if (report.hasErrors)
+              Text(l10n.fixErrorsThenRetry, style: theme.textTheme.bodyMedium?.copyWith(color: scheme.error))
             else
-              Row(
+              Wrap(
+                spacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  const Icon(Icons.check, size: 18),
-                  const SizedBox(width: 8),
-                  Text(l10n.importDone),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.check, size: 18),
+                      const SizedBox(width: 8),
+                      Text(l10n.importDone),
+                    ],
+                  ),
+                  if (report.raw['draft'] is Map)
+                    OutlinedButton.icon(
+                      onPressed: () => context.go('/accounting/opening-balances'),
+                      icon: const Icon(Icons.fact_check_outlined),
+                      label: Text(l10n.reviewOpeningBalances),
+                    ),
                 ],
               ),
           ],
@@ -413,6 +443,17 @@ class _ResultCard extends ConsumerWidget {
             mode: current.mode,
             dryRun: false,
           );
+      // An import writes records other screens have already cached. Refresh
+      // them now, so a customer, item or opening stock imported here appears
+      // in the invoice pickers, item list and stock screen without a restart.
+      ref.invalidate(customersProvider);
+      ref.invalidate(suppliersProvider);
+      ref.invalidate(itemsProvider);
+      ref.invalidate(customersListProvider);
+      ref.invalidate(suppliersListProvider);
+      ref.invalidate(itemsListProvider);
+      ref.invalidate(chartOfAccountsProvider);
+      ref.invalidate(stockListProvider);
       controller.succeeded(report);
     } catch (error) {
       controller.failed(describeApiError(error));

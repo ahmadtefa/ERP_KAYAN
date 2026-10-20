@@ -158,6 +158,36 @@ abstract class AppLocalizations {
   /// **'Cannot reach the server. Check your connection or the API address.'**
   String get networkError;
 
+  /// No description provided for @sessionExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'Your session has expired. Sign in again to continue.'**
+  String get sessionExpired;
+
+  /// No description provided for @permissionDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'You do not have permission to perform this action.'**
+  String get permissionDenied;
+
+  /// No description provided for @openingQuantity.
+  ///
+  /// In en, this message translates to:
+  /// **'Opening quantity'**
+  String get openingQuantity;
+
+  /// No description provided for @openingUnitCost.
+  ///
+  /// In en, this message translates to:
+  /// **'Opening unit cost'**
+  String get openingUnitCost;
+
+  /// No description provided for @openingStockHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional. Posts the stock and its inventory/equity entry with the item. Leave blank to enter opening stock later through Opening balances.'**
+  String get openingStockHint;
+
   /// No description provided for @loading.
   ///
   /// In en, this message translates to:
@@ -194,6 +224,30 @@ abstract class AppLocalizations {
   /// **'Chart of Accounts'**
   String get chartOfAccounts;
 
+  /// No description provided for @openingBalancesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Opening balances'**
+  String get openingBalancesTitle;
+
+  /// No description provided for @reviewOpeningBalances.
+  ///
+  /// In en, this message translates to:
+  /// **'Review opening balances'**
+  String get reviewOpeningBalances;
+
+  /// No description provided for @noOpeningBalanceDocuments.
+  ///
+  /// In en, this message translates to:
+  /// **'No opening-balance drafts yet'**
+  String get noOpeningBalanceDocuments;
+
+  /// No description provided for @openingBalanceDraftHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Imported opening balances are drafts until you review and post them.'**
+  String get openingBalanceDraftHint;
+
   /// No description provided for @journalEntries.
   ///
   /// In en, this message translates to:
@@ -224,11 +278,83 @@ abstract class AppLocalizations {
   /// **'Reports'**
   String get reports;
 
+  /// No description provided for @signInIncomplete.
+  ///
+  /// In en, this message translates to:
+  /// **'The server accepted the sign-in but did not send the account details. This usually means the program and the server are different versions, or the company setup was not finished. The technical detail is in the program log.'**
+  String get signInIncomplete;
+
+  /// No description provided for @sessionStorageLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Session storage'**
+  String get sessionStorageLabel;
+
+  /// No description provided for @sessionStorageDurable.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved on this device'**
+  String get sessionStorageDurable;
+
+  /// No description provided for @sessionStorageMemoryOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Memory only'**
+  String get sessionStorageMemoryOnly;
+
+  /// No description provided for @sessionStorageMemoryHint.
+  ///
+  /// In en, this message translates to:
+  /// **'This page is not served over HTTPS, so the browser keeps the session only until it is reloaded. Serve the program over HTTPS to keep people signed in.'**
+  String get sessionStorageMemoryHint;
+
   /// No description provided for @settings.
   ///
   /// In en, this message translates to:
   /// **'Settings'**
   String get settings;
+
+  /// The size of text across the whole program. Buttons, menus, tables and dialogs follow it.
+  ///
+  /// In en, this message translates to:
+  /// **'Font size'**
+  String get fontSize;
+
+  /// No description provided for @fontSizeDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Applies to the whole program: buttons, menus, the sidebar, tables, dialogs and reports. It is remembered for the next sign-in.'**
+  String get fontSizeDescription;
+
+  /// No description provided for @fontSizeSmaller.
+  ///
+  /// In en, this message translates to:
+  /// **'Smaller text'**
+  String get fontSizeSmaller;
+
+  /// No description provided for @fontSizeLarger.
+  ///
+  /// In en, this message translates to:
+  /// **'Larger text'**
+  String get fontSizeLarger;
+
+  /// No description provided for @fontSizeReset.
+  ///
+  /// In en, this message translates to:
+  /// **'Default size'**
+  String get fontSizeReset;
+
+  /// No description provided for @fontSizePreview.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview: invoice 1,250.00 EGP · 12.5% discount'**
+  String get fontSizePreview;
+
+  /// No description provided for @sessionNotPersisted.
+  ///
+  /// In en, this message translates to:
+  /// **'This session is kept in memory only: the browser will not store it on a plain http:// address. Reloading signs you out. Serve the program over HTTPS to keep the session.'**
+  String get sessionNotPersisted;
 
   /// No description provided for @language.
   ///
@@ -277,6 +403,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Branch'**
   String get branch;
+
+  /// No description provided for @warehouse.
+  ///
+  /// In en, this message translates to:
+  /// **'Warehouse'**
+  String get warehouse;
 
   /// No description provided for @notAvailable.
   ///
@@ -596,6 +728,12 @@ abstract class AppLocalizations {
   /// **'Service / not stocked'**
   String get stockNotTracked;
 
+  /// No description provided for @stockTrackingDoesNotAddQuantity.
+  ///
+  /// In en, this message translates to:
+  /// **'Stock tracking does not add quantity. Use Opening balances to enter opening stock, then review and post the draft.'**
+  String get stockTrackingDoesNotAddQuantity;
+
   /// No description provided for @noStock.
   ///
   /// In en, this message translates to:
@@ -715,6 +853,168 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'New purchase invoice'**
   String get newPurchaseInvoice;
+
+  /// No description provided for @landedCosts.
+  ///
+  /// In en, this message translates to:
+  /// **'Landed costs'**
+  String get landedCosts;
+
+  /// No description provided for @landedCostAllocationHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Add each freight, shipping, duty, or other charge. The total is allocated across stock lines by line value.'**
+  String get landedCostAllocationHint;
+
+  /// No description provided for @landedCostCannotBeNegative.
+  ///
+  /// In en, this message translates to:
+  /// **'Landed costs cannot be negative'**
+  String get landedCostCannotBeNegative;
+
+  /// No description provided for @addLandedCost.
+  ///
+  /// In en, this message translates to:
+  /// **'Add charge'**
+  String get addLandedCost;
+
+  /// No description provided for @removeLandedCost.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove charge'**
+  String get removeLandedCost;
+
+  /// No description provided for @otherLandedCosts.
+  ///
+  /// In en, this message translates to:
+  /// **'Other landed costs'**
+  String get otherLandedCosts;
+
+  /// No description provided for @landedCostDescriptionRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a description for each landed-cost charge'**
+  String get landedCostDescriptionRequired;
+
+  /// No description provided for @landedCostAmountInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a valid non-negative amount for each landed-cost charge'**
+  String get landedCostAmountInvalid;
+
+  /// No description provided for @editDraftInvoice.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit draft invoice'**
+  String get editDraftInvoice;
+
+  /// No description provided for @onlyDraftInvoiceCanBeEdited.
+  ///
+  /// In en, this message translates to:
+  /// **'Only a draft invoice can be edited'**
+  String get onlyDraftInvoiceCanBeEdited;
+
+  /// No description provided for @salesReturns.
+  ///
+  /// In en, this message translates to:
+  /// **'Sales returns'**
+  String get salesReturns;
+
+  /// No description provided for @purchaseReturns.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase returns'**
+  String get purchaseReturns;
+
+  /// No description provided for @newSalesReturn.
+  ///
+  /// In en, this message translates to:
+  /// **'New sales return'**
+  String get newSalesReturn;
+
+  /// No description provided for @newPurchaseReturn.
+  ///
+  /// In en, this message translates to:
+  /// **'New purchase return'**
+  String get newPurchaseReturn;
+
+  /// No description provided for @noReturns.
+  ///
+  /// In en, this message translates to:
+  /// **'No returns yet'**
+  String get noReturns;
+
+  /// No description provided for @returnDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Return date'**
+  String get returnDate;
+
+  /// No description provided for @returnReason.
+  ///
+  /// In en, this message translates to:
+  /// **'Return reason'**
+  String get returnReason;
+
+  /// No description provided for @originalInvoice.
+  ///
+  /// In en, this message translates to:
+  /// **'Original invoice'**
+  String get originalInvoice;
+
+  /// No description provided for @selectOriginalInvoice.
+  ///
+  /// In en, this message translates to:
+  /// **'Select a posted invoice'**
+  String get selectOriginalInvoice;
+
+  /// No description provided for @remainingToReturn.
+  ///
+  /// In en, this message translates to:
+  /// **'Remaining to return'**
+  String get remainingToReturn;
+
+  /// No description provided for @quantityToReturn.
+  ///
+  /// In en, this message translates to:
+  /// **'Quantity to return'**
+  String get quantityToReturn;
+
+  /// No description provided for @createReturn.
+  ///
+  /// In en, this message translates to:
+  /// **'Create return'**
+  String get createReturn;
+
+  /// No description provided for @returnCreated.
+  ///
+  /// In en, this message translates to:
+  /// **'Return saved as a draft'**
+  String get returnCreated;
+
+  /// No description provided for @confirmPostReturn.
+  ///
+  /// In en, this message translates to:
+  /// **'Posting updates stock and the customer or supplier balance. Continue?'**
+  String get confirmPostReturn;
+
+  /// No description provided for @returnPosted.
+  ///
+  /// In en, this message translates to:
+  /// **'Return posted'**
+  String get returnPosted;
+
+  /// No description provided for @returnReversed.
+  ///
+  /// In en, this message translates to:
+  /// **'Return reversed'**
+  String get returnReversed;
+
+  /// No description provided for @returnLines.
+  ///
+  /// In en, this message translates to:
+  /// **'Return lines'**
+  String get returnLines;
 
   /// No description provided for @invoiceNumber.
   ///
@@ -2135,7 +2435,7 @@ abstract class AppLocalizations {
   /// No description provided for @logoHint.
   ///
   /// In en, this message translates to:
-  /// **'Optional — PNG, JPEG or WebP up to 2 MB'**
+  /// **'Optional — PNG, JPEG or WebP; resized to 1024 × 1024 px, up to 2 MB.'**
   String get logoHint;
 
   /// No description provided for @logoUpdated.
@@ -2149,6 +2449,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Logo removed'**
   String get logoRemoved;
+
+  /// No description provided for @logoInvalid.
+  String get logoInvalid;
+
+  /// No description provided for @logoTooLarge.
+  String get logoTooLarge;
+
+  /// No description provided for @demoBackupTitle.
+  String get demoBackupTitle;
+
+  /// No description provided for @demoBackupHint.
+  String get demoBackupHint;
+
+  /// No description provided for @downloadDemoBackup.
+  String get downloadDemoBackup;
+
+  /// No description provided for @demoLoginHint.
+  String get demoLoginHint;
 
   /// No description provided for @noLogo.
   ///
@@ -2800,6 +3118,855 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   /// **'تم تخصيص المبلغ على أقدم الفواتير المفتوحة'**
   String get settleOldestFirst;
 
+  /// In en, this message translates to:
+  /// **'Cost centers'**
+  String get costCenters;
+
+  /// In en, this message translates to:
+  /// **'Cost center'**
+  String get costCenter;
+
+  /// In en, this message translates to:
+  /// **'New cost center'**
+  String get newCostCenter;
+
+  /// In en, this message translates to:
+  /// **'Edit cost center'**
+  String get editCostCenter;
+
+  /// In en, this message translates to:
+  /// **'Cost center code'**
+  String get costCenterCode;
+
+  /// In en, this message translates to:
+  /// **'Cost center type'**
+  String get costCenterType;
+
+  /// In en, this message translates to:
+  /// **'Department'**
+  String get department;
+
+  /// In en, this message translates to:
+  /// **'Administrative unit'**
+  String get administrativeUnit;
+
+  /// In en, this message translates to:
+  /// **'Project'**
+  String get project;
+
+  /// In en, this message translates to:
+  /// **'Responsible person'**
+  String get responsiblePerson;
+
+  /// In en, this message translates to:
+  /// **'Parent cost center'**
+  String get parentCostCenter;
+
+  /// In en, this message translates to:
+  /// **'Search cost centers'**
+  String get searchCostCenters;
+
+  /// In en, this message translates to:
+  /// **'No cost centers yet'**
+  String get noCostCenters;
+
+  /// In en, this message translates to:
+  /// **'Cost center saved'**
+  String get costCenterSaved;
+
+  /// In en, this message translates to:
+  /// **'Cost center deactivated'**
+  String get costCenterDeactivated;
+
+  /// In en, this message translates to:
+  /// **'Deactivating stops new postings. Existing transactions keep their centre. Continue?'**
+  String get confirmDeactivateCostCenter;
+
+  /// In en, this message translates to:
+  /// **'Delete cost center'**
+  String get deleteCostCenter;
+
+  /// In en, this message translates to:
+  /// **'Only an unused cost center can be deleted. If it has transactions, deactivate it instead. Continue?'**
+  String get confirmDeleteCostCenter;
+
+  /// In en, this message translates to:
+  /// **'Cost center deleted'**
+  String get costCenterDeleted;
+
+  /// In en, this message translates to:
+  /// **'All parents'**
+  String get allParents;
+
+  /// In en, this message translates to:
+  /// **'All statuses'**
+  String get allStatuses;
+
+  /// In en, this message translates to:
+  /// **'Usage'**
+  String get usage;
+
+  /// In en, this message translates to:
+  /// **'Journal lines'**
+  String get journalLinesUsing;
+
+  /// In en, this message translates to:
+  /// **'Allocated lines'**
+  String get allocatedLinesUsing;
+
+  /// In en, this message translates to:
+  /// **'Cost centers'**
+  String get costCenterReport;
+
+  /// In en, this message translates to:
+  /// **'Own'**
+  String get ownAmount;
+
+  /// In en, this message translates to:
+  /// **'Including children'**
+  String get rolledUp;
+
+  /// In en, this message translates to:
+  /// **'Unallocated'**
+  String get unallocated;
+
+  /// In en, this message translates to:
+  /// **'Transactions'**
+  String get transactions;
+
+  /// In en, this message translates to:
+  /// **'No transactions in this period'**
+  String get noTransactions;
+
+  /// In en, this message translates to:
+  /// **'Details'**
+  String get drillDown;
+
+  /// In en, this message translates to:
+  /// **'Budgets'**
+  String get budgets;
+
+  /// In en, this message translates to:
+  /// **'Budget'**
+  String get budget;
+
+  /// In en, this message translates to:
+  /// **'New budget'**
+  String get newBudget;
+
+  /// In en, this message translates to:
+  /// **'Edit budget'**
+  String get editBudget;
+
+  /// In en, this message translates to:
+  /// **'Budget amount'**
+  String get budgetAmount;
+
+  /// In en, this message translates to:
+  /// **'Actual'**
+  String get actualAmount;
+
+  /// In en, this message translates to:
+  /// **'Variance'**
+  String get variance;
+
+  /// In en, this message translates to:
+  /// **'Variance %'**
+  String get variancePercent;
+
+  /// In en, this message translates to:
+  /// **'Budget period'**
+  String get budgetPeriod;
+
+  /// In en, this message translates to:
+  /// **'No budgets yet'**
+  String get noBudgets;
+
+  /// In en, this message translates to:
+  /// **'Budget saved'**
+  String get budgetSaved;
+
+  /// In en, this message translates to:
+  /// **'Retire budget'**
+  String get retireBudget;
+
+  /// In en, this message translates to:
+  /// **'A retired budget keeps its history and leaves the active list. Continue?'**
+  String get confirmRetireBudget;
+
+  /// In en, this message translates to:
+  /// **'Budget vs actual'**
+  String get budgetReport;
+
+  /// In en, this message translates to:
+  /// **'Favorable'**
+  String get favorable;
+
+  /// In en, this message translates to:
+  /// **'Unfavorable'**
+  String get unfavorable;
+
+  /// In en, this message translates to:
+  /// **'Retired'**
+  String get budgetRetired;
+
+  /// In en, this message translates to:
+  /// **'Allocation'**
+  String get allocation;
+
+  /// In en, this message translates to:
+  /// **'Allocations'**
+  String get allocations;
+
+  /// In en, this message translates to:
+  /// **'Allocated'**
+  String get allocated;
+
+  /// In en, this message translates to:
+  /// **'Line amount'**
+  String get sourceAmount;
+
+  /// In en, this message translates to:
+  /// **'Remaining'**
+  String get remainingToAllocate;
+
+  /// In en, this message translates to:
+  /// **'Split across cost centers'**
+  String get splitAcrossCenters;
+
+  /// In en, this message translates to:
+  /// **'Allocations must add up to the line amount exactly.'**
+  String get allocationMustReconcile;
+
+  /// In en, this message translates to:
+  /// **'This cost center is already in the split.'**
+  String get duplicateCostCenter;
+
+  /// In en, this message translates to:
+  /// **'Select a cost center'**
+  String get selectCostCenter;
+
+  /// In en, this message translates to:
+  /// **'No cost center'**
+  String get noAllocation;
+
+  /// In en, this message translates to:
+  /// **'Inactive cost centers cannot receive new postings.'**
+  String get costCenterInactive;
+
+  /// In en, this message translates to:
+  /// **'Add cost center'**
+  String get addAllocation;
+
+  /// In en, this message translates to:
+  /// **'Allocated total'**
+  String get allocationTotal;
+
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get deleteRecord;
+
+  /// In en, this message translates to:
+  /// **'Result'**
+  String get resultLabel;
+
+  /// In en, this message translates to:
+  /// **'en'**
+  String get @@locale;
+
+  /// In en, this message translates to:
+  /// **'The account “{account}” will be deleted, as long as it has no movements or sub-accounts. Continue?'**
+  String get deleteAccountConfirm;
+
+  /// In en, this message translates to:
+  /// **'The unit “{unit}” will be deleted. Units with movements cannot be deleted.'**
+  String get deleteBranchConfirm;
+
+  /// In en, this message translates to:
+  /// **'The file “{file}” will be permanently removed from the server.'**
+  String get deleteBackupConfirm;
+
+  /// In en, this message translates to:
+  /// **'This will reset “{company}”.'**
+  String get resetForCompany;
+
+  /// In en, this message translates to:
+  /// **'The only way back is to restore the backup that is about to be taken. Type your password and the word {word} to go ahead.'**
+  String get resetConfirmBody;
+
+  /// In en, this message translates to:
+  /// **'Type {word}'**
+  String get resetWordLabel;
+
+  /// In en, this message translates to:
+  /// **'Type {word} exactly as it is written to confirm.'**
+  String get resetWrongWord;
+
+  /// In en, this message translates to:
+  /// **'The company’s data was cleared. “{file}” holds the old data.'**
+  String get resetDone;
+
+  /// In en, this message translates to:
+  /// **'Row density'**
+  String get rowDensity;
+
+  /// In en, this message translates to:
+  /// **'Compact'**
+  String get densityCompact;
+
+  /// In en, this message translates to:
+  /// **'Normal'**
+  String get densityNormal;
+
+  /// In en, this message translates to:
+  /// **'Spacious'**
+  String get densitySpacious;
+
+  /// In en, this message translates to:
+  /// **'Drag a column edge to widen it'**
+  String get dragColumnHint;
+
+  /// In en, this message translates to:
+  /// **'Nothing to show'**
+  String get noRecords;
+
+  /// In en, this message translates to:
+  /// **'Resize'**
+  String get resizeDialog;
+
+  /// In en, this message translates to:
+  /// **'Maximize'**
+  String get maximize;
+
+  /// In en, this message translates to:
+  /// **'Restore'**
+  String get restore;
+
+  /// In en, this message translates to:
+  /// **'Available in branch'**
+  String get availableInBranch;
+
+  /// In en, this message translates to:
+  /// **'The branch\'s actual on-hand balance, the same figure posting checks. Warehouse-level balances are not tracked.'**
+  String get branchStockHint;
+
+  /// In en, this message translates to:
+  /// **'Stock quantities need the inventory.stock.read permission, so they are not shown.'**
+  String get stockNotVisible;
+
+  /// In en, this message translates to:
+  /// **'Use'**
+  String get useItem;
+
+  /// In en, this message translates to:
+  /// **'Invoice discount'**
+  String get invoiceDiscount;
+
+  /// In en, this message translates to:
+  /// **'Applied before tax and allocated across the lines'**
+  String get discountBeforeTaxHint;
+
+  /// In en, this message translates to:
+  /// **'No discount'**
+  String get noDiscount;
+
+  /// In en, this message translates to:
+  /// **'Percentage'**
+  String get discountPercent;
+
+  /// In en, this message translates to:
+  /// **'Fixed amount'**
+  String get discountAmount;
+
+  /// In en, this message translates to:
+  /// **'Percent %'**
+  String get discountPercentValue;
+
+  /// In en, this message translates to:
+  /// **'Amount'**
+  String get discountAmountValue;
+
+  /// In en, this message translates to:
+  /// **'Line discount'**
+  String get lineDiscount;
+
+  /// In en, this message translates to:
+  /// **'Before discount'**
+  String get beforeDiscount;
+
+  /// In en, this message translates to:
+  /// **'Line discounts'**
+  String get lineDiscounts;
+
+  /// In en, this message translates to:
+  /// **'Net line'**
+  String get netLine;
+
+  /// In en, this message translates to:
+  /// **'Quotations'**
+  String get quotations;
+
+  /// In en, this message translates to:
+  /// **'Quotation'**
+  String get quotation;
+
+  /// In en, this message translates to:
+  /// **'New quotation'**
+  String get newQuotation;
+
+  /// In en, this message translates to:
+  /// **'Edit quotation'**
+  String get editQuotation;
+
+  /// In en, this message translates to:
+  /// **'Quotation number'**
+  String get quotationNumber;
+
+  /// In en, this message translates to:
+  /// **'Quotation date'**
+  String get quotationDate;
+
+  /// In en, this message translates to:
+  /// **'Valid until'**
+  String get validUntil;
+
+  /// In en, this message translates to:
+  /// **'Sent'**
+  String get sent;
+
+  /// In en, this message translates to:
+  /// **'Accepted'**
+  String get accepted;
+
+  /// In en, this message translates to:
+  /// **'Rejected'**
+  String get rejected;
+
+  /// In en, this message translates to:
+  /// **'Expired'**
+  String get expired;
+
+  /// In en, this message translates to:
+  /// **'Converted'**
+  String get converted;
+
+  /// In en, this message translates to:
+  /// **'Tables'**
+  String get quotationTables;
+
+  /// In en, this message translates to:
+  /// **'Add table'**
+  String get addTable;
+
+  /// In en, this message translates to:
+  /// **'Table title'**
+  String get tableTitle;
+
+  /// In en, this message translates to:
+  /// **'Table discount'**
+  String get tableDiscount;
+
+  /// In en, this message translates to:
+  /// **'Move up'**
+  String get moveUp;
+
+  /// In en, this message translates to:
+  /// **'Move down'**
+  String get moveDown;
+
+  /// In en, this message translates to:
+  /// **'Remove table'**
+  String get removeTable;
+
+  /// In en, this message translates to:
+  /// **'Add line'**
+  String get addQuotationLine;
+
+  /// In en, this message translates to:
+  /// **'Country of origin'**
+  String get countryOfOrigin;
+
+  /// In en, this message translates to:
+  /// **'Origin'**
+  String get origin;
+
+  /// In en, this message translates to:
+  /// **'Gross value'**
+  String get grossValue;
+
+  /// In en, this message translates to:
+  /// **'Net value'**
+  String get netValue;
+
+  /// In en, this message translates to:
+  /// **'Final total'**
+  String get finalTotal;
+
+  /// In en, this message translates to:
+  /// **'Total discounts'**
+  String get totalDiscounts;
+
+  /// In en, this message translates to:
+  /// **'Quotation discount'**
+  String get quotationDiscount;
+
+  /// In en, this message translates to:
+  /// **'Subtotal before discount'**
+  String get subtotalBeforeDiscount;
+
+  /// In en, this message translates to:
+  /// **'Summary'**
+  String get quotationSummary;
+
+  /// In en, this message translates to:
+  /// **'Table subtotal'**
+  String get tableSubtotal;
+
+  /// In en, this message translates to:
+  /// **'Terms and conditions'**
+  String get termsAndConditions;
+
+  /// In en, this message translates to:
+  /// **'Notes'**
+  String get notesLabel;
+
+  /// In en, this message translates to:
+  /// **'Company manager'**
+  String get managerName;
+
+  /// In en, this message translates to:
+  /// **'Responsible person'**
+  String get responsibleName;
+
+  /// In en, this message translates to:
+  /// **'Responsible telephone'**
+  String get responsiblePhone;
+
+  /// In en, this message translates to:
+  /// **'Follow up'**
+  String get followUp;
+
+  /// In en, this message translates to:
+  /// **'What was discussed'**
+  String get followUpNote;
+
+  /// In en, this message translates to:
+  /// **'Write what was discussed before saving the follow-up.'**
+  String get followUpRequired;
+
+  /// In en, this message translates to:
+  /// **'History'**
+  String get statusHistory;
+
+  /// In en, this message translates to:
+  /// **'Issue and mark sent'**
+  String get sendQuotation;
+
+  /// In en, this message translates to:
+  /// **'Accept'**
+  String get acceptQuotation;
+
+  /// In en, this message translates to:
+  /// **'Reject'**
+  String get rejectQuotation;
+
+  /// In en, this message translates to:
+  /// **'Start a revision'**
+  String get reviseQuotation;
+
+  /// In en, this message translates to:
+  /// **'Convert to invoice'**
+  String get convertToInvoice;
+
+  /// In en, this message translates to:
+  /// **'Convert'**
+  String get convert;
+
+  /// In en, this message translates to:
+  /// **'Converted invoice'**
+  String get convertedInvoice;
+
+  /// In en, this message translates to:
+  /// **'Create a draft sales invoice from this accepted quotation? Nothing is posted and no stock moves until the invoice is posted separately.'**
+  String get conversionConfirm;
+
+  /// In en, this message translates to:
+  /// **'The quotation total is before tax. The invoice applies the company tax rules, so its total may be higher.'**
+  String get conversionTaxNote;
+
+  /// In en, this message translates to:
+  /// **'No quotations yet'**
+  String get noQuotations;
+
+  /// In en, this message translates to:
+  /// **'Print preview'**
+  String get printPreview;
+
+  /// In en, this message translates to:
+  /// **'Download PDF'**
+  String get downloadPdf;
+
+  /// In en, this message translates to:
+  /// **'Quotation saved'**
+  String get quotationSaved;
+
+  /// In en, this message translates to:
+  /// **'Quotation issued and marked as sent'**
+  String get quotationSent;
+
+  /// In en, this message translates to:
+  /// **'Quotation accepted'**
+  String get quotationAccepted;
+
+  /// In en, this message translates to:
+  /// **'Quotation rejected'**
+  String get quotationRejected;
+
+  /// In en, this message translates to:
+  /// **'A new draft revision was created'**
+  String get quotationRevised;
+
+  /// In en, this message translates to:
+  /// **'Quotation converted to a draft invoice'**
+  String get quotationConverted;
+
+  /// In en, this message translates to:
+  /// **'Draft quotation removed'**
+  String get quotationDeleted;
+
+  /// In en, this message translates to:
+  /// **'Remove this draft quotation? Issued quotations are never deleted.'**
+  String get deleteQuotationConfirm;
+
+  /// In en, this message translates to:
+  /// **'Add at least one table with one line.'**
+  String get quotationNeedsTable;
+
+  /// In en, this message translates to:
+  /// **'Status'**
+  String get filterStatus;
+
+  /// In en, this message translates to:
+  /// **'From date'**
+  String get fromDate;
+
+  /// In en, this message translates to:
+  /// **'To date'**
+  String get toDate;
+
+  /// In en, this message translates to:
+  /// **'This is a draft: nothing is posted and stock is untouched. Issuing it freezes the content that the customer receives.'**
+  String get quotationDraftHint;
+
+  /// In en, this message translates to:
+  /// **'Optional'**
+  String get optional;
+
+  /// In en, this message translates to:
+  /// **'Currency'**
+  String get currency;
+
+  /// In en, this message translates to:
+  /// **'Clear'**
+  String get clear;
+
+  /// In en, this message translates to:
+  /// **'Filter by status, customer or date'**
+  String get quotationFilterHint;
+
+  /// In en, this message translates to:
+  /// **'Documents and quotations'**
+  String get documentSettings;
+
+  /// In en, this message translates to:
+  /// **'Maximum discount %'**
+  String get maximumDiscount;
+
+  /// In en, this message translates to:
+  /// **'Print the tax registration number on quotations'**
+  String get showTaxIdOnQuotations;
+
+  /// In en, this message translates to:
+  /// **'A display choice only. It never deletes the number, and it cannot override a legal requirement to show it.'**
+  String get taxIdLegalNote;
+
+  /// In en, this message translates to:
+  /// **'Sales manager'**
+  String get salesManagerName;
+
+  /// In en, this message translates to:
+  /// **'Sales manager telephone'**
+  String get salesManagerPhone;
+
+  /// In en, this message translates to:
+  /// **'Settings saved'**
+  String get settingsSaved;
+
+  /// In en, this message translates to:
+  /// **'Save settings'**
+  String get saveSettings;
+
+  /// In en, this message translates to:
+  /// **'Changing these needs the company administration permission.'**
+  String get readOnlySettings;
+
+  /// In en, this message translates to:
+  /// **'Enter a value between 0 and 100.'**
+  String get invalidSetting;
+
+  /// In en, this message translates to:
+  /// **'Network and remote access'**
+  String get networkAccessTitle;
+
+  /// In en, this message translates to:
+  /// **'The server did not answer its network report. Check that it is running.'**
+  String get networkUnavailable;
+
+  /// In en, this message translates to:
+  /// **'Available on the local network'**
+  String get lanReachable;
+
+  /// In en, this message translates to:
+  /// **'This computer only'**
+  String get localOnly;
+
+  /// In en, this message translates to:
+  /// **'Server'**
+  String get serverStatus;
+
+  /// In en, this message translates to:
+  /// **'ready, database up'**
+  String get serverReady;
+
+  /// In en, this message translates to:
+  /// **'database not reachable'**
+  String get databaseDown;
+
+  /// In en, this message translates to:
+  /// **'Listening on'**
+  String get listeningOn;
+
+  /// In en, this message translates to:
+  /// **'Local address'**
+  String get localAddress;
+
+  /// In en, this message translates to:
+  /// **'Network address'**
+  String get networkAddress;
+
+  /// In en, this message translates to:
+  /// **'Address if enabled'**
+  String get wouldBeAddress;
+
+  /// In en, this message translates to:
+  /// **'Address copied'**
+  String get addressCopied;
+
+  /// In en, this message translates to:
+  /// **'Copy address'**
+  String get copyAddress;
+
+  /// In en, this message translates to:
+  /// **'The server is bound to this computer only, so the addresses below do not answer from another device. To allow the other computers on the network, set HOST=0.0.0.0 in the installation settings file and restart the program.'**
+  String get lanNotEnabledHint;
+
+  /// In en, this message translates to:
+  /// **'Windows Firewall must also allow the program on private networks. The database port (5432) is never opened: other devices only reach the program, and still have to sign in.'**
+  String get lanFirewallHint;
+
+  /// In en, this message translates to:
+  /// **'Public (internet) address'**
+  String get publicAddressTitle;
+
+  /// In en, this message translates to:
+  /// **'Detect'**
+  String get detectPublicAddress;
+
+  /// In en, this message translates to:
+  /// **'Detected only when you press Detect. A public address alone does not make this server reachable from the internet: the router or the carrier may block incoming connections. For remote use, prefer a VPN or an HTTPS gateway; never expose the database.'**
+  String get publicAddressHint;
+
+  /// In en, this message translates to:
+  /// **'Checking…'**
+  String get publicAddressChecking;
+
+  /// In en, this message translates to:
+  /// **'The public address could not be detected.'**
+  String get publicAddressUnavailable;
+
+  /// In en, this message translates to:
+  /// **'an address alone does not prove that incoming connections reach this computer.'**
+  String get publicAddressNotProof;
+
+  /// In en, this message translates to:
+  /// **'Last checked'**
+  String get lastChecked;
+
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get remove;
+
+
+  /// No description provided for @termsLibrary.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved terms'**
+  String get termsLibrary;
+
+  /// No description provided for @insertSavedTerms.
+  ///
+  /// In en, this message translates to:
+  /// **'Insert saved terms'**
+  String get insertSavedTerms;
+
+  /// No description provided for @saveTermsToLibrary.
+  ///
+  /// In en, this message translates to:
+  /// **'Save terms to library'**
+  String get saveTermsToLibrary;
+
+  /// No description provided for @termsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Entry title'**
+  String get termsTitle;
+
+  /// No description provided for @termsBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Terms text'**
+  String get termsBody;
+
+  /// No description provided for @noSavedTerms.
+  ///
+  /// In en, this message translates to:
+  /// **'No saved terms yet. Write the terms below and save them for reuse.'**
+  String get noSavedTerms;
+
+  /// No description provided for @termsSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Terms saved to the library'**
+  String get termsSaved;
+
+  /// No description provided for @manageSavedTerms.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage saved terms'**
+  String get manageSavedTerms;
+
+  /// No description provided for @termsInserted.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved terms inserted. You can edit this copy freely.'**
+  String get termsInserted;
+
+  /// No description provided for @removeSavedTerm.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove this saved entry? Documents that already used it keep their own copy.'**
+  String get removeSavedTerm;
+
   // Lookup logic when only language code is specified.
   switch (locale.languageCode) {
     case 'ar':
@@ -2814,4 +3981,89 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
     'on GitHub with a reproducible sample app and the gen-l10n configuration '
     'that was used.',
   );
+  /// In en, this message translates to:
+  /// **'Item code'**
+  String get itemCode;
+
+  /// In en, this message translates to:
+  /// **'Subject'**
+  String get subject;
+
+  /// In en, this message translates to:
+  /// **'The headline of this offer, printed above the customer\'s name.'**
+  String get subjectHint;
+
+  /// In en, this message translates to:
+  /// **'Print the company tax number on this offer'**
+  String get showTaxNumberOnOffer;
+
+  /// In en, this message translates to:
+  /// **'The company setting is only the default; this offer keeps its own choice.'**
+  String get showTaxNumberOnOfferHint;
+
+  /// In en, this message translates to:
+  /// **'Line columns'**
+  String get quotationColumns;
+
+  /// In en, this message translates to:
+  /// **'Column layout'**
+  String get columnLayout;
+
+  /// In en, this message translates to:
+  /// **'Choose, rename, order and size the columns this offer prints.'**
+  String get columnLayoutHint;
+
+  /// In en, this message translates to:
+  /// **'English label'**
+  String get columnLabelEn;
+
+  /// In en, this message translates to:
+  /// **'Arabic label'**
+  String get columnLabelAr;
+
+  /// In en, this message translates to:
+  /// **'Width'**
+  String get columnWidth;
+
+  /// In en, this message translates to:
+  /// **'Add column'**
+  String get addColumn;
+
+  /// In en, this message translates to:
+  /// **'Remove column'**
+  String get removeColumn;
+
+  /// In en, this message translates to:
+  /// **'Saved layout'**
+  String get columnTemplate;
+
+  /// In en, this message translates to:
+  /// **'New layout name'**
+  String get templateName;
+
+  /// In en, this message translates to:
+  /// **'Save as a layout'**
+  String get saveColumnTemplate;
+
+  /// In en, this message translates to:
+  /// **'Layout saved to the library'**
+  String get templateSaved;
+
+  /// In en, this message translates to:
+  /// **'Keep at least one column visible.'**
+  String get keepOneColumnVisible;
+  /// In en, this message translates to:
+  /// **'Printed'**
+  String get printedOnOffer;
+
+  /// In en, this message translates to:
+  /// **'Not printed'**
+  String get notPrintedOnOffer;
+  /// In en, this message translates to:
+  /// **'Warehouses'**
+  String get perWarehouse;
+
+  /// In en, this message translates to:
+  /// **'Unassigned'**
+  String get unassignedWarehouse;
 }

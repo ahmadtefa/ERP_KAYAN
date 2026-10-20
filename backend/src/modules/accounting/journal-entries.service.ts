@@ -8,6 +8,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import { accountName } from '../../common/localization/account-name';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import { CostCentersService } from './cost-centers.service';
 import { DocumentNumberService } from './document-number.service';
 import { CreateJournalEntryDto, JournalLineDto } from './dto/create-journal-entry.dto';
 import { FiscalPeriodsService } from './fiscal-periods.service';
@@ -21,6 +22,12 @@ const LINES_WITH_ACCOUNT = {
   orderBy: { lineNumber: 'asc' },
   include: {
     account: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+    costCenter: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+    allocations: {
+      include: {
+        costCenter: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+      },
+    },
   },
 } as const;
 
@@ -31,6 +38,7 @@ interface NormalisedLine {
   credit: Prisma.Decimal;
   description?: string;
   costCenterId?: string;
+  allocations: Array<{ costCenterId: string; amount: Prisma.Decimal }>;
 }
 
 @Injectable()
@@ -41,6 +49,7 @@ export class JournalEntriesService {
     private readonly audit: AuditService,
     private readonly periods: FiscalPeriodsService,
     private readonly settings: CompanySettingsService,
+    private readonly costCenters: CostCentersService,
   ) {}
 
   async findAll(companyId: string, page = 1, pageSize = 50) {
@@ -145,6 +154,19 @@ export class JournalEntriesService {
       );
     }
 
+    // The analytical dimension is validated against this company and the entry
+    // date before anything is written: an inactive centre, another company's
+    // centre or a centre outside its validity window is refused, not stored.
+    await this.costCenters.assertPostable(
+      this.prisma,
+      companyId,
+      lines.flatMap((l) => [
+        ...(l.costCenterId ? [l.costCenterId] : []),
+        ...l.allocations.map((a) => a.costCenterId),
+      ]),
+      new Date(dto.entryDate),
+    );
+
     // Number allocation and the insert share one transaction: if the insert
     // fails, the reserved number is rolled back with it.
     const created = await this.prisma.$transaction(async (tx) => {
@@ -174,6 +196,12 @@ export class JournalEntriesService {
               credit: l.credit,
               description: l.description ?? null,
               costCenterId: l.costCenterId ?? null,
+              allocations: {
+                create: l.allocations.map((allocation) => ({
+                  costCenterId: allocation.costCenterId,
+                  amount: allocation.amount,
+                })),
+              },
             })),
           },
         },
@@ -413,7 +441,7 @@ export class JournalEntriesService {
   async reverse(companyId: string, userId: string, id: string) {
     const original = await this.prisma.journalEntry.findFirst({
       where: { id, companyId },
-      include: { lines: true },
+      include: { lines: { include: { allocations: true } } },
     });
     if (!original) throw new NotFoundException('Journal entry not found');
     if (original.status !== JournalStatus.POSTED) {
@@ -460,6 +488,14 @@ export class JournalEntriesService {
               credit: l.debit,
               description: l.description,
               costCenterId: l.costCenterId,
+              // The split is given back exactly as it was taken, so a
+              // cost-center report nets a reversed entry to zero.
+              allocations: {
+                create: (l.allocations ?? []).map((allocation) => ({
+                  costCenterId: allocation.costCenterId,
+                  amount: allocation.amount,
+                })),
+              },
             })),
           },
         },
@@ -514,12 +550,37 @@ export class JournalEntriesService {
       );
     }
 
+    const amount = debit.plus(credit);
+    const requested = line.allocations ?? [];
+    if (requested.length > 0 && line.costCenterId) {
+      throw new BadRequestException(
+        'A journal line cannot name one cost center and also be split between several',
+      );
+    }
+    const allocations =
+      requested.length > 0
+        ? CostCentersService.validateAllocations(amount, requested)
+        : [];
+    // One allocation covering the whole line is the ordinary single-centre
+    // case; storing it on the line keeps every existing report unchanged.
+    if (allocations.length === 1) {
+      return {
+        accountId: line.accountId,
+        debit,
+        credit,
+        description: line.description,
+        costCenterId: allocations[0].costCenterId,
+        allocations: [],
+      };
+    }
+
     return {
       accountId: line.accountId,
       debit,
       credit,
       description: line.description,
       costCenterId: line.costCenterId,
+      allocations,
     };
   }
 
@@ -551,6 +612,17 @@ export class JournalEntriesService {
         nameEn: string | null;
         nameAr: string | null;
       } | null;
+      costCenter?: {
+        id: string;
+        code: string;
+        nameEn: string;
+        nameAr: string;
+      } | null;
+      allocations?: Array<{
+        costCenterId: string;
+        amount: Prisma.Decimal;
+        costCenter?: { id: string; code: string; nameEn: string; nameAr: string } | null;
+      }>;
     }>;
   }) {
     return {
@@ -586,6 +658,20 @@ export class JournalEntriesService {
           credit: l.credit.toFixed(MONEY_SCALE),
           description: l.description,
           costCenterId: l.costCenterId,
+          costCenterCode: l.costCenter?.code ?? null,
+          costCenterNameEn: l.costCenter?.nameEn ?? null,
+          costCenterNameAr: l.costCenter?.nameAr ?? null,
+          // A split line reports its allocations; a single-centre line reports
+          // an empty list and carries `costCenterId` instead. Clients must not
+          // add the two together.
+          allocations:
+            l.allocations?.map((allocation) => ({
+              costCenterId: allocation.costCenterId,
+              costCenterCode: allocation.costCenter?.code ?? null,
+              costCenterNameEn: allocation.costCenter?.nameEn ?? null,
+              costCenterNameAr: allocation.costCenter?.nameAr ?? null,
+              amount: allocation.amount.toFixed(MONEY_SCALE),
+            })) ?? [],
         })) ?? [],
     };
   }

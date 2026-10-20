@@ -9,6 +9,7 @@ import { StockService } from './stock.service';
 interface StockQuery {
   branchId?: string;
   itemId?: string;
+  itemIds?: string;
   onlyInStock?: string;
 }
 
@@ -23,6 +24,21 @@ export class StockController {
       branchId: query.branchId,
       itemId: query.itemId,
       onlyInStock: query.onlyInStock === 'true',
+    });
+  }
+
+  /// The same balances split by the warehouse the movements name. The
+  /// picker shows both: the branch total and where it actually sits.
+  @Get('by-warehouse')
+  @RequirePermissions('inventory.stock.read')
+  byWarehouse(@CurrentUser() user: AuthUser, @Query() query: StockQuery) {
+    const itemIds = (query.itemIds ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0);
+    return this.service.byWarehouse(user.companyId, {
+      branchId: query.branchId,
+      itemIds: itemIds.length ? itemIds : undefined,
     });
   }
 

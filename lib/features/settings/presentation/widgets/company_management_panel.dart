@@ -1,9 +1,9 @@
-import 'dart:typed_data';
-
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/image/company_logo_image.dart';
+import '../../../../core/image/company_logo_url.dart';
 import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -139,45 +139,33 @@ class _CompanyManagementPanelState
         extensions: const ['.png', '.jpg', '.jpeg', '.webp'],
       );
       if (file == null) return;
-      if (file.sizeInBytes > 2 * 1024 * 1024) {
-        throw StateError(
-          tr(
-            'Choose an image smaller than 2 MB.',
-            'اختر صورة أصغر من ٢ ميجابايت.',
-          ),
-        );
-      }
-      final bytes = file.bytes;
-      if (!_looksLikeImage(bytes)) {
-        throw StateError(
-          tr(
-            'The selected file is not a supported image.',
-            'الملف المحدد ليس صورة مدعومة.',
-          ),
-        );
-      }
+      final bytes = await normalizeCompanyLogo(file.bytes);
+      if (!mounted) return;
       setState(() {
-        _logo = file;
+        _logo = PickedFile(
+          name: 'company-logo.png',
+          bytes: bytes,
+          mimeType: 'image/png',
+        );
         _error = null;
       });
+    } on CompanyLogoImageException catch (problem) {
+      if (!mounted) return;
+      setState(() {
+        _error = problem.tooLarge
+            ? tr(
+                'The resized logo is still larger than 2 MB. Choose a simpler image.',
+                'ما زال حجم الشعار بعد التصغير أكبر من ٢ ميجابايت. اختر صورة أبسط.',
+              )
+            : tr(
+                'Choose a valid PNG, JPEG or WebP image at least 32 × 32 pixels.',
+                'اختر صورة PNG أو JPEG أو WebP صالحة، وبأبعاد لا تقل عن ٣٢ × ٣٢ بكسل.',
+              );
+      });
     } catch (e) {
-      setState(() => _error = '$e');
+      if (mounted) setState(() => _error = '$e');
     }
   }
-
-  bool _looksLikeImage(Uint8List bytes) =>
-      (bytes.length >= 8 &&
-          bytes[0] == 137 &&
-          bytes[1] == 80 &&
-          bytes[2] == 78 &&
-          bytes[3] == 71) ||
-      (bytes.length >= 3 &&
-          bytes[0] == 255 &&
-          bytes[1] == 216 &&
-          bytes[2] == 255) ||
-      (bytes.length >= 12 &&
-          String.fromCharCodes(bytes.sublist(0, 4)) == 'RIFF' &&
-          String.fromCharCodes(bytes.sublist(8, 12)) == 'WEBP');
 
   Future<void> _saveLogo() async {
     final file = _logo;
@@ -206,6 +194,28 @@ class _CompanyManagementPanelState
     });
   }
 
+  String _friendlyError(Object error) {
+    final response = error is DioException ? error.response?.data : null;
+    final raw = response is Map && response['detail'] is String
+        ? response['detail'] as String
+        : '$error';
+    final lower = raw.toLowerCase();
+    if (lower.contains('larger than') || lower.contains('too large')) {
+      return tr(
+        'The resized logo is still larger than 2 MB. Choose a simpler image.',
+        'ما زال حجم الشعار بعد التصغير أكبر من ٢ ميجابايت. اختر صورة أبسط.',
+      );
+    }
+    if (lower.contains('logo') || lower.contains('image') ||
+        lower.contains('png') || lower.contains('jpeg') || lower.contains('webp')) {
+      return tr(
+        'Choose a valid PNG, JPEG or WebP image at least 32 × 32 pixels.',
+        'اختر صورة PNG أو JPEG أو WebP صالحة، وبأبعاد لا تقل عن ٣٢ × ٣٢ بكسل.',
+      );
+    }
+    return raw;
+  }
+
   Future<void> _run(Future<void> Function() action) async {
     setState(() {
       _busy = true;
@@ -214,7 +224,7 @@ class _CompanyManagementPanelState
     try {
       await action();
     } catch (e) {
-      _error = '$e';
+      _error = _friendlyError(e);
     }
     if (mounted) setState(() => _busy = false);
   }
@@ -232,9 +242,14 @@ class _CompanyManagementPanelState
     }
     final base = ref.watch(appConfigProvider).apiBaseUrl;
     final user = ref.watch(currentUserProvider);
-    final logoUrl = user == null
-        ? null
-        : '${base.replaceFirst(RegExp(r'/+$'), '')}/companies/logo/${user.companyId}';
+    // One source for the mark address — the profile's own `logoUrl`, which
+    // carries the version stamp that changes whenever the logo changes, so a
+    // fresh upload shows up immediately instead of a cached copy.
+    final savedLogoUrl = companyLogoUrl(base, {
+      ...?_company,
+      if (_company?['id'] == null && user != null) 'id': user.companyId,
+      'hasLogo': _company?['hasLogo'] == true || _company?['logoUrl'] != null,
+    });
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -285,10 +300,11 @@ class _CompanyManagementPanelState
                         height: 76,
                         child: _logo != null
                             ? Image.memory(_logo!.bytes, fit: BoxFit.contain)
-                            : (logoUrl == null
+                            : (savedLogoUrl == null
                                   ? const Icon(Icons.business, size: 48)
                                   : Image.network(
-                                      '$logoUrl?v=${_company?['updatedAt'] ?? ''}',
+                                      savedLogoUrl,
+                                      key: ValueKey(savedLogoUrl),
                                       fit: BoxFit.contain,
                                       errorBuilder: (_, _, _) =>
                                           const Icon(Icons.business, size: 48),

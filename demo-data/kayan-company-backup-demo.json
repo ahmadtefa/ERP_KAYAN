@@ -1,16 +1,16 @@
 {
   "format": "kayan-backup",
   "version": 1,
-  "createdAt": "2026-10-12T19:22:57.650Z",
+  "createdAt": "2026-10-14T10:52:51.690Z",
   "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
   "companyCode": "DEMO",
-  "companyName": "النخيل للتجارة والتوزيع",
+  "companyName": "النخيل للتجارة والتوزيع — بيانات تجريبية شاملة",
   "counts": {
     "branch": 3,
     "role": 3,
     "rolePermission": 58,
     "user": 3,
-    "userRole": 2,
+    "userRole": 3,
     "userBranch": 3,
     "fiscalPeriod": 2,
     "account": 46,
@@ -26,7 +26,28 @@
     "purchaseInvoice": 20,
     "purchaseInvoiceLine": 66,
     "documentSequence": 5,
-    "auditLog": 4
+    "auditLog": 4,
+    "userPermission": 4,
+    "costCenter": 3,
+    "companySetting": 1,
+    "priceList": 2,
+    "itemCategory": 3,
+    "itemUnit": 12,
+    "warehouse": 3,
+    "priceListItem": 8,
+    "salesOrder": 2,
+    "salesOrderLine": 4,
+    "purchaseOrder": 2,
+    "purchaseOrderLine": 4,
+    "stockDocument": 2,
+    "stockDocumentLine": 4,
+    "openingBalance": 1,
+    "openingBalanceLine": 2,
+    "cashAccount": 2,
+    "bankReconciliation": 1,
+    "cashVoucher": 2,
+    "cashTransfer": 1,
+    "cashVoucherAllocation": 2
   },
   "tables": {
     "branch": [
@@ -114,235 +135,293 @@
     "rolePermission": [
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "a68f8a93-3e10-4d52-9000-9c23e18662fa"
+        "permissionId": "a68f8a93-3e10-4d52-9000-9c23e18662fa",
+        "permissionCode": "accounting.accounts.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "5aff562e-65cf-408c-ba7d-364c3ba8fc5b"
+        "permissionId": "5aff562e-65cf-408c-ba7d-364c3ba8fc5b",
+        "permissionCode": "accounting.accounts.create"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "c5fbec5d-170a-43da-b88d-be88f1371fea"
+        "permissionId": "c5fbec5d-170a-43da-b88d-be88f1371fea",
+        "permissionCode": "accounting.accounts.update"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "20f4b93f-e013-47ce-8182-3a1c838389fc"
+        "permissionId": "20f4b93f-e013-47ce-8182-3a1c838389fc",
+        "permissionCode": "accounting.accounts.delete"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "ca8fa733-e688-4479-ac8e-19ba01051be1"
+        "permissionId": "ca8fa733-e688-4479-ac8e-19ba01051be1",
+        "permissionCode": "accounting.journal.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "b3a28846-a249-490d-90fb-f03d02421d59"
+        "permissionId": "b3a28846-a249-490d-90fb-f03d02421d59",
+        "permissionCode": "accounting.journal.create"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "dfff8011-c751-4e19-b873-db802d45fc2e"
+        "permissionId": "dfff8011-c751-4e19-b873-db802d45fc2e",
+        "permissionCode": "accounting.journal.post"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "84db3157-b076-4d8c-8008-0a60e29c8b56"
+        "permissionId": "84db3157-b076-4d8c-8008-0a60e29c8b56",
+        "permissionCode": "admin.users.manage"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "fc2e2586-284e-4b3d-a575-8164163deafa"
+        "permissionId": "fc2e2586-284e-4b3d-a575-8164163deafa",
+        "permissionCode": "admin.roles.manage"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "e5800330-489e-4342-aba3-ca4ef7f4c343"
+        "permissionId": "e5800330-489e-4342-aba3-ca4ef7f4c343",
+        "permissionCode": "admin.audit.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "fe9ae1b3-7d87-4831-8144-22c424129cd6"
+        "permissionId": "fe9ae1b3-7d87-4831-8144-22c424129cd6",
+        "permissionCode": "admin.backup"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "87f17dde-6c03-4973-8a44-fdee65b206a5"
+        "permissionId": "87f17dde-6c03-4973-8a44-fdee65b206a5",
+        "permissionCode": "admin.company.manage"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "78ef011b-3205-4728-aa95-6292f891a1a2"
+        "permissionId": "78ef011b-3205-4728-aa95-6292f891a1a2",
+        "permissionCode": "parties.customers.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "bd2fcb2e-d54e-43ce-bb30-77cc0101ef92"
+        "permissionId": "bd2fcb2e-d54e-43ce-bb30-77cc0101ef92",
+        "permissionCode": "parties.customers.create"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "7e06a85f-0cba-48d8-bd75-d1c798428462"
+        "permissionId": "7e06a85f-0cba-48d8-bd75-d1c798428462",
+        "permissionCode": "parties.customers.update"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "ec8454bd-a993-447e-98a2-315d5b4094b8"
+        "permissionId": "ec8454bd-a993-447e-98a2-315d5b4094b8",
+        "permissionCode": "parties.suppliers.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "032435c5-d176-4a4b-a64e-7a602d76ba9f"
+        "permissionId": "032435c5-d176-4a4b-a64e-7a602d76ba9f",
+        "permissionCode": "parties.suppliers.create"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "c442c051-9f9a-4419-8d27-840d9b7b7970"
+        "permissionId": "c442c051-9f9a-4419-8d27-840d9b7b7970",
+        "permissionCode": "parties.suppliers.update"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "9b828dc6-e064-44b6-884b-91ba510034ec"
+        "permissionId": "9b828dc6-e064-44b6-884b-91ba510034ec",
+        "permissionCode": "inventory.items.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "b86336a7-b0a0-4dee-bb43-5f303c6c67fd"
+        "permissionId": "b86336a7-b0a0-4dee-bb43-5f303c6c67fd",
+        "permissionCode": "inventory.items.create"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "bf746cd7-bcef-400c-96d4-50154059902f"
+        "permissionId": "bf746cd7-bcef-400c-96d4-50154059902f",
+        "permissionCode": "inventory.items.update"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "22f87ad4-c52b-48cd-849b-2c5d5dd3a358"
+        "permissionId": "22f87ad4-c52b-48cd-849b-2c5d5dd3a358",
+        "permissionCode": "inventory.stock.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "af669a1e-1fed-46ea-9c56-2b3f04724dd4"
+        "permissionId": "af669a1e-1fed-46ea-9c56-2b3f04724dd4",
+        "permissionCode": "sales.invoices.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "5f1c869b-4553-4c97-b221-db3bc00b236e"
+        "permissionId": "5f1c869b-4553-4c97-b221-db3bc00b236e",
+        "permissionCode": "sales.invoices.create"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "a1781838-67f7-4d12-999a-d30ba1cb7a4f"
+        "permissionId": "a1781838-67f7-4d12-999a-d30ba1cb7a4f",
+        "permissionCode": "sales.invoices.post"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "57e34e84-6f09-4eff-977d-749aaaf1bc34"
+        "permissionId": "57e34e84-6f09-4eff-977d-749aaaf1bc34",
+        "permissionCode": "purchases.invoices.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "9f062d36-b813-4881-8131-43a5a6ace86c"
+        "permissionId": "9f062d36-b813-4881-8131-43a5a6ace86c",
+        "permissionCode": "purchases.invoices.create"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "4b02c299-b567-4e25-8f2a-7cf4309e1f7c"
+        "permissionId": "4b02c299-b567-4e25-8f2a-7cf4309e1f7c",
+        "permissionCode": "purchases.invoices.post"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "b654303f-be6c-4c6d-91e7-c7dfc826495f"
+        "permissionId": "b654303f-be6c-4c6d-91e7-c7dfc826495f",
+        "permissionCode": "reports.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "e0f58a06-0bcd-4e3e-a724-19789cc3b19c"
+        "permissionId": "e0f58a06-0bcd-4e3e-a724-19789cc3b19c",
+        "permissionCode": "accounting.periods.read"
       },
       {
         "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
-        "permissionId": "d2db8022-b67d-49c0-8716-ab696fd97c0b"
+        "permissionId": "d2db8022-b67d-49c0-8716-ab696fd97c0b",
+        "permissionCode": "accounting.periods.manage"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "a68f8a93-3e10-4d52-9000-9c23e18662fa"
+        "permissionId": "a68f8a93-3e10-4d52-9000-9c23e18662fa",
+        "permissionCode": "accounting.accounts.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "5aff562e-65cf-408c-ba7d-364c3ba8fc5b"
+        "permissionId": "5aff562e-65cf-408c-ba7d-364c3ba8fc5b",
+        "permissionCode": "accounting.accounts.create"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "c5fbec5d-170a-43da-b88d-be88f1371fea"
+        "permissionId": "c5fbec5d-170a-43da-b88d-be88f1371fea",
+        "permissionCode": "accounting.accounts.update"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "20f4b93f-e013-47ce-8182-3a1c838389fc"
+        "permissionId": "20f4b93f-e013-47ce-8182-3a1c838389fc",
+        "permissionCode": "accounting.accounts.delete"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "ca8fa733-e688-4479-ac8e-19ba01051be1"
+        "permissionId": "ca8fa733-e688-4479-ac8e-19ba01051be1",
+        "permissionCode": "accounting.journal.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "b3a28846-a249-490d-90fb-f03d02421d59"
+        "permissionId": "b3a28846-a249-490d-90fb-f03d02421d59",
+        "permissionCode": "accounting.journal.create"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "dfff8011-c751-4e19-b873-db802d45fc2e"
+        "permissionId": "dfff8011-c751-4e19-b873-db802d45fc2e",
+        "permissionCode": "accounting.journal.post"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "78ef011b-3205-4728-aa95-6292f891a1a2"
+        "permissionId": "78ef011b-3205-4728-aa95-6292f891a1a2",
+        "permissionCode": "parties.customers.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "bd2fcb2e-d54e-43ce-bb30-77cc0101ef92"
+        "permissionId": "bd2fcb2e-d54e-43ce-bb30-77cc0101ef92",
+        "permissionCode": "parties.customers.create"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "7e06a85f-0cba-48d8-bd75-d1c798428462"
+        "permissionId": "7e06a85f-0cba-48d8-bd75-d1c798428462",
+        "permissionCode": "parties.customers.update"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "ec8454bd-a993-447e-98a2-315d5b4094b8"
+        "permissionId": "ec8454bd-a993-447e-98a2-315d5b4094b8",
+        "permissionCode": "parties.suppliers.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "032435c5-d176-4a4b-a64e-7a602d76ba9f"
+        "permissionId": "032435c5-d176-4a4b-a64e-7a602d76ba9f",
+        "permissionCode": "parties.suppliers.create"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "c442c051-9f9a-4419-8d27-840d9b7b7970"
+        "permissionId": "c442c051-9f9a-4419-8d27-840d9b7b7970",
+        "permissionCode": "parties.suppliers.update"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "9b828dc6-e064-44b6-884b-91ba510034ec"
+        "permissionId": "9b828dc6-e064-44b6-884b-91ba510034ec",
+        "permissionCode": "inventory.items.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "b86336a7-b0a0-4dee-bb43-5f303c6c67fd"
+        "permissionId": "b86336a7-b0a0-4dee-bb43-5f303c6c67fd",
+        "permissionCode": "inventory.items.create"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "bf746cd7-bcef-400c-96d4-50154059902f"
+        "permissionId": "bf746cd7-bcef-400c-96d4-50154059902f",
+        "permissionCode": "inventory.items.update"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "22f87ad4-c52b-48cd-849b-2c5d5dd3a358"
+        "permissionId": "22f87ad4-c52b-48cd-849b-2c5d5dd3a358",
+        "permissionCode": "inventory.stock.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "af669a1e-1fed-46ea-9c56-2b3f04724dd4"
+        "permissionId": "af669a1e-1fed-46ea-9c56-2b3f04724dd4",
+        "permissionCode": "sales.invoices.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "57e34e84-6f09-4eff-977d-749aaaf1bc34"
+        "permissionId": "57e34e84-6f09-4eff-977d-749aaaf1bc34",
+        "permissionCode": "purchases.invoices.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "b654303f-be6c-4c6d-91e7-c7dfc826495f"
+        "permissionId": "b654303f-be6c-4c6d-91e7-c7dfc826495f",
+        "permissionCode": "reports.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "e0f58a06-0bcd-4e3e-a724-19789cc3b19c"
+        "permissionId": "e0f58a06-0bcd-4e3e-a724-19789cc3b19c",
+        "permissionCode": "accounting.periods.read"
       },
       {
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
-        "permissionId": "d2db8022-b67d-49c0-8716-ab696fd97c0b"
+        "permissionId": "d2db8022-b67d-49c0-8716-ab696fd97c0b",
+        "permissionCode": "accounting.periods.manage"
       },
       {
         "roleId": "5cffaff0-538f-4b85-9cee-2f29b0391db1",
-        "permissionId": "78ef011b-3205-4728-aa95-6292f891a1a2"
+        "permissionId": "78ef011b-3205-4728-aa95-6292f891a1a2",
+        "permissionCode": "parties.customers.read"
       },
       {
         "roleId": "5cffaff0-538f-4b85-9cee-2f29b0391db1",
-        "permissionId": "9b828dc6-e064-44b6-884b-91ba510034ec"
+        "permissionId": "9b828dc6-e064-44b6-884b-91ba510034ec",
+        "permissionCode": "inventory.items.read"
       },
       {
         "roleId": "5cffaff0-538f-4b85-9cee-2f29b0391db1",
-        "permissionId": "22f87ad4-c52b-48cd-849b-2c5d5dd3a358"
+        "permissionId": "22f87ad4-c52b-48cd-849b-2c5d5dd3a358",
+        "permissionCode": "inventory.stock.read"
       },
       {
         "roleId": "5cffaff0-538f-4b85-9cee-2f29b0391db1",
-        "permissionId": "af669a1e-1fed-46ea-9c56-2b3f04724dd4"
+        "permissionId": "af669a1e-1fed-46ea-9c56-2b3f04724dd4",
+        "permissionCode": "sales.invoices.read"
       },
       {
         "roleId": "5cffaff0-538f-4b85-9cee-2f29b0391db1",
-        "permissionId": "5f1c869b-4553-4c97-b221-db3bc00b236e"
+        "permissionId": "5f1c869b-4553-4c97-b221-db3bc00b236e",
+        "permissionCode": "sales.invoices.create"
       }
     ],
     "user": [
@@ -405,6 +484,12 @@
       }
     ],
     "userRole": [
+      {
+        "userId": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "roleId": "3960cf7a-d98f-4b7b-b770-b575fa5cd590",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": null
+      },
       {
         "userId": "4ad98007-8589-423f-8bfe-0777fb6f26e2",
         "roleId": "17507119-4c7f-4692-ad10-ac5b15869cfe",
@@ -1696,7 +1781,8 @@
         "updatedAt": "2026-10-12T19:22:54.914Z",
         "createdBy": null,
         "updatedBy": null,
-        "deletedAt": null
+        "deletedAt": null,
+        "categoryId": "00000000-0000-4000-8000-000000009005"
       },
       {
         "id": "1069d6bf-93fa-438b-ae72-1b548fe3f2b0",
@@ -1715,7 +1801,8 @@
         "updatedAt": "2026-10-12T19:22:54.916Z",
         "createdBy": null,
         "updatedBy": null,
-        "deletedAt": null
+        "deletedAt": null,
+        "categoryId": "00000000-0000-4000-8000-000000009006"
       },
       {
         "id": "426f3444-12af-4cc3-b6eb-c305f825de73",
@@ -1734,7 +1821,8 @@
         "updatedAt": "2026-10-12T19:22:54.917Z",
         "createdBy": null,
         "updatedBy": null,
-        "deletedAt": null
+        "deletedAt": null,
+        "categoryId": "00000000-0000-4000-8000-000000009007"
       },
       {
         "id": "4c91ac89-c8f4-4e60-ae78-7d881c6a6fd2",
@@ -1753,7 +1841,8 @@
         "updatedAt": "2026-10-12T19:22:54.918Z",
         "createdBy": null,
         "updatedBy": null,
-        "deletedAt": null
+        "deletedAt": null,
+        "categoryId": "00000000-0000-4000-8000-000000009005"
       },
       {
         "id": "d1dfd68b-e555-4d70-9507-88bed8395aeb",
@@ -1772,7 +1861,8 @@
         "updatedAt": "2026-10-12T19:22:54.920Z",
         "createdBy": null,
         "updatedBy": null,
-        "deletedAt": null
+        "deletedAt": null,
+        "categoryId": "00000000-0000-4000-8000-000000009006"
       },
       {
         "id": "7e509f02-44bc-43b1-9503-aa4f58cb9b93",
@@ -1791,7 +1881,8 @@
         "updatedAt": "2026-10-12T19:22:54.921Z",
         "createdBy": null,
         "updatedBy": null,
-        "deletedAt": null
+        "deletedAt": null,
+        "categoryId": "00000000-0000-4000-8000-000000009007"
       },
       {
         "id": "bec6c7c4-63ca-4b07-b037-7755b1fa5edd",
@@ -1810,7 +1901,8 @@
         "updatedAt": "2026-10-12T19:22:54.907Z",
         "createdBy": null,
         "updatedBy": null,
-        "deletedAt": null
+        "deletedAt": null,
+        "categoryId": "00000000-0000-4000-8000-000000009005"
       },
       {
         "id": "019a0239-bafd-4c87-9319-c91fa263c15f",
@@ -1829,7 +1921,8 @@
         "updatedAt": "2026-10-12T19:22:54.908Z",
         "createdBy": null,
         "updatedBy": null,
-        "deletedAt": null
+        "deletedAt": null,
+        "categoryId": "00000000-0000-4000-8000-000000009006"
       },
       {
         "id": "854b3d00-d21d-4fdc-a359-484ccd132ba8",
@@ -1848,7 +1941,8 @@
         "updatedAt": "2026-10-12T19:22:54.909Z",
         "createdBy": null,
         "updatedBy": null,
-        "deletedAt": null
+        "deletedAt": null,
+        "categoryId": "00000000-0000-4000-8000-000000009007"
       },
       {
         "id": "6875ad24-281d-4f70-bb03-e65071bf3198",
@@ -1867,7 +1961,8 @@
         "updatedAt": "2026-10-12T19:22:54.911Z",
         "createdBy": null,
         "updatedBy": null,
-        "deletedAt": null
+        "deletedAt": null,
+        "categoryId": "00000000-0000-4000-8000-000000009005"
       },
       {
         "id": "28ccf368-2586-4a35-b372-6442ade69a72",
@@ -1886,7 +1981,8 @@
         "updatedAt": "2026-10-12T19:22:54.913Z",
         "createdBy": null,
         "updatedBy": null,
-        "deletedAt": null
+        "deletedAt": null,
+        "categoryId": "00000000-0000-4000-8000-000000009006"
       },
       {
         "id": "3c5dfeb6-b39b-4d84-bbb9-9183cc3b27fa",
@@ -1905,7 +2001,8 @@
         "updatedAt": "2026-10-12T19:22:54.927Z",
         "createdBy": null,
         "updatedBy": null,
-        "deletedAt": null
+        "deletedAt": null,
+        "categoryId": "00000000-0000-4000-8000-000000009007"
       },
       {
         "id": "eb9a9f0a-3231-49e1-b3b5-770583855620",
@@ -19497,6 +19594,943 @@
         "userAgent": "node",
         "createdAt": "2026-10-12T19:22:57.189Z"
       }
+    ],
+    "userPermission": [
+      {
+        "userId": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "permissionId": "a68f8a93-3e10-4d52-9000-9c23e18662fa",
+        "permissionCode": "accounting.accounts.read"
+      },
+      {
+        "userId": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "permissionId": "5aff562e-65cf-408c-ba7d-364c3ba8fc5b",
+        "permissionCode": "accounting.accounts.create"
+      },
+      {
+        "userId": "4ad98007-8589-423f-8bfe-0777fb6f26e2",
+        "permissionId": "c5fbec5d-170a-43da-b88d-be88f1371fea",
+        "permissionCode": "accounting.accounts.update"
+      },
+      {
+        "userId": "9bca255e-4b55-43cc-adff-9c938c8e2087",
+        "permissionId": "20f4b93f-e013-47ce-8182-3a1c838389fc",
+        "permissionCode": "accounting.accounts.delete"
+      }
+    ],
+    "costCenter": [
+      {
+        "id": "00000000-0000-4000-8000-000000009000",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "code": "CC-SALES",
+        "nameEn": "Sales",
+        "nameAr": "المبيعات",
+        "isActive": true,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009001",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "code": "CC-OPS",
+        "nameEn": "Operations",
+        "nameAr": "التشغيل",
+        "isActive": true,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009002",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "code": "CC-ADMIN",
+        "nameEn": "Administration",
+        "nameAr": "الإدارة",
+        "isActive": true,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      }
+    ],
+    "companySetting": [
+      {
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "taxRate": "14",
+        "pricesIncludeTax": false,
+        "allowNegativeStock": false,
+        "inventoryValuation": "WEIGHTED_AVERAGE",
+        "approvalRequiredForJournal": false,
+        "segregationOfDuties": false,
+        "backupRetentionCount": 14,
+        "backupIntervalHours": 24,
+        "maxDiscountPercent": "20",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1"
+      }
+    ],
+    "priceList": [
+      {
+        "id": "00000000-0000-4000-8000-000000009003",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "code": "RETAIL",
+        "nameEn": "Retail Price List",
+        "nameAr": "قائمة أسعار التجزئة",
+        "currency": "EGP",
+        "validFrom": "2026-01-01T00:00:00.000Z",
+        "validTo": null,
+        "discountPercent": "0",
+        "isActive": true,
+        "notes": "Standard retail prices",
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009004",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "code": "WHOLESALE",
+        "nameEn": "Wholesale Price List",
+        "nameAr": "قائمة أسعار الجملة",
+        "currency": "EGP",
+        "validFrom": "2026-01-01T00:00:00.000Z",
+        "validTo": null,
+        "discountPercent": "5",
+        "isActive": true,
+        "notes": "Wholesale customer prices",
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      }
+    ],
+    "itemCategory": [
+      {
+        "id": "00000000-0000-4000-8000-000000009005",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "code": "FOOD",
+        "nameEn": "Food & Grocery",
+        "nameAr": "مواد غذائية",
+        "isActive": true,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009006",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "code": "BEV",
+        "nameEn": "Beverages",
+        "nameAr": "مشروبات",
+        "isActive": true,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009007",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "code": "HOME",
+        "nameEn": "Home Supplies",
+        "nameAr": "مستلزمات منزلية",
+        "isActive": true,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      }
+    ],
+    "itemUnit": [
+      {
+        "id": "00000000-0000-4000-8000-000000009008",
+        "itemId": "6dd07049-686b-48dc-916a-5236933a8905",
+        "unit": "carton",
+        "factor": "12",
+        "barcode": "DEMO-UNIT-001",
+        "salePrice": "98",
+        "purchasePrice": "7",
+        "createdAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009009",
+        "itemId": "1069d6bf-93fa-438b-ae72-1b548fe3f2b0",
+        "unit": "piece",
+        "factor": "1",
+        "barcode": "DEMO-UNIT-002",
+        "salePrice": "168",
+        "purchasePrice": "7",
+        "createdAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009010",
+        "itemId": "426f3444-12af-4cc3-b6eb-c305f825de73",
+        "unit": "carton",
+        "factor": "12",
+        "barcode": "DEMO-UNIT-003",
+        "salePrice": "6.5",
+        "purchasePrice": "7",
+        "createdAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009011",
+        "itemId": "4c91ac89-c8f4-4e60-ae78-7d881c6a6fd2",
+        "unit": "piece",
+        "factor": "1",
+        "barcode": "DEMO-UNIT-004",
+        "salePrice": "69",
+        "purchasePrice": "7",
+        "createdAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009012",
+        "itemId": "d1dfd68b-e555-4d70-9507-88bed8395aeb",
+        "unit": "carton",
+        "factor": "12",
+        "barcode": "DEMO-UNIT-005",
+        "salePrice": "35",
+        "purchasePrice": "7",
+        "createdAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009013",
+        "itemId": "7e509f02-44bc-43b1-9503-aa4f58cb9b93",
+        "unit": "piece",
+        "factor": "1",
+        "barcode": "DEMO-UNIT-006",
+        "salePrice": "185",
+        "purchasePrice": "7",
+        "createdAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009014",
+        "itemId": "bec6c7c4-63ca-4b07-b037-7755b1fa5edd",
+        "unit": "carton",
+        "factor": "12",
+        "barcode": "DEMO-UNIT-007",
+        "salePrice": "28",
+        "purchasePrice": "7",
+        "createdAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009015",
+        "itemId": "019a0239-bafd-4c87-9319-c91fa263c15f",
+        "unit": "piece",
+        "factor": "1",
+        "barcode": "DEMO-UNIT-008",
+        "salePrice": "82",
+        "purchasePrice": "7",
+        "createdAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009016",
+        "itemId": "854b3d00-d21d-4fdc-a359-484ccd132ba8",
+        "unit": "carton",
+        "factor": "12",
+        "barcode": "DEMO-UNIT-009",
+        "salePrice": "24",
+        "purchasePrice": "7",
+        "createdAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009017",
+        "itemId": "6875ad24-281d-4f70-bb03-e65071bf3198",
+        "unit": "piece",
+        "factor": "1",
+        "barcode": "DEMO-UNIT-010",
+        "salePrice": "16",
+        "purchasePrice": "7",
+        "createdAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009018",
+        "itemId": "28ccf368-2586-4a35-b372-6442ade69a72",
+        "unit": "carton",
+        "factor": "12",
+        "barcode": "DEMO-UNIT-011",
+        "salePrice": "42",
+        "purchasePrice": "7",
+        "createdAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009019",
+        "itemId": "3c5dfeb6-b39b-4d84-bbb9-9183cc3b27fa",
+        "unit": "piece",
+        "factor": "1",
+        "barcode": "DEMO-UNIT-012",
+        "salePrice": "37",
+        "purchasePrice": "7",
+        "createdAt": "2026-10-14T09:00:00.000Z"
+      }
+    ],
+    "warehouse": [
+      {
+        "id": "00000000-0000-4000-8000-000000009020",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "a2a34d1c-c851-4b9b-84db-583d0234904e",
+        "code": "WH-MAIN",
+        "nameEn": "Main Warehouse",
+        "nameAr": "المخزن الرئيسي",
+        "address": "Cairo, Egypt",
+        "isDefault": true,
+        "isActive": true,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009021",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "43619371-5559-48ba-8988-a9a2d9afe48b",
+        "code": "WH-ALEX",
+        "nameEn": "Alexandria Warehouse",
+        "nameAr": "مخزن الإسكندرية",
+        "address": "Alexandria, Egypt",
+        "isDefault": false,
+        "isActive": true,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009022",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "a2a34d1c-c851-4b9b-84db-583d0234904e",
+        "code": "WH-RET",
+        "nameEn": "Retail Store",
+        "nameAr": "مخزن منفذ البيع",
+        "address": "Giza, Egypt",
+        "isDefault": false,
+        "isActive": true,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      }
+    ],
+    "priceListItem": [
+      {
+        "id": "00000000-0000-4000-8000-000000009023",
+        "priceListId": "00000000-0000-4000-8000-000000009003",
+        "itemId": "6dd07049-686b-48dc-916a-5236933a8905",
+        "unit": "tin",
+        "minQuantity": "1",
+        "price": "98",
+        "discountPercent": "0",
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009024",
+        "priceListId": "00000000-0000-4000-8000-000000009004",
+        "itemId": "1069d6bf-93fa-438b-ae72-1b548fe3f2b0",
+        "unit": "packet",
+        "minQuantity": "10",
+        "price": "151.20000000000002",
+        "discountPercent": "5",
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009025",
+        "priceListId": "00000000-0000-4000-8000-000000009003",
+        "itemId": "426f3444-12af-4cc3-b6eb-c305f825de73",
+        "unit": "bottle",
+        "minQuantity": "1",
+        "price": "6.5",
+        "discountPercent": "0",
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009026",
+        "priceListId": "00000000-0000-4000-8000-000000009004",
+        "itemId": "4c91ac89-c8f4-4e60-ae78-7d881c6a6fd2",
+        "unit": "crate",
+        "minQuantity": "10",
+        "price": "62.1",
+        "discountPercent": "5",
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009027",
+        "priceListId": "00000000-0000-4000-8000-000000009003",
+        "itemId": "d1dfd68b-e555-4d70-9507-88bed8395aeb",
+        "unit": "bottle",
+        "minQuantity": "1",
+        "price": "35",
+        "discountPercent": "0",
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009028",
+        "priceListId": "00000000-0000-4000-8000-000000009004",
+        "itemId": "7e509f02-44bc-43b1-9503-aa4f58cb9b93",
+        "unit": "jar",
+        "minQuantity": "10",
+        "price": "166.5",
+        "discountPercent": "5",
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009029",
+        "priceListId": "00000000-0000-4000-8000-000000009003",
+        "itemId": "bec6c7c4-63ca-4b07-b037-7755b1fa5edd",
+        "unit": "bottle",
+        "minQuantity": "1",
+        "price": "28",
+        "discountPercent": "0",
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009030",
+        "priceListId": "00000000-0000-4000-8000-000000009004",
+        "itemId": "019a0239-bafd-4c87-9319-c91fa263c15f",
+        "unit": "box",
+        "minQuantity": "10",
+        "price": "73.8",
+        "discountPercent": "5",
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z"
+      }
+    ],
+    "salesOrder": [
+      {
+        "id": "00000000-0000-4000-8000-000000009031",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "a2a34d1c-c851-4b9b-84db-583d0234904e",
+        "customerId": "12a9f4b7-96cb-4ad6-85e7-352806d9dae1",
+        "orderNumber": "SO-DEMO-001",
+        "orderDate": "2026-10-02T00:00:00.000Z",
+        "deliveryDate": "2026-10-05T00:00:00.000Z",
+        "status": "APPROVED",
+        "currency": "EGP",
+        "subTotal": "2450",
+        "taxAmount": "343",
+        "totalAmount": "2793",
+        "notes": "Demo approved sales order",
+        "approvedAt": "2026-10-14T09:00:00.000Z",
+        "approvedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "9bca255e-4b55-43cc-adff-9c938c8e2087",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009032",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "43619371-5559-48ba-8988-a9a2d9afe48b",
+        "customerId": "2423e0db-685d-4997-8d4f-2847516029f8",
+        "orderNumber": "SO-DEMO-002",
+        "orderDate": "2026-10-08T00:00:00.000Z",
+        "deliveryDate": "2026-10-12T00:00:00.000Z",
+        "status": "DRAFT",
+        "currency": "EGP",
+        "subTotal": "1680",
+        "taxAmount": "235.2",
+        "totalAmount": "1915.2",
+        "notes": "Demo draft sales order",
+        "approvedAt": null,
+        "approvedBy": null,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "9bca255e-4b55-43cc-adff-9c938c8e2087",
+        "updatedBy": "9bca255e-4b55-43cc-adff-9c938c8e2087",
+        "deletedAt": null
+      }
+    ],
+    "salesOrderLine": [
+      {
+        "id": "00000000-0000-4000-8000-000000009033",
+        "orderId": "00000000-0000-4000-8000-000000009031",
+        "lineNumber": 1,
+        "itemId": "6dd07049-686b-48dc-916a-5236933a8905",
+        "description": "Black tea, 250 g tin",
+        "quantity": "10",
+        "invoicedQuantity": "0",
+        "unitPrice": "120",
+        "discountPercent": "0",
+        "taxRate": "14",
+        "lineTotal": "1200",
+        "notes": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009034",
+        "orderId": "00000000-0000-4000-8000-000000009031",
+        "lineNumber": 2,
+        "itemId": "1069d6bf-93fa-438b-ae72-1b548fe3f2b0",
+        "description": "Ground coffee, 250 g",
+        "quantity": "5",
+        "invoicedQuantity": "0",
+        "unitPrice": "250",
+        "discountPercent": "0",
+        "taxRate": "14",
+        "lineTotal": "1250",
+        "notes": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009035",
+        "orderId": "00000000-0000-4000-8000-000000009032",
+        "lineNumber": 1,
+        "itemId": "426f3444-12af-4cc3-b6eb-c305f825de73",
+        "description": "Mineral water, 1.5 litre",
+        "quantity": "10",
+        "invoicedQuantity": "0",
+        "unitPrice": "120",
+        "discountPercent": "0",
+        "taxRate": "14",
+        "lineTotal": "1200",
+        "notes": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009036",
+        "orderId": "00000000-0000-4000-8000-000000009032",
+        "lineNumber": 2,
+        "itemId": "4c91ac89-c8f4-4e60-ae78-7d881c6a6fd2",
+        "description": "Mineral water, 12 bottle crate",
+        "quantity": "5",
+        "invoicedQuantity": "0",
+        "unitPrice": "250",
+        "discountPercent": "0",
+        "taxRate": "14",
+        "lineTotal": "1250",
+        "notes": null
+      }
+    ],
+    "purchaseOrder": [
+      {
+        "id": "00000000-0000-4000-8000-000000009037",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "a2a34d1c-c851-4b9b-84db-583d0234904e",
+        "supplierId": "b6446672-584f-4d74-85ce-5b1359329e65",
+        "orderNumber": "PO-DEMO-001",
+        "orderDate": "2026-10-03T00:00:00.000Z",
+        "expectedDate": "2026-10-09T00:00:00.000Z",
+        "status": "APPROVED",
+        "currency": "EGP",
+        "subTotal": "7800",
+        "taxAmount": "1092",
+        "totalAmount": "8892",
+        "notes": "Demo approved purchase order",
+        "approvedAt": "2026-10-14T09:00:00.000Z",
+        "approvedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "4ad98007-8589-423f-8bfe-0777fb6f26e2",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009038",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "43619371-5559-48ba-8988-a9a2d9afe48b",
+        "supplierId": "b185fdd5-4fb6-4d16-aa17-b664a6aed144",
+        "orderNumber": "PO-DEMO-002",
+        "orderDate": "2026-10-10T00:00:00.000Z",
+        "expectedDate": "2026-10-17T00:00:00.000Z",
+        "status": "DRAFT",
+        "currency": "EGP",
+        "subTotal": "4250",
+        "taxAmount": "595",
+        "totalAmount": "4845",
+        "notes": "Demo draft purchase order",
+        "approvedAt": null,
+        "approvedBy": null,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "4ad98007-8589-423f-8bfe-0777fb6f26e2",
+        "updatedBy": "4ad98007-8589-423f-8bfe-0777fb6f26e2",
+        "deletedAt": null
+      }
+    ],
+    "purchaseOrderLine": [
+      {
+        "id": "00000000-0000-4000-8000-000000009039",
+        "orderId": "00000000-0000-4000-8000-000000009037",
+        "lineNumber": 1,
+        "itemId": "d1dfd68b-e555-4d70-9507-88bed8395aeb",
+        "description": "Orange juice, 1 litre",
+        "quantity": "20",
+        "invoicedQuantity": "0",
+        "unitPrice": "180",
+        "discountPercent": "0",
+        "taxRate": "14",
+        "lineTotal": "3600",
+        "notes": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009040",
+        "orderId": "00000000-0000-4000-8000-000000009037",
+        "lineNumber": 2,
+        "itemId": "7e509f02-44bc-43b1-9503-aa4f58cb9b93",
+        "description": "Instant coffee, 200 g jar",
+        "quantity": "12",
+        "invoicedQuantity": "0",
+        "unitPrice": "250",
+        "discountPercent": "0",
+        "taxRate": "14",
+        "lineTotal": "3000",
+        "notes": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009041",
+        "orderId": "00000000-0000-4000-8000-000000009038",
+        "lineNumber": 1,
+        "itemId": "019a0239-bafd-4c87-9319-c91fa263c15f",
+        "description": "Laundry powder, 2 kg",
+        "quantity": "20",
+        "invoicedQuantity": "0",
+        "unitPrice": "180",
+        "discountPercent": "0",
+        "taxRate": "14",
+        "lineTotal": "3600",
+        "notes": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009042",
+        "orderId": "00000000-0000-4000-8000-000000009038",
+        "lineNumber": 2,
+        "itemId": "854b3d00-d21d-4fdc-a359-484ccd132ba8",
+        "description": "Floor cleaner, 1 litre",
+        "quantity": "12",
+        "invoicedQuantity": "0",
+        "unitPrice": "250",
+        "discountPercent": "0",
+        "taxRate": "14",
+        "lineTotal": "3000",
+        "notes": null
+      }
+    ],
+    "stockDocument": [
+      {
+        "id": "00000000-0000-4000-8000-000000009043",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "a2a34d1c-c851-4b9b-84db-583d0234904e",
+        "kind": "ADJUSTMENT",
+        "documentNumber": "STK-DEMO-001",
+        "documentDate": "2026-10-04T00:00:00.000Z",
+        "fromBranchId": "a2a34d1c-c851-4b9b-84db-583d0234904e",
+        "toBranchId": null,
+        "fromWarehouseId": "00000000-0000-4000-8000-000000009020",
+        "toWarehouseId": null,
+        "status": "DRAFT",
+        "reason": "Cycle count correction",
+        "notes": "Demo stock adjustment",
+        "journalEntryId": null,
+        "postedAt": null,
+        "postedBy": null,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009044",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "a2a34d1c-c851-4b9b-84db-583d0234904e",
+        "kind": "TRANSFER",
+        "documentNumber": "STK-DEMO-002",
+        "documentDate": "2026-10-07T00:00:00.000Z",
+        "fromBranchId": "a2a34d1c-c851-4b9b-84db-583d0234904e",
+        "toBranchId": "43619371-5559-48ba-8988-a9a2d9afe48b",
+        "fromWarehouseId": "00000000-0000-4000-8000-000000009020",
+        "toWarehouseId": "00000000-0000-4000-8000-000000009021",
+        "status": "DRAFT",
+        "reason": "Replenishment",
+        "notes": "Demo inter-warehouse transfer",
+        "journalEntryId": null,
+        "postedAt": null,
+        "postedBy": null,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      }
+    ],
+    "stockDocumentLine": [
+      {
+        "id": "00000000-0000-4000-8000-000000009045",
+        "documentId": "00000000-0000-4000-8000-000000009043",
+        "itemId": "854b3d00-d21d-4fdc-a359-484ccd132ba8",
+        "quantity": "15",
+        "unitCost": "45",
+        "countedQuantity": "120",
+        "notes": "Demo inventory movement",
+        "lineNumber": 1
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009046",
+        "documentId": "00000000-0000-4000-8000-000000009043",
+        "itemId": "6875ad24-281d-4f70-bb03-e65071bf3198",
+        "quantity": "8",
+        "unitCost": "80",
+        "countedQuantity": "75",
+        "notes": "Demo inventory movement",
+        "lineNumber": 2
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009047",
+        "documentId": "00000000-0000-4000-8000-000000009044",
+        "itemId": "28ccf368-2586-4a35-b372-6442ade69a72",
+        "quantity": "15",
+        "unitCost": "45",
+        "countedQuantity": null,
+        "notes": "Demo inventory movement",
+        "lineNumber": 1
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009048",
+        "documentId": "00000000-0000-4000-8000-000000009044",
+        "itemId": "3c5dfeb6-b39b-4d84-bbb9-9183cc3b27fa",
+        "quantity": "8",
+        "unitCost": "80",
+        "countedQuantity": null,
+        "notes": "Demo inventory movement",
+        "lineNumber": 2
+      }
+    ],
+    "openingBalance": [
+      {
+        "id": "00000000-0000-4000-8000-000000009049",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "a2a34d1c-c851-4b9b-84db-583d0234904e",
+        "documentNumber": "OB-DEMO-001",
+        "asOfDate": "2026-01-01T00:00:00.000Z",
+        "description": "Opening balances for demo testing",
+        "status": "DRAFT",
+        "totalDebit": "15000",
+        "totalCredit": "15000",
+        "journalEntryId": null,
+        "postedAt": null,
+        "postedBy": null,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      }
+    ],
+    "openingBalanceLine": [
+      {
+        "id": "00000000-0000-4000-8000-000000009050",
+        "openingBalanceId": "00000000-0000-4000-8000-000000009049",
+        "accountId": "b4ca48ad-233a-4e58-a395-49d544defaff",
+        "customerId": "12a9f4b7-96cb-4ad6-85e7-352806d9dae1",
+        "supplierId": null,
+        "itemId": null,
+        "debit": "15000",
+        "credit": "0",
+        "quantity": null,
+        "unitCost": null,
+        "description": "Opening receivable",
+        "lineNumber": 1
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009051",
+        "openingBalanceId": "00000000-0000-4000-8000-000000009049",
+        "accountId": "2d227cb0-a58e-4f14-af1f-3a7a20e8024c",
+        "customerId": null,
+        "supplierId": null,
+        "itemId": null,
+        "debit": "0",
+        "credit": "15000",
+        "quantity": null,
+        "unitCost": null,
+        "description": "Opening equity counterpart",
+        "lineNumber": 2
+      }
+    ],
+    "cashAccount": [
+      {
+        "id": "00000000-0000-4000-8000-000000009052",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "a2a34d1c-c851-4b9b-84db-583d0234904e",
+        "code": "CASH-MAIN",
+        "nameEn": "Main Cash",
+        "nameAr": "الخزينة الرئيسية",
+        "kind": "CASH",
+        "currency": "EGP",
+        "accountId": "b4ca48ad-233a-4e58-a395-49d544defaff",
+        "bankName": null,
+        "bankAccountNumber": null,
+        "iban": null,
+        "swiftCode": null,
+        "notes": "Demo cash account",
+        "isActive": true,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009053",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "a2a34d1c-c851-4b9b-84db-583d0234904e",
+        "code": "BANK-001",
+        "nameEn": "Main Bank Account",
+        "nameAr": "الحساب البنكي الرئيسي",
+        "kind": "BANK",
+        "currency": "EGP",
+        "accountId": "2d227cb0-a58e-4f14-af1f-3a7a20e8024c",
+        "bankName": "National Demo Bank",
+        "bankAccountNumber": "000123456789",
+        "iban": "EG00DEMO000123456789",
+        "swiftCode": "DEMOEGCX",
+        "notes": "Fictional banking details for testing only",
+        "isActive": true,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "updatedBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      }
+    ],
+    "bankReconciliation": [
+      {
+        "id": "00000000-0000-4000-8000-000000009054",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "cashAccountId": "00000000-0000-4000-8000-000000009053",
+        "statementDate": "2026-10-10T00:00:00.000Z",
+        "periodFrom": "2026-10-01T00:00:00.000Z",
+        "periodTo": "2026-10-10T00:00:00.000Z",
+        "statementBalance": "54200",
+        "bookBalance": "53750",
+        "difference": "450",
+        "status": "DRAFT",
+        "notes": "Demo reconciliation: difference requires review",
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1"
+      }
+    ],
+    "cashVoucher": [
+      {
+        "id": "00000000-0000-4000-8000-000000009055",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "a2a34d1c-c851-4b9b-84db-583d0234904e",
+        "voucherNumber": "CV-DEMO-001",
+        "voucherDate": "2026-10-05T00:00:00.000Z",
+        "kind": "RECEIPT",
+        "cashAccountId": "00000000-0000-4000-8000-000000009052",
+        "amount": "1200",
+        "currency": "EGP",
+        "customerId": "12a9f4b7-96cb-4ad6-85e7-352806d9dae1",
+        "supplierId": null,
+        "counterAccountId": "a8f5fbd7-7e1d-494f-a334-d399af8fe983",
+        "description": "Customer receipt sample",
+        "reference": "DEMO-RCPT-001",
+        "status": "DRAFT",
+        "journalEntryId": null,
+        "postedAt": null,
+        "postedBy": null,
+        "reconciledAt": null,
+        "reconciliationId": null,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009056",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "a2a34d1c-c851-4b9b-84db-583d0234904e",
+        "voucherNumber": "CV-DEMO-002",
+        "voucherDate": "2026-10-06T00:00:00.000Z",
+        "kind": "PAYMENT",
+        "cashAccountId": "00000000-0000-4000-8000-000000009053",
+        "amount": "850",
+        "currency": "EGP",
+        "customerId": null,
+        "supplierId": "b6446672-584f-4d74-85ce-5b1359329e65",
+        "counterAccountId": "23808fbf-78e0-4113-8ec7-f307858225e3",
+        "description": "Supplier payment sample",
+        "reference": "DEMO-PAY-001",
+        "status": "DRAFT",
+        "journalEntryId": null,
+        "postedAt": null,
+        "postedBy": null,
+        "reconciledAt": null,
+        "reconciliationId": null,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      }
+    ],
+    "cashTransfer": [
+      {
+        "id": "00000000-0000-4000-8000-000000009057",
+        "companyId": "5addd5ab-0a0b-414c-a045-0cd3cc9eb518",
+        "branchId": "a2a34d1c-c851-4b9b-84db-583d0234904e",
+        "transferNumber": "TR-DEMO-001",
+        "transferDate": "2026-10-09T00:00:00.000Z",
+        "fromCashAccountId": "00000000-0000-4000-8000-000000009052",
+        "toCashAccountId": "00000000-0000-4000-8000-000000009053",
+        "amount": "2500",
+        "currency": "EGP",
+        "description": "Demo cash-to-bank transfer",
+        "status": "DRAFT",
+        "journalEntryId": null,
+        "postedAt": null,
+        "postedBy": null,
+        "createdAt": "2026-10-14T09:00:00.000Z",
+        "updatedAt": "2026-10-14T09:00:00.000Z",
+        "createdBy": "b40dd80e-943f-4d87-b090-b6f448bd56b1",
+        "deletedAt": null
+      }
+    ],
+    "cashVoucherAllocation": [
+      {
+        "id": "00000000-0000-4000-8000-000000009058",
+        "voucherId": "00000000-0000-4000-8000-000000009055",
+        "salesInvoiceId": "f8ef46fa-eee2-4254-a6af-c3acb5d383b9",
+        "purchaseInvoiceId": null,
+        "amount": "300"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000009059",
+        "voucherId": "00000000-0000-4000-8000-000000009056",
+        "salesInvoiceId": null,
+        "purchaseInvoiceId": "bcfbdc6e-5c96-4378-8320-1bba5c760a28",
+        "amount": "250"
+      }
     ]
+  },
+  "notes": "Fictional demo fixture for KAYAN ERP. The special DEMO company code allows this sample backup to be restored into the currently signed-in test company; restore still requires the normal explicit replace confirmation. Contains populated accounting, parties, inventory, sales and purchasing, price lists, warehouses, stock documents, opening balances, cash/bank accounts, vouchers, transfers, reconciliations and allocations. All names, identifiers and transactions are synthetic. Never use as a real company backup.",
+  "companyProfile": {
+    "nameEn": "Al Nakheel Trading and Distribution",
+    "nameAr": "النخيل للتجارة والتوزيع",
+    "taxId": null,
+    "commercialRegistration": null,
+    "addressEn": "Minya, Egypt",
+    "addressAr": "المنيا، مصر",
+    "phone": "+20 86 000 0000",
+    "email": "demo@kayan-erp.local",
+    "address": "Minya, Egypt",
+    "currency": "EGP",
+    "timezone": "Africa/Cairo",
+    "logoBase64": null,
+    "logoMime": null
   }
 }

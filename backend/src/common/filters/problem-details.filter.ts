@@ -24,17 +24,30 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       exception instanceof Prisma.PrismaClientKnownRequestError &&
       exception.code === 'P2002';
 
+    const rawStatus =
+      typeof exception === 'object' && exception !== null && 'status' in exception
+        ? Number((exception as { status?: unknown }).status)
+        : typeof exception === 'object' && exception !== null && 'statusCode' in exception
+          ? Number((exception as { statusCode?: unknown }).statusCode)
+          : 0;
+    const requestTooLarge = rawStatus === HttpStatus.PAYLOAD_TOO_LARGE;
     const status = isUniqueConstraint
       ? HttpStatus.CONFLICT
-      : exception instanceof HttpException
-        ? exception.getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
+      : requestTooLarge
+        ? HttpStatus.PAYLOAD_TOO_LARGE
+        : exception instanceof HttpException
+          ? exception.getStatus()
+          : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    let detail = 'Unexpected server error';
+    let detail = requestTooLarge
+      ? 'حجم الملف أو الطلب أكبر من الحد المسموح. قلّل حجم صورة الشعار وحاول مرة أخرى.'
+      : 'Unexpected server error';
     let extra: Record<string, unknown> = {};
 
     if (isUniqueConstraint) {
       detail = 'A record with the same unique value already exists';
+    } else if (requestTooLarge) {
+      // Keep the bounded-upload explanation above; do not expose parser text.
     } else if (exception instanceof HttpException) {
       const body = exception.getResponse();
       if (typeof body === 'string') {
