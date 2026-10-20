@@ -1159,7 +1159,10 @@ export class QuotationsService {
         taxRate: (quotation.taxRate ?? new Prisma.Decimal(0)).toFixed(RATE_SCALE),
         taxAmount: (quotation.taxAmount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
       },
-      design: quotation.design ?? {},
+      design:
+        quotation.design && typeof quotation.design === 'object' && !Array.isArray(quotation.design)
+          ? (quotation.design as Record<string, unknown>)
+          : {},
     };
   }
 
