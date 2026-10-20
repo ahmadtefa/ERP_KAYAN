@@ -7,7 +7,6 @@ import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/screens/login_screen.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/shared/utils/error_messages.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 

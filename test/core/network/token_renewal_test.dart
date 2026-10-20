@@ -71,7 +71,7 @@ class _RefusingBackend implements SecureTokenBackend {
   Future<void> delete(String key) async {}
 }
 
-ApiClient buildClient(_ScriptedAdapter adapter, TokenStore store) {
+ApiClient _buildClient(_ScriptedAdapter adapter, TokenStore store) {
   final dio = Dio(
     BaseOptions(
       baseUrl: 'http://127.0.0.1:3000/api/v1',
@@ -95,7 +95,7 @@ void main() {
     final adapter = _ScriptedAdapter();
     final store = TokenStore(backend: _RefusingBackend());
     await store.saveTokens(accessToken: 'access-1', refreshToken: 'refresh-1');
-    final client = buildClient(adapter, store);
+    final client = _buildClient(adapter, store);
 
     final body = await client.get('/anything');
 
@@ -111,7 +111,7 @@ void main() {
     final adapter = _ScriptedAdapter()..refuseRefresh = true;
     final store = TokenStore(backend: _RefusingBackend());
     await store.saveTokens(accessToken: 'access-1', refreshToken: 'refresh-1');
-    final client = buildClient(adapter, store);
+    final client = _buildClient(adapter, store);
     var expired = 0;
     client.onSessionExpired = () => expired += 1;
 
@@ -131,7 +131,7 @@ void main() {
     final adapter = _ScriptedAdapter()..expireFirst = 2;
     final store = TokenStore(backend: _RefusingBackend());
     await store.saveTokens(accessToken: 'access-1', refreshToken: 'refresh-1');
-    final client = buildClient(adapter, store);
+    final client = _buildClient(adapter, store);
 
     final bodies = await Future.wait([client.get('/a'), client.get('/b')]);
 

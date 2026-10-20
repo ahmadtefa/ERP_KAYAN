@@ -13,18 +13,18 @@ import 'package:flutter_test/flutter_test.dart';
 /// In-memory store: the preferences plug-in has no bindings in a widget test,
 /// and the point here is the controller and the scaler, not the file format.
 class _MemoryTokenStore extends TokenStore {
-  _MemoryTokenStore({double scale = 1}) : _scale = scale;
+  _MemoryTokenStore({this.storedScale = 1});
 
-  double _scale;
+  double storedScale;
   int saves = 0;
 
   @override
-  Future<double> readTextScale() async => _scale;
+  Future<double> readTextScale() async => storedScale;
 
   @override
   Future<void> saveTextScale(double scale) async {
     saves += 1;
-    _scale = scale;
+    storedScale = scale;
   }
 }
 
@@ -184,7 +184,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(store.saves, 1);
-      expect(store._scale, 1.05);
+      expect(store.storedScale, 1.05);
       expect(find.text('105%'), findsWidgets);
     });
 
@@ -217,7 +217,7 @@ void main() {
       await tester.tap(find.widgetWithText(ChoiceChip, '140%'));
       await tester.pumpAndSettle();
 
-      expect(store._scale, 1.4);
+      expect(store.storedScale, 1.4);
       expect(store.saves, 1);
     });
 
@@ -229,7 +229,7 @@ void main() {
       await tester.tap(find.text('Default size'));
       await tester.pumpAndSettle();
 
-      expect(store._scale, 1.0);
+      expect(store.storedScale, 1.0);
       final reset = tester.widget<TextButton>(
         find.ancestor(
           of: find.text('Default size'),

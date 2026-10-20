@@ -52,11 +52,16 @@ void main() {
         ApiFailure() => 'api',
         ServerFailure() => 'server',
         ValidationFailure() => 'validation',
+        IncompleteSignInFailure() => 'incomplete-sign-in',
       };
       expect(classify(const NetworkFailure()), 'network');
       expect(classify(const AuthFailure()), 'auth');
       expect(classify(const SessionExpiredFailure()), 'session-expired');
       expect(classify(const PermissionFailure()), 'permission');
+      expect(
+        classify(const IncompleteSignInFailure()),
+        'incomplete-sign-in',
+      );
       expect(classify(const ApiFailure('rejected', statusCode: 422)), 'api');
       expect(classify(const ServerFailure()), 'server');
       expect(classify(const ValidationFailure('bad')), 'validation');

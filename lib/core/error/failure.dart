@@ -66,6 +66,9 @@ class ServerFailure extends Failure {
 /// check instead of "an unexpected error occurred".
 class IncompleteSignInFailure extends Failure {
   const IncompleteSignInFailure([
+    // `cause` has to travel through an explicit super call, so this cannot be
+    // a super parameter.
+    // ignore: use_super_parameters
     String message = 'The sign-in answer is incomplete',
     Object? cause,
   ]) : super(message, cause: cause);
