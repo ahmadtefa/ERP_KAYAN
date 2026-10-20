@@ -221,7 +221,7 @@ describe('quotation document template', () => {
     expect(html).toContain('CUST-TAX-77');
   });
 
-  it('handles a missing logo with a monogram and no image tag', () => {
+  it('leaves the logo area empty instead of showing a fake logo tile', () => {
     const html = renderQuotationDocument(
       snapshot(),
       { logoData: null, logoMime: null },
@@ -229,7 +229,7 @@ describe('quotation document template', () => {
       false,
     );
     expect(html).not.toContain('<img');
-    expect(html).toContain('class="monogram"');
+    expect(html).not.toContain('class="monogram"');
   });
 
   it('escapes user text and keeps long descriptions intact', () => {
