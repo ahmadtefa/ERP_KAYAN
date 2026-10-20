@@ -1,7 +1,10 @@
 name: Quotation PDF proof
 
 on:
-  workflow_dispatch:
+  push:
+    paths:
+      - 'backend/scripts/quotation-proof.ts'
+      - '.github/workflows/pdf-proof.yml'
 
 permissions:
   contents: read
