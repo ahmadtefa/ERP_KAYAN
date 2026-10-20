@@ -121,7 +121,7 @@ function escapeHtml(value: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/\"/g, '&quot;');
+    .replace(/"/g, '&quot;');
 }
 
 function multiline(value: string): string {

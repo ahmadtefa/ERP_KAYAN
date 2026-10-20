@@ -970,7 +970,7 @@ export class QuotationsService {
     taxRate: string,
   ): Promise<PreparedQuotation> {
     const limit = new Prisma.Decimal(maximum);
-    const quoteTaxRate = new Prisma.Decimal(taxRate);
+    const quoteTaxRate = new Prisma.Decimal(taxRate ?? '0');
     const preparedTables: PreparedQuotationTable[] = [];
 
     // One query for every item named, rather than one per line.
@@ -1148,8 +1148,8 @@ export class QuotationsService {
         subTotal: quotation.subTotal.toFixed(MONEY_SCALE),
         discountTotal: quotation.discountTotal.toFixed(MONEY_SCALE),
         totalAmount: quotation.totalAmount.toFixed(MONEY_SCALE),
-        taxRate: quotation.taxRate.toFixed(RATE_SCALE),
-        taxAmount: quotation.taxAmount.toFixed(MONEY_SCALE),
+        taxRate: (quotation.taxRate ?? new Prisma.Decimal(0)).toFixed(RATE_SCALE),
+        taxAmount: (quotation.taxAmount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
       },
     };
   }
@@ -1173,8 +1173,8 @@ export class QuotationsService {
       subTotal: quotation.subTotal.toFixed(MONEY_SCALE),
       discountTotal: quotation.discountTotal.toFixed(MONEY_SCALE),
       totalAmount: quotation.totalAmount.toFixed(MONEY_SCALE),
-      taxRate: quotation.taxRate.toFixed(RATE_SCALE),
-      taxAmount: quotation.taxAmount.toFixed(MONEY_SCALE),
+      taxRate: (quotation.taxRate ?? new Prisma.Decimal(0)).toFixed(RATE_SCALE),
+      taxAmount: (quotation.taxAmount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
       managerName: quotation.managerName,
       responsibleName: quotation.responsibleName,
       responsiblePhone: quotation.responsiblePhone,
