@@ -13,7 +13,13 @@
  */
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { PDFDocument } from 'pdf-lib';
+import {
+  PDFArray,
+  PDFContentStream,
+  PDFDocument,
+  PDFRawStream,
+  decodePDFRawStream,
+} from 'pdf-lib';
 import { PdfService } from '../src/modules/export/pdf.service';
 import {
   QuotationSnapshot,
@@ -138,10 +144,36 @@ async function main() {
 
   const document = await PDFDocument.load(pdf);
   const pages = document.getPages().map((page) => page.getSize());
+
+  // The service stamps "n / total" with a standard font; the digits are in
+  // the page's content stream, so every page can be checked, not assumed.
+  const stamped: number[] = [];
+  document.getPages().forEach((page, index) => {
+    const contents = page.node.Contents();
+    if (!contents) return;
+    const streams = contents instanceof PDFArray
+      ? contents.asArray().map((ref) => document.context.lookup(ref))
+      : [contents];
+    const text = streams
+      .map((stream) => {
+        if (stream instanceof PDFRawStream) {
+          return Buffer.from(decodePDFRawStream(stream).decode()).toString('latin1');
+        }
+        if (stream instanceof PDFContentStream) {
+          return Buffer.from(stream.getContents()).toString('latin1');
+        }
+        return '';
+      })
+      .join('\n');
+    if (text.includes(`${index + 1} / ${document.getPageCount()}`)) {
+      stamped.push(index + 1);
+    }
+  });
   const summary = {
     browser: true,
     bytes: pdf.length,
     pages: pages.length,
+    pageNumbersOn: stamped,
     sizes: pages.map(({ width, height }) => ({
       width: Number(width.toFixed(2)),
       height: Number(height.toFixed(2)),
@@ -159,6 +191,12 @@ async function main() {
   );
   if (notA4 || pages.length < 2) {
     console.error('The rendered sheet is not a multi-page A4 document.');
+    process.exit(1);
+  }
+  if (stamped.length !== pages.length) {
+    console.error(
+      `Only ${stamped.length} of ${pages.length} pages carry a page number.`,
+    );
     process.exit(1);
   }
 }
