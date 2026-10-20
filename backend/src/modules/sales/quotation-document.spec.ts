@@ -282,7 +282,7 @@ describe('quotation document template', () => {
     expect(hardwareSection).toContain('Serial no.');
     expect(hardwareSection).toContain('SN-001');
     expect(hardwareSection).not.toContain('<th>Description</th>');
-    expect(softwareSection).toContain('<th>Description</th>');
+    expect(softwareSection).toContain('>Description</th>');
   });
 
   it('leaves the logo area empty instead of showing a fake logo tile', () => {
