@@ -18,6 +18,9 @@ export interface QuotationSnapshotLine {
   quantity: string;
   unitPrice: string;
   lineTotal: string;
+  /// Values for user-defined columns that are not one of the built-in keys.
+  /// Keyed by the column's key, holding the cell's display text.
+  customValues?: Record<string, string> | null;
 }
 
 export interface QuotationSnapshot {
@@ -54,6 +57,8 @@ export interface QuotationSnapshot {
   responsiblePhone: string | null;
   notes: string | null;
   terms: string | null;
+  /// Persisted per-element presentation settings; absent on legacy quotations.
+  design?: Record<string, unknown> | null;
   discountType: string | null;
   discountPercent: string;
   discountAmount: string;
@@ -66,7 +71,16 @@ export interface QuotationSnapshot {
     netTotal: string;
     lines: QuotationSnapshotLine[];
   }>;
-  totals: { subTotal: string; discountTotal: string; totalAmount: string };
+  totals: {
+    subTotal: string;
+    discountTotal: string;
+    totalAmount: string;
+    /// The company's VAT rate in percent that was in force when the offer was
+    /// prepared. Stored so the printed document never changes retroactively.
+    taxRate?: string;
+    /// VAT charged on the discounted net value. Applied exactly once.
+    taxAmount?: string;
+  };
 }
 
 /// The live company row used only for the mark. Every other company field in
@@ -77,17 +91,26 @@ export interface QuotationDocumentCompanyMark {
   logoMime: string | null;
 }
 
-/// The palette and type of the printed quotation, kept in one place so the
-/// Flutter preview and this template cannot drift apart silently:
-/// royal blue #00288E, ink #0B1C30, wash #EFF4FF, surface #F8F9FF.
-const ROYAL = '#00288e';
-const ROYAL_DEEP = '#001b60';
-const ROYAL_TINT = '#3755c3';
-const INK = '#0b1c30';
-const MUTED = '#444653';
+/// The palette of the printed quotation. These are the Stitch reference
+/// identity colours carried into the real ERP document:
+///
+///   primary   #1e60aa  (brand, headings, rules)
+///   secondary #0088cc  (secondary text, sub-brand)
+///   accent    #e67e22  (totals emphasis, accents)
+const PRIMARY = '#1e60aa';
+const SECONDARY = '#0088cc';
+const ACCENT = '#e67e22';
+const PRIMARY_DEEP = '#164d84';
+const INK = '#111827';
+const MUTED = '#4b5563';
 const LINE = '#d3e4fe';
 const WASH = '#eff4ff';
 const SURFACE = '#f8f9ff';
+const TABLE_HEADER_BG = '#6ba4d9';
+const TABLE_HEADER_TEXT = '#ffffff';
+const TABLE_TOTAL_BG = '#93c5fd';
+const TABLE_TOTAL_TEXT = '#0b2244';
+const FOOTER_BG = '#1e5ba3';
 
 const STATUS_LABELS: Record<string, [string, string]> = {
   DRAFT: ['Draft', 'مسودة'],
@@ -135,8 +158,11 @@ function columnCell(
   column: QuotationColumn,
   line: QuotationSnapshotLine,
 ): { text: string; numeric: boolean; strong: boolean } {
-  const numeric = COLUMN_LABELS[column.key].numeric;
+  const builtIn = COLUMN_LABELS[column.key];
+  const numeric = builtIn ? builtIn.numeric : column.numeric ?? false;
   switch (column.key) {
+    case 'description':
+      return { text: line.description, numeric: false, strong: false };
     case 'itemCode':
       return { text: line.itemCode ?? '', numeric: false, strong: false };
     case 'countryOfOrigin':
@@ -154,7 +180,11 @@ function columnCell(
     case 'lineTotal':
       return { text: amount(line.lineTotal), numeric: true, strong: true };
     default:
-      return { text: line.description, numeric: false, strong: false };
+      return {
+        text: line.customValues?.[column.key] ?? '',
+        numeric,
+        strong: false,
+      };
   }
 }
 
@@ -177,6 +207,10 @@ export function quotationDocumentFileName(
 /// as a data URI and the only script is the optional auto-print call. A
 /// browser therefore lays out the Arabic itself, with the letters joined and
 /// in the right order, which a server-side PDF library cannot promise.
+///
+/// The visual identity follows the Stitch reference (primary #1e60aa,
+/// secondary #0088cc, accent #e67e22, right-to-left Arabic) while keeping
+/// the structural hooks the Flutter preview and the document tests rely on.
 export function renderQuotationDocument(
   content: QuotationSnapshot,
   company: QuotationDocumentCompanyMark,
@@ -241,7 +275,8 @@ export function renderQuotationDocument(
   const span = columns.length + 1;
   const headCells = columns
     .map((column) => {
-      const numeric = COLUMN_LABELS[column.key].numeric;
+      const builtIn = COLUMN_LABELS[column.key];
+      const numeric = builtIn ? builtIn.numeric : column.numeric ?? false;
       const width = `${Math.round((column.width / columnCount) * 100)}%`;
       return `<th${numeric ? ` class="num"` : ''} style="width:${width}">${escapeHtml(
         columnLabel(column, lang),
@@ -328,16 +363,18 @@ export function renderQuotationDocument(
       10000,
   );
 
+  /// The tax already computed and stored by the service: VAT on the discounted
+  /// net value, applied exactly once, never recomputed here.
+  const taxRate = Number(content.totals.taxRate ?? 0);
+  const taxAmount = Number(content.totals.taxAmount ?? 0);
+  const showTax = taxAmount > 0;
+
   const summaryRows = content.tables
     .map(
       (table) => `<tr>
         <td>${escapeHtml(table.title)}</td>
         <td class="num">${money(table.subTotal)}</td>
-        <td class="num">${
-          Number(table.discountAmount) > 0
-            ? `− ${money(table.discountAmount)}`
-            : '—'
-        }</td>
+        <td class="num">${Number(table.discountAmount) > 0 ? `− ${money(table.discountAmount)}` : '—'}</td>
         <td class="num strong">${money(table.netTotal)}</td>
       </tr>`,
     )
@@ -356,6 +393,11 @@ export function renderQuotationDocument(
       ? `<tr><td>${L('Quotation discount', 'خصم العرض')}</td><td class="num">− ${money(
           quotationDiscount.toFixed(2),
         )}</td></tr>`
+      : '',
+    showTax
+      ? `<tr class="tax"><td>${L('Tax (VAT)', 'الضريبة المضافة')}${
+          taxRate > 0 ? ` (${taxRate.toFixed(2)}%)` : ''
+        }</td><td class="num">+ ${money(taxAmount.toFixed(2))}</td></tr>`
       : '',
   ]
     .filter(Boolean)
@@ -385,10 +427,9 @@ export function renderQuotationDocument(
       ? `<div class="sign"><div class="line"></div><span>${L(
           'Responsible person',
           'المسؤول',
-        )}</span><b>${escapeHtml(content.responsibleName)}</b>${
-          content.responsiblePhone
-            ? `<div class="small">${escapeHtml(content.responsiblePhone)}</div>`
-            : ''
+        )}</span><b>${escapeHtml(content.responsibleName)}</b>${content.responsiblePhone
+          ? `<div class="small">${escapeHtml(content.responsiblePhone)}</div>`
+          : ''
         }</div>`
       : '',
   ]
@@ -432,78 +473,80 @@ export function renderQuotationDocument(
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
-    font-family: 'Segoe UI', 'IBM Plex Sans Arabic', Tahoma, 'Noto Naskh Arabic', Arial, sans-serif;
+    direction: ${rtl ? 'rtl' : 'ltr'};
+    font-family: 'Tahoma', 'Segoe UI', 'Arial', sans-serif;
     color: ${INK};
     font-size: 9.5pt;
     line-height: 1.45;
-    background: ${SURFACE};
+    background: #f3f4f6;
   }
-  .toolbar { display: flex; gap: 8px; justify-content: flex-end; padding: 10px 4px; background: ${SURFACE}; }
+  .toolbar { display: flex; gap: 8px; justify-content: flex-end; padding: 10px 4px; background: #ffffff; }
   .toolbar button { font: inherit; padding: 7px 15px; border-radius: 4px; border: 1px solid ${LINE}; background: #fff; color: ${INK}; cursor: pointer; }
-  .toolbar button.primary { background: ${ROYAL}; border-color: ${ROYAL}; color: #fff; }
+  .toolbar button.primary { background: ${PRIMARY}; border-color: ${PRIMARY}; color: #fff; }
   .sheet {
-    width: 186mm;
-    min-height: 263mm;
+    width: 210mm;
+    min-height: 297mm;
     margin: 0 auto;
     padding: 0 0 6mm;
     background: #fff;
     color: ${INK};
   }
-  .masthead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8mm; padding-bottom: 5mm; border-bottom: 0.6mm solid ${ROYAL}; }
+  .masthead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8mm; padding-bottom: 5mm; border-bottom: 0.6mm solid ${PRIMARY}; }
   .brand { flex: 1; }
-  .brand h1 { margin: 0; color: ${ROYAL}; font-size: 12.5pt; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
-  .brand .secondary { margin-top: 1mm; color: ${MUTED}; font-size: 8pt; letter-spacing: 0.06em; text-transform: uppercase; }
-  .mark { width: 38mm; display: flex; justify-content: flex-end; }
-  .mark img { max-width: 38mm; max-height: 20mm; object-fit: contain; }
+  .brand h1 { margin: 0; color: ${PRIMARY_DEEP}; font-family: 'Tahoma', 'Segoe UI', Arial, sans-serif; font-size: 12.5pt; font-weight: 600; line-height: 1.35; }
+  .brand .secondary { margin-top: 1mm; color: ${MUTED}; font-family: 'Tahoma', 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; font-weight: 400; letter-spacing: 0.02em; text-transform: none; }
+  .mark { width: 30mm; min-height: 14mm; display: flex; justify-content: flex-end; align-items: flex-start; }
+  .mark img { max-width: 30mm; max-height: 14mm; width: auto; height: auto; object-fit: contain; }
   .title-band { text-align: center; padding: 6mm 0 5mm; }
-  .title-band .rule { width: 18mm; height: 0.8mm; background: ${ROYAL_TINT}; margin: 0 auto 3mm; }
-  .title-band h2 { margin: 0; color: ${ROYAL}; font-size: 23pt; font-weight: 700; letter-spacing: 0.01em; }
+  .title-band .rule { width: 18mm; height: 0.8mm; background: ${SECONDARY}; margin: 0 auto 3mm; }
+  .title-band h2 { margin: 0; color: ${PRIMARY_DEEP}; font-size: 23pt; font-weight: 800; letter-spacing: 0.01em; }
   .title-band .english { margin-top: 1mm; color: ${MUTED}; font-size: 8.5pt; letter-spacing: 0.18em; text-transform: uppercase; }
-  .title-band .number { margin-top: 2mm; color: ${ROYAL_DEEP}; font-size: 10pt; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .title-band .number { margin-top: 2mm; color: ${PRIMARY_DEEP}; font-size: 10pt; font-weight: 700; font-variant-numeric: tabular-nums; }
   .panels { display: flex; gap: 4mm; margin-bottom: 5mm; }
   .panel { flex: 1; border: 0.3mm solid ${LINE}; border-radius: 1.5mm; padding: 3.5mm 4mm; background: ${SURFACE}; }
-  .panel .eyebrow { color: ${ROYAL}; font-size: 7.5pt; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 1.5mm; }
+  .panel .eyebrow { color: ${PRIMARY}; font-size: 7.5pt; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 1.5mm; }
   .panel h3 { margin: 0 0 1mm; font-size: 10.5pt; }
   .panel .code { color: ${MUTED}; font-size: 8pt; margin-bottom: 2mm; }
   .panel .row { display: flex; justify-content: space-between; gap: 4mm; font-size: 8.5pt; padding: 0.6mm 0; }
   .panel .row span { color: ${MUTED}; }
-  .panel .row b { font-weight: 600; text-align: ${rtl ? 'left' : 'right'}; }
-  .facts .number { color: ${ROYAL_DEEP}; font-size: 12pt; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .status { display: inline-block; margin-top: 2mm; padding: 0.6mm 2.5mm; border-radius: 10mm; background: ${WASH}; color: ${ROYAL}; font-size: 8pt; font-weight: 600; }
-  .subject { border-inline-start: 0.8mm solid ${ROYAL}; background: ${WASH}; padding: 2.5mm 3.5mm; margin-bottom: 5mm; font-size: 9.5pt; }
+  .panel .row b { font-weight: 700; text-align: ${rtl ? 'left' : 'right'}; }
+  .facts .number { color: ${PRIMARY_DEEP}; font-size: 12pt; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .status { display: inline-block; margin-top: 2mm; padding: 0.6mm 2.5mm; border-radius: 10mm; background: ${WASH}; color: ${PRIMARY}; font-size: 8pt; font-weight: 800; }
+  .subject { border-inline-start: 0.8mm solid ${PRIMARY}; background: ${WASH}; padding: 2.5mm 3.5mm; margin-bottom: 5mm; font-size: 9.5pt; }
   .subject span { color: ${MUTED}; font-size: 8pt; margin-inline-end: 2mm; }
   .block { margin-bottom: 6mm; }
   .section-head { display: flex; align-items: center; gap: 2.5mm; margin-bottom: 2mm; break-after: avoid; }
-  .section-index { display: inline-flex; align-items: center; justify-content: center; width: 6.5mm; height: 6.5mm; border-radius: 50%; background: ${ROYAL}; color: #fff; font-size: 7.5pt; font-weight: 700; }
-  .section-head h3 { margin: 0; color: ${ROYAL}; font-size: 11pt; font-weight: 700; }
+  .section-index { display: inline-flex; align-items: center; justify-content: center; width: 6.5mm; height: 6.5mm; border-radius: 50%; background: ${PRIMARY}; color: #fff; font-size: 7.5pt; font-weight: 800; }
+  .section-head h3 { margin: 0; color: ${PRIMARY}; font-size: 11pt; font-weight: 800; }
   table { width: 100%; border-collapse: collapse; }
   .items { font-size: 8.5pt; border: 0.3mm solid ${LINE}; }
   .items th, .items td { padding: 1.8mm 2mm; vertical-align: top; border-bottom: 0.25mm solid ${LINE}; }
-  .items thead th { background: ${WASH}; color: ${ROYAL}; font-size: 8pt; font-weight: 700; text-align: start; border-bottom: 0.4mm solid ${ROYAL_TINT}; }
+  .items thead th { background: ${TABLE_HEADER_BG}; color: ${TABLE_HEADER_TEXT}; font-size: 8pt; font-weight: 800; text-align: start; border-bottom: 0.4mm solid ${SECONDARY}; }
   .items thead th.num { text-align: ${numAlign}; }
   .items tbody tr:nth-child(even) { background: #fbfcff; }
-  .items tfoot th { background: ${SURFACE}; text-align: start; font-weight: 600; }
+  .items tfoot th { background: ${SURFACE}; text-align: start; font-weight: 700; }
   .items tfoot td { background: ${SURFACE}; }
   .items tfoot .discount th, .items tfoot .discount td { color: ${MUTED}; }
-  .items tfoot .net th, .items tfoot .net td { background: ${WASH}; color: ${ROYAL}; font-weight: 700; }
+  .items tfoot .net th, .items tfoot .net td { background: ${TABLE_TOTAL_BG}; color: ${TABLE_TOTAL_TEXT}; font-weight: 800; }
   .idx { width: 7mm; color: ${MUTED}; text-align: center; }
   .desc { word-break: break-word; }
   .num { text-align: ${numAlign}; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .strong { font-weight: 600; }
+  .strong { font-weight: 700; }
   .summary { margin-top: 2mm; margin-bottom: 6mm; break-inside: avoid; }
-  .summary h3 { margin: 0 0 2.5mm; color: ${ROYAL}; font-size: 11pt; }
+  .summary h3 { margin: 0 0 2.5mm; color: ${PRIMARY}; font-size: 11pt; font-weight: 800; }
   .summary table { font-size: 8.5pt; border: 0.3mm solid ${LINE}; }
-  .summary thead th { background: ${WASH}; color: ${ROYAL}; text-align: start; padding: 2mm; border-bottom: 0.4mm solid ${ROYAL_TINT}; }
+  .summary thead th { background: ${TABLE_HEADER_BG}; color: ${TABLE_HEADER_TEXT}; text-align: start; padding: 2mm; border-bottom: 0.4mm solid ${SECONDARY}; }
   .summary tbody td { padding: 1.8mm 2mm; border-bottom: 0.25mm solid ${LINE}; }
   .summary thead th.num { text-align: ${numAlign}; }
   .totals { display: flex; justify-content: ${rtl ? 'flex-start' : 'flex-end'}; margin-top: 4mm; }
   .totals table { width: 82mm; border: 0.3mm solid ${LINE}; }
   .totals td { padding: 2mm 2.5mm; border-bottom: 0.25mm solid ${LINE}; }
   .totals td:first-child { color: ${MUTED}; }
-  .totals tr.grand td { background: ${ROYAL}; color: #fff; font-weight: 700; font-size: 11pt; border-bottom: none; }
+  .totals tr.grand td { background: ${PRIMARY}; color: #fff; font-weight: 800; font-size: 11pt; border-bottom: none; }
   .totals tr.grand td:first-child { color: #fff; }
+  .totals tr.tax td { background: ${WASH}; color: ${ACCENT}; font-weight: 800; }
   .terms, .notes { margin-top: 4mm; break-inside: avoid; }
-  .terms h3, .notes h3 { margin: 0 0 1.5mm; color: ${ROYAL}; font-size: 10pt; }
+  .terms h3, .notes h3 { margin: 0 0 1.5mm; color: ${PRIMARY}; font-size: 10pt; font-weight: 800; }
   .terms div, .notes div { color: ${MUTED}; font-size: 8.5pt; line-height: 1.6; }
   .signs { display: flex; gap: 12mm; margin-top: 10mm; break-inside: avoid; }
   .sign { flex: 1; font-size: 8.5pt; }
@@ -512,7 +555,7 @@ export function renderQuotationDocument(
   .sign b { display: block; font-size: 9.5pt; margin-top: 0.5mm; }
   .sign .small { color: ${MUTED}; font-size: 8pt; }
   .page-footer { margin-top: 8mm; padding-top: 2.5mm; border-top: 0.3mm solid ${LINE}; color: ${MUTED}; font-size: 7.5pt; }
-  .page-footer .name { color: ${ROYAL}; font-weight: 700; font-size: 8.5pt; }
+  .page-footer .name { color: ${PRIMARY}; font-weight: 800; font-size: 8.5pt; }
   .page-footer .legal { margin-top: 1mm; color: ${MUTED}; }
   @media print {
     body { background: #fff; }
@@ -545,7 +588,10 @@ ${
       <h1>${escapeHtml(companyName)}</h1>
       ${secondaryName ? `<div class="secondary">${escapeHtml(secondaryName)}</div>` : ''}
     </div>
-    ${logo ? `<div class="mark"><img src="${logo}" alt="${escapeHtml(companyName)}"></div>` : ''}
+    <div class="mark">${logo
+      ? `<img src="${logo}" alt="${escapeHtml(companyName)}">`
+      : ''
+    }</div>
   </header>
 
   <div class="title-band">
@@ -559,29 +605,19 @@ ${
     <section class="panel">
       <div class="eyebrow">${L('Prepared for', 'مقدم إلى')}</div>
       <h3>${escapeHtml(customerName)}</h3>
-      <div class="code">${L('Customer code', 'كود العميل')}: ${escapeHtml(
-        content.customer.code,
-      )}</div>
+      <div class="code">${L('Customer code', 'كود العميل')}: ${escapeHtml(content.customer.code)}</div>
       ${customerRows}
     </section>
     <section class="panel facts">
       <div class="eyebrow">${L('Quotation details', 'بيانات العرض')}</div>
-      <div class="row"><span>${L('Number', 'الرقم')}</span><b class="number">${escapeHtml(
-        content.quotationNumber,
-      )}</b></div>
-      <div class="row"><span>${L('Date', 'التاريخ')}</span><b>${escapeHtml(
-        content.quotationDate,
-      )}</b></div>
+      <div class="row"><span>${L('Number', 'الرقم')}</span><b class="number">${escapeHtml(content.quotationNumber)}</b></div>
+      <div class="row"><span>${L('Date', 'التاريخ')}</span><b>${escapeHtml(content.quotationDate)}</b></div>
       ${
         content.validUntil
-          ? `<div class="row"><span>${L('Valid until', 'صالح حتى')}</span><b>${escapeHtml(
-              content.validUntil,
-            )}</b></div>`
+          ? `<div class="row"><span>${L('Valid until', 'صالح حتى')}</span><b>${escapeHtml(content.validUntil)}</b></div>`
           : ''
       }
-      <div class="row"><span>${L('Currency', 'العملة')}</span><b>${escapeHtml(
-        content.currency,
-      )}</b></div>
+      <div class="row"><span>${L('Currency', 'العملة')}</span><b>${escapeHtml(content.currency)}</b></div>
       <div class="row"><span>${L('Version', 'الإصدار')}</span><b>${content.version}</b></div>
       <div class="status">${escapeHtml(statusLabel(content.status, rtl))}</div>
     </section>
@@ -589,9 +625,7 @@ ${
 
   ${
     content.subject?.trim()
-      ? `<div class="subject"><span>${L('Subject', 'الموضوع')}</span>${escapeHtml(
-          content.subject.trim(),
-        )}</div>`
+      ? `<div class="subject"><span>${L('Subject', 'الموضوع')}</span>${escapeHtml(content.subject.trim())}</div>`
       : ''
   }
 
@@ -633,5 +667,6 @@ ${
 </div>
 ${autoPrint ? '<script>window.addEventListener("load",()=>window.print())</script>' : ''}
 </body>
-</html>`;
+</html>
+`;
 }

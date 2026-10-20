@@ -70,6 +70,7 @@ interface PreparedQuotationLine {
   quantity: Prisma.Decimal;
   unitPrice: Prisma.Decimal;
   lineTotal: Prisma.Decimal;
+  customValues: Record<string, string>;
 }
 
 interface PreparedQuotationTable {
@@ -87,6 +88,11 @@ interface PreparedQuotation {
   subTotal: Prisma.Decimal;
   discountTotal: Prisma.Decimal;
   totalAmount: Prisma.Decimal;
+  /// The company's VAT rate in force when the offer is prepared, snapshotted
+  /// so an issued offer never changes retroactively.
+  taxRate: Prisma.Decimal;
+  /// VAT charged exactly once on the discounted net value.
+  taxAmount: Prisma.Decimal;
 }
 
 /// Quotations: priced offers that are deliberately not invoices.
@@ -198,7 +204,12 @@ export class QuotationsService {
       throw new BadRequestException('The currency must be a three-letter code');
     }
 
-    const prepared = await this.prepare(companyId, dto, settings.maxDiscountPercent);
+    const prepared = await this.prepare(
+      companyId,
+      dto,
+      settings.maxDiscountPercent,
+      settings.taxRate,
+    );
 
     const created = await this.prisma.$transaction(async (tx) => {
       const quotationNumber = await this.numbers.next(tx, companyId, 'SALES_QUOTATION', 'QT');
@@ -221,6 +232,9 @@ export class QuotationsService {
           subTotal: prepared.subTotal,
           discountTotal: prepared.discountTotal,
           totalAmount: prepared.totalAmount,
+          taxRate: prepared.taxRate,
+          taxAmount: prepared.taxAmount,
+          design: dto.design as Prisma.InputJsonValue ?? {},
           managerName: this.text(dto.managerName) ?? settings.managerName,
           responsibleName: this.text(dto.responsibleName) ?? settings.salesManagerName,
           responsiblePhone: this.text(dto.responsiblePhone) ?? settings.salesManagerPhone,
@@ -248,6 +262,7 @@ export class QuotationsService {
                   quantity: line.quantity,
                   unitPrice: line.unitPrice,
                   lineTotal: line.lineTotal,
+                  customValues: line.customValues as Prisma.InputJsonValue ?? {},
                 })),
               },
             })),
@@ -294,7 +309,12 @@ export class QuotationsService {
     if (!/^[A-Z]{3}$/.test(currency)) {
       throw new BadRequestException('The currency must be a three-letter code');
     }
-    const prepared = await this.prepare(companyId, dto, settings.maxDiscountPercent);
+    const prepared = await this.prepare(
+      companyId,
+      dto,
+      settings.maxDiscountPercent,
+      settings.taxRate,
+    );
 
     await this.prisma.$transaction(async (tx) => {
       const claimed = await tx.quotation.updateMany({
@@ -314,6 +334,9 @@ export class QuotationsService {
           subTotal: prepared.subTotal,
           discountTotal: prepared.discountTotal,
           totalAmount: prepared.totalAmount,
+          taxRate: prepared.taxRate,
+          taxAmount: prepared.taxAmount,
+          design: dto.design as Prisma.InputJsonValue ?? {},
           managerName: this.text(dto.managerName),
           responsibleName: this.text(dto.responsibleName),
           responsiblePhone: this.text(dto.responsiblePhone),
@@ -353,6 +376,7 @@ export class QuotationsService {
                 quantity: line.quantity,
                 unitPrice: line.unitPrice,
                 lineTotal: line.lineTotal,
+                customValues: line.customValues as Prisma.InputJsonValue ?? {},
               })),
             },
           },
@@ -580,6 +604,7 @@ export class QuotationsService {
                   quantity: line.quantity,
                   unitPrice: line.unitPrice,
                   lineTotal: line.lineTotal,
+                  customValues: line.customValues as Prisma.InputJsonValue ?? {},
                 })),
               },
             })),
@@ -948,8 +973,10 @@ export class QuotationsService {
     companyId: string,
     dto: CreateQuotationDto,
     maximum: string,
+    taxRate: string,
   ): Promise<PreparedQuotation> {
     const limit = new Prisma.Decimal(maximum);
+    const quoteTaxRate = new Prisma.Decimal(taxRate ?? '0');
     const preparedTables: PreparedQuotationTable[] = [];
 
     // One query for every item named, rather than one per line.
@@ -997,6 +1024,7 @@ export class QuotationsService {
           quantity,
           unitPrice,
           lineTotal,
+          customValues: rawLine.customValues ?? {},
         });
       }
 
@@ -1050,12 +1078,17 @@ export class QuotationsService {
     }
 
     const discountTotal = tableDiscountTotal.plus(allocation.discount.amount);
+    // Tax is charged exactly once, on the net value after every discount.
+    const taxable = subTotal.minus(discountTotal);
+    const taxAmount = taxable.mul(quoteTaxRate).div(100).toDecimalPlaces(MONEY_SCALE);
     return {
       tables: preparedTables,
       documentDiscount: allocation.discount,
       subTotal,
       discountTotal,
-      totalAmount: subTotal.minus(discountTotal),
+      totalAmount: taxable.plus(taxAmount),
+      taxRate: quoteTaxRate,
+      taxAmount,
     };
   }
 
@@ -1116,13 +1149,20 @@ export class QuotationsService {
           quantity: line.quantity.toFixed(MONEY_SCALE),
           unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
           lineTotal: line.lineTotal.toFixed(MONEY_SCALE),
+          customValues: (line.customValues as Record<string, string>) ?? {},
         })),
       })),
       totals: {
         subTotal: quotation.subTotal.toFixed(MONEY_SCALE),
         discountTotal: quotation.discountTotal.toFixed(MONEY_SCALE),
         totalAmount: quotation.totalAmount.toFixed(MONEY_SCALE),
+        taxRate: (quotation.taxRate ?? new Prisma.Decimal(0)).toFixed(RATE_SCALE),
+        taxAmount: (quotation.taxAmount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
       },
+      design:
+        quotation.design && typeof quotation.design === 'object' && !Array.isArray(quotation.design)
+          ? (quotation.design as Record<string, unknown>)
+          : {},
     };
   }
 
@@ -1145,6 +1185,8 @@ export class QuotationsService {
       subTotal: quotation.subTotal.toFixed(MONEY_SCALE),
       discountTotal: quotation.discountTotal.toFixed(MONEY_SCALE),
       totalAmount: quotation.totalAmount.toFixed(MONEY_SCALE),
+      taxRate: (quotation.taxRate ?? new Prisma.Decimal(0)).toFixed(RATE_SCALE),
+      taxAmount: (quotation.taxAmount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
       managerName: quotation.managerName,
       responsibleName: quotation.responsibleName,
       responsiblePhone: quotation.responsiblePhone,

@@ -1,5 +1,156 @@
+import 'package:flutter/material.dart';
+
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
+
+/// تنسيق عنصر واحد من عناصر عرض السعر (حجم الخط، سمكه، لونه، محاذاته).
+///
+/// القيم المخزنة مضاعفات أو أوصاف تُطبّق في المعاينة وPDF والطباعة.
+class QuotationDocumentElementStyle {
+  const QuotationDocumentElementStyle({
+    this.fontSizeMultiplier = 1.0,
+    this.fontWeight,
+    this.color,
+  });
+
+  /// مضاعف لحجم الخط الأساسي للعنصر (1.0 = الحجم الافتراضي).
+  final double fontSizeMultiplier;
+  /// سمك الخط (اختياري).
+  final FontWeight? fontWeight;
+  /// لون النص (اختياري).
+  final String? color;
+
+  /// ينشئ نسخة من هذا النمط مع تعديلات جزئية.
+  QuotationDocumentElementStyle copyWith({
+    double? fontSizeMultiplier,
+    FontWeight? fontWeight,
+    String? color,
+  }) {
+    return QuotationDocumentElementStyle(
+      fontSizeMultiplier: fontSizeMultiplier ?? this.fontSizeMultiplier,
+      fontWeight: fontWeight ?? this.fontWeight,
+      color: color ?? this.color,
+    );
+  }
+}
+
+/// أنماط جميع عناصر عرض السعر، مخزنة كجزء من القالب أو العرض.
+class QuotationDocumentDesign {
+  const QuotationDocumentDesign({
+    this.title,
+    this.company,
+    this.customer,
+    this.sectionTitle,
+    this.tableHeader,
+    this.tableCell,
+    this.totalsLabel,
+    this.totalsValue,
+    this.finalTotal,
+    this.footer,
+    this.header,
+  });
+
+  final QuotationDocumentElementStyle? title;
+  final QuotationDocumentElementStyle? company;
+  final QuotationDocumentElementStyle? customer;
+  final QuotationDocumentElementStyle? sectionTitle;
+  final QuotationDocumentElementStyle? tableHeader;
+  final QuotationDocumentElementStyle? tableCell;
+  final QuotationDocumentElementStyle? totalsLabel;
+  final QuotationDocumentElementStyle? totalsValue;
+  final QuotationDocumentElementStyle? finalTotal;
+  final QuotationDocumentElementStyle? footer;
+  final QuotationDocumentElementStyle? header;
+
+  /// الأنماط الافتراضية (بدون تجاوزات).
+  static QuotationDocumentDesign defaultDesign() => const QuotationDocumentDesign();
+
+  /// يدمج هذا التصميم مع آخر (القيم في [other] تغلب).
+  QuotationDocumentDesign merge(QuotationDocumentDesign other) {
+    return QuotationDocumentDesign(
+      title: other.title ?? title,
+      company: other.company ?? company,
+      customer: other.customer ?? customer,
+      sectionTitle: other.sectionTitle ?? sectionTitle,
+      tableHeader: other.tableHeader ?? tableHeader,
+      tableCell: other.tableCell ?? tableCell,
+      totalsLabel: other.totalsLabel ?? totalsLabel,
+      totalsValue: other.totalsValue ?? totalsValue,
+      finalTotal: other.finalTotal ?? finalTotal,
+      footer: other.footer ?? footer,
+      header: other.header ?? header,
+    );
+  }
+
+  /// يقرأ التصميم من خريطة JSON (مثلاً من contentSnapshot أو القالب).
+  factory QuotationDocumentDesign.fromJson(Json? raw) {
+    if (raw == null) return defaultDesign();
+    QuotationDocumentElementStyle? styleOf(String key) {
+      final v = raw[key];
+      if (v is! Map) return null;
+      return QuotationDocumentElementStyle(
+        fontSizeMultiplier:
+            (v['fontSizeMultiplier'] as num?)?.toDouble() ?? 1.0,
+        fontWeight: _fontWeightOf(v['fontWeight']),
+        color: v['color'] as String?,
+      );
+    }
+    return QuotationDocumentDesign(
+      title: styleOf('title'),
+      company: styleOf('company'),
+      customer: styleOf('customer'),
+      sectionTitle: styleOf('sectionTitle'),
+      tableHeader: styleOf('tableHeader'),
+      tableCell: styleOf('tableCell'),
+      totalsLabel: styleOf('totalsLabel'),
+      totalsValue: styleOf('totalsValue'),
+      finalTotal: styleOf('finalTotal'),
+      footer: styleOf('footer'),
+      header: styleOf('header'),
+    );
+  }
+
+  /// يكتب التصميم إلى خريطة JSON للتخزين.
+  Map<String, dynamic> toJson() {
+    final result = <String, dynamic>{};
+    void set(String key, QuotationDocumentElementStyle? s) {
+      if (s == null) return;
+      result[key] = {
+        'fontSizeMultiplier': s.fontSizeMultiplier,
+        if (s.fontWeight != null) 'fontWeight': s.fontWeight.toString(),
+        if (s.color != null) 'color': s.color,
+      };
+    }
+    set('title', title);
+    set('company', company);
+    set('customer', customer);
+    set('sectionTitle', sectionTitle);
+    set('tableHeader', tableHeader);
+    set('tableCell', tableCell);
+    set('totalsLabel', totalsLabel);
+    set('totalsValue', totalsValue);
+    set('finalTotal', finalTotal);
+    set('footer', footer);
+    set('header', header);
+    return result;
+  }
+}
+
+FontWeight? _fontWeightOf(dynamic v) {
+  if (v is! String) return null;
+  return switch (v) {
+    'w100' => FontWeight.w100,
+    'w200' => FontWeight.w200,
+    'w300' => FontWeight.w300,
+    'w400' => FontWeight.w400,
+    'w500' => FontWeight.w500,
+    'w600' => FontWeight.w600,
+    'w700' => FontWeight.w700,
+    'w800' => FontWeight.w800,
+    'w900' => FontWeight.w900,
+    _ => null,
+  };
+}
 
 /// One printed line, already resolved for the reader's language.
 class QuotationDocumentRow {
@@ -62,6 +213,8 @@ class QuotationDocumentTotals {
     required this.tableDiscountTotal,
     required this.quotationDiscount,
     required this.totalAmount,
+    this.taxRate = '',
+    this.taxAmount = '',
   });
 
   final String subTotal;
@@ -69,6 +222,12 @@ class QuotationDocumentTotals {
   final String tableDiscountTotal;
   final String quotationDiscount;
   final String totalAmount;
+  /// The company's VAT rate in force when the offer was prepared, in percent.
+  final String taxRate;
+  /// VAT charged exactly once on the discounted net value.
+  final String taxAmount;
+
+  bool get hasTax => (num.tryParse(taxAmount) ?? 0) > 0;
 }
 
 class QuotationDocumentParty {
@@ -135,6 +294,7 @@ class QuotationDocument {
     required this.responsiblePhone,
     required this.showTaxId,
     required this.arabic,
+    this.design,
   });
 
   final String number;
@@ -155,6 +315,8 @@ class QuotationDocument {
   final String responsiblePhone;
   final bool showTaxId;
   final bool arabic;
+  /// تصميم العناصر (حجم الخط، سمكه، لونه، محاذاته) المخزّن مع القالب أو العرض.
+  final QuotationDocumentDesign? design;
 
   bool get hasAnySection => sections.isNotEmpty;
 
@@ -307,6 +469,8 @@ class QuotationDocument {
             ? '0'
             : quotationDiscount.toStringAsFixed(2),
         totalAmount: totalAmount,
+        taxRate: text(totalsRaw, 'taxRate', fallback: text(quotation, 'taxRate')),
+        taxAmount: text(totalsRaw, 'taxAmount', fallback: text(quotation, 'taxAmount')),
       ),
       terms: text(source, 'terms', fallback: text(quotation, 'terms')),
       notes: text(source, 'notes', fallback: text(quotation, 'notes')),
@@ -319,6 +483,7 @@ class QuotationDocument {
       ),
       showTaxId: source['showTaxId'] != false,
       arabic: arabic,
+      design: QuotationDocumentDesign.fromJson(source['design']),
     );
   }
 
@@ -330,20 +495,23 @@ class QuotationDocument {
     final seen = <String>{};
     for (final entry in raw) {
       final key = text(entry, 'key');
-      if (!_labels.containsKey(key) || seen.contains(key)) continue;
+      if (key.isEmpty || seen.contains(key)) continue;
       if (entry['visible'] == false) continue;
       seen.add(key);
       final override = language == 'ar'
           ? text(entry, 'labelAr')
           : text(entry, 'labelEn');
       final weight = asNum(entry['width'])?.toInt() ?? 2;
+      final builtIn = _labels[key];
       result.add(
         QuotationDocumentColumn(
           key: key,
           label: override.isNotEmpty
               ? override
-              : _labels[key]![language == 'ar' ? 1 : 0],
-          numeric: _numeric.contains(key),
+              : (builtIn != null ? builtIn[language == 'ar' ? 1 : 0] : key),
+          numeric: entry['numeric'] == true
+              ? true
+              : (builtIn != null ? _numeric.contains(key) : false),
           weight: weight.clamp(1, 6).toInt(),
         ),
       );
@@ -374,6 +542,8 @@ class QuotationDocument {
 
   static String _cell(Json line, String key) {
     switch (key) {
+      case 'description':
+        return text(line, 'description');
       case 'itemCode':
         return text(line, 'itemCode').ifEmpty('—');
       case 'countryOfOrigin':
@@ -387,7 +557,13 @@ class QuotationDocument {
       case 'lineTotal':
         return formatAmount(text(line, 'lineTotal'));
       default:
-        return text(line, 'description');
+        // User-defined column: read its stored value from customValues.
+        final custom = line['customValues'];
+        if (custom is Map) {
+          final value = custom[key];
+          if (value != null) return value.toString();
+        }
+        return '';
     }
   }
 

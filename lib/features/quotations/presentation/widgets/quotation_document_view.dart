@@ -10,15 +10,24 @@ import '../document/quotation_document.dart';
 /// the in-app preview and the exported PDF show one document rather than two
 /// interpretations of it. Every number comes from [QuotationDocument], which
 /// copies the figures the API stored: nothing is recalculated here.
+///
+/// The user's program-wide text size (Settings) is applied on top of the
+/// layout scale, so the offer is never stuck at an unreadable size.
 class QuotationDocumentView extends StatelessWidget {
   const QuotationDocumentView({
     super.key,
     required this.document,
     this.logoUrl,
+    this.textScale = 1.0,
   });
 
   final QuotationDocument document;
   final String? logoUrl;
+
+  /// The user's program-wide text size (Settings), applied on top of the
+  /// layout scale. Defaults to the design's own size so the view works
+  /// standalone (e.g. in tests) without a `ProviderScope` ancestor.
+  final double textScale;
 
   /// The reference layout is 860 points wide; narrower windows shrink the
   /// whole sheet instead of letting a column overflow.
@@ -31,7 +40,8 @@ class QuotationDocumentView extends StatelessWidget {
         final width = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : _referenceWidth;
-        final scale = (width / _referenceWidth).clamp(0.72, 1.0).toDouble();
+        final scale =
+            ((width / _referenceWidth).clamp(0.72, 1.0) * textScale).toDouble();
         return Directionality(
           textDirection: document.arabic
               ? TextDirection.rtl
@@ -53,6 +63,33 @@ class _Sheet extends StatelessWidget {
   final QuotationDocument document;
   final double scale;
   final String? logoUrl;
+
+  /// يطبق نمط التصميم المخزن على نمط نص أساسي، مع keeping الحجم الأساسي.
+  TextStyle _styled(TextStyle base, QuotationDocumentElementStyle? style) {
+    if (style == null) return base;
+    return base.copyWith(
+      fontSize: (base.fontSize ?? 12) * style.fontSizeMultiplier,
+      fontWeight: style.fontWeight ?? base.fontWeight,
+      color: style.color != null
+          ? _parseColor(style.color!)
+          : base.color,
+    );
+  }
+
+  Color? _parseColor(String hex) {
+    try {
+      final clean = hex.replaceAll('#', '');
+      if (clean.length == 6) {
+        return Color(int.parse('0xFF$clean', radix: 16));
+      }
+      if (clean.length == 8) {
+        return Color(int.parse('0x$clean', radix: 16));
+      }
+    } on Exception {
+      return null;
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -115,7 +152,7 @@ class _Sheet extends StatelessWidget {
         ? const SizedBox.shrink()
         : Image.network(
             logoUrl!,
-            height: 48 * scale,
+            height: 42 * scale,
             fit: BoxFit.contain,
             errorBuilder: (context, error, stack) => const SizedBox.shrink(),
           );
@@ -123,6 +160,7 @@ class _Sheet extends StatelessWidget {
     // The company's name sits at the start of the line (the right in Arabic)
     // and the mark at the end (the left), as a letterhead does in both
     // languages.
+    final design = document.design;
     return Container(
       padding: EdgeInsets.only(bottom: 12 * scale),
       decoration: const BoxDecoration(
@@ -137,11 +175,14 @@ class _Sheet extends StatelessWidget {
               children: [
                 Text(
                   company.name,
-                  style: TextStyle(
-                    color: _Doc.royal,
-                    fontSize: 15.5 * scale,
-                    fontWeight: FontWeight.w700,
-                    height: 1.25,
+                  style: _styled(
+                    TextStyle(
+                      color: _Doc.royal,
+                      fontSize: 14 * scale,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
+                    ),
+                    design?.company,
                   ),
                 ),
                 if (company.secondaryName.trim().isNotEmpty)
@@ -151,25 +192,28 @@ class _Sheet extends StatelessWidget {
                       company.secondaryName.toUpperCase(),
                       style: TextStyle(
                         color: _Doc.muted,
-                        fontSize: 7.5 * scale,
-                        letterSpacing: 1.1 * scale,
+                        fontSize: 7 * scale,
+                        letterSpacing: 0.35 * scale,
                       ),
                     ),
                   ),
               ],
             ),
           ),
-          SizedBox(width: 20 * scale),
-          ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: 150 * scale),
-            child: mark,
-          ),
+          if (logoUrl != null && logoUrl!.isNotEmpty) ...[
+            SizedBox(width: 16 * scale),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 150 * scale),
+              child: mark,
+            ),
+          ],
         ],
       ),
     );
   }
 
   Widget _titleBand() {
+    final design = document.design;
     return Column(
       children: [
         Container(
@@ -181,11 +225,14 @@ class _Sheet extends StatelessWidget {
         Text(
           document.arabic ? 'عرض سعر' : 'QUOTATION',
           textAlign: TextAlign.center,
-          style: TextStyle(
-            color: _Doc.royal,
-            fontSize: 28 * scale,
-            fontWeight: FontWeight.w700,
-            height: 1.2,
+          style: _styled(
+            TextStyle(
+              color: _Doc.royal,
+              fontSize: 28 * scale,
+              fontWeight: FontWeight.w700,
+              height: 1.2,
+            ),
+            design?.title,
           ),
         ),
         SizedBox(height: 4 * scale),
@@ -434,10 +481,13 @@ class _Sheet extends StatelessWidget {
               Expanded(
                 child: Text(
                   section.title,
-                  style: TextStyle(
-                    color: _Doc.royal,
-                    fontSize: 13.5 * scale,
-                    fontWeight: FontWeight.w700,
+                  style: _styled(
+                    TextStyle(
+                      color: _Doc.royal,
+                      fontSize: 13.5 * scale,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    document.design?.sectionTitle,
                   ),
                 ),
               ),
@@ -749,6 +799,7 @@ class _Sheet extends StatelessWidget {
     final totals = document.totals;
     final tableDiscount = num.tryParse(totals.tableDiscountTotal) ?? 0;
     final quotationDiscount = num.tryParse(totals.quotationDiscount) ?? 0;
+    final design = document.design;
 
     Widget row(String label, String value) => Container(
           padding: EdgeInsets.symmetric(vertical: 6 * scale, horizontal: 9 * scale),
@@ -760,16 +811,22 @@ class _Sheet extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: TextStyle(color: _Doc.muted, fontSize: 8.8 * scale),
+                  style: _styled(
+                    TextStyle(color: _Doc.muted, fontSize: 8.8 * scale),
+                    design?.totalsLabel,
+                  ),
                 ),
               ),
               Text(
                 value,
-                style: TextStyle(
-                  color: _Doc.ink,
-                  fontSize: 9.3 * scale,
-                  fontWeight: FontWeight.w600,
-                  fontFeatures: const [FontFeature.tabularFigures()],
+                style: _styled(
+                  TextStyle(
+                    color: _Doc.ink,
+                    fontSize: 9.3 * scale,
+                    fontWeight: FontWeight.w600,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                  design?.totalsValue,
                 ),
               ),
             ],
@@ -795,6 +852,13 @@ class _Sheet extends StatelessWidget {
               document.arabic ? 'خصم العرض' : 'Quotation discount',
               '− ${_money(totals.quotationDiscount)}',
             ),
+          if (totals.hasTax)
+            row(
+              document.arabic
+                  ? 'الضريبة المضافة${totals.taxRate.isNotEmpty ? ' (${totals.taxRate}%)' : ''}'
+                  : 'Tax (VAT)${totals.taxRate.isNotEmpty ? ' (${totals.taxRate}%)' : ''}',
+              '+ ${_money(totals.taxAmount)}',
+            ),
           Container(
             color: _Doc.royal,
             padding: EdgeInsets.symmetric(
@@ -806,20 +870,26 @@ class _Sheet extends StatelessWidget {
                 Expanded(
                   child: Text(
                     document.arabic ? 'الإجمالي النهائي' : 'Final total',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 10 * scale,
-                      fontWeight: FontWeight.w700,
+                    style: _styled(
+                      TextStyle(
+                        color: Colors.white,
+                        fontSize: 10 * scale,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      design?.finalTotal,
                     ),
                   ),
                 ),
                 Text(
                   _money(totals.totalAmount),
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 12 * scale,
-                    fontWeight: FontWeight.w700,
-                    fontFeatures: const [FontFeature.tabularFigures()],
+                  style: _styled(
+                    TextStyle(
+                      color: Colors.white,
+                      fontSize: 12 * scale,
+                      fontWeight: FontWeight.w700,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                    design?.finalTotal,
                   ),
                 ),
               ],
@@ -941,6 +1011,7 @@ class _Sheet extends StatelessWidget {
           : 'This offer is not a tax invoice.',
     ].join(' · ');
 
+    final design = document.design;
     return Container(
       padding: EdgeInsets.only(top: 9 * scale),
       decoration: BoxDecoration(
@@ -951,10 +1022,13 @@ class _Sheet extends StatelessWidget {
         children: [
           Text(
             company.name,
-            style: TextStyle(
-              color: _Doc.royal,
-              fontSize: 8.5 * scale,
-              fontWeight: FontWeight.w700,
+            style: _styled(
+              TextStyle(
+                color: _Doc.royal,
+                fontSize: 8.5 * scale,
+                fontWeight: FontWeight.w700,
+              ),
+              design?.footer,
             ),
           ),
           if (contact.isNotEmpty)
@@ -962,14 +1036,20 @@ class _Sheet extends StatelessWidget {
               padding: EdgeInsets.only(top: 2 * scale),
               child: Text(
                 contact,
-                style: TextStyle(color: _Doc.muted, fontSize: 7.5 * scale),
+                style: _styled(
+                  TextStyle(color: _Doc.muted, fontSize: 7.5 * scale),
+                  design?.footer,
+                ),
               ),
             ),
           Padding(
             padding: EdgeInsets.only(top: 2 * scale),
             child: Text(
               legal,
-              style: TextStyle(color: _Doc.muted, fontSize: 7.2 * scale),
+              style: _styled(
+                TextStyle(color: _Doc.muted, fontSize: 7.2 * scale),
+                design?.footer,
+              ),
             ),
           ),
         ],
@@ -1003,12 +1083,16 @@ class _Sheet extends StatelessWidget {
 }
 
 /// The document palette, shared with the server template (`quotation-document.ts`).
+/// Identity colours follow the Stitch reference:
+///   primary   #1e60aa  (brand, headings, rules)
+///   secondary #0088cc  (secondary text, sub-brand)
+///   accent    #e67e22  (totals emphasis)
 abstract final class _Doc {
-  static const royal = Color(0xFF00288E);
-  static const royalDeep = Color(0xFF001B60);
-  static const royalTint = Color(0xFF3755C3);
-  static const ink = Color(0xFF0B1C30);
-  static const muted = Color(0xFF444653);
+  static const royal = Color(0xFF1E60AA);
+  static const royalDeep = Color(0xFF164D84);
+  static const royalTint = Color(0xFF0088CC);
+  static const ink = Color(0xFF111827);
+  static const muted = Color(0xFF4B5563);
   static const line = Color(0xFFD3E4FE);
   static const wash = Color(0xFFEFF4FF);
   static const rows = Color(0xFFFBFCFE);

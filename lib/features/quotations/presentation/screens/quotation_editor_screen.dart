@@ -16,6 +16,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../../shared/widgets/discount_kind_label.dart';
+import '../document/quotation_document.dart';
 import '../providers/quotation_providers.dart';
 
 class _QLineDraft {
@@ -26,11 +27,14 @@ class _QLineDraft {
     String unit = '',
     String quantity = '1',
     String unitPrice = '0',
+    Map<String, String>? customValues,
   }) : description = TextEditingController(text: description),
        origin = TextEditingController(text: origin),
        unit = TextEditingController(text: unit),
        quantity = TextEditingController(text: quantity),
-       unitPrice = TextEditingController(text: unitPrice);
+       unitPrice = TextEditingController(text: unitPrice),
+       customValues = customValues ?? {},
+       customValueControllers = {};
 
   String? itemId;
   final TextEditingController description;
@@ -38,11 +42,23 @@ class _QLineDraft {
   final TextEditingController unit;
   final TextEditingController quantity;
   final TextEditingController unitPrice;
+  /// Values for user-defined columns, keyed by the column's key.
+  final Map<String, String> customValues;
+  /// Controllers for custom value fields, created lazily and disposed with
+  /// the line draft.
+  final Map<String, TextEditingController> customValueControllers;
 
   Decimal get lineTotal {
     final qty = Decimal.tryParse(quantity.text.trim()) ?? Decimal.zero;
     final price = Decimal.tryParse(unitPrice.text.trim()) ?? Decimal.zero;
     return (qty * price).round(scale: moneyScale);
+  }
+
+  TextEditingController customValueController(String key, String initial) {
+    return customValueControllers.putIfAbsent(
+      key,
+      () => TextEditingController(text: initial),
+    );
   }
 
   void dispose() {
@@ -51,6 +67,9 @@ class _QLineDraft {
     unit.dispose();
     quantity.dispose();
     unitPrice.dispose();
+    for (final c in customValueControllers.values) {
+      c.dispose();
+    }
   }
 }
 
@@ -64,6 +83,7 @@ class _QColumnDraft {
     String labelAr = '',
     this.visible = true,
     this.width = 2,
+    this.numeric = false,
   }) : labelEn = TextEditingController(text: labelEn),
        labelAr = TextEditingController(text: labelAr);
 
@@ -72,6 +92,9 @@ class _QColumnDraft {
   final TextEditingController labelAr;
   bool visible;
   int width;
+  /// Whether the column holds a monetary quantity. User-defined columns
+  /// default to text unless the user marks them numeric.
+  bool numeric;
 
   _QColumnDraft copy() => _QColumnDraft(
     key: key,
@@ -79,6 +102,7 @@ class _QColumnDraft {
     labelAr: labelAr.text,
     visible: visible,
     width: width,
+    numeric: numeric,
   );
 
   void dispose() {
@@ -136,6 +160,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   final _tables = <_QTableDraft>[];
   final _subject = TextEditingController();
   final _columns = <_QColumnDraft>[];
+  QuotationDocumentDesign _design = QuotationDocumentDesign.defaultDesign();
   bool _showTaxId = true;
   final _discountValue = TextEditingController();
   final _terms = TextEditingController();
@@ -188,6 +213,13 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         }
         table.lines.clear();
         for (final row in listOf(tableRow['lines'])) {
+          final rawCustom = row['customValues'];
+          final customValues = <String, String>{};
+          if (rawCustom is Map) {
+            rawCustom.forEach((k, v) {
+              customValues[k.toString()] = v.toString();
+            });
+          }
           table.lines.add(
             _QLineDraft(
               itemId: text(row, 'itemId').isEmpty ? null : text(row, 'itemId'),
@@ -196,6 +228,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
               unit: text(row, 'unit'),
               quantity: text(row, 'quantity', fallback: '1'),
               unitPrice: text(row, 'unitPrice', fallback: '0'),
+              customValues: customValues,
             ),
           );
         }
@@ -232,6 +265,12 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         _date = text(quotation, 'quotationDate', fallback: _date);
         final valid = text(quotation, 'validUntil');
         _validUntil = valid.isEmpty ? null : valid;
+        final rawDesign = quotation['design'];
+        if (rawDesign is Map) {
+          _design = QuotationDocumentDesign.fromJson(
+            rawDesign as Map<String, dynamic>,
+          );
+        }
         _loading = false;
       });
     } on Failure catch (error) {
@@ -255,30 +294,32 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   /// The six columns every offer printed before layouts were configurable.
   List<_QColumnDraft> _standardColumns() => [
     for (final entry in const [
-      ('description', 4),
-      ('countryOfOrigin', 2),
-      ('unit', 1),
-      ('quantity', 1),
-      ('unitPrice', 2),
-      ('lineTotal', 2),
+      ('description', 4, false),
+      ('countryOfOrigin', 2, false),
+      ('unit', 1, false),
+      ('quantity', 1, true),
+      ('unitPrice', 2, true),
+      ('lineTotal', 2, true),
     ])
-      _QColumnDraft(key: entry.$1, width: entry.$2),
+      _QColumnDraft(key: entry.$1, width: entry.$2, numeric: entry.$3),
   ];
 
-  /// Reads the stored layout. An offer saved before this feature has none, so
+  /// Reads the stored layout. Any key is accepted — built-in keys and
+  /// user-defined keys alike. An offer saved before this feature has none, so
   /// it starts from the standard six rather than from an empty table.
   List<_QColumnDraft> _columnsFrom(Object? raw) {
     final rows = listOf(raw);
     if (rows.isEmpty) return _standardColumns();
     return [
       for (final row in rows)
-        if (_columnKeys.contains(text(row, 'key')))
+        if (text(row, 'key').isNotEmpty)
           _QColumnDraft(
             key: text(row, 'key'),
             labelEn: text(row, 'labelEn'),
             labelAr: text(row, 'labelAr'),
             visible: row['visible'] != false,
             width: (asNum(row['width']) ?? 2).toInt(),
+            numeric: row['numeric'] == true,
           ),
     ];
   }
@@ -307,6 +348,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
           'labelAr': column.labelAr.text.trim(),
         'visible': column.visible,
         'width': column.width,
+        if (column.numeric) 'numeric': true,
       },
   ];
 
@@ -477,6 +519,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
           'unitPrice': line.unitPrice.text.trim().isEmpty
               ? '0'
               : line.unitPrice.text.trim(),
+          if (line.customValues.isNotEmpty)
+            'customValues': line.customValues,
         });
       }
       if (lines.isEmpty) {
@@ -517,6 +561,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         'subject': _subject.text.trim(),
         'showTaxId': _showTaxId,
         'columns': _columnBody(),
+        if (_design.toJson().isNotEmpty) 'design': _design.toJson(),
         'discountType': ?discountTypeOf(_discountKind),
         if (_discountKind == DiscountKind.percent &&
             _discountValue.text.trim().isNotEmpty)
@@ -946,11 +991,17 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                         PopupMenuButton<String>(
                           key: const ValueKey('add-column'),
                           tooltip: l10n.addColumn,
-                          enabled:
-                              working.length < _columnKeys.length,
-                          onSelected: (key) => setDialogState(
-                            () => working.add(_QColumnDraft(key: key)),
-                          ),
+                          onSelected: (key) {
+                            if (key == '_custom') {
+                              _addCustomColumnDialog(setDialogState, working);
+                              return;
+                            }
+                            setDialogState(() {
+                              if (!working.any((c) => c.key == key)) {
+                                working.add(_QColumnDraft(key: key));
+                              }
+                            });
+                          },
                           itemBuilder: (context) => [
                             for (final key in _columnKeys)
                               if (!working.any((column) => column.key == key))
@@ -958,6 +1009,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                   value: key,
                                   child: Text(_columnName(key)),
                                 ),
+                            const PopupMenuItem(
+                              value: '_custom',
+                              child: Text('أعمدة مخصصة / Custom column…'),
+                            ),
                           ],
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
@@ -1057,6 +1112,26 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                         onChanged: (value) => setDialogState(
                                           () => column.width = value ?? 2,
                                         ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Checkbox(
+                                      key: ValueKey(
+                                        'column-numeric-${column.key}',
+                                      ),
+                                      value: column.numeric,
+                                      onChanged: (value) => setDialogState(
+                                        () => column.numeric = value ?? false,
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 60,
+                                      child: Text(
+                                        l10n.columnNumeric,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                     IconButton(
@@ -1193,6 +1268,95 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       }
       templateName.dispose();
     }
+  }
+
+  /// Opens a dialog that lets the user define a new column with a free-text
+  /// key and label. The column is added to [working] when the user saves.
+  void _addCustomColumnDialog(
+    void Function(void Function()) setDialogState,
+    List<_QColumnDraft> working,
+  ) {
+    final keyController = TextEditingController();
+    final labelEnController = TextEditingController();
+    final labelArController = TextEditingController();
+    final l10n = context.l10n;
+    showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l10n.addCustomColumn),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: keyController,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: l10n.columnKey,
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: labelEnController,
+              decoration: InputDecoration(
+                labelText: l10n.columnLabelEn,
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: labelArController,
+              decoration: InputDecoration(
+                labelText: l10n.columnLabelAr,
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () {
+              final key = keyController.text.trim();
+              if (key.isEmpty) {
+                showMessage(
+                  dialogContext,
+                  l10n.columnKey,
+                  error: true,
+                );
+                return;
+              }
+              if (working.any((c) => c.key == key)) {
+                showMessage(
+                  dialogContext,
+                  l10n.columnAlreadyExists,
+                  error: true,
+                );
+                return;
+              }
+              setDialogState(() {
+                working.add(_QColumnDraft(
+                  key: key,
+                  labelEn: labelEnController.text.trim(),
+                  labelAr: labelArController.text.trim(),
+                ));
+              });
+              keyController.dispose();
+              labelEnController.dispose();
+              labelArController.dispose();
+              Navigator.of(dialogContext).pop(true);
+            },
+            child: Text(l10n.add),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<Json?> _saveColumnTemplate(
@@ -1496,9 +1660,67 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
               ),
             ],
           ),
+          // حقول الأعمدة المخصصة التي ليست من المفاتيح المضمّنة.
+          if (_customColumnKeys.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                for (final column in _customColumnKeys)
+                  SizedBox(
+                    width: 150,
+                    child: TextField(
+                      key: ValueKey(
+                        'quotation-custom-${column.key}-$tableIndex-$index',
+                      ),
+                      controller: _customValueController(line, column.key),
+                      decoration: InputDecoration(
+                        labelText: language == 'ar'
+                            ? column.labelAr.text.trim().isNotEmpty
+                                ? column.labelAr.text
+                                : column.key
+                            : column.labelEn.text.trim().isNotEmpty
+                                ? column.labelEn.text
+                                : column.key,
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (value) =>
+                          line.customValues[column.key] = value,
+                    ),
+                  ),
+              ],
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  /// الأعمدة الظاهرة التي يعرفها المستخدم (ليست من المفاتيح المضمّنة).
+  List<_QColumnDraft> get _customColumnKeys =>
+      _columns.where((c) => c.visible && !_builtinColumnKeys.contains(c.key))
+          .toList();
+
+  /// المفاتيح المضمّنة التي لها حقول خاصة بها في السطر.
+  static const _builtinColumnKeys = {
+    'itemCode',
+    'description',
+    'countryOfOrigin',
+    'unit',
+    'quantity',
+    'unitPrice',
+    'lineTotal',
+  };
+
+  /// يعيد المتحكم في حقل قيمة العمود المخصص لسطر معين، ينشئه عند الحاجة.
+  TextEditingController _customValueController(
+    _QLineDraft line,
+    String key,
+  ) {
+    final initial = line.customValues[key] ?? '';
+    return line.customValueController(key, initial);
   }
 
   Widget _smallField(

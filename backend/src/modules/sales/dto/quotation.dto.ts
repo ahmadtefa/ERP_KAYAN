@@ -30,7 +30,9 @@ export const QUOTATION_COLUMN_KEYS = [
 ] as const;
 
 export class QuotationColumnDto {
-  @IsIn(QUOTATION_COLUMN_KEYS as unknown as string[]) key!: string;
+  /// The column key. Built-in keys (itemCode, description, …) are recognised
+  /// by the printer; any other free text is a user-defined column.
+  @IsString() key!: string;
 
   /// A label this offer uses instead of the built-in one. Left empty means the
   /// translated standard label.
@@ -43,6 +45,10 @@ export class QuotationColumnDto {
 
   /// Relative width in print. 1 is a narrow column, 4 a wide one.
   @IsOptional() @IsNumber() @Min(1) @Max(6) width?: number;
+
+  /// Whether the column holds a monetary quantity. User-defined columns
+  /// default to text.
+  @IsOptional() @IsBoolean() numeric?: boolean;
 }
 
 export class QuotationLineDto {
@@ -62,6 +68,9 @@ export class QuotationLineDto {
   @IsString() quantity!: string;
 
   @IsOptional() @IsString() unitPrice?: string;
+
+  /// Values for user-defined columns, keyed by column key.
+  @IsOptional() @Type(() => Object) customValues?: Record<string, string>;
 }
 
 export class QuotationTableDto {
@@ -121,6 +130,10 @@ export class CreateQuotationDto {
   @ValidateNested({ each: true })
   @Type(() => QuotationColumnDto)
   columns?: QuotationColumnDto[];
+
+  /// Per-element styling (font size, weight, color, alignment) stored with
+  /// the offer and applied when printing or previewing.
+  @IsOptional() @Type(() => Object) design?: Record<string, unknown>;
 
   @IsArray()
   @ArrayMinSize(1)
