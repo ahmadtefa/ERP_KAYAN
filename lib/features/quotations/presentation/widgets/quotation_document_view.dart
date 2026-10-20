@@ -73,7 +73,6 @@ class _Sheet extends StatelessWidget {
       color: style.color != null
           ? _parseColor(style.color!)
           : base.color,
-      textAlign: style.textAlign ?? base.textAlign,
     );
   }
 
