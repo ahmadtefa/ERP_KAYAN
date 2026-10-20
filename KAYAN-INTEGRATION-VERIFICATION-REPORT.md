@@ -1,6 +1,6 @@
 # KAYAN ERP — Integration Verification Report
 
-**Date:** 2026-10-20 (code head `cb81bc3`; report commit `57cd41e`, the commit the installer was built from)
+**Date:** 2026-10-20 (code head `cb81bc3`; report commit `16af9d2`, the commit the installer was built from)
 **Earlier revisions:** 2026-10-19 (`5da76f2`, `8cdd84d`) — kept as history below
 **Repository:** [ahmadtefa/ERP_KAYAN](https://github.com/ahmadtefa/ERP_KAYAN)
 **Integration branch:** `arena/a5a099ec-erp-kayan`
@@ -9,7 +9,7 @@
 
 **Current verification (2026-10-20, head `cb81bc3`):** CI run `39340110065` is green in all four
 jobs (Backend with real PostgreSQL and demo restore, Regression scenarios, Flutter Web, Linux
-Desktop), and Windows run `39343786112` built and smoke-tested the installer from `57cd41e`,
+Desktop), and Windows run `39347143689` built and smoke-tested the installer from `16af9d2`,
 whose tree is identical to the code head `cb81bc3`.
 **Section 17 is authoritative for the current state.** Sections 1–16 are kept as the historical
 record of their own commits; where they say "not implemented yet" or quote an older artifact,
@@ -37,7 +37,7 @@ guessed "probably works".
 | Does a Flutter UI exist for the quotations work? | **Yes:** editor, list, detail, subject, per-offer tax switch, column editor with templates, tables, discounts, statuses, conversion and four separate export actions. |
 | Are Arabic and English strings complete? | **Yes:** 719 keys in both languages, 1323 usages, `tools/check-l10n-keys.mjs` passes. RTL rendering was **not visually verified**. |
 | Are the tests green? | **Yes on `cb81bc3`:** CI `39340110065` — Backend, Regression, Flutter Web and Linux Desktop all **success**. |
-| Is the installer built from the current code? | **Yes:** artifact `12230884927` from run `39343786112` at `57cd41e`, whose tree is identical to the code head `cb81bc3` (the only difference is Markdown). SHA-256 `21530778…216B`, 344,727,358 bytes, installed-package smoke test **passed**. Unsigned. |
+| Is the installer built from the current code? | **Yes:** artifact `12232113873` from run `39347143689` at `16af9d2`, whose tree is identical to the code head `cb81bc3` (the only difference is Markdown). SHA-256 `89487505…07EE`, 344,707,446 bytes, installed-package smoke test **passed**. Unsigned. |
 | Is LAN verified from a second computer? | **No — NOT VERIFIED.** |
 | Was a human click-through of the installed UI done? | **No — NOT VERIFIED.** |
 
@@ -47,18 +47,18 @@ guessed "probably works".
 |---|---|
 | Branch | `arena/a5a099ec-erp-kayan` |
 | Code commit | `cb81bc3` — `Assert the field the API actually receives for the per-offer tax choice` |
-| Report/installer commit | `57cd41e` — `Document the verified head, CI run and Windows installer` |
+| Report/installer commit | `16af9d2` — `Record the installer built from the documentation head` |
 | Commits ahead of `main` | 70 |
 | Working tree | clean when the verification runs were made |
 | `main` | `e1a2a7e`, untouched by this branch |
 | Merged into `main`? | **No** |
 | New production release published? | **No** (the publish step is restricted to `main`) |
 | CI | `39340110065` — four jobs, all success |
-| Installer | `12230884927` from run `39343786112` at `57cd41e`; 344,727,358 bytes; SHA-256 `21530778C88640FD6059A7FCAE1998734AF9F4807787C2263E29A481C45E216B`; smoke test passed |
+| Installer | `12232113873` from run `39347143689` at `16af9d2`; 344,707,446 bytes; SHA-256 `894875055BE7F8929B6924B0366589D75FCF20475944CEC0E4ABFE5CCBA207EE`; smoke test passed |
 
-The installer run checked out `57cd41e`, the report commit whose tree is identical to the code
-head `cb81bc3`: `git diff cb81bc3..57cd41e -- . ':(exclude)*.md'` is empty, and Markdown is not
-packaged. The run announces `head_sha=57cd41e`; pull-request checkout uses the temporary merge
+The installer run checked out `16af9d2`, the report commit whose tree is identical to the code
+head `cb81bc3`: `git diff cb81bc3..16af9d2 -- . ':(exclude)*.md'` is empty, and Markdown is not
+packaged. The run announces `head_sha=16af9d2`; pull-request checkout uses the temporary merge
 ref, whose tree matches because `main` is unchanged and the PR is mergeable. The fingerprint
 line in this report was added by a later documentation-only commit.
 
@@ -891,7 +891,8 @@ Production code was not changed to make a test pass, and no assertion was weaken
 | Run | Result | Jobs |
 |---|---|---|
 | [`39340110065`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39340110065) | **success** | Regression `118359257671`, Backend `118359257757`, Flutter Web `118359257742`, Linux Desktop `118359257857` |
-| [`39343786197`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39343786197) | **success** | Regression `118371395313`, Backend `118371394858`, Flutter Web `118371395179`, Linux Desktop `118371395235` (on the report commit) |
+| [`39343786197`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39343786197) | **success** | Regression `118371395313`, Backend `118371394858`, Flutter Web `118371395179`, Linux Desktop `118371395235` (on `57cd41e`) |
+| [`39347143580`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39347143580) | **success** | Regression `118382366699`, Backend `118382366464`, Flutter Web `118382366518`, Linux Desktop `118382366270` (on `16af9d2`) |
 
 The Backend job executed, in order: install → `prisma generate` → `prisma validate` →
 `tsc --noEmit` → **`npm test`** → `npm run build` → `prisma migrate deploy` on ephemeral
@@ -924,7 +925,7 @@ release builds.
 | Per-warehouse stock in the item picker | `GET /inventory/stock/by-warehouse`, grouped display next to total | Service/controller; scenario covers stock | **DONE + TESTED (API); UI visual not verified** |
 | Cost centres | hierarchy, line attribution, journal allocations, report filters, budgets, stock attribution | Service specs; widget tests for cost-centre picker; CI | **DONE + TESTED (automated)** |
 | Migrations, seed, backup/restore | 34 migrations; CI applies them to a new DB; demo JSON built and restored on clean DBs | Backend job steps 11–16 all success | **DONE + TESTED on disposable databases** |
-| Installer from final code | Windows run `39343786112` at `57cd41e` (tree identical to `cb81bc3`) | artifact `12230884927`, smoke test passed | **DONE + TESTED** |
+| Installer from final code | Windows run `39347143689` at `16af9d2` (tree identical to `cb81bc3`) | artifact `12232113873`, smoke test passed | **DONE + TESTED** |
 
 ### 17.4 Exact commands and outcomes
 
@@ -964,13 +965,13 @@ authoritative run is the CI job on the real client.
 
 | Item | Value |
 |---|---|
-| Workflow run | [`39343786112`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39343786112) — success |
-| Source commit | `57cd41ead5def6ca0959fe585dc3bbff32129c5c` (tree identical to `cb81bc3`) |
-| Artifact | `12230884927` — `KAYAN-ERP-Windows-x64-Installer` |
-| Size | **344,727,358 bytes** |
-| SHA-256 | `21530778C88640FD6059A7FCAE1998734AF9F4807787C2263E29A481C45E216B` |
-| Expires | 2026-11-03T00:19:30Z |
-| Link | <https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39343786112/artifacts/12230884927> |
+| Workflow run | [`39347143689`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39347143689) — success |
+| Source commit | `16af9d2995d3523a2d21ffc266b800c8c4671d2a` (tree identical to `cb81bc3`) |
+| Artifact | `12232113873` — `KAYAN-ERP-Windows-x64-Installer` |
+| Size | **344,707,446 bytes** |
+| SHA-256 | `894875055BE7F8929B6924B0366589D75FCF20475944CEC0E4ABFE5CCBA207EE` |
+| Expires | 2026-11-03T00:52:41Z |
+| Link | <https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39347143689/artifacts/12232113873> |
 
 The installed-package smoke test verified, on the runner and from the actual installer:
 

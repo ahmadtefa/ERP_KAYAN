@@ -251,7 +251,8 @@ flutter build linux --release
 | التشغيل | النتيجة | المدة | الوظائف |
 |---|---|---|---|
 | [`39340110065`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39340110065) | **success** | 2m49s | Regression، Backend، Flutter Web، Linux Desktop |
-| [`39343786197`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39343786197) | **success** | 3m0s | Regression، Backend، Flutter Web، Linux Desktop (على commit التقارير) |
+| [`39343786197`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39343786197) | **success** | 3m0s | Regression، Backend، Flutter Web، Linux Desktop (على `57cd41e`) |
+| [`39347143580`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39347143580) | **success** | 3m3s | Regression، Backend، Flutter Web، Linux Desktop (على `16af9d2`) |
 
 **وظائف التشغيل ومعرّفاتها:**
 
@@ -286,13 +287,13 @@ flutter build linux --release
 
 | العنصر | القيمة |
 |---|---|
-| التشغيل | [`39343786112`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39343786112) — **success** |
-| commit المصدر | `57cd41ead5def6ca0959fe585dc3bbff32129c5c` (commit التقارير؛ كوده مطابق لـ`cb81bc3`) |
-| Artifact | `#12230884927` — `KAYAN-ERP-Windows-x64-Installer` |
-| الحجم | **344,727,358 بايت** (≈328.8 MiB) |
-| SHA-256 | `21530778C88640FD6059A7FCAE1998734AF9F4807787C2263E29A481C45E216B` |
-| الانتهاء | 2026-11-03T00:19:30Z |
-| الرابط | <https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39343786112/artifacts/12230884927> |
+| التشغيل | [`39347143689`](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39347143689) — **success** |
+| commit المصدر | `16af9d2995d3523a2d21ffc266b800c8c4671d2a` (commit التقارير؛ كوده مطابق لـ`cb81bc3`) |
+| Artifact | `#12232113873` — `KAYAN-ERP-Windows-x64-Installer` |
+| الحجم | **344,707,446 بايت** (≈328.7 MiB) |
+| SHA-256 | `894875055BE7F8929B6924B0366589D75FCF20475944CEC0E4ABFE5CCBA207EE` |
+| الانتهاء | 2026-11-03T00:52:41Z |
+| الرابط | <https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/39347143689/artifacts/12232113873> |
 
 **مخرجات smoke test (من الـannotations الرسمية):**
 
@@ -300,10 +301,10 @@ flutter build linux --release
 - `Installed Windows PostgreSQL backup/restore passed: real archive, mutation, checked restore, safety copy, re-login and original sentinel verified.`
 - `Installed Windows company JSON backup/restore passed: snapshot, mutation, restore, re-login and original sentinel verified.`
 
-**حول المصدر:** المثبّت بُني من `57cd41e`، وهو الـcommit الذي يحمل كامل كود التطبيق وكامل
+**حول المصدر:** المثبّت بُني من `16af9d2`، وهو الـcommit الذي يحمل كامل كود التطبيق وكامل
 هذين التقريرين. الفرق بينه وبين `cb81bc3` هو ملفات `*.md` فقط (تم التحقق:
-`git diff cb81bc3..57cd41e -- . ':(exclude)*.md'` فارغ)، وهذه الملفات غير مشمولة في حزمة
-المثبّت. التشغيل يعلن `head_sha=57cd41e`؛ وفي أحداث `pull_request` يستخدم checkout مرجع الدمج
+`git diff cb81bc3..16af9d2 -- . ':(exclude)*.md'` فارغ)، وهذه الملفات غير مشمولة في حزمة
+المثبّت. التشغيل يعلن `head_sha=16af9d2`؛ وفي أحداث `pull_request` يستخدم checkout مرجع الدمج
 المؤقت، وشجرته مطابقة لأن `main` ثابت والـPR قابل للدمج. سطر البصمة هذا أُضيف في commit
 توثيقي لاحق لا يغيّر أي كود.
 
