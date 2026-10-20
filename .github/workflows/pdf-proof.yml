@@ -1,0 +1,27 @@
+name: Quotation PDF proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx ts-node --transpile-only scripts/quotation-proof.ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quotation-pdf-proof
+          path: backend/artifacts/
