@@ -1,4 +1,16 @@
+import { Request } from 'express';
 import { HealthController } from './health.controller';
+
+/// The parts of the request the network report reads: where it arrived, and
+/// whether the transport was encrypted.
+function fakeRequest(overrides: Partial<Record<string, unknown>> = {}): Request {
+  return {
+    headers: {},
+    secure: false,
+    socket: { localAddress: '127.0.0.1' },
+    ...overrides,
+  } as unknown as Request;
+}
 
 describe('HealthController', () => {
   let controller: HealthController;
@@ -25,7 +37,7 @@ describe('HealthController', () => {
     const previous = process.env.HOST;
     process.env.HOST = '0.0.0.0';
     try {
-      const net = await controller.network();
+      const net = await controller.network(fakeRequest({ headers: { host: '127.0.0.1:3000' } }));
       expect(net.port).toBeDefined();
       expect(net.host).toBe('0.0.0.0');
       expect(net.isLanAccessible).toBe(true);
@@ -34,6 +46,10 @@ describe('HealthController', () => {
       expect(typeof net.primaryUrl).toBe('string');
       expect(net.database).toBe('up');
       expect(net.localUrl).toMatch(/^http:\/\/localhost:\d+$/);
+      // A plain http page is not a secure context, so the browser keeps the
+      // session in memory. Reported from this request, not guessed.
+      expect(net.secureContext).toBe(false);
+      expect(net.sessionStorage).toBe('durable'); // loopback is a secure context
       // Every offered address is a link that can actually be opened from
       // another machine: no loopback, no hostname-less placeholder.
       for (const address of net.addresses) {
@@ -50,7 +66,7 @@ describe('HealthController', () => {
     const previous = process.env.HOST;
     process.env.HOST = '127.0.0.1';
     try {
-      const net = await controller.network();
+      const net = await controller.network(fakeRequest());
       expect(net.isLanAccessible).toBe(false);
       expect(net.addresses).toEqual([]);
       expect(net.primaryUrl).toMatch(/^http:\/\/localhost:\d+$/);

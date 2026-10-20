@@ -833,8 +833,7 @@ class _CompanyContext extends StatelessWidget {
               children: [
                 Text(
                   name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2,
                   style: theme.textTheme.titleMedium?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.w700,
@@ -843,8 +842,7 @@ class _CompanyContext extends StatelessWidget {
                 if (secondaryName.isNotEmpty && secondaryName != name)
                   Text(
                     secondaryName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    maxLines: 2,
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: AppColors.onNavyMuted,
                     ),
@@ -902,8 +900,7 @@ class _ContextChip extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 240),
         child: Text(
           label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+          maxLines: 2,
           style: const TextStyle(
             color: AppColors.onNavyMuted,
             fontSize: 11,

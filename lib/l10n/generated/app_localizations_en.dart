@@ -108,6 +108,42 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settings => 'Settings';
 
   @override
+  String get sessionStorageLabel => 'Session storage';
+
+  @override
+  String get sessionStorageDurable => 'Saved on this device';
+
+  @override
+  String get sessionStorageMemoryOnly => 'Memory only';
+
+  @override
+  String get sessionStorageMemoryHint => 'This page is not served over HTTPS, so the browser keeps the session only until it is reloaded. Serve the program over HTTPS to keep people signed in.';
+
+  @override
+  String get signInIncomplete => 'The server accepted the sign-in but did not send the account details. This usually means the program and the server are different versions, or the company setup was not finished. The technical detail is in the program log.';
+
+  @override
+  String get fontSize => 'Font size';
+
+  @override
+  String get fontSizeDescription => 'Applies to the whole program: buttons, menus, the sidebar, tables, dialogs and reports. It is remembered for the next sign-in.';
+
+  @override
+  String get fontSizeSmaller => 'Smaller text';
+
+  @override
+  String get fontSizeLarger => 'Larger text';
+
+  @override
+  String get fontSizeReset => 'Default size';
+
+  @override
+  String get fontSizePreview => 'Preview: invoice 1,250.00 EGP · 12.5% discount';
+
+  @override
+  String get sessionNotPersisted => 'This session is kept in memory only: the browser will not store it on a plain http:// address. Reloading signs you out. Serve the program over HTTPS to keep the session.';
+
+  @override
   String get language => 'Language';
 
   @override

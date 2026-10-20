@@ -126,12 +126,24 @@ class ApiClient {
       if (accessToken is! String || accessToken.isEmpty) {
         return const _RefreshOutcome.unavailable();
       }
-      await _tokenStore.saveTokens(
-        accessToken: accessToken,
-        refreshToken: rotated is String && rotated.isNotEmpty
-            ? rotated
-            : refreshToken,
-      );
+      // The server has already issued a fresh, valid session. If the
+      // platform refuses to persist it - a browser on plain `http://` does -
+      // the token store keeps it in memory, and that must not be reported as
+      // a failed renewal, which would send an otherwise working session back
+      // to the sign-in screen.
+      try {
+        await _tokenStore.saveTokens(
+          accessToken: accessToken,
+          refreshToken: rotated is String && rotated.isNotEmpty
+              ? rotated
+              : refreshToken,
+        );
+      } catch (error) {
+        _log.warning(
+          'The renewed token could not be stored (${error.runtimeType}); '
+          'continuing with it in memory',
+        );
+      }
       _log.info('Access token renewed');
       return _RefreshOutcome.success(accessToken);
     } on DioException catch (e) {

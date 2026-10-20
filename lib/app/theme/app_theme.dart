@@ -15,10 +15,21 @@ import 'design_tokens.dart';
 /// without being touched, which is what keeps this change a presentation
 /// change rather than a rewrite.
 abstract final class AppTheme {
-  static ThemeData light() => _build(Brightness.light);
-  static ThemeData dark() => _build(Brightness.dark);
+  /// [textScale] is the user's size from settings. It changes *geometry* only
+  /// - control heights and table rows - so a larger text cannot be clipped by
+  /// a box that was measured for the default size. The text itself is scaled
+  /// once, by `applyTextScale` at the root; scaling the font sizes here too
+  /// would multiply the setting by itself on every rebuild.
+  static ThemeData light({double textScale = 1}) =>
+      _build(Brightness.light, textScale);
+  static ThemeData dark({double textScale = 1}) =>
+      _build(Brightness.dark, textScale);
 
-  static ThemeData _build(Brightness brightness) {
+  /// One step of extra room per unit of extra text size.
+  static double _room(double base, double textScale, double perUnit) =>
+      base + (textScale - 1) * perUnit;
+
+  static ThemeData _build(Brightness brightness, double textScale) {
     final isLight = brightness == Brightness.light;
     final scheme = isLight ? _lightScheme : _darkScheme;
     final textTheme = _textTheme(scheme);
@@ -44,7 +55,7 @@ abstract final class AppTheme {
 
       appBarTheme: AppBarTheme(
         centerTitle: false,
-        toolbarHeight: AppSizes.topBarHeight,
+        toolbarHeight: _room(AppSizes.topBarHeight, textScale, 18),
         backgroundColor: surface,
         foregroundColor: scheme.onSurface,
         elevation: 0,
@@ -241,8 +252,8 @@ abstract final class AppTheme {
 
       filledButtonTheme: FilledButtonThemeData(
         style: ButtonStyle(
-          minimumSize: const WidgetStatePropertyAll(
-            Size(0, AppSizes.buttonHeight),
+          minimumSize: WidgetStatePropertyAll(
+            Size(0, _room(AppSizes.buttonHeight, textScale, 16)),
           ),
           padding: const WidgetStatePropertyAll(
             EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -273,8 +284,8 @@ abstract final class AppTheme {
 
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: ButtonStyle(
-          minimumSize: const WidgetStatePropertyAll(
-            Size(0, AppSizes.buttonHeight),
+          minimumSize: WidgetStatePropertyAll(
+            Size(0, _room(AppSizes.buttonHeight, textScale, 16)),
           ),
           padding: const WidgetStatePropertyAll(
             EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -298,7 +309,9 @@ abstract final class AppTheme {
 
       textButtonTheme: TextButtonThemeData(
         style: ButtonStyle(
-          minimumSize: const WidgetStatePropertyAll(Size(0, 34)),
+          minimumSize: WidgetStatePropertyAll(
+            Size(0, _room(34, textScale, 12)),
+          ),
           padding: const WidgetStatePropertyAll(
             EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           ),
@@ -330,9 +343,9 @@ abstract final class AppTheme {
 
       dataTableTheme: DataTableThemeData(
         headingRowColor: WidgetStatePropertyAll(surfaceAlt),
-        headingRowHeight: AppSizes.tableHeaderHeight,
-        dataRowMinHeight: AppSizes.tableRowHeight,
-        dataRowMaxHeight: AppSizes.tableRowHeight + 6,
+        headingRowHeight: _room(AppSizes.tableHeaderHeight, textScale, 16),
+        dataRowMinHeight: _room(AppSizes.tableRowHeight, textScale, 16),
+        dataRowMaxHeight: _room(AppSizes.tableRowHeight + 6, textScale, 24),
         headingTextStyle: textTheme.labelSmall?.copyWith(
           color: scheme.onSurfaceVariant,
           fontWeight: FontWeight.w700,

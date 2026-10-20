@@ -278,11 +278,83 @@ abstract class AppLocalizations {
   /// **'Reports'**
   String get reports;
 
+  /// No description provided for @signInIncomplete.
+  ///
+  /// In en, this message translates to:
+  /// **'The server accepted the sign-in but did not send the account details. This usually means the program and the server are different versions, or the company setup was not finished. The technical detail is in the program log.'**
+  String get signInIncomplete;
+
+  /// No description provided for @sessionStorageLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Session storage'**
+  String get sessionStorageLabel;
+
+  /// No description provided for @sessionStorageDurable.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved on this device'**
+  String get sessionStorageDurable;
+
+  /// No description provided for @sessionStorageMemoryOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Memory only'**
+  String get sessionStorageMemoryOnly;
+
+  /// No description provided for @sessionStorageMemoryHint.
+  ///
+  /// In en, this message translates to:
+  /// **'This page is not served over HTTPS, so the browser keeps the session only until it is reloaded. Serve the program over HTTPS to keep people signed in.'**
+  String get sessionStorageMemoryHint;
+
   /// No description provided for @settings.
   ///
   /// In en, this message translates to:
   /// **'Settings'**
   String get settings;
+
+  /// The size of text across the whole program. Buttons, menus, tables and dialogs follow it.
+  ///
+  /// In en, this message translates to:
+  /// **'Font size'**
+  String get fontSize;
+
+  /// No description provided for @fontSizeDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Applies to the whole program: buttons, menus, the sidebar, tables, dialogs and reports. It is remembered for the next sign-in.'**
+  String get fontSizeDescription;
+
+  /// No description provided for @fontSizeSmaller.
+  ///
+  /// In en, this message translates to:
+  /// **'Smaller text'**
+  String get fontSizeSmaller;
+
+  /// No description provided for @fontSizeLarger.
+  ///
+  /// In en, this message translates to:
+  /// **'Larger text'**
+  String get fontSizeLarger;
+
+  /// No description provided for @fontSizeReset.
+  ///
+  /// In en, this message translates to:
+  /// **'Default size'**
+  String get fontSizeReset;
+
+  /// No description provided for @fontSizePreview.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview: invoice 1,250.00 EGP · 12.5% discount'**
+  String get fontSizePreview;
+
+  /// No description provided for @sessionNotPersisted.
+  ///
+  /// In en, this message translates to:
+  /// **'This session is kept in memory only: the browser will not store it on a plain http:// address. Reloading signs you out. Serve the program over HTTPS to keep the session.'**
+  String get sessionNotPersisted;
 
   /// No description provided for @language.
   ///

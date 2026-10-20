@@ -230,7 +230,10 @@ class _DialogHeader extends StatelessWidget {
               style: theme.textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
-              overflow: TextOverflow.ellipsis,
+              // Wraps rather than elides: at the largest text size a long
+              // document title must stay readable, and the header is free to
+              // grow because the body below it is the expanding child.
+              softWrap: true,
             ),
           ),
           if (canResize)

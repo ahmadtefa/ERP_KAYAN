@@ -14,6 +14,7 @@ String localizedError(BuildContext context, Object error) {
     PermissionFailure() => l10n.permissionDenied,
     AuthFailure() => l10n.invalidCredentials,
     NetworkFailure() => l10n.networkError,
+    IncompleteSignInFailure() => l10n.signInIncomplete,
     ApiFailure(:final message) when message.isNotEmpty => message,
     _ => l10n.unexpectedError,
   };

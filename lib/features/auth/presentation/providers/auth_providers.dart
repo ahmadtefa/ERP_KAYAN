@@ -44,6 +44,19 @@ final companyBrandingProvider = FutureProvider<Map<String, dynamic>?>((
   }
 });
 
+/// True when the session lives only in this window because the platform
+/// refused to store the tokens. The shell says so instead of letting the
+/// person discover it when a reload signs them out.
+class SessionStorageNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void update(bool value) => state = value;
+}
+
+final volatileSessionProvider =
+    NotifierProvider<SessionStorageNotifier, bool>(SessionStorageNotifier.new);
+
 final authRemoteDataSourceProvider = Provider<AuthRemoteDataSource>(
   (ref) => AuthRemoteDataSourceImpl(ref.watch(apiClientProvider)),
 );
@@ -79,6 +92,11 @@ class AuthController extends AsyncNotifier<AppUser?> {
       username: username,
       password: password,
     );
+    if (result.isSuccess) {
+      ref
+          .read(volatileSessionProvider.notifier)
+          .update(ref.read(tokenStoreProvider).isSessionVolatile);
+    }
     if (result.isSuccess && rememberLogin) {
       try {
         await ref
@@ -95,6 +113,7 @@ class AuthController extends AsyncNotifier<AppUser?> {
   Future<void> signOut() async {
     state = const AsyncValue.loading();
     await ref.read(authRepositoryProvider).signOut();
+    ref.read(volatileSessionProvider.notifier).update(false);
     state = const AsyncValue.data(null);
   }
 
@@ -103,6 +122,7 @@ class AuthController extends AsyncNotifier<AppUser?> {
   /// stored tokens; dropping to `null` sends the router to sign-in.
   Future<void> sessionExpired() async {
     if (state.value == null && !state.isLoading) return;
+    ref.read(volatileSessionProvider.notifier).update(false);
     state = const AsyncValue.data(null);
   }
 }

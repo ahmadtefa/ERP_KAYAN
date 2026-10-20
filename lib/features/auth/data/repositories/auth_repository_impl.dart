@@ -40,8 +40,14 @@ class AuthRepositoryImpl implements AuthRepository {
       _log.warning('Sign-in failed: ${failure.runtimeType}');
       return ResultFailure(failure);
     } on FormatException catch (e) {
+      // The password was accepted and a session was issued, but the answer
+      // lacks the account the interface needs. Say so plainly: the usual
+      // causes are an API and a program from different versions, or a company
+      // whose setup was never completed. The technical detail goes to the log,
+      // never to the screen.
+      _log.severe('Sign-in answer could not be read: ${e.message}');
       await _tokenStore.clear();
-      return ResultFailure(ServerFailure('Malformed sign-in response', e));
+      return ResultFailure(IncompleteSignInFailure('Sign-in answer', e));
     } catch (e) {
       _log.severe('Sign-in error', e);
       return ResultFailure(ServerFailure('Sign-in failed', e));

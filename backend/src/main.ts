@@ -8,6 +8,12 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { ProblemDetailsFilter } from './common/filters/problem-details.filter';
 import { isCorsOriginAllowed } from './common/security/cors-origin';
+import {
+  assertSafeExposure,
+  exposureWarning,
+  isPublishedExposure,
+  tlsTerminatedByProxy,
+} from './common/security/exposure';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -33,6 +39,16 @@ async function bootstrap() {
   );
 
   app.useGlobalFilters(new ProblemDetailsFilter());
+
+  // Behind a declared reverse proxy, Express must read the forwarded address
+  // so audit rows and rate limits see the caller, not the proxy. Nothing is
+  // trusted when the variable is absent.
+  const trustedProxy = (process.env.KAYAN_TRUST_PROXY ?? '').trim();
+  if (trustedProxy) {
+    (app.getHttpAdapter().getInstance() as { set?: (k: string, v: unknown) => void })
+      .set?.('trust proxy', trustedProxy);
+    logger.log(`Trusting the reverse proxy described by KAYAN_TRUST_PROXY=${trustedProxy}`);
+  }
 
   // Development is permissive so Flutter's changing local dev-server port
   // does not break sign-in. Production accepts only explicit CORS_ORIGINS
@@ -102,6 +118,24 @@ async function bootstrap() {
   // reach it.
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '0.0.0.0';
+  const exposed = host === '0.0.0.0' || host === '::';
+  const tls = tlsTerminatedByProxy();
+  const published = isPublishedExposure();
+  // A deliberately published installation that is still plain HTTP is a
+  // configuration error, not a warning: the sign-in form would travel in
+  // clear text. Everything else is logged and left to the operator.
+  assertSafeExposure({
+    exposed,
+    published,
+    hasTlsTerminator: tls,
+  });
+  const warning = exposureWarning({
+    exposed,
+    published,
+    hasTlsTerminator: tls,
+  });
+  if (warning) logger.warn(warning);
+
   await app.listen(port, host);
   logger.log(`API listening on http://${host}:${port}/api/v1`);
   logger.log(`Local web access: http://localhost:${port}`);
@@ -117,5 +151,9 @@ async function bootstrap() {
   }
   // A line the desktop shell can wait for, in addition to the health route.
   logger.log(`KAYAN-API-READY port=${port} host=${host}`);
+  logger.log(
+    `Exposure: ${exposed ? 'network' : 'this machine only'}, ` +
+      `TLS ${tls ? 'terminated by the configured proxy' : 'not terminated at this process'}`,
+  );
 }
 void bootstrap();

@@ -62,8 +62,10 @@ class PageHeader extends StatelessWidget {
                 ),
               Text(
                 title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                // The page's own name wraps rather than elides: at the
+                // largest text size a long Arabic title must not become
+                // "...".
+                softWrap: true,
                 style:
                     (dense
                             ? theme.textTheme.titleLarge
@@ -79,8 +81,7 @@ class PageHeader extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 3),
                   child: Text(
                     subtitle!,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                    softWrap: true,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),

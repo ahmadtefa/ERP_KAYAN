@@ -84,8 +84,9 @@ class KpiCard extends StatelessWidget {
           SizedBox(height: compact ? AppSpacing.sm : AppSpacing.md),
           Text(
             label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            // Two lines instead of an ellipsis: the card has no fixed height,
+            // so a longer label at a larger text size simply makes it taller.
+            maxLines: 2,
             style: theme.textTheme.bodySmall?.copyWith(
               color: scheme.onSurfaceVariant,
               fontWeight: FontWeight.w500,
@@ -94,8 +95,7 @@ class KpiCard extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            maxLines: 2,
             style: (compact
                     ? theme.textTheme.titleLarge
                     : theme.textTheme.headlineSmall)
@@ -110,8 +110,7 @@ class KpiCard extends StatelessWidget {
             const SizedBox(height: 3),
             Text(
               caption!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
               style: theme.textTheme.labelSmall?.copyWith(
                 color: scheme.onSurfaceVariant,
                 fontWeight: FontWeight.w500,
@@ -171,30 +170,32 @@ class StatStripItem extends StatelessWidget {
           Icon(icon, size: 16, color: tone.foreground),
           const SizedBox(width: AppSpacing.sm),
         ],
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-                fontWeight: FontWeight.w500,
+        // Loose, so a long label at a large text size wraps inside the strip
+        // instead of running past it.
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                maxLines: 2,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
-            ),
-            const SizedBox(height: 1),
-            Text(
-              value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleSmall?.copyWith(
-                color: scheme.onSurface,
-                fontWeight: FontWeight.w700,
+              const SizedBox(height: 1),
+              Text(
+                value,
+                maxLines: 2,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: scheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ],
     );

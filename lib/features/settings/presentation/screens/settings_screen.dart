@@ -10,6 +10,7 @@ import '../providers/locale_provider.dart';
 import '../widgets/lan_access_card.dart';
 import '../widgets/reset_data_card.dart';
 import '../widgets/document_settings_card.dart';
+import '../widgets/text_scale_card.dart';
 
 /// Application settings.
 ///
@@ -56,7 +57,7 @@ class SettingsScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Card(
+        Card(
           child: Column(
             children: [
               ListTile(
@@ -77,6 +78,8 @@ class SettingsScreen extends ConsumerWidget {
             ],
           ),
         ),
+        const SizedBox(height: 16),
+        const TextScaleCard(),
         const SizedBox(height: 16),
         const LanAccessCard(),
         const SizedBox(height: 16),

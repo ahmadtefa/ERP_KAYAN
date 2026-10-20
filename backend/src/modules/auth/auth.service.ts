@@ -62,6 +62,15 @@ export class AuthService {
     const invalid = new UnauthorizedException('Invalid username or password');
 
     if (!user || user.deletedAt !== null || !user.isActive) {
+      this.logger.warn(
+        `Sign-in refused for "${username}": ${
+          user === null
+            ? 'no such account'
+            : user.deletedAt !== null
+              ? 'account deleted'
+              : 'account inactive'
+        }`,
+      );
       await this.audit.record({
         action: 'LOGIN_FAILED',
         entity: 'users',
@@ -73,6 +82,9 @@ export class AuthService {
     }
 
     if (user.lockedUntil && user.lockedUntil > new Date()) {
+      this.logger.warn(
+        `Sign-in refused for "${username}": locked until ${user.lockedUntil.toISOString()}`,
+      );
       throw new UnauthorizedException(
         'Account temporarily locked after repeated failed sign-ins',
       );
@@ -80,6 +92,7 @@ export class AuthService {
 
     const passwordOk = await argon2.verify(user.passwordHash, password);
     if (!passwordOk) {
+      this.logger.warn(`Sign-in refused for "${username}": wrong password`);
       // Increment in the database so simultaneous failed logins cannot
       // overwrite one another's counters with the same stale value.
       const updated = await this.prisma.user.update({
@@ -163,6 +176,10 @@ export class AuthService {
       data: { failedLoginCount: 0, lockedUntil: null, lastLoginAt: new Date() },
     });
 
+    this.logger.log(
+      `Signed in "${user.username}" (company ${user.companyId}, ${roles.length} role(s), ` +
+        `${permissions.length} permission(s)) from ${ip ?? 'an unknown address'}`,
+    );
     await this.audit.record({
       companyId: user.companyId,
       userId: user.id,

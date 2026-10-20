@@ -59,6 +59,18 @@ class ServerFailure extends Failure {
     : super(cause: cause);
 }
 
+/// The server accepted the sign-in and issued a session, but the account
+/// details in its answer could not be read - typically a version mismatch
+/// between the program and the API, or a company that was never finished
+/// setting up. Distinct from [ServerFailure] so the screen can say what to
+/// check instead of "an unexpected error occurred".
+class IncompleteSignInFailure extends Failure {
+  const IncompleteSignInFailure([
+    String message = 'The sign-in answer is incomplete',
+    Object? cause,
+  ]) : super(message, cause: cause);
+}
+
 /// Input validation failed before any network call was attempted.
 ///
 /// Client-side validation is a UX convenience; the server must enforce the

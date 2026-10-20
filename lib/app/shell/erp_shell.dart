@@ -7,6 +7,7 @@ import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/search/presentation/search_dialog.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
+import '../../shared/widgets/session_storage_notice.dart';
 import '../router/app_router.dart';
 import '../theme/design_tokens.dart';
 
@@ -115,6 +116,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
                     isWide: isWide,
                     isExtended: isExtended,
                   ),
+                  const SessionStorageNotice(),
                   Expanded(child: widget.child),
                 ],
               ),
@@ -371,8 +373,17 @@ class _Sidebar extends StatelessWidget {
       groups.putIfAbsent(item.group, () => []).add(item);
     }
 
+    // The rail is a fixed icon column; the open sidebar gives a larger label
+    // a wider column too, so "المحاسبة" is not squeezed into two narrow lines
+    // at the largest text size. It grows by a little over half of the text
+    // increase, which keeps the working area for the tables.
+    final scale = MediaQuery.textScalerOf(context).scale(1);
+    final width = extended
+        ? AppSizes.sidebarWidth * (1 + (scale - 1) * 0.55)
+        : AppSizes.sidebarRailWidth;
+
     return Container(
-      width: extended ? AppSizes.sidebarWidth : AppSizes.sidebarRailWidth,
+      width: width,
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -612,7 +623,7 @@ class _NavEntry extends StatelessWidget {
             leading: Icon(item.icon, size: 18, color: foreground),
             title: Text(
               item.label,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: foreground,
@@ -724,7 +735,8 @@ class _TopBar extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Container(
-      height: AppSizes.topBarHeight,
+      height: Theme.of(context).appBarTheme.toolbarHeight ??
+          AppSizes.topBarHeight,
       decoration: BoxDecoration(
         color: scheme.surface,
         border: Border(
