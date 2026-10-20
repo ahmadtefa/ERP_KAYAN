@@ -616,6 +616,7 @@ export function renderQuotationDocument(
     .summary, .terms, .notes, .signs, .page-footer { break-inside: avoid; }
     .section-head { break-after: avoid; }
   }
+  ${designCss}
 </style>
 </head>
 <body>
