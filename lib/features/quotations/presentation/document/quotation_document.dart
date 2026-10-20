@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 
@@ -9,30 +11,25 @@ class QuotationDocumentElementStyle {
     this.fontSizeMultiplier = 1.0,
     this.fontWeight,
     this.color,
-    this.textAlign,
   });
 
   /// مضاعف لحجم الخط الأساسي للعنصر (1.0 = الحجم الافتراضي).
   final double fontSizeMultiplier;
   /// سمك الخط (اختياري).
   final FontWeight? fontWeight;
-  /// لون النصksenاختياري.
+  /// لون النص (اختياري).
   final String? color;
-  /// محاذاة النص (اختياري).
-  final TextAlign? textAlign;
 
   /// ينشئ نسخة من هذا النمط مع تعديلات جزئية.
   QuotationDocumentElementStyle copyWith({
     double? fontSizeMultiplier,
     FontWeight? fontWeight,
     String? color,
-    TextAlign? textAlign,
   }) {
     return QuotationDocumentElementStyle(
       fontSizeMultiplier: fontSizeMultiplier ?? this.fontSizeMultiplier,
       fontWeight: fontWeight ?? this.fontWeight,
       color: color ?? this.color,
-      textAlign: textAlign ?? this.textAlign,
     );
   }
 }
@@ -96,7 +93,6 @@ class QuotationDocumentDesign {
             (v['fontSizeMultiplier'] as num?)?.toDouble() ?? 1.0,
         fontWeight: _fontWeightOf(v['fontWeight']),
         color: v['color'] as String?,
-        textAlign: _textAlignOf(v['textAlign']),
       );
     }
     return QuotationDocumentDesign(
@@ -123,7 +119,6 @@ class QuotationDocumentDesign {
         'fontSizeMultiplier': s.fontSizeMultiplier,
         if (s.fontWeight != null) 'fontWeight': s.fontWeight.toString(),
         if (s.color != null) 'color': s.color,
-        if (s.textAlign != null) 'textAlign': s.textAlign.toString(),
       };
     }
     set('title', title);
@@ -153,19 +148,6 @@ FontWeight? _fontWeightOf(dynamic v) {
     'w700' => FontWeight.w700,
     'w800' => FontWeight.w800,
     'w900' => FontWeight.w900,
-    _ => null,
-  };
-}
-
-TextAlign? _textAlignOf(dynamic v) {
-  if (v is! String) return null;
-  return switch (v) {
-    'left' => TextAlign.left,
-    'right' => TextAlign.right,
-    'center' => TextAlign.center,
-    'justify' => TextAlign.justify,
-    'start' => TextAlign.start,
-    'end' => TextAlign.end,
     _ => null,
   };
 }

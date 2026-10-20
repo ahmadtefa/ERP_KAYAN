@@ -4026,6 +4026,22 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   String get columnWidth;
 
   /// In en, this message translates to:
+  /// **'Numeric'**
+  String get columnNumeric;
+
+  /// In en, this message translates to:
+  /// **'Custom column…'**
+  String get addCustomColumn;
+
+  /// In en, this message translates to:
+  /// **'Column key'**
+  String get columnKey;
+
+  /// In en, this message translates to:
+  /// **'A column with this key already exists.'**
+  String get columnAlreadyExists;
+
+  /// In en, this message translates to:
   /// **'Add column'**
   String get addColumn;
 

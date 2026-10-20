@@ -245,7 +245,7 @@ class _Sheet extends StatelessWidget {
         SizedBox(height: 12 * scale),
         Text(
           document.arabic ? 'عرض سعر' : 'QUOTATION',
-          textAlign: design?.title?.textAlign ?? TextAlign.center,
+          textAlign: TextAlign.center,
           style: _styled(
             TextStyle(
               color: _Doc.royal,

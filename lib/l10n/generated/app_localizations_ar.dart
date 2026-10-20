@@ -2246,6 +2246,18 @@ class AppLocalizationsAr extends AppLocalizations {
   String get columnWidth => 'العرض';
 
   @override
+  String get columnNumeric => 'رقمي';
+
+  @override
+  String get addCustomColumn => 'عمود مخصص…';
+
+  @override
+  String get columnKey => 'مفتاح العمود';
+
+  @override
+  String get columnAlreadyExists => 'يوجد عمود بهذا المفتاح بالفعل.';
+
+  @override
   String get addColumn => 'إضافة عمود';
 
   @override

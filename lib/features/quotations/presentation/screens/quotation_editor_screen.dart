@@ -267,7 +267,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         _validUntil = valid.isEmpty ? null : valid;
         final rawDesign = quotation['design'];
         if (rawDesign is Map) {
-          _design = QuotationDocumentDesign.fromJson(rawDesign);
+          _design = QuotationDocumentDesign.fromJson(
+            rawDesign as Map<String, dynamic>,
+          );
         }
         _loading = false;
       });
@@ -288,9 +290,6 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     'unitPrice',
     'lineTotal',
   ];
-
-  /// The six columns every offer printed before layouts were configurable.
-  static const _builtinNumeric = {'quantity', 'unitPrice', 'lineTotal'};
 
   /// The six columns every offer printed before layouts were configurable.
   List<_QColumnDraft> _standardColumns() => [
