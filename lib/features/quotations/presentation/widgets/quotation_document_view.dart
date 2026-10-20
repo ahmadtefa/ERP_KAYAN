@@ -112,12 +112,12 @@ class _Sheet extends StatelessWidget {
   Widget _masthead() {
     final company = document.company;
     final mark = logoUrl == null || logoUrl!.isEmpty
-        ? _monogram(company.name)
+        ? const SizedBox.shrink()
         : Image.network(
             logoUrl!,
             height: 48 * scale,
             fit: BoxFit.contain,
-            errorBuilder: (context, error, stack) => _monogram(company.name),
+            errorBuilder: (context, error, stack) => const SizedBox.shrink(),
           );
 
     // The company's name sits at the start of the line (the right in Arabic)
@@ -139,7 +139,7 @@ class _Sheet extends StatelessWidget {
                   company.name,
                   style: TextStyle(
                     color: _Doc.royal,
-                    fontSize: 20 * scale,
+                    fontSize: 15.5 * scale,
                     fontWeight: FontWeight.w700,
                     height: 1.25,
                   ),
@@ -165,28 +165,6 @@ class _Sheet extends StatelessWidget {
             child: mark,
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _monogram(String name) {
-    final trimmed = name.trim();
-    final initial = trimmed.isEmpty ? 'K' : trimmed.substring(0, 1);
-    return Container(
-      width: 48 * scale,
-      height: 48 * scale,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: _Doc.royal,
-        borderRadius: BorderRadius.circular(6 * scale),
-      ),
-      child: Text(
-        initial,
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 22 * scale,
-          fontWeight: FontWeight.w700,
-        ),
       ),
     );
   }
