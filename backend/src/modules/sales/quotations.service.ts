@@ -1149,7 +1149,7 @@ export class QuotationsService {
           quantity: line.quantity.toFixed(MONEY_SCALE),
           unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
           lineTotal: line.lineTotal.toFixed(MONEY_SCALE),
-          customValues: line.customValues ?? {},
+          customValues: (line.customValues as Record<string, string>) ?? {},
         })),
       })),
       totals: {
