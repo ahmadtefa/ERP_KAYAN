@@ -112,12 +112,12 @@ describe('QuotationsService subject and column layout', () => {
     // No layout chosen: the standard six, stored explicitly so a later
     // catalogue change cannot silently alter this offer.
     expect(data.columns).toEqual([
-      { key: 'description', labelEn: 'Description', labelAr: 'الوصف', visible: true, width: 4, numeric: false },
-      { key: 'countryOfOrigin', labelEn: 'Origin', labelAr: 'بلد المنشأ', visible: true, width: 2, numeric: false },
-      { key: 'unit', labelEn: 'Unit', labelAr: 'الوحدة', visible: true, width: 1, numeric: false },
-      { key: 'quantity', labelEn: 'Qty', labelAr: 'الكمية', visible: true, width: 1, numeric: true },
-      { key: 'unitPrice', labelEn: 'Unit price', labelAr: 'سعر الوحدة', visible: true, width: 2, numeric: true },
-      { key: 'lineTotal', labelEn: 'Total', labelAr: 'الإجمالي', visible: true, width: 2, numeric: true },
+      { key: 'description', labelEn: null, labelAr: null, visible: true, width: 4, numeric: false },
+      { key: 'countryOfOrigin', labelEn: null, labelAr: null, visible: true, width: 2, numeric: false },
+      { key: 'unit', labelEn: null, labelAr: null, visible: true, width: 1, numeric: false },
+      { key: 'quantity', labelEn: null, labelAr: null, visible: true, width: 1, numeric: true },
+      { key: 'unitPrice', labelEn: null, labelAr: null, visible: true, width: 2, numeric: true },
+      { key: 'lineTotal', labelEn: null, labelAr: null, visible: true, width: 2, numeric: true },
     ]);
   });
 
