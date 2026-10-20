@@ -1020,8 +1020,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                       },
                     ),
                     const SizedBox(height: 16),
-                    Text((arabic ? 'حجم الخط: ' : 'Font size: ') +
-                        (multiplier * 100).round().toString() + '%'),
+                    Text('${arabic ? 'حجم الخط: ' : 'Font size: '}${(multiplier * 100).round()}%'),
                     Slider(
                       value: multiplier.clamp(0.7, 1.6).toDouble(),
                       min: 0.7,
