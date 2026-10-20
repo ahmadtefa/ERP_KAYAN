@@ -121,6 +121,7 @@ class _QTableDraft {
   DiscountKind discountKind = DiscountKind.none;
   final TextEditingController discountValue;
   final List<_QLineDraft> lines;
+  final List<_QColumnDraft> columns = [];
 
   Decimal get gross => lines.fold(Decimal.zero, (sum, line) => sum + line.lineTotal);
 
@@ -138,6 +139,10 @@ class _QTableDraft {
     for (final line in lines) {
       line.dispose();
     }
+    for (final column in columns) {
+      column.dispose();
+    }
+    columns.clear();
   }
 }
 
@@ -183,8 +188,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     _date = '${now.year.toString().padLeft(4, '0')}-'
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
-    _tables.add(_QTableDraft());
     _columns.addAll(_standardColumns());
+    final firstTable = _QTableDraft();
+    firstTable.columns.addAll(_columnsFrom(_columnBody()));
+    _tables.add(firstTable);
     if (widget.quotationId != null) {
       _loading = true;
       _load();
@@ -203,6 +210,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       _tables.clear();
       for (final tableRow in listOf(quotation['tables'])) {
         final table = _QTableDraft(title: text(tableRow, 'title'));
+        table.columns.addAll(_columnsFrom(tableRow['columns'] ?? quotation['columns']));
         table.discountKind = discountKindOf(text(tableRow, 'discountType'));
         table.discountValue.text = table.discountKind == DiscountKind.percent
             ? text(tableRow, 'discountPercent', fallback: '')
@@ -235,7 +243,11 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         if (table.lines.isEmpty) table.lines.add(_QLineDraft());
         _tables.add(table);
       }
-      if (_tables.isEmpty) _tables.add(_QTableDraft());
+      if (_tables.isEmpty) {
+        final table = _QTableDraft();
+        table.columns.addAll(_columnsFrom(quotation['columns']));
+        _tables.add(table);
+      }
       _discountKind = discountKindOf(text(quotation, 'discountType'));
       _discountValue.text = _discountKind == DiscountKind.percent
           ? text(quotation, 'discountPercent', fallback: '')
@@ -338,8 +350,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   }
 
   /// The offer's layout as it will be stored: order, labels, visibility.
-  List<Map<String, dynamic>> _columnBody() => [
-    for (final column in _columns)
+  List<Map<String, dynamic>> _columnBody() => _columnBodyFor(_columns);
+
+  List<Map<String, dynamic>> _columnBodyFor(List<_QColumnDraft> source) => [
+    for (final column in source)
       {
         'key': column.key,
         if (column.labelEn.text.trim().isNotEmpty)
@@ -530,6 +544,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       final discountText = table.discountValue.text.trim();
       tables.add({
         'title': title,
+        'columns': _columnBodyFor(table.columns.isEmpty ? _columns : table.columns),
         'discountType': ?discountTypeOf(table.discountKind),
         if (table.discountKind == DiscountKind.percent &&
             discountText.isNotEmpty)
@@ -544,7 +559,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       return;
     }
 
-    if (!_columns.any((column) => column.visible)) {
+    if (_tables.any((table) =>
+        !(table.columns.isEmpty ? _columns : table.columns)
+            .any((column) => column.visible))) {
       showMessage(context, l10n.keepOneColumnVisible, error: true);
       return;
     }
@@ -853,7 +870,11 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 Center(
                   child: TextButton.icon(
                     onPressed: () =>
-                        setState(() => _tables.add(_QTableDraft())),
+                        setState(() {
+                      final table = _QTableDraft();
+                      table.columns.addAll(_columnsFrom(_columnBody()));
+                      _tables.add(table);
+                    }),
                     icon: const Icon(Icons.add),
                     label: Text(l10n.addTable),
                   ),
@@ -1249,13 +1270,14 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   /// Changes the layout on a working copy, so Cancel really cancels. A saved
   /// template is a starting point; the offer keeps its own copy of whatever
   /// was applied.
-  Future<void> _editColumns() async {
+  Future<void> _editColumns({List<_QColumnDraft>? target}) async {
+    final targetColumns = target ?? _columns;
     final l10n = context.l10n;
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
     final available = [
       ...?ref.read(quotationColumnTemplatesProvider).value,
     ];
-    final working = [for (final column in _columns) column.copy()];
+    final working = [for (final column in targetColumns) column.copy()];
     final templateName = TextEditingController();
     String? templateId;
     String templateDisplayName = '';
@@ -1677,14 +1699,14 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         ),
       );
       if (saved != true) return;
-      for (final column in _columns) {
+      for (final column in targetColumns) {
         column.dispose();
       }
       setState(() {
-        _columns
+        targetColumns
           ..clear()
           ..addAll(working);
-        if (templateDesign != null) {
+        if (target == null && templateDesign != null) {
           _design = QuotationDocumentDesign.fromJson(templateDesign);
         }
       });
@@ -1878,6 +1900,18 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                   icon: const Icon(Icons.delete_outline, size: 18),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: OutlinedButton.icon(
+                key: ValueKey('edit-table-columns-$index'),
+                onPressed: () => _editColumns(target: table.columns),
+                icon: const Icon(Icons.view_column_outlined, size: 18),
+                label: Text(Localizations.localeOf(context).languageCode == 'ar'
+                    ? 'أعمدة هذا الجدول'
+                    : 'Columns for this table'),
+              ),
             ),
             const SizedBox(height: 8),
             Row(
