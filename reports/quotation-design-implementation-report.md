@@ -252,7 +252,7 @@ sizes: [{594.96, 841.92}, {594.96, 841.92}, {594.96, 841.92}, {594.96, 841.92}]
 | `npx jest --runInBand src/modules/sales` (محليًا) | 4 suites لم تُترجم: `Prisma.Decimal` غير موجود لأن عميل Prisma لم يُولَّد في هذه البيئة (`binaries.prisma.sh` محجوب). ليست فشلاً في منطق الاختبارات، وCI يولّد العميل ويمرّ. |
 | `npx jest src/modules/sales/quotation-pdf.spec.ts` (محليًا) | 2 متخطاة: لا متصفح على الجهاز |
 | فحص HTML مولَّد بـPython `html.parser` | 0 أخطاء بنيوية، لا `undefined`/`NaN`/`null`، صفحة عربية `dir=rtl` وأخرى إنجليزية `dir=ltr`، زر طباعة واحد في صفحة المعاينة وصفر في صفحة `auto=1` |
-| CI — `ERP KAYAN CI` على `8173b1d` (run 39374093620) | **نجح بالكامل:** Backend (Prisma/PostgreSQL/smoke) + Regression + Flutter Web (analyze/test/build) + Linux Desktop (analyze/test/build) |
+| CI — `ERP KAYAN CI` على `8173b1d` (run 39374093620) ثم على `0a12d01` (run 39378138000) | **نجح بالكامل:** Backend (Prisma/PostgreSQL/smoke) + Regression + Flutter Web (analyze/test/build) + Linux Desktop (analyze/test/build) |
 | CI — مهمة إثبات PDF (run 39374088586) | **نجحت:** 4 صفحات A4 وترقيم على 4/4 |
 | Windows Installer على `0a12d01` (run 39378137999) | **نجح بالكامل:** اختبارات الباك-إند، تحليل Flutter، اختبارات Flutter، بناء Windows، بناء المثبّت، واختبار الدخان للتطبيق المثبَّت فعليًا. (النسخة السابقة `e339e0a` نجحت أيضًا في 39374973810.) |
 
