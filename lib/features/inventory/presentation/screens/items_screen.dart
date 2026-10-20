@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
@@ -190,8 +191,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             ),
             ColumnSpec(
               l10n.status,
-              value: (r) =>
-                  flag(r, 'isActive', fallback: true) ? l10n.active : l10n.inactive,
+              value: (r) => flag(r, 'isActive', fallback: true)
+                  ? l10n.active
+                  : l10n.inactive,
+              tone: (r) => flag(r, 'isActive', fallback: true)
+                  ? AppTone.success
+                  : AppTone.neutral,
             ),
           ],
           actions: (row) => [

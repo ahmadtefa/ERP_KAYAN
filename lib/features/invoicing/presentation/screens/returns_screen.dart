@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
+import '../../../../shared/widgets/status_pill.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
@@ -176,7 +177,11 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
               numeric: true,
               value: (row) => formatAmount(asString(row['totalAmount'])),
             ),
-            ColumnSpec(l10n.status, value: (row) => statusLabel(context, row)),
+            ColumnSpec(
+              l10n.status,
+              value: (row) => statusLabel(context, row),
+              tone: (row) => toneForStatus(text(row, 'status')),
+            ),
           ],
           actions: (row) {
             final status = text(row, 'status').toLowerCase();

@@ -6,6 +6,7 @@ import '../../../../app/router/app_router.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
+import '../../../../shared/widgets/status_pill.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/download_feedback.dart';
@@ -246,6 +247,7 @@ class _QuotationListScreenState extends ConsumerState<QuotationListScreen> {
                         context,
                         text(row, 'status'),
                       ),
+                      tone: (row) => toneForStatus(text(row, 'status')),
                     ),
                     ColumnSpec(
                       l10n.version,

@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/page_header.dart';
 
 /// Standard header above a module screen: title, actions and the body.
+///
+/// Every list screen in the program goes through this widget, which is what
+/// makes the header, the action placement and the spacing identical whether
+/// you open customers, budgets or the chart of accounts.
 class ModuleScaffold extends StatelessWidget {
   const ModuleScaffold({
     super.key,
@@ -10,33 +16,42 @@ class ModuleScaffold extends StatelessWidget {
     required this.body,
     this.actions = const [],
     this.trailing,
+    this.subtitle,
+    this.eyebrow,
+    this.leading,
+    this.denseHeader = false,
   });
 
   final String title;
+  final String? subtitle;
+
+  /// The module family shown above the title, e.g. "Accounting".
+  final String? eyebrow;
   final Widget body;
   final List<Widget> actions;
   final Widget? trailing;
+  final Widget? leading;
+  final bool denseHeader;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(title, style: theme.textTheme.titleLarge),
-              ),
-              ?trailing,
-              for (final action in actions) ...[
-                const SizedBox(width: 8),
-                action,
-              ],
-            ],
-          ),
+        PageHeader(
+          title: title,
+          subtitle: subtitle,
+          eyebrow: eyebrow,
+          leading: leading,
+          dense: denseHeader,
+          actions: [
+            ?trailing,
+            ...actions,
+          ],
+        ),
+        Container(
+          height: 1,
+          color: Theme.of(context).colorScheme.outlineVariant,
         ),
         Expanded(child: body),
       ],
@@ -45,31 +60,82 @@ class ModuleScaffold extends StatelessWidget {
 }
 
 /// A search box shared by every list screen.
-class SearchField extends StatelessWidget {
+///
+/// It owns its controller when the screen does not supply one, so the clear
+/// button can work without every caller adding state for it.
+class SearchField extends StatefulWidget {
   const SearchField({
     super.key,
     required this.hint,
     required this.onChanged,
     this.controller,
+    this.width = 300,
   });
 
   final String hint;
   final ValueChanged<String> onChanged;
   final TextEditingController? controller;
+  final double width;
+
+  @override
+  State<SearchField> createState() => _SearchFieldState();
+}
+
+class _SearchFieldState extends State<SearchField> {
+  TextEditingController? _owned;
+
+  TextEditingController get _controller =>
+      widget.controller ?? (_owned ??= TextEditingController());
+
+  @override
+  void dispose() {
+    _owned?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return SizedBox(
-      width: 280,
-      child: TextField(
-        controller: controller,
-        onChanged: onChanged,
-        decoration: InputDecoration(
-          hintText: hint,
-          isDense: true,
-          prefixIcon: const Icon(Icons.search, size: 20),
-          border: const OutlineInputBorder(),
-        ),
+      width: widget.width,
+      child: ValueListenableBuilder<TextEditingValue>(
+        valueListenable: _controller,
+        builder: (context, value, _) {
+          return TextField(
+            controller: _controller,
+            onChanged: widget.onChanged,
+            style: Theme.of(context).textTheme.bodyMedium,
+            decoration: InputDecoration(
+              hintText: widget.hint,
+              isDense: true,
+              filled: true,
+              fillColor: scheme.surfaceContainerLow,
+              prefixIcon: const Icon(Icons.search_rounded, size: 18),
+              suffixIcon: value.text.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: MaterialLocalizations.of(context).deleteButtonTooltip,
+                      icon: const Icon(Icons.close_rounded, size: 16),
+                      onPressed: () {
+                        _controller.clear();
+                        widget.onChanged('');
+                      },
+                    ),
+              border: OutlineInputBorder(
+                borderRadius: AppRadii.control,
+                borderSide: BorderSide(color: scheme.outlineVariant),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: AppRadii.control,
+                borderSide: BorderSide(color: scheme.outlineVariant),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: 10,
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -82,8 +148,20 @@ void showMessage(BuildContext context, String message, {bool error = false}) {
     ..hideCurrentSnackBar()
     ..showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: error ? scheme.error : null,
+        content: Row(
+          children: [
+            Icon(
+              error
+                  ? Icons.error_outline_rounded
+                  : Icons.check_circle_outline_rounded,
+              size: 18,
+              color: Colors.white,
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: error ? scheme.error : AppColors.navy,
       ),
     );
 }

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../app/theme/design_tokens.dart';
 import '../../core/json/json_utils.dart';
 import '../extensions/l10n_extension.dart';
 
@@ -113,15 +114,18 @@ class _ResizableTableState extends State<ResizableTable> {
   }
 
   double get _rowHeight => switch (_density) {
-    TableDensity.compact => 32,
-    TableDensity.normal => 42,
+    TableDensity.compact => AppSizes.compactControlHeight,
+    TableDensity.normal => AppSizes.tableRowHeight,
     TableDensity.spacious => 56,
   };
 
   EdgeInsets get _cellPadding => switch (_density) {
-    TableDensity.compact => const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-    TableDensity.normal => const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-    TableDensity.spacious => const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+    TableDensity.compact =>
+      const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+    TableDensity.normal =>
+      const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+    TableDensity.spacious =>
+      const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
   };
 
   @override
@@ -137,7 +141,11 @@ class _ResizableTableState extends State<ResizableTable> {
       children: [
         if (widget.showToolbar)
           Padding(
-            padding: const EdgeInsetsDirectional.only(start: 4, end: 4, bottom: 6),
+            padding: const EdgeInsetsDirectional.only(
+              start: AppSpacing.xs,
+              end: AppSpacing.xs,
+              bottom: AppSpacing.sm,
+            ),
             child: Row(
               children: [
                 Text(
@@ -188,11 +196,14 @@ class _ResizableTableState extends State<ResizableTable> {
           ),
         DecoratedBox(
           decoration: BoxDecoration(
-            border: Border.all(color: theme.colorScheme.outlineVariant),
-            borderRadius: BorderRadius.circular(8),
+            color: theme.colorScheme.surface,
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.85),
+            ),
+            borderRadius: AppRadii.control,
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: AppRadii.control,
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: SizedBox(
@@ -201,7 +212,9 @@ class _ResizableTableState extends State<ResizableTable> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Container(
-                      color: theme.colorScheme.surfaceContainerHighest,
+                      color: theme.brightness == Brightness.light
+                          ? AppColors.surfaceSunken
+                          : AppColors.darkSurfaceAlt,
                       child: Row(
                         children: [
                           for (var index = 0;
@@ -218,7 +231,10 @@ class _ResizableTableState extends State<ResizableTable> {
                                 ),
                                 child: Text(
                                   l10n.actions,
-                                  style: theme.textTheme.labelLarge,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
                             ),
@@ -258,7 +274,11 @@ class _ResizableTableState extends State<ResizableTable> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
               child: Text(
                 column.label,
-                style: theme.textTheme.labelLarge,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.4,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -325,10 +345,16 @@ class _ResizableTableState extends State<ResizableTable> {
                         textAlign: widget.columns[index].numeric
                             ? TextAlign.end
                             : TextAlign.start,
-                        style: widget.columns[index].emphasise
-                            ? theme.textTheme.bodyMedium
-                                ?.copyWith(fontWeight: FontWeight.w600)
-                            : theme.textTheme.bodyMedium,
+                        style: (widget.columns[index].emphasise
+                                ? theme.textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  )
+                                : theme.textTheme.bodyMedium)
+                            ?.copyWith(
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
                       ),
                     ),
                   ),

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
+import '../../../../shared/widgets/status_pill.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
@@ -177,7 +178,11 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
                 numeric: true,
                 value: (r) => formatAmount(asString(r['balanceDue'])),
               ),
-            ColumnSpec(l10n.status, value: (r) => statusLabel(context, r)),
+            ColumnSpec(
+              l10n.status,
+              value: (r) => statusLabel(context, r),
+              tone: (r) => toneForStatus(text(r, 'status')),
+            ),
           ],
           actions: (row) {
             final status = text(row, 'status').toLowerCase();

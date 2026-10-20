@@ -2,10 +2,12 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/image/company_logo_image.dart';
 import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/page_header.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../providers/company_providers.dart';
 
@@ -19,25 +21,49 @@ class CompanySettingsScreen extends ConsumerWidget {
     final l10n = context.l10n;
     final profile = ref.watch(companyProfileProvider);
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          l10n.companyProfile,
-          style: Theme.of(context).textTheme.titleMedium,
+        PageHeader(title: l10n.companySettings),
+        Container(
+          height: 1,
+          color: Theme.of(context).colorScheme.outlineVariant,
         ),
-        const SizedBox(height: 8),
-        AsyncStateView<Map<String, dynamic>>(
-          value: profile,
-          onRetry: () => ref.read(companyProfileProvider.notifier).refresh(),
-          isEmpty: (map) => map.isEmpty,
-          emptyMessage: l10n.noData,
-          data: (data) => _ProfileCard(profile: data),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.xxl),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1080),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      l10n.companyProfile,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    AsyncStateView<Map<String, dynamic>>(
+                      value: profile,
+                      onRetry: () =>
+                          ref.read(companyProfileProvider.notifier).refresh(),
+                      isEmpty: (map) => map.isEmpty,
+                      emptyMessage: l10n.noData,
+                      data: (data) => _ProfileCard(profile: data),
+                    ),
+                    const SizedBox(height: AppSpacing.xxl),
+                    Text(
+                      l10n.branches,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    const _BranchesCard(),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
-        const SizedBox(height: 24),
-        Text(l10n.branches, style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
-        const _BranchesCard(),
       ],
     );
   }

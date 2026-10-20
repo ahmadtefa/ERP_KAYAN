@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
+import '../../../../shared/widgets/status_pill.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/account_name.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
@@ -133,6 +134,7 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
                 'reversed' => l10n.reversed,
                 _ => text(r, 'status'),
               },
+              tone: (r) => toneForStatus(text(r, 'status')),
             ),
           ],
           actions: (row) {

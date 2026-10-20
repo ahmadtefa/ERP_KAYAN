@@ -4,12 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/router/app_router.dart';
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/discount_math.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
+import '../../../../shared/widgets/page_header.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
@@ -556,27 +558,36 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     final items = ref.watch(itemsProvider).value ?? const <Json>[];
     final savedTerms = ref.watch(quotationTermsProvider).value ?? const <Json>[];
 
+    // The screen lives inside the application shell, which already draws the
+    // window chrome. A second AppBar would put two titles on one page, so the
+    // editor uses the same header band as every list screen.
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.quotationId == null ? l10n.newQuotation : l10n.editQuotation,
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsetsDirectional.only(end: 16),
-            child: FilledButton.icon(
-              onPressed: _saving || _loading ? null : _save,
-              icon: const Icon(Icons.save_outlined),
-              label: Text(l10n.save),
-            ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          PageHeader(
+            dense: true,
+            title: widget.quotationId == null
+                ? l10n.newQuotation
+                : l10n.editQuotation,
+            actions: [
+              FilledButton.icon(
+                onPressed: _saving || _loading ? null : _save,
+                icon: const Icon(Icons.save_outlined, size: 17),
+                label: Text(l10n.save),
+              ),
+            ],
           ),
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
+          Container(
+            height: 1,
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : ListView(
+                    padding: const EdgeInsets.all(AppSpacing.xl),
+                    children: [
                 Text(
                   l10n.quotationDraftHint,
                   style: Theme.of(context).textTheme.bodySmall,
@@ -803,8 +814,11 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 ),
                 const SizedBox(height: 8),
                 _summary(context),
-              ],
-            ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
     );
   }
 

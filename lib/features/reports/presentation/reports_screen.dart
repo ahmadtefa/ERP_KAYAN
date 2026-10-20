@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/theme/design_tokens.dart';
 import '../../../core/error/failure.dart';
 import '../../../core/json/amount_format.dart';
 import '../../../core/json/json_utils.dart';
@@ -8,6 +9,7 @@ import '../../../shared/extensions/l10n_extension.dart';
 import '../../../shared/utils/account_name.dart';
 import '../../../shared/widgets/data_dialog.dart';
 import '../../../shared/widgets/records_table.dart';
+import '../../../shared/widgets/status_pill.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../../accounting/presentation/providers/chart_of_accounts_providers.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
@@ -1454,6 +1456,9 @@ class _CostCentersTab extends ConsumerWidget {
                     value: (row) => flag(row, 'isActive', fallback: true)
                         ? l10n.active
                         : l10n.inactive,
+                    tone: (row) => flag(row, 'isActive', fallback: true)
+                        ? AppTone.success
+                        : AppTone.neutral,
                   ),
                 ],
                 actions: (row) => [
@@ -1553,6 +1558,7 @@ class _CostCentersTab extends ConsumerWidget {
                   ColumnSpec(
                     l10n.status,
                     value: (row) => text(row, 'status'),
+                    tone: (row) => toneForStatus(text(row, 'status')),
                   ),
                 ],
               ),
@@ -1675,6 +1681,11 @@ class _BudgetReportTab extends ConsumerWidget {
                               : (flag(row, 'isActive', fallback: true)
                                     ? l10n.active
                                     : l10n.inactive),
+                          tone: (row) => row['retired'] == true
+                              ? AppTone.neutral
+                              : (flag(row, 'isActive', fallback: true)
+                                    ? AppTone.success
+                                    : AppTone.neutral),
                         ),
                         ColumnSpec(
                           l10n.resultLabel,

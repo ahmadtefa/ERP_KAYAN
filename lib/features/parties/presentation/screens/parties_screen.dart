@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
@@ -191,9 +192,13 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
         data: (rows) => RecordsTable(
           rows: _filter(rows),
           columns: [
-            ColumnSpec(l10n.accountCode, value: (r) => text(r, 'code'), emphasise: true),
-            ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
-            ColumnSpec('الاسم', value: (r) => text(r, 'nameAr')),
+            ColumnSpec(
+              l10n.accountCode,
+              value: (r) => text(r, 'code'),
+              emphasise: true,
+            ),
+            ColumnSpec(l10n.nameEnglish, value: (r) => text(r, 'nameEn')),
+            ColumnSpec(l10n.nameArabic, value: (r) => text(r, 'nameAr')),
             ColumnSpec(l10n.phone, value: (r) => text(r, 'phone')),
             if (_isCustomer)
               ColumnSpec(
@@ -206,6 +211,9 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
               value: (r) => flag(r, 'isActive', fallback: true)
                   ? l10n.active
                   : l10n.inactive,
+              tone: (r) => flag(r, 'isActive', fallback: true)
+                  ? AppTone.success
+                  : AppTone.neutral,
             ),
           ],
           actions: (row) => [

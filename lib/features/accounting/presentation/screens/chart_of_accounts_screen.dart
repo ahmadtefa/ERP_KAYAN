@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/extensions/account_type_labels.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/account_name.dart';
+import '../../../../shared/widgets/page_header.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
@@ -24,32 +26,45 @@ class ChartOfAccountsScreen extends ConsumerWidget {
     final l10n = context.l10n;
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        PageHeader(
+          title: l10n.chartOfAccounts,
+          actions: [
+            const ListExportActions(list: 'chart-of-accounts'),
+            FilledButton.icon(
+              onPressed: () => _editAccount(context, ref, null),
+              icon: const Icon(Icons.add, size: 17),
+              label: Text(l10n.newAccount),
+            ),
+          ],
+        ),
         if (showSampleNotice) const _SampleDataBanner(),
+        Container(
+          height: 1,
+          color: Theme.of(context).colorScheme.outlineVariant,
+        ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.xxl,
+            AppSpacing.md,
+            AppSpacing.xxl,
+            AppSpacing.sm,
+          ),
           child: Row(
             children: [
               Expanded(
                 child: TextField(
                   decoration: InputDecoration(
                     hintText: l10n.searchAccounts,
-                    prefixIcon: const Icon(Icons.search),
+                    prefixIcon: const Icon(Icons.search_rounded, size: 18),
                   ),
                   onChanged: (value) =>
                       ref.read(accountSearchProvider.notifier).setQuery(value),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: AppSpacing.md),
               _TypeFilter(ref: ref),
-              const SizedBox(width: 12),
-              const ListExportActions(list: 'chart-of-accounts'),
-              const SizedBox(width: 8),
-              FilledButton.icon(
-                onPressed: () => _editAccount(context, ref, null),
-                icon: const Icon(Icons.add),
-                label: Text(l10n.newAccount),
-              ),
             ],
           ),
         ),

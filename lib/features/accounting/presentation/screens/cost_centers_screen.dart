@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -360,6 +361,9 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
                       value: (row) => flag(row, 'isActive', fallback: true)
                           ? l10n.active
                           : l10n.inactive,
+                      tone: (row) => flag(row, 'isActive', fallback: true)
+                          ? AppTone.success
+                          : AppTone.neutral,
                     ),
                   ],
                   actions: (row) => [

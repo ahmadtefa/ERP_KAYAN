@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -150,8 +151,9 @@ class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
             ColumnSpec(l10n.endDate, value: (r) => text(r, 'endDate')),
             ColumnSpec(
               l10n.status,
-              value: (r) =>
-                  flag(r, 'isClosed') ? l10n.closed : l10n.open,
+              value: (r) => flag(r, 'isClosed') ? l10n.closed : l10n.open,
+              tone: (r) =>
+                  flag(r, 'isClosed') ? AppTone.neutral : AppTone.success,
             ),
             ColumnSpec(
               l10n.closedOn,

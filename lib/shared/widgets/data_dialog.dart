@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../app/theme/design_tokens.dart';
 import '../extensions/l10n_extension.dart';
 
 /// A dialog built for data, not for a one-line question.
@@ -114,7 +115,7 @@ class _DataDialogState<T> extends State<DataDialog<T>> {
         : _height.clamp(widget.minimumSize.height, maxHeight).toDouble();
 
     return Dialog(
-      insetPadding: const EdgeInsets.all(12),
+      insetPadding: const EdgeInsets.all(AppSpacing.md),
       clipBehavior: Clip.antiAlias,
       child: SizedBox(
         width: width,
@@ -134,7 +135,6 @@ class _DataDialogState<T> extends State<DataDialog<T>> {
                   }),
                   onClose: () => Navigator.of(context).pop(),
                 ),
-                const Divider(height: 1),
                 Expanded(child: widget.child),
               ],
             ),
@@ -201,31 +201,53 @@ class _DialogHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsetsDirectional.only(start: 18, end: 6, top: 8, bottom: 8),
+    final scheme = theme.colorScheme;
+    final muted = theme.brightness == Brightness.light
+        ? AppColors.surfaceMuted
+        : AppColors.darkSurfaceAlt;
+    return Container(
+      decoration: BoxDecoration(
+        color: muted,
+        border: BorderDirectional(
+          bottom: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.8)),
+        ),
+      ),
+      padding: const EdgeInsetsDirectional.only(
+        start: AppSpacing.lg,
+        end: AppSpacing.sm,
+        top: AppSpacing.xs,
+        bottom: AppSpacing.xs,
+      ),
       child: Row(
         children: [
           if (icon != null) ...[
-            Icon(icon, size: 20, color: theme.colorScheme.primary),
-            const SizedBox(width: 10),
+            Icon(icon, size: 19, color: scheme.primary),
+            const SizedBox(width: AppSpacing.sm),
           ],
           Expanded(
             child: Text(
               title ?? '',
-              style: theme.textTheme.titleMedium,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           if (canResize)
             IconButton(
               tooltip: maximised ? context.l10n.restore : context.l10n.maximize,
+              visualDensity: VisualDensity.compact,
               onPressed: onToggleMaximise,
-              icon: Icon(maximised ? Icons.close_fullscreen : Icons.open_in_full),
+              icon: Icon(
+                maximised ? Icons.close_fullscreen : Icons.open_in_full,
+                size: 18,
+              ),
             ),
           IconButton(
             tooltip: context.l10n.close,
+            visualDensity: VisualDensity.compact,
             onPressed: onClose,
-            icon: const Icon(Icons.close),
+            icon: const Icon(Icons.close, size: 18),
           ),
         ],
       ),

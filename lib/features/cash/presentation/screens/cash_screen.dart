@@ -8,6 +8,7 @@ import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
+import '../../../../shared/widgets/status_pill.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../accounting/presentation/providers/cost_center_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -673,7 +674,11 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   emphasise: true,
                   value: (r) => formatAmount(amount(r, 'amount')),
                 ),
-                ColumnSpec(l10n.status, value: (r) => text(r, 'status')),
+                ColumnSpec(
+                  l10n.status,
+                  value: (r) => text(r, 'status'),
+                  tone: (r) => toneForStatus(text(r, 'status')),
+                ),
               ],
               actions: (row) => [
                 IconButton(
@@ -774,7 +779,11 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   emphasise: true,
                   value: (r) => formatAmount(amount(r, 'amount')),
                 ),
-                ColumnSpec(l10n.status, value: (r) => text(r, 'status')),
+                ColumnSpec(
+                  l10n.status,
+                  value: (r) => text(r, 'status'),
+                  tone: (r) => toneForStatus(text(r, 'status')),
+                ),
               ],
               actions: (row) => [
                 if (text(row, 'status').toUpperCase() == 'DRAFT')

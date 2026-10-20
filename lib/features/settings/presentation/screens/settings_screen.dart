@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/page_header.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../providers/company_providers.dart';
 import '../providers/locale_provider.dart';
@@ -37,10 +39,24 @@ class SettingsScreen extends ConsumerWidget {
             ? user!.companyId
             : l10n.notAvailable);
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Card(
+        PageHeader(title: l10n.settings, subtitle: l10n.aboutDescription),
+        Container(
+          height: 1,
+          color: Theme.of(context).colorScheme.outlineVariant,
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.xxl),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 920),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Card(
           child: Column(
             children: [
               ListTile(
@@ -117,11 +133,21 @@ class SettingsScreen extends ConsumerWidget {
             ],
           ),
         ),
-        const SizedBox(height: 24),
-        FilledButton.tonalIcon(
-          onPressed: () => ref.read(authControllerProvider.notifier).signOut(),
-          icon: const Icon(Icons.logout),
-          label: Text(l10n.signOut),
+                    const SizedBox(height: AppSpacing.xxl),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: FilledButton.tonalIcon(
+                        onPressed: () =>
+                            ref.read(authControllerProvider.notifier).signOut(),
+                        icon: const Icon(Icons.logout, size: 18),
+                        label: Text(l10n.signOut),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     );
