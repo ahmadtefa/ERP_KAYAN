@@ -112,11 +112,22 @@ Future<void> downloadFile(DownloadRequest request) async {
 /// An empty result means the user cancelled; no file is reported as saved.
 Future<String?> _chooseSavePath(String suggestedName) async {
   final safe = suggestedName.replaceAll("'", "''");
+  final extension = suggestedName.contains('.')
+      ? suggestedName.split('.').last.toLowerCase()
+      : '';
+  final filter = switch (extension) {
+    'pdf' => 'PDF document (*.pdf)|*.pdf|All files (*.*)|*.*',
+    'xlsx' => 'Excel workbook (*.xlsx)|*.xlsx|All files (*.*)|*.*',
+    'csv' => 'CSV file (*.csv)|*.csv|All files (*.*)|*.*',
+    'json' => 'JSON file (*.json)|*.json|All files (*.*)|*.*',
+    'zip' => 'ZIP archive (*.zip)|*.zip|All files (*.*)|*.*',
+    _ => 'All files (*.*)|*.*',
+  };
   final script = 'Add-Type -AssemblyName System.Windows.Forms\n'
       r'$dialog = New-Object System.Windows.Forms.SaveFileDialog' '\n'
       r'$dialog.OverwritePrompt = $true' '\n'
       r'$dialog.FileName = ' "'$safe'" '\n'
-      r'$dialog.Filter = "PDF document (*.pdf)|*.pdf|All files (*.*)|*.*"' '\n'
+      "\$dialog.Filter = '${filter.replaceAll("'", "''")}'\n"
       r'if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) '
       r'{ [Console]::Out.Write($dialog.FileName) }';
   final result = await Process.run('powershell', [
