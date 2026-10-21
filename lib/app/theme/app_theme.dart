@@ -261,9 +261,16 @@ abstract final class AppTheme {
           shape: WidgetStatePropertyAll(
             RoundedRectangleBorder(borderRadius: AppRadii.control),
           ),
-          textStyle: const WidgetStatePropertyAll(
-            TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          textStyle: WidgetStatePropertyAll(
+            TextStyle(fontSize: 13 * textScale, fontWeight: FontWeight.w600),
           ),
+          elevation: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) return 0;
+            if (states.contains(WidgetState.pressed)) return 0;
+            if (states.contains(WidgetState.hovered) ||
+                states.contains(WidgetState.focused)) return 3;
+            return 1.5;
+          }),
           backgroundColor: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.disabled)) {
               return scheme.primary.withValues(alpha: 0.38);
@@ -293,9 +300,15 @@ abstract final class AppTheme {
           shape: WidgetStatePropertyAll(
             RoundedRectangleBorder(borderRadius: AppRadii.control),
           ),
-          textStyle: const WidgetStatePropertyAll(
-            TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          textStyle: WidgetStatePropertyAll(
+            TextStyle(fontSize: 13 * textScale, fontWeight: FontWeight.w600),
           ),
+          elevation: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.pressed)) return 0;
+            if (states.contains(WidgetState.hovered) ||
+                states.contains(WidgetState.focused)) return 2;
+            return 0;
+          }),
           foregroundColor: WidgetStatePropertyAll(scheme.primary),
           backgroundColor: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.hovered)) {
@@ -318,8 +331,8 @@ abstract final class AppTheme {
           shape: WidgetStatePropertyAll(
             RoundedRectangleBorder(borderRadius: AppRadii.control),
           ),
-          textStyle: const WidgetStatePropertyAll(
-            TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          textStyle: WidgetStatePropertyAll(
+            TextStyle(fontSize: 13 * textScale, fontWeight: FontWeight.w600),
           ),
           foregroundColor: WidgetStatePropertyAll(scheme.primary),
         ),
