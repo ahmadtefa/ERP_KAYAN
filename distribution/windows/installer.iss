@@ -23,6 +23,11 @@ OutputBaseFilename=KAYAN-ERP-Setup-{#AppVersion}-x64
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
+; The KAYAN mark on Setup.exe itself and on the uninstall entry. setup.ico
+; is staged next to this script by build-installer.ps1, which generates it
+; from the approved brand image before Inno Setup runs.
+SetupIconFile={#SourcePath}setup.ico
+UninstallDisplayIcon={app}\erp_kayan.exe
 WizardStyle=modern
 Compression=lzma2/max
 SolidCompression=yes

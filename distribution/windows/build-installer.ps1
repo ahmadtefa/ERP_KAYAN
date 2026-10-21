@@ -200,6 +200,9 @@ Copy-Item (Join-Path $PSScriptRoot 'UnelevatedProcess.cs') $app
 Copy-Item (Join-Path $PSScriptRoot 'README.txt') $app
 Copy-Item (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') $app
 Copy-Item (Join-Path $PSScriptRoot 'installer.iss') (Join-Path $stage 'installer.iss')
+# The icon Inno Setup embeds into Setup.exe (SetupIconFile in installer.iss).
+# generate_app_icons.py above has just refreshed it from the brand image.
+Copy-Item (Join-Path $root 'windows\runner\resources\app_icon.ico') (Join-Path $stage 'setup.ico')
 
 # Compile the real RepairTool.exe that ships in the Start menu and is exercised
 # by scripts\smoke-test-installed-windows.ps1.
