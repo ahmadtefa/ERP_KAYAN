@@ -55,6 +55,22 @@ class _FakeApiClient extends ApiClient {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  // TEMPORARY diagnosis: surface the FIRST framework error (the cascades
+  // after it fill every log window). printOnFailure lands in the tail of
+  // the output, which is the part CI annotations preserve.
+  var reportedFirstError = false;
+  final previousOnError = FlutterError.onError;
+  FlutterError.onError = (details) {
+    if (!reportedFirstError) {
+      reportedFirstError = true;
+      final frames = '${details.stack}'.split('\n').take(10).join(' <- ');
+      printOnFailure(
+        'FIRST-ERROR: ${details.exception}\nFIRST-STACK: $frames',
+      );
+    }
+    previousOnError?.call(details);
+  };
+
   Future<void> pumpEditor(
     WidgetTester tester,
     _FakeApiClient api, {
