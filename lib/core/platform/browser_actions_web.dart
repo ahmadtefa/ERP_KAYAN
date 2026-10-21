@@ -62,6 +62,9 @@ Future<void> _fetchAndSave(DownloadRequest request) async {
   }
 
   final name = request.fileName ?? _nameFromHeader(response) ?? _nameFromUrl(request.url);
+  // Same guard as the desktop save: a success status carrying the web
+  // app's own page must not be handed over under a .pdf or .xlsx name.
+  validateDownloadedFile(bytes, name);
   final blob = html.Blob(<Object>[bytes]);
   final objectUrl = html.Url.createObjectUrlFromBlob(blob);
   final anchor = html.AnchorElement(href: objectUrl)
