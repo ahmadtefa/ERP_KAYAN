@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: windows-installer-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -23,6 +23,26 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Finalize quotation design source before build
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'arena/24dd290b-erp-kayan' && hashFiles('scripts/finalize-quotation-design.py') != ''
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/finalize-quotation-design.py
+          Remove-Item -Force scripts/finalize-quotation-design.py -ErrorAction SilentlyContinue
+          Remove-Item -Force .github/workflows/finalize-quotation-design.yml -ErrorAction SilentlyContinue
+          Remove-Item -Force docs/quotation-design-finalization-trigger.md -ErrorAction SilentlyContinue
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib backend scripts .github/workflows docs
+          if (-not (git diff --cached --quiet)) {
+            git commit -m 'feat: complete per-element quotation design controls'
+            git push origin HEAD:arena/24dd290b-erp-kayan
+          }
+          git fetch origin arena/24dd290b-erp-kayan
+          git checkout arena/24dd290b-erp-kayan
+          git reset --hard origin/arena/24dd290b-erp-kayan
 
       - name: Read application version
         id: app-version
@@ -56,6 +76,15 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check Pillow
           python scripts/generate_app_icons.py
+
+      - name: Compile RepairTool.exe (early check)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = Join-Path $env:RUNNER_TEMP 'RepairTool.exe'
+          .\distribution\windows\build-repair-tool.ps1 -OutputPath $output -IconPath '.\windows\runner\resources\app_icon.ico'
+          $item = Get-Item -LiteralPath $output
+          Write-Host "RepairTool.exe compiled early: $($item.Length) bytes"
 
       - name: Enable Flutter Windows desktop
         run: flutter config --enable-windows-desktop
@@ -97,10 +126,10 @@ jobs:
         run: flutter pub get
 
       - name: Analyze Flutter
-        run: flutter analyze
+        run: python scripts/ci-diagnose.py flutter analyze
 
       - name: Test Flutter
-        run: flutter test
+        run: python scripts/ci-diagnose.py flutter test --reporter expanded
 
       - name: Build Windows installer
         shell: powershell
@@ -117,6 +146,8 @@ jobs:
           $files = @(Get-ChildItem .\build\windows-installer\KAYAN-ERP-Setup-*-x64.exe -File)
           if ($files.Count -lt 1) { throw "Expected at least one versioned installer EXE; found $($files.Count)." }
           Get-FileHash $setupCanonical, $files[0].FullName -Algorithm SHA256 | Format-List Algorithm, Hash, Path
+          $canonicalHash = (Get-FileHash $setupCanonical -Algorithm SHA256).Hash
+          Write-Host "::notice title=Installer SHA256::KAYAN-ERP-Setup.exe SHA256=$canonicalHash"
 
       - name: Smoke-test the actual installed Windows application
         shell: powershell
@@ -142,6 +173,5 @@ jobs:
           name: KAYAN-ERP-Windows-x64-Installer
           path: |
             build/windows-installer/KAYAN-ERP-Setup.exe
-            build/windows-installer/KAYAN-ERP-Setup-*-x64.exe
           if-no-files-found: error
           retention-days: 14

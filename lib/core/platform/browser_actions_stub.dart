@@ -42,6 +42,44 @@ Future<void> downloadFile(DownloadRequest request) async {
   try {
     final httpRequest = await client.getUrl(uri);
     final response = await httpRequest.close();
+    if (Platform.isWindows) {
+      // Windows desktop must let the user choose the actual destination;
+      // handing the URL to a browser silently picks that browser's Downloads
+      // folder and is not equivalent to saving the file in KAYAN.
+      final bytes = await response.fold<BytesBuilder>(
+        BytesBuilder(copy: false),
+        (builder, chunk) => builder..add(chunk),
+      );
+      final payload = bytes.takeBytes();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final body = utf8.decode(payload, allowMalformed: true);
+        throw DownloadFailure(
+          _reasonFrom(body, response.statusCode),
+          statusCode: response.statusCode,
+        );
+      }
+      final disposition = response.headers.value('content-disposition');
+      final fromHeader = disposition == null
+          ? null
+          : RegExp(r'filename="?([^";]+)"?').firstMatch(disposition)?.group(1);
+      final suggested = _safeFileName(
+        request.fileName ??
+            fromHeader ??
+            (uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'download.pdf'),
+      );
+      final path = await _chooseSavePath(suggested);
+      if (path == null) {
+        throw const DownloadFailure('Saving the file was cancelled.');
+      }
+      final file = File(path);
+      await file.writeAsBytes(payload, flush: true);
+      if (!await file.exists() || await file.length() != payload.length) {
+        throw const DownloadFailure(
+          'The file could not be verified after saving. Choose another location and try again.',
+        );
+      }
+      return;
+    }
     if (response.statusCode >= 400) {
       final body = await response
           .transform(const Utf8Decoder(allowMalformed: true))
@@ -52,8 +90,8 @@ Future<void> downloadFile(DownloadRequest request) async {
         statusCode: response.statusCode,
       );
     }
-    // The file itself is the browser's job; this socket has said all it
-    // needed to.
+    // The file itself is the browser's job on non-Windows desktop; this
+    // socket has said all it needed to.
     final socket = await response.detachSocket();
     socket.destroy();
   } on DownloadFailure {
@@ -67,6 +105,53 @@ Future<void> downloadFile(DownloadRequest request) async {
   }
 
   _openInBrowser(request.url);
+}
+
+
+/// Opens the native Windows Save As dialogue and returns the chosen path.
+/// An empty result means the user cancelled; no file is reported as saved.
+Future<String?> _chooseSavePath(String suggestedName) async {
+  final safe = suggestedName.replaceAll("'", "''");
+  final extension = suggestedName.contains('.')
+      ? suggestedName.split('.').last.toLowerCase()
+      : '';
+  final filter = switch (extension) {
+    'pdf' => 'PDF document (*.pdf)|*.pdf|All files (*.*)|*.*',
+    'xlsx' => 'Excel workbook (*.xlsx)|*.xlsx|All files (*.*)|*.*',
+    'csv' => 'CSV file (*.csv)|*.csv|All files (*.*)|*.*',
+    'json' => 'JSON file (*.json)|*.json|All files (*.*)|*.*',
+    'zip' => 'ZIP archive (*.zip)|*.zip|All files (*.*)|*.*',
+    _ => 'All files (*.*)|*.*',
+  };
+  final script = 'Add-Type -AssemblyName System.Windows.Forms\n'
+      r'$dialog = New-Object System.Windows.Forms.SaveFileDialog' '\n'
+      r'$dialog.OverwritePrompt = $true' '\n'
+      r'$dialog.FileName = ' "'$safe'" '\n'
+      "\$dialog.Filter = '${filter.replaceAll("'", "''")}'\n"
+      r'if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) '
+      r'{ [Console]::Out.Write($dialog.FileName) }';
+  final result = await Process.run('powershell', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    script,
+  ]);
+  if (result.exitCode != 0) {
+    throw StateError(
+      'The Save As dialogue could not be opened: ${result.stderr}'.trim(),
+    );
+  }
+  final path = '${result.stdout}'.trim();
+  return path.isEmpty ? null : path;
+}
+
+String _safeFileName(String name) {
+  final cleaned = name
+      .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_')
+      .trim();
+  return cleaned.isEmpty ? 'quotation.pdf' : cleaned;
 }
 
 /// The server's own explanation, when it sent one (RFC 9457 `detail`).

@@ -127,6 +127,10 @@ class ResetDataCard extends ConsumerWidget {
       ),
     );
     ref.invalidate(resetPreviewProvider);
+    // The reset revokes every refresh token and returns the company to its
+    // first-run state. Drop the local JWT as well, so the router opens the
+    // setup/login flow instead of leaving a signed-in screen on empty books.
+    await ref.read(authControllerProvider.notifier).signOut();
   }
 }
 

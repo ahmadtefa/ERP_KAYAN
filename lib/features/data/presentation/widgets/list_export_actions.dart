@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../providers/data_providers.dart';
@@ -140,22 +141,25 @@ class _Trigger extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final colour = enabled ? scheme.primary : scheme.onSurface.withValues(alpha: 0.38);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
       decoration: BoxDecoration(
         border: Border.all(color: colour.withValues(alpha: 0.6)),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: AppRadii.control,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.download_outlined, size: 18, color: colour),
-          const SizedBox(width: 8),
+          Icon(Icons.download_outlined, size: 17, color: colour),
+          const SizedBox(width: AppSpacing.sm),
           Text(
             label,
             style: TextStyle(
               color: colour,
               fontWeight: FontWeight.w600,
-              fontSize: 14,
+              fontSize: 13,
             ),
           ),
           Icon(Icons.arrow_drop_down, size: 20, color: colour),

@@ -177,6 +177,7 @@ foreach ($relative in @(
   "install-runtime.ps1",
   "repair-runtime.ps1",
   "repair-kayan.bat",
+  "RepairTool.exe",
   "database-control.ps1",
   "erp_kayan.exe"
 )) {
@@ -247,16 +248,31 @@ if ($sentinelExit -ne 0 -or (($sentinelResult -join '').Trim() -ne 'preserved'))
 }
 Write-Host "PASS: the upgrade/reinstall retained the existing company-data probe."
 
-# Exercise the bundled repair tool against a stopped service and a re-corrupted
-# 0-ACE kayan.env file, proving that repair-runtime.ps1 restores both service
-# health and file permissions without losing company data.
+# Exercise the bundled RepairTool.exe against a stopped service and a
+# re-corrupted 0-ACE kayan.env file. The tool must (a) report the problems it
+# detected, (b) attempt the repair, and (c) confirm afterwards that no problems
+# remain -- while company data and credentials are preserved.
 Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
 [System.IO.File]::SetAccessControl($settings, $emptyAcl)
-$repairScript = Join-Path $installRoot "repair-runtime.ps1"
-$repair = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ('"' + $repairScript + '"'), "-Quiet") -WorkingDirectory $installRoot -Wait -PassThru -NoNewWindow
-if ($repair.ExitCode -ne 0) {
-  Fail "The bundled repair tool (repair-runtime.ps1) failed with exit code $($repair.ExitCode)."
+$repairTool = Join-Path $installRoot "RepairTool.exe"
+if (-not (Test-Path $repairTool)) { Fail "The installed package is missing RepairTool.exe." }
+$diagnoseBeforeLog = Join-Path $env:TEMP "kayan-repairtool-before.log"
+$diagnoseBefore = Start-Process -FilePath $repairTool -ArgumentList @("--diagnose") -WorkingDirectory $installRoot -Wait -PassThru -RedirectStandardOutput $diagnoseBeforeLog -RedirectStandardError "$diagnoseBeforeLog.err"
+if ($diagnoseBefore.ExitCode -eq 0) {
+  $beforeText = (Get-Content -LiteralPath $diagnoseBeforeLog -Raw -ErrorAction SilentlyContinue)
+  Fail "RepairTool.exe --diagnose reported a healthy installation while the PostgreSQL service was stopped. Output: $beforeText"
 }
+Write-Host "PASS: RepairTool.exe detected the stopped PostgreSQL service before repair (diagnose exit code $($diagnoseBefore.ExitCode))."
+
+$repair = Start-Process -FilePath $repairTool -ArgumentList @("--repair", "--quiet") -WorkingDirectory $installRoot -Wait -PassThru
+if ($repair.ExitCode -ne 0) {
+  Fail "The bundled RepairTool.exe failed with exit code $($repair.ExitCode). See $runtimeLog and $env:ProgramData\KAYAN-ERP\logs\repairtool.log"
+}
+$diagnoseAfter = Start-Process -FilePath $repairTool -ArgumentList @("--diagnose") -WorkingDirectory $installRoot -Wait -PassThru
+if ($diagnoseAfter.ExitCode -ne 0) {
+  Fail "RepairTool.exe --diagnose still reports problems after a successful repair (exit code $($diagnoseAfter.ExitCode)). See $env:ProgramData\KAYAN-ERP\logs\repairtool.log"
+}
+Write-Host "PASS: RepairTool.exe confirmed a healthy installation after the repair."
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if (-not $service -or $service.Status -ne "Running") {
   Fail "The bundled repair tool did not restart the PostgreSQL service."
@@ -271,7 +287,7 @@ Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
 if ($repairProbeExit -ne 0 -or (($repairProbe -join '').Trim() -ne 'preserved')) {
   Fail ("The company-data probe did not survive the bundled repair tool run. PostgreSQL output: " + ($repairProbe -join ' '))
 }
-Write-Host "PASS: bundled repair tool recovered the 0-ACE kayan.env and stopped PostgreSQL service while preserving company data."
+Write-Host "PASS: bundled RepairTool.exe recovered the 0-ACE kayan.env and stopped PostgreSQL service while preserving company data."
 
 # The important test: start the actual installed Flutter executable by itself.
 $clientPath = Join-Path $installRoot "erp_kayan.exe"
@@ -307,7 +323,74 @@ try {
   }
   if (-not $login.accessToken) { Fail "Installed API login did not return an access token." }
   Write-Host "PASS: installed API accepted a login against the bundled database."
-  Write-Output "::notice::Windows installer smoke test passed: service, database preparation, client startup on port $apiPort and login all verified."
+  # Exercise backups against this installed runtime, not a separately started
+  # development server. Only synthetic CI records are created/restored here.
+  $base = "http://127.0.0.1:$apiPort/api/v1"
+  $headers = @{ Authorization = "Bearer $($login.accessToken)" }
+  $originalName = 'Installed backup sentinel'
+  $customerBody = @{ code = 'WIN-BACKUP-PROBE'; nameEn = $originalName; nameAr = 'Windows backup probe' } | ConvertTo-Json -Compress
+  $customer = Invoke-RestMethod -Method Post -Uri "$base/parties/customers" -Headers $headers -ContentType 'application/json' -Body $customerBody -TimeoutSec 30
+  if (-not $customer.id) { Fail 'Installed API did not create the backup sentinel customer.' }
+  $customerUri = "$base/parties/customers/$($customer.id)"
+  $changedBody = @{ nameEn = 'Changed after backup' } | ConvertTo-Json -Compress
+
+  $jsonPath = Join-Path $env:TEMP 'kayan-installed-company-backup.json'
+  Invoke-WebRequest -UseBasicParsing -Uri "$base/backup/download" -Headers $headers -OutFile $jsonPath -TimeoutSec 60
+  $snapshot = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
+  if ($snapshot.format -ne 'kayan-backup' -or -not $snapshot.tables.customer) { Fail 'Installed company backup is not a populated KAYAN JSON backup.' }
+  $null = Invoke-RestMethod -Method Patch -Uri $customerUri -Headers $headers -ContentType 'application/json' -Body $changedBody -TimeoutSec 30
+  $changed = Invoke-RestMethod -Uri $customerUri -Headers $headers -TimeoutSec 30
+  if ($changed.nameEn -ne 'Changed after backup') { Fail 'JSON restore test did not actually mutate the sentinel.' }
+
+  # Windows PowerShell 5.1 has no Invoke-RestMethod -Form. Use the framework
+  # multipart client; never put the access token on a child command line.
+  Add-Type -AssemblyName System.Net.Http
+  $http = New-Object System.Net.Http.HttpClient
+  $http.Timeout = [TimeSpan]::FromMinutes(5)
+  $multipart = New-Object System.Net.Http.MultipartFormDataContent
+  try {
+    $http.DefaultRequestHeaders.Authorization = New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Bearer', $login.accessToken)
+    $part = New-Object System.Net.Http.ByteArrayContent -ArgumentList (,([IO.File]::ReadAllBytes($jsonPath)))
+    $part.Headers.ContentType = New-Object System.Net.Http.Headers.MediaTypeHeaderValue('application/json')
+    $multipart.Add($part, 'file', 'company-backup.json')
+    $response = $http.PostAsync("$base/backup/restore?replace=true", $multipart).GetAwaiter().GetResult()
+    $text = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+    if (-not $response.IsSuccessStatusCode) { Fail ("Installed JSON restore failed: HTTP " + [int]$response.StatusCode + ' ' + $text) }
+    $jsonRestored = $text | ConvertFrom-Json
+    if (-not $jsonRestored.companyId -or $jsonRestored.total -le 0) { Fail 'Installed JSON restore did not report restored company data.' }
+    $response.Dispose()
+  } finally {
+    $multipart.Dispose()
+    $http.Dispose()
+  }
+  $login = Invoke-RestMethod -Method Post -Uri "$base/auth/login" -ContentType 'application/json' -Body $loginPayload -TimeoutSec 30
+  if (-not $login.accessToken) { Fail 'Login failed after installed JSON restore.' }
+  $headers = @{ Authorization = "Bearer $($login.accessToken)" }
+  $restoredCustomer = Invoke-RestMethod -Uri $customerUri -Headers $headers -TimeoutSec 30
+  if ($restoredCustomer.nameEn -ne $originalName) { Fail 'Installed JSON restore did not roll back the sentinel mutation.' }
+  Write-Output '::notice::Installed Windows company JSON backup/restore passed: snapshot, mutation, restore, re-login and original sentinel verified.'
+
+  $full = Invoke-RestMethod -Method Post -Uri "$base/backup/full" -Headers $headers -TimeoutSec 180
+  if (-not $full.file.name -or $full.file.sizeBytes -le 0) { Fail 'Installed runtime did not produce a real PostgreSQL backup archive.' }
+  $verified = Invoke-RestMethod -Method Post -Uri "$base/backup/full/$($full.file.name)/verify" -Headers $headers -TimeoutSec 180
+  if ($verified.entries -le 0) { Fail 'Bundled pg_restore did not verify any archive objects.' }
+  $dumpPath = Join-Path $env:TEMP 'kayan-installed-full-backup.dump'
+  Invoke-WebRequest -UseBasicParsing -Uri "$base/backup/full/$($full.file.name)/download" -Headers $headers -OutFile $dumpPath -TimeoutSec 60
+  $dumpBytes = [IO.File]::ReadAllBytes($dumpPath)
+  if ($dumpBytes.Length -le 5 -or [Text.Encoding]::ASCII.GetString($dumpBytes, 0, 5) -ne 'PGDMP') { Fail 'Installed full backup download is not a real PostgreSQL custom archive.' }
+  $null = Invoke-RestMethod -Method Patch -Uri $customerUri -Headers $headers -ContentType 'application/json' -Body $changedBody -TimeoutSec 30
+  $changed = Invoke-RestMethod -Uri $customerUri -Headers $headers -TimeoutSec 30
+  if ($changed.nameEn -ne 'Changed after backup') { Fail 'Full restore test did not actually mutate the sentinel.' }
+  $restoreBody = @{ confirm = $true; fileName = $full.file.name } | ConvertTo-Json -Compress
+  $fullRestored = Invoke-RestMethod -Method Post -Uri "$base/backup/full/restore" -Headers $headers -ContentType 'application/json' -Body $restoreBody -TimeoutSec 300
+  if (-not $fullRestored.restored -or -not $fullRestored.checked -or -not $fullRestored.safetyBackup) { Fail 'Installed full restore did not complete with checked data and a safety backup.' }
+  $login = Invoke-RestMethod -Method Post -Uri "$base/auth/login" -ContentType 'application/json' -Body $loginPayload -TimeoutSec 30
+  if (-not $login.accessToken) { Fail 'Login failed after installed PostgreSQL restore.' }
+  $headers = @{ Authorization = "Bearer $($login.accessToken)" }
+  $restoredCustomer = Invoke-RestMethod -Uri $customerUri -Headers $headers -TimeoutSec 30
+  if ($restoredCustomer.nameEn -ne $originalName) { Fail 'Installed PostgreSQL restore did not roll back the sentinel mutation.' }
+  Write-Output '::notice::Installed Windows PostgreSQL backup/restore passed: real archive, mutation, checked restore, safety copy, re-login and original sentinel verified.'
+  Write-Output "::notice::Windows installer smoke test passed: service, database preparation, client startup on port $apiPort, login, company JSON and full PostgreSQL backup/restore all verified."
 } finally {
   if ($client -and -not $client.HasExited) {
     $null = $client.CloseMainWindow()

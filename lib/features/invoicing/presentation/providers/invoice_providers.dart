@@ -12,6 +12,12 @@ extension InvoiceKindPaths on InvoiceKind {
 
   String get basePath => isSales ? '/sales/invoices' : '/purchases/invoices';
 
+  String get returnsPath => isSales ? '/returns/sales' : '/returns/purchases';
+
+  String get returnsRoute => isSales ? '/sales/returns' : '/purchases/returns';
+
+  String get newReturnPath => isSales ? '/sales/returns/new' : '/purchases/returns/new';
+
   /// The key under which the API nests the counterparty.
   String get partyKey => isSales ? 'customer' : 'supplier';
 }
@@ -35,6 +41,30 @@ final purchaseInvoicesProvider =
     AsyncNotifierProvider<JsonListController, List<Json>>(
       PurchaseInvoicesController.new,
     );
+
+class SalesReturnsController extends JsonListController {
+  @override
+  String get resourcePath => '/returns/sales';
+}
+
+class PurchaseReturnsController extends JsonListController {
+  @override
+  String get resourcePath => '/returns/purchases';
+}
+
+final salesReturnsProvider =
+    AsyncNotifierProvider<JsonListController, List<Json>>(
+      SalesReturnsController.new,
+    );
+
+final purchaseReturnsProvider =
+    AsyncNotifierProvider<JsonListController, List<Json>>(
+      PurchaseReturnsController.new,
+    );
+
+AsyncNotifierProvider<JsonListController, List<Json>> returnListProvider(
+  InvoiceKind kind,
+) => kind.isSales ? salesReturnsProvider : purchaseReturnsProvider;
 
 AsyncNotifierProvider<JsonListController, List<Json>> invoiceListProvider(
   InvoiceKind kind,

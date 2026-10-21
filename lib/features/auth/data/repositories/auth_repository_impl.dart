@@ -40,8 +40,14 @@ class AuthRepositoryImpl implements AuthRepository {
       _log.warning('Sign-in failed: ${failure.runtimeType}');
       return ResultFailure(failure);
     } on FormatException catch (e) {
+      // The password was accepted and a session was issued, but the answer
+      // lacks the account the interface needs. Say so plainly: the usual
+      // causes are an API and a program from different versions, or a company
+      // whose setup was never completed. The technical detail goes to the log,
+      // never to the screen.
+      _log.severe('Sign-in answer could not be read: ${e.message}');
       await _tokenStore.clear();
-      return ResultFailure(ServerFailure('Malformed sign-in response', e));
+      return const ResultFailure(IncompleteSignInFailure());
     } catch (e) {
       _log.severe('Sign-in error', e);
       return ResultFailure(ServerFailure('Sign-in failed', e));
@@ -60,8 +66,13 @@ class AuthRepositoryImpl implements AuthRepository {
           : json;
       return Success(UserDto(userJson).toDomain());
     } on Failure catch (failure) {
-      // An invalid/expired token must not lock the app in a broken state.
-      await _tokenStore.clear();
+      // A refused token is dead and must not be replayed. A network failure
+      // is not a verdict on the token: clearing it would sign the person out
+      // for a dropped connection, so those credentials are kept for the next
+      // attempt.
+      if (failure is AuthFailure || failure is SessionExpiredFailure) {
+        await _tokenStore.clear();
+      }
       return ResultFailure(failure);
     } catch (e) {
       await _tokenStore.clear();

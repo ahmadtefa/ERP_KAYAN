@@ -57,6 +57,7 @@ model Company {
   branches      Branch[]
   users         User[]
   accounts      Account[]
+  budgets       Budget[]
   journalEntry  JournalEntry[]
   roles         Role[]
   userRoles     UserRole[]
@@ -80,6 +81,9 @@ model Company {
   salesInvoices    SalesInvoice[]
   purchaseInvoices PurchaseInvoice[]
   fiscalPeriods FiscalPeriod[]
+  quotations    Quotation[]
+  quotationTermTemplates QuotationTermTemplate[]
+  quotationColumnTemplates QuotationColumnTemplate[]
 
   warehouses     Warehouse[]
   priceLists     PriceList[]
@@ -132,6 +136,7 @@ model Branch {
   warehouses       Warehouse[]
   purchaseOrders   PurchaseOrder[]
   salesOrders      SalesOrder[]
+  quotations       Quotation[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -151,6 +156,8 @@ model User {
   passwordHash String // Argon2id. Never stores a plain or reversible value.
   isActive     Boolean   @default(true)
   isSuperAdmin Boolean   @default(false)
+  /// Increment to revoke every already-issued access token for this user.
+  tokenVersion Int       @default(0)
 
   failedLoginCount Int       @default(0)
   lockedUntil      DateTime?
@@ -306,6 +313,7 @@ model Account {
   cashAccounts     CashAccount[]
   voucherCounter   CashVoucher[]   @relation("VoucherCounterAccount")
   openingLines     OpeningBalanceLine[]
+  budgets          Budget[]        @relation("BudgetAccount")
 
   @@unique([companyId, code])
   @@index([companyId, type])
@@ -402,6 +410,7 @@ model JournalLine {
   entry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   account Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
   costCenter CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+  allocations JournalLineAllocation[]
 
   @@unique([journalEntryId, lineNumber])
   @@index([accountId])
@@ -414,13 +423,36 @@ model JournalLine {
 /// A cost center is an analytical dimension: "whose cost is this?". Flat by
 /// design - a cost center inherits nothing, and a report over it answers a
 /// question the chart of accounts cannot.
+enum CostCenterType {
+  DEPARTMENT
+  ADMINISTRATIVE_UNIT
+  PROJECT
+}
+
+/// The analytical dimension carried by a journal line: "whose cost is this?".
+///
+/// One centre may sit under another (a department under a division, a project
+/// under a department), which is what lets a report roll a group of centres up
+/// without losing the detail underneath. The hierarchy is validated in the
+/// service, and the self-relation is restricted at the database level so a
+/// parent cannot be deleted while a child still points at it.
 model CostCenter {
   id        String  @id @default(uuid()) @db.Uuid
   companyId String  @db.Uuid
   code      String
   nameEn    String
   nameAr    String
+  type      CostCenterType @default(DEPARTMENT)
   isActive  Boolean @default(true)
+
+  parentId String? @db.Uuid
+  parent   CostCenter?  @relation("CostCenterHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children CostCenter[] @relation("CostCenterHierarchy")
+
+  description       String?   @db.VarChar(500)
+  responsiblePerson String?   @db.VarChar(200)
+  startDate         DateTime? @db.Date
+  endDate           DateTime? @db.Date
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -428,12 +460,41 @@ model CostCenter {
   updatedBy String?   @db.Uuid
   deletedAt DateTime?
 
-  company Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  lines   JournalLine[]
+  company         Company                @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  lines           JournalLine[]
+  allocations     JournalLineAllocation[]
+  salesLines      SalesInvoiceLine[]
+  purchaseLines   PurchaseInvoiceLine[]
+  cashVouchers    CashVoucher[]    @relation("VoucherCostCenter")
+  budgets         Budget[]         @relation("CostCenterBudgets")
+  stockDocuments  StockDocument[]  @relation("StockDocumentCostCenter")
 
   @@unique([companyId, code])
   @@index([companyId, isActive])
+  @@index([companyId, parentId])
   @@map("cost_centers")
+}
+
+/// A controlled split of one journal line across several cost centres.
+///
+/// A line either names a single centre in `JournalLine.costCenterId`, or it is
+/// split here. The two are never both set for the same line, which is what
+/// keeps a report from counting the same amount twice. The service enforces
+/// that the amounts add up to the line amount exactly, at the ledger's scale.
+model JournalLineAllocation {
+  id            String @id @default(uuid()) @db.Uuid
+  journalLineId String @db.Uuid
+  costCenterId  String @db.Uuid
+  amount        Decimal @db.Decimal(19, 4)
+
+  createdAt DateTime @default(now())
+
+  line       JournalLine @relation(fields: [journalLineId], references: [id], onDelete: Cascade)
+  costCenter CostCenter  @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+
+  @@unique([journalLineId, costCenterId])
+  @@index([costCenterId])
+  @@map("journal_line_allocations")
 }
 
 // --------------------------------------------------------- company settings
@@ -479,6 +540,17 @@ model CompanySetting {
 
   /// Largest discount a sales line may carry, in percent.
   maxDiscountPercent Decimal @default(100) @db.Decimal(9, 4)
+
+  /// Whether a quotation prints the company's tax registration number.
+  /// A display choice only: the number itself is never deleted, and a company
+  /// that is legally required to show it can leave this on.
+  showTaxIdOnQuotations Boolean @default(true)
+
+  /// The people a quotation names. Optional, and never invented: a document
+  /// prints only what the company has actually filled in.
+  managerName       String?
+  salesManagerName  String?
+  salesManagerPhone String?
 
   updatedAt DateTime @updatedAt
   updatedBy String?  @db.Uuid
@@ -568,6 +640,11 @@ model CashVoucher {
   /// side of the entry.
   counterAccountId String? @db.Uuid
 
+  /// Optional cost center for the counter-account side of a receipt or
+  /// payment (an expense paid from a box, a project receipt). Partner
+  /// balances are never attributed.
+  costCenterId String? @db.Uuid
+
   description String?
   reference   String?
 
@@ -591,6 +668,7 @@ model CashVoucher {
   customer    Customer?            @relation(fields: [customerId], references: [id], onDelete: Restrict)
   supplier    Supplier?            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   counterAccount Account?          @relation("VoucherCounterAccount", fields: [counterAccountId], references: [id], onDelete: Restrict)
+  costCenter     CostCenter?       @relation("VoucherCostCenter", fields: [costCenterId], references: [id], onDelete: Restrict)
   reconciliation BankReconciliation? @relation(fields: [reconciliationId], references: [id], onDelete: SetNull)
   allocations CashVoucherAllocation[]
 
@@ -696,8 +774,10 @@ model OpeningBalance {
   id             String        @id @default(uuid()) @db.Uuid
   companyId      String        @db.Uuid
   branchId       String        @db.Uuid
-  documentNumber String
-  asOfDate       DateTime      @db.Date
+  warehouseId    String?       @db.Uuid
+  documentNumber   String
+  importFingerprint String?     @db.VarChar(64)
+  asOfDate         DateTime    @db.Date
   description    String?
   status         InvoiceStatus @default(DRAFT)
 
@@ -714,10 +794,12 @@ model OpeningBalance {
   deletedAt DateTime?
 
   company Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  branch  Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  lines   OpeningBalanceLine[]
+  branch    Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  warehouse Warehouse?         @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  lines     OpeningBalanceLine[]
 
   @@unique([companyId, documentNumber])
+  @@unique([companyId, importFingerprint])
   @@index([companyId, asOfDate])
   @@map("opening_balances")
 }
@@ -785,6 +867,12 @@ model StockDocument {
   status         InvoiceStatus     @default(DRAFT)
   reason         String?
   notes          String?
+
+  /// The centre that bears the loss or gain of an adjustment or a count.
+  /// Transfers never carry one: a movement between two warehouses is not a
+  /// cost, and inventing an owner for it would be a lie.
+  costCenterId   String?           @db.Uuid
+
   journalEntryId String?           @db.Uuid
   postedAt       DateTime?
   postedBy       String?           @db.Uuid
@@ -798,10 +886,12 @@ model StockDocument {
   branch        Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
   fromWarehouse Warehouse?         @relation("StockDocumentFromWarehouse", fields: [fromWarehouseId], references: [id], onDelete: Restrict)
   toWarehouse   Warehouse?         @relation("StockDocumentToWarehouse", fields: [toWarehouseId], references: [id], onDelete: Restrict)
+  costCenter    CostCenter?        @relation("StockDocumentCostCenter", fields: [costCenterId], references: [id], onDelete: Restrict)
   lines         StockDocumentLine[]
 
   @@unique([companyId, documentNumber])
   @@index([companyId, kind, documentDate])
+  @@index([costCenterId])
   @@map("stock_documents")
 }
 
@@ -939,6 +1029,7 @@ model Customer {
   priceList     PriceList?     @relation(fields: [priceListId], references: [id], onDelete: Restrict)
   salesInvoices SalesInvoice[]
   salesOrders   SalesOrder[]
+  quotations    Quotation[]
   cashVouchers  CashVoucher[]
   openingLines  OpeningBalanceLine[]
 
@@ -1050,6 +1141,11 @@ model Item {
 
   isStockTracked Boolean @default(true)
   isActive       Boolean @default(true)
+
+  /// Where the item was made, when the business knows and wants it printed on
+  /// quotations. Optional: the program never guesses a country.
+  countryOfOrigin String? @db.VarChar(80)
+
   notes          String?
 
   createdAt DateTime  @default(now())
@@ -1070,6 +1166,7 @@ model Item {
   priceListItems PriceListItem[]
   purchaseOrderLines PurchaseOrderLine[]
   salesOrderLines SalesOrderLine[]
+  quotationLines QuotationLine[]
 
   @@unique([companyId, code])
   @@index([companyId, nameEn])
@@ -1193,6 +1290,15 @@ model SalesInvoice {
   discountPercent Decimal @default(0) @db.Decimal(9, 4)
   discountAmount  Decimal @default(0) @db.Decimal(19, 4)
 
+  /// PERCENT or AMOUNT. Null means no document-level discount was given.
+  /// The existing percent/amount pair keeps its meaning: the discount taken
+  /// from the document as a whole, applied before tax.
+  discountType String? @db.VarChar(16)
+
+  /// Sum of the line-level discounts, stored so the printed document can show
+  /// the two kinds of discount separately without recomputing history.
+  lineDiscountTotal Decimal @default(0) @db.Decimal(19, 4)
+
   subTotal     Decimal @default(0) @db.Decimal(19, 4)
   taxAmount    Decimal @default(0) @db.Decimal(19, 4)
   totalAmount  Decimal @default(0) @db.Decimal(19, 4)
@@ -1229,6 +1335,11 @@ model SalesInvoice {
   originalInvoice SalesInvoice?  @relation("SalesReturns", fields: [originalInvoiceId], references: [id], onDelete: Restrict)
   returns         SalesInvoice[] @relation("SalesReturns")
 
+  /// The quotation this invoice was raised from, when it was. A quotation
+  /// converts at most once; the unique key on the quotation side is what
+  /// makes a second conversion impossible even under two simultaneous clicks.
+  sourceQuotation Quotation?
+
   @@unique([companyId, invoiceNumber])
   @@index([companyId, invoiceDate])
   @@index([companyId, status])
@@ -1251,10 +1362,30 @@ model SalesInvoiceLine {
   discountPercent Decimal @default(0) @db.Decimal(9, 4)
   discountAmount  Decimal @default(0) @db.Decimal(19, 4)
 
+  /// PERCENT or AMOUNT, describing the line discount above. Null means none.
+  discountType String? @db.VarChar(16)
+
+  /// Quantity x unit price before any discount. Null on rows written before
+  /// item discounts existed, where lineTotal is already the whole value.
+  grossLineTotal Decimal? @db.Decimal(19, 4)
+
+  /// This line's exact share of the invoice-level discount, allocated pro
+  /// rata over eligible line values. Stored so a posted invoice reproduces its
+  /// own arithmetic and a return can credit the right amount.
+  invoiceDiscountAmount Decimal @default(0) @db.Decimal(19, 4)
+
   /// How much of this line has already been returned. A return may not take
   /// more than what is left, which is what stops the same goods being
   /// credited twice.
   returnedQuantity Decimal @default(0) @db.Decimal(19, 4)
+  /// Net sales value already credited by posted returns, for exact partial-return rounding.
+  returnedSubTotal Decimal @default(0) @db.Decimal(19, 4)
+  /// Exact cost already credited back by posted returns, used to assign the
+  /// rounding remainder to the last partial return.
+  returnedCostTotal Decimal @default(0) @db.Decimal(19, 4)
+  /// Tax already credited by posted returns; the last partial return receives
+  /// the rounding remainder so a full return exactly reverses the invoice.
+  returnedTaxTotal Decimal @default(0) @db.Decimal(19, 4)
 
   /// On a return line only: the line of the original invoice it gives back.
   /// Naming the line - not just the item - is what makes "return half of it"
@@ -1264,8 +1395,14 @@ model SalesInvoiceLine {
   unitCost  Decimal @default(0) @db.Decimal(19, 4)
   costTotal Decimal @default(0) @db.Decimal(19, 4)
 
+  /// The analytical dimension of the line: the department, branch of activity
+  /// or project the revenue (and its cost of goods) belongs to. Optional, so
+  /// historical invoices keep meaning exactly what they meant before.
+  costCenterId String? @db.Uuid
+
   invoice SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item    Item?        @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  costCenter CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
   originalLine SalesInvoiceLine?  @relation("SalesReturnLines", fields: [originalLineId], references: [id], onDelete: Restrict)
   returnedBy   SalesInvoiceLine[] @relation("SalesReturnLines")
 
@@ -1297,10 +1434,18 @@ model PurchaseInvoice {
   discountPercent Decimal @default(0) @db.Decimal(9, 4)
   discountAmount  Decimal @default(0) @db.Decimal(19, 4)
 
+  /// PERCENT or AMOUNT for the document-level discount above.
+  discountType String? @db.VarChar(16)
+
+  /// Sum of the line-level discounts on this document.
+  lineDiscountTotal Decimal @default(0) @db.Decimal(19, 4)
+
   subTotal    Decimal @default(0) @db.Decimal(19, 4)
   taxAmount   Decimal @default(0) @db.Decimal(19, 4)
-  totalAmount Decimal @default(0) @db.Decimal(19, 4)
-  paidAmount  Decimal @default(0) @db.Decimal(19, 4)
+  totalAmount      Decimal @default(0) @db.Decimal(19, 4)
+  paidAmount       Decimal @default(0) @db.Decimal(19, 4)
+  landedCostAmount Decimal @default(0) @db.Decimal(19, 4)
+  landedCostCharges Json   @default("[]")
 
   /// The warehouse the goods arrived at. Null means the branch's default.
   warehouseId String? @db.Uuid
@@ -1347,13 +1492,35 @@ model PurchaseInvoiceLine {
   taxAmount   Decimal @default(0) @db.Decimal(19, 4)
   lineTotal   Decimal @db.Decimal(19, 4)
 
+  /// Purchase-cost add-on distributed across invoice lines by line value.
+  landedCostAmount   Decimal @default(0) @db.Decimal(19, 4)
+  inventoryCostTotal Decimal @default(0) @db.Decimal(19, 4)
+  returnedCostTotal  Decimal @default(0) @db.Decimal(19, 4)
+  /// Tax already credited by posted returns for this invoice line.
+  returnedTaxTotal   Decimal @default(0) @db.Decimal(19, 4)
+
   discountPercent  Decimal @default(0) @db.Decimal(9, 4)
   discountAmount   Decimal @default(0) @db.Decimal(19, 4)
+
+  /// PERCENT or AMOUNT, describing the line discount above. Null means none.
+  discountType String? @db.VarChar(16)
+  /// Quantity x unit price before any discount.
+  grossLineTotal Decimal? @db.Decimal(19, 4)
+  /// This line's share of the document-level discount.
+  invoiceDiscountAmount Decimal @default(0) @db.Decimal(19, 4)
+
   returnedQuantity Decimal @default(0) @db.Decimal(19, 4)
+  /// Net purchase value already credited by posted returns.
+  returnedSubTotal Decimal @default(0) @db.Decimal(19, 4)
   originalLineId   String? @db.Uuid
+
+  /// The analytical dimension of the line: which department or project the
+  /// cost was incurred for. Optional, and never guessed for old rows.
+  costCenterId String? @db.Uuid
 
   invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item    Item?           @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  costCenter CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
   originalLine PurchaseInvoiceLine?  @relation("PurchaseReturnLines", fields: [originalLineId], references: [id], onDelete: Restrict)
   returnedBy   PurchaseInvoiceLine[] @relation("PurchaseReturnLines")
 
@@ -1362,6 +1529,245 @@ model PurchaseInvoiceLine {
   @@map("purchase_invoice_lines")
 }
 
+
+
+// --------------------------------------------------------------- quotations
+
+/// What a quotation is at this moment. DRAFT is the only state that can be
+/// edited in place; an issued quotation is a record of what the customer was
+/// given, and a change is made by raising a new revision.
+
+model QuotationTermTemplate {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @db.Uuid
+  title     String
+  body      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String?  @db.Uuid
+  updatedBy String?  @db.Uuid
+  deletedAt DateTime?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, isActive, sortOrder])
+  @@map("quotation_term_templates")
+}
+
+/// A named column layout an offer can start from: "Cabinets", "Service".
+/// The quotation itself owns a copy of the columns, so editing a template
+/// later never rewrites an offer that was already sent.
+model QuotationColumnTemplate {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @db.Uuid
+  name      String   @db.VarChar(120)
+  columns   Json
+  isDefault Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String?  @db.Uuid
+  updatedBy String?  @db.Uuid
+  deletedAt DateTime?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, name])
+  @@index([companyId, isActive])
+  @@map("quotation_column_templates")
+}
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CONVERTED
+}
+
+enum QuotationEventType {
+  CREATED
+  UPDATED
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  REVISED
+  CONVERTED
+  FOLLOW_UP
+  NOTE
+}
+
+/// A priced offer to a customer.
+///
+/// It is deliberately not a sales invoice. Nothing here posts to the ledger,
+/// reserves stock or changes a customer balance; only converting it into an
+/// invoice, through the ordinary invoice posting workflow, can do that.
+model Quotation {
+  id              String         @id @default(uuid()) @db.Uuid
+  companyId       String         @db.Uuid
+  branchId        String         @db.Uuid
+  quotationNumber String
+  quotationDate   DateTime       @db.Date
+  validUntil      DateTime?      @db.Date
+  customerId      String         @db.Uuid
+  status          QuotationStatus @default(DRAFT)
+  currency        String         @default("EGP") @db.VarChar(3)
+
+  /// The revision chain: the first offer is version 1, and revising an issued
+  /// offer creates version 2 as a new draft while the old one keeps exactly
+  /// the content it was sent with.
+  version      Int     @default(1)
+  revisionOfId String? @db.Uuid
+
+  notes String?
+  /// Terms and conditions, printed on the first page. Editable per quotation.
+  terms String?
+
+  /// The offer's own headline, e.g. "Kitchen for the Nasr flat". Printed under
+  /// the company header and kept in the snapshot; null means no subject line.
+  subject String? @db.VarChar(200)
+
+  /// Which line columns this offer prints, in which order, and under which
+  /// labels. Null means the standard set, so older rows keep printing exactly
+  /// as they did. Copied into the snapshot when the offer is issued.
+  columns Json?
+
+  /// The quotation-wide discount, applied after the per-table discounts.
+  discountType    String? @db.VarChar(16)
+  discountPercent Decimal @default(0) @db.Decimal(9, 4)
+  discountAmount  Decimal @default(0) @db.Decimal(19, 4)
+
+  /// VAT rate in percent that was in force when the offer was prepared, and
+  /// the VAT charged on the discounted net value. Both are snapshotted so an
+  /// issued offer keeps printing exactly as it did. Tax is applied exactly
+  /// once, after every discount, never on top of an already-taxed value.
+  taxRate     Decimal @default(0) @db.Decimal(9, 4)
+  taxAmount   Decimal @default(0) @db.Decimal(19, 4)
+
+  /// Frozen totals, recomputed whenever a draft is saved. Stored so a printed
+  /// quotation never has to be recalculated from a different price list.
+  subTotal      Decimal @default(0) @db.Decimal(19, 4)
+  discountTotal Decimal @default(0) @db.Decimal(19, 4)
+  totalAmount   Decimal @default(0) @db.Decimal(19, 4)
+
+  /// تصميم المستند (أنماط الخطوط، الألوان، المحاذاة لكل عنصر) يُحفظ مع
+  /// العرض ويُستعاد عند الطباعة أو المعاينة.
+  design        Json? @default("{}")
+
+  /// Who signs the offer. Taken from the company profile or typed on the
+  /// quotation, and snapshotted when it is issued.
+  managerName       String?
+  responsibleName   String?
+  responsiblePhone  String?
+
+  /// Whether the company's tax registration number is printed. Snapshotted
+  /// with the rest of the issued content, so a later settings change does not
+  /// rewrite history.
+  showTaxId Boolean @default(true)
+
+  /// The issued document: customer, company, tables, lines, totals, terms and
+  /// the names above, exactly as they were at that moment.
+  contentSnapshot Json?
+  snapshotAt      DateTime?
+
+  convertedInvoiceId String?   @unique @db.Uuid
+  convertedAt        DateTime?
+  issuedAt           DateTime?
+  sentAt             DateTime?
+  acceptedAt         DateTime?
+  rejectedAt         DateTime?
+  expiredAt          DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  updatedBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company          Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch           Branch          @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer         Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  convertedInvoice SalesInvoice?   @relation(fields: [convertedInvoiceId], references: [id], onDelete: Restrict)
+  revisionOf       Quotation?      @relation("QuotationRevisions", fields: [revisionOfId], references: [id], onDelete: Restrict)
+  revisions        Quotation[]     @relation("QuotationRevisions")
+  tables           QuotationTable[]
+  events           QuotationEvent[]
+
+  @@unique([companyId, quotationNumber])
+  @@index([companyId, quotationDate])
+  @@index([companyId, status])
+  @@index([customerId])
+  @@map("quotations")
+}
+
+/// One titled table inside a quotation. An offer for a kitchen may have a
+/// "Cabinets" table and an "Appliances" table, each with its own discount.
+model QuotationTable {
+  id            String @id @default(uuid()) @db.Uuid
+  quotationId   String @db.Uuid
+  title         String
+  sortOrder     Int
+  discountType    String? @db.VarChar(16)
+  discountPercent Decimal @default(0) @db.Decimal(9, 4)
+  discountAmount  Decimal @default(0) @db.Decimal(19, 4)
+  subTotal        Decimal @default(0) @db.Decimal(19, 4)
+  discountTotal   Decimal @default(0) @db.Decimal(19, 4)
+  netTotal        Decimal @default(0) @db.Decimal(19, 4)
+
+  quotation Quotation       @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  lines     QuotationLine[]
+
+  @@unique([quotationId, sortOrder])
+  @@map("quotation_tables")
+}
+
+model QuotationLine {
+  id            String @id @default(uuid()) @db.Uuid
+  tableId       String @db.Uuid
+  lineNumber    Int
+  itemId        String? @db.Uuid
+  description   String
+  /// Copied from the item at the time the line was written, or typed. Never
+  /// guessed: an unknown origin prints as blank.
+  countryOfOrigin String? @db.VarChar(80)
+  unit          String?
+  quantity      Decimal @db.Decimal(19, 4)
+  unitPrice     Decimal @db.Decimal(19, 4)
+  lineTotal     Decimal @db.Decimal(19, 4)
+  /// Values for user-defined columns, keyed by column key. Kept in one JSON
+  /// column so adding a user-named column never requires a new database
+  /// column.
+  customValues  Json? @default("{}")
+
+  table QuotationTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  item  Item?          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([tableId, lineNumber])
+  @@index([itemId])
+  @@map("quotation_lines")
+}
+
+/// Follow-up history: every status change, note and contact attempt, with the
+/// person and the time. This is what makes "where is that offer?" answerable.
+model QuotationEvent {
+  id          String              @id @default(uuid()) @db.Uuid
+  quotationId String              @db.Uuid
+  type        QuotationEventType
+  fromStatus  QuotationStatus?
+  toStatus    QuotationStatus?
+  note        String?
+  userId      String?             @db.Uuid
+  createdAt   DateTime            @default(now())
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  @@index([quotationId, createdAt])
+  @@map("quotation_events")
+}
 
 /// A grouping of items for reporting and for picking: "spare parts",
 /// "food", "services". One level, because a shop's catalogue is not a tree.
@@ -1447,6 +1853,7 @@ model Warehouse {
   purchaseInvoices     PurchaseInvoice[]
   stockDocumentsFrom   StockDocument[] @relation("StockDocumentFromWarehouse")
   stockDocumentsTo     StockDocument[] @relation("StockDocumentToWarehouse")
+  openingBalances      OpeningBalance[]
 
   @@unique([companyId, code])
   @@index([companyId, branchId])
@@ -1655,4 +2062,42 @@ model PriceListItem {
   @@unique([priceListId, itemId, unit, minQuantity])
   @@index([priceListId])
   @@map("price_list_items")
+}
+
+// ------------------------------------------------------------------ budgets
+
+/// What a cost centre is allowed to spend, or expected to earn, on one account
+/// over one period.
+///
+/// Deliberately narrow: a budget names a revenue or an expense account (a
+/// balance-sheet account has no "spend" to compare against), one cost centre
+/// and one period. There is no proration and no currency conversion — actuals
+/// are read from posted ledger lines in the company's own currency, so the
+/// comparison can never invent a figure the books do not contain.
+model Budget {
+  id           String   @id @default(uuid()) @db.Uuid
+  companyId    String   @db.Uuid
+  costCenterId String   @db.Uuid
+  accountId    String   @db.Uuid
+  periodStart  DateTime @db.Date
+  periodEnd    DateTime @db.Date
+  amount       Decimal  @db.Decimal(18, 4)
+  currency     String   @db.VarChar(3)
+  notes        String?  @db.VarChar(500)
+  isActive     Boolean  @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?   @db.Uuid
+  updatedBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  costCenter CostCenter @relation("CostCenterBudgets", fields: [costCenterId], references: [id], onDelete: Restrict)
+  account    Account    @relation("BudgetAccount", fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, periodStart, periodEnd])
+  @@index([companyId, costCenterId])
+  @@index([accountId])
+  @@map("budgets")
 }

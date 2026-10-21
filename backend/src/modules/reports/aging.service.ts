@@ -78,7 +78,7 @@ export class AgingService {
             where: {
               companyId,
               deletedAt: null,
-              status: { in: [InvoiceStatus.POSTED, InvoiceStatus.REVERSED] },
+              status: InvoiceStatus.POSTED,
               invoiceDate: { lte: asOf },
               ...(query.customerId ? { customerId: query.customerId } : {}),
               ...(query.branchId ? { branchId: query.branchId } : {}),
@@ -90,7 +90,7 @@ export class AgingService {
             where: {
               companyId,
               deletedAt: null,
-              status: { in: [InvoiceStatus.POSTED, InvoiceStatus.REVERSED] },
+              status: InvoiceStatus.POSTED,
               invoiceDate: { lte: asOf },
               ...(query.supplierId ? { supplierId: query.supplierId } : {}),
               ...(query.branchId ? { branchId: query.branchId } : {}),
@@ -105,6 +105,8 @@ export class AgingService {
       const party = side === 'customer' ? (invoice as any).customer : (invoice as any).supplier;
       if (!party) continue;
 
+      // Reversed invoices/returns have offsetting journals and no live debt.
+      // They must not be counted as unpaid documents a second time.
       // A credit note against a sale, or a debit note against a purchase,
       // reduces what the party owes instead of adding to it. Reading the
       // document type here is what keeps this report and the control account
@@ -199,6 +201,7 @@ export class AgingService {
          AND e.status IN ('POSTED', 'REVERSED')
          AND e."entryDate" <= ${asOf}::date
          AND a.code = ${controlCode}
+         ${query.branchId ? Prisma.sql`AND e."branchId" = ${query.branchId}::uuid` : Prisma.sql``}
     `);
     const ledgerBalance = new Prisma.Decimal(ledgerRows[0]?.net ?? 0);
     const documentBalance = new Prisma.Decimal(totals.total);

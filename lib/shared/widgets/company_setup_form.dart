@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/backend/company_setup_data.dart';
+import '../../core/image/company_logo_image.dart';
 import '../../core/platform/browser_actions.dart';
 import '../../core/platform/picked_file.dart';
 
@@ -152,14 +153,25 @@ class _CompanySetupFormState extends State<CompanySetupForm> {
   Future<void> _pickLogo() async {
     final picked = await pickFile(extensions: ['.png', '.jpg', '.jpeg', '.webp']);
     if (picked == null || !mounted) return;
-    if (picked.sizeInBytes > 2 * 1024 * 1024) {
-      setState(() => _localError = 'الشعار أكبر من ٢ ميجابايت / The logo is larger than 2 MB');
-      return;
+    try {
+      final bytes = await normalizeCompanyLogo(picked.bytes);
+      if (!mounted) return;
+      setState(() {
+        _logo = PickedFile(
+          name: 'company-logo.png',
+          bytes: bytes,
+          mimeType: 'image/png',
+        );
+        _localError = null;
+      });
+    } on CompanyLogoImageException catch (problem) {
+      if (!mounted) return;
+      setState(() {
+        _localError = problem.tooLarge
+            ? 'الشعار بعد التصغير أكبر من ٢ ميجابايت / The resized logo is larger than 2 MB'
+            : 'اختر صورة PNG أو JPEG أو WebP صالحة، وبأبعاد لا تقل عن ٣٢ × ٣٢ بكسل / Choose a valid PNG, JPEG or WebP image at least 32 × 32 pixels';
+      });
     }
-    setState(() {
-      _logo = picked;
-      _localError = null;
-    });
   }
 
   void _submit() {

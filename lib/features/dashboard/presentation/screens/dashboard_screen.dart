@@ -1,22 +1,31 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/router/app_router.dart';
+import '../../../../app/theme/design_tokens.dart';
+import '../../../../core/image/company_logo_url.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../l10n/generated/app_localizations.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/kpi_card.dart';
+import '../../../../shared/widgets/page_header.dart';
+import '../../../../shared/widgets/state_views.dart';
+import '../../../../shared/widgets/surface_card.dart';
 import '../../../accounting/presentation/providers/chart_of_accounts_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../settings/presentation/providers/company_providers.dart';
 import '../providers/dashboard_providers.dart';
 import '../widgets/dashboard_panels.dart';
 
-/// Responsive executive dashboard, fed by the server-side dashboard figures:
-/// totals, cash, debts, who buys most, what sells most, and what is waiting.
+/// Executive dashboard, fed by the server-side figures: totals, cash, debts,
+/// who buys most, what sells most and what is waiting.
+///
+/// The redesign keeps the same data and the same refresh behaviour; what
+/// changes is the hierarchy. Six numbers an owner actually acts on get large
+/// cards, the rest sit in one compact strip, and the lists below answer
+/// "who?" and "what happened?" without competing for attention.
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
 
@@ -32,7 +41,14 @@ class DashboardScreen extends ConsumerWidget {
     final company = companyAsync.asData?.value == null
         ? <String, dynamic>{}
         : Map<String, dynamic>.from(companyAsync.asData!.value as Map);
-    final branches = branchesAsync.asData?.value
+    // The profile reports a path, not an address; the running client is the
+    // only one that knows the host it talks to.
+    final brandMark = companyLogoUrl(
+      ref.watch(appConfigProvider).apiBaseUrl,
+      company,
+    );
+    final branches =
+        branchesAsync.asData?.value
             .map((e) => Map<String, dynamic>.from(e))
             .toList() ??
         <Map<String, dynamic>>[];
@@ -57,81 +73,84 @@ class DashboardScreen extends ConsumerWidget {
     }
     if (branchName.isEmpty) branchName = user?.branchId ?? l10n.notAvailable;
 
-    final wide = MediaQuery.sizeOf(context).width >= 1100;
-    final medium = MediaQuery.sizeOf(context).width >= 650;
-    final pad = wide ? 28.0 : 16.0;
-    final scheme = Theme.of(context).colorScheme;
+    final width = MediaQuery.sizeOf(context).width;
+    final medium = width >= 650;
+    final pagePadding = width >= 1280 ? 24.0 : 16.0;
 
-    return ListView(
-      padding: EdgeInsets.fromLTRB(pad, 22, pad, 32),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    arabic ? 'لوحة التحكم' : 'Executive dashboard',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.6,
-                        ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    (arabic ? 'مرحباً، ' : 'Welcome back, ') +
-                        (user?.fullName ?? ''),
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                  ),
-                ],
-              ),
+        PageHeader(
+          eyebrow: companyName.isEmpty
+              ? (arabic ? 'مساحة عمل الشركة' : 'Company workspace')
+              : companyName,
+          title: arabic ? 'لوحة التحكم' : 'Executive dashboard',
+          subtitle: (arabic ? 'مرحباً، ' : 'Welcome back, ') +
+              (user?.fullName ?? ''),
+          actions: [
+            OutlinedButton.icon(
+              onPressed: () => context.go(AppRoutes.companySettings),
+              icon: const Icon(Icons.business_outlined, size: 17),
+              label: Text(l10n.companySettings),
             ),
             IconButton.filledTonal(
               tooltip: arabic ? 'تحديث البيانات' : 'Refresh data',
               onPressed: () {
                 // Refresh every live source on this dashboard, including the
-                // company identity and branch context in the hero header.
+                // company identity and branch context in the header.
                 ref.invalidate(dashboardSummaryProvider);
                 ref.invalidate(dashboardMonthlyProvider);
                 ref.invalidate(companyProfileProvider);
                 ref.invalidate(branchesProvider);
                 ref.invalidate(chartOfAccountsProvider);
               },
-              icon: const Icon(Icons.refresh_rounded),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
             ),
           ],
         ),
-        const SizedBox(height: 22),
-        _CompanyHero(
-          company: company,
-          name: companyName.isEmpty
-              ? (arabic ? 'مساحة عمل الشركة' : 'Company workspace')
-              : companyName,
-          branch: branchName,
-          arabic: arabic,
-          onEdit: () => context.go(AppRoutes.companySettings),
+        Container(
+          height: 1,
+          color: Theme.of(context).colorScheme.outlineVariant,
         ),
-        const SizedBox(height: 24),
-        summaryAsync.when(
-          loading: () => const Padding(
-            padding: EdgeInsets.symmetric(vertical: 48),
-            child: Center(child: CircularProgressIndicator()),
-          ),
-          error: (error, _) => _ErrorCard(
-            arabic: arabic,
-            onRetry: () => ref.invalidate(dashboardSummaryProvider),
-          ),
-          data: (summary) => _SummarySections(
-            summary: summary,
-            monthly: monthlyAsync.asData?.value,
-            monthlyLoading: monthlyAsync.isLoading,
-            arabic: arabic,
-            wide: wide,
-            medium: medium,
-            l10n: l10n,
+        Expanded(
+          child: ListView(
+            padding: EdgeInsets.fromLTRB(
+              pagePadding,
+              AppSpacing.lg,
+              pagePadding,
+              AppSpacing.xxl,
+            ),
+            children: [
+              _CompanyContext(
+                company: company,
+                logoUrl: brandMark,
+                name: companyName.isEmpty
+                    ? (arabic ? 'مساحة عمل الشركة' : 'Company workspace')
+                    : companyName,
+                branch: branchName,
+                arabic: arabic,
+                onEdit: () => context.go(AppRoutes.companySettings),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              summaryAsync.when(
+                loading: () => const SizedBox(
+                  height: 240,
+                  child: LoadingView(),
+                ),
+                error: (error, _) => _ErrorCard(
+                  arabic: arabic,
+                  onRetry: () => ref.invalidate(dashboardSummaryProvider),
+                ),
+                data: (summary) => _SummarySections(
+                  summary: summary,
+                  monthly: monthlyAsync.asData?.value,
+                  monthlyLoading: monthlyAsync.isLoading,
+                  arabic: arabic,
+                  medium: medium,
+                  l10n: l10n,
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -139,14 +158,13 @@ class DashboardScreen extends ConsumerWidget {
   }
 }
 
-/// Everything below the hero, built from the server summary.
+/// Everything below the context strip, built from the server summary.
 class _SummarySections extends StatelessWidget {
   const _SummarySections({
     required this.summary,
     required this.monthly,
     required this.monthlyLoading,
     required this.arabic,
-    required this.wide,
     required this.medium,
     required this.l10n,
   });
@@ -155,12 +173,12 @@ class _SummarySections extends StatelessWidget {
   final Json? monthly;
   final bool monthlyLoading;
   final bool arabic;
-  final bool wide;
   final bool medium;
   final AppLocalizations l10n;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final sales = Map<String, dynamic>.from(summary['sales'] as Map? ?? {});
     final purchases =
         Map<String, dynamic>.from(summary['purchases'] as Map? ?? {});
@@ -176,109 +194,95 @@ class _SummarySections extends StatelessWidget {
         Map<String, dynamic>.from(parties['suppliers'] as Map? ?? {});
     final previous =
         Map<String, dynamic>.from(summary['previousPeriod'] as Map? ?? {});
-    final quick =
-        Map<String, dynamic>.from(summary['quickActions'] as Map? ?? {});
+    final quick = Map<String, dynamic>.from(summary['quickActions'] as Map? ?? {});
     final hasData = flag(summary, 'hasData', fallback: true);
     String money(Object? value) => formatAmount(asString(value), decimals: 0);
 
-    final metrics = <_Metric>[
-      _Metric(
+    // The six figures that belong on a KPI card: money in, money out, the
+    // result, what is liquid, what is owed to us, what we owe.
+    final primary = <_PrimaryMetric>[
+      _PrimaryMetric(
         arabic ? 'إجمالي المبيعات' : 'Total sales',
         money(sales['total']),
         arabic
             ? '${sales['invoices'] ?? 0} فاتورة'
             : '${sales['invoices'] ?? 0} invoices',
         Icons.trending_up_rounded,
-        const Color(0xFF087F8C),
+        AppTone.success,
       ),
-      _Metric(
+      _PrimaryMetric(
         arabic ? 'إجمالي المشتريات' : 'Total purchases',
         money(purchases['total']),
         arabic
             ? '${purchases['invoices'] ?? 0} فاتورة'
             : '${purchases['invoices'] ?? 0} invoices',
         Icons.shopping_bag_outlined,
-        const Color(0xFF7657C8),
+        AppTone.info,
       ),
-      _Metric(
-        arabic ? 'المقبوضات' : 'Receipts',
-        money(receipts['total']),
-        arabic
-            ? '${receipts['vouchers'] ?? 0} سند'
-            : '${receipts['vouchers'] ?? 0} vouchers',
-        Icons.south_west_rounded,
-        const Color(0xFF1B8A5A),
-      ),
-      _Metric(
-        arabic ? 'المدفوعات' : 'Payments',
-        money(payments['total']),
-        arabic
-            ? '${payments['vouchers'] ?? 0} سند'
-            : '${payments['vouchers'] ?? 0} vouchers',
-        Icons.north_east_rounded,
-        const Color(0xFFC2474B),
-      ),
-      _Metric(
+      _PrimaryMetric(
         arabic ? 'صافي النتيجة' : 'Net result',
         money(summary['grossResult']),
         arabic ? 'إيرادات ناقص مصروفات' : 'Revenue less expenses',
         Icons.insights_rounded,
-        const Color(0xFF2878C8),
+        AppTone.info,
       ),
-      _Metric(
-        arabic ? 'المصروفات' : 'Expenses',
-        money(summary['expenses']),
-        arabic ? 'من دليل الحسابات' : 'From the ledger',
-        Icons.receipt_long_outlined,
-        const Color(0xFFB36A18),
-      ),
-      _Metric(
+      _PrimaryMetric(
         arabic ? 'النقدية' : 'Cash position',
         money(summary['cashPosition']),
         arabic ? 'الصناديق والبنوك' : 'Cash boxes and banks',
         Icons.account_balance_wallet_outlined,
-        const Color(0xFF0F766E),
+        AppTone.neutral,
       ),
-      _Metric(
+      _PrimaryMetric(
         arabic ? 'الذمم المدينة' : 'Receivables',
         money(summary['receivables']),
         arabic ? 'مستحق من العملاء' : 'Owed by customers',
         Icons.groups_2_outlined,
-        const Color(0xFF2878C8),
+        AppTone.warning,
       ),
-      _Metric(
+      _PrimaryMetric(
         arabic ? 'الذمم الدائنة' : 'Payables',
         money(summary['payables']),
         arabic ? 'مستحق للموردين' : 'Owed to suppliers',
         Icons.local_shipping_outlined,
-        const Color(0xFF7657C8),
+        AppTone.danger,
       ),
-      _Metric(
-        arabic ? 'الفواتير المتأخرة' : 'Overdue invoices',
-        money(overdue['total']),
-        arabic
-            ? '${overdue['invoices'] ?? 0} فاتورة'
-            : '${overdue['invoices'] ?? 0} invoices',
-        Icons.warning_amber_rounded,
-        const Color(0xFFC2474B),
+    ];
+
+    final secondary = <Widget>[
+      StatStripItem(
+        label: arabic ? 'المقبوضات' : 'Receipts',
+        value: money(receipts['total']),
+        icon: Icons.south_west_rounded,
+        tone: AppTone.success,
       ),
-      _Metric(
-        arabic ? 'العملاء' : 'Customers',
-        '${customers['count'] ?? 0}',
-        arabic
-            ? '${customers['active'] ?? 0} نشط'
-            : '${customers['active'] ?? 0} active',
-        Icons.people_outline,
-        const Color(0xFF2878C8),
+      StatStripItem(
+        label: arabic ? 'المدفوعات' : 'Payments',
+        value: money(payments['total']),
+        icon: Icons.north_east_rounded,
+        tone: AppTone.info,
       ),
-      _Metric(
-        arabic ? 'الموردون' : 'Suppliers',
-        '${suppliers['count'] ?? 0}',
-        arabic
-            ? '${suppliers['active'] ?? 0} نشط'
-            : '${suppliers['active'] ?? 0} active',
-        Icons.local_shipping_outlined,
-        const Color(0xFFB36A18),
+      StatStripItem(
+        label: arabic ? 'المصروفات' : 'Expenses',
+        value: money(summary['expenses']),
+        icon: Icons.receipt_long_outlined,
+        tone: AppTone.warning,
+      ),
+      StatStripItem(
+        label: arabic ? 'فواتير متأخرة' : 'Overdue invoices',
+        value: money(overdue['total']),
+        icon: Icons.warning_amber_rounded,
+        tone: AppTone.danger,
+      ),
+      StatStripItem(
+        label: arabic ? 'العملاء' : 'Customers',
+        value: '${customers['count'] ?? 0}',
+        icon: Icons.people_outline,
+      ),
+      StatStripItem(
+        label: arabic ? 'الموردون' : 'Suppliers',
+        value: '${suppliers['count'] ?? 0}',
+        icon: Icons.local_shipping_outlined,
       ),
     ];
 
@@ -293,154 +297,244 @@ class _SummarySections extends StatelessWidget {
       children: [
         if (!hasData)
           Container(
-            margin: const EdgeInsets.only(bottom: 18),
-            padding: const EdgeInsets.all(16),
+            margin: const EdgeInsets.only(bottom: AppSpacing.md),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.sm,
+            ),
             decoration: BoxDecoration(
-              color: const Color(0xFF2878C8).withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: const Color(0xFF2878C8).withValues(alpha: 0.25),
-              ),
+              color: AppColors.infoSoft,
+              borderRadius: AppRadii.card,
+              border: Border.all(color: AppColors.primary.withValues(alpha: 0.18)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.info_outline, color: Color(0xFF2878C8)),
-                const SizedBox(width: 12),
+                const Icon(
+                  Icons.info_outline_rounded,
+                  size: 18,
+                  color: AppColors.primary,
+                ),
+                const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: Text(
                     arabic
                         ? 'لا توجد مستندات في هذه الفترة بعد. ابدأ بتسجيل أول فاتورة أو سند.'
                         : 'There are no documents in this period yet. Raise your first invoice or voucher.',
-                    style: Theme.of(context).textTheme.bodyMedium,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-        Text(
-          arabic ? 'مؤشرات الأعمال' : 'Business overview',
-          style: Theme.of(context)
-              .textTheme
-              .titleLarge
-              ?.copyWith(fontWeight: FontWeight.w800),
+        Row(
+          children: [
+            Text(
+              arabic ? 'مؤشرات الأعمال' : 'Business overview',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Container(
+                height: 1,
+                color: theme.colorScheme.outlineVariant,
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpacing.md),
         LayoutBuilder(
           builder: (context, constraints) {
-            final columns = wide ? 4 : 2;
-            const gap = 12.0;
+            final columns = constraints.maxWidth >= 1180
+                ? 4
+                : constraints.maxWidth >= 900
+                    ? 3
+                    : constraints.maxWidth >= 560
+                        ? 2
+                        : 1;
+            const gap = AppSpacing.md;
             final cardWidth =
                 (constraints.maxWidth - gap * (columns - 1)) / columns;
             return Wrap(
               spacing: gap,
               runSpacing: gap,
               children: [
-                for (final metric in metrics)
+                for (final metric in primary)
                   SizedBox(
                     width: cardWidth,
-                    child: _MetricCard(metric: metric),
+                    child: KpiCard(
+                      label: metric.label,
+                      value: metric.value,
+                      caption: metric.caption,
+                      icon: metric.icon,
+                      tone: metric.tone,
+                    ),
                   ),
               ],
             );
           },
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: AppSpacing.md),
+        SurfaceCard(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg,
+            vertical: AppSpacing.md,
+          ),
+          child: Wrap(
+            spacing: AppSpacing.xxl,
+            runSpacing: AppSpacing.md,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: secondary,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
         _ComparisonStrip(summary: summary, previous: previous, arabic: arabic),
-        const SizedBox(height: 22),
-        if (monthlyLoading && monthlyRows.isEmpty)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: CircularProgressIndicator(),
-            ),
-          )
-        else
-          MonthlyBarsChart(months: monthlyRows, arabic: arabic),
-        const SizedBox(height: 22),
-        Text(
-          arabic ? 'أعلى العملاء والمنتجات' : 'Top customers & products',
-          style: Theme.of(context)
-              .textTheme
-              .titleLarge
-              ?.copyWith(fontWeight: FontWeight.w800),
+        const SizedBox(height: AppSpacing.md),
+        SurfaceCard(
+          title: arabic ? 'المبيعات والمشتريات شهرياً' : 'Monthly sales & purchases',
+          subtitle: arabic
+              ? 'مقارنة الإيرادات والمشتريات خلال الأشهر المعروضة'
+              : 'Revenue against purchases over the months shown',
+          icon: Icons.stacked_bar_chart_outlined,
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.lg,
+            AppSpacing.lg,
+            AppSpacing.md,
+          ),
+          child: monthlyLoading && monthlyRows.isEmpty
+              ? const SizedBox(height: 160, child: LoadingView())
+              : MonthlyBarsChart(months: monthlyRows, arabic: arabic),
         ),
-        const SizedBox(height: 12),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: TopListPanel(
-                title: arabic ? 'أهم العملاء' : 'Top customers',
-                rows: topCustomers,
-                arabic: arabic,
-                emptyText: arabic
-                    ? 'ستظهر الأسماء هنا عند توفر مبيعات.'
-                    : 'Names appear here once sales exist.',
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TopListPanel(
-                title: arabic
-                    ? 'أكثر المنتجات مبيعاً'
-                    : 'Best-selling products',
-                rows: topItems,
-                arabic: arabic,
-                quantitySuffix: arabic ? 'وحدة' : 'units',
-                emptyText: arabic
-                    ? 'ستظهر الأصناف هنا عند توفر مبيعات.'
-                    : 'Items appear here once sales exist.',
-              ),
-            ),
-          ],
+        const SizedBox(height: AppSpacing.md),
+        _SectionTitle(
+          title: arabic ? 'أعلى العملاء والمنتجات' : 'Top customers & products',
         ),
-        const SizedBox(height: 22),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: CashAccountsPanel(
-                rows: cashAccounts,
-                arabic: arabic,
-                emptyText: arabic
-                    ? 'لم تُسجَّل حسابات نقدية بعد.'
-                    : 'No cash accounts recorded yet.',
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: RecentDocumentsPanel(
-                rows: recent,
-                arabic: arabic,
-                emptyText: arabic
-                    ? 'لا توجد عمليات بعد.'
-                    : 'No activity yet.',
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
-        Text(
-          arabic ? 'إجراءات سريعة' : 'Quick actions',
-          style: Theme.of(context)
-              .textTheme
-              .titleLarge
-              ?.copyWith(fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 12),
-        _QuickActions(
-          quick: quick,
-          arabic: arabic,
-          wide: wide,
+        const SizedBox(height: AppSpacing.sm),
+        _ResponsivePair(
           medium: medium,
-          l10n: l10n,
+          gap: AppSpacing.md,
+          first: TopListPanel(
+            title: arabic ? 'أهم العملاء' : 'Top customers',
+            rows: topCustomers,
+            arabic: arabic,
+            emptyText: arabic
+                ? 'ستظهر الأسماء هنا عند توفر مبيعات.'
+                : 'Names appear here once sales exist.',
+          ),
+          second: TopListPanel(
+            title: arabic ? 'أكثر المنتجات مبيعاً' : 'Best-selling products',
+            rows: topItems,
+            arabic: arabic,
+            quantitySuffix: arabic ? 'وحدة' : 'units',
+            emptyText: arabic
+                ? 'ستظهر الأصناف هنا عند توفر مبيعات.'
+                : 'Items appear here once sales exist.',
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        _ResponsivePair(
+          medium: medium,
+          gap: AppSpacing.md,
+          first: CashAccountsPanel(
+            rows: cashAccounts,
+            arabic: arabic,
+            emptyText: arabic
+                ? 'لم تُسجَّل حسابات نقدية بعد.'
+                : 'No cash accounts recorded yet.',
+          ),
+          second: RecentDocumentsPanel(
+            rows: recent,
+            arabic: arabic,
+            emptyText: arabic ? 'لا توجد عمليات بعد.' : 'No activity yet.',
+          ),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        _SectionTitle(title: arabic ? 'إجراءات سريعة' : 'Quick actions'),
+        const SizedBox(height: AppSpacing.sm),
+        _QuickActions(quick: quick, arabic: arabic, l10n: l10n),
+      ],
+    );
+  }
+}
+
+class _PrimaryMetric {
+  const _PrimaryMetric(
+    this.label,
+    this.value,
+    this.caption,
+    this.icon,
+    this.tone,
+  );
+
+  final String label;
+  final String value;
+  final String caption;
+  final IconData icon;
+  final AppTone tone;
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Text(
+          title,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Container(height: 1, color: theme.colorScheme.outlineVariant),
         ),
       ],
     );
   }
 }
 
-/// This period against the previous one, in one honest sentence each.
+/// Two panels side by side on desktop, stacked when the window is narrow.
+class _ResponsivePair extends StatelessWidget {
+  const _ResponsivePair({
+    required this.medium,
+    required this.gap,
+    required this.first,
+    required this.second,
+  });
+
+  final bool medium;
+  final double gap;
+  final Widget first;
+  final Widget second;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!medium) {
+      return Column(
+        children: [first, SizedBox(height: gap), second],
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(child: first),
+        SizedBox(width: gap),
+        Expanded(child: second),
+      ],
+    );
+  }
+}
+
+/// This period against the previous one, in one honest line per figure.
 class _ComparisonStrip extends StatelessWidget {
   const _ComparisonStrip({
     required this.summary,
@@ -455,36 +549,35 @@ class _ComparisonStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final changeRaw = asString(previous['revenueChange']);
     final change = changeRaw == null ? null : num.tryParse(changeRaw);
-    final changeColor = change == null
-        ? theme.colorScheme.onSurfaceVariant
+    final changeTone = change == null
+        ? AppTone.neutral
         : change >= 0
-            ? const Color(0xFF1B8A5A)
-            : const Color(0xFFC2474B);
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest
-            .withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(16),
+            ? AppTone.success
+            : AppTone.danger;
+    return SurfaceCard(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
       ),
       child: Wrap(
-        spacing: 24,
-        runSpacing: 12,
+        spacing: AppSpacing.xxl,
+        runSpacing: AppSpacing.md,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          _comparisonItem(
+          _figure(
             context,
             arabic ? 'إيرادات هذه الفترة' : 'Revenue this period',
             formatAmount(asString(summary['revenue'])),
           ),
-          _comparisonItem(
+          _figure(
             context,
             arabic ? 'إيرادات الفترة السابقة' : 'Revenue previous period',
             formatAmount(asString(previous['revenue'])),
           ),
-          _comparisonItem(
+          _figure(
             context,
             arabic ? 'النتيجة السابقة' : 'Previous result',
             formatAmount(asString(previous['result'])),
@@ -494,17 +587,24 @@ class _ComparisonStrip extends StatelessWidget {
             children: [
               Text(
                 arabic ? 'التغير: ' : 'Change: ',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
-              Text(
-                change == null
-                    ? (arabic ? '—' : '—')
-                    : '${change >= 0 ? '+' : ''}${change.toStringAsFixed(1)}%',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: changeColor,
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: changeTone.background,
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                ),
+                child: Text(
+                  change == null
+                      ? '—'
+                      : '${change >= 0 ? '+' : ''}${change.toStringAsFixed(1)}%',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: changeTone.foreground,
+                  ),
                 ),
               ),
             ],
@@ -514,7 +614,7 @@ class _ComparisonStrip extends StatelessWidget {
     );
   }
 
-  Widget _comparisonItem(BuildContext context, String label, String value) {
+  Widget _figure(BuildContext context, String label, String value) {
     final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -522,14 +622,17 @@ class _ComparisonStrip extends StatelessWidget {
       children: [
         Text(
           label,
-          style: theme.textTheme.bodySmall?.copyWith(
+          style: theme.textTheme.labelSmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w500,
           ),
         ),
+        const SizedBox(height: 1),
         Text(
           value,
-          style: theme.textTheme.titleMedium
-              ?.copyWith(fontWeight: FontWeight.w800),
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ],
     );
@@ -541,15 +644,11 @@ class _QuickActions extends StatelessWidget {
   const _QuickActions({
     required this.quick,
     required this.arabic,
-    required this.wide,
-    required this.medium,
     required this.l10n,
   });
 
   final Json quick;
   final bool arabic;
-  final bool wide;
-  final bool medium;
   final AppLocalizations l10n;
 
   @override
@@ -557,27 +656,41 @@ class _QuickActions extends StatelessWidget {
     final drafts = asString(quick['draftDocuments']) ?? '0';
     final overdue = asString(quick['overdueInvoices']) ?? '0';
     final reorder = asString(quick['itemsToReorder']) ?? '0';
-    return GridView.count(
-      crossAxisCount: wide ? 5 : medium ? 3 : 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 12,
-      crossAxisSpacing: 12,
-      childAspectRatio: wide ? 1.8 : 1.5,
-      children: [
-        for (final module in _modules(l10n))
-          QuickActionTile(
-            icon: module.icon,
-            label: module.label,
-            onTap: () => context.go(module.path),
-            badge: switch (module.path) {
-              AppRoutes.journalEntries => drafts,
-              AppRoutes.salesInvoices => overdue,
-              AppRoutes.stock => reorder,
-              _ => null,
-            },
-          ),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Column count follows the width the grid actually gets, not the
+        // window: the sidebar already took 250 px of it.
+        final available = constraints.maxWidth;
+        final columns = available >= 980
+            ? 5
+            : available >= 760
+            ? 4
+            : available >= 520
+            ? 3
+            : 2;
+        return GridView.count(
+          crossAxisCount: columns,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: AppSpacing.sm,
+          crossAxisSpacing: AppSpacing.sm,
+          mainAxisExtent: 92,
+          children: [
+            for (final module in _modules(l10n))
+              QuickActionTile(
+                icon: module.icon,
+                label: module.label,
+                onTap: () => context.go(module.path),
+                badge: switch (module.path) {
+                  AppRoutes.journalEntries => drafts,
+                  AppRoutes.salesInvoices => overdue,
+                  AppRoutes.stock => reorder,
+                  _ => null,
+                },
+              ),
+          ],
+        );
+      },
     );
   }
 }
@@ -590,29 +703,38 @@ class _ErrorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.errorContainer.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(18),
-      ),
+    return SurfaceCard(
+      padding: const EdgeInsets.all(AppSpacing.xxl),
       child: Column(
         children: [
-          Icon(Icons.cloud_off_rounded,
-              size: 40, color: theme.colorScheme.error),
-          const SizedBox(height: 10),
+          Container(
+            width: 44,
+            height: 44,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppColors.errorSoft,
+              borderRadius: BorderRadius.circular(AppRadii.lg),
+            ),
+            child: const Icon(
+              Icons.cloud_off_rounded,
+              size: 21,
+              color: AppColors.error,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
           Text(
             arabic
                 ? 'تعذر تحميل مؤشرات لوحة التحكم. تحقق من الاتصال ثم أعد المحاولة.'
                 : 'The dashboard figures could not be loaded. Check the connection and try again.',
             textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
+          const SizedBox(height: AppSpacing.lg),
+          OutlinedButton.icon(
             onPressed: onRetry,
-            icon: const Icon(Icons.refresh_rounded),
+            icon: const Icon(Icons.refresh_rounded, size: 17),
             label: Text(arabic ? 'إعادة المحاولة' : 'Retry'),
           ),
         ],
@@ -632,9 +754,12 @@ String _localName(
   return arabic ? (ar.isNotEmpty ? ar : en) : (en.isNotEmpty ? en : ar);
 }
 
-class _CompanyHero extends StatelessWidget {
-  const _CompanyHero({
+/// The company identity strip. It used to be a tall gradient hero; the same
+/// information now sits in one compact navy band so the numbers start higher.
+class _CompanyContext extends StatelessWidget {
+  const _CompanyContext({
     required this.company,
+    required this.logoUrl,
     required this.name,
     required this.branch,
     required this.arabic,
@@ -642,6 +767,7 @@ class _CompanyHero extends StatelessWidget {
   });
 
   final Map<String, dynamic> company;
+  final String? logoUrl;
   final String name;
   final String branch;
   final bool arabic;
@@ -649,115 +775,108 @@ class _CompanyHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
     final secondaryName = _localName(company, !arabic, 'nameAr', 'nameEn');
     final taxId = (company['taxId'] as String?)?.trim() ?? '';
-    final rawLogo = (company['logoBase64'] as String?)?.trim();
-    Widget logo = const Icon(Icons.apartment_rounded, size: 32, color: Colors.white);
-    if (rawLogo != null && rawLogo.isNotEmpty) {
-      try {
-        logo = Image.memory(
-          base64Decode(rawLogo),
-          width: 58,
-          height: 58,
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) =>
-              const Icon(Icons.apartment_rounded, size: 32, color: Colors.white),
-        );
-      } catch (_) {
-        logo = const Icon(Icons.apartment_rounded, size: 32, color: Colors.white);
-      }
-    }
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: AlignmentDirectional.topStart,
-          end: AlignmentDirectional.bottomEnd,
-          colors: [
-            scheme.primary,
-            Color.lerp(scheme.primary, const Color(0xFF152B43), 0.45)!,
-          ],
+    final code = (company['code'] as String?)?.trim() ?? '';
+    Widget logo = const Icon(
+      Icons.apartment_rounded,
+      size: 24,
+      color: Colors.white,
+    );
+    if (logoUrl != null && logoUrl!.isNotEmpty) {
+      logo = Image.network(
+        logoUrl!,
+        width: 46,
+        height: 46,
+        fit: BoxFit.contain,
+        errorBuilder: (_, _, _) => const Icon(
+          Icons.apartment_rounded,
+          size: 24,
+          color: Colors.white,
         ),
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: scheme.primary.withValues(alpha: 0.17),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
-          ),
-        ],
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
+      ),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: AlignmentDirectional.centerStart,
+          end: AlignmentDirectional.centerEnd,
+          colors: [AppColors.navy, AppColors.navySoft],
+        ),
+        borderRadius: AppRadii.card,
       ),
       child: Row(
         children: [
           Container(
-            width: 64,
-            height: 64,
+            width: 46,
+            height: 46,
             clipBehavior: Clip.antiAlias,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(18),
+              color: Colors.white.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppRadii.md),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
             ),
             child: logo,
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   name,
                   maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                      ),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-                if (secondaryName.isNotEmpty && secondaryName != name) ...[
-                  const SizedBox(height: 3),
+                if (secondaryName.isNotEmpty && secondaryName != name)
                   Text(
                     secondaryName,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.82),
-                        ),
-                  ),
-                ],
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _HeroChip(
-                      icon: Icons.location_on_outlined,
-                      label: branch,
+                    maxLines: 2,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: AppColors.onNavyMuted,
                     ),
+                  ),
+                const SizedBox(height: 5),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: 4,
+                  children: [
+                    _ContextChip(icon: Icons.location_on_outlined, label: branch),
                     if (taxId.isNotEmpty)
-                      _HeroChip(
+                      _ContextChip(
                         icon: Icons.receipt_long_outlined,
                         label: (arabic ? 'الرقم الضريبي: ' : 'Tax ID: ') + taxId,
                       ),
-                    if ((company['code'] as String?)?.isNotEmpty ?? false)
-                      _HeroChip(
+                    if (code.isNotEmpty)
+                      _ContextChip(
                         icon: Icons.badge_outlined,
-                        label: (arabic ? 'كود الشركة: ' : 'Company code: ') +
-                            company['code'].toString(),
+                        label: (arabic ? 'كود الشركة: ' : 'Code: ') + code,
                       ),
                   ],
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           IconButton(
             tooltip: arabic ? 'إعدادات الشركة' : 'Company settings',
             onPressed: onEdit,
             style: IconButton.styleFrom(
               foregroundColor: Colors.white,
-              backgroundColor: Colors.white.withValues(alpha: 0.14),
+              backgroundColor: Colors.white.withValues(alpha: 0.12),
             ),
-            icon: const Icon(Icons.edit_outlined),
+            icon: const Icon(Icons.edit_outlined, size: 17),
           ),
         ],
       ),
@@ -765,132 +884,45 @@ class _CompanyHero extends StatelessWidget {
   }
 }
 
-class _HeroChip extends StatelessWidget {
-  const _HeroChip({required this.icon, required this.label});
+class _ContextChip extends StatelessWidget {
+  const _ContextChip({required this.icon, required this.label});
+
   final IconData icon;
   final String label;
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.13),
-          borderRadius: BorderRadius.circular(30),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 15, color: Colors.white),
-            const SizedBox(width: 6),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 260),
-              child: Text(
-                label,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontSize: 12),
-              ),
-            ),
-          ],
-        ),
-      );
-}
-
-class _Metric {
-  const _Metric(this.title, this.value, this.note, this.icon, this.color);
-  final String title;
-  final String value;
-  final String note;
-  final IconData icon;
-  final Color color;
-}
-
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({required this.metric});
-  final _Metric metric;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(17),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.025),
-            blurRadius: 16,
-            offset: const Offset(0, 5),
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, size: 12, color: AppColors.onNavyMuted),
+      const SizedBox(width: 3),
+      ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 240),
+        child: Text(
+          label,
+          maxLines: 2,
+          style: const TextStyle(
+            color: AppColors.onNavyMuted,
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
           ),
-        ],
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: metric.color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(metric.icon, color: metric.color),
-              ),
-              const Spacer(),
-              Icon(Icons.north_east_rounded,
-                  size: 17, color: theme.colorScheme.onSurfaceVariant),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            metric.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            metric.value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.5,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            metric.note,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(color: metric.color),
-          ),
-        ],
-      ),
-    );
-  }
+    ],
+  );
 }
 
 List<({IconData icon, String label, String path})> _modules(
   AppLocalizations l10n,
 ) => [
-      (icon: Icons.menu_book_outlined, label: l10n.journalEntries, path: AppRoutes.journalEntries),
-      (icon: Icons.people_outline, label: l10n.customers, path: AppRoutes.customers),
-      (icon: Icons.local_shipping_outlined, label: l10n.suppliers, path: AppRoutes.suppliers),
-      (icon: Icons.category_outlined, label: l10n.items, path: AppRoutes.items),
-      (icon: Icons.inventory_2_outlined, label: l10n.stock, path: AppRoutes.stock),
-      (icon: Icons.point_of_sale_outlined, label: l10n.salesInvoices, path: AppRoutes.salesInvoices),
-      (icon: Icons.shopping_cart_outlined, label: l10n.purchaseInvoices, path: AppRoutes.purchaseInvoices),
-      (icon: Icons.account_tree_outlined, label: l10n.chartOfAccounts, path: AppRoutes.chartOfAccounts),
-      (icon: Icons.bar_chart_outlined, label: l10n.reports, path: AppRoutes.reports),
-      (icon: Icons.settings_outlined, label: l10n.settings, path: AppRoutes.settings),
-    ];
+  (icon: Icons.menu_book_outlined, label: l10n.journalEntries, path: AppRoutes.journalEntries),
+  (icon: Icons.people_outline, label: l10n.customers, path: AppRoutes.customers),
+  (icon: Icons.local_shipping_outlined, label: l10n.suppliers, path: AppRoutes.suppliers),
+  (icon: Icons.category_outlined, label: l10n.items, path: AppRoutes.items),
+  (icon: Icons.inventory_2_outlined, label: l10n.stock, path: AppRoutes.stock),
+  (icon: Icons.point_of_sale_outlined, label: l10n.salesInvoices, path: AppRoutes.salesInvoices),
+  (icon: Icons.shopping_cart_outlined, label: l10n.purchaseInvoices, path: AppRoutes.purchaseInvoices),
+  (icon: Icons.account_tree_outlined, label: l10n.chartOfAccounts, path: AppRoutes.chartOfAccounts),
+  (icon: Icons.bar_chart_outlined, label: l10n.reports, path: AppRoutes.reports),
+  (icon: Icons.settings_outlined, label: l10n.settings, path: AppRoutes.settings),
+];

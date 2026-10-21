@@ -31,6 +31,8 @@
  *  15. check the session lifecycle: refresh, logout, reuse after logout
  *  16. take a full backup, verify it, restore it into a scratch database, and
  *      check the restored data is really there
+ *  17. when explicitly enabled for an ephemeral database, verify the guarded
+ *      reset, its verified safety backup, and first-run setup status afterward
  *
  * Exit code 0 means every check passed. Nothing here is mocked: the server, the
  * database and pg_dump are the real ones.
@@ -92,6 +94,18 @@ async function api(path, options = {}) {
     const wait = Number(/(\d+)\s*second/.exec(String(data?.detail ?? ''))?.[1] ?? 5) + 1;
     await sleep(Math.min(wait, 90) * 1000);
   }
+}
+
+/// Upload a real company JSON backup without setting Content-Type manually;
+/// fetch supplies the multipart boundary that Multer expects.
+async function uploadJsonBackup(path, backup) {
+  const form = new FormData();
+  form.append(
+    'file',
+    new Blob([JSON.stringify(backup)], { type: 'application/json' }),
+    'kayan-company-backup-e2e.json',
+  );
+  return api(path, { method: 'POST', body: form });
 }
 
 /// A step that must work: on failure the scenario stops, because every later
@@ -251,7 +265,45 @@ async function main() {
       purchasePrice: '20',
     },
   });
-  if (!customer || !supplier || !itemA || !itemB) return false;
+  const openingItem = await must('create a stock-tracked item for opening stock', '/inventory/items', {
+    method: 'POST',
+    json: {
+      code: `E2E-OPEN-${stamp}`,
+      nameEn: `Opening-stock scenario item ${stamp}`,
+      nameAr: `صنف رصيد افتتاحي ${stamp}`,
+      unit: 'PCS',
+      isStockTracked: true,
+      salePrice: '40',
+      purchasePrice: '25',
+    },
+  });
+  const serviceItem = await must('create a non-stock item', '/inventory/items', {
+    method: 'POST',
+    json: {
+      code: `E2E-SVC-${stamp}`,
+      nameEn: `Non-stock scenario service ${stamp}`,
+      nameAr: `خدمة بلا مخزون ${stamp}`,
+      unit: 'SERVICE',
+      isStockTracked: false,
+      salePrice: '10',
+    },
+  });
+  if (!customer || !supplier || !itemA || !itemB || !openingItem || !serviceItem) return false;
+
+  const openingStockBefore = await api(`/inventory/stock?itemId=${openingItem.id}`);
+  const openingLedgerBefore = await api(`/inventory/stock/${openingItem.id}/ledger`);
+  const serviceLedgerBefore = await api(`/inventory/stock/${serviceItem.id}/ledger`);
+  check(
+    'creating an item only marks it stock-tracked; it does not invent an opening movement',
+    openingStockBefore.status === 200 && quantityOf(openingStockBefore.data, openingItem.id) === 0 &&
+      (openingLedgerBefore.data?.movements ?? []).length === 0,
+    `stock rows ${Array.isArray(openingStockBefore.data) ? openingStockBefore.data.length : 'wrapped'}, movements ${(openingLedgerBefore.data?.movements ?? []).length}`,
+  );
+  check(
+    'a non-stock item has no stock movements',
+    serviceLedgerBefore.status === 200 && (serviceLedgerBefore.data?.movements ?? []).length === 0,
+    `movements ${(serviceLedgerBefore.data?.movements ?? []).length}`,
+  );
 
   const unit = await must('give the item a second unit of measure', `/inventory/items/${itemA.id}/units`, {
     method: 'POST',
@@ -614,6 +666,7 @@ async function main() {
   );
 
   // ───────────────────────────────────── 9. opening balances for the branch
+  const openingStockValue = 125;
   const opening = await api('/accounting/opening-balances', {
     method: 'POST',
     json: {
@@ -621,21 +674,68 @@ async function main() {
       description: `Opening balances ${stamp}`,
       lines: [
         { accountId: cashLedger?.id, debit: '1000', description: 'Cash in hand' },
-        { accountId: code('3103'), credit: '1000', description: 'Opening equity' },
+        {
+          accountId: code('1104'),
+          debit: String(openingStockValue),
+          itemId: openingItem.id,
+          quantity: '5',
+          unitCost: '25',
+          description: 'Opening stock',
+        },
+        { accountId: code('3103'), credit: String(1000 + openingStockValue), description: 'Opening equity' },
       ],
     },
   });
   if (opening.status < 300) {
-    await must('post the opening balances', `/accounting/opening-balances/${opening.data.id}/post`, {
-      method: 'POST',
-    });
+    const [firstOpeningPost, secondOpeningPost] = await Promise.all([
+      api(`/accounting/opening-balances/${opening.data.id}/post`, { method: 'POST' }),
+      api(`/accounting/opening-balances/${opening.data.id}/post`, { method: 'POST' }),
+    ]);
+    const openingPostStatuses = [firstOpeningPost.status, secondOpeningPost.status];
+    check(
+      'concurrent opening-balance posting is idempotent',
+      openingPostStatuses.filter((status) => status >= 200 && status < 300).length === 1 &&
+        openingPostStatuses.filter((status) => status >= 400 && status < 500).length === 1,
+      `HTTP statuses ${openingPostStatuses.join(', ')}`,
+    );
     const openingDocument = await api(`/accounting/opening-balances/${opening.data.id}`);
     const openingLines = openingDocument.data?.lines ?? [];
+    const stockAfterOpening = await api(`/inventory/stock?itemId=${openingItem.id}`);
+    const stockOpeningRow = (Array.isArray(stockAfterOpening.data)
+      ? stockAfterOpening.data
+      : stockAfterOpening.data?.items ?? stockAfterOpening.data?.balances ?? [])
+      .find((row) => row.itemId === openingItem.id);
+    const openingLedger = await api(`/inventory/stock/${openingItem.id}/ledger`);
+    const openingMovements = openingLedger.data?.movements ?? [];
     check(
-      'the opening balance posts one balanced document: 1,000 of cash against opening equity',
-      near(await delta('3103'), -1000) &&
-        openingLines.some((row) => money(row.debit) === 1000) &&
-        openingLines.some((row) => money(row.credit) === 1000),
+      'posting opening stock creates one branch balance and one warehouse-linked movement',
+      String(openingDocument.data?.status).toLowerCase() === 'posted' &&
+        stockOpeningRow?.branchId === principal.branchId &&
+        near(stockOpeningRow?.quantity, 5) && near(stockOpeningRow?.value, openingStockValue) &&
+        openingMovements.length === 1 && openingMovements[0].direction === 'in' &&
+        near(openingMovements[0].quantity, 5) && near(openingMovements[0].totalCost, openingStockValue) &&
+        Boolean(openingMovements[0].warehouseCode),
+      `status ${openingDocument.data?.status}, balance ${stockOpeningRow?.quantity ?? 0} / ${stockOpeningRow?.value ?? 0} on branch ${stockOpeningRow?.branchId ?? 'none'}, movements ${openingMovements.length}, warehouse ${openingMovements[0]?.warehouseCode ?? 'none'}`,
+    );
+    const valuationAfterOpening = await api('/inventory/reports/valuation');
+    const openingValuationRow = (valuationAfterOpening.data?.rows ?? [])
+      .find((row) => row.itemId === openingItem.id);
+    check(
+      'opening stock appears in inventory valuation at the posted cost',
+      near(openingValuationRow?.quantity, 5) && near(openingValuationRow?.value, openingStockValue),
+      `quantity ${openingValuationRow?.quantity}, value ${openingValuationRow?.value}`,
+    );
+    const serviceLedgerAfter = await api(`/inventory/stock/${serviceItem.id}/ledger`);
+    check(
+      'posting an opening stock document does not create movement for non-stock items',
+      (serviceLedgerAfter.data?.movements ?? []).length === 0,
+      `movements ${(serviceLedgerAfter.data?.movements ?? []).length}`,
+    );
+    check(
+      'the opening balance posts cash and stock against equal opening equity',
+      near(await delta('3103'), -(1000 + openingStockValue)) &&
+        openingLines.some((row) => row.itemId === openingItem.id && money(row.debit) === openingStockValue) &&
+        openingLines.some((row) => money(row.credit) === 1000 + openingStockValue),
       `cash account moved ${await delta(`1101.E2E${stamp}`)} (opening plus the transfer), equity ${await delta('3103')}, ${openingLines.length} lines`,
     );
     const second = await api('/accounting/opening-balances', {
@@ -839,60 +939,62 @@ async function main() {
     );
   }
 
-  // a user who may read but not write must be turned away by the API itself
+  // Exercise authorization over HTTP; setup failures must never silently skip
+  // these assertions (DTOs accept permission codes and fullNameEn/fullNameAr).
+  const readOnlyCodes = ['reports.read', 'sales.invoices.read', 'parties.customers.read'];
   const role = await must('create a read-only role', '/admin/roles', {
     method: 'POST',
-    json: { code: `E2E-RO-${stamp}`, nameEn: `Reader ${stamp}`, nameAr: `قارئ ${stamp}` },
+    json: { code: `E2E-RO-${stamp}`, nameEn: `Reader ${stamp}`, nameAr: `قارئ ${stamp}`, permissions: readOnlyCodes },
   });
-  const permissions = await api('/admin/permissions');
-  const permissionRaw = permissions.data?.items ?? permissions.data;
-  const permissionList = Array.isArray(permissionRaw)
-    ? permissionRaw
-    : (permissionRaw?.permissions ?? permissionRaw?.rows ?? []);
-  const readOnly = permissionList.filter((row) =>
-    ['reports.read', 'sales.invoices.read', 'parties.customers.read'].includes(row.code),
-  );
-  if (role && readOnly.length > 0) {
-    await api(`/admin/roles/${role.id}/permissions`, {
-      method: 'POST',
-      json: { permissionIds: readOnly.map((row) => row.id) },
-    });
-    const user = await api('/admin/users', {
-      method: 'POST',
-      json: {
-        username: `e2e-reader-${stamp}`,
-        nameEn: `Reader ${stamp}`,
-        nameAr: `قارئ ${stamp}`,
-        password: `Reader@${stamp}9x`,
-        roleIds: [role.id],
-      },
-    });
-    if (user.status < 300) {
-      const adminToken = token;
-      const readerLogin = await api('/auth/login', {
-        method: 'POST',
-        json: { username: `e2e-reader-${stamp}`, password: `Reader@${stamp}9x` },
-        noAuth: true,
-      });
-      check('the read-only user can sign in', Boolean(readerLogin.data?.accessToken), `status ${readerLogin.status}`);
-      token = readerLogin.data?.accessToken ?? '';
-      if (draft) {
-        await mustRefuse('the read-only user cannot post an invoice', `/sales/invoices/${draft.id}/post`, {
-          method: 'POST',
-        });
-      }
-      await mustRefuse('the read-only user cannot create an item', '/inventory/items', {
-        method: 'POST',
-        json: { code: `NOPE-${stamp}`, nameEn: 'Not allowed', nameAr: 'غير مسموح', unit: 'PCS' },
-      });
-      const readable = await api(`/reports/trial-balance?from=${from}&to=${today}`);
-      check(
-        'the read-only user can still read the reports they were granted',
-        readable.status === 200,
-        `status ${readable.status}`,
-      );
-      token = adminToken;
+  if (!role?.id) return false;
+  const reader = await must('create a read-only user', '/admin/users', {
+    method: 'POST',
+    json: {
+      username: `e2e-reader-${stamp}`, fullNameEn: `Reader ${stamp}`, fullNameAr: `قارئ ${stamp}`,
+      password: `Reader@${stamp}9x`, roleIds: [role.id], branchIds: [principal.branchId],
+    },
+  });
+  if (!reader?.id) return false;
+  const readerLogin = await api('/auth/login', {
+    method: 'POST', noAuth: true,
+    json: { username: `e2e-reader-${stamp}`, password: `Reader@${stamp}9x` },
+  });
+  check('the read-only user can sign in', readerLogin.status === 201 && Boolean(readerLogin.data?.accessToken), `status ${readerLogin.status}`);
+  if (!readerLogin.data?.accessToken) return false;
+  const adminToken = token;
+  const readerToken = readerLogin.data.accessToken;
+  try {
+    token = readerToken;
+    if (draft) {
+      const refused = await api(`/sales/invoices/${draft.id}/post`, { method: 'POST' });
+      check('the read-only user cannot post an invoice', refused.status === 403, `status ${refused.status}`);
     }
+    const refused = await api('/inventory/items', {
+      method: 'POST', json: { code: `NOPE-${stamp}`, nameEn: 'Not allowed', nameAr: 'غير مسموح', unit: 'PCS' },
+    });
+    check('the read-only user cannot create an item', refused.status === 403, `status ${refused.status}`);
+    const readable = await api(`/reports/trial-balance?from=${from}&to=${today}`);
+    check('the read-only user can still read the reports they were granted', readable.status === 200, `status ${readable.status}`);
+
+    token = adminToken;
+    await must('grant tenant backup access without super-admin access', `/admin/roles/${role.id}/permissions`, {
+      method: 'POST', json: { permissions: [...readOnlyCodes, 'admin.backup'] },
+    });
+    token = readerToken; // Deliberately reuse the token issued before the grant.
+    const companyBackup = await api('/backup/summary');
+    check('a new role grant takes effect on the existing access token', companyBackup.status === 200, `status ${companyBackup.status}`);
+    const fullBackup = await api('/backup/full');
+    check('a tenant backup operator cannot list machine-wide database backups', fullBackup.status === 403, `status ${fullBackup.status}`);
+
+    token = adminToken;
+    await must('revoke the readers role grants', `/admin/roles/${role.id}/permissions`, { method: 'POST', json: { permissions: [] } });
+    token = readerToken;
+    const revoked = await api(`/reports/trial-balance?from=${from}&to=${today}`);
+    check('revoked permissions take effect without waiting for JWT expiry', revoked.status === 403, `status ${revoked.status}`);
+    const currentReader = await api('/auth/me');
+    check('current-user response reflects live revoked permissions', currentReader.status === 200 && currentReader.data?.user?.permissions?.length === 0, `status ${currentReader.status}`);
+  } finally {
+    token = adminToken;
   }
 
   // Two separate invoices compete for the remaining stock at the same time.
@@ -1062,14 +1164,28 @@ async function main() {
     );
 
     // ─────────────────────────────────────────────── 16. migrations, checked
-    const migrations = await client.query(
-      'SELECT count(*)::int AS n, count(*) FILTER (WHERE finished_at IS NULL)::int AS pending FROM _prisma_migrations',
-    );
-    check(
-      'every migration is applied and none is left pending',
-      migrations.rows[0].pending === 0 && migrations.rows[0].n >= 9,
-      `${migrations.rows[0].n} migrations, ${migrations.rows[0].pending} pending`,
-    );
+    //
+    // `_prisma_migrations` exists only when the database was built by `prisma
+    // migrate`. A database built by apply-migrations.mjs on a machine without
+    // the Prisma engine binaries is still complete - every migration ran - but
+    // there is no bookkeeping table to read. Say so instead of failing: a
+    // skipped check is honest, a failure it did not find is not.
+    try {
+      const migrations = await client.query(
+        'SELECT count(*)::int AS n, count(*) FILTER (WHERE finished_at IS NULL)::int AS pending FROM _prisma_migrations',
+      );
+      check(
+        'every migration is applied and none is left pending',
+        migrations.rows[0].pending === 0 && migrations.rows[0].n >= 9,
+        `${migrations.rows[0].n} migrations, ${migrations.rows[0].pending} pending`,
+      );
+    } catch (error) {
+      if (error?.code !== '42P01') throw error;
+      skip(
+        'every migration is applied and none is left pending',
+        '_prisma_migrations is absent: this database was built by applying migration SQL directly, not by prisma migrate',
+      );
+    }
   } finally {
     await client.end();
   }
@@ -1121,7 +1237,7 @@ async function main() {
     });
     check(
       'the backup can be restored, and the restore reports what it put back',
-      restored.status < 300 && restored.data?.restored === true,
+      restored.status < 300 && restored.data?.restored === true && restored.data?.rehearsed === true,
       `restored ${restored.data?.source}, safety copy ${restored.data?.safetyBackup}, rehearsed ${restored.data?.rehearsed}`,
     );
     const afterRestore = await api(`/parties/customers?q=${encodeURIComponent(`E2E-C-${stamp}`)}`);
@@ -1129,6 +1245,56 @@ async function main() {
       'after the restore the data is still there, including what this run created',
       (afterRestore.data?.items ?? []).some((row) => row.code === `E2E-C-${stamp}`),
       `${afterRestore.data?.items?.length ?? 0} matching customers after the restore`,
+    );
+    const companyJson = await api('/backup/download');
+    const companyBackup = companyJson.data;
+    const linkedSalesReturns = (companyBackup?.tables?.salesInvoice ?? [])
+      .filter((row) => row.originalInvoiceId).length;
+    const linkedPurchaseReturns = (companyBackup?.tables?.purchaseInvoice ?? [])
+      .filter((row) => row.originalInvoiceId).length;
+    const linkedSalesReturnLines = (companyBackup?.tables?.salesInvoiceLine ?? [])
+      .filter((row) => row.originalLineId).length;
+    const linkedPurchaseReturnLines = (companyBackup?.tables?.purchaseInvoiceLine ?? [])
+      .filter((row) => row.originalLineId).length;
+    check(
+      'the company JSON backup contains linked sales and purchase return documents and lines',
+      companyJson.status < 300 && linkedSalesReturns > 0 && linkedPurchaseReturns > 0 &&
+        linkedSalesReturnLines > 0 && linkedPurchaseReturnLines > 0,
+      `sales ${linkedSalesReturns}/${linkedSalesReturnLines} returns/lines, purchases ${linkedPurchaseReturns}/${linkedPurchaseReturnLines}`,
+    );
+    const preview = await uploadJsonBackup('/backup/inspect', companyBackup);
+    check(
+      'company JSON restore preview recognizes this company without changing it',
+      preview.status < 300 && preview.data?.belongsToThisCompany === true &&
+        Number(preview.data?.current?.account ?? 0) > 0,
+      `status ${preview.status}, belongs ${preview.data?.belongsToThisCompany}, existing accounts ${preview.data?.current?.account ?? 0}`,
+    );
+    const jsonRestored = await uploadJsonBackup('/backup/restore?replace=true', companyBackup);
+    check(
+      'the company JSON backup restores into the disposable PostgreSQL company',
+      jsonRestored.status < 300 && jsonRestored.data?.replaced === true &&
+        Number(jsonRestored.data?.total ?? 0) > 0,
+      `status ${jsonRestored.status}, replaced ${jsonRestored.data?.replaced}, rows ${jsonRestored.data?.total ?? 0}`,
+    );
+    const restoredSalesReturns = await api('/returns/sales');
+    const restoredPurchaseReturns = await api('/returns/purchases');
+    const salesReturnRows = restoredSalesReturns.data?.items ?? [];
+    const purchaseReturnRows = restoredPurchaseReturns.data?.items ?? [];
+    check(
+      'restored return documents still link to their original invoices',
+      salesReturnRows.some((row) => row.originalInvoiceNumber) &&
+        purchaseReturnRows.some((row) => row.originalInvoiceNumber),
+      `sales ${salesReturnRows.length}, purchases ${purchaseReturnRows.length}`,
+    );
+    const openingStockAfterJsonRestore = await api(`/inventory/stock?itemId=${openingItem.id}`);
+    const openingLedgerAfterJsonRestore = await api(`/inventory/stock/${openingItem.id}/ledger`);
+    check(
+      'restored stock balances and their warehouse-linked ledger movements agree',
+      near(quantityOf(openingStockAfterJsonRestore.data, openingItem.id), 5) &&
+        (openingLedgerAfterJsonRestore.data?.movements ?? []).filter(
+          (movement) => movement.referenceType === 'OPENING_BALANCE' && movement.warehouseCode,
+        ).length === 1,
+      `quantity ${quantityOf(openingStockAfterJsonRestore.data, openingItem.id)}, movements ${(openingLedgerAfterJsonRestore.data?.movements ?? []).length}`,
     );
     const schedule = await api('/backup/schedule');
     check(
@@ -1164,6 +1330,146 @@ async function main() {
     !/password|user not found|no such/i.test(String(detail)) || /too many requests/i.test(String(detail)),
     String(detail).slice(0, 90),
   );
+
+  // This operation is intentionally disabled unless CI (or an operator using
+  // a dedicated disposable database) opts in explicitly. Never let a routine
+  // scenario run reset a real or developer database by accident.
+  if (process.env.ENABLE_DISPOSABLE_RESET === 'true') {
+    const setupBeforeReset = await api('/setup/status', { noAuth: true });
+    check(
+      'reset scenario is running against a fully set-up disposable database',
+      setupBeforeReset.status === 200 && setupBeforeReset.data?.needsSetup === false &&
+        Number(setupBeforeReset.data?.companyCount) === 1,
+      `status ${setupBeforeReset.status}, setup ${setupBeforeReset.data?.needsSetup}, companies ${setupBeforeReset.data?.companyCount}`,
+    );
+
+    const resetPreview = await api('/admin/reset');
+    check(
+      'reset preview names the active company and requires the exact confirmation word',
+      resetPreview.status === 200 && resetPreview.data?.confirmationWord === 'RESET' &&
+        Boolean(resetPreview.data?.companyCode) &&
+        Number(resetPreview.data?.counts?.accounts) > 0,
+      `status ${resetPreview.status}, company ${resetPreview.data?.companyCode}, word ${resetPreview.data?.confirmationWord}`,
+    );
+
+    const wrongPassword = await api('/admin/reset', {
+      method: 'POST',
+      json: { password: `${PASSWORD}-wrong`, confirmation: 'RESET' },
+    });
+    check(
+      'reset refuses an incorrect administrator password without changing the company',
+      wrongPassword.status === 401,
+      `status ${wrongPassword.status}`,
+    );
+    const wrongConfirmation = await api('/admin/reset', {
+      method: 'POST',
+      json: { password: PASSWORD, confirmation: 'not-reset' },
+    });
+    check(
+      'reset refuses a missing exact confirmation word without changing the company',
+      wrongConfirmation.status === 400,
+      `status ${wrongConfirmation.status}`,
+    );
+
+    const reset = await api('/admin/reset', {
+      method: 'POST',
+      json: { password: PASSWORD, confirmation: 'RESET' },
+    });
+    check(
+      'live reset verifies a non-empty safety backup before deleting business data',
+      reset.status === 200 && reset.data?.reset === true &&
+        Boolean(reset.data?.backupFile) && Number(reset.data?.backupBytes) > 0 &&
+        Number(reset.data?.backupEntries) > 0,
+      `status ${reset.status}, backup ${reset.data?.backupFile}, ${reset.data?.backupBytes ?? 0} bytes / ${reset.data?.backupEntries ?? 0} entries`,
+    );
+    check(
+      'live reset reports that first-run setup is required again',
+      reset.data?.needsSetup === true && Number(reset.data?.deleted?.accounts) > 0 &&
+        Number(reset.data?.deleted?.branches) > 0,
+      `needsSetup ${reset.data?.needsSetup}, deleted accounts ${reset.data?.deleted?.accounts ?? 0}, branches ${reset.data?.deleted?.branches ?? 0}`,
+    );
+    const staleAccess = await api('/auth/me');
+    check(
+      'reset invalidates the access token that triggered it',
+      staleAccess.status === 401,
+      `status ${staleAccess.status}`,
+    );
+
+    const setupAfterReset = await api('/setup/status', { noAuth: true });
+    const healthAfterReset = await api('/health', { noAuth: true });
+    check(
+      'setup status after reset exposes the first-run flow while keeping the administrator',
+      setupAfterReset.status === 200 && setupAfterReset.data?.needsSetup === true &&
+        Number(setupAfterReset.data?.companyCount) === 0 && setupAfterReset.data?.hasUsers === true,
+      `status ${setupAfterReset.status}, setup ${setupAfterReset.data?.needsSetup}, companies ${setupAfterReset.data?.companyCount}, has users ${setupAfterReset.data?.hasUsers}`,
+    );
+    check(
+      'the API and PostgreSQL stay healthy after reset',
+      healthAfterReset.status === 200 && healthAfterReset.data?.status === 'ok' &&
+        healthAfterReset.data?.database === 'up' && healthAfterReset.data?.needsSetup === true,
+      `status ${healthAfterReset.status}, database ${healthAfterReset.data?.database}, setup ${healthAfterReset.data?.needsSetup}`,
+    );
+    const administratorAfterReset = await api('/auth/login', {
+      method: 'POST',
+      json: { username: USERNAME, password: PASSWORD },
+      noAuth: true,
+    });
+    check(
+      'the preserved administrator can sign in again to complete first-run setup',
+      administratorAfterReset.status === 201 && Boolean(administratorAfterReset.data?.accessToken),
+      `status ${administratorAfterReset.status}`,
+    );
+
+    const completedSetup = await api('/setup/initial', {
+      method: 'POST',
+      noAuth: true,
+      json: {
+        companyCode: reset.data?.companyCode,
+        companyNameEn: 'KAYAN CI after reset',
+        companyNameAr: 'كيان بعد إعادة الضبط',
+        facilityKind: 'HEADQUARTERS',
+        unitCode: 'MAIN',
+        unitNameEn: 'Head Office',
+        unitNameAr: 'المركز الرئيسي',
+        adminUsername: USERNAME,
+        adminPassword: PASSWORD,
+        adminFullNameEn: 'CI Administrator',
+        adminFullNameAr: 'مدير الاختبار',
+        seedChartOfAccounts: true,
+      },
+    });
+    check(
+      'the preserved administrator can finish first-run setup on the reset company',
+      completedSetup.status < 300 &&
+        completedSetup.data?.companyId === reset.data?.companyId &&
+        completedSetup.data?.companyCode === reset.data?.companyCode,
+      `status ${completedSetup.status}, company ${completedSetup.data?.companyCode}, administrator ${completedSetup.data?.adminUsername}`,
+    );
+
+    const setupAfterCompletion = await api('/setup/status', { noAuth: true });
+    const healthAfterCompletion = await api('/health', { noAuth: true });
+    check(
+      'completed first-run setup closes the setup flow and restores a healthy ready state',
+      setupAfterCompletion.status === 200 && setupAfterCompletion.data?.needsSetup === false &&
+        Number(setupAfterCompletion.data?.companyCount) === 1 &&
+        healthAfterCompletion.status === 200 && healthAfterCompletion.data?.status === 'ok' &&
+        healthAfterCompletion.data?.database === 'up' && healthAfterCompletion.data?.needsSetup === false,
+      `setup ${setupAfterCompletion.data?.needsSetup}, companies ${setupAfterCompletion.data?.companyCount}, health ${healthAfterCompletion.data?.status}, database ${healthAfterCompletion.data?.database}`,
+    );
+
+    const administratorAfterSetup = await api('/auth/login', {
+      method: 'POST',
+      json: { username: USERNAME, password: PASSWORD },
+      noAuth: true,
+    });
+    check(
+      'the administrator can sign in with the credentials confirmed by first-run setup',
+      administratorAfterSetup.status === 201 && Boolean(administratorAfterSetup.data?.accessToken),
+      `status ${administratorAfterSetup.status}`,
+    );
+  } else {
+    skip('live reset and first-run status', 'set ENABLE_DISPOSABLE_RESET=true only for an ephemeral test database');
+  }
 
   // ─────────────────────────────────────────────────────────── the summary
   const failed = results.filter((row) => !row.ok);

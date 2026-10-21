@@ -1,6 +1,12 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { basename, join } from 'node:path';
+import { readFile, unlink } from 'node:fs/promises';
 
-import { Prisma } from '@prisma/client';
+import { PeriodStatus, Prisma } from '@prisma/client';
 
 import {
   AuditPurgeRequest,
@@ -8,6 +14,12 @@ import {
 } from '../../common/audit/audit-purge.service';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import {
+  LOGO_MAX_BYTES,
+  logoDimensions,
+  uploadsDir,
+  validateLogo,
+} from '../company/company.service';
 
 /// The file format. Kept as a constant so a backup taken today can still be
 /// recognised by a later version of the program.
@@ -21,6 +33,24 @@ export interface BackupFile {
   companyId: string;
   companyCode: string;
   companyName: string;
+  /// Portable profile fields. The installation-specific company code/ID are
+  /// deliberately not restored; they identify the target company, not its
+  /// display profile. Older version-1 files may omit this payload.
+  companyProfile?: {
+    nameEn: string;
+    nameAr: string;
+    taxId: string | null;
+    commercialRegistration: string | null;
+    addressEn: string | null;
+    addressAr: string | null;
+    phone: string | null;
+    email: string | null;
+    address: string | null;
+    currency: string;
+    timezone: string;
+    logoBase64: string | null;
+    logoMime: string | null;
+  };
   counts: Record<string, number>;
   tables: Record<string, Array<Record<string, unknown>>>;
 }
@@ -65,9 +95,15 @@ interface TableSpec {
   /// For a child: the table it hangs from and the column that points at it.
   parent?: string;
   foreignKey?: string;
+  /// For a child whose parent has no companyId of its own (a journal line
+  /// allocation hangs from a journal line, which hangs from the entry). The
+  /// relation filter that reaches the company in one step.
+  companyWhere?: (companyId: string) => Record<string, unknown>;
   /// Rows of this table may point at another row of the same table (an account
   /// has a parent account). Those are written parents first.
   selfReferencing?: boolean;
+  /// The scalar column that names the parent row in this same table.
+  selfReferenceField?: string;
 }
 
 /// Backs everything up as one JSON file, and puts it back again.
@@ -86,7 +122,12 @@ interface TableSpec {
 const TABLES: TableSpec[] = [
   // Insert parents before dependants. Restore deletes this list in reverse,
   // so every foreign-key dependant is removed before its parent.
-  { model: 'branch', scope: 'company', selfReferencing: true },
+  {
+    model: 'branch',
+    scope: 'company',
+    selfReferencing: true,
+    selfReferenceField: 'parentBranchId',
+  },
   { model: 'role', scope: 'company' },
   { model: 'rolePermission', scope: 'child', parent: 'role', foreignKey: 'roleId' },
   { model: 'user', scope: 'company' },
@@ -94,7 +135,12 @@ const TABLES: TableSpec[] = [
   { model: 'userRole', scope: 'company' },
   { model: 'userBranch', scope: 'child', parent: 'user', foreignKey: 'userId' },
   { model: 'fiscalPeriod', scope: 'company' },
-  { model: 'account', scope: 'company', selfReferencing: true },
+  {
+    model: 'account',
+    scope: 'company',
+    selfReferencing: true,
+    selfReferenceField: 'parentId',
+  },
   { model: 'costCenter', scope: 'company' },
   { model: 'companySetting', scope: 'company' },
   { model: 'priceList', scope: 'company' },
@@ -107,18 +153,80 @@ const TABLES: TableSpec[] = [
   { model: 'priceListItem', scope: 'child', parent: 'priceList', foreignKey: 'priceListId' },
   { model: 'stockBalance', scope: 'company' },
   { model: 'stockMovement', scope: 'company' },
-  { model: 'journalEntry', scope: 'company' },
+  {
+    model: 'journalEntry',
+    scope: 'company',
+    selfReferencing: true,
+    selfReferenceField: 'reversalOfId',
+  },
   { model: 'journalLine', scope: 'child', parent: 'journalEntry', foreignKey: 'journalEntryId' },
+  {
+    // The split of one journal line across several cost centres. It is not a
+    // column on the line: a line can belong to several centres at once, and a
+    // backup that dropped these rows would silently move every split amount
+    // into "unallocated" when the file was restored.
+    model: 'journalLineAllocation',
+    scope: 'child',
+    companyWhere: (companyId) => ({ line: { entry: { companyId } } }),
+  },
   { model: 'salesOrder', scope: 'company' },
   { model: 'salesOrderLine', scope: 'child', parent: 'salesOrder', foreignKey: 'orderId' },
   { model: 'purchaseOrder', scope: 'company' },
   { model: 'purchaseOrderLine', scope: 'child', parent: 'purchaseOrder', foreignKey: 'orderId' },
-  { model: 'salesInvoice', scope: 'company' },
-  { model: 'salesInvoiceLine', scope: 'child', parent: 'salesInvoice', foreignKey: 'invoiceId' },
-  { model: 'purchaseInvoice', scope: 'company' },
-  { model: 'purchaseInvoiceLine', scope: 'child', parent: 'purchaseInvoice', foreignKey: 'invoiceId' },
+  {
+    model: 'salesInvoice',
+    scope: 'company',
+    selfReferencing: true,
+    selfReferenceField: 'originalInvoiceId',
+  },
+  {
+    model: 'salesInvoiceLine',
+    scope: 'child',
+    parent: 'salesInvoice',
+    foreignKey: 'invoiceId',
+    selfReferencing: true,
+    selfReferenceField: 'originalLineId',
+  },
+  {
+    model: 'purchaseInvoice',
+    scope: 'company',
+    selfReferencing: true,
+    selfReferenceField: 'originalInvoiceId',
+  },
+  {
+    model: 'purchaseInvoiceLine',
+    scope: 'child',
+    parent: 'purchaseInvoice',
+    foreignKey: 'invoiceId',
+    selfReferencing: true,
+    selfReferenceField: 'originalLineId',
+  },
   { model: 'stockDocument', scope: 'company' },
   { model: 'stockDocumentLine', scope: 'child', parent: 'stockDocument', foreignKey: 'documentId' },
+  // Quotations point at the invoice they became, so they follow sales
+  // invoices. The content snapshot is a column on the quotation, so an issued
+  // offer survives the round trip exactly as it was sent.
+  {
+    model: 'quotation',
+    scope: 'company',
+    selfReferencing: true,
+    selfReferenceField: 'revisionOfId',
+  },
+  {
+    model: 'quotationTable',
+    scope: 'child',
+    companyWhere: (companyId) => ({ quotation: { companyId } }),
+  },
+  {
+    model: 'quotationLine',
+    scope: 'child',
+    companyWhere: (companyId) => ({ table: { quotation: { companyId } } }),
+  },
+  {
+    model: 'quotationEvent',
+    scope: 'child',
+    companyWhere: (companyId) => ({ quotation: { companyId } }),
+  },
   { model: 'openingBalance', scope: 'company' },
   { model: 'openingBalanceLine', scope: 'child', parent: 'openingBalance', foreignKey: 'openingBalanceId' },
   { model: 'cashAccount', scope: 'company' },
@@ -130,45 +238,12 @@ const TABLES: TableSpec[] = [
   { model: 'auditLog', scope: 'company' },
 ];
 
-const PERMISSION_CODES: string[] = [
-  'accounting.accounts.read',
-  'accounting.accounts.create',
-  'accounting.accounts.update',
-  'accounting.accounts.delete',
-  'accounting.journal.read',
-  'accounting.journal.create',
-  'accounting.journal.post',
-  'admin.users.manage',
-  'admin.roles.manage',
-  'admin.audit.read',
-  'admin.backup',
-  'admin.company.manage',
-  'parties.customers.read',
-  'parties.customers.create',
-  'parties.customers.update',
-  'parties.suppliers.read',
-  'parties.suppliers.create',
-  'parties.suppliers.update',
-  'inventory.items.read',
-  'inventory.items.create',
-  'inventory.items.update',
-  'inventory.stock.read',
-  'sales.invoices.read',
-  'sales.invoices.create',
-  'sales.invoices.post',
-  'purchases.invoices.read',
-  'purchases.invoices.create',
-  'purchases.invoices.post',
-  'reports.read',
-  'accounting.periods.read',
-  'accounting.periods.manage',
-];
-
 /// Tables that are deliberately left out, and why. A backup file that silently
 /// omits something is worse than one that says what it omits.
 const OMITTED: Record<string, string> = {
   permission: 'the list of permissions is part of the program, not of the data',
   refreshToken: 'sign-in sessions should not come back to life when a backup is restored',
+  backupRun: 'backup history describes files on this installation, not portable company business data',
 };
 
 @Injectable()
@@ -206,9 +281,57 @@ export class BackupService {
       companyId: company.id,
       companyCode: company.code,
       companyName: company.nameAr ?? company.nameEn,
+      companyProfile: {
+        nameEn: company.nameEn,
+        nameAr: company.nameAr,
+        taxId: company.taxId,
+        commercialRegistration: company.commercialRegistration,
+        addressEn: company.addressEn,
+        addressAr: company.addressAr,
+        phone: company.phone,
+        email: company.email,
+        address: company.address,
+        currency: company.currency,
+        timezone: company.timezone,
+        logoBase64: company.logoData
+          ? Buffer.from(company.logoData).toString('base64')
+          : null,
+        logoMime: company.logoData ? company.logoMime : null,
+      },
       counts,
       tables,
     };
+  }
+
+  /// The sample backup is shipped as a discoverable download, but never
+  /// inferred from a caller-supplied path. The first location is the packaged
+  /// Windows layout; the second is the repository layout used in development.
+  async demoBackup(): Promise<Buffer> {
+    const fileName = 'kayan-company-backup-demo.json';
+    const paths = [
+      join(process.cwd(), 'demo-data', fileName),
+      join(process.cwd(), '..', 'demo-data', fileName),
+    ];
+    for (const path of paths) {
+      try {
+        const data = await readFile(path);
+        let parsed: BackupFile;
+        try {
+          parsed = JSON.parse(data.toString('utf8')) as BackupFile;
+        } catch {
+          throw new BadRequestException('The packaged demo company backup is not valid JSON.');
+        }
+        this.validate(parsed);
+        if (parsed.companyCode !== 'DEMO') {
+          throw new BadRequestException('The packaged demo company backup has the wrong identity.');
+        }
+        return data;
+      } catch (error) {
+        if (error instanceof BadRequestException) throw error;
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+    throw new NotFoundException('The demo company backup is not included in this installation.');
   }
 
   private delegate(
@@ -234,6 +357,14 @@ export class BackupService {
       >;
     }
 
+    // A child that reaches the company through two relations is filtered
+    // directly: its parent has no companyId to list.
+    if (spec.companyWhere) {
+      return (await delegate.findMany({
+        where: spec.companyWhere(companyId),
+      })) as Array<Record<string, unknown>>;
+    }
+
     // A child table is reached through its parent's ids.
     const parent = this.delegate(client, spec.parent as string);
     const parents = (await parent.findMany({
@@ -242,9 +373,22 @@ export class BackupService {
     })) as Array<{ id: string }>;
     if (parents.length === 0) return [];
 
-    return (await delegate.findMany({
+    const includePermissionCode =
+      spec.model === 'rolePermission' || spec.model === 'userPermission';
+    const rows = (await delegate.findMany({
       where: { [spec.foreignKey as string]: { in: parents.map((row) => row.id) } },
+      ...(includePermissionCode ? { include: { permission: { select: { code: true } } } } : {}),
     })) as Array<Record<string, unknown>>;
+    if (!includePermissionCode) return rows;
+    return rows.map((row) => {
+      const { permission, ...scalars } = row as Record<string, unknown> & {
+        permission?: { code?: string } | null;
+      };
+      return {
+        ...scalars,
+        ...(permission?.code ? { permissionCode: permission.code } : {}),
+      };
+    });
   }
 
   /// ───────────────────────────────────────────────────────── putting one back
@@ -269,12 +413,12 @@ export class BackupService {
         'The company in this backup does not exist here. Restore it on the installation it came from.',
       );
     }
+    const previousLogoPath = company.logoPath;
 
     const isMatch =
       file.companyId === requesterCompanyId ||
       file.companyCode === company.code ||
-      file.companyCode === 'DEMO' ||
-      file.companyCode === 'KAYAN';
+      file.companyCode === 'DEMO';
 
     if (!isMatch) {
       throw new BadRequestException(
@@ -282,6 +426,13 @@ export class BackupService {
       );
     }
 
+    const actor = options.actorUserId &&
+      typeof (this.prisma as any).user?.findFirst === 'function'
+      ? await (this.prisma as any).user.findFirst({
+          where: { id: options.actorUserId, companyId: requesterCompanyId, deletedAt: null },
+          select: { id: true, isSuperAdmin: true },
+        })
+      : null;
     const existing = await this.countExisting(requesterCompanyId);
     const hasData = Object.values(existing).some((count) => count > 0);
 
@@ -363,10 +514,62 @@ export class BackupService {
         }
 
         for (const spec of TABLES) {
-          const rows = (file.tables[spec.model] ?? []).filter(isRow);
+          const rows = file.tables[spec.model] ?? [];
           if (rows.length === 0) continue;
-          await this.insertTable(tx, spec, rows, requesterCompanyId);
+          // Historical documents must pass the same open-period triggers as
+          // ordinary inserts. Periods are open only inside this transaction;
+          // restore their saved closed state after all dependent rows exist.
+          const restoreRows = spec.model === 'fiscalPeriod'
+            ? rows.map((row) => row.status === PeriodStatus.CLOSED
+                ? { ...row, status: PeriodStatus.OPEN }
+                : row)
+            : rows;
+          await this.insertTable(tx, spec, restoreRows, requesterCompanyId, {
+            actorUserId: actor?.id ?? null,
+            actorIsSuperAdmin: actor?.isSuperAdmin === true,
+          });
           written[spec.model] = rows.length;
+        }
+
+        for (const period of file.tables.fiscalPeriod ?? []) {
+          if (period.status !== PeriodStatus.CLOSED) continue;
+          await tx.fiscalPeriod.updateMany({
+            where: { id: String(period.id), companyId: requesterCompanyId },
+            data: { status: PeriodStatus.CLOSED },
+          });
+        }
+
+        // The profile is part of a current company backup, but not of older
+        // version-1 files. Keep legacy restore behaviour for files that omit
+        // it; when present, restore the portable company details and image
+        // without changing the target installation's identity/code.
+        if (file.companyProfile) {
+          const profile = file.companyProfile;
+          const logo = profile.logoBase64 === null
+            ? null
+            : validateLogo(
+                Buffer.from(profile.logoBase64, 'base64'),
+                profile.logoMime ?? '',
+              );
+          await tx.company.update({
+            where: { id: requesterCompanyId },
+            data: {
+              nameEn: profile.nameEn,
+              nameAr: profile.nameAr,
+              taxId: profile.taxId,
+              commercialRegistration: profile.commercialRegistration,
+              addressEn: profile.addressEn,
+              addressAr: profile.addressAr,
+              phone: profile.phone,
+              email: profile.email,
+              address: profile.address,
+              currency: profile.currency,
+              timezone: profile.timezone,
+              logoData: logo?.data ?? null,
+              logoMime: logo?.mime ?? null,
+              logoPath: null,
+            },
+          });
         }
 
         // The purge is recorded now that the accounts are back, and what was
@@ -396,9 +599,13 @@ export class BackupService {
       { timeout: 300_000, maxWait: 30_000 },
     );
 
+    if (file.companyProfile && previousLogoPath) {
+      await unlink(join(uploadsDir(), basename(previousLogoPath))).catch(() => {});
+    }
+
     return {
       companyId: requesterCompanyId,
-      companyName: file.companyName,
+      companyName: file.companyProfile?.nameAr ?? file.companyName,
       createdAt: file.createdAt,
       replaced: hasData,
       written,
@@ -422,8 +629,7 @@ export class BackupService {
       belongsToThisCompany:
         file.companyId === requesterCompanyId ||
         (company?.code != null && file.companyCode === company.code) ||
-        file.companyCode === 'DEMO' ||
-        file.companyCode === 'KAYAN',
+        file.companyCode === 'DEMO',
       contains: file.counts ?? {},
       current: await this.countExisting(requesterCompanyId),
       omitted: OMITTED,
@@ -438,13 +644,86 @@ export class BackupService {
         'This file is not a KAYAN backup. Choose a file that was downloaded from the backup screen.',
       );
     }
-    if (typeof file.version !== 'number' || file.version > BACKUP_VERSION) {
+    if (
+      !Number.isInteger(file.version) ||
+      file.version < 1 ||
+      file.version > BACKUP_VERSION
+    ) {
       throw new BadRequestException(
         `This backup was written by a newer version of the program (format ${file.version}). Update the program first.`,
       );
     }
-    if (!file.tables || typeof file.tables !== 'object') {
+    if (!file.tables || typeof file.tables !== 'object' || Array.isArray(file.tables)) {
       throw new BadRequestException('The backup file has no tables in it.');
+    }
+    const supportedTables = new Set(TABLES.map((spec) => spec.model));
+    for (const [name, rows] of Object.entries(file.tables)) {
+      if (!Array.isArray(rows)) {
+        throw new BadRequestException(`The backup table "${name}" must contain a list of rows.`);
+      }
+      if (!supportedTables.has(name) && rows.length > 0) {
+        throw new BadRequestException(
+          `The backup contains data for unsupported table "${name}". Use a matching program version; nothing was changed.`,
+        );
+      }
+      for (const [index, row] of rows.entries()) {
+        if (!isRow(row)) {
+          throw new BadRequestException(
+            `The backup row ${index + 1} in table "${name}" must be a JSON object; nothing was changed.`,
+          );
+        }
+      }
+    }
+    if (!file.companyId || !file.companyCode || !file.createdAt) {
+      throw new BadRequestException('The backup is missing its company identity or creation date.');
+    }
+
+    if (file.companyProfile !== undefined) {
+      const profile = file.companyProfile;
+      if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+        throw new BadRequestException('The backup company profile is invalid.');
+      }
+      if (
+        typeof profile.nameEn !== 'string' || !profile.nameEn.trim() ||
+        typeof profile.nameAr !== 'string' || !profile.nameAr.trim() ||
+        typeof profile.currency !== 'string' || !/^[A-Z]{3}$/.test(profile.currency) ||
+        typeof profile.timezone !== 'string' || !profile.timezone.trim()
+      ) {
+        throw new BadRequestException('The backup company profile is missing its required fields.');
+      }
+      for (const field of [
+        'taxId', 'commercialRegistration', 'addressEn', 'addressAr',
+        'phone', 'email', 'address',
+      ] as const) {
+        const value = profile[field];
+        if (value !== null && typeof value !== 'string') {
+          throw new BadRequestException(`The backup company profile field "${field}" is invalid.`);
+        }
+      }
+
+      if (profile.logoBase64 !== null) {
+        if (
+          typeof profile.logoBase64 !== 'string' ||
+          profile.logoBase64.length > Math.ceil(LOGO_MAX_BYTES * 4 / 3) + 4 ||
+          !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(profile.logoBase64)
+        ) {
+          throw new BadRequestException('The backup company logo is not valid base64.');
+        }
+        const data = Buffer.from(profile.logoBase64, 'base64');
+        if (data.toString('base64') !== profile.logoBase64) {
+          throw new BadRequestException('The backup company logo is not valid base64.');
+        }
+        const logo = validateLogo(data, profile.logoMime ?? '');
+        const dimensions = logoDimensions(data, logo.mime);
+        if (
+          !dimensions || dimensions.width < 32 || dimensions.height < 32 ||
+          dimensions.width > 2048 || dimensions.height > 2048
+        ) {
+          throw new BadRequestException('The backup company logo must be between 32px and 2048px.');
+        }
+      } else if (profile.logoMime !== null) {
+        throw new BadRequestException('The backup company logo type is inconsistent.');
+      }
     }
   }
 
@@ -465,7 +744,27 @@ export class BackupService {
     const delegate = this.delegate(client, spec.model);
     if (!delegate?.deleteMany) return;
 
-    if (spec.model === 'account') {
+    if (spec.model === 'salesInvoiceLine') {
+      await (client as any).salesInvoiceLine.updateMany({
+        where: { invoice: { companyId } },
+        data: { originalLineId: null },
+      });
+    } else if (spec.model === 'salesInvoice') {
+      await (client as any).salesInvoice.updateMany({
+        where: { companyId },
+        data: { originalInvoiceId: null },
+      });
+    } else if (spec.model === 'purchaseInvoiceLine') {
+      await (client as any).purchaseInvoiceLine.updateMany({
+        where: { invoice: { companyId } },
+        data: { originalLineId: null },
+      });
+    } else if (spec.model === 'purchaseInvoice') {
+      await (client as any).purchaseInvoice.updateMany({
+        where: { companyId },
+        data: { originalInvoiceId: null },
+      });
+    } else if (spec.model === 'account') {
       await (client as any).account.updateMany({
         where: { companyId },
         data: { parentId: null },
@@ -475,10 +774,22 @@ export class BackupService {
         where: { companyId },
         data: { parentBranchId: null },
       }).catch(() => {});
+    } else if (spec.model === 'quotation') {
+      // Revisions point at one another. Break the chain before deleting so
+      // the delete cannot fail on its own foreign key.
+      await (client as any).quotation.updateMany({
+        where: { companyId },
+        data: { revisionOfId: null },
+      }).catch(() => {});
     }
 
     if (spec.scope === 'company') {
       await delegate.deleteMany({ where: { companyId } });
+      return;
+    }
+
+    if (spec.companyWhere) {
+      await delegate.deleteMany({ where: spec.companyWhere(companyId) });
       return;
     }
 
@@ -498,6 +809,7 @@ export class BackupService {
     spec: TableSpec,
     rows: Array<Record<string, unknown>>,
     companyId: string,
+    security: { actorUserId: string | null; actorIsSuperAdmin: boolean },
   ): Promise<void> {
     const delegate = this.delegate(client, spec.model);
     if (!delegate?.createMany) return;
@@ -508,6 +820,26 @@ export class BackupService {
     let prepared = rows.map((row) => {
       const clean: Record<string, unknown> = { ...row };
       if (spec.scope === 'company') clean.companyId = companyId;
+      // New cost fields default to the historical line value when a v1
+      // purchase backup predates explicit landed-cost storage.
+      if (spec.model === 'purchaseInvoice') {
+        clean.landedCostAmount ??= '0';
+        clean.landedCostCharges ??= [];
+      }
+      if (spec.model === 'purchaseInvoiceLine') {
+        clean.landedCostAmount ??= '0';
+        clean.inventoryCostTotal ??= clean.lineTotal ?? '0';
+        clean.returnedCostTotal ??= '0';
+      }
+      if (spec.model === 'salesInvoiceLine') clean.returnedCostTotal ??= '0';
+      // A JSON backup can restore company users and their role assignments,
+      // but it can never grant installation-wide super-admin powers. Keep
+      // that flag only for the currently authenticated account and only if it
+      // already had that privilege on this installation.
+      if (spec.model === 'user') {
+        clean.isSuperAdmin =
+          clean.id === security.actorUserId && security.actorIsSuperAdmin;
+      }
       for (const [key, value] of Object.entries(clean)) {
         if (typeof value === 'string' && looksLikeDate(key, value)) {
           clean[key] = new Date(value);
@@ -520,56 +852,69 @@ export class BackupService {
       (spec.model === 'rolePermission' || spec.model === 'userPermission') &&
       typeof (client as any).permission?.findMany === 'function'
     ) {
-      const targetPerms = (await (client as any).permission.findMany()) as Array<{
-        id: string;
-        code: string;
-      }>;
-      if (targetPerms.length > 0) {
-        const targetById = new Set(targetPerms.map((p) => p.id));
-        const targetByCode = new Map(targetPerms.map((p) => [p.code, p.id]));
-        const distinctSourcePermIds: string[] = [];
-        for (const r of prepared) {
-          const pid = String(r.permissionId ?? '');
-          if (pid && !distinctSourcePermIds.includes(pid)) {
-            distinctSourcePermIds.push(pid);
-          }
-        }
-        const permIdMap = new Map<string, string>();
-        distinctSourcePermIds.forEach((sourceId, idx) => {
-          if (targetById.has(sourceId)) {
-            permIdMap.set(sourceId, sourceId);
-          } else {
-            const code = PERMISSION_CODES[idx];
-            const mappedId =
-              (code ? targetByCode.get(code) : undefined) ??
-              targetPerms[idx]?.id;
-            if (mappedId) {
-              permIdMap.set(sourceId, mappedId);
-            }
-          }
-        });
+      const targetPerms = (await (client as any).permission.findMany({
+        select: { id: true, code: true },
+      })) as Array<{ id: string; code: string }>;
+      const targetById = new Set(targetPerms.map((permission) => permission.id));
+      const targetByCode = new Map(targetPerms.map((permission) => [permission.code, permission.id]));
+      const assignmentField = spec.model === 'rolePermission' ? 'roleId' : 'userId';
+      const seenPairs = new Set<string>();
+      const remapped: Array<Record<string, unknown>> = [];
+      const missingLegacyCodes: string[] = [];
 
-        const seenPairs = new Set<string>();
-        const remapped: Array<Record<string, unknown>> = [];
-        for (const r of prepared) {
-          const assignmentField = spec.model === 'rolePermission' ? 'roleId' : 'userId';
-          const assignmentId = String(r[assignmentField] ?? '');
-          const rawPermId = String(r.permissionId ?? '');
-          const mappedPermId =
-            (typeof r.permissionCode === 'string'
-              ? targetByCode.get(r.permissionCode)
-              : undefined) ?? permIdMap.get(rawPermId);
-          if (!assignmentId || !mappedPermId) continue;
-          const pairKey = assignmentId + ':' + mappedPermId;
-          if (seenPairs.has(pairKey)) continue;
-          seenPairs.add(pairKey);
-          remapped.push({ [assignmentField]: assignmentId, permissionId: mappedPermId });
+      for (const row of prepared) {
+        const assignmentId = String(row[assignmentField] ?? '');
+        const sourcePermissionId = String(row.permissionId ?? '');
+        const permissionCode =
+          typeof row.permissionCode === 'string' ? row.permissionCode : null;
+        const mappedPermissionId = permissionCode
+          ? targetByCode.get(permissionCode)
+          : targetById.has(sourcePermissionId)
+            ? sourcePermissionId
+            : undefined;
+
+        if (!permissionCode && sourcePermissionId && !mappedPermissionId) {
+          missingLegacyCodes.push(sourcePermissionId);
+          continue;
         }
-        prepared = remapped;
+        // A newer backup can contain permissions the installed app does not
+        // know yet. They are safely omitted rather than guessed by array
+        // position and accidentally granted to the wrong role.
+        if (!assignmentId || !mappedPermissionId) continue;
+        const pairKey = `${assignmentId}:${mappedPermissionId}`;
+        if (seenPairs.has(pairKey)) continue;
+        seenPairs.add(pairKey);
+        remapped.push({ [assignmentField]: assignmentId, permissionId: mappedPermissionId });
       }
+
+      if (missingLegacyCodes.length > 0) {
+        throw new BadRequestException(
+          'This older backup does not include permission codes, and its permission IDs do not match this installation. ' +
+            'Restore it on the original installation or create a new company JSON backup with a version that stores permission codes. Nothing was changed.',
+        );
+      }
+      prepared = remapped;
     }
 
-    const ordered = spec.selfReferencing ? parentsFirst(prepared) : prepared;
+    // Prisma rejects columns that belonged to an older schema but no longer
+    // exist. Filter each row against this generated client's scalar model
+    // fields. Required fields and foreign keys are checked by PostgreSQL when
+    // createMany runs inside the all-or-nothing restore transaction; any such
+    // error rolls the complete restore back.
+    const modelFields = this.scalarModelFields(spec.model);
+    if (modelFields) {
+      prepared = prepared.map((row) => {
+        const clean: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(row)) {
+          if (modelFields.has(key)) clean[key] = value;
+        }
+        return clean;
+      });
+    }
+
+    const ordered = spec.selfReferencing
+      ? parentsFirst(prepared, spec.selfReferenceField)
+      : prepared;
 
     // In chunks, because a single statement with tens of thousands of rows
     // exceeds the parameter limit PostgreSQL accepts. The chunk is large
@@ -583,6 +928,28 @@ export class BackupService {
         skipDuplicates: false,
       });
     }
+  }
+
+  private scalarModelFields(model: string): Set<string> | null {
+    const prismaWithDmmf = Prisma as unknown as {
+      dmmf?: {
+        datamodel?: {
+          models?: Array<{
+            name: string;
+            fields: Array<{
+              name: string;
+              kind: string;
+            }>;
+          }>;
+        };
+      };
+    };
+    const dmmf = prismaWithDmmf.dmmf;
+    const modelName = model.charAt(0).toUpperCase() + model.slice(1);
+    const info = dmmf?.datamodel?.models?.find((candidate) => candidate.name === modelName);
+    if (!info) return null;
+    const scalar = info.fields.filter((field) => field.kind !== 'object');
+    return new Set(scalar.map((field) => field.name));
   }
 }
 
@@ -610,9 +977,10 @@ function looksLikeDate(key: string, value: string): boolean {
 }
 
 /// Rows that point at another row of the same table are moved after the row
-/// they point at, so a chart of accounts is written top down.
+/// they point at: branch/account hierarchies and invoice/line return links.
 function parentsFirst(
   rows: Array<Record<string, unknown>>,
+  selfReferenceField?: string,
 ): Array<Record<string, unknown>> {
   const placed = new Set<string>();
   const remaining = [...rows];
@@ -623,7 +991,9 @@ function parentsFirst(
     moved = false;
     for (let index = remaining.length - 1; index >= 0; index -= 1) {
       const row = remaining[index];
-      const parentId = row.parentId ?? row.parentBranchId;
+      const parentId = selfReferenceField
+        ? row[selfReferenceField]
+        : row.parentId ?? row.parentBranchId;
       if (parentId === null || parentId === undefined || placed.has(String(parentId))) {
         placed.add(String(row.id));
         out.push(row);

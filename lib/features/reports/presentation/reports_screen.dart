@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/theme/design_tokens.dart';
+import '../../../core/error/failure.dart';
 import '../../../core/json/amount_format.dart';
 import '../../../core/json/json_utils.dart';
 import '../../../shared/extensions/l10n_extension.dart';
 import '../../../shared/utils/account_name.dart';
+import '../../../shared/widgets/data_dialog.dart';
 import '../../../shared/widgets/records_table.dart';
+import '../../../shared/widgets/status_pill.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../../accounting/presentation/providers/chart_of_accounts_providers.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
@@ -98,7 +102,7 @@ class ReportsScreen extends ConsumerStatefulWidget {
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 15, vsync: this)
+  late final TabController _tabs = TabController(length: 17, vsync: this)
     ..addListener(() => setState(() {}));
 
   @override
@@ -159,6 +163,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               ),
               Tab(text: l10n.expenses),
               Tab(text: _t(context, 'الإيرادات', 'Income')),
+              Tab(text: l10n.costCenterReport),
+              Tab(text: l10n.budgetReport),
             ],
           ),
           // Download and print always reflect the tab that is open and the
@@ -167,14 +173,19 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: Align(
               alignment: AlignmentDirectional.centerEnd,
-              child: ReportExportActions(
-                report: _reportSlug,
-                from: period.from,
-                to: period.to,
-                accountId: _tabs.index == 6
-                    ? ref.watch(ledgerAccountProvider)
-                    : null,
-              ),
+              // The exported report catalogue does not include the two
+              // cost-centre reports yet, so the button is not offered for a
+              // report it would fail to produce.
+              child: _tabs.index >= 15
+                  ? const SizedBox.shrink()
+                  : ReportExportActions(
+                      report: _reportSlug,
+                      from: period.from,
+                      to: period.to,
+                      accountId: _tabs.index == 6
+                          ? ref.watch(ledgerAccountProvider)
+                          : null,
+                    ),
             ),
           ),
           Expanded(
@@ -199,7 +210,9 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               11 => const _CashReportTab(),
               12 => const _OutstandingInvoicesTab(),
               13 => const _ExpensesIncomeTab(isExpense: true),
-              _ => const _ExpensesIncomeTab(isExpense: false),
+              14 => const _ExpensesIncomeTab(isExpense: false),
+              15 => const _CostCentersTab(),
+              _ => const _BudgetReportTab(),
             },
           ),
         ],
@@ -223,7 +236,9 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
     11 => 'cash',
     12 => 'outstanding-invoices',
     13 => 'expenses',
-    _ => 'income',
+    14 => 'income',
+    15 => 'cost-centers',
+    _ => 'budgets',
   };
 
   Future<void> _pickPeriod() async {
@@ -1356,6 +1371,334 @@ class _ExpensesIncomeTab extends ConsumerWidget {
           emphasise: true,
         ),
       ],
+    );
+  }
+}
+
+
+/// Cost-center revenue, expenses and result, with the unattributed bucket and
+/// the ledger reconciliation the API returns. The figures come from posted
+/// entries only; the screen adds nothing to them.
+class _CostCentersTab extends ConsumerWidget {
+  const _CostCentersTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    final period = ref.watch(periodProvider);
+    final language = Localizations.localeOf(context).languageCode;
+    final path =
+        '/reports/cost-centers?from=${period.from}&to=${period.to}&includeInactive=true';
+    final async = ref.watch(reportProvider(path));
+
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final rows = listOf(data['items']);
+        final unallocated = data['unallocated'] is Map
+            ? Map<String, dynamic>.from(data['unallocated'] as Map)
+            : <String, dynamic>{};
+        final totals = data['totals'] is Map
+            ? Map<String, dynamic>.from(data['totals'] as Map)
+            : <String, dynamic>{};
+        return Column(
+          children: [
+            _SummaryStrip(
+              entries: [
+                MapEntry(l10n.revenue, formatAmount(asString(totals['revenue']))),
+                MapEntry(l10n.expenses, formatAmount(asString(totals['expenses']))),
+                MapEntry(l10n.netProfit, formatAmount(asString(totals['result']))),
+                MapEntry(
+                  l10n.unallocated,
+                  '${formatAmount(asString(unallocated['revenue']))} / '
+                      '${formatAmount(asString(unallocated['expenses']))}',
+                ),
+              ],
+            ),
+            Expanded(
+              child: RecordsTable(
+                rows: rows,
+                columns: [
+                  ColumnSpec(
+                    l10n.costCenter,
+                    emphasise: true,
+                    value: (row) =>
+                        '${text(row, 'code')} — '
+                        '${language == 'ar' ? text(row, 'nameAr') : text(row, 'nameEn')}',
+                  ),
+                  ColumnSpec(
+                    l10n.costCenterType,
+                    value: (row) => _costCenterTypeLabel(context, text(row, 'type')),
+                  ),
+                  ColumnSpec(
+                    l10n.ownAmount,
+                    numeric: true,
+                    value: (row) =>
+                        '${formatAmount(asString(row['ownRevenue']))} / '
+                        '${formatAmount(asString(row['ownExpenses']))}',
+                  ),
+                  ColumnSpec(
+                    l10n.rolledUp,
+                    numeric: true,
+                    value: (row) =>
+                        '${formatAmount(asString(row['revenue']))} / '
+                        '${formatAmount(asString(row['expenses']))}',
+                  ),
+                  ColumnSpec(
+                    l10n.netProfit,
+                    numeric: true,
+                    value: (row) => formatAmount(asString(row['result'])),
+                    emphasise: true,
+                  ),
+                  ColumnSpec(
+                    l10n.status,
+                    value: (row) => flag(row, 'isActive', fallback: true)
+                        ? l10n.active
+                        : l10n.inactive,
+                    tone: (row) => flag(row, 'isActive', fallback: true)
+                        ? AppTone.success
+                        : AppTone.neutral,
+                  ),
+                ],
+                actions: (row) => [
+                  IconButton(
+                    tooltip: l10n.drillDown,
+                    icon: const Icon(Icons.list_alt_outlined, size: 20),
+                    onPressed: () => _showLines(
+                      context,
+                      ref,
+                      id: text(row, 'costCenterId'),
+                      title: '${text(row, 'code')} — ${text(row, 'nameEn')}',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (unallocated.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton.icon(
+                    onPressed: () => _showLines(
+                      context,
+                      ref,
+                      id: 'unallocated',
+                      title: l10n.unallocated,
+                    ),
+                    icon: const Icon(Icons.list_alt_outlined),
+                    label: Text(
+                      '${l10n.unallocated}: '
+                      '${formatAmount(asString(unallocated['revenue']))} / '
+                      '${formatAmount(asString(unallocated['expenses']))}',
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showLines(
+    BuildContext context,
+    WidgetRef ref, {
+    required String id,
+    required String title,
+  }) async {
+    final period = ref.read(periodProvider);
+    Json data;
+    try {
+      data = await ref.read(apiClientProvider).getObject(
+        '/reports/cost-centers/$id/transactions',
+        query: {'from': period.from, 'to': period.to, 'pageSize': '200'},
+      );
+    } on Failure catch (error) {
+      if (context.mounted) showMessage(context, error.message, error: true);
+      return;
+    }
+    if (!context.mounted) return;
+    final l10n = context.l10n;
+    final rows = listOf(data['items']);
+    await showDataDialog<void>(
+      context,
+      storageKey: 'cost-center-transactions',
+      title: title,
+      icon: Icons.account_tree_outlined,
+      initialSize: const Size(900, 560),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: rows.isEmpty
+            ? Center(child: Text(l10n.noTransactions))
+            : RecordsTable(
+                rows: rows,
+                columns: [
+                  ColumnSpec(
+                    l10n.entryNumber,
+                    emphasise: true,
+                    value: (row) => text(row, 'entryNumber'),
+                  ),
+                  ColumnSpec(l10n.invoiceDate, value: (row) => text(row, 'entryDate')),
+                  ColumnSpec(
+                    l10n.account,
+                    value: (row) => '${text(row, 'accountCode')} — '
+                        '${text(row, 'accountName')}',
+                  ),
+                  ColumnSpec(
+                    l10n.description,
+                    value: (row) => text(row, 'description'),
+                  ),
+                  ColumnSpec(
+                    l10n.amount,
+                    numeric: true,
+                    value: (row) => formatAmount(asString(row['amount'])),
+                  ),
+                  ColumnSpec(
+                    l10n.status,
+                    value: (row) => text(row, 'status'),
+                    tone: (row) => toneForStatus(text(row, 'status')),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+String _costCenterTypeLabel(BuildContext context, String type) {
+  final l10n = context.l10n;
+  return switch (type) {
+    'DEPARTMENT' => l10n.department,
+    'ADMINISTRATIVE_UNIT' => l10n.administrativeUnit,
+    'PROJECT' => l10n.project,
+    _ => type,
+  };
+}
+
+/// Budget against actual, row by row. Every figure is the API's answer from
+/// posted ledger lines; the screen only arranges it.
+class _BudgetReportTab extends ConsumerWidget {
+  const _BudgetReportTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    final period = ref.watch(periodProvider);
+    final language = Localizations.localeOf(context).languageCode;
+    final path =
+        '/reports/budgets?from=${period.from}&to=${period.to}&includeInactive=true';
+    final async = ref.watch(reportProvider(path));
+
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final rows = listOf(data['rows']);
+        final totals = data['totals'] is Map
+            ? Map<String, dynamic>.from(data['totals'] as Map)
+            : <String, dynamic>{};
+        final expense = totals['expense'] is Map
+            ? Map<String, dynamic>.from(totals['expense'] as Map)
+            : <String, dynamic>{};
+        final revenue = totals['revenue'] is Map
+            ? Map<String, dynamic>.from(totals['revenue'] as Map)
+            : <String, dynamic>{};
+        return Column(
+          children: [
+            _SummaryStrip(
+              entries: [
+                MapEntry(
+                  '${l10n.expenses} — ${l10n.budget}',
+                  formatAmount(asString(expense['budget'])),
+                ),
+                MapEntry(
+                  '${l10n.expenses} — ${l10n.actualAmount}',
+                  formatAmount(asString(expense['actual'])),
+                ),
+                MapEntry(
+                  '${l10n.revenue} — ${l10n.budget}',
+                  formatAmount(asString(revenue['budget'])),
+                ),
+                MapEntry(
+                  '${l10n.revenue} — ${l10n.actualAmount}',
+                  formatAmount(asString(revenue['actual'])),
+                ),
+              ],
+            ),
+            Expanded(
+              child: rows.isEmpty
+                  ? Center(child: Text(l10n.noBudgets))
+                  : RecordsTable(
+                      rows: rows,
+                      columns: [
+                        ColumnSpec(
+                          l10n.costCenter,
+                          emphasise: true,
+                          value: (row) =>
+                              '${text(row, 'costCenterCode')} — '
+                              '${language == 'ar' ? text(row, 'costCenterNameAr') : text(row, 'costCenterNameEn')}',
+                        ),
+                        ColumnSpec(
+                          l10n.account,
+                          value: (row) =>
+                              '${text(row, 'accountCode')} — '
+                              '${language == 'ar' ? text(row, 'accountNameAr') : text(row, 'accountNameEn')}',
+                        ),
+                        ColumnSpec(
+                          l10n.budgetPeriod,
+                          value: (row) =>
+                              '${text(row, 'periodStart')} → ${text(row, 'periodEnd')}',
+                        ),
+                        ColumnSpec(
+                          l10n.budgetAmount,
+                          numeric: true,
+                          value: (row) => formatAmount(asString(row['budget'])),
+                        ),
+                        ColumnSpec(
+                          l10n.actualAmount,
+                          numeric: true,
+                          value: (row) => formatAmount(asString(row['actual'])),
+                        ),
+                        ColumnSpec(
+                          l10n.variance,
+                          numeric: true,
+                          value: (row) => formatAmount(asString(row['variance'])),
+                          emphasise: true,
+                        ),
+                        ColumnSpec(
+                          l10n.variancePercent,
+                          numeric: true,
+                          value: (row) => row['variancePercent'] == null
+                              ? '—'
+                              : '${text(row, 'variancePercent')}%',
+                        ),
+                        ColumnSpec(
+                          l10n.status,
+                          value: (row) => row['retired'] == true
+                              ? l10n.budgetRetired
+                              : (flag(row, 'isActive', fallback: true)
+                                    ? l10n.active
+                                    : l10n.inactive),
+                          tone: (row) => row['retired'] == true
+                              ? AppTone.neutral
+                              : (flag(row, 'isActive', fallback: true)
+                                    ? AppTone.success
+                                    : AppTone.neutral),
+                        ),
+                        ColumnSpec(
+                          l10n.resultLabel,
+                          value: (row) => row['favorable'] == true
+                              ? l10n.favorable
+                              : l10n.unfavorable,
+                        ),
+                      ],
+                    ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

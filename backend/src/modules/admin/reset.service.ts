@@ -8,8 +8,8 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
-import { mkdir, readFile, stat, writeFile } from 'fs/promises';
-import { join } from 'path';
+import { mkdir, readFile, stat, unlink, writeFile } from 'fs/promises';
+import { basename, join } from 'path';
 
 import { AuditPurgeService } from '../../common/audit/audit-purge.service';
 import { AuditService } from '../../common/audit/audit.service';
@@ -18,6 +18,7 @@ import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { BackupService } from '../backup/backup.service';
 import { FullBackupService } from '../backup/full-backup.service';
+import { uploadsDir } from '../company/company.service';
 import { RESET_CONFIRMATION_WORD } from './dto/reset.dto';
 
 /**
@@ -178,7 +179,7 @@ export class ResetService {
         isActive: true,
         isSuperAdmin: true,
         companyId: true,
-        company: { select: { id: true, code: true, deletedAt: true } },
+        company: { select: { id: true, code: true, deletedAt: true, logoPath: true } },
       },
     });
     if (!me || !me.isActive || !me.isSuperAdmin) {
@@ -280,43 +281,99 @@ export class ResetService {
             counts[name] = await run();
           };
 
-          // Journal lines hang off entries; entries hang off branches and
-          // accounts. Reversals point at the entry they reverse, so the link
-          // is cleared before either end is removed.
-          await step('journalLines', async () => {
-            const rows = await tx.$queryRaw<Array<{ id: string }>>`
-              DELETE FROM journal_lines l
-              USING journal_entries e
-              WHERE l."journalEntryId" = e.id AND e."companyId" = ${me.companyId}::uuid
-              RETURNING l.id`;
-            return rows.length;
+          // Delete business rows in explicit foreign-key order. In particular,
+          // allocations and returns point back at invoices/lines; cash books,
+          // opening balances and stock documents point at accounts, parties,
+          // branches and warehouses. Clearing the small self-references first
+          // keeps the whole reset inside this transaction without cascading to
+          // program/runtime data.
+          await step('cashVoucherAllocations', async () => {
+            const { count } = await tx.cashVoucherAllocation.deleteMany({
+              where: { voucher: { companyId: me.companyId } },
+            });
+            return count;
           });
-          await tx.$executeRaw`
-            UPDATE journal_entries SET "reversalOfId" = NULL
-            WHERE "companyId" = ${me.companyId}::uuid`;
-          await step('journalEntries', async () => {
-            const { count } = await tx.journalEntry.deleteMany({
+
+          await tx.salesInvoiceLine.updateMany({
+            where: { invoice: { companyId: me.companyId } },
+            data: { originalLineId: null },
+          });
+          await tx.salesInvoice.updateMany({
+            where: { companyId: me.companyId },
+            data: { originalInvoiceId: null },
+          });
+          await tx.purchaseInvoiceLine.updateMany({
+            where: { invoice: { companyId: me.companyId } },
+            data: { originalLineId: null },
+          });
+          await tx.purchaseInvoice.updateMany({
+            where: { companyId: me.companyId },
+            data: { originalInvoiceId: null },
+          });
+
+          // Cash vouchers/transfers and reconciliations all hold restrictive
+          // references to cash accounts and other business masters.
+          await step('cashVouchers', async () => {
+            const { count } = await tx.cashVoucher.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('cashTransfers', async () => {
+            const { count } = await tx.cashTransfer.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('bankReconciliations', async () => {
+            const { count } = await tx.bankReconciliation.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('cashAccounts', async () => {
+            const { count } = await tx.cashAccount.deleteMany({
               where: { companyId: me.companyId },
             });
             return count;
           });
 
-          // Invoices, then their lines (a line cannot outlive its invoice).
+          await step('stockDocumentLines', async () => {
+            const { count } = await tx.stockDocumentLine.deleteMany({
+              where: { document: { companyId: me.companyId } },
+            });
+            return count;
+          });
+          await step('stockDocuments', async () => {
+            const { count } = await tx.stockDocument.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('openingBalanceLines', async () => {
+            const { count } = await tx.openingBalanceLine.deleteMany({
+              where: { openingBalance: { companyId: me.companyId } },
+            });
+            return count;
+          });
+          await step('openingBalances', async () => {
+            const { count } = await tx.openingBalance.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+
           await step('salesInvoiceLines', async () => {
-            const rows = await tx.$queryRaw<Array<{ id: string }>>`
-              DELETE FROM sales_invoice_lines l
-              USING sales_invoices i
-              WHERE l."invoiceId" = i.id AND i."companyId" = ${me.companyId}::uuid
-              RETURNING l.id`;
-            return rows.length;
+            const { count } = await tx.salesInvoiceLine.deleteMany({
+              where: { invoice: { companyId: me.companyId } },
+            });
+            return count;
           });
           await step('purchaseInvoiceLines', async () => {
-            const rows = await tx.$queryRaw<Array<{ id: string }>>`
-              DELETE FROM purchase_invoice_lines l
-              USING purchase_invoices i
-              WHERE l."invoiceId" = i.id AND i."companyId" = ${me.companyId}::uuid
-              RETURNING l.id`;
-            return rows.length;
+            const { count } = await tx.purchaseInvoiceLine.deleteMany({
+              where: { invoice: { companyId: me.companyId } },
+            });
+            return count;
           });
           await step('salesInvoices', async () => {
             const { count } = await tx.salesInvoice.deleteMany({
@@ -331,8 +388,31 @@ export class ResetService {
             return count;
           });
 
-          // Stock: movements first (they reference items and branches), then
-          // the running balances.
+          await step('salesOrderLines', async () => {
+            const { count } = await tx.salesOrderLine.deleteMany({
+              where: { order: { companyId: me.companyId } },
+            });
+            return count;
+          });
+          await step('purchaseOrderLines', async () => {
+            const { count } = await tx.purchaseOrderLine.deleteMany({
+              where: { order: { companyId: me.companyId } },
+            });
+            return count;
+          });
+          await step('salesOrders', async () => {
+            const { count } = await tx.salesOrder.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('purchaseOrders', async () => {
+            const { count } = await tx.purchaseOrder.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+
           await step('stockMovements', async () => {
             const { count } = await tx.stockMovement.deleteMany({
               where: { companyId: me.companyId },
@@ -346,24 +426,34 @@ export class ResetService {
             return count;
           });
 
-          // Numbering, periods, master data, and the chart of accounts. An
-          // account may have a parent in the same table, so the tree is
-          // flattened before anything is removed.
-          await step('documentSequences', async () => {
-            const { count } = await tx.documentSequence.deleteMany({
+          // Journal entries have a self-reference for reversals and lines that
+          // restrict account/cost-center deletion. Flatten and remove them now.
+          await tx.journalEntry.updateMany({
+            where: { companyId: me.companyId },
+            data: { reversalOfId: null },
+          });
+          await step('journalLines', async () => {
+            const { count } = await tx.journalLine.deleteMany({
+              where: { entry: { companyId: me.companyId } },
+            });
+            return count;
+          });
+          await step('journalEntries', async () => {
+            const { count } = await tx.journalEntry.deleteMany({
               where: { companyId: me.companyId },
             });
             return count;
           });
-          await step('fiscalPeriods', async () => {
-            const { count } = await tx.fiscalPeriod.deleteMany({
-              where: { companyId: me.companyId },
+
+          await step('itemUnits', async () => {
+            const { count } = await tx.itemUnit.deleteMany({
+              where: { item: { companyId: me.companyId } },
             });
             return count;
           });
-          await step('items', async () => {
-            const { count } = await tx.item.deleteMany({
-              where: { companyId: me.companyId },
+          await step('priceListItems', async () => {
+            const { count } = await tx.priceListItem.deleteMany({
+              where: { priceList: { companyId: me.companyId } },
             });
             return count;
           });
@@ -379,18 +469,69 @@ export class ResetService {
             });
             return count;
           });
-          await tx.$executeRaw`
-            UPDATE accounts SET "parentId" = NULL
-            WHERE "companyId" = ${me.companyId}::uuid`;
+          await step('items', async () => {
+            const { count } = await tx.item.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('priceLists', async () => {
+            const { count } = await tx.priceList.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('itemCategories', async () => {
+            const { count } = await tx.itemCategory.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('costCenters', async () => {
+            const { count } = await tx.costCenter.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+
+          await tx.account.updateMany({
+            where: { companyId: me.companyId },
+            data: { parentId: null },
+          });
           await step('accounts', async () => {
             const { count } = await tx.account.deleteMany({
               where: { companyId: me.companyId },
             });
             return count;
           });
+          await step('companySettings', async () => {
+            const { count } = await tx.companySetting.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('fiscalPeriods', async () => {
+            const { count } = await tx.fiscalPeriod.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('documentSequences', async () => {
+            const { count } = await tx.documentSequence.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
 
-          // Sessions, the audit trail, and everything that attaches a person
-          // to a role or a branch.
+          await step('warehouses', async () => {
+            const { count } = await tx.warehouse.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+
+          // Revoke every session, including the administrator's; the client
+          // signs out as soon as this transaction succeeds.
           await step('refreshTokens', async () => {
             const rows = await tx.$queryRaw<Array<{ id: string }>>`
               DELETE FROM refresh_tokens t
@@ -399,20 +540,35 @@ export class ResetService {
               RETURNING t.id`;
             return rows.length;
           });
-          // The trail is append-only in the database. It comes out only
-          // through the purge service, which announces the purge to this
-          // transaction, records who asked for it and why, and switches the
-          // guard straight back on.
-          //
-          // The purge carries the company with it, so the rows it removes are
-          // this company's rows. Rows that belong to no company are
-          // installation-level events — a failed sign-in against a username
-          // that does not exist, a full backup of the whole database — and they
-          // stay: they are not this company's history to erase. The people they
-          // name are looked after too: before the accounts are deleted, the
-          // links that pointed at them are cleared (see `detachUserLinks`).
-          await step('auditLogs', async () => {
-            return this.purge.purge(
+          await step('userPermissions', async () => {
+            const { count } = await tx.userPermission.deleteMany({
+              where: { user: { companyId: me.companyId } },
+            });
+            return count;
+          });
+          await step('userRoles', async () => {
+            const { count } = await tx.userRole.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('userBranches', async () => {
+            const { count } = await tx.userBranch.deleteMany({
+              where: { branch: { companyId: me.companyId } },
+            });
+            return count;
+          });
+          await step('rolePermissions', async () => {
+            const { count } = await tx.rolePermission.deleteMany({
+              where: { role: { companyId: me.companyId } },
+            });
+            return count;
+          });
+
+          // The trail is append-only in the database. The purge service is the
+          // only permitted path and records the purge before accounts go.
+          await step('auditLogs', async () =>
+            this.purge.purge(
               tx,
               {
                 companyId: me.companyId,
@@ -422,50 +578,36 @@ export class ResetService {
                 userAgent: userAgent ?? null,
                 detail: { backupFile: verified.name, companyCode: me.company?.code ?? null },
               },
-              // The people are deleted further down this transaction. The
-              // trail's remaining links to them are cleared while the guard is
-              // open: the foreign key's own UPDATE would be refused by the
-              // append-only trigger, guard or no guard.
               { detachLinksToUsersOf: me.companyId },
-            );
-          });
-          await step('userRoles', async () => {
-            const { count } = await tx.userRole.deleteMany({
-              where: { companyId: me.companyId },
-            });
-            return count;
-          });
-          await step('userBranches', async () => {
-            const rows = await tx.$queryRaw<Array<{ userId: string }>>`
-              DELETE FROM user_branches b
-              USING branches br
-              WHERE b."branchId" = br.id AND br."companyId" = ${me.companyId}::uuid
-              RETURNING b."userId"`;
-            return rows.length;
-          });
+            ),
+          );
 
-          // The company's own roles. System roles (no company) are the
-          // program's, not the company's, and stay.
           await step('roles', async () => {
             const { count } = await tx.role.deleteMany({
               where: { companyId: me.companyId },
             });
             return count;
           });
-
-          // Every other person. The administrator doing this keeps their
-          // account: being locked out of a wiped program helps nobody.
+          // Keep the administrator who will complete first-run setup, but do
+          // not carry a stale lockout from the company that was just reset.
+          await tx.user.update({
+            where: { id: me.id },
+            data: {
+              failedLoginCount: 0,
+              lockedUntil: null,
+              tokenVersion: { increment: 1 },
+            },
+          });
           await step('users', async () => {
             const { count } = await tx.user.deleteMany({
               where: { companyId: me.companyId, id: { not: me.id } },
             });
             return count;
           });
-
-          // Branches last: a branch may have a parent branch.
-          await tx.$executeRaw`
-            UPDATE branches SET "parentBranchId" = NULL
-            WHERE "companyId" = ${me.companyId}::uuid`;
+          await tx.branch.updateMany({
+            where: { companyId: me.companyId },
+            data: { parentBranchId: null },
+          });
           await step('branches', async () => {
             const { count } = await tx.branch.deleteMany({
               where: { companyId: me.companyId },
@@ -482,6 +624,7 @@ export class ResetService {
               deletedAt: new Date(),
               logoData: null,
               logoMime: null,
+              logoPath: null,
               updatedBy: me.id,
             },
           });
@@ -490,6 +633,12 @@ export class ResetService {
         },
         { timeout: 300_000, maxWait: 30_000 },
       );
+
+      // The company logo is business data too. Clear the database reference
+      // transactionally above, then remove only its application-managed file.
+      if (me.company?.logoPath) {
+        await unlink(join(uploadsDir(), basename(me.company.logoPath))).catch(() => {});
+      }
 
       // 6. The audit trail is written after the deletion, because the
       //    deletion clears it. It names what happened and what was kept; it
@@ -546,6 +695,7 @@ export class ResetService {
   ): Promise<{ name: string; sizeBytes: number; entries: number }> {
     try {
       const backupData = await this.companyBackups!.create(companyId);
+      await this.companyBackups!.inspect(backupData, companyId);
       const totalEntries = Object.values(backupData.counts ?? {}).reduce(
         (sum, count) => sum + count,
         0,
@@ -561,7 +711,7 @@ export class ResetService {
       const filePath = join(dir, name);
 
       const content = Buffer.from(JSON.stringify(backupData, null, 2), 'utf8');
-      await writeFile(filePath, content);
+      await writeFile(filePath, content, { mode: 0o600 });
 
       // Verify the file was written and can be read back cleanly
       const statInfo = await stat(filePath);
@@ -580,6 +730,7 @@ export class ResetService {
           'The backup verification failed (invalid format or company ID).',
         );
       }
+      await this.companyBackups!.inspect(parsed, companyId);
 
       return {
         name,
