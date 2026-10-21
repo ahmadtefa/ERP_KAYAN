@@ -98,7 +98,11 @@ export class ImportController {
       };
       const needed = updatePermission[slug];
       if (needed && !user.permissions.includes(needed)) {
-        throw new ForbiddenException(`Missing permission: ${needed}`);
+        throw new ForbiddenException(
+          `ليس لديك صلاحية تعديل السجلات الموجودة بالاستيراد (${needed}). ` +
+            'اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات. ' +
+            `/ Missing permission: ${needed}. Ask an administrator to grant it to your role.`,
+        );
       }
     }
 
@@ -127,7 +131,11 @@ export class ImportController {
     if (user.isSuperAdmin) return;
     const needed = PERMISSION[kind];
     if (!user.permissions.includes(needed)) {
-      throw new ForbiddenException(`Missing permission: ${needed}`);
+      throw new ForbiddenException(
+        `ليس لديك صلاحية استخدام هذا الاستيراد (${needed}). ` +
+          'اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات، ثم أعد المحاولة. ' +
+          `/ Missing permission: ${needed}. Ask an administrator to grant it to your role, then try again.`,
+      );
     }
   }
 }

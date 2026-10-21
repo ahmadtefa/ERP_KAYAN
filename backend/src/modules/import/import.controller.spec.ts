@@ -26,6 +26,58 @@ describe('spreadsheet import authorization', () => {
     await expect(controller.upload({ ...user, isSuperAdmin: true, permissions: [] }, 'customers', file, { mode: 'upsert' })).resolves.toEqual({ updated: 1 });
   });
 
+  describe('template download', () => {
+    const response = () => ({
+      setHeader: jest.fn(),
+      end: jest.fn(),
+    });
+
+    it('serves the opening-balances template to a user holding the manage grant', async () => {
+      const body = Buffer.from('PK\x03\x04-template');
+      const template = jest.fn().mockResolvedValue(body);
+      const controller = new ImportController({ template } as any);
+      const res = response();
+      await controller.template(
+        { ...user, permissions: ['accounting.openingbalances.manage'] },
+        'opening-balances',
+        res as any,
+      );
+      expect(template).toHaveBeenCalledWith('opening-balances');
+      expect(res.setHeader).toHaveBeenCalledWith(
+        'Content-Disposition',
+        'attachment; filename="kayan-import-opening-balances.xlsx"',
+      );
+      expect(res.end).toHaveBeenCalledWith(body);
+    });
+
+    it('serves templates to a super administrator without explicit grants', async () => {
+      const template = jest.fn().mockResolvedValue(Buffer.from('PK'));
+      const controller = new ImportController({ template } as any);
+      const res = response();
+      await controller.template(
+        { ...user, isSuperAdmin: true, permissions: [] },
+        'opening-balances',
+        res as any,
+      );
+      expect(res.end).toHaveBeenCalled();
+    });
+
+    it('rejects a user without the grant before generating any file, naming the permission', async () => {
+      const template = jest.fn();
+      const controller = new ImportController({ template } as any);
+      const res = response();
+      await expect(
+        controller.template(
+          { ...user, permissions: ['accounting.journal.read'] },
+          'opening-balances',
+          res as any,
+        ),
+      ).rejects.toThrow('accounting.openingbalances.manage');
+      expect(template).not.toHaveBeenCalled();
+      expect(res.end).not.toHaveBeenCalled();
+    });
+  });
+
   it('still rejects users without the create grant before parsing or writing', async () => {
     const run = jest.fn();
     const controller = new ImportController({ run } as any);
