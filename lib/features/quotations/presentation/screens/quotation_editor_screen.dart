@@ -987,7 +987,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                   : ListView.separated(
                       shrinkWrap: true,
                       itemCount: initial.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final template = initial[index];
                         final id = text(template, 'id');
@@ -1027,6 +1027,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                 onPressed: () async {
                                   try {
                                     await ref.read(apiClientProvider).delete('/sales/quotation-design-templates/$id');
+                                    if (!dialogContext.mounted) return;
                                     initial.removeAt(index);
                                     ref.invalidate(quotationDesignTemplatesProvider);
                                     setDialogState(() {});
@@ -1034,7 +1035,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                       Navigator.of(dialogContext).pop();
                                     }
                                   } on Failure catch (error) {
-                                    if (mounted) showMessage(context, error.message, error: true);
+                                    if (dialogContext.mounted) showMessage(dialogContext, error.message, error: true);
                                   }
                                 },
                               ),
