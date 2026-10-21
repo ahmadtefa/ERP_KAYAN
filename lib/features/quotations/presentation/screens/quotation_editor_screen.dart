@@ -1774,12 +1774,14 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setLocalState) => AlertDialog(
           title: Text(l10n.addColumn),
-          // A fixed content width: an AlertDialog otherwise sizes itself by
-          // intrinsic measurement, and a DropdownButtonFormField measured
+          // A fixed content width and a scroll view: an AlertDialog sizes
+          // itself by intrinsic measurement, and dropdowns measured
           // intrinsically inside that pass can claim absurd extents and
-          // overflow the column (seen as a ~100k-pixel overflow in tests).
+          // overflow a plain column (seen as a ~100k-pixel overflow in
+          // tests). Bounded and scrollable, the content simply fits.
           content: SizedBox(
             width: 420,
+            child: SingleChildScrollView(
             child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1853,6 +1855,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 ],
               ),
             ],
+            ),
             ),
           ),
           actions: [
