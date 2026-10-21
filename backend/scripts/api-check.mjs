@@ -591,6 +591,9 @@ async function main() {
       Boolean(signedInAgain.data?.accessToken),
       `status ${signedInAgain.status}`,
     );
+    // Everything after this point acts as the NEW administrator: the token
+    // from before the reset names a user and company that no longer exist.
+    token = signedInAgain.data?.accessToken ?? token;
   }
 
   // ─────────────────────────────────────────────────────── reaching it from
