@@ -1551,6 +1551,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                           'column-width-${column.key}',
                                         ),
                                         initialValue: column.width,
+                                        isExpanded: true,
                                         decoration: InputDecoration(
                                           labelText: l10n.columnWidth,
                                           border: const OutlineInputBorder(),
@@ -1573,7 +1574,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                     // column they defined; a built-in field
                                     // already knows what it holds.
                                     SizedBox(
-                                      width: 130,
+                                      width: 152,
                                       child: column.isBuiltIn
                                           ? Padding(
                                               padding: const EdgeInsets.symmetric(
@@ -1592,6 +1593,11 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                                 'column-kind-${column.key}',
                                               ),
                                               initialValue: column.kind,
+                                              // Without this the closed
+                                              // dropdown sizes its inner row
+                                              // to the widest item and
+                                              // overflows the fixed box.
+                                              isExpanded: true,
                                               decoration: InputDecoration(
                                                 labelText: l10n.columnType,
                                                 border: const OutlineInputBorder(),
@@ -1798,6 +1804,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                     child: DropdownButtonFormField<String>(
                       key: const ValueKey('new-column-kind'),
                       initialValue: kind,
+                      isExpanded: true,
                       decoration: InputDecoration(
                         labelText: l10n.columnType,
                         border: const OutlineInputBorder(),
@@ -1820,6 +1827,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                     child: DropdownButtonFormField<int>(
                       key: const ValueKey('new-column-width'),
                       initialValue: width,
+                      isExpanded: true,
                       decoration: InputDecoration(
                         labelText: l10n.columnWidth,
                         border: const OutlineInputBorder(),
