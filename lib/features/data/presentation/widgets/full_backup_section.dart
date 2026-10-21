@@ -32,6 +32,12 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
   Map<String, dynamic>? _capabilities;
   List<Map<String, dynamic>> _files = const [];
   bool _busy = false;
+
+  /// True only while the first capabilities/list round-trip is in flight.
+  /// The loading bar is bound to this flag — never to "capabilities is
+  /// still null" — so a failed load ends in a message and a retry button
+  /// instead of a progress bar that spins forever over a hidden error.
+  bool _loading = true;
   String? _notice;
   String? _failure;
 
@@ -43,6 +49,7 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
 
   Future<void> _load() async {
     setState(() {
+      _loading = true;
       _failure = null;
     });
     try {
@@ -57,11 +64,14 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     } catch (error) {
       if (!mounted) return;
       setState(() => _failure = describeApiError(error));
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _createBackup() async {
     final l10n = context.l10n;
+    final knownNames = {for (final file in _files) '${file['name']}'};
     setState(() {
       _busy = true;
       _notice = l10n.backupInProgress;
@@ -78,7 +88,31 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
       await _load();
     } catch (error) {
       if (!mounted) return;
-      setState(() => _failure = describeApiError(error));
+      // The request can fail on this side (a timeout, a dropped
+      // connection) while the server finishes the dump anyway. Before
+      // declaring failure, look at the folder: a file that was not there
+      // when we started means the backup actually happened, and saying
+      // "failed" over a good backup would be its own kind of lie.
+      var recovered = false;
+      try {
+        final files = await ref.read(fullBackupServiceProvider).list();
+        final fresh = files.where(
+          (file) => !knownNames.contains('${file['name']}'),
+        );
+        if (fresh.isNotEmpty && mounted) {
+          recovered = true;
+          setState(() {
+            _files = files;
+            _notice =
+                '${l10n.createdSuccessfully}: ${fresh.first['name']}';
+          });
+        }
+      } catch (_) {
+        // The list could not be read either; the original error stands.
+      }
+      if (!recovered && mounted) {
+        setState(() => _failure = describeApiError(error));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -280,9 +314,23 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
-            if (capabilities == null)
+            if (capabilities == null && _loading)
               const LinearProgressIndicator()
-            else if (!toolsAvailable) ...[
+            else if (capabilities == null) ...[
+              // The load itself failed (no permission, server unreachable,
+              // ...). Say so, and offer the way back — never an endless bar.
+              _Notice(
+                icon: Icons.error_outline,
+                color: theme.colorScheme.error,
+                text: _failure ?? l10n.fullBackupUnavailable,
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _busy ? null : _load,
+                icon: const Icon(Icons.refresh),
+                label: Text(l10n.refreshStatus),
+              ),
+            ] else if (!toolsAvailable) ...[
               // No tools on this machine: say so, and show nothing that
               // pretends to work.
               _Notice(
@@ -321,6 +369,13 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
                   ),
                 ],
               ),
+              // Bound to _busy, which every path resets in a finally: the
+              // person always sees motion while work runs and a result —
+              // success or failure — when it stops.
+              if (_busy) ...[
+                const SizedBox(height: 12),
+                const LinearProgressIndicator(),
+              ],
             ],
             if (_notice != null) ...[
               const SizedBox(height: 12),
@@ -330,7 +385,7 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
                 text: _notice!,
               ),
             ],
-            if (_failure != null) ...[
+            if (_failure != null && capabilities != null) ...[
               const SizedBox(height: 12),
               _Notice(
                 icon: Icons.error_outline,

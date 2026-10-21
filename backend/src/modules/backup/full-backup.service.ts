@@ -338,6 +338,10 @@ export class FullBackupService {
         '--format=custom',
         '--no-owner',
         '--no-privileges',
+        // Never prompt: a service has no console to answer on, and a tool
+        // waiting for a password looks exactly like a backup that hangs
+        // forever. Failing fast with the real reason beats both.
+        '--no-password',
         `--file=${path}`,
         // The database itself comes from the environment, never from a
         // parameter a caller could point at someone else's books.
@@ -374,35 +378,38 @@ export class FullBackupService {
   }
 
   async list(): Promise<FullBackupFile[]> {
-    const dir = this.backupDir();
-    if (!existsSync(dir)) return [];
-
-    let entries: string[];
-    try {
-      entries = await readdir(dir);
-    } catch (error) {
-      // A folder the program cannot read is a machine problem with a name.
-      throw new ServiceUnavailableException(
-        `The backup folder "${dir}" could not be read ` +
-          `(${(error as Error).message}).`,
-      );
-    }
-
     const files: FullBackupFile[] = [];
-    for (const name of entries) {
-      if (!name.endsWith('.dump')) continue;
-      const path = join(dir, name);
+    const seen = new Set<string>();
+    for (const dir of this.backupDirs()) {
+      if (!existsSync(dir)) continue;
+
+      let entries: string[];
       try {
-        const info = await stat(path);
-        if (!info.isFile()) continue;
-        files.push({
-          name,
-          sizeBytes: info.size,
-          createdAt: info.mtime.toISOString(),
-          kind: name.includes('-safety-') ? 'safety' : 'full',
-        });
-      } catch {
-        /* vanished between listing and stat: skip */
+        entries = await readdir(dir);
+      } catch (error) {
+        // A folder the program cannot read is a machine problem with a name.
+        throw new ServiceUnavailableException(
+          `The backup folder "${dir}" could not be read ` +
+            `(${(error as Error).message}).`,
+        );
+      }
+
+      for (const name of entries) {
+        if (!name.endsWith('.dump') || seen.has(name)) continue;
+        seen.add(name);
+        const path = join(dir, name);
+        try {
+          const info = await stat(path);
+          if (!info.isFile()) continue;
+          files.push({
+            name,
+            sizeBytes: info.size,
+            createdAt: info.mtime.toISOString(),
+            kind: name.includes('-safety-') ? 'safety' : 'full',
+          });
+        } catch {
+          /* vanished between listing and stat: skip */
+        }
       }
     }
     return files.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
@@ -651,6 +658,7 @@ export class FullBackupService {
             '--exit-on-error',
             '--no-owner',
             '--no-privileges',
+            '--no-password',
             `--dbname=${scratchName}`,
             staging,
           ]);
@@ -685,6 +693,7 @@ export class FullBackupService {
           '--exit-on-error',
           '--no-owner',
           '--no-privileges',
+          '--no-password',
           ...this.connectionArgs(),
           staging,
         ]);
@@ -754,6 +763,7 @@ export class FullBackupService {
         '--exit-on-error',
         '--no-owner',
         '--no-privileges',
+        '--no-password',
         ...this.connectionArgs(),
         path,
       ]);
@@ -867,9 +877,30 @@ export class FullBackupService {
   }
 
   public backupDir(): string {
-    return (
-      process.env.KAYAN_BACKUP_DIR?.trim() || join(process.cwd(), 'backups')
-    );
+    const chosen = process.env.KAYAN_BACKUP_DIR?.trim();
+    if (chosen) return chosen;
+    // On Windows the working directory of the installed backend is either
+    // the service's System32 or the program folder under Program Files —
+    // neither is a place a backup can reliably be written or found again.
+    // The installer's own data root under ProgramData (the same root that
+    // holds the bundled PostgreSQL) is writable by the service account and
+    // survives reinstalling the program.
+    if (process.platform === 'win32') {
+      const programData = process.env.ProgramData ?? process.env.PROGRAMDATA;
+      if (programData) return join(programData, 'KAYAN-ERP', 'backups');
+    }
+    return join(process.cwd(), 'backups');
+  }
+
+  /// Every folder a backup may legitimately sit in: the current one first,
+  /// then the legacy working-directory folder older builds wrote to, so a
+  /// backup taken before this change stays listed, downloadable and
+  /// restorable instead of vanishing from the screen.
+  private backupDirs(): string[] {
+    const dirs = [this.backupDir()];
+    const legacy = join(process.cwd(), 'backups');
+    if (resolve(legacy) !== resolve(dirs[0])) dirs.push(legacy);
+    return dirs;
   }
 
   public async ensureBackupDir(): Promise<string> {
@@ -892,20 +923,27 @@ export class FullBackupService {
     return dir;
   }
 
-  /// A backup name can only be a simple file name inside the backup folder.
+  /// A backup name can only be a simple file name inside a backup folder.
   /// Anything with a path separator in it is refused before it is joined.
+  /// The first folder that actually holds the file wins, so backups written
+  /// by older builds into the working directory remain reachable.
   private safePath(name: string): string {
     if (!NAME_PATTERN.test(name)) {
       throw new BadRequestException(
         'That is not a backup file name. Choose one from the list.',
       );
     }
-    const dir = resolve(this.backupDir());
-    const path = resolve(dir, name);
-    if (!path.startsWith(dir + sep)) {
-      throw new BadRequestException('That file is outside the backup folder.');
+    for (const folder of this.backupDirs()) {
+      const dir = resolve(folder);
+      const path = resolve(dir, name);
+      if (!path.startsWith(dir + sep)) {
+        throw new BadRequestException('That file is outside the backup folder.');
+      }
+      if (existsSync(path)) return path;
     }
-    return path;
+    // Nothing found: answer with the primary folder so callers report the
+    // file as missing from the place new backups are written to.
+    return resolve(this.backupDir(), name);
   }
 
   private async validateAndDescribe(
