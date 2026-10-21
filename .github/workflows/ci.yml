@@ -326,6 +326,11 @@ jobs:
         run: flutter pub get
       - name: Analyze
         run: python scripts/ci-diagnose.py flutter analyze
+      # Same screenshot generation as the web job: baselines are produced in
+      # this job's own workspace so the test run below has something to
+      # compare against (the PNGs themselves are uploaded by the web job).
+      - name: Render design screenshots
+        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
       - name: Run tests
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
       - name: Build Linux desktop
