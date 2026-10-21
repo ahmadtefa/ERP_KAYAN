@@ -870,7 +870,6 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   }
 
   Widget _designCard(BuildContext context) {
-    final l10n = context.l10n;
     final labels = <String, String>{
       'title': 'عنوان العرض', 'company': 'اسم الشركة', 'customer': 'بيانات العميل',
       'sectionTitle': 'عناوين الجداول', 'tableHeader': 'رؤوس الجداول',
