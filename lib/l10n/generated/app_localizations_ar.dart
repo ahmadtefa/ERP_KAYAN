@@ -106,18 +106,6 @@ class AppLocalizationsAr extends AppLocalizations {
   String get settings => 'الإعدادات';
 
   @override
-  String get sessionStorageLabel => 'حفظ الجلسة';
-
-  @override
-  String get sessionStorageDurable => 'محفوظة على هذا الجهاز';
-
-  @override
-  String get sessionStorageMemoryOnly => 'في الذاكرة فقط';
-
-  @override
-  String get sessionStorageMemoryHint => 'هذه الصفحة ليست عبر HTTPS، لذا يحفظ المتصفح الجلسة حتى إعادة التحميل فقط. شغّل البرنامج عبر HTTPS لبقاء المستخدمين مسجّلين.';
-
-  @override
   String get signInIncomplete => 'قبِل الخادم تسجيل الدخول لكنه لم يُرسل بيانات الحساب. يعني ذلك عادةً أن البرنامج والخادم بإصدارين مختلفين، أو أن تهيئة الشركة لم تكتمل. التفاصيل التقنية في سجل البرنامج.';
 
   @override
@@ -137,9 +125,6 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get fontSizePreview => 'معاينة: فاتورة 1,250.00 ج.م · خصم 12.5%';
-
-  @override
-  String get sessionNotPersisted => 'الجلسة محفوظة في الذاكرة فقط: المتصفح لا يخزّنها على عنوان http:// غير آمن. إعادة تحميل الصفحة تسجّل الخروج. شغّل البرنامج عبر HTTPS لحفظ الجلسة.';
 
   @override
   String get language => 'اللغة';

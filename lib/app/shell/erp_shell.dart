@@ -7,7 +7,6 @@ import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/search/presentation/search_dialog.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
-import '../../shared/widgets/session_storage_notice.dart';
 import '../router/app_router.dart';
 import '../theme/design_tokens.dart';
 
@@ -116,7 +115,6 @@ class _ErpShellState extends ConsumerState<ErpShell> {
                     isWide: isWide,
                     isExtended: isExtended,
                   ),
-                  const SessionStorageNotice(),
                   Expanded(child: widget.child),
                 ],
               ),
