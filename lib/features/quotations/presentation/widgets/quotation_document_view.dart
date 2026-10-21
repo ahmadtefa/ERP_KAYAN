@@ -166,6 +166,7 @@ class _Sheet extends StatelessWidget {
     // and the mark at the end (the left), as a letterhead does in both
     // languages.
     final design = document.design;
+    final headerCustomText = design?.header?.customText?.trim() ?? '';
     return Container(
       padding: EdgeInsets.only(bottom: 12 * scale),
       decoration: const BoxDecoration(
@@ -190,6 +191,17 @@ class _Sheet extends StatelessWidget {
                     design?.company,
                   ),
                 ),
+                if (headerCustomText.isNotEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(top: 4 * scale),
+                    child: Text(
+                      headerCustomText,
+                      style: _styled(
+                        TextStyle(color: _Doc.muted, fontSize: 8 * scale),
+                        design?.header,
+                      ),
+                    ),
+                  ),
                 if (company.secondaryName.trim().isNotEmpty)
                   Padding(
                     padding: EdgeInsets.only(top: 3 * scale),
@@ -1017,6 +1029,7 @@ class _Sheet extends StatelessWidget {
     ].join(' · ');
 
     final design = document.design;
+    final footerCustomText = design?.footer?.customText?.trim() ?? '';
     return Container(
       padding: EdgeInsets.only(top: 9 * scale),
       decoration: BoxDecoration(
@@ -1057,6 +1070,17 @@ class _Sheet extends StatelessWidget {
               ),
             ),
           ),
+          if (footerCustomText.isNotEmpty)
+            Padding(
+              padding: EdgeInsets.only(top: 2 * scale),
+              child: Text(
+                footerCustomText,
+                style: _styled(
+                  TextStyle(color: _Doc.muted, fontSize: 7.5 * scale),
+                  design?.footer,
+                ),
+              ),
+            ),
         ],
       ),
     );
