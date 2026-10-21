@@ -847,6 +847,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 const SizedBox(height: 12),
                 _columnsCard(context),
                 const SizedBox(height: 12),
+                _designCard(context),
+                const SizedBox(height: 12),
                 for (var index = 0; index < _tables.length; index++)
                   _tableCard(index, language, items),
                 Center(
@@ -865,6 +867,124 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         ],
       ),
     );
+  }
+
+  Widget _designCard(BuildContext context) {
+    final l10n = context.l10n;
+    final labels = <String, String>{
+      'title': 'عنوان العرض', 'company': 'اسم الشركة', 'customer': 'بيانات العميل',
+      'sectionTitle': 'عناوين الجداول', 'tableHeader': 'رؤوس الجداول',
+      'tableCell': 'خلايا الجداول', 'totalsLabel': 'عناوين الإجماليات',
+      'totalsValue': 'قيم الإجماليات', 'finalTotal': 'الإجمالي النهائي',
+      'header': 'الهيدر', 'footer': 'الفوتر',
+    };
+    final enabled = _design.toJson().keys.where(labels.containsKey).length;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('تنسيق عرض السعر', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 4),
+            Text('تحكم مستقل في الخط والحجم واللون والمحاذاة والمسافات والخلفية والحدود لكل جزء.', style: Theme.of(context).textTheme.bodySmall),
+            if (enabled > 0) Text('$enabled عناصر مخصصة', style: Theme.of(context).textTheme.bodySmall),
+          ])),
+          OutlinedButton.icon(
+            key: const ValueKey('quotation-design-editor'),
+            onPressed: _editDesign,
+            icon: const Icon(Icons.palette_outlined, size: 18),
+            label: const Text('تخصيص التصميم'),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _editDesign() async {
+    const keys = ['title','company','customer','sectionTitle','tableHeader','tableCell','totalsLabel','totalsValue','finalTotal','header','footer'];
+    const labels = {
+      'title':'عنوان العرض','company':'اسم الشركة','customer':'بيانات العميل','sectionTitle':'عناوين الجداول',
+      'tableHeader':'رؤوس الجداول','tableCell':'خلايا الجداول','totalsLabel':'عناوين الإجماليات','totalsValue':'قيم الإجماليات',
+      'finalTotal':'الإجمالي النهائي','header':'الهيدر','footer':'الفوتر',
+    };
+    String selected = 'title';
+    final family = TextEditingController();
+    final size = TextEditingController(text: '1.0');
+    final color = TextEditingController();
+    final background = TextEditingController();
+    final border = TextEditingController();
+    final borderWidth = TextEditingController(text: '0');
+    final lineHeight = TextEditingController();
+    final customText = TextEditingController();
+    var weight = FontWeight.w400;
+    var align = TextAlign.start;
+    var visible = true;
+    void load() {
+      final j = _design.toJson()[selected];
+      if (j is Map) {
+        family.text = '${j['fontFamily'] ?? ''}'; size.text = '${j['fontSizeMultiplier'] ?? 1.0}';
+        color.text = '${j['color'] ?? ''}'; background.text = '${j['backgroundColor'] ?? ''}';
+        border.text = '${j['borderColor'] ?? ''}'; borderWidth.text = '${j['borderWidth'] ?? 0}';
+        lineHeight.text = '${j['lineHeight'] ?? ''}'; customText.text = '${j['customText'] ?? ''}';
+        final a = '${j['textAlign'] ?? 'start'}';
+        align = switch (a) { 'left'=>TextAlign.left, 'right'=>TextAlign.right, 'center'=>TextAlign.center, 'justify'=>TextAlign.justify, _=>TextAlign.start };
+        visible = j['visible'] != false;
+      } else { family.clear(); size.text='1.0'; color.clear(); background.clear(); border.clear(); borderWidth.text='0'; lineHeight.clear(); customText.clear(); visible=true; align=TextAlign.start; }
+    }
+    load();
+    await showDialog<void>(context: context, builder: (dialogContext) => StatefulBuilder(builder: (dialogContext, setDialogState) {
+      final current = _design.toJson()[selected];
+      if (current is Map && family.text.isEmpty && size.text == '1.0') load();
+      return AlertDialog(
+        title: const Text('تخصيص عنصر العرض'),
+        content: SizedBox(width: 720, child: SingleChildScrollView(child: Column(children: [
+          DropdownButtonFormField<String>(initialValue: selected, decoration: const InputDecoration(labelText:'العنصر', border:OutlineInputBorder()), items:[for(final k in keys) DropdownMenuItem(value:k, child:Text(labels[k]!))], onChanged:(v){ if(v==null)return; setDialogState((){selected=v; load();}); }),
+          const SizedBox(height:10),
+          Wrap(spacing:10, runSpacing:10, children:[
+            SizedBox(width:180, child:TextField(controller:family, decoration:const InputDecoration(labelText:'نوع الخط', hintText:'Tahoma / Arial / Segoe UI', border:OutlineInputBorder()))),
+            SizedBox(width:130, child:TextField(controller:size, keyboardType:const TextInputType.numberWithOptions(decimal:true), decoration:const InputDecoration(labelText:'حجم الخط', border:OutlineInputBorder()))),
+            SizedBox(width:160, child:TextField(controller:lineHeight, keyboardType:const TextInputType.numberWithOptions(decimal:true), decoration:const InputDecoration(labelText:'ارتفاع السطر', border:OutlineInputBorder()))),
+            SizedBox(width:150, child:DropdownButtonFormField<FontWeight>(initialValue:weight, decoration:const InputDecoration(labelText:'السمك', border:OutlineInputBorder()), items:[for(final w in [FontWeight.w400,FontWeight.w500,FontWeight.w600,FontWeight.w700,FontWeight.w800]) DropdownMenuItem(value:w, child:Text(w==FontWeight.w400?'عادي':w==FontWeight.w500?'متوسط':w==FontWeight.w600?'شبه عريض':w==FontWeight.w700?'عريض':'عريض جدًا'))], onChanged:(v)=>setDialogState(()=>weight=v??FontWeight.w400))),
+            SizedBox(width:150, child:DropdownButtonFormField<TextAlign>(initialValue:align, decoration:const InputDecoration(labelText:'المحاذاة', border:OutlineInputBorder()), items:[for(final a in [TextAlign.start,TextAlign.center,TextAlign.end,TextAlign.justify]) DropdownMenuItem(value:a, child:Text(a==TextAlign.center?'وسط':a==TextAlign.justify?'ضبط':a==TextAlign.end?'نهاية':'بداية'))], onChanged:(v)=>setDialogState(()=>align=v??TextAlign.start))),
+            SizedBox(width:150, child:TextField(controller:color, decoration:const InputDecoration(labelText:'لون النص', hintText:'#1E60AA', border:OutlineInputBorder()))),
+            SizedBox(width:150, child:TextField(controller:background, decoration:const InputDecoration(labelText:'لون الخلفية', hintText:'#FFFFFF', border:OutlineInputBorder()))),
+            SizedBox(width:150, child:TextField(controller:border, decoration:const InputDecoration(labelText:'لون الحدود', hintText:'#D3E4FE', border:OutlineInputBorder()))),
+            SizedBox(width:130, child:TextField(controller:borderWidth, keyboardType:const TextInputType.numberWithOptions(decimal:true), decoration:const InputDecoration(labelText:'سمك الحدود', border:OutlineInputBorder()))),
+            SizedBox(width:320, child:TextField(controller:customText, decoration:const InputDecoration(labelText:'نص مخصص للهيدر/الفوتر', border:OutlineInputBorder()))),
+            Switch(value:visible,onChanged:(v)=>setDialogState(()=>visible=v)),
+            const Text('إظهار العنصر'),
+          ]),
+        ]))),
+        actions:[
+          TextButton(onPressed:()=>Navigator.of(dialogContext).pop(), child:const Text('إلغاء')),
+          FilledButton(onPressed:(){
+            QuotationDocumentElementStyle make(){
+              return QuotationDocumentElementStyle(fontSizeMultiplier:double.tryParse(size.text.trim())??1,fontWeight:weight,color:color.text.trim().isEmpty?null:color.text.trim(),fontFamily:family.text.trim().isEmpty?null:family.text.trim(),textAlign:align,lineHeight:double.tryParse(lineHeight.text.trim()),backgroundColor:background.text.trim().isEmpty?null:background.text.trim(),borderColor:border.text.trim().isEmpty?null:border.text.trim(),borderWidth:double.tryParse(borderWidth.text.trim())??0,visible:visible,customText:customText.text.trim().isEmpty?null:customText.text.trim());
+            }
+            final s=make();
+            setState((){ _design = _replaceDesign(_design, selected, s); });
+            Navigator.of(dialogContext).pop();
+          }, child:const Text('حفظ')),
+        ],
+      );
+    }));
+    family.dispose(); size.dispose(); color.dispose(); background.dispose(); border.dispose(); borderWidth.dispose(); lineHeight.dispose(); customText.dispose();
+  }
+
+  QuotationDocumentDesign _replaceDesign(QuotationDocumentDesign d, String key, QuotationDocumentElementStyle s) {
+    return switch(key) {
+      'title'=>QuotationDocumentDesign(title:s,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
+      'company'=>QuotationDocumentDesign(title:d.title,company:s,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
+      'customer'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:s,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
+      'sectionTitle'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:s,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
+      'tableHeader'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:s,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
+      'tableCell'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:s,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
+      'totalsLabel'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:s,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
+      'totalsValue'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:s,finalTotal:d.finalTotal,footer:d.footer,header:d.header),
+      'finalTotal'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:s,footer:d.footer,header:d.header),
+      'footer'=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:s,header:d.header),
+      _=>QuotationDocumentDesign(title:d.title,company:d.company,customer:d.customer,sectionTitle:d.sectionTitle,tableHeader:d.tableHeader,tableCell:d.tableCell,totalsLabel:d.totalsLabel,totalsValue:d.totalsValue,finalTotal:d.finalTotal,footer:d.footer,header:s),
+    };
   }
 
   /// The line columns this offer prints, and the button that changes them.

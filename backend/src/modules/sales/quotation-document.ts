@@ -148,6 +148,46 @@ function amount(value: string): string {
   });
 }
 
+function safeColor(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  return /^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$/.test(v) ? v : null;
+}
+
+function safeFont(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  if (!v || v.length > 80 || !/^[A-Za-z0-9 _,-]+$/.test(v)) return null;
+  return v;
+}
+
+function designCss(design: Record<string, unknown> | null | undefined): string {
+  if (!design) return '';
+  const rules: string[] = [];
+  const targets: Record<string, string> = {
+    title: '.title-band h2', company: '.brand h1', customer: '.panels .panel',
+    sectionTitle: '.section-head h3', tableHeader: '.items thead th', tableCell: '.items tbody td',
+    totalsLabel: '.totals td:first-child', totalsValue: '.totals td.num', finalTotal: '.totals tr.grand td',
+    header: '.masthead', footer: '.document-footer',
+  };
+  for (const [key, selector] of Object.entries(targets)) {
+    const raw = design[key];
+    if (!raw || typeof raw !== 'object') continue;
+    const v = raw as Record<string, unknown>;
+    const css: string[] = [];
+    const color = safeColor(v.color); const bg = safeColor(v.backgroundColor); const bc = safeColor(v.borderColor);
+    const font = safeFont(v.fontFamily); const size = Number(v.fontSizeMultiplier); const lh = Number(v.lineHeight); const bw = Number(v.borderWidth);
+    if (color) css.push(`color:${color}`); if (bg) css.push(`background-color:${bg}`); if (bc && bw > 0) css.push(`border-color:${bc}`);
+    if (bw > 0 && bw < 20) css.push(`border-width:${bw}mm`); if (font) css.push(`font-family:${font},Tahoma,Arial,sans-serif`);
+    if (Number.isFinite(size) && size >= 0.5 && size <= 3) css.push(`font-size:${size}em`);
+    if (Number.isFinite(lh) && lh >= 0.8 && lh <= 3) css.push(`line-height:${lh}`);
+    if (typeof v.textAlign === 'string' && ['left','right','center','justify','start','end'].includes(v.textAlign)) css.push(`text-align:${v.textAlign}`);
+    if (v.visible === false) css.push('display:none !important');
+    if (css.length) rules.push(`${selector}{${css.join(';')}}`);
+  }
+  return rules.join('\n');
+}
+
 function quantity(value: string): string {
   return Number(value).toLocaleString('en-US', {
     maximumFractionDigits: 4,
@@ -569,6 +609,7 @@ export function renderQuotationDocument(
     .summary, .terms, .notes, .signs, .page-footer { break-inside: avoid; }
     .section-head { break-after: avoid; }
   }
+${designCss(content.design)}
 </style>
 </head>
 <body>

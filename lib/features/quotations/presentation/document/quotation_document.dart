@@ -11,6 +11,14 @@ class QuotationDocumentElementStyle {
     this.fontSizeMultiplier = 1.0,
     this.fontWeight,
     this.color,
+    this.fontFamily,
+    this.textAlign,
+    this.lineHeight,
+    this.backgroundColor,
+    this.borderColor,
+    this.borderWidth = 0,
+    this.visible = true,
+    this.customText,
   });
 
   /// مضاعف لحجم الخط الأساسي للعنصر (1.0 = الحجم الافتراضي).
@@ -19,17 +27,41 @@ class QuotationDocumentElementStyle {
   final FontWeight? fontWeight;
   /// لون النص (اختياري).
   final String? color;
+  final String? fontFamily;
+  final TextAlign? textAlign;
+  final double? lineHeight;
+  final String? backgroundColor;
+  final String? borderColor;
+  final double borderWidth;
+  final bool visible;
+  final String? customText;
 
   /// ينشئ نسخة من هذا النمط مع تعديلات جزئية.
   QuotationDocumentElementStyle copyWith({
     double? fontSizeMultiplier,
     FontWeight? fontWeight,
     String? color,
+    String? fontFamily,
+    TextAlign? textAlign,
+    double? lineHeight,
+    String? backgroundColor,
+    String? borderColor,
+    double? borderWidth,
+    bool? visible,
+    String? customText,
   }) {
     return QuotationDocumentElementStyle(
       fontSizeMultiplier: fontSizeMultiplier ?? this.fontSizeMultiplier,
       fontWeight: fontWeight ?? this.fontWeight,
       color: color ?? this.color,
+      fontFamily: fontFamily ?? this.fontFamily,
+      textAlign: textAlign ?? this.textAlign,
+      lineHeight: lineHeight ?? this.lineHeight,
+      backgroundColor: backgroundColor ?? this.backgroundColor,
+      borderColor: borderColor ?? this.borderColor,
+      borderWidth: borderWidth ?? this.borderWidth,
+      visible: visible ?? this.visible,
+      customText: customText ?? this.customText,
     );
   }
 }
@@ -93,6 +125,14 @@ class QuotationDocumentDesign {
             (v['fontSizeMultiplier'] as num?)?.toDouble() ?? 1.0,
         fontWeight: _fontWeightOf(v['fontWeight']),
         color: v['color'] as String?,
+        fontFamily: v['fontFamily'] as String?,
+        textAlign: _textAlignOf(v['textAlign']),
+        lineHeight: (v['lineHeight'] as num?)?.toDouble(),
+        backgroundColor: v['backgroundColor'] as String?,
+        borderColor: v['borderColor'] as String?,
+        borderWidth: (v['borderWidth'] as num?)?.toDouble() ?? 0,
+        visible: v['visible'] != false,
+        customText: v['customText'] as String?,
       );
     }
     return QuotationDocumentDesign(
@@ -119,6 +159,14 @@ class QuotationDocumentDesign {
         'fontSizeMultiplier': s.fontSizeMultiplier,
         if (s.fontWeight != null) 'fontWeight': s.fontWeight.toString(),
         if (s.color != null) 'color': s.color,
+        if (s.fontFamily != null && s.fontFamily!.trim().isNotEmpty) 'fontFamily': s.fontFamily,
+        if (s.textAlign != null) 'textAlign': s.textAlign.toString().split('.').last,
+        if (s.lineHeight != null) 'lineHeight': s.lineHeight,
+        if (s.backgroundColor != null) 'backgroundColor': s.backgroundColor,
+        if (s.borderColor != null) 'borderColor': s.borderColor,
+        if (s.borderWidth > 0) 'borderWidth': s.borderWidth,
+        if (!s.visible) 'visible': false,
+        if (s.customText != null && s.customText!.trim().isNotEmpty) 'customText': s.customText,
       };
     }
     set('title', title);
@@ -134,6 +182,19 @@ class QuotationDocumentDesign {
     set('header', header);
     return result;
   }
+}
+
+TextAlign? _textAlignOf(dynamic v) {
+  if (v is! String) return null;
+  return switch (v) {
+    'left' => TextAlign.left,
+    'right' => TextAlign.right,
+    'center' => TextAlign.center,
+    'justify' => TextAlign.justify,
+    'start' => TextAlign.start,
+    'end' => TextAlign.end,
+    _ => null,
+  };
 }
 
 FontWeight? _fontWeightOf(dynamic v) {

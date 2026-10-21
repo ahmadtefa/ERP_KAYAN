@@ -70,9 +70,9 @@ class _Sheet extends StatelessWidget {
     return base.copyWith(
       fontSize: (base.fontSize ?? 12) * style.fontSizeMultiplier,
       fontWeight: style.fontWeight ?? base.fontWeight,
-      color: style.color != null
-          ? _parseColor(style.color!)
-          : base.color,
+      color: style.color != null ? _parseColor(style.color!) : base.color,
+      fontFamily: style.fontFamily ?? base.fontFamily,
+      height: style.lineHeight ?? base.height,
     );
   }
 
@@ -94,6 +94,8 @@ class _Sheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final d = document;
+    final headerStyle = d.design?.header;
+    final footerStyle = d.design?.footer;
     return Container(
       width: double.infinity,
       constraints: BoxConstraints(minHeight: 1123 * scale),
@@ -118,7 +120,7 @@ class _Sheet extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _masthead(),
+          if (headerStyle?.visible != false) _masthead(),
           SizedBox(height: 22 * scale),
           _titleBand(),
           SizedBox(height: 20 * scale),
@@ -138,7 +140,7 @@ class _Sheet extends StatelessWidget {
           if (d.managerName.isNotEmpty || d.responsibleName.isNotEmpty)
             _signatures(),
           SizedBox(height: 22 * scale),
-          _footer(),
+          if (footerStyle?.visible != false) _footer(),
         ],
       ),
     );
