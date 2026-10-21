@@ -287,5 +287,280 @@ describe('QuotationsService subject and column layout', () => {
       );
       expect(html).toContain('TAX-999');
     });
+
+    it('prints each table with its own columns and custom values; a table without its own layout inherits the quotation one', async () => {
+      const row = quotationRow({
+        tables: [
+          {
+            title: 'الأجهزة',
+            sortOrder: 1,
+            subTotal: new Prisma.Decimal('100'),
+            discountPercent: new Prisma.Decimal('0'),
+            discountAmount: new Prisma.Decimal('0'),
+            netTotal: new Prisma.Decimal('100'),
+            columns: [
+              { key: 'description', visible: true, width: 4 },
+              {
+                key: 'custom-warranty',
+                labelAr: 'مدة الضمان',
+                labelEn: 'Warranty',
+                visible: true,
+                width: 2,
+                kind: 'text',
+              },
+              {
+                key: 'custom-discount',
+                labelAr: 'خصم إضافي',
+                labelEn: 'Extra discount',
+                visible: true,
+                width: 2,
+                kind: 'percent',
+              },
+              { key: 'lineTotal', visible: true, width: 2 },
+            ],
+            lines: [
+              {
+                lineNumber: 1,
+                itemId: null,
+                item: null,
+                description: 'ثلاجة',
+                countryOfOrigin: null,
+                unit: 'piece',
+                quantity: new Prisma.Decimal('1'),
+                unitPrice: new Prisma.Decimal('100'),
+                lineTotal: new Prisma.Decimal('100'),
+                customValues: {
+                  'custom-warranty': 'سنتان',
+                  'custom-discount': '12.5',
+                },
+              },
+            ],
+          },
+          {
+            title: 'Services',
+            sortOrder: 2,
+            subTotal: new Prisma.Decimal('0'),
+            discountPercent: new Prisma.Decimal('0'),
+            discountAmount: new Prisma.Decimal('0'),
+            netTotal: new Prisma.Decimal('0'),
+            lines: [
+              {
+                lineNumber: 1,
+                itemId: null,
+                item: { code: 'IT-9', nameEn: 'Visit', nameAr: 'زيارة' },
+                description: 'Visit',
+                countryOfOrigin: null,
+                unit: 'visit',
+                quantity: new Prisma.Decimal('1'),
+                unitPrice: new Prisma.Decimal('0'),
+                lineTotal: new Prisma.Decimal('0'),
+                customValues: {},
+              },
+            ],
+          },
+        ],
+      });
+      const html = await serviceFor(row).printHtml(COMPANY_ID, 'quotation-1', 'ar');
+      // The first section gets both of its own extra columns and the values.
+      expect(html).toContain('مدة الضمان');
+      expect(html).toContain('سنتان');
+      expect(html).toContain('خصم إضافي');
+      expect(html).toContain('٪');
+      // The second section inherits the quotation layout ('Pieces' label).
+      expect(html).toContain('Pieces');
+      // And the custom headers belong to the first section only: they
+      // appear exactly once.
+      expect(html.split('مدة الضمان')).toHaveLength(2);
+    });
+
+    it('returns custom values and per-table columns in the detail response the editor reloads from', async () => {
+      const row = quotationRow({
+        tables: [
+          {
+            id: 'table-1',
+            title: 'Main',
+            sortOrder: 1,
+            discountType: null,
+            subTotal: new Prisma.Decimal('100'),
+            discountPercent: new Prisma.Decimal('0'),
+            discountAmount: new Prisma.Decimal('0'),
+            discountTotal: new Prisma.Decimal('0'),
+            netTotal: new Prisma.Decimal('100'),
+            columns: [
+              { key: 'description', visible: true, width: 4 },
+              { key: 'custom-warranty', labelAr: 'مدة الضمان', labelEn: 'Warranty', visible: true, width: 2 },
+            ],
+            lines: [
+              {
+                id: 'line-1',
+                lineNumber: 1,
+                itemId: null,
+                item: null,
+                description: 'Line',
+                countryOfOrigin: null,
+                unit: 'piece',
+                quantity: new Prisma.Decimal('1'),
+                unitPrice: new Prisma.Decimal('100'),
+                lineTotal: new Prisma.Decimal('100'),
+                customValues: { 'custom-warranty': 'سنتان' },
+              },
+            ],
+          },
+        ],
+      });
+      const response = (serviceFor(row) as never as {
+        toResponse: (q: unknown, detail: boolean) => Record<string, unknown>;
+      }).toResponse(row, true) as {
+        tables: Array<{
+          columns: Array<{ key: string; labelAr: string | null }>;
+          lines: Array<{ customValues: Record<string, string> }>;
+        }>;
+      };
+      expect(response.tables[0].columns.map((c) => c.key)).toEqual([
+        'description',
+        'custom-warranty',
+      ]);
+      expect(response.tables[0].lines[0].customValues).toEqual({
+        'custom-warranty': 'سنتان',
+      });
+    });
+  });
+
+  describe('user-defined columns', () => {
+    it('accepts Arabic- and English-named custom columns and stores their kinds', async () => {
+      const { instance, tx } = service();
+      await instance.create(
+        COMPANY_ID,
+        BRANCH_ID,
+        USER_ID,
+        baseDto({
+          columns: [
+            { key: 'description', width: 4 },
+            { key: 'custom-1', labelAr: 'مدة الضمان', labelEn: 'Warranty', width: 2, kind: 'text' },
+            { key: 'custom-2', labelAr: 'الخصم', labelEn: 'Discount', width: 2, kind: 'percent' },
+            { key: 'lineTotal', width: 2 },
+          ],
+          tables: [
+            {
+              title: 'Main',
+              lines: [
+                {
+                  description: 'Line',
+                  quantity: '1',
+                  unitPrice: '100',
+                  customValues: { 'custom-1': 'سنتان', 'custom-2': '10' },
+                },
+              ],
+            },
+          ],
+        }) as never,
+      );
+      const data = tx.quotation.create.mock.calls[0][0].data as {
+        columns: Array<Record<string, unknown>>;
+        tables: { create: Array<{ lines: { create: Array<{ customValues: unknown }> } }> };
+      };
+      // Two new columns (not rows): the layout grew from the built-ins by
+      // exactly the two user-defined entries, kinds intact.
+      expect(data.columns).toHaveLength(4);
+      expect(data.columns[1]).toMatchObject({
+        key: 'custom-1',
+        labelAr: 'مدة الضمان',
+        labelEn: 'Warranty',
+        kind: 'text',
+        numeric: false,
+      });
+      expect(data.columns[2]).toMatchObject({
+        key: 'custom-2',
+        kind: 'percent',
+        numeric: true,
+      });
+      expect(data.tables.create[0].lines.create[0].customValues).toEqual({
+        'custom-1': 'سنتان',
+        'custom-2': '10',
+      });
+    });
+
+    it('stores per-table layouts independently and inherits where a table has none', async () => {
+      const { instance, tx } = service();
+      await instance.create(
+        COMPANY_ID,
+        BRANCH_ID,
+        USER_ID,
+        baseDto({
+          tables: [
+            {
+              title: 'With layout',
+              columns: [
+                { key: 'description', width: 4 },
+                { key: 'custom-a', labelAr: 'الضمان', width: 2 },
+              ],
+              lines: [{ description: 'A', quantity: '1', unitPrice: '10' }],
+            },
+            {
+              title: 'Inherited',
+              lines: [{ description: 'B', quantity: '1', unitPrice: '20' }],
+            },
+          ],
+        }) as never,
+      );
+      const data = tx.quotation.create.mock.calls[0][0].data as {
+        tables: { create: Array<{ title: string; columns: unknown }> };
+      };
+      expect(Array.isArray(data.tables.create[0].columns)).toBe(true);
+      expect(data.tables.create[0].columns).toMatchObject([
+        { key: 'description' },
+        { key: 'custom-a', labelAr: 'الضمان' },
+      ]);
+      // SQL NULL: the second table inherits the quotation-level layout.
+      expect(data.tables.create[1].columns).toBe(Prisma.DbNull);
+    });
+
+    it('refuses a duplicated user-defined column and a blank column name', async () => {
+      const { instance } = service();
+      await expect(
+        instance.create(
+          COMPANY_ID,
+          BRANCH_ID,
+          USER_ID,
+          baseDto({
+            columns: [
+              { key: 'custom-a', labelAr: 'الضمان' },
+              { key: 'custom-a', labelAr: 'ضمان آخر' },
+            ],
+          }) as never,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        instance.create(
+          COMPANY_ID,
+          BRANCH_ID,
+          USER_ID,
+          baseDto({ columns: [{ key: '  ' }] }) as never,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('still reads legacy layouts where the typed name was the key', async () => {
+      const { instance, tx } = service();
+      await instance.create(
+        COMPANY_ID,
+        BRANCH_ID,
+        USER_ID,
+        baseDto({
+          columns: [
+            { key: 'description', width: 4 },
+            { key: 'مدة التنفيذ', width: 2 },
+          ],
+        }) as never,
+      );
+      const data = tx.quotation.create.mock.calls[0][0].data as {
+        columns: Array<Record<string, unknown>>;
+      };
+      expect(data.columns[1]).toMatchObject({
+        key: 'مدة التنفيذ',
+        labelAr: 'مدة التنفيذ',
+        labelEn: 'مدة التنفيذ',
+      });
+    });
   });
 });

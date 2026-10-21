@@ -31,8 +31,10 @@ export const QUOTATION_COLUMN_KEYS = [
 
 export class QuotationColumnDto {
   /// The column key. Built-in keys (itemCode, description, …) are recognised
-  /// by the printer; any other free text is a user-defined column.
-  @IsString() key!: string;
+  /// by the printer; any other free text is a user-defined column. A
+  /// user-defined key is an internal identifier the editor generates — the
+  /// name the person reads is labelAr/labelEn, never the key itself.
+  @IsString() @MinLength(1) @MaxLength(120) key!: string;
 
   /// A label this offer uses instead of the built-in one. Left empty means the
   /// translated standard label.
@@ -49,6 +51,12 @@ export class QuotationColumnDto {
   /// Whether the column holds a monetary quantity. User-defined columns
   /// default to text.
   @IsOptional() @IsBoolean() numeric?: boolean;
+
+  /// How a user-defined column's values are entered and printed. Ignored
+  /// for built-in keys, whose meaning is fixed.
+  @IsOptional()
+  @IsIn(['text', 'number', 'quantity', 'price', 'percent'])
+  kind?: string;
 }
 
 export class QuotationLineDto {
@@ -75,6 +83,16 @@ export class QuotationLineDto {
 
 export class QuotationTableDto {
   @IsString() @MinLength(1) @MaxLength(200) title!: string;
+
+  /// This table's own column layout. Omitted means the table inherits the
+  /// quotation-level layout; when present it fully replaces it for this
+  /// table only, so sections of one offer can show different columns.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(16)
+  @ValidateNested({ each: true })
+  @Type(() => QuotationColumnDto)
+  columns?: QuotationColumnDto[];
 
   @IsOptional() @IsIn(['PERCENT', 'AMOUNT']) discountType?: string;
   @IsOptional() @IsString() discountPercent?: string;

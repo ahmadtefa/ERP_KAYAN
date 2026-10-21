@@ -1711,6 +1711,12 @@ model QuotationTable {
   quotationId   String @db.Uuid
   title         String
   sortOrder     Int
+
+  /// This table's own line-column layout, independent of the quotation's
+  /// other tables. Null means "inherit the quotation-level layout"
+  /// (Quotation.columns), which is what every table created before
+  /// per-table layouts existed must keep doing.
+  columns Json?
   discountType    String? @db.VarChar(16)
   discountPercent Decimal @default(0) @db.Decimal(9, 4)
   discountAmount  Decimal @default(0) @db.Decimal(19, 4)

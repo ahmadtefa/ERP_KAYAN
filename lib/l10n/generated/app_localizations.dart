@@ -4000,6 +4000,46 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   String get columnNumeric;
 
   /// In en, this message translates to:
+  /// **'This table\'s columns'**
+  String get tableColumns;
+
+  /// In en, this message translates to:
+  /// **'Built-in columns'**
+  String get builtinColumns;
+
+  /// In en, this message translates to:
+  /// **'Column type'**
+  String get columnType;
+
+  /// In en, this message translates to:
+  /// **'Text'**
+  String get columnTypeText;
+
+  /// In en, this message translates to:
+  /// **'Number'**
+  String get columnTypeNumber;
+
+  /// In en, this message translates to:
+  /// **'Quantity'**
+  String get columnTypeQuantity;
+
+  /// In en, this message translates to:
+  /// **'Price'**
+  String get columnTypePrice;
+
+  /// In en, this message translates to:
+  /// **'Percent'**
+  String get columnTypePercent;
+
+  /// In en, this message translates to:
+  /// **'Give the column a name in Arabic or English.'**
+  String get columnNameRequired;
+
+  /// In en, this message translates to:
+  /// **'Table preview'**
+  String get tablePreview;
+
+  /// In en, this message translates to:
   /// **'Custom column…'**
   String get addCustomColumn;
 

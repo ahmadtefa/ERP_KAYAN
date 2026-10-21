@@ -1,6 +1,7 @@
 import {
   COLUMN_LABELS,
   QuotationColumn,
+  columnIsNumeric,
   columnLabel,
   standardColumns,
 } from './quotation-columns';
@@ -65,6 +66,10 @@ export interface QuotationSnapshot {
   tables: Array<{
     title: string;
     sortOrder: number;
+    /// This section's own columns when it has them; absent on snapshots
+    /// frozen before per-table layouts, which keep printing the
+    /// quotation-level [columns] for every section.
+    columns?: QuotationColumn[];
     subTotal: string;
     discountPercent: string;
     discountAmount: string;
@@ -208,9 +213,10 @@ function quantity(value: string): string {
 function columnCell(
   column: QuotationColumn,
   line: QuotationSnapshotLine,
+  lang: 'en' | 'ar' = 'en',
 ): { text: string; numeric: boolean; strong: boolean } {
   const builtIn = COLUMN_LABELS[column.key];
-  const numeric = builtIn ? builtIn.numeric : column.numeric ?? false;
+  const numeric = builtIn ? builtIn.numeric : columnIsNumeric(column);
   switch (column.key) {
     case 'description':
       return { text: line.description, numeric: false, strong: false };
@@ -230,12 +236,26 @@ function columnCell(
       return { text: amount(line.unitPrice), numeric: true, strong: false };
     case 'lineTotal':
       return { text: amount(line.lineTotal), numeric: true, strong: true };
-    default:
-      return {
-        text: line.customValues?.[column.key] ?? '',
-        numeric,
-        strong: false,
-      };
+    default: {
+      const raw = line.customValues?.[column.key] ?? '';
+      // A numeric custom column prints like the built-in numbers around it
+      // (grouped, trimmed) instead of echoing whatever was typed; text
+      // that does not parse as a number is shown as written rather than
+      // dropped, because a wrong-looking value beats a missing one.
+      if (numeric && raw.trim() !== '' && Number.isFinite(Number(raw))) {
+        const formatted =
+          column.kind === 'price' ? amount(raw) : quantity(raw);
+        return {
+          text:
+            column.kind === 'percent'
+              ? `${formatted}${lang === 'ar' ? '٪' : '%'}`
+              : formatted,
+          numeric,
+          strong: false,
+        };
+      }
+      return { text: raw, numeric, strong: false };
+    }
   }
 }
 
@@ -318,30 +338,39 @@ export function renderQuotationDocument(
     .filter(Boolean)
     .join('');
 
-  const columns = (
+  // The quotation-level layout: every section's fallback, and the only
+  // layout a snapshot frozen before per-table columns has.
+  const fallbackColumns = (
     content.columns?.length ? content.columns : standardColumns()
   ).filter((column) => column.visible);
-  const columnCount =
-    columns.reduce((sum, column) => sum + column.width, 0) || 1;
-  const span = columns.length + 1;
-  const headCells = columns
-    .map((column) => {
-      const builtIn = COLUMN_LABELS[column.key];
-      const numeric = builtIn ? builtIn.numeric : column.numeric ?? false;
-      const width = `${Math.round((column.width / columnCount) * 100)}%`;
-      return `<th${numeric ? ` class="num"` : ''} style="width:${width}">${escapeHtml(
-        columnLabel(column, lang),
-      )}</th>`;
-    })
-    .join('');
 
   const tables = content.tables
     .map((table, index) => {
+      // This section's own columns when it carries them. Widths, header
+      // cells and the footer span are per-section now, because sections
+      // of one offer no longer have to share one layout.
+      const columns =
+        table.columns?.length
+          ? table.columns.filter((column) => column.visible)
+          : fallbackColumns;
+      const columnCount =
+        columns.reduce((sum, column) => sum + column.width, 0) || 1;
+      const span = columns.length + 1;
+      const headCells = columns
+        .map((column) => {
+          const numeric = columnIsNumeric(column);
+          const width = `${Math.round((column.width / columnCount) * 100)}%`;
+          return `<th${numeric ? ` class="num"` : ''} style="width:${width}">${escapeHtml(
+            columnLabel(column, lang),
+          )}</th>`;
+        })
+        .join('');
+
       const rows = table.lines
         .map((line, lineIndex) => {
           const cells = columns
             .map((column) => {
-              const cell = columnCell(column, line);
+              const cell = columnCell(column, line, lang);
               const classes = [
                 cell.numeric ? 'num' : '',
                 cell.strong ? 'strong' : '',

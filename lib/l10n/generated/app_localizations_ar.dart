@@ -2234,6 +2234,36 @@ class AppLocalizationsAr extends AppLocalizations {
   String get columnNumeric => 'رقمي';
 
   @override
+  String get tableColumns => 'أعمدة هذا الجدول';
+
+  @override
+  String get builtinColumns => 'أعمدة جاهزة';
+
+  @override
+  String get columnType => 'نوع العمود';
+
+  @override
+  String get columnTypeText => 'نص';
+
+  @override
+  String get columnTypeNumber => 'رقم';
+
+  @override
+  String get columnTypeQuantity => 'كمية';
+
+  @override
+  String get columnTypePrice => 'سعر';
+
+  @override
+  String get columnTypePercent => 'نسبة مئوية';
+
+  @override
+  String get columnNameRequired => 'أعطِ العمود اسمًا بالعربية أو بالإنجليزية.';
+
+  @override
+  String get tablePreview => 'معاينة الجدول';
+
+  @override
   String get addCustomColumn => 'عمود مخصص…';
 
   @override

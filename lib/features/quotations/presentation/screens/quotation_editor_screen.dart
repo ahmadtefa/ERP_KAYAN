@@ -73,6 +73,22 @@ class _QLineDraft {
   }
 }
 
+/// The built-in line fields a column can name. Anything else is a
+/// user-defined column whose key the editor generated and whose heading is
+/// the name the person typed.
+const _builtinColumnKeys = {
+  'itemCode',
+  'description',
+  'countryOfOrigin',
+  'unit',
+  'quantity',
+  'unitPrice',
+  'lineTotal',
+};
+
+/// The kinds a user-defined column can have, stored with the layout.
+const _columnKinds = ['text', 'number', 'quantity', 'price', 'percent'];
+
 /// One line column as this offer prints it. The key names a line field; the
 /// labels override the built-in text, and a hidden column is kept so it can be
 /// turned back on without rebuilding the layout.
@@ -84,6 +100,7 @@ class _QColumnDraft {
     this.visible = true,
     this.width = 2,
     this.numeric = false,
+    this.kind = 'text',
   }) : labelEn = TextEditingController(text: labelEn),
        labelAr = TextEditingController(text: labelAr);
 
@@ -96,6 +113,18 @@ class _QColumnDraft {
   /// default to text unless the user marks them numeric.
   bool numeric;
 
+  /// How a user-defined column's values are entered and printed:
+  /// text | number | quantity | price | percent. Anything but text is
+  /// numeric; the two are kept in sync by [applyKind].
+  String kind;
+
+  void applyKind(String value) {
+    kind = value;
+    numeric = value != 'text';
+  }
+
+  bool get isBuiltIn => _builtinColumnKeys.contains(key);
+
   _QColumnDraft copy() => _QColumnDraft(
     key: key,
     labelEn: labelEn.text,
@@ -103,6 +132,7 @@ class _QColumnDraft {
     visible: visible,
     width: width,
     numeric: numeric,
+    kind: kind,
   );
 
   void dispose() {
@@ -112,14 +142,20 @@ class _QColumnDraft {
 }
 
 class _QTableDraft {
-  _QTableDraft({String title = ''})
+  _QTableDraft({String title = '', List<_QColumnDraft>? columns})
     : title = TextEditingController(text: title),
       discountValue = TextEditingController(),
+      columns = columns ?? _standardColumnDrafts(),
       lines = [_QLineDraft()];
 
   final TextEditingController title;
   DiscountKind discountKind = DiscountKind.none;
   final TextEditingController discountValue;
+
+  /// This table's own column layout. Each table of an offer carries its
+  /// own, so adding «إضافة عمود» inside one section never changes the
+  /// columns of another.
+  final List<_QColumnDraft> columns;
   final List<_QLineDraft> lines;
 
   Decimal get gross => lines.fold(Decimal.zero, (sum, line) => sum + line.lineTotal);
@@ -135,10 +171,55 @@ class _QTableDraft {
   void dispose() {
     title.dispose();
     discountValue.dispose();
+    for (final column in columns) {
+      column.dispose();
+    }
     for (final line in lines) {
       line.dispose();
     }
   }
+}
+
+/// The six columns every offer printed before layouts were configurable,
+/// and what a new table starts with.
+List<_QColumnDraft> _standardColumnDrafts() => [
+  for (final entry in const [
+    ('description', 4, 'text'),
+    ('countryOfOrigin', 2, 'text'),
+    ('unit', 1, 'text'),
+    ('quantity', 1, 'quantity'),
+    ('unitPrice', 2, 'price'),
+    ('lineTotal', 2, 'price'),
+  ])
+    _QColumnDraft(
+      key: entry.$1,
+      width: entry.$2,
+      kind: entry.$3,
+      numeric: entry.$3 != 'text',
+    ),
+];
+
+/// Reads a stored layout. Any key is accepted — built-in keys and
+/// user-defined keys alike. An offer saved before this feature has none, so
+/// it starts from the standard six rather than from an empty table.
+List<_QColumnDraft> _columnDraftsFrom(Object? raw) {
+  final rows = listOf(raw);
+  if (rows.isEmpty) return _standardColumnDrafts();
+  return [
+    for (final row in rows)
+      if (text(row, 'key').isNotEmpty)
+        _QColumnDraft(
+          key: text(row, 'key'),
+          labelEn: text(row, 'labelEn'),
+          labelAr: text(row, 'labelAr'),
+          visible: row['visible'] != false,
+          width: (asNum(row['width']) ?? 2).toInt(),
+          numeric: row['numeric'] == true,
+          kind: _columnKinds.contains(text(row, 'kind'))
+              ? text(row, 'kind')
+              : (row['numeric'] == true ? 'number' : 'text'),
+        ),
+  ];
 }
 
 /// Creates or edits a draft quotation with any number of titled tables.
@@ -159,7 +240,6 @@ class QuotationEditorScreen extends ConsumerStatefulWidget {
 class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   final _tables = <_QTableDraft>[];
   final _subject = TextEditingController();
-  final _columns = <_QColumnDraft>[];
   QuotationDocumentDesign _design = QuotationDocumentDesign.defaultDesign();
   bool _showTaxId = true;
   final _discountValue = TextEditingController();
@@ -184,7 +264,6 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
     _tables.add(_QTableDraft());
-    _columns.addAll(_standardColumns());
     if (widget.quotationId != null) {
       _loading = true;
       _load();
@@ -202,7 +281,15 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       }
       _tables.clear();
       for (final tableRow in listOf(quotation['tables'])) {
-        final table = _QTableDraft(title: text(tableRow, 'title'));
+        // Each table reopens with its own layout. The server returns the
+        // effective layout per table; the quotation-level list is only a
+        // fallback for responses from before per-table columns existed.
+        final table = _QTableDraft(
+          title: text(tableRow, 'title'),
+          columns: _columnDraftsFrom(
+            tableRow['columns'] ?? quotation['columns'],
+          ),
+        );
         table.discountKind = discountKindOf(text(tableRow, 'discountType'));
         table.discountValue.text = table.discountKind == DiscountKind.percent
             ? text(tableRow, 'discountPercent', fallback: '')
@@ -246,12 +333,6 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       _notes.text = text(quotation, 'notes');
       _subject.text = text(quotation, 'subject');
       _showTaxId = quotation['showTaxId'] != false;
-      for (final column in _columns) {
-        column.dispose();
-      }
-      _columns
-        ..clear()
-        ..addAll(_columnsFrom(quotation['columns']));
       _managerName.text = text(quotation, 'managerName');
       _responsibleName.text = text(quotation, 'responsibleName');
       _responsiblePhone.text = text(quotation, 'responsiblePhone');
@@ -291,38 +372,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     'lineTotal',
   ];
 
-  /// The six columns every offer printed before layouts were configurable.
-  List<_QColumnDraft> _standardColumns() => [
-    for (final entry in const [
-      ('description', 4, false),
-      ('countryOfOrigin', 2, false),
-      ('unit', 1, false),
-      ('quantity', 1, true),
-      ('unitPrice', 2, true),
-      ('lineTotal', 2, true),
-    ])
-      _QColumnDraft(key: entry.$1, width: entry.$2, numeric: entry.$3),
-  ];
 
-  /// Reads the stored layout. Any key is accepted — built-in keys and
-  /// user-defined keys alike. An offer saved before this feature has none, so
-  /// it starts from the standard six rather than from an empty table.
-  List<_QColumnDraft> _columnsFrom(Object? raw) {
-    final rows = listOf(raw);
-    if (rows.isEmpty) return _standardColumns();
-    return [
-      for (final row in rows)
-        if (text(row, 'key').isNotEmpty)
-          _QColumnDraft(
-            key: text(row, 'key'),
-            labelEn: text(row, 'labelEn'),
-            labelAr: text(row, 'labelAr'),
-            visible: row['visible'] != false,
-            width: (asNum(row['width']) ?? 2).toInt(),
-            numeric: row['numeric'] == true,
-          ),
-    ];
-  }
 
   String _columnName(String key) {
     final l10n = context.l10n;
@@ -333,13 +383,18 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       'unit' => l10n.unit,
       'quantity' => l10n.quantity,
       'unitPrice' => l10n.unitPrice,
-      _ => l10n.lineTotal,
+      'lineTotal' => l10n.lineTotal,
+      // A user-defined key names itself. (This used to fall through to
+      // "line total", so every custom column showed up in the dialog
+      // wearing a built-in column's name.)
+      _ => key,
     };
   }
 
-  /// The offer's layout as it will be stored: order, labels, visibility.
-  List<Map<String, dynamic>> _columnBody() => [
-    for (final column in _columns)
+  /// One table's layout as it will be stored: order, labels, visibility,
+  /// width, and the kind of each user-defined column.
+  List<Map<String, dynamic>> _columnBodyOf(List<_QColumnDraft> columns) => [
+    for (final column in columns)
       {
         'key': column.key,
         if (column.labelEn.text.trim().isNotEmpty)
@@ -349,6 +404,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         'visible': column.visible,
         'width': column.width,
         if (column.numeric) 'numeric': true,
+        if (!column.isBuiltIn) 'kind': column.kind,
       },
   ];
 
@@ -421,9 +477,6 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     }
     _discountValue.dispose();
     _subject.dispose();
-    for (final column in _columns) {
-      column.dispose();
-    }
     _terms.dispose();
     _notes.dispose();
     _managerName.dispose();
@@ -530,6 +583,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       final discountText = table.discountValue.text.trim();
       tables.add({
         'title': title,
+        // The layout travels with its table: definitions, order, labels,
+        // widths and kinds — the same names the preview and the PDF use.
+        'columns': _columnBodyOf(table.columns),
         'discountType': ?discountTypeOf(table.discountKind),
         if (table.discountKind == DiscountKind.percent &&
             discountText.isNotEmpty)
@@ -544,7 +600,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       return;
     }
 
-    if (!_columns.any((column) => column.visible)) {
+    if (_tables.any(
+      (table) => !table.columns.any((column) => column.visible),
+    )) {
       showMessage(context, l10n.keepOneColumnVisible, error: true);
       return;
     }
@@ -560,7 +618,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         'notes': _notes.text.trim(),
         'subject': _subject.text.trim(),
         'showTaxId': _showTaxId,
-        'columns': _columnBody(),
+        // The quotation-level layout stays as the legacy default (the first
+        // table's); each table's own layout above is what prints.
+        'columns': _columnBodyOf(_tables.first.columns),
         if (_design.toJson().isNotEmpty) 'design': _design.toJson(),
         'discountType': ?discountTypeOf(_discountKind),
         if (_discountKind == DiscountKind.percent &&
@@ -844,8 +904,6 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 12),
-                _columnsCard(context),
                 const SizedBox(height: 12),
                 _designCard(context),
                 const SizedBox(height: 12),
@@ -1155,70 +1213,171 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     };
   }
 
-  /// The line columns this offer prints, and the button that changes them.
-  Widget _columnsCard(BuildContext context) {
+  /// One table's column summary and the button that edits *its* layout.
+  /// Columns live on the table now, so the control lives on the table too:
+  /// what the person changes here is visibly scoped to this section.
+  Widget _tableColumnsRow(int index, _QTableDraft table, String language) {
     final l10n = context.l10n;
     final theme = Theme.of(context);
-    final language = Localizations.localeOf(context).languageCode;
-    final visible = _columns.where((column) => column.visible).toList();
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(l10n.quotationColumns, style: theme.textTheme.titleSmall),
-                  const SizedBox(height: 4),
-                  Text(
-                    visible.isEmpty
-                        ? l10n.keepOneColumnVisible
-                        : visible
-                              .map(
-                                (column) =>
-                                    '${_columnLabel(column, language)} '
-                                    '(${column.width})',
-                              )
-                              .join(' · '),
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(l10n.columnLayoutHint, style: theme.textTheme.bodySmall),
-                ],
-              ),
+    final visible = table.columns.where((column) => column.visible).toList();
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.view_column_outlined,
+            size: 18,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l10n.tableColumns,
+                  style: theme.textTheme.titleSmall,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  visible.isEmpty
+                      ? l10n.keepOneColumnVisible
+                      : visible
+                            .map(
+                              (column) =>
+                                  '${_columnLabel(column, language)} '
+                                  '(${column.width})',
+                            )
+                            .join(' · '),
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              key: const ValueKey('edit-columns'),
-              onPressed: _editColumns,
-              icon: const Icon(Icons.view_column_outlined, size: 18),
-              label: Text(l10n.columnLayout),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            key: ValueKey('edit-columns-$index'),
+            onPressed: () => _editColumns(table),
+            icon: const Icon(Icons.view_column_outlined, size: 18),
+            label: Text(l10n.columnLayout),
+          ),
+        ],
       ),
     );
   }
 
-  /// The label the offer prints for a column: its own text when set, the
-  /// built-in translation otherwise.
+  /// The heading the offer prints for a column: the person's own text when
+  /// set, the built-in translation for a built-in field, and for a
+  /// user-defined column the name they typed — never a built-in's name.
   String _columnLabel(_QColumnDraft column, String language) {
     final override = language == 'ar' ? column.labelAr.text : column.labelEn.text;
     if (override.trim().isNotEmpty) return override.trim();
-    return _columnName(column.key);
+    return _columnDisplayName(column, language);
+  }
+
+  /// What a column is called before any per-offer rename: the translated
+  /// field name for a built-in, the typed name (either language) for a
+  /// user-defined column.
+  String _columnDisplayName(_QColumnDraft column, String language) {
+    if (column.isBuiltIn) return _columnName(column.key);
+    final ar = column.labelAr.text.trim();
+    final en = column.labelEn.text.trim();
+    if (language == 'ar') {
+      return ar.isNotEmpty ? ar : (en.isNotEmpty ? en : column.key);
+    }
+    return en.isNotEmpty ? en : (ar.isNotEmpty ? ar : column.key);
+  }
+
+  /// The table as a grid, from the drafts themselves. This is what adding
+  /// a column visibly does here: the editor's line forms are fields, not a
+  /// spreadsheet, so without this preview a new column could not be seen
+  /// as a column until the document preview — which is exactly how the old
+  /// mechanism read as "it added a row".
+  Widget _tableGridPreview(_QTableDraft table, String language) {
+    final l10n = context.l10n;
+    final theme = Theme.of(context);
+    final visible = table.columns.where((c) => c.visible).toList();
+    if (visible.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(l10n.tablePreview, style: theme.textTheme.titleSmall),
+        const SizedBox(height: 6),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            key: ValueKey('quotation-grid-${identityHashCode(table)}'),
+            headingRowHeight: 36,
+            dataRowMinHeight: 32,
+            dataRowMaxHeight: 40,
+            columns: [
+              for (final column in visible)
+                DataColumn(
+                  label: Text(_columnLabel(column, language)),
+                  numeric: column.numeric,
+                ),
+            ],
+            rows: [
+              for (final line in table.lines)
+                DataRow(
+                  cells: [
+                    for (final column in visible)
+                      DataCell(Text(_draftCellText(column, line))),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The preview cell for one column of one draft line.
+  String _draftCellText(_QColumnDraft column, _QLineDraft line) {
+    return switch (column.key) {
+      'description' => line.description.text,
+      'itemCode' => line.itemId == null ? '' : '—',
+      'countryOfOrigin' => line.origin.text,
+      'unit' => line.unit.text,
+      'quantity' => line.quantity.text,
+      'unitPrice' => line.unitPrice.text,
+      'lineTotal' => formatAmount(line.lineTotal.toString()),
+      _ => line.customValues[column.key] ?? '',
+    };
+  }
+
+  /// A built-in column draft with the kind its field carries.
+  _QColumnDraft _builtinDraft(String key) {
+    final kind = switch (key) {
+      'quantity' => 'quantity',
+      'unitPrice' || 'lineTotal' => 'price',
+      _ => 'text',
+    };
+    return _QColumnDraft(key: key, kind: kind, numeric: kind != 'text');
+  }
+
+  String _kindLabel(String kind) {
+    final l10n = context.l10n;
+    return switch (kind) {
+      'number' => l10n.columnTypeNumber,
+      'quantity' => l10n.columnTypeQuantity,
+      'price' => l10n.columnTypePrice,
+      'percent' => l10n.columnTypePercent,
+      _ => l10n.columnTypeText,
+    };
   }
 
   /// Changes the layout on a working copy, so Cancel really cancels. A saved
   /// template is a starting point; the offer keeps its own copy of whatever
   /// was applied.
-  Future<void> _editColumns() async {
+  Future<void> _editColumns(_QTableDraft table) async {
     final l10n = context.l10n;
+    final language = Localizations.localeOf(context).languageCode;
     final available = [
       ...?ref.read(quotationColumnTemplatesProvider).value,
     ];
-    final working = [for (final column in _columns) column.copy()];
+    final working = [for (final column in table.columns) column.copy()];
     final templateName = TextEditingController();
     String? templateId;
     try {
@@ -1270,23 +1429,34 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                     }
                                     working
                                       ..clear()
-                                      ..addAll(_columnsFrom(template['columns']));
+                                      ..addAll(_columnDraftsFrom(template['columns']));
                                     setDialogState(() => templateId = value);
                                   },
                           ),
                         ),
                         const SizedBox(width: 8),
-                        PopupMenuButton<String>(
+                        // «إضافة عمود» means a new column with the name the
+                        // person chooses — that is the primary action, and
+                        // it opens the naming dialog directly. (The old
+                        // menu led with the one unused built-in, «كود
+                        // الصنف», which read as the program forcing that
+                        // column.) Re-adding a removed built-in is the
+                        // secondary menu beside it.
+                        FilledButton.icon(
                           key: const ValueKey('add-column'),
-                          tooltip: l10n.addColumn,
+                          onPressed: () =>
+                              _addCustomColumnDialog(setDialogState, working),
+                          icon: const Icon(Icons.add, size: 18),
+                          label: Text(l10n.addColumn),
+                        ),
+                        const SizedBox(width: 8),
+                        PopupMenuButton<String>(
+                          key: const ValueKey('add-builtin-column'),
+                          tooltip: l10n.builtinColumns,
                           onSelected: (key) {
-                            if (key == '_custom') {
-                              _addCustomColumnDialog(setDialogState, working);
-                              return;
-                            }
                             setDialogState(() {
                               if (!working.any((c) => c.key == key)) {
-                                working.add(_QColumnDraft(key: key));
+                                working.add(_builtinDraft(key));
                               }
                             });
                           },
@@ -1297,10 +1467,6 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                   value: key,
                                   child: Text(_columnName(key)),
                                 ),
-                            const PopupMenuItem(
-                              value: '_custom',
-                              child: Text('أعمدة مخصصة / Custom column…'),
-                            ),
                           ],
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
@@ -1310,9 +1476,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.add, size: 18),
+                                const Icon(Icons.view_column_outlined, size: 18),
                                 const SizedBox(width: 4),
-                                Text(l10n.addColumn),
+                                Text(l10n.builtinColumns),
                               ],
                             ),
                           ),
@@ -1342,7 +1508,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                     ),
                                     Expanded(
                                       child: Text(
-                                        _columnName(column.key),
+                                        _columnDisplayName(column, language),
                                         style: Theme.of(
                                           context,
                                         ).textTheme.bodyMedium,
@@ -1403,24 +1569,48 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                       ),
                                     ),
                                     const SizedBox(width: 6),
-                                    Checkbox(
-                                      key: ValueKey(
-                                        'column-numeric-${column.key}',
-                                      ),
-                                      value: column.numeric,
-                                      onChanged: (value) => setDialogState(
-                                        () => column.numeric = value ?? false,
-                                      ),
-                                    ),
+                                    // The kind is the person's choice for a
+                                    // column they defined; a built-in field
+                                    // already knows what it holds.
                                     SizedBox(
-                                      width: 60,
-                                      child: Text(
-                                        l10n.columnNumeric,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                      width: 130,
+                                      child: column.isBuiltIn
+                                          ? Padding(
+                                              padding: const EdgeInsets.symmetric(
+                                                vertical: 12,
+                                              ),
+                                              child: Text(
+                                                _kindLabel(column.kind),
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodySmall,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            )
+                                          : DropdownButtonFormField<String>(
+                                              key: ValueKey(
+                                                'column-kind-${column.key}',
+                                              ),
+                                              initialValue: column.kind,
+                                              decoration: InputDecoration(
+                                                labelText: l10n.columnType,
+                                                border: const OutlineInputBorder(),
+                                                isDense: true,
+                                              ),
+                                              items: [
+                                                for (final kind in _columnKinds)
+                                                  DropdownMenuItem(
+                                                    value: kind,
+                                                    child: Text(_kindLabel(kind)),
+                                                  ),
+                                              ],
+                                              onChanged: (value) =>
+                                                  setDialogState(
+                                                    () => column.applyKind(
+                                                      value ?? 'text',
+                                                    ),
+                                                  ),
+                                            ),
                                     ),
                                     IconButton(
                                       key: ValueKey('column-up-${column.key}'),
@@ -1540,11 +1730,11 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         ),
       );
       if (saved != true) return;
-      for (final column in _columns) {
+      for (final column in table.columns) {
         column.dispose();
       }
       setState(() {
-        _columns
+        table.columns
           ..clear()
           ..addAll(working);
       });
@@ -1558,93 +1748,149 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     }
   }
 
-  /// Opens a dialog that lets the user define a new column with a free-text
-  /// key and label. The column is added to [working] when the user saves.
+  /// «إضافة عمود»: the person gives the new column a name — Arabic,
+  /// English, or both — and says what kind of values it holds. There is no
+  /// "key" to invent: the internal identifier is generated, because the
+  /// name a person reads and the name a database row is keyed by were
+  /// never the same question, and asking both at once is what made the
+  /// old dialog feel like it forced «كود الصنف» on people.
   void _addCustomColumnDialog(
     void Function(void Function()) setDialogState,
     List<_QColumnDraft> working,
   ) {
-    final keyController = TextEditingController();
     final labelEnController = TextEditingController();
     final labelArController = TextEditingController();
     final l10n = context.l10n;
+    var kind = 'text';
+    var width = 2;
     showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(l10n.addCustomColumn),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: keyController,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: l10n.columnKey,
-                border: const OutlineInputBorder(),
-                isDense: true,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setLocalState) => AlertDialog(
+          title: Text(l10n.addColumn),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                key: const ValueKey('new-column-name-ar'),
+                controller: labelArController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: l10n.columnLabelAr,
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
               ),
+              const SizedBox(height: 8),
+              TextField(
+                key: const ValueKey('new-column-name-en'),
+                controller: labelEnController,
+                decoration: InputDecoration(
+                  labelText: l10n.columnLabelEn,
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      key: const ValueKey('new-column-kind'),
+                      initialValue: kind,
+                      decoration: InputDecoration(
+                        labelText: l10n.columnType,
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: [
+                        for (final option in _columnKinds)
+                          DropdownMenuItem(
+                            value: option,
+                            child: Text(_kindLabel(option)),
+                          ),
+                      ],
+                      onChanged: (value) =>
+                          setLocalState(() => kind = value ?? 'text'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 110,
+                    child: DropdownButtonFormField<int>(
+                      key: const ValueKey('new-column-width'),
+                      initialValue: width,
+                      decoration: InputDecoration(
+                        labelText: l10n.columnWidth,
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: [
+                        for (var option = 1; option <= 6; option++)
+                          DropdownMenuItem(
+                            value: option,
+                            child: Text('$option'),
+                          ),
+                      ],
+                      onChanged: (value) =>
+                          setLocalState(() => width = value ?? 2),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(l10n.cancel),
             ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: labelEnController,
-              decoration: InputDecoration(
-                labelText: l10n.columnLabelEn,
-                border: const OutlineInputBorder(),
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: labelArController,
-              decoration: InputDecoration(
-                labelText: l10n.columnLabelAr,
-                border: const OutlineInputBorder(),
-                isDense: true,
-              ),
+            FilledButton(
+              key: const ValueKey('confirm-add-column'),
+              onPressed: () {
+                final labelAr = labelArController.text.trim();
+                final labelEn = labelEnController.text.trim();
+                if (labelAr.isEmpty && labelEn.isEmpty) {
+                  showMessage(
+                    dialogContext,
+                    l10n.columnNameRequired,
+                    error: true,
+                  );
+                  return;
+                }
+                // Generated, unique inside this table, and never shown:
+                // renaming the column later must not orphan its values.
+                var key =
+                    'custom-${DateTime.now().microsecondsSinceEpoch}';
+                var suffix = 0;
+                while (working.any((c) => c.key == key)) {
+                  suffix += 1;
+                  key =
+                      'custom-${DateTime.now().microsecondsSinceEpoch}-$suffix';
+                }
+                setDialogState(() {
+                  working.add(
+                    _QColumnDraft(
+                      key: key,
+                      labelEn: labelEn,
+                      labelAr: labelAr,
+                      width: width,
+                      kind: kind,
+                      numeric: kind != 'text',
+                    ),
+                  );
+                });
+                Navigator.of(dialogContext).pop(true);
+              },
+              child: Text(l10n.add),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(l10n.cancel),
-          ),
-          FilledButton(
-            onPressed: () {
-              final key = keyController.text.trim();
-              if (key.isEmpty) {
-                showMessage(
-                  dialogContext,
-                  l10n.columnKey,
-                  error: true,
-                );
-                return;
-              }
-              if (working.any((c) => c.key == key)) {
-                showMessage(
-                  dialogContext,
-                  l10n.columnAlreadyExists,
-                  error: true,
-                );
-                return;
-              }
-              setDialogState(() {
-                working.add(_QColumnDraft(
-                  key: key,
-                  labelEn: labelEnController.text.trim(),
-                  labelAr: labelArController.text.trim(),
-                ));
-              });
-              keyController.dispose();
-              labelEnController.dispose();
-              labelArController.dispose();
-              Navigator.of(dialogContext).pop(true);
-            },
-            child: Text(l10n.add),
-          ),
-        ],
       ),
-    );
+    ).then((_) {
+      labelEnController.dispose();
+      labelArController.dispose();
+    });
   }
 
   Future<Json?> _saveColumnTemplate(
@@ -1669,6 +1915,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                       'labelAr': column.labelAr.text.trim(),
                     'visible': column.visible,
                     'width': column.width,
+                    if (column.numeric) 'numeric': true,
+                    if (!column.isBuiltIn) 'kind': column.kind,
                   },
               ],
             },
@@ -1795,6 +2043,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 ),
               ],
             ),
+            _tableColumnsRow(index, table, language),
             const Divider(height: 24),
             for (var lineIndex = 0;
                 lineIndex < table.lines.length;
@@ -1816,6 +2065,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 label: Text(l10n.addQuotationLine),
               ),
             ),
+            const SizedBox(height: 8),
+            _tableGridPreview(table, language),
           ],
         ),
       ),
@@ -1948,14 +2199,14 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
               ),
             ],
           ),
-          // حقول الأعمدة المخصصة التي ليست من المفاتيح المضمّنة.
-          if (_customColumnKeys.isNotEmpty) ...[
+          // حقول قيم أعمدة هذا الجدول التي عرّفها المستخدم.
+          if (_customColumnsOf(table).isNotEmpty) ...[
             const SizedBox(height: 6),
             Wrap(
               spacing: 8,
               runSpacing: 6,
               children: [
-                for (final column in _customColumnKeys)
+                for (final column in _customColumnsOf(table))
                   SizedBox(
                     width: 150,
                     child: TextField(
@@ -1963,19 +2214,20 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                         'quotation-custom-${column.key}-$tableIndex-$index',
                       ),
                       controller: _customValueController(line, column.key),
+                      keyboardType: column.numeric
+                          ? const TextInputType.numberWithOptions(
+                              decimal: true,
+                            )
+                          : null,
                       decoration: InputDecoration(
-                        labelText: language == 'ar'
-                            ? column.labelAr.text.trim().isNotEmpty
-                                ? column.labelAr.text
-                                : column.key
-                            : column.labelEn.text.trim().isNotEmpty
-                                ? column.labelEn.text
-                                : column.key,
+                        labelText: _columnLabel(column, language),
                         border: const OutlineInputBorder(),
                         isDense: true,
                       ),
-                      onChanged: (value) =>
-                          line.customValues[column.key] = value,
+                      onChanged: (value) {
+                        line.customValues[column.key] = value;
+                        setState(() {});
+                      },
                     ),
                   ),
               ],
@@ -1986,21 +2238,11 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     );
   }
 
-  /// الأعمدة الظاهرة التي يعرفها المستخدم (ليست من المفاتيح المضمّنة).
-  List<_QColumnDraft> get _customColumnKeys =>
-      _columns.where((c) => c.visible && !_builtinColumnKeys.contains(c.key))
-          .toList();
+  /// الأعمدة الظاهرة التي عرّفها المستخدم داخل جدول بعينه.
+  List<_QColumnDraft> _customColumnsOf(_QTableDraft table) =>
+      table.columns.where((c) => c.visible && !c.isBuiltIn).toList();
 
-  /// المفاتيح المضمّنة التي لها حقول خاصة بها في السطر.
-  static const _builtinColumnKeys = {
-    'itemCode',
-    'description',
-    'countryOfOrigin',
-    'unit',
-    'quantity',
-    'unitPrice',
-    'lineTotal',
-  };
+
 
   /// يعيد المتحكم في حقل قيمة العمود المخصص لسطر معين، ينشئه عند الحاجة.
   TextEditingController _customValueController(

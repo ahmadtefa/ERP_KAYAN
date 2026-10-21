@@ -2244,6 +2244,36 @@ class AppLocalizationsEn extends AppLocalizations {
   String get columnNumeric => 'Numeric';
 
   @override
+  String get tableColumns => 'This table\'s columns';
+
+  @override
+  String get builtinColumns => 'Built-in columns';
+
+  @override
+  String get columnType => 'Column type';
+
+  @override
+  String get columnTypeText => 'Text';
+
+  @override
+  String get columnTypeNumber => 'Number';
+
+  @override
+  String get columnTypeQuantity => 'Quantity';
+
+  @override
+  String get columnTypePrice => 'Price';
+
+  @override
+  String get columnTypePercent => 'Percent';
+
+  @override
+  String get columnNameRequired => 'Give the column a name in Arabic or English.';
+
+  @override
+  String get tablePreview => 'Table preview';
+
+  @override
   String get addCustomColumn => 'Custom column…';
 
   @override

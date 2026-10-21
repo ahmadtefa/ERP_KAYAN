@@ -30,7 +30,6 @@ import {
 } from './dto/quotation.dto';
 import {
   COLUMN_LABELS,
-  columnLabel,
   normalizeColumns,
   QuotationColumn,
   standardColumns,
@@ -76,6 +75,9 @@ interface PreparedQuotationLine {
 interface PreparedQuotationTable {
   title: string;
   sortOrder: number;
+  /// This table's own validated column layout, or null to inherit the
+  /// quotation-level one.
+  columns: QuotationColumn[] | null;
   discount: ResolvedDiscount;
   subTotal: Prisma.Decimal;
   netTotal: Prisma.Decimal;
@@ -246,6 +248,9 @@ export class QuotationsService {
             create: prepared.tables.map((table) => ({
               title: table.title,
               sortOrder: table.sortOrder,
+              columns: table.columns
+                ? (table.columns as unknown as Prisma.InputJsonValue)
+                : Prisma.DbNull,
               discountType: table.discount.type,
               discountPercent: table.discount.percent,
               discountAmount: table.discount.amount,
@@ -360,6 +365,9 @@ export class QuotationsService {
             quotationId: id,
             title: table.title,
             sortOrder: table.sortOrder,
+            columns: table.columns
+              ? (table.columns as unknown as Prisma.InputJsonValue)
+              : Prisma.DbNull,
             discountType: table.discount.type,
             discountPercent: table.discount.percent,
             discountAmount: table.discount.amount,
@@ -588,6 +596,7 @@ export class QuotationsService {
             create: quotation.tables.map((table) => ({
               title: table.title,
               sortOrder: table.sortOrder,
+              columns: table.columns == null ? Prisma.DbNull : (table.columns as Prisma.InputJsonValue),
               discountType: table.discountType,
               discountPercent: table.discountPercent,
               discountAmount: table.discountAmount,
@@ -1044,6 +1053,12 @@ export class QuotationsService {
       preparedTables.push({
         title,
         sortOrder: tableIndex + 1,
+        // An omitted or empty per-table layout inherits the quotation's;
+        // a present one is validated on its own so one bad table cannot
+        // hide behind another table's good layout.
+        columns: rawTable.columns?.length
+          ? this.columnData(rawTable.columns, `Table ${tableIndex + 1}`)
+          : null,
         discount,
         subTotal,
         netTotal: discount.net,
@@ -1137,6 +1152,9 @@ export class QuotationsService {
       tables: quotation.tables.map((table) => ({
         title: table.title,
         sortOrder: table.sortOrder,
+        // Frozen per table, like everything else in the snapshot: the
+        // layout this section printed with when the offer was issued.
+        columns: this.effectiveColumns(table.columns, quotation.columns),
         subTotal: table.subTotal.toFixed(MONEY_SCALE),
         discountPercent: table.discountPercent.toFixed(RATE_SCALE),
         discountAmount: table.discountAmount.toFixed(MONEY_SCALE),
@@ -1217,6 +1235,10 @@ export class QuotationsService {
         id: table.id,
         title: table.title,
         sortOrder: table.sortOrder,
+        // The layout in force for this table (its own when it has one, the
+        // quotation's otherwise), so the editor reopens exactly what was
+        // saved instead of rebuilding every section from one shared list.
+        columns: this.effectiveColumns(table.columns, quotation.columns),
         discountType: table.discountType,
         discountPercent: table.discountPercent.toFixed(RATE_SCALE),
         discountAmount: table.discountAmount.toFixed(MONEY_SCALE),
@@ -1236,6 +1258,10 @@ export class QuotationsService {
           quantity: line.quantity.toFixed(MONEY_SCALE),
           unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
           lineTotal: line.lineTotal.toFixed(MONEY_SCALE),
+          // Without this the editor reopened every offer with its
+          // user-defined column values silently emptied, and the next save
+          // made the loss permanent.
+          customValues: (line.customValues as Record<string, string>) ?? {},
         })),
       }));
       response.events = quotation.events.map((event) => ({
@@ -1299,30 +1325,65 @@ export class QuotationsService {
     return normalizeColumns(raw);
   }
 
-  /// Validates what the editor sent before it is stored. A layout with no
-  /// visible column would print an empty table, so it is refused rather than
-  /// quietly replaced.
-  private columnData(raw?: Array<{
-    key: string;
-    labelEn?: string | null;
-    labelAr?: string | null;
-    visible?: boolean;
-    width?: number;
-  }>): QuotationColumn[] {
+  /// The layout one table actually uses: its own when it has one, the
+  /// quotation-level layout it inherits otherwise.
+  private effectiveColumns(
+    tableRaw: unknown,
+    quotationRaw: unknown,
+  ): QuotationColumn[] {
+    return normalizeColumns(tableRaw ?? quotationRaw);
+  }
+
+  /// Validates what the editor sent before it is stored.
+  ///
+  /// A key is either one of the built-in fields or a user-defined column —
+  /// free text the editor generated, in any language. An earlier version of
+  /// this check rejected every non-built-in key as "unknown", which made
+  /// the editor's custom columns unsavable while the DTO and the printer
+  /// both accepted them; the refusal is now about shape, not vocabulary:
+  /// blank keys, the same key twice (including redefining a built-in field
+  /// under its own key), and a layout with nothing visible.
+  private columnData(
+    raw?: Array<{
+      key: string;
+      labelEn?: string | null;
+      labelAr?: string | null;
+      visible?: boolean;
+      width?: number;
+      numeric?: boolean;
+      kind?: string;
+    }>,
+    where = 'Quotation',
+  ): QuotationColumn[] {
     if (!raw || raw.length === 0) return standardColumns();
     const seen = new Set<string>();
     for (const entry of raw) {
-      if (!COLUMN_LABELS[entry.key]) {
-        throw new BadRequestException(`Unknown quotation column "${entry.key}"`);
+      const key = (entry.key ?? '').trim();
+      if (!key) {
+        throw new BadRequestException(
+          `${where}: اسم العمود فارغ. أعطِ كل عمود اسمًا قبل الحفظ. / A column has no name. Name every column before saving.`,
+        );
       }
-      if (seen.has(entry.key)) {
-        throw new BadRequestException(`The column "${entry.key}" is listed twice`);
+      if (seen.has(key)) {
+        throw new BadRequestException(
+          `${where}: العمود "${key}" مكرر. لا يمكن تكرار العمود نفسه أو إعادة تعريف عمود مدمج. / The column "${key}" is listed twice; a column — built-in or custom — may appear only once.`,
+        );
       }
-      seen.add(entry.key);
+      seen.add(key);
     }
-    const columns = normalizeColumns(raw);
+    const columns = normalizeColumns(raw).map((column) => {
+      // Older editors sent the person's typed name AS the key with no
+      // labels. Keep reading those layouts the way they were meant: the
+      // key is the heading in both languages.
+      if (!COLUMN_LABELS[column.key] && !column.labelEn && !column.labelAr) {
+        return { ...column, labelEn: column.key, labelAr: column.key };
+      }
+      return column;
+    });
     if (!columns.some((column) => column.visible)) {
-      throw new BadRequestException('Keep at least one column visible');
+      throw new BadRequestException(
+        `${where}: أبقِ عمودًا واحدًا ظاهرًا على الأقل. / Keep at least one column visible.`,
+      );
     }
     return columns;
   }
