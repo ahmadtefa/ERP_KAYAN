@@ -390,7 +390,28 @@ try {
   $restoredCustomer = Invoke-RestMethod -Uri $customerUri -Headers $headers -TimeoutSec 30
   if ($restoredCustomer.nameEn -ne $originalName) { Fail 'Installed PostgreSQL restore did not roll back the sentinel mutation.' }
   Write-Output '::notice::Installed Windows PostgreSQL backup/restore passed: real archive, mutation, checked restore, safety copy, re-login and original sentinel verified.'
-  Write-Output "::notice::Windows installer smoke test passed: service, database preparation, client startup on port $apiPort, login, company JSON and full PostgreSQL backup/restore all verified."
+
+  # A real quotation PDF from the installed runtime — the same route the
+  # «Download PDF» button calls, rendered by the bundled server through the
+  # system browser. A 200 without %PDF- bytes is a failure, not a pass.
+  $quotationBody = @{
+    quotationDate = (Get-Date -Format 'yyyy-MM-dd')
+    customerId = $customer.id
+    currency = 'EGP'
+    subject = 'Windows smoke quotation'
+    tables = @(@{
+      title = 'Smoke table'
+      lines = @(@{ description = 'Smoke line item'; quantity = '2'; unitPrice = '150'; unit = 'piece' })
+    })
+  } | ConvertTo-Json -Compress -Depth 6
+  $quotation = Invoke-RestMethod -Method Post -Uri "$base/sales/quotations" -Headers $headers -ContentType 'application/json' -Body $quotationBody -TimeoutSec 30
+  if (-not $quotation.id) { Fail 'Installed API did not create the smoke quotation.' }
+  $pdfPath = Join-Path $env:TEMP 'kayan-installed-quotation.pdf'
+  Invoke-WebRequest -UseBasicParsing -Uri "$base/sales/quotations/$($quotation.id)/pdf?lang=ar" -Headers $headers -OutFile $pdfPath -TimeoutSec 180
+  $pdfBytes = [IO.File]::ReadAllBytes($pdfPath)
+  if ($pdfBytes.Length -le 5 -or [Text.Encoding]::ASCII.GetString($pdfBytes, 0, 5) -ne '%PDF-') { Fail 'Installed quotation PDF download is not a real PDF file.' }
+  Write-Output "::notice::Installed Windows quotation PDF passed: real %PDF- file of $($pdfBytes.Length) bytes rendered by the installed runtime."
+  Write-Output "::notice::Windows installer smoke test passed: service, database preparation, client startup on port $apiPort, login, company JSON and full PostgreSQL backup/restore, and a real quotation PDF all verified."
 } finally {
   if ($client -and -not $client.HasExited) {
     $null = $client.CloseMainWindow()
