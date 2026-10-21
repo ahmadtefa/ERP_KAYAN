@@ -227,6 +227,177 @@ List<_QColumnDraft> _columnDraftsFrom(Object? raw) {
 /// The screen never posts anything: quotations have no ledger or stock effect.
 /// Issuing the offer and converting it to an invoice are separate actions in
 /// the detail dialog, each with its own permission and confirmation.
+
+/// «إضافة عمود» as its own widget, so the name controllers live and die
+/// with the dialog's element. They used to be created before showDialog
+/// and disposed in its `.then`, which can fire before the exiting route's
+/// last rebuild — a TextField then re-subscribed to a disposed controller
+/// ("used after being disposed") and the whole Navigator teardown fell
+/// over. The dialog returns the finished draft; the caller files it.
+class _AddColumnDialog extends StatefulWidget {
+  const _AddColumnDialog({required this.existingKeys});
+
+  final Set<String> existingKeys;
+
+  @override
+  State<_AddColumnDialog> createState() => _AddColumnDialogState();
+}
+
+class _AddColumnDialogState extends State<_AddColumnDialog> {
+  final _labelEnController = TextEditingController();
+  final _labelArController = TextEditingController();
+  var _kind = 'text';
+  var _width = 2;
+
+  @override
+  void dispose() {
+    _labelEnController.dispose();
+    _labelArController.dispose();
+    super.dispose();
+  }
+
+  String _kindLabel(String kind) {
+    final l10n = context.l10n;
+    return switch (kind) {
+      'number' => l10n.columnTypeNumber,
+      'quantity' => l10n.columnTypeQuantity,
+      'price' => l10n.columnTypePrice,
+      'percent' => l10n.columnTypePercent,
+      _ => l10n.columnTypeText,
+    };
+  }
+
+  void _confirm() {
+    final l10n = context.l10n;
+    final labelAr = _labelArController.text.trim();
+    final labelEn = _labelEnController.text.trim();
+    if (labelAr.isEmpty && labelEn.isEmpty) {
+      showMessage(context, l10n.columnNameRequired, error: true);
+      return;
+    }
+    // Generated, unique inside this table, and never shown: renaming the
+    // column later must not orphan its values.
+    var key = 'custom-${DateTime.now().microsecondsSinceEpoch}';
+    var suffix = 0;
+    while (widget.existingKeys.contains(key)) {
+      suffix += 1;
+      key = 'custom-${DateTime.now().microsecondsSinceEpoch}-$suffix';
+    }
+    Navigator.of(context).pop(
+      _QColumnDraft(
+        key: key,
+        labelEn: labelEn,
+        labelAr: labelAr,
+        width: _width,
+        kind: _kind,
+        numeric: _kind != 'text',
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return AlertDialog(
+      title: Text(l10n.addColumn),
+      // A fixed content width and a scroll view: an AlertDialog sizes
+      // itself by intrinsic measurement, and dropdowns measured
+      // intrinsically inside that pass can claim absurd extents and
+      // overflow a plain column. Bounded and scrollable, it simply fits.
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                key: const ValueKey('new-column-name-ar'),
+                controller: _labelArController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: l10n.columnLabelAr,
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                key: const ValueKey('new-column-name-en'),
+                controller: _labelEnController,
+                decoration: InputDecoration(
+                  labelText: l10n.columnLabelEn,
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      key: const ValueKey('new-column-kind'),
+                      initialValue: _kind,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: l10n.columnType,
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: [
+                        for (final option in _columnKinds)
+                          DropdownMenuItem(
+                            value: option,
+                            child: Text(_kindLabel(option)),
+                          ),
+                      ],
+                      onChanged: (value) =>
+                          setState(() => _kind = value ?? 'text'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 110,
+                    child: DropdownButtonFormField<int>(
+                      key: const ValueKey('new-column-width'),
+                      initialValue: _width,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: l10n.columnWidth,
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: [
+                        for (var option = 1; option <= 6; option++)
+                          DropdownMenuItem(
+                            value: option,
+                            child: Text('$option'),
+                          ),
+                      ],
+                      onChanged: (value) =>
+                          setState(() => _width = value ?? 2),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          key: const ValueKey('confirm-add-column'),
+          onPressed: _confirm,
+          child: Text(l10n.add),
+        ),
+      ],
+    );
+  }
+}
+
 class QuotationEditorScreen extends ConsumerStatefulWidget {
   const QuotationEditorScreen({super.key, this.quotationId});
 
@@ -1003,7 +1174,13 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         ),
       );
     } finally {
-      controller.dispose();
+      // Disposing the moment showDialog's future completes can beat the
+      // exiting route's last rebuild, which then touches the dead
+      // controller ("used after being disposed"). One frame later the
+      // subtree is gone for good.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        controller.dispose();
+      });
     }
   }
 
@@ -1194,7 +1371,11 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         ],
       );
     }));
-    family.dispose(); size.dispose(); color.dispose(); background.dispose(); border.dispose(); borderWidth.dispose(); lineHeight.dispose(); customText.dispose();
+    // Deferred past the exiting route's last rebuild — see
+    // _askDesignTemplateName for why immediate disposal is unsafe here.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      family.dispose(); size.dispose(); color.dispose(); background.dispose(); border.dispose(); borderWidth.dispose(); lineHeight.dispose(); customText.dispose();
+    });
   }
 
   QuotationDocumentDesign _replaceDesign(QuotationDocumentDesign d, String key, QuotationDocumentElementStyle s) {
@@ -1760,156 +1941,21 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   /// name a person reads and the name a database row is keyed by were
   /// never the same question, and asking both at once is what made the
   /// old dialog feel like it forced «كود الصنف» on people.
-  void _addCustomColumnDialog(
+  Future<void> _addCustomColumnDialog(
     void Function(void Function()) setDialogState,
     List<_QColumnDraft> working,
-  ) {
-    final labelEnController = TextEditingController();
-    final labelArController = TextEditingController();
-    final l10n = context.l10n;
-    var kind = 'text';
-    var width = 2;
-    showDialog<bool>(
+  ) async {
+    final draft = await showDialog<_QColumnDraft>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setLocalState) => AlertDialog(
-          title: Text(l10n.addColumn),
-          // A fixed content width and a scroll view: an AlertDialog sizes
-          // itself by intrinsic measurement, and dropdowns measured
-          // intrinsically inside that pass can claim absurd extents and
-          // overflow a plain column (seen as a ~100k-pixel overflow in
-          // tests). Bounded and scrollable, the content simply fits.
-          content: SizedBox(
-            width: 420,
-            child: SingleChildScrollView(
-            child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                key: const ValueKey('new-column-name-ar'),
-                controller: labelArController,
-                autofocus: true,
-                decoration: InputDecoration(
-                  labelText: l10n.columnLabelAr,
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                key: const ValueKey('new-column-name-en'),
-                controller: labelEnController,
-                decoration: InputDecoration(
-                  labelText: l10n.columnLabelEn,
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      key: const ValueKey('new-column-kind'),
-                      initialValue: kind,
-                      isExpanded: true,
-                      decoration: InputDecoration(
-                        labelText: l10n.columnType,
-                        border: const OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      items: [
-                        for (final option in _columnKinds)
-                          DropdownMenuItem(
-                            value: option,
-                            child: Text(_kindLabel(option)),
-                          ),
-                      ],
-                      onChanged: (value) =>
-                          setLocalState(() => kind = value ?? 'text'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    width: 110,
-                    child: DropdownButtonFormField<int>(
-                      key: const ValueKey('new-column-width'),
-                      initialValue: width,
-                      isExpanded: true,
-                      decoration: InputDecoration(
-                        labelText: l10n.columnWidth,
-                        border: const OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      items: [
-                        for (var option = 1; option <= 6; option++)
-                          DropdownMenuItem(
-                            value: option,
-                            child: Text('$option'),
-                          ),
-                      ],
-                      onChanged: (value) =>
-                          setLocalState(() => width = value ?? 2),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: Text(l10n.cancel),
-            ),
-            FilledButton(
-              key: const ValueKey('confirm-add-column'),
-              onPressed: () {
-                final labelAr = labelArController.text.trim();
-                final labelEn = labelEnController.text.trim();
-                if (labelAr.isEmpty && labelEn.isEmpty) {
-                  showMessage(
-                    dialogContext,
-                    l10n.columnNameRequired,
-                    error: true,
-                  );
-                  return;
-                }
-                // Generated, unique inside this table, and never shown:
-                // renaming the column later must not orphan its values.
-                var key =
-                    'custom-${DateTime.now().microsecondsSinceEpoch}';
-                var suffix = 0;
-                while (working.any((c) => c.key == key)) {
-                  suffix += 1;
-                  key =
-                      'custom-${DateTime.now().microsecondsSinceEpoch}-$suffix';
-                }
-                setDialogState(() {
-                  working.add(
-                    _QColumnDraft(
-                      key: key,
-                      labelEn: labelEn,
-                      labelAr: labelAr,
-                      width: width,
-                      kind: kind,
-                      numeric: kind != 'text',
-                    ),
-                  );
-                });
-                Navigator.of(dialogContext).pop(true);
-              },
-              child: Text(l10n.add),
-            ),
-          ],
-        ),
+      builder: (_) => _AddColumnDialog(
+        existingKeys: {for (final column in working) column.key},
       ),
-    ).then((_) {
-      labelEnController.dispose();
-      labelArController.dispose();
-    });
+    );
+    if (draft != null) {
+      setDialogState(() => working.add(draft));
+    }
   }
+
 
   Future<Json?> _saveColumnTemplate(
     String name,
