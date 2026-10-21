@@ -114,3 +114,8 @@ final quotationColumnTemplatesProvider = FutureProvider<List<Json>>((
       .read(apiClientProvider)
       .getList('/sales/quotation-column-templates');
 });
+
+/// Company-wide reusable visual designs for quotation documents.
+final quotationDesignTemplatesProvider = FutureProvider<List<Json>>((ref) async {
+  return ref.read(apiClientProvider).getList('/sales/quotation-design-templates');
+});
