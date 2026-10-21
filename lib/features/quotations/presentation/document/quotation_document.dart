@@ -157,7 +157,7 @@ class QuotationDocumentDesign {
       if (s == null) return;
       result[key] = {
         'fontSizeMultiplier': s.fontSizeMultiplier,
-        if (s.fontWeight != null) 'fontWeight': s.fontWeight.toString(),
+        if (s.fontWeight != null) 'fontWeight': s.fontWeight.toString().split('.').last,
         if (s.color != null) 'color': s.color,
         if (s.fontFamily != null && s.fontFamily!.trim().isNotEmpty) 'fontFamily': s.fontFamily,
         if (s.textAlign != null) 'textAlign': s.textAlign.toString().split('.').last,
