@@ -22,6 +22,7 @@ import { join, resolve, sep } from 'path';
 import { AuditService } from '../../common/audit/audit.service';
 import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { reconcileRestoredAccess } from './restore-access';
 
 /**
  * Full-database backup and restore, on the server that hosts PostgreSQL.
@@ -723,6 +724,24 @@ export class FullBackupService {
         }
       }
 
+      // 6. The archive is a snapshot of the program that wrote it. Bring
+      // its access rows up to this version's policy — system-role grants
+      // topped up, and a super administrator guaranteed per company — or
+      // the installation-level screens (program reset, this very backup
+      // screen) stay locked after an otherwise perfect restore. A repair
+      // failure must not un-report a restore whose data already passed
+      // its checks, so it is logged and written into the audit record
+      // instead of failing the request.
+      let accessRepair: unknown = null;
+      try {
+        accessRepair = await this.reconcileRestoredCompanies();
+      } catch (repairError) {
+        this.logger.error(
+          `Post-restore access repair failed: ${(repairError as Error).message}`,
+        );
+        accessRepair = { error: String((repairError as Error).message ?? repairError) };
+      }
+
       await this.audit.record({
         action: 'RESTORE',
         entity: 'backup_full',
@@ -732,6 +751,7 @@ export class FullBackupService {
           safetyBackup: safety.name,
           rehearsedInScratchDatabase: rehearsed,
           postRestoreCheck: 'passed',
+          accessReconciled: accessRepair,
         },
         userId,
       });
@@ -747,6 +767,33 @@ export class FullBackupService {
       await unlink(staging).catch(() => {});
       this.maintenance.end();
     }
+  }
+
+  /**
+   * Runs the shared post-restore access repair for every company the
+   * archive brought back (a full archive can hold more than one).
+   */
+  private async reconcileRestoredCompanies(): Promise<{
+    companies: number;
+    grantsAdded: number;
+    superAdminPromoted: string[];
+  }> {
+    const companies = await this.prisma.company.findMany({
+      where: { deletedAt: null },
+      select: { id: true },
+    });
+    let grantsAdded = 0;
+    const superAdminPromoted: string[] = [];
+    for (const company of companies) {
+      const repaired = await this.prisma.$transaction((tx) =>
+        reconcileRestoredAccess(tx, company.id),
+      );
+      grantsAdded += repaired.grantsAdded;
+      if (repaired.superAdminPromoted) {
+        superAdminPromoted.push(repaired.superAdminPromoted);
+      }
+    }
+    return { companies: companies.length, grantsAdded, superAdminPromoted };
   }
 
   /**
