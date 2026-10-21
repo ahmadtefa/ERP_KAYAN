@@ -81,18 +81,6 @@ class DashboardScreen extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         PageHeader(
-          leading: brandMark == null
-              ? null
-              : ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: Image.network(
-                    brandMark,
-                    width: 48,
-                    height: 48,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                  ),
-                ),
           eyebrow: companyName.isEmpty
               ? (arabic ? 'مساحة عمل الشركة' : 'Company workspace')
               : companyName,
