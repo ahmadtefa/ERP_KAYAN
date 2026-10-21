@@ -581,7 +581,7 @@ async function main() {
     // from before the reset names a user and company that no longer exist.
     token = signedInAgain.data?.accessToken ?? token;
 
-    const accounts = await call('/accounting/chart-of-accounts?pageSize=200');
+    const accounts = await call('/accounting/chart-of-accounts');
     const itemsAfter = accounts.data?.items ?? [];
     check(
       'the company holds no operational data afterwards',
