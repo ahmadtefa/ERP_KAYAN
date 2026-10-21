@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS quotation_design_templates (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  "companyId" UUID NOT NULL REFERENCES "Company"(id) ON DELETE CASCADE,
+  "companyId" UUID NOT NULL REFERENCES "companies"(id) ON DELETE CASCADE,
   name VARCHAR(120) NOT NULL,
   design JSONB NOT NULL DEFAULT '{}'::jsonb,
   "isActive" BOOLEAN NOT NULL DEFAULT TRUE,
