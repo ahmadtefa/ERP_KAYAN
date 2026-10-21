@@ -177,8 +177,9 @@ function designCss(design: Record<string, unknown> | null | undefined): string {
     const css: string[] = [];
     const color = safeColor(v.color); const bg = safeColor(v.backgroundColor); const bc = safeColor(v.borderColor);
     const font = safeFont(v.fontFamily); const size = Number(v.fontSizeMultiplier); const lh = Number(v.lineHeight); const bw = Number(v.borderWidth);
+    const weight = typeof v.fontWeight === 'string' && /^w[1-9]00$/.test(v.fontWeight) ? Number(v.fontWeight.slice(1)) : null;
     if (color) css.push(`color:${color}`); if (bg) css.push(`background-color:${bg}`); if (bc && bw > 0) css.push(`border-color:${bc}`);
-    if (bw > 0 && bw < 20) css.push(`border-width:${bw}mm`); if (font) css.push(`font-family:${font},Tahoma,Arial,sans-serif`);
+    if (bw > 0 && bw < 20) css.push(`border-width:${bw}mm`); if (font) css.push(`font-family:${font},Tahoma,Arial,sans-serif`); if (weight) css.push(`font-weight:${weight}`);
     if (Number.isFinite(size) && size >= 0.5 && size <= 3) css.push(`font-size:${size}em`);
     if (Number.isFinite(lh) && lh >= 0.8 && lh <= 3) css.push(`line-height:${lh}`);
     if (typeof v.textAlign === 'string' && ['left','right','center','justify','start','end'].includes(v.textAlign)) css.push(`text-align:${v.textAlign}`);
