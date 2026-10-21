@@ -1,14 +1,14 @@
 # One-shot source finalization; it deletes itself after a successful commit.
 name: Apply quotation design finalization
 on:
-  push:
-    branches:
-      - arena/24dd290b-erp-kayan
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
 permissions:
   contents: write
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
+    if: github.event.pull_request.head.ref == 'arena/24dd290b-erp-kayan' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
