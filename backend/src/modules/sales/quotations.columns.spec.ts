@@ -366,8 +366,11 @@ describe('QuotationsService subject and column layout', () => {
       expect(html).toContain('سنتان');
       expect(html).toContain('خصم إضافي');
       expect(html).toContain('٪');
-      // The second section inherits the quotation layout ('Pieces' label).
-      expect(html).toContain('Pieces');
+      // The second section inherits the quotation layout: its quantity
+      // header is the Arabic override from that layout, and it appears
+      // only there (the first section has no quantity column).
+      expect(html).toContain('الكمية');
+      expect(html.split('الكمية')).toHaveLength(2);
       // And the custom headers belong to the first section only: they
       // appear exactly once.
       expect(html.split('مدة الضمان')).toHaveLength(2);

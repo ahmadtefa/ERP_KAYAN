@@ -219,7 +219,9 @@ void main() {
     _FakeApiClient api, {
     String? quotationId,
   }) async {
-    tester.view.physicalSize = const Size(1600, 1100);
+    // A tall surface: the editor is a long form, and tests below assert on
+    // widgets far down it (per-table grid previews, line fields).
+    tester.view.physicalSize = const Size(1600, 2000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -309,29 +311,41 @@ void main() {
       await addNamedColumn(tester, nameAr: 'مدة الضمان');
       // Still inside the layout dialog: the new column is listed by the
       // name that was typed, not by a built-in name or a generated key.
-      expect(find.text('مدة الضمان'), findsWidgets);
+      // (The row can sit below the dialog list's fold, hence skipOffstage.)
+      expect(find.text('مدة الضمان', skipOffstage: false), findsWidgets);
       await addNamedColumn(tester, nameEn: 'Lead time');
       await tester.tap(find.byKey(const ValueKey('save-columns')));
       await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
 
       // The editor grid gained two COLUMNS (6 standard + 2 new), not rows.
-      await tester.ensureVisible(find.byType(DataTable).first);
+      await tester.ensureVisible(
+        find.byType(DataTable, skipOffstage: false).first,
+      );
       await tester.pumpAndSettle();
-      final grid = tester.widget<DataTable>(find.byType(DataTable).first);
+      final grid = tester.widget<DataTable>(
+        find.byType(DataTable, skipOffstage: false).first,
+      );
       expect(grid.columns, hasLength(8));
-      expect(find.text('مدة الضمان'), findsWidgets);
-      expect(find.text('Lead time'), findsWidgets);
+      expect(find.text('مدة الضمان', skipOffstage: false), findsWidgets);
+      expect(find.text('Lead time', skipOffstage: false), findsWidgets);
 
       // The line gained a value field under the Arabic name.
       final warrantyField = find.byWidgetPredicate(
         (widget) =>
             widget is TextField && widget.decoration?.labelText == 'مدة الضمان',
+        skipOffstage: false,
       );
       await tester.ensureVisible(warrantyField);
       await tester.enterText(warrantyField, 'سنتان');
       await tester.pump();
 
-      // Fill the minimum and save.
+      // Fill the minimum and save. Scroll back up first: the customer
+      // dropdown sits at the top of the form, far above the grid.
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('quotation-subject'), skipOffstage: false),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byType(DropdownButtonFormField<String>).first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('CUS-1 — Test customer').last);
@@ -382,20 +396,23 @@ void main() {
     await pumpEditor(tester, api);
 
     // Second table.
-    await tester.ensureVisible(find.text('Add table'));
+    await tester.ensureVisible(find.text('Add table', skipOffstage: false));
     await tester.tap(find.text('Add table'));
     await tester.pumpAndSettle();
 
     // Give only the second table an extra column.
-    await tester.ensureVisible(find.byKey(const ValueKey('edit-columns-1')));
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('edit-columns-1'), skipOffstage: false),
+    );
     await tester.tap(find.byKey(const ValueKey('edit-columns-1')));
     await tester.pumpAndSettle();
     await addNamedColumn(tester, nameAr: 'الضمان');
     await tester.tap(find.byKey(const ValueKey('save-columns')));
     await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
 
     final grids = tester
-        .widgetList<DataTable>(find.byType(DataTable))
+        .widgetList<DataTable>(find.byType(DataTable, skipOffstage: false))
         .toList();
     expect(grids, hasLength(2));
     expect(grids[0].columns, hasLength(6));
@@ -450,12 +467,19 @@ void main() {
 
       // The saved layout came back: the grid shows the saved header, and
       // the line's stored value is in its field again.
-      await tester.ensureVisible(find.byType(DataTable).first);
+      await tester.ensureVisible(
+        find.byType(DataTable, skipOffstage: false).first,
+      );
       await tester.pumpAndSettle();
-      final grid = tester.widget<DataTable>(find.byType(DataTable).first);
+      final grid = tester.widget<DataTable>(
+        find.byType(DataTable, skipOffstage: false).first,
+      );
       expect(grid.columns, hasLength(3));
-      expect(find.text('مدة الضمان'), findsWidgets);
-      expect(find.widgetWithText(TextField, 'سنتان'), findsOneWidget);
+      expect(find.text('مدة الضمان', skipOffstage: false), findsWidgets);
+      expect(
+        find.widgetWithText(TextField, 'سنتان', skipOffstage: false),
+        findsOneWidget,
+      );
     },
   );
 }

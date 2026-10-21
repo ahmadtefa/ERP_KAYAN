@@ -108,6 +108,14 @@ jobs:
       - name: Analyze Flutter
         run: python scripts/ci-diagnose.py flutter analyze
 
+      # Same screenshot generation as the ERP CI jobs: the design-screenshot
+      # goldens are not committed, so they must be rendered in this job's own
+      # workspace before the test run below compares against them. Without
+      # this step every Windows run failed at "Test Flutter" with missing
+      # golden files even when all real tests passed on Linux.
+      - name: Render design screenshots
+        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
+
       - name: Test Flutter
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
 
