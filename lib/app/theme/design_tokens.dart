@@ -6,37 +6,40 @@ import 'package:flutter/material.dart';
 /// and control sizes from here, so a change of identity happens once instead
 /// of being copied into dozens of `EdgeInsets` and `Color(0x...)` literals.
 ///
-/// The identity is deliberately restrained: navy for structure, one blue for
-/// action, white surfaces, hairline borders and almost no shadow. Financial
-/// data is the loudest thing on the screen, never the chrome around it.
+/// The identity follows Microsoft's Fluent 2 language: a neutral grey
+/// canvas, white surfaces with hairline borders and soft depth, one brand
+/// blue for action, and a distinct accent per product section (see
+/// [SectionAccents]) so the place you are in is recognisable by colour, not
+/// only by title. Financial data stays the loudest thing on the screen.
 abstract final class AppColors {
-  // Structure — navigation, brand, headings on dark surfaces.
+  // Structure — brand marks and text on inverted surfaces.
   static const navy = Color(0xFF142B4A);
   static const navyDeep = Color(0xFF0E1F36);
   static const navySoft = Color(0xFF1D3A60);
 
-  // Action — buttons, links, selected states.
-  static const primary = Color(0xFF2457A7);
-  static const primaryHover = Color(0xFF1D4A90);
-  static const primarySoft = Color(0xFFEAF1FC);
-  static const accent = Color(0xFF367BF5);
+  // Action — Fluent brand blue, with its hover and pressed steps.
+  static const primary = Color(0xFF0F6CBD);
+  static const primaryHover = Color(0xFF0E5DAC);
+  static const primaryPressed = Color(0xFF0E4E8A);
+  static const primarySoft = Color(0xFFE8F1FA);
+  static const accent = Color(0xFF2B7CD3);
 
-  // Canvas and surfaces.
-  static const background = Color(0xFFF4F7FB);
+  // Canvas and surfaces (Fluent neutral background ramp).
+  static const background = Color(0xFFF5F5F5);
   static const surface = Color(0xFFFFFFFF);
-  static const surfaceMuted = Color(0xFFF8FAFD);
-  static const surfaceSunken = Color(0xFFEEF3F9);
+  static const surfaceMuted = Color(0xFFFAFAFA);
+  static const surfaceSunken = Color(0xFFF0F0F0);
 
-  // Text.
-  static const textPrimary = Color(0xFF172B4D);
-  static const textSecondary = Color(0xFF68778D);
-  static const textDisabled = Color(0xFF9AA7B8);
+  // Text (Fluent neutral foreground ramp).
+  static const textPrimary = Color(0xFF242424);
+  static const textSecondary = Color(0xFF616161);
+  static const textDisabled = Color(0xFFA3A3A3);
   static const onNavy = Color(0xFFF7FAFF);
   static const onNavyMuted = Color(0xFFB7C6DA);
 
   // Lines.
-  static const border = Color(0xFFE2E8F0);
-  static const borderStrong = Color(0xFFCBD5E1);
+  static const border = Color(0xFFE0E0E0);
+  static const borderStrong = Color(0xFFC8C8C8);
 
   // Meaning.
   static const success = Color(0xFF16845B);
@@ -53,13 +56,90 @@ abstract final class AppColors {
   static const chartPurchases = Color(0xFF8A6A2F);
   static const chartPurchasesDark = Color(0xFFD8B678);
 
-  // Dark theme counterparts.
-  static const darkBackground = Color(0xFF0B1728);
-  static const darkSurface = Color(0xFF122138);
-  static const darkSurfaceAlt = Color(0xFF17293F);
-  static const darkBorder = Color(0xFF24374F);
-  static const darkText = Color(0xFFE7EEF7);
-  static const darkTextMuted = Color(0xFF9FB0C6);
+  // Dark theme counterparts (Fluent neutral dark ramp).
+  static const darkBackground = Color(0xFF141414);
+  static const darkSurface = Color(0xFF1F1F1F);
+  static const darkSurfaceAlt = Color(0xFF292929);
+  static const darkBorder = Color(0xFF3D3D3D);
+  static const darkText = Color(0xFFF5F5F5);
+  static const darkTextMuted = Color(0xFFADADAD);
+}
+
+/// One section's identity colour: the strong step for icons and selected
+/// text, the soft step for selected backgrounds, and a brighter step that
+/// stays legible on dark surfaces.
+class SectionAccent {
+  const SectionAccent({
+    required this.base,
+    required this.soft,
+    required this.darkBase,
+  });
+
+  final Color base;
+  final Color soft;
+  final Color darkBase;
+
+  Color of(Brightness brightness) =>
+      brightness == Brightness.dark ? darkBase : base;
+
+  Color softOf(Brightness brightness) => brightness == Brightness.dark
+      ? darkBase.withValues(alpha: 0.18)
+      : soft;
+}
+
+/// The colour of each main section of the product. The navigation, the top
+/// bar and the dashboard figures all read from here, so «المبيعات» is green
+/// everywhere and «العملاء والموردون» keep their own rose identity instead
+/// of borrowing the accounting colour.
+abstract final class SectionAccents {
+  static const overview = SectionAccent(
+    base: Color(0xFF0F6CBD),
+    soft: Color(0xFFE5F0FA),
+    darkBase: Color(0xFF62ABF0),
+  );
+  static const accounting = SectionAccent(
+    base: Color(0xFF744DA9),
+    soft: Color(0xFFF0EAF8),
+    darkBase: Color(0xFFB79CED),
+  );
+
+  /// Banks & cashboxes live inside the accounting group but are their own
+  /// daily destination, so the cash entry carries this teal instead.
+  static const cash = SectionAccent(
+    base: Color(0xFF038387),
+    soft: Color(0xFFE0F2F2),
+    darkBase: Color(0xFF4FC4C4),
+  );
+  static const parties = SectionAccent(
+    base: Color(0xFFB83A7A),
+    soft: Color(0xFFF9E9F2),
+    darkBase: Color(0xFFE87FB0),
+  );
+  static const inventory = SectionAccent(
+    base: Color(0xFF986F0B),
+    soft: Color(0xFFFAF0DA),
+    darkBase: Color(0xFFE0B45C),
+  );
+  static const sales = SectionAccent(
+    base: Color(0xFF107C10),
+    soft: Color(0xFFE5F3E5),
+    darkBase: Color(0xFF5FBF5F),
+  );
+  static const purchases = SectionAccent(
+    base: Color(0xFFCA5010),
+    soft: Color(0xFFFBEAE0),
+    darkBase: Color(0xFFF09A6B),
+  );
+  static const insights = SectionAccent(
+    base: Color(0xFF4B53BC),
+    soft: Color(0xFFE8E9F8),
+    darkBase: Color(0xFF8F96E8),
+  );
+  static const administration = SectionAccent(
+    base: Color(0xFF64707D),
+    soft: Color(0xFFEDF0F3),
+    darkBase: Color(0xFFA7B3BF),
+  );
 }
 
 /// A 4-point spacing scale. Nothing in the UI should invent its own gaps.
@@ -87,9 +167,11 @@ abstract final class AppRadii {
   static const xl = 14.0;
   static const pill = 999.0;
 
-  static BorderRadius get control => BorderRadius.circular(md);
+  // Fluent controls sit on the smaller step; cards and dialogs keep the
+  // roomier ones.
+  static BorderRadius get control => BorderRadius.circular(sm);
   static BorderRadius get card => BorderRadius.circular(lg);
-  static BorderRadius get dialog => BorderRadius.circular(xl);
+  static BorderRadius get dialog => BorderRadius.circular(lg);
   static BorderRadius get chip => BorderRadius.circular(sm);
 }
 
@@ -106,17 +188,19 @@ abstract final class AppSizes {
   static const tableHeaderHeight = 40.0;
 }
 
-/// Shadows are almost invisible on purpose: a hairline border already
-/// separates a panel from the canvas.
+/// Fluent depth: two soft layers (a tight contact shadow plus a wider
+/// ambient one). Light enough to read as «lifted», never as decoration.
 abstract final class AppShadows {
   static const none = <BoxShadow>[];
 
   static const raised = <BoxShadow>[
-    BoxShadow(color: Color(0x0A142B4A), blurRadius: 10, offset: Offset(0, 2)),
+    BoxShadow(color: Color(0x14000000), blurRadius: 8, offset: Offset(0, 2)),
+    BoxShadow(color: Color(0x0F000000), blurRadius: 2, offset: Offset(0, 0)),
   ];
 
   static const overlay = <BoxShadow>[
-    BoxShadow(color: Color(0x1A142B4A), blurRadius: 28, offset: Offset(0, 12)),
+    BoxShadow(color: Color(0x24000000), blurRadius: 32, offset: Offset(0, 8)),
+    BoxShadow(color: Color(0x14000000), blurRadius: 4, offset: Offset(0, 0)),
   ];
 }
 

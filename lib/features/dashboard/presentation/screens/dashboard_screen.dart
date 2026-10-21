@@ -209,6 +209,7 @@ class _SummarySections extends StatelessWidget {
             : '${sales['invoices'] ?? 0} invoices',
         Icons.trending_up_rounded,
         AppTone.success,
+        SectionAccents.sales,
       ),
       _PrimaryMetric(
         arabic ? 'إجمالي المشتريات' : 'Total purchases',
@@ -218,6 +219,7 @@ class _SummarySections extends StatelessWidget {
             : '${purchases['invoices'] ?? 0} invoices',
         Icons.shopping_bag_outlined,
         AppTone.info,
+        SectionAccents.purchases,
       ),
       _PrimaryMetric(
         arabic ? 'صافي النتيجة' : 'Net result',
@@ -225,6 +227,7 @@ class _SummarySections extends StatelessWidget {
         arabic ? 'إيرادات ناقص مصروفات' : 'Revenue less expenses',
         Icons.insights_rounded,
         AppTone.info,
+        SectionAccents.insights,
       ),
       _PrimaryMetric(
         arabic ? 'النقدية' : 'Cash position',
@@ -232,6 +235,7 @@ class _SummarySections extends StatelessWidget {
         arabic ? 'الصناديق والبنوك' : 'Cash boxes and banks',
         Icons.account_balance_wallet_outlined,
         AppTone.neutral,
+        SectionAccents.cash,
       ),
       _PrimaryMetric(
         arabic ? 'الذمم المدينة' : 'Receivables',
@@ -239,6 +243,7 @@ class _SummarySections extends StatelessWidget {
         arabic ? 'مستحق من العملاء' : 'Owed by customers',
         Icons.groups_2_outlined,
         AppTone.warning,
+        SectionAccents.parties,
       ),
       _PrimaryMetric(
         arabic ? 'الذمم الدائنة' : 'Payables',
@@ -246,6 +251,7 @@ class _SummarySections extends StatelessWidget {
         arabic ? 'مستحق للموردين' : 'Owed to suppliers',
         Icons.local_shipping_outlined,
         AppTone.danger,
+        SectionAccents.parties,
       ),
     ];
 
@@ -371,6 +377,7 @@ class _SummarySections extends StatelessWidget {
                       caption: metric.caption,
                       icon: metric.icon,
                       tone: metric.tone,
+                      accent: metric.accent,
                     ),
                   ),
               ],
@@ -468,6 +475,7 @@ class _PrimaryMetric {
     this.caption,
     this.icon,
     this.tone,
+    this.accent,
   );
 
   final String label;
@@ -475,6 +483,10 @@ class _PrimaryMetric {
   final String caption;
   final IconData icon;
   final AppTone tone;
+
+  /// The section this figure belongs to; its card wears that section's
+  /// colour, matching the navigation.
+  final SectionAccent accent;
 }
 
 class _SectionTitle extends StatelessWidget {
@@ -680,6 +692,7 @@ class _QuickActions extends StatelessWidget {
               QuickActionTile(
                 icon: module.icon,
                 label: module.label,
+                accent: module.accent,
                 onTap: () => context.go(module.path),
                 badge: switch (module.path) {
                   AppRoutes.journalEntries => drafts,
@@ -912,17 +925,16 @@ class _ContextChip extends StatelessWidget {
   );
 }
 
-List<({IconData icon, String label, String path})> _modules(
-  AppLocalizations l10n,
-) => [
-  (icon: Icons.menu_book_outlined, label: l10n.journalEntries, path: AppRoutes.journalEntries),
-  (icon: Icons.people_outline, label: l10n.customers, path: AppRoutes.customers),
-  (icon: Icons.local_shipping_outlined, label: l10n.suppliers, path: AppRoutes.suppliers),
-  (icon: Icons.category_outlined, label: l10n.items, path: AppRoutes.items),
-  (icon: Icons.inventory_2_outlined, label: l10n.stock, path: AppRoutes.stock),
-  (icon: Icons.point_of_sale_outlined, label: l10n.salesInvoices, path: AppRoutes.salesInvoices),
-  (icon: Icons.shopping_cart_outlined, label: l10n.purchaseInvoices, path: AppRoutes.purchaseInvoices),
-  (icon: Icons.account_tree_outlined, label: l10n.chartOfAccounts, path: AppRoutes.chartOfAccounts),
-  (icon: Icons.bar_chart_outlined, label: l10n.reports, path: AppRoutes.reports),
-  (icon: Icons.settings_outlined, label: l10n.settings, path: AppRoutes.settings),
+List<({IconData icon, String label, String path, SectionAccent accent})>
+_modules(AppLocalizations l10n) => [
+  (icon: Icons.menu_book_outlined, label: l10n.journalEntries, path: AppRoutes.journalEntries, accent: SectionAccents.accounting),
+  (icon: Icons.people_outline, label: l10n.customers, path: AppRoutes.customers, accent: SectionAccents.parties),
+  (icon: Icons.local_shipping_outlined, label: l10n.suppliers, path: AppRoutes.suppliers, accent: SectionAccents.parties),
+  (icon: Icons.category_outlined, label: l10n.items, path: AppRoutes.items, accent: SectionAccents.inventory),
+  (icon: Icons.inventory_2_outlined, label: l10n.stock, path: AppRoutes.stock, accent: SectionAccents.inventory),
+  (icon: Icons.point_of_sale_outlined, label: l10n.salesInvoices, path: AppRoutes.salesInvoices, accent: SectionAccents.sales),
+  (icon: Icons.shopping_cart_outlined, label: l10n.purchaseInvoices, path: AppRoutes.purchaseInvoices, accent: SectionAccents.purchases),
+  (icon: Icons.account_tree_outlined, label: l10n.chartOfAccounts, path: AppRoutes.chartOfAccounts, accent: SectionAccents.accounting),
+  (icon: Icons.bar_chart_outlined, label: l10n.reports, path: AppRoutes.reports, accent: SectionAccents.insights),
+  (icon: Icons.settings_outlined, label: l10n.settings, path: AppRoutes.settings, accent: SectionAccents.administration),
 ];

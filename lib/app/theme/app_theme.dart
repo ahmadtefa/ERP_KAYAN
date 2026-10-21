@@ -99,8 +99,10 @@ abstract final class AppTheme {
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       ),
 
+      // The drawer is the same light navigation surface as the sidebar;
+      // the old navy slab belonged to the previous identity.
       drawerTheme: DrawerThemeData(
-        backgroundColor: AppColors.navy,
+        backgroundColor: surface,
         surfaceTintColor: Colors.transparent,
         width: 290,
         shape: const RoundedRectangleBorder(),
@@ -226,7 +228,9 @@ abstract final class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: AppRadii.control,
-          borderSide: BorderSide(color: scheme.primary, width: 1.5),
+          // Fluent's 2px brand underline-step, as a full border here: the
+          // focused field must be findable at a glance on a dense form.
+          borderSide: BorderSide(color: scheme.primary, width: 2),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: AppRadii.control,
@@ -277,8 +281,14 @@ abstract final class AppTheme {
             if (states.contains(WidgetState.disabled)) {
               return scheme.primary.withValues(alpha: 0.38);
             }
-            if (states.contains(WidgetState.hovered) ||
-                states.contains(WidgetState.pressed)) {
+            // Fluent gives hover and pressed their own steps of the brand
+            // ramp, so a press is visible before the click lands. The dark
+            // scheme's primary is already the light step, so there the
+            // white overlay below carries the state instead.
+            if (isLight && states.contains(WidgetState.pressed)) {
+              return AppColors.primaryPressed;
+            }
+            if (isLight && states.contains(WidgetState.hovered)) {
               return AppColors.primaryHover;
             }
             return scheme.primary;
@@ -314,6 +324,9 @@ abstract final class AppTheme {
           }),
           foregroundColor: WidgetStatePropertyAll(scheme.primary),
           backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.pressed)) {
+              return scheme.primary.withValues(alpha: 0.10);
+            }
             if (states.contains(WidgetState.hovered)) {
               return scheme.primary.withValues(alpha: 0.05);
             }
@@ -359,6 +372,15 @@ abstract final class AppTheme {
 
       dataTableTheme: DataTableThemeData(
         headingRowColor: WidgetStatePropertyAll(surfaceAlt),
+        dataRowColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return scheme.primaryContainer;
+          }
+          if (states.contains(WidgetState.hovered)) {
+            return scheme.surfaceContainerLow;
+          }
+          return null;
+        }),
         headingRowHeight: _room(AppSizes.tableHeaderHeight, textScale, 16),
         dataRowMinHeight: _room(AppSizes.tableRowHeight, textScale, 16),
         dataRowMaxHeight: _room(AppSizes.tableRowHeight + 6, textScale, 24),
@@ -508,12 +530,12 @@ abstract final class AppTheme {
     surface: AppColors.darkSurface,
     onSurface: AppColors.darkText,
     onSurfaceVariant: AppColors.darkTextMuted,
-    surfaceContainerLowest: Color(0xFF0A1524),
+    surfaceContainerLowest: Color(0xFF0F0F0F),
     surfaceContainerLow: AppColors.darkSurfaceAlt,
     surfaceContainer: AppColors.darkSurface,
-    surfaceContainerHigh: Color(0xFF1B2F49),
-    surfaceContainerHighest: Color(0xFF21374F),
-    outline: Color(0xFF3A5069),
+    surfaceContainerHigh: Color(0xFF2E2E2E),
+    surfaceContainerHighest: Color(0xFF383838),
+    outline: Color(0xFF525252),
     outlineVariant: AppColors.darkBorder,
     shadow: Colors.black,
     scrim: Color(0xAA000000),
