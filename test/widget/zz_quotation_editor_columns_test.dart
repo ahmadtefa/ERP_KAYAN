@@ -144,39 +144,19 @@ void main() {
   testWidgets(
     'add column creates named Arabic and English columns in the grid, and their values save with the line',
     (tester) async {
-      // TEMPORARY diagnosis: surface the FIRST framework error (the
-      // cascades after it fill every log window). Installed inside the
-      // test because the binding replaces FlutterError.onError per test.
-      var reportedFirstError = false;
-      final previousOnError = FlutterError.onError;
-      FlutterError.onError = (details) {
-        if (!reportedFirstError) {
-          reportedFirstError = true;
-          final frames = '${details.stack}'.split('\n').take(10).join(' <- ');
-          printOnFailure(
-            'FIRST-ERROR: ${details.exception}\nFIRST-STACK: $frames',
-          );
-        }
-        previousOnError?.call(details);
-      };
       final api = _FakeApiClient();
       await pumpEditor(tester, api);
-      printOnFailure('STEP-OK pumped');
 
       await tester.tap(find.byKey(const ValueKey('edit-columns-0')));
       await tester.pumpAndSettle();
-      printOnFailure('STEP-OK columns dialog open');
       await addNamedColumn(tester, nameAr: 'مدة الضمان');
-      printOnFailure('STEP-OK arabic column added');
       // Still inside the layout dialog: the new column is listed by the
       // name that was typed, not by a built-in name or a generated key.
       expect(find.text('مدة الضمان', skipOffstage: false), findsWidgets);
       await addNamedColumn(tester, nameEn: 'Lead time');
-      printOnFailure('STEP-OK english column added');
       await tester.tap(find.byKey(const ValueKey('save-columns')));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
-      printOnFailure('STEP-OK columns saved, dialog closed');
 
       // The editor grid gained two COLUMNS (6 standard + 2 new), not rows.
       await tester.ensureVisible(
@@ -186,9 +166,7 @@ void main() {
       final grid = tester.widget<DataTable>(
         find.byType(DataTable, skipOffstage: false).first,
       );
-      printOnFailure('STEP-OK grid visible');
       expect(grid.columns, hasLength(8));
-      printOnFailure('STEP-OK grid has 8 columns');
       expect(find.text('مدة الضمان', skipOffstage: false), findsWidgets);
       expect(find.text('Lead time', skipOffstage: false), findsWidgets);
 
@@ -200,7 +178,6 @@ void main() {
       );
       await tester.ensureVisible(warrantyField);
       await tester.enterText(warrantyField, 'سنتان');
-      printOnFailure('STEP-OK warranty value entered');
       await tester.pump();
 
       // Fill the minimum and save. Scroll back up first: the customer
