@@ -2,11 +2,14 @@ name: Finalize quotation design
 on:
   push:
     branches: [arena/24dd290b-erp-kayan]
+  pull_request:
+    types: [synchronize]
+    branches: [main]
 permissions:
   contents: write
 jobs:
   finalize:
-    if: github.actor != 'github-actions[bot]'
+    if: github.event.pull_request.head.ref == 'arena/24dd290b-erp-kayan' || github.ref == 'refs/heads/arena/24dd290b-erp-kayan'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +21,7 @@ jobs:
           python-version: '3.12'
       - name: Apply final quotation design
         run: python scripts/finalize-quotation-design.py
-      - name: Validate changed source syntax
+      - name: Validate source
         run: |
           python -m py_compile scripts/finalize-quotation-design.py
           cd backend && npm ci --ignore-scripts && npx prisma generate && npx tsc --noEmit
@@ -32,4 +35,4 @@ jobs:
           git commit -m 'feat: complete per-element quotation design controls'
           git push origin HEAD:arena/24dd290b-erp-kayan
 
-# Trigger source finalization after workflow installation.
+# Trigger finalization from the PR synchronize event as well as branch pushes.
