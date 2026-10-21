@@ -888,15 +888,176 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
             Text('تحكم مستقل في الخط والحجم واللون والمحاذاة والمسافات والخلفية والحدود لكل جزء.', style: Theme.of(context).textTheme.bodySmall),
             if (enabled > 0) Text('$enabled عناصر مخصصة', style: Theme.of(context).textTheme.bodySmall),
           ])),
-          OutlinedButton.icon(
-            key: const ValueKey('quotation-design-editor'),
-            onPressed: _editDesign,
-            icon: const Icon(Icons.palette_outlined, size: 18),
-            label: const Text('تخصيص التصميم'),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                key: const ValueKey('quotation-design-editor'),
+                onPressed: _editDesign,
+                icon: const Icon(Icons.palette_outlined, size: 18),
+                label: const Text('تخصيص التصميم'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _saveDesignTemplate,
+                icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                label: const Text('حفظ كقالب'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _openDesignTemplates,
+                icon: const Icon(Icons.style_outlined, size: 18),
+                label: const Text('القوالب المحفوظة'),
+              ),
+            ],
           ),
         ]),
       ),
     );
+  }
+
+  Future<String?> _askDesignTemplateName({String initial = ''}) async {
+    final controller = TextEditingController(text: initial);
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(initial.isEmpty ? 'حفظ قالب تصميم' : 'تحديث اسم القالب'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 120,
+            decoration: const InputDecoration(
+              labelText: 'اسم القالب',
+              border: OutlineInputBorder(),
+            ),
+            onSubmitted: (value) => Navigator.of(dialogContext).pop(value.trim()),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(context.l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+              child: Text(context.l10n.save),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  Future<void> _saveDesignTemplate({String? id, String? existingName}) async {
+    final name = await _askDesignTemplateName(initial: existingName ?? '');
+    if (name == null || name.trim().isEmpty || !mounted) return;
+    try {
+      final body = <String, dynamic>{'name': name.trim(), 'design': _design.toJson()};
+      if (id == null) {
+        await ref.read(apiClientProvider).post('/sales/quotation-design-templates', body: body);
+      } else {
+        await ref.read(apiClientProvider).put('/sales/quotation-design-templates/$id', body: body);
+      }
+      ref.invalidate(quotationDesignTemplatesProvider);
+      if (mounted) showMessage(context, 'تم حفظ قالب التصميم');
+    } on Failure catch (error) {
+      if (mounted) showMessage(context, error.message, error: true);
+    } catch (error) {
+      if (mounted) showMessage(context, 'تعذر حفظ قالب التصميم: $error', error: true);
+    }
+  }
+
+  Future<void> _openDesignTemplates() async {
+    try {
+      final initial = await ref.read(apiClientProvider).getList('/sales/quotation-design-templates');
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            title: const Text('قوالب تصميم عروض الأسعار'),
+            content: SizedBox(
+              width: 620,
+              child: initial.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.all(20),
+                      child: Text('لا توجد قوالب محفوظة بعد. استخدم «حفظ كقالب» لحفظ التصميم الحالي.'),
+                    )
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: initial.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final template = initial[index];
+                        final id = text(template, 'id');
+                        final name = text(template, 'name');
+                        return ListTile(
+                          title: Text(name),
+                          subtitle: const Text('قالب تصميم الشركة — لا يحتوي بيانات العميل أو الأسعار'),
+                          leading: const Icon(Icons.style_outlined),
+                          trailing: Wrap(
+                            spacing: 2,
+                            children: [
+                              IconButton(
+                                tooltip: 'تطبيق القالب',
+                                icon: const Icon(Icons.check_circle_outline),
+                                onPressed: () {
+                                  final raw = template['design'];
+                                  if (raw is Map) {
+                                    setState(() => _design = QuotationDocumentDesign.fromJson(
+                                      Map<String, dynamic>.from(raw),
+                                    ));
+                                    Navigator.of(dialogContext).pop();
+                                    showMessage(context, 'تم تطبيق قالب التصميم');
+                                  }
+                                },
+                              ),
+                              IconButton(
+                                tooltip: 'تحديث القالب بالتصميم الحالي',
+                                icon: const Icon(Icons.save_outlined),
+                                onPressed: () async {
+                                  Navigator.of(dialogContext).pop();
+                                  await _saveDesignTemplate(id: id, existingName: name);
+                                },
+                              ),
+                              IconButton(
+                                tooltip: 'حذف القالب',
+                                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                onPressed: () async {
+                                  try {
+                                    await ref.read(apiClientProvider).delete('/sales/quotation-design-templates/$id');
+                                    initial.removeAt(index);
+                                    ref.invalidate(quotationDesignTemplatesProvider);
+                                    setDialogState(() {});
+                                    if (initial.isEmpty) {
+                                      Navigator.of(dialogContext).pop();
+                                    }
+                                  } on Failure catch (error) {
+                                    if (mounted) showMessage(context, error.message, error: true);
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: Text(context.l10n.close),
+              ),
+            ],
+          ),
+        ),
+      );
+    } on Failure catch (error) {
+      if (mounted) showMessage(context, error.message, error: true);
+    } catch (error) {
+      if (mounted) showMessage(context, 'تعذر تحميل قوالب التصميم: $error', error: true);
+    }
   }
 
   Future<void> _editDesign() async {
