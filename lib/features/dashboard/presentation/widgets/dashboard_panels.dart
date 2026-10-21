@@ -492,8 +492,8 @@ class QuickActionTile extends StatelessWidget {
         onTap: onTap,
         child: Ink(
           padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.md,
+            horizontal: AppSpacing.sm,
+            vertical: 10,
           ),
           decoration: BoxDecoration(
             borderRadius: AppRadii.control,
@@ -507,8 +507,8 @@ class QuickActionTile extends StatelessWidget {
                 label: Text(badge ?? ''),
                 backgroundColor: AppColors.warning,
                 child: Container(
-                  width: 38,
-                  height: 38,
+                  width: 34,
+                  height: 34,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: accent?.softOf(scheme.brightness) ??
@@ -518,11 +518,11 @@ class QuickActionTile extends StatelessWidget {
                   child: Icon(
                     icon,
                     color: accent?.of(scheme.brightness) ?? scheme.primary,
-                    size: 21,
+                    size: 20,
                   ),
                 ),
               ),
-              const SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: 6),
               Text(
                 label,
                 textAlign: TextAlign.center,

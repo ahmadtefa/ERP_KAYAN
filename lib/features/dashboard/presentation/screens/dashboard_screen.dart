@@ -686,7 +686,7 @@ class _QuickActions extends StatelessWidget {
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: AppSpacing.sm,
           crossAxisSpacing: AppSpacing.sm,
-          mainAxisExtent: 92,
+          mainAxisExtent: 100,
           children: [
             for (final module in _modules(l10n))
               QuickActionTile(
