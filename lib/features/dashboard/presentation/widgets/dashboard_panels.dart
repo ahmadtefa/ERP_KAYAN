@@ -29,8 +29,8 @@ class MonthlyBarsChart extends StatelessWidget {
     final scheme = theme.colorScheme;
     final salesColor = scheme.primary;
     final purchaseColor = theme.brightness == Brightness.light
-        ? const Color(0xFF8A6A2F)
-        : const Color(0xFFD8B678);
+        ? AppColors.chartPurchases
+        : AppColors.chartPurchasesDark;
     final resultColor = scheme.tertiary;
     final maxValue = months.fold<double>(0, (max, row) {
       final double sales = asNum(row['sales'])?.toDouble() ?? 0.0;

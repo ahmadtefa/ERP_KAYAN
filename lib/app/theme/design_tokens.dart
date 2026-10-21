@@ -47,6 +47,12 @@ abstract final class AppColors {
   static const errorSoft = Color(0xFFFBEAEA);
   static const infoSoft = Color(0xFFEAF1FC);
 
+  // Dashboard chart series. Sales follow the brand primary and the result
+  // line the success green; purchases keep a warm gold so the two bar
+  // series stay tellable apart at a glance in either theme.
+  static const chartPurchases = Color(0xFF8A6A2F);
+  static const chartPurchasesDark = Color(0xFFD8B678);
+
   // Dark theme counterparts.
   static const darkBackground = Color(0xFF0B1728);
   static const darkSurface = Color(0xFF122138);
