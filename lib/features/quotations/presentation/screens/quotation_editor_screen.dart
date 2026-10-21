@@ -925,10 +925,17 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         color.text = '${j['color'] ?? ''}'; background.text = '${j['backgroundColor'] ?? ''}';
         border.text = '${j['borderColor'] ?? ''}'; borderWidth.text = '${j['borderWidth'] ?? 0}';
         lineHeight.text = '${j['lineHeight'] ?? ''}'; customText.text = '${j['customText'] ?? ''}';
+        weight = switch ('${j['fontWeight'] ?? 'w400'}') {
+          'w500' => FontWeight.w500,
+          'w600' => FontWeight.w600,
+          'w700' => FontWeight.w700,
+          'w800' => FontWeight.w800,
+          _ => FontWeight.w400,
+        };
         final a = '${j['textAlign'] ?? 'start'}';
         align = switch (a) { 'left'=>TextAlign.left, 'right'=>TextAlign.right, 'center'=>TextAlign.center, 'justify'=>TextAlign.justify, _=>TextAlign.start };
         visible = j['visible'] != false;
-      } else { family.clear(); size.text='1.0'; color.clear(); background.clear(); border.clear(); borderWidth.text='0'; lineHeight.clear(); customText.clear(); visible=true; align=TextAlign.start; }
+      } else { family.clear(); size.text='1.0'; color.clear(); background.clear(); border.clear(); borderWidth.text='0'; lineHeight.clear(); customText.clear(); visible=true; align=TextAlign.start; weight=FontWeight.w400; }
     }
     load();
     await showDialog<void>(context: context, builder: (dialogContext) => StatefulBuilder(builder: (dialogContext, setDialogState) {
