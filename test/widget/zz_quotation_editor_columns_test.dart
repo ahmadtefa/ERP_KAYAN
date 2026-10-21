@@ -170,17 +170,6 @@ void main() {
       printOnFailure('STEP-OK arabic column added');
       // Still inside the layout dialog: the new column is listed by the
       // name that was typed, not by a built-in name or a generated key.
-      // The new row is appended at the bottom of the dialog's lazy list,
-      // so scroll it into existence before looking for the name.
-      await tester.dragUntilVisible(
-        find.text('مدة الضمان'),
-        find.descendant(
-          of: find.byType(AlertDialog),
-          matching: find.byType(ListView),
-        ),
-        const Offset(0, -120),
-      );
-      await tester.pumpAndSettle();
       expect(find.text('مدة الضمان', skipOffstage: false), findsWidgets);
       await addNamedColumn(tester, nameEn: 'Lead time');
       printOnFailure('STEP-OK english column added');
@@ -349,7 +338,9 @@ void main() {
         find.byType(DataTable, skipOffstage: false).first,
       );
       expect(grid.columns, hasLength(3));
-      expect(find.text('مدة الضمان', skipOffstage: false), findsWidgets);
+      // The editor runs in English here, so the restored column shows its
+      // English name in the grid header and on the line's value field.
+      expect(find.text('Warranty', skipOffstage: false), findsWidgets);
       expect(
         find.widgetWithText(TextField, 'سنتان', skipOffstage: false),
         findsOneWidget,
