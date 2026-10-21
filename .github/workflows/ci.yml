@@ -271,6 +271,19 @@ jobs:
         run: flutter pub get
       - name: Analyze
         run: python scripts/ci-diagnose.py flutter analyze
+      # Renders real screens (shell + dashboard, customers, sales) to PNG so
+      # a design change can be inspected visually from the run's artifacts.
+      # These are screenshot generators: baselines are regenerated here, so
+      # the normal test run below compares against this run's own render.
+      - name: Render design screenshots
+        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
+      - name: Upload design screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: design-screenshots
+          path: test/screenshots/goldens/*.png
+          if-no-files-found: warn
+          retention-days: 30
       - name: Run tests
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
       - name: Build web
