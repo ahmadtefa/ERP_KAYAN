@@ -284,6 +284,13 @@ jobs:
           path: test/screenshots/goldens/*.png
           if-no-files-found: warn
           retention-days: 30
+      # TEMPORARY diagnosis: run the three failing editor-column tests alone
+      # so their first exception fits ci-diagnose.py's 300-line annotation
+      # window (in the full parallel run it scrolls out of reach). Remove
+      # this step once those tests pass in the full run below.
+      - name: Diagnose quotation column editor tests
+        continue-on-error: true
+        run: python scripts/ci-diagnose.py flutter test test/widget/zz_quotation_editor_columns_test.dart --reporter expanded
       - name: Run tests
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
       - name: Build web
