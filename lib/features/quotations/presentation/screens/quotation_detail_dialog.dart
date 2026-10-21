@@ -301,7 +301,6 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                       context,
                       quotation: quotation,
                       language: language,
-                      canExport: canExport,
                     ),
                     icon: const Icon(Icons.visibility_outlined, size: 18),
                     label: Text(l10n.printPreview),
