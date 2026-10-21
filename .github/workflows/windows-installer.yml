@@ -147,16 +147,19 @@ jobs:
           generateReleaseNotes: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # A manually dispatched build on a branch publishes the same Setup.exe
-      # as a prerelease, so a branch build can be handed over with a direct
-      # .exe download address before anything reaches main. Pull-request
-      # builds only upload the diagnostic artifact below; the official
-      # release above stays exclusive to main.
+      # A branch build publishes the same Setup.exe as a prerelease, so it
+      # can be handed over with a direct .exe download address before
+      # anything reaches main. Manual dispatches qualify on any branch;
+      # pull-request builds qualify only for the handover branch named
+      # below (the automation token cannot dispatch workflows itself).
+      # Everywhere else a pull-request build only uploads the diagnostic
+      # artifact further down; the official release above stays main-only.
       - name: Publish branch prerelease with direct Setup.exe download
-        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        if: (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'arena/13bf1607-erp-kayan')
         uses: ncipollo/release-action@v1
         with:
           tag: windows-v${{ steps.app-version.outputs.version }}-pre-${{ github.run_id }}
+          commit: ${{ github.event.pull_request.head.sha || github.sha }}
           name: KAYAN ERP Windows ${{ steps.app-version.outputs.version }} (branch build ${{ github.run_id }})
           artifacts: build/windows-installer/KAYAN-ERP-Setup.exe
           artifactContentType: application/vnd.microsoft.portable-executable
@@ -166,8 +169,8 @@ jobs:
             Automatic branch build for testing and handover. This is not an
             official release; the official download is published from main.
 
-            Branch: ${{ github.ref_name }}
-            Commit: ${{ github.sha }}
+            Branch: ${{ github.event.pull_request.head.ref || github.ref_name }}
+            Commit: ${{ github.event.pull_request.head.sha || github.sha }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Windows installer (diagnostic build artifact)
