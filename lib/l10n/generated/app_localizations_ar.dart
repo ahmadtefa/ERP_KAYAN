@@ -1259,7 +1259,12 @@ class AppLocalizationsAr extends AppLocalizations {
       'نسخة كاملة لكل قاعدة البيانات (جميع الشركات والمستخدمين) بصيغة PostgreSQL. تعمل على الخادم نفسه الذي تستضيف القاعدة.';
 
   @override
-  String get createFullBackup => 'إنشاء نسخة كاملة';
+  String get createFullBackup => 'إنشاء نسخة احتياطية الآن';
+
+  @override
+  String backupSavedIn(Object directory) {
+    return 'مكان الحفظ: $directory';
+  }
 
   @override
   String get backupInProgress => 'جارٍ إنشاء النسخة…';
@@ -1340,20 +1345,20 @@ class AppLocalizationsAr extends AppLocalizations {
   String get printBlocked => 'حجب المتصفح التبويب الجديد. اسمح بالفتح في تبويب جديد لهذا العنوان ثم اضغط طباعة مرة أخرى.';
 
   @override
-  String get resetData => 'إعادة ضبط بيانات البرنامج';
+  String get resetData => 'إعادة تهيئة البرنامج';
 
   @override
   String get resetDataHint => 'يحذف بيانات هذه الشركة ويعيد البرنامج إلى أول تشغيل. تؤخذ نسخة احتياطية ويتم التأكد منها قبل حذف أي شيء، وتتوقف العملية إن تعذّر ذلك.';
 
   @override
-  String get resetButton => 'إعادة ضبط بيانات البرنامج';
+  String get resetButton => 'إعادة تهيئة البرنامج';
 
   @override
   String get resetOnlyAdmins => 'لا يمكن تنفيذ هذا إلا بصلاحية مدير البرنامج.';
 
   @override
   String resetForCompany(Object company) {
-    return 'ستتم إعادة ضبط بيانات «$company».';
+    return 'ستتم إعادة تهيئة بيانات «$company».';
   }
 
   @override

@@ -2546,6 +2546,12 @@ abstract class AppLocalizations {
   /// **'Create full backup'**
   String get createFullBackup;
 
+  /// No description provided for @backupSavedIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved in: {directory}'**
+  String backupSavedIn(Object directory);
+
   /// No description provided for @backupInProgress.
   ///
   /// In en, this message translates to:

@@ -87,6 +87,36 @@ void main() {
       expect(find.byType(LinearProgressIndicator), findsNothing);
       expect(find.textContaining('program administrator'), findsOneWidget);
       expect(find.widgetWithText(OutlinedButton, 'Refresh status'), findsOneWidget);
+      // The reported bug: this state used to leave «Refresh status» as the
+      // only button in the section. The create action itself must be on
+      // the screen next to it.
+      expect(
+        find.widgetWithText(FilledButton, 'Create backup now'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'the create button stays usable when the capabilities load failed',
+    (tester) async {
+      final service = _FakeFullBackupService()
+        ..capabilitiesError = DioException(
+          requestOptions: RequestOptions(path: '/backup/full/capabilities'),
+          type: DioExceptionType.connectionError,
+        );
+      service.filesAfterCreate = const [
+        {'name': 'kayan-full-test.dump', 'kind': 'full', 'sizeBytes': 2048},
+      ];
+
+      await _pump(tester, service);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Create backup now'));
+      await tester.pumpAndSettle();
+
+      expect(service.createCalled, isTrue);
+      expect(find.textContaining('kayan-full-test.dump'), findsWidgets);
     },
   );
 
@@ -102,7 +132,7 @@ void main() {
     await _pump(tester, service);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Create full backup'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Create backup now'));
     await tester.pump();
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
     expect(find.text('Creating the backup…'), findsOneWidget);
@@ -131,7 +161,7 @@ void main() {
       await _pump(tester, service);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.widgetWithText(FilledButton, 'Create full backup'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Create backup now'));
       await tester.pumpAndSettle();
 
       expect(find.byType(LinearProgressIndicator), findsNothing);
@@ -157,14 +187,14 @@ void main() {
     await _pump(tester, service);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Create full backup'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Create backup now'));
     await tester.pumpAndSettle();
 
     expect(find.byType(LinearProgressIndicator), findsNothing);
     expect(find.textContaining('could not be created'), findsOneWidget);
     // The button is usable again: busy was reset.
     final button = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Create full backup'),
+      find.widgetWithText(FilledButton, 'Create backup now'),
     );
     expect(button.onPressed, isNotNull);
   });

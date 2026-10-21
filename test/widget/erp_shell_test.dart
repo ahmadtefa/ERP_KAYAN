@@ -287,9 +287,10 @@ void main() {
         return (tile.title! as Text).style?.color;
       }
 
-      // Sales is active: its label carries the sales green, and the top
-      // bar names the section in the same colour.
-      expect(titleColorOf('فواتير البيع'), SectionAccents.sales.base);
+      // Sales is active: its sidebar label carries the sales green in the
+      // step mixed for the navy sidebar, and the (light) top bar names
+      // the section in the base step of the same hue.
+      expect(titleColorOf('فواتير البيع'), SectionAccents.sales.darkBase);
       expect(
         find.byWidgetPredicate(
           (w) =>
@@ -309,7 +310,7 @@ void main() {
       // over the label and the top bar, and sales goes back to neutral.
       router.go(AppRoutes.customers);
       await tester.pumpAndSettle();
-      expect(titleColorOf('العملاء'), SectionAccents.parties.base);
+      expect(titleColorOf('العملاء'), SectionAccents.parties.darkBase);
       expect(
         find.byWidgetPredicate(
           (w) =>

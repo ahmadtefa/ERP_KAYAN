@@ -1267,7 +1267,12 @@ class AppLocalizationsEn extends AppLocalizations {
       'A complete copy of the whole database (every company and user) in PostgreSQL format. It is made on the server that hosts the database.';
 
   @override
-  String get createFullBackup => 'Create full backup';
+  String get createFullBackup => 'Create backup now';
+
+  @override
+  String backupSavedIn(Object directory) {
+    return 'Saved in: $directory';
+  }
 
   @override
   String get backupInProgress => 'Creating the backup…';
@@ -1348,13 +1353,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get printBlocked => 'The browser blocked the new tab. Allow pop-ups for this address, then press Print again.';
 
   @override
-  String get resetData => 'Reset the program\'s data';
+  String get resetData => 'Reset program';
 
   @override
   String get resetDataHint => 'Clears this company’s books and returns the program to its first run. A backup is taken and checked before anything is deleted, and the reset stops if that backup fails.';
 
   @override
-  String get resetButton => 'Reset ERP Data';
+  String get resetButton => 'Reset program';
 
   @override
   String get resetOnlyAdmins => 'Only an administrator of the program can do this.';

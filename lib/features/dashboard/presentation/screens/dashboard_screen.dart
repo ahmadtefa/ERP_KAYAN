@@ -817,12 +817,9 @@ class _CompanyContext extends StatelessWidget {
         vertical: AppSpacing.md,
       ),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: AlignmentDirectional.centerStart,
-          end: AlignmentDirectional.centerEnd,
-          colors: [AppColors.navy, AppColors.navySoft],
-        ),
+        gradient: AppGradients.brand,
         borderRadius: AppRadii.card,
+        boxShadow: AppShadows.raised,
       ),
       child: Row(
         children: [

@@ -99,10 +99,11 @@ abstract final class AppTheme {
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       ),
 
-      // The drawer is the same light navigation surface as the sidebar;
-      // the old navy slab belonged to the previous identity.
+      // The drawer carries the same navy frame as the sidebar: on a phone
+      // it *is* the sidebar, and the two must not disagree about what the
+      // program looks like.
       drawerTheme: DrawerThemeData(
-        backgroundColor: surface,
+        backgroundColor: AppColors.navy,
         surfaceTintColor: Colors.transparent,
         width: 290,
         shape: const RoundedRectangleBorder(),
@@ -152,7 +153,7 @@ abstract final class AppTheme {
         backgroundColor: surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        shadowColor: const Color(0x33142B4A),
+        shadowColor: const Color(0x330A1E3C),
         insetPadding: const EdgeInsets.all(AppSpacing.xxl),
         shape: RoundedRectangleBorder(
           borderRadius: AppRadii.dialog,
@@ -179,7 +180,7 @@ abstract final class AppTheme {
         color: surface,
         surfaceTintColor: Colors.transparent,
         elevation: 8,
-        shadowColor: const Color(0x1F142B4A),
+        shadowColor: const Color(0x1F0A1E3C),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.lg),
           side: BorderSide(color: border),
@@ -371,7 +372,11 @@ abstract final class AppTheme {
       ),
 
       dataTableTheme: DataTableThemeData(
-        headingRowColor: WidgetStatePropertyAll(surfaceAlt),
+        // Table heads sit in the paler step of the navy family, so a grid
+        // reads as one framed object instead of rows floating on the page.
+        headingRowColor: WidgetStatePropertyAll(
+          isLight ? const Color(0xFFEDF2FA) : AppColors.darkSurfaceAlt,
+        ),
         dataRowColor: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
             return scheme.primaryContainer;
@@ -385,7 +390,7 @@ abstract final class AppTheme {
         dataRowMinHeight: _room(AppSizes.tableRowHeight, textScale, 16),
         dataRowMaxHeight: _room(AppSizes.tableRowHeight + 6, textScale, 24),
         headingTextStyle: textTheme.labelSmall?.copyWith(
-          color: scheme.onSurfaceVariant,
+          color: isLight ? AppColors.navy : AppColors.darkText,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.5,
         ),
@@ -503,22 +508,22 @@ abstract final class AppTheme {
     surfaceContainerHighest: AppColors.surfaceSunken,
     outline: AppColors.borderStrong,
     outlineVariant: AppColors.border,
-    shadow: Color(0x1A142B4A),
-    scrim: Color(0x66142B4A),
+    shadow: Color(0x1A0A1E3C),
+    scrim: Color(0x660A1E3C),
     inverseSurface: AppColors.navy,
     onInverseSurface: Colors.white,
-    inversePrimary: Color(0xFF9DBDF0),
+    inversePrimary: Color(0xFFA9C6F5),
     surfaceTint: Colors.transparent,
   );
 
   static const _darkScheme = ColorScheme(
     brightness: Brightness.dark,
-    primary: Color(0xFF7FA9E8),
-    onPrimary: Color(0xFF0B1B2E),
-    primaryContainer: Color(0xFF1D3A60),
+    primary: Color(0xFF7FA9F5),
+    onPrimary: Color(0xFF081730),
+    primaryContainer: Color(0xFF16305C),
     onPrimaryContainer: Color(0xFFDCE8F8),
     secondary: Color(0xFF8FB6F7),
-    onSecondary: Color(0xFF0B1B2E),
+    onSecondary: Color(0xFF081730),
     secondaryContainer: Color(0xFF1B3252),
     onSecondaryContainer: Color(0xFFDCE8F8),
     tertiary: Color(0xFF6FC3A0),
@@ -530,12 +535,12 @@ abstract final class AppTheme {
     surface: AppColors.darkSurface,
     onSurface: AppColors.darkText,
     onSurfaceVariant: AppColors.darkTextMuted,
-    surfaceContainerLowest: Color(0xFF0F0F0F),
+    surfaceContainerLowest: Color(0xFF070F1E),
     surfaceContainerLow: AppColors.darkSurfaceAlt,
     surfaceContainer: AppColors.darkSurface,
-    surfaceContainerHigh: Color(0xFF2E2E2E),
-    surfaceContainerHighest: Color(0xFF383838),
-    outline: Color(0xFF525252),
+    surfaceContainerHigh: Color(0xFF1D3050),
+    surfaceContainerHighest: Color(0xFF243A5E),
+    outline: Color(0xFF41587C),
     outlineVariant: AppColors.darkBorder,
     shadow: Colors.black,
     scrim: Color(0xAA000000),
