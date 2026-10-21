@@ -52,10 +52,41 @@ trap {
 function Require-Command([string]$Name) {
   if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) { throw "Required build command '$Name' was not found. Install it on the Windows build machine." }
 }
+function Invoke-DownloadWithRetry([string]$Url, [string]$Destination, [int]$Attempts = 3) {
+  for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+    try {
+      if (Test-Path -LiteralPath $Destination) {
+        Remove-Item -LiteralPath $Destination -Force
+      }
+      Write-Host "Downloading $([IO.Path]::GetFileName($Destination)) (attempt $attempt/$Attempts)..."
+      Invoke-WebRequest -Uri $Url -OutFile $Destination -TimeoutSec 300
+      if (-not (Test-Path -LiteralPath $Destination) -or (Get-Item -LiteralPath $Destination).Length -le 0) {
+        throw "Download produced an empty file: $Destination"
+      }
+      return
+    } catch {
+      $message = $_.Exception.Message
+      Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+      if ($attempt -ge $Attempts) {
+        throw "Download failed after $Attempts attempts for $Url. Last error: $message"
+      }
+      Write-Host "Download attempt $attempt failed: $message. Retrying in $($attempt * 5) seconds..."
+      Start-Sleep -Seconds ($attempt * 5)
+    }
+  }
+}
 function Get-VerifiedArchive([string]$Url, [string]$Destination, [string]$Sha256) {
-  if (-not (Test-Path $Destination)) {
-    Write-Host "Downloading $([IO.Path]::GetFileName($Destination))..."
-    Invoke-WebRequest -Uri $Url -OutFile $Destination
+  $validExistingFile = $false
+  if (Test-Path -LiteralPath $Destination) {
+    $existingHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
+    $validExistingFile = $existingHash -eq $Sha256
+    if (-not $validExistingFile) {
+      Write-Host "Discarding incomplete or checksum-mismatched archive: $([IO.Path]::GetFileName($Destination))"
+      Remove-Item -LiteralPath $Destination -Force
+    }
+  }
+  if (-not $validExistingFile) {
+    Invoke-DownloadWithRetry -Url $Url -Destination $Destination
   }
   $actual = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actual -ne $Sha256) { throw "Checksum mismatch for $([IO.Path]::GetFileName($Destination)); refusing to use it." }
@@ -96,7 +127,7 @@ $pgZip = Join-Path $stage "downloads\$postgresArchive"
 Get-VerifiedArchive $nodeUrl $nodeZip $nodeSha256
 Get-VerifiedArchive $postgresUrl $pgZip $postgresSha256
 $vcRuntime = Join-Path $stage 'downloads\vc_redist.x64.exe'
-if (-not (Test-Path $vcRuntime)) { Invoke-WebRequest -Uri $vcRuntimeUrl -OutFile $vcRuntime }
+if (-not (Test-Path $vcRuntime)) { Invoke-DownloadWithRetry -Url $vcRuntimeUrl -Destination $vcRuntime }
 $vcSignature = Get-AuthenticodeSignature -FilePath $vcRuntime
 if ($vcSignature.Status -ne 'Valid' -or $vcSignature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') {
   throw 'The Microsoft Visual C++ x64 redistributable signature could not be verified.'
