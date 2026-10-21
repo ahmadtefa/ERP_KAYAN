@@ -268,7 +268,9 @@ abstract final class AppTheme {
             if (states.contains(WidgetState.disabled)) return 0;
             if (states.contains(WidgetState.pressed)) return 0;
             if (states.contains(WidgetState.hovered) ||
-                states.contains(WidgetState.focused)) return 3;
+                states.contains(WidgetState.focused)) {
+              return 3;
+            }
             return 1.5;
           }),
           backgroundColor: WidgetStateProperty.resolveWith((states) {
@@ -282,7 +284,6 @@ abstract final class AppTheme {
             return scheme.primary;
           }),
           foregroundColor: WidgetStatePropertyAll(scheme.onPrimary),
-          elevation: const WidgetStatePropertyAll(0),
           overlayColor: WidgetStatePropertyAll(
             Colors.white.withValues(alpha: 0.12),
           ),
@@ -306,7 +307,9 @@ abstract final class AppTheme {
           elevation: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.pressed)) return 0;
             if (states.contains(WidgetState.hovered) ||
-                states.contains(WidgetState.focused)) return 2;
+                states.contains(WidgetState.focused)) {
+              return 2;
+            }
             return 0;
           }),
           foregroundColor: WidgetStatePropertyAll(scheme.primary),
