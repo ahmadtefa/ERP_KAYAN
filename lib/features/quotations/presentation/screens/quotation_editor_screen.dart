@@ -1774,7 +1774,13 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setLocalState) => AlertDialog(
           title: Text(l10n.addColumn),
-          content: Column(
+          // A fixed content width: an AlertDialog otherwise sizes itself by
+          // intrinsic measurement, and a DropdownButtonFormField measured
+          // intrinsically inside that pass can claim absurd extents and
+          // overflow the column (seen as a ~100k-pixel overflow in tests).
+          content: SizedBox(
+            width: 420,
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
@@ -1847,6 +1853,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 ],
               ),
             ],
+            ),
           ),
           actions: [
             TextButton(
