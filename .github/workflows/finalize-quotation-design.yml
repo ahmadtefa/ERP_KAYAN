@@ -31,3 +31,5 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m 'feat: complete per-element quotation design controls'
           git push origin HEAD:arena/24dd290b-erp-kayan
+
+# Trigger source finalization after workflow installation.
