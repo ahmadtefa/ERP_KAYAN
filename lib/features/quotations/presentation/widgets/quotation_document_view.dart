@@ -71,6 +71,9 @@ class _Sheet extends StatelessWidget {
       fontSize: (base.fontSize ?? 12) * style.fontSizeMultiplier,
       fontWeight: style.fontWeight ?? base.fontWeight,
       color: style.color != null ? _parseColor(style.color!) : base.color,
+      backgroundColor: style.backgroundColor != null
+          ? _parseColor(style.backgroundColor!)
+          : base.backgroundColor,
       fontFamily: style.fontFamily ?? base.fontFamily,
       height: style.lineHeight ?? base.height,
     );
