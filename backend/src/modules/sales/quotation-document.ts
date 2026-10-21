@@ -168,7 +168,7 @@ function designCss(design: Record<string, unknown> | null | undefined): string {
     title: '.title-band h2', company: '.brand h1', customer: '.panels .panel',
     sectionTitle: '.section-head h3', tableHeader: '.items thead th', tableCell: '.items tbody td',
     totalsLabel: '.totals td:first-child', totalsValue: '.totals td.num', finalTotal: '.totals tr.grand td',
-    header: '.masthead', footer: '.document-footer',
+    header: '.masthead, .custom-header', footer: '.page-footer',
   };
   for (const [key, selector] of Object.entries(targets)) {
     const raw = design[key];
@@ -187,6 +187,16 @@ function designCss(design: Record<string, unknown> | null | undefined): string {
     if (css.length) rules.push(`${selector}{${css.join(';')}}`);
   }
   return rules.join('\n');
+}
+
+function designCustomText(
+  design: Record<string, unknown> | null | undefined,
+  key: string,
+): string {
+  const raw = design?.[key];
+  if (!raw || typeof raw !== 'object') return '';
+  const value = (raw as Record<string, unknown>).customText;
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function quantity(value: string): string {
@@ -629,6 +639,7 @@ ${
     <div class="brand">
       <h1>${escapeHtml(companyName)}</h1>
       ${secondaryName ? `<div class="secondary">${escapeHtml(secondaryName)}</div>` : ''}
+      ${designCustomText(content.design, 'header') ? `<div class="custom-header">${escapeHtml(designCustomText(content.design, 'header'))}</div>` : ''}
     </div>
     <div class="mark">${logo
       ? `<img src="${logo}" alt="${escapeHtml(companyName)}">`
@@ -704,6 +715,7 @@ ${
   <footer class="page-footer">
     <div class="name">${escapeHtml(companyName)}</div>
     ${contactLine ? `<div>${contactLine}</div>` : ''}
+    ${designCustomText(content.design, 'footer') ? `<div class="custom-footer">${escapeHtml(designCustomText(content.design, 'footer'))}</div>` : ''}
     <div class="legal">${legalLine}</div>
   </footer>
 </div>
