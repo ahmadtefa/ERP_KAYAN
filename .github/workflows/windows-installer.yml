@@ -24,26 +24,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Finalize quotation design source before build
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'arena/24dd290b-erp-kayan' && hashFiles('scripts/finalize-quotation-design.py') != ''
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          python scripts/finalize-quotation-design.py
-          Remove-Item -Force scripts/finalize-quotation-design.py -ErrorAction SilentlyContinue
-          Remove-Item -Force .github/workflows/finalize-quotation-design.yml -ErrorAction SilentlyContinue
-          Remove-Item -Force docs/quotation-design-finalization-trigger.md -ErrorAction SilentlyContinue
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add lib backend scripts .github/workflows docs
-          if (-not (git diff --cached --quiet)) {
-            git commit -m 'feat: complete per-element quotation design controls'
-            git push origin HEAD:arena/24dd290b-erp-kayan
-          }
-          git fetch origin arena/24dd290b-erp-kayan
-          git checkout arena/24dd290b-erp-kayan
-          git reset --hard origin/arena/24dd290b-erp-kayan
-
       - name: Read application version
         id: app-version
         shell: powershell
@@ -165,6 +145,29 @@ jobs:
           replacesArtifacts: true
           makeLatest: true
           generateReleaseNotes: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # A manually dispatched build on a branch publishes the same Setup.exe
+      # as a prerelease, so a branch build can be handed over with a direct
+      # .exe download address before anything reaches main. Pull-request
+      # builds only upload the diagnostic artifact below; the official
+      # release above stays exclusive to main.
+      - name: Publish branch prerelease with direct Setup.exe download
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        uses: ncipollo/release-action@v1
+        with:
+          tag: windows-v${{ steps.app-version.outputs.version }}-pre-${{ github.run_id }}
+          name: KAYAN ERP Windows ${{ steps.app-version.outputs.version }} (branch build ${{ github.run_id }})
+          artifacts: build/windows-installer/KAYAN-ERP-Setup.exe
+          artifactContentType: application/vnd.microsoft.portable-executable
+          prerelease: true
+          makeLatest: false
+          body: |
+            Automatic branch build for testing and handover. This is not an
+            official release; the official download is published from main.
+
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Windows installer (diagnostic build artifact)
