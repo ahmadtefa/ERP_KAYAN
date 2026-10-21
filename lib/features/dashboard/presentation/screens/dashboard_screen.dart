@@ -90,7 +90,7 @@ class DashboardScreen extends ConsumerWidget {
                     width: 48,
                     height: 48,
                     fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
                   ),
                 ),
           eyebrow: companyName.isEmpty
