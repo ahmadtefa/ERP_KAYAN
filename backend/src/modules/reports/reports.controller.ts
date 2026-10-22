@@ -17,6 +17,7 @@ import {
   PeriodQueryDto,
 } from './dto/report-query.dto';
 import { OperationsReportsService } from './operations-reports.service';
+import { PartyReconciliationService } from './party-reconciliation.service';
 import { ReportsService } from './reports.service';
 
 @Controller('reports')
@@ -27,7 +28,20 @@ export class ReportsController {
     private readonly aging: AgingService,
     private readonly operations: OperationsReportsService,
     private readonly budgets: BudgetsService,
+    private readonly reconciliation: PartyReconciliationService,
   ) {}
+
+  @Get('receivables-reconciliation')
+  @RequirePermissions('reports.read')
+  receivablesReconciliation(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
+    return this.reconciliation.receivables(user.companyId, { asOf: query.asOf ?? query.to });
+  }
+
+  @Get('payables-reconciliation')
+  @RequirePermissions('reports.read')
+  payablesReconciliation(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
+    return this.reconciliation.payables(user.companyId, { asOf: query.asOf ?? query.to });
+  }
 
   @Get('trial-balance')
   @RequirePermissions('reports.read')

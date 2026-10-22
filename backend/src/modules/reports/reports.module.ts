@@ -5,6 +5,7 @@ import { PrismaModule } from '../../common/prisma/prisma.module';
 import { AgingService } from './aging.service';
 import { FinancialStatementsService } from './financial-statements.service';
 import { OperationsReportsService } from './operations-reports.service';
+import { PartyReconciliationService } from './party-reconciliation.service';
 import { ReportsController } from './reports.controller';
 import { ReportsService } from './reports.service';
 
@@ -16,6 +17,7 @@ import { ReportsService } from './reports.service';
     FinancialStatementsService,
     AgingService,
     OperationsReportsService,
+    PartyReconciliationService,
   ],
   // The exporter renders the same numbers as files, so it reads the same
   // service rather than re-deriving them.
@@ -24,6 +26,7 @@ import { ReportsService } from './reports.service';
     FinancialStatementsService,
     AgingService,
     OperationsReportsService,
+    PartyReconciliationService,
   ],
 })
 export class ReportsModule {}

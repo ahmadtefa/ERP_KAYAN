@@ -26,9 +26,15 @@ export function monthlyCharge(
   salvageValue: Prisma.Decimal,
   usefulLifeMonths: number,
 ): Prisma.Decimal {
+  // Rounded UP (away from zero), deliberately: with the usual half-up
+  // rounding a base that does not divide the life (1,000 over 3 months
+  // → 333.3333) leaves a residue a fraction larger than one monthly
+  // charge, which no later charge would ever take. Rounding up makes
+  // the residue smaller than a month, so the final charge — capped at
+  // what remains — lands the schedule exactly on the base.
   return depreciableBase(cost, salvageValue)
     .div(usefulLifeMonths)
-    .toDecimalPlaces(4);
+    .toDecimalPlaces(4, Prisma.Decimal.ROUND_UP);
 }
 
 /** What one more month costs, given what has already been charged. */

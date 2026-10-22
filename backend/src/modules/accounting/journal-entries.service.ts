@@ -8,6 +8,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import { accountName } from '../../common/localization/account-name';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import { ACCOUNT_CODES } from './account-map.service';
 import { CostCentersService } from './cost-centers.service';
 import { DocumentNumberService } from './document-number.service';
 import { CreateJournalEntryDto, JournalLineDto } from './dto/create-journal-entry.dto';
@@ -154,6 +155,25 @@ export class JournalEntriesService {
       );
     }
 
+    // The receivable/payable control accounts belong to the subledgers.
+    // A manual line written straight onto one of them moves the ledger
+    // without moving any customer or supplier, and the two then disagree
+    // by exactly that line — the classic unreconciled control account.
+    // It is refused here, at the door; the party documents (invoices,
+    // notes, vouchers, opening balances) are how these accounts move.
+    const control = accounts.filter((a) =>
+      [ACCOUNT_CODES.accountsReceivable, ACCOUNT_CODES.accountsPayable].includes(
+        a.code as never,
+      ),
+    );
+    if (control.length > 0) {
+      throw new BadRequestException(
+        `Manual entries cannot post directly to a control account (${control
+          .map((a) => a.code)
+          .join(', ')}). Use the customer/supplier documents so the subledger and the ledger move together.`,
+      );
+    }
+
     // The analytical dimension is validated against this company and the entry
     // date before anything is written: an inactive centre, another company's
     // centre or a centre outside its validity window is refused, not stored.
@@ -239,6 +259,24 @@ export class JournalEntriesService {
       throw new BadRequestException(
         `Only a draft or an approved entry can be posted (current status: ${entry.status})`,
       );
+    }
+
+    if (!entry.reversalOfId) {
+      const lineAccounts = await this.prisma.account.findMany({
+        where: {
+          companyId,
+          code: { in: [ACCOUNT_CODES.accountsReceivable, ACCOUNT_CODES.accountsPayable] },
+          id: { in: entry.lines.map((l) => l.accountId) },
+        },
+        select: { code: true },
+      });
+      if (lineAccounts.length > 0) {
+        throw new BadRequestException(
+          `Manual entries cannot post directly to a control account (${lineAccounts
+            .map((a) => a.code)
+            .join(', ')}). Cancel this draft and use the customer/supplier documents instead.`,
+        );
+      }
     }
 
     const policy = await this.settings.get(companyId);

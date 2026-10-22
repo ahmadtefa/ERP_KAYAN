@@ -2,6 +2,8 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { accountLabel } from '../../common/localization/account-name';
 import { PartiesService } from '../parties/parties.service';
+import { FixedAssetsService } from '../fixed-assets/fixed-assets.service';
+import { PartyReconciliationService } from '../reports/party-reconciliation.service';
 import { AgingService } from '../reports/aging.service';
 import { FinancialStatementsService } from '../reports/financial-statements.service';
 import { OperationsReportsService } from '../reports/operations-reports.service';
@@ -19,6 +21,10 @@ export type ExportableReport =
   | 'balance-sheet'
   | 'cash-flow'
   | 'equity-changes'
+  | 'receivables-reconciliation'
+  | 'payables-reconciliation'
+  | 'fixed-assets'
+  | 'depreciation'
   | 'receivables-aging'
   | 'payables-aging'
   | 'sales'
@@ -40,6 +46,10 @@ export const EXPORTABLE_REPORTS: ExportableReport[] = [
   'balance-sheet',
   'cash-flow',
   'equity-changes',
+  'receivables-reconciliation',
+  'payables-reconciliation',
+  'fixed-assets',
+  'depreciation',
   'receivables-aging',
   'payables-aging',
   'sales',
@@ -67,6 +77,8 @@ export class ReportTablesService {
     private readonly aging: AgingService,
     private readonly operations: OperationsReportsService,
     private readonly parties: PartiesService,
+    private readonly reconciliation: PartyReconciliationService,
+    private readonly fixedAssets: FixedAssetsService,
   ) {}
 
   async build(
@@ -100,6 +112,14 @@ export class ReportTablesService {
         return this.cashFlow(companyId, query);
       case 'equity-changes':
         return this.equityChanges(companyId, query);
+      case 'receivables-reconciliation':
+        return this.partyReconciliation(companyId, query, 'receivables');
+      case 'payables-reconciliation':
+        return this.partyReconciliation(companyId, query, 'payables');
+      case 'fixed-assets':
+        return this.fixedAssetsTable(companyId);
+      case 'depreciation':
+        return this.depreciationTable(companyId, query);
       case 'receivables-aging':
         return this.agingTable(companyId, query, 'receivables');
       case 'payables-aging':
@@ -471,6 +491,20 @@ export class ReportTablesService {
       rows,
       totals: [
         { labelEn: 'Opening cash', labelAr: 'النقدية أول الفترة', value: data.totals.opening },
+        ...(data.sections ?? []).map(
+          (section: { cashFlowClass: string; net: string }) => ({
+            labelEn: `Net ${section.cashFlowClass}`,
+            labelAr:
+              section.cashFlowClass === 'operating'
+                ? 'صافي التشغيلية'
+                : section.cashFlowClass === 'investing'
+                  ? 'صافي الاستثمارية'
+                  : section.cashFlowClass === 'financing'
+                    ? 'صافي التمويلية'
+                    : 'صافي غير مصنّفة',
+            value: section.net,
+          }),
+        ),
         { labelEn: 'Inflow', labelAr: 'وارد', value: data.totals.inflow },
         { labelEn: 'Outflow', labelAr: 'صادر', value: data.totals.outflow },
         { labelEn: 'Net', labelAr: 'الصافي', value: data.totals.net },
@@ -531,6 +565,144 @@ export class ReportTablesService {
           ar: 'صف النتيجة يعرض نتيجة الفترة قبل ترحيلها؛ وإقفال السنة ينقلها إلى الأرباح المرحَّلة في عمود النتيجة المرحَّلة.',
         },
       ],
+    });
+  }
+
+  private async partyReconciliation(
+    companyId: string,
+    query: PeriodQueryDto,
+    side: 'receivables' | 'payables',
+  ) {
+    const data =
+      side === 'receivables'
+        ? await this.reconciliation.receivables(companyId, { asOf: query.asOf ?? query.to })
+        : await this.reconciliation.payables(companyId, { asOf: query.asOf ?? query.to });
+    return this.table({
+      slug: side === 'receivables' ? 'receivables-reconciliation' : 'payables-reconciliation',
+      titleEn:
+        side === 'receivables' ? 'Receivables reconciliation' : 'Payables reconciliation',
+      titleAr: side === 'receivables' ? 'تسوية العملاء' : 'تسوية الموردين',
+      meta: [
+        { labelEn: 'As at', labelAr: 'حتى تاريخ', value: data.asOf },
+        {
+          labelEn: 'Control account',
+          labelAr: 'حساب الرقابة',
+          value: `${data.controlAccount.code} — ${data.controlAccount.nameEn}`,
+        },
+      ],
+      columns: [
+        { key: 'entryNumber', labelEn: 'Entry', labelAr: 'القيد', width: 16 },
+        { key: 'entryDate', labelEn: 'Date', labelAr: 'التاريخ', width: 14 },
+        { key: 'sourceType', labelEn: 'Source', labelAr: 'المصدر', width: 20 },
+        { key: 'sourceNumber', labelEn: 'Document', labelAr: 'المستند', width: 20 },
+        { key: 'amount', labelEn: 'Amount', labelAr: 'المبلغ', numeric: true, width: 16 },
+      ],
+      rows: data.otherPostings,
+      totals: [
+        { labelEn: 'Subledger', labelAr: 'الأستاذ المساعد', value: data.subledger.total },
+        { labelEn: 'Control account', labelAr: 'حساب الرقابة', value: data.controlBalance },
+        { labelEn: 'Advances held', labelAr: 'مقدّمات غير مطبّقة', value: data.advances },
+        {
+          labelEn: 'Postings outside the subledger (listed)',
+          labelAr: 'قيود خارج المساعد (معروضة أعلاه)',
+          value: data.otherPostingsTotal,
+        },
+        { labelEn: 'Difference', labelAr: 'الفرق', value: data.difference },
+        {
+          labelEn: 'Unexplained (must be zero)',
+          labelAr: 'غير مفسَّر (لازم يكون صفر)',
+          value: data.unexplained,
+        },
+      ],
+      notes: [
+        {
+          en: 'Listed rows are ledger postings on the control account that no invoice, note or voucher wrote; each one explains part of any difference.',
+          ar: 'الصفوف المعروضة قيود على حساب الرقابة لم يكتبها أي فاتورة أو إشعار أو سند؛ وكل منها يفسّر جزءًا من أي فرق.',
+        },
+      ],
+    });
+  }
+
+  private async fixedAssetsTable(companyId: string) {
+    const data = await this.fixedAssets.summary(companyId);
+    return this.table({
+      slug: 'fixed-assets',
+      titleEn: 'Fixed assets register',
+      titleAr: 'سجل الأصول الثابتة',
+      meta: [],
+      columns: [
+        { key: 'code', labelEn: 'Code', labelAr: 'الكود', width: 14 },
+        { key: 'nameEn', labelEn: 'Asset', labelAr: 'الأصل', width: 30 },
+        { key: 'nameAr', labelEn: 'Asset (Arabic)', labelAr: 'الأصل بالعربية', width: 30 },
+        { key: 'category', labelEn: 'Category', labelAr: 'التصنيف', width: 16 },
+        { key: 'status', labelEn: 'Status', labelAr: 'الحالة', width: 16 },
+        { key: 'inServiceDate', labelEn: 'In service', labelAr: 'بدء الاستخدام', width: 14 },
+        { key: 'cost', labelEn: 'Cost', labelAr: 'التكلفة', numeric: true, width: 16 },
+        {
+          key: 'accumulatedDepreciation',
+          labelEn: 'Accumulated depreciation',
+          labelAr: 'مجمع الإهلاك',
+          numeric: true,
+          width: 20,
+        },
+        { key: 'bookValue', labelEn: 'Book value', labelAr: 'القيمة الدفترية', numeric: true, width: 16 },
+      ],
+      rows: data.items,
+      totals: [
+        { labelEn: 'Total cost', labelAr: 'إجمالي التكلفة', value: data.totals.cost },
+        {
+          labelEn: 'Total accumulated depreciation',
+          labelAr: 'إجمالي مجمع الإهلاك',
+          value: data.totals.accumulatedDepreciation,
+        },
+        { labelEn: 'Total book value', labelAr: 'إجمالي القيمة الدفترية', value: data.totals.bookValue },
+      ],
+      notes: [],
+    });
+  }
+
+  private async depreciationTable(companyId: string, query: PeriodQueryDto) {
+    const period = query.from?.slice(0, 7);
+    const data = await this.fixedAssets.listRuns(companyId, { period });
+    const rows = data.items.flatMap((run) =>
+      run.lines.map((line) => ({
+        runNumber: run.runNumber,
+        period: run.period,
+        runDate: run.runDate,
+        code: line.code,
+        nameEn: line.nameEn,
+        nameAr: line.nameAr,
+        amount: line.amount,
+        accumulatedAfter: line.accumulatedAfter,
+      })),
+    );
+    return this.table({
+      slug: 'depreciation',
+      titleEn: 'Depreciation runs',
+      titleAr: 'تشغيلات الإهلاك',
+      meta: period ? [{ labelEn: 'Month', labelAr: 'الشهر', value: period }] : [],
+      columns: [
+        { key: 'runNumber', labelEn: 'Run', labelAr: 'التشغيل', width: 16 },
+        { key: 'period', labelEn: 'Month', labelAr: 'الشهر', width: 12 },
+        { key: 'runDate', labelEn: 'Date', labelAr: 'التاريخ', width: 14 },
+        { key: 'code', labelEn: 'Asset code', labelAr: 'كود الأصل', width: 14 },
+        { key: 'nameEn', labelEn: 'Asset', labelAr: 'الأصل', width: 30 },
+        { key: 'amount', labelEn: 'Charge', labelAr: 'قسط الإهلاك', numeric: true, width: 16 },
+        {
+          key: 'accumulatedAfter',
+          labelEn: 'Accumulated after',
+          labelAr: 'المجمع بعد القسط',
+          numeric: true,
+          width: 18,
+        },
+      ],
+      rows,
+      totals: data.items.map((run) => ({
+        labelEn: `Run ${run.runNumber} (${run.period})`,
+        labelAr: `تشغيل ${run.runNumber} (${run.period})`,
+        value: run.totalAmount,
+      })),
+      notes: [],
     });
   }
 
