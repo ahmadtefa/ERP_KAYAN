@@ -389,11 +389,13 @@ export class FinancialStatementsService {
    *    happened to sort first, so a sale collected in cash showed every
    *    pound — tax included — as "revenue".
    *
-   * What this deliberately does not do is file the lines under IAS 7
-   * operating / investing / financing classes: that assignment is an
-   * accounting policy per account, not something to invent at report
-   * time. The counterpart-account detail is factual; classifying it is a
-   * decision for the accountant.
+   * The IAS 7 reading (operating / investing / financing) comes from
+   * each account's own `cashFlowClass` in the chart — set by the
+   * accountant, per account, where it belongs. Nothing is classified by
+   * guessing from the account's type or name: an account nobody has
+   * classified reports under "unclassified", with its amount, until the
+   * decision is made. The four section nets always add to the net cash
+   * movement taken from the cash lines themselves.
    */
   async cashFlow(companyId: string, query: { from?: string; to?: string; branchId?: string }) {
     const { from, to } = rangeOf(query);
@@ -413,6 +415,14 @@ export class FinancialStatementsService {
         to: to.toISOString().slice(0, 10),
         inflows: [],
         outflows: [],
+        sections: ['operating', 'investing', 'financing', 'unclassified'].map(
+          (cashFlowClass) => ({
+            cashFlowClass,
+            inflow: zero,
+            outflow: zero,
+            net: zero,
+          }),
+        ),
         cashBalances: [],
         totals: { opening: zero, inflow: zero, outflow: zero, net: zero, closing: zero },
         note: 'This company has no cash or bank accounts defined.',
@@ -482,6 +492,7 @@ export class FinancialStatementsService {
         code: string;
         nameEn: string;
         nameAr: string;
+        cashFlowClass: string | null;
         inflowSide: boolean;
         movement: Prisma.Decimal;
       }>
@@ -500,6 +511,7 @@ export class FinancialStatementsService {
         HAVING SUM(l.debit - l.credit) <> 0
       )
       SELECT a.id AS "accountId", a.code, a."nameEn", a."nameAr",
+             a."cashFlowClass"::text AS "cashFlowClass",
              (ce.net_cash > 0) AS "inflowSide",
              COALESCE(SUM(CASE WHEN ce.net_cash > 0
                                THEN l.credit - l.debit
@@ -508,7 +520,7 @@ export class FinancialStatementsService {
         JOIN journal_lines l ON l."journalEntryId" = ce.entry_id
         JOIN accounts a ON a.id = l."accountId"
        WHERE l."accountId" NOT IN (${Prisma.join(cashAccountIds.map((id) => Prisma.sql`${id}::uuid`))})
-       GROUP BY a.id, a.code, a."nameEn", a."nameAr", (ce.net_cash > 0)
+       GROUP BY a.id, a.code, a."nameEn", a."nameAr", a."cashFlowClass", (ce.net_cash > 0)
        ORDER BY a.code
     `);
     const side = (inflowSide: boolean) =>
@@ -519,15 +531,44 @@ export class FinancialStatementsService {
           code: row.code,
           nameEn: row.nameEn,
           nameAr: row.nameAr,
+          cashFlowClass: row.cashFlowClass ? row.cashFlowClass.toLowerCase() : null,
           movement: new Prisma.Decimal(row.movement).toFixed(MONEY_SCALE),
         }))
         .filter((row) => !new Prisma.Decimal(row.movement).isZero());
+
+    // The IAS 7 reading of the same lines: each counterpart belongs to
+    // the class its account carries in the chart. An account nobody has
+    // classified reports under "unclassified" — visible as a decision
+    // still to make, never silently filed somewhere. The four nets add
+    // to the statement's net movement, which still comes from the cash
+    // lines themselves.
+    const sections = ['operating', 'investing', 'financing', 'unclassified'].map(
+      (cashFlowClass) => {
+        const part = (inflowSide: boolean) =>
+          counterparts
+            .filter(
+              (row) =>
+                row.inflowSide === inflowSide &&
+                (row.cashFlowClass?.toLowerCase() ?? 'unclassified') === cashFlowClass,
+            )
+            .reduce((sum, row) => sum.plus(row.movement), new Prisma.Decimal(0));
+        const inflow = part(true);
+        const outflow = part(false);
+        return {
+          cashFlowClass,
+          inflow: inflow.toFixed(MONEY_SCALE),
+          outflow: outflow.toFixed(MONEY_SCALE),
+          net: inflow.minus(outflow).toFixed(MONEY_SCALE),
+        };
+      },
+    );
 
     return {
       from: from.toISOString().slice(0, 10),
       to: to.toISOString().slice(0, 10),
       inflows: side(true),
       outflows: side(false),
+      sections,
       cashBalances,
       totals: {
         opening: cashTotal('opening').toFixed(MONEY_SCALE),
