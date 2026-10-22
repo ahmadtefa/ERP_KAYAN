@@ -130,6 +130,13 @@ try {
   });
   check('no journal line was created by adding accounts', lines === 0, `lines ${lines}`);
 } finally {
+  // Unparent first: the self-reference is Restrict, so deleting a
+  // heading while its children still point at it would fail the whole
+  // cleanup depending on row order.
+  await prisma.account.updateMany({
+    where: { companyId: { in: companyIds } },
+    data: { parentId: null },
+  });
   await prisma.account.deleteMany({ where: { companyId: { in: companyIds } } });
   await prisma.company.deleteMany({ where: { id: { in: companyIds } } });
   await prisma.$disconnect();

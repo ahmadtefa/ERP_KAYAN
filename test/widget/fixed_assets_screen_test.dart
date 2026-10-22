@@ -184,9 +184,18 @@ const _user = AppUser(
   ],
 );
 
+class _Prefilled extends AssetPrefillNotifier {
+  _Prefilled(this.values);
+
+  final Json values;
+
+  @override
+  Json? build() => values;
+}
+
 Future<_FakeApiClient> _pump(
   WidgetTester tester, {
-  List<Override> extra = const [],
+  Json? prefill,
   Size size = const Size(1500, 950),
 }) async {
   tester.view.physicalSize = size;
@@ -200,7 +209,8 @@ Future<_FakeApiClient> _pump(
       overrides: [
         apiClientProvider.overrideWithValue(api),
         currentUserProvider.overrideWithValue(_user),
-        ...extra,
+        if (prefill != null)
+          assetPrefillProvider.overrideWith(() => _Prefilled(prefill)),
       ],
       child: const MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -327,19 +337,15 @@ void main() {
     // deposits values and navigates; this is the receiving half.
     await _pump(
       tester,
-      extra: [
-        assetPrefillProvider.overrideWith(
-          (ref) => {
-            'purchaseInvoiceLineId': 'line-9',
-            'purchaseQuantity': '2',
-            'cost': '1200',
-            'purchaseDate': '2025-03-01',
-            'inServiceDate': '2025-03-01',
-            'nameEn': 'Press unit',
-            'nameAr': 'وحدة كبس',
-          },
-        ),
-      ],
+      prefill: {
+        'purchaseInvoiceLineId': 'line-9',
+        'purchaseQuantity': '2',
+        'cost': '1200',
+        'purchaseDate': '2025-03-01',
+        'inServiceDate': '2025-03-01',
+        'nameEn': 'Press unit',
+        'nameAr': 'وحدة كبس',
+      },
     );
 
     expect(find.byType(AlertDialog), findsOneWidget,

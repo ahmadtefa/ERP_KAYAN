@@ -104,7 +104,7 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
       return;
     }
     final date = text(invoice, 'invoiceDate');
-    ref.read(assetPrefillProvider.notifier).state = {
+    ref.read(assetPrefillProvider.notifier).deposit({
       'purchaseInvoiceLineId': text(line, 'id'),
       'purchaseQuantity': asString(offered['remainingQuantity']),
       'cost': asString(offered['remainingCost']),
@@ -117,7 +117,7 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
       'description':
           '${ar ? 'من فاتورة الشراء' : 'From purchase invoice'} '
           '${text(invoice, 'invoiceNumber')}',
-    };
+    });
     Navigator.of(context).pop();
     context.go(AppRoutes.fixedAssets);
   }

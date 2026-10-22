@@ -41,7 +41,22 @@ final fixedAssetsSummaryProvider = FutureProvider<Json>((ref) async {
 /// invoice line) deposits the values it already knows, navigates here,
 /// and the register opens its form prefilled, then clears this so the
 /// next ordinary visit starts blank.
-final assetPrefillProvider = StateProvider<Json?>((ref) => null);
+class AssetPrefillNotifier extends Notifier<Json?> {
+  @override
+  Json? build() => null;
+
+  void deposit(Json values) => state = values;
+
+  Json? take() {
+    final values = state;
+    state = null;
+    return values;
+  }
+}
+
+final assetPrefillProvider = NotifierProvider<AssetPrefillNotifier, Json?>(
+  AssetPrefillNotifier.new,
+);
 
 class FixedAssetsScreen extends ConsumerStatefulWidget {
   const FixedAssetsScreen({super.key});
@@ -63,9 +78,8 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final prefill = ref.read(assetPrefillProvider);
+      final prefill = ref.read(assetPrefillProvider.notifier).take();
       if (prefill != null && mounted) {
-        ref.read(assetPrefillProvider.notifier).state = null;
         _save(prefill: prefill);
       }
     });

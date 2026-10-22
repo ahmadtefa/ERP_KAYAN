@@ -37,11 +37,17 @@ void _size(WidgetTester tester, double width) {
   addTearDown(tester.view.resetDevicePixelRatio);
 }
 
-Widget _app(Widget home, {List<Override> overrides = const []}) {
+Widget _app(
+  Widget home, {
+  ChartOfAccountsDataSource? chartSource,
+  ApiClient? api,
+}) {
   return ProviderScope(
     overrides: [
       currentUserProvider.overrideWithValue(testUser),
-      ...overrides,
+      if (chartSource != null)
+        chartOfAccountsDataSourceProvider.overrideWithValue(chartSource),
+      if (api != null) apiClientProvider.overrideWithValue(api),
     ],
     child: MaterialApp(
       localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -128,14 +134,7 @@ void main() {
   testWidgets('the chart of accounts reads cleanly on a phone', (tester) async {
     _size(tester, 390);
     await tester.pumpWidget(
-      _app(
-        const ChartOfAccountsScreen(),
-        overrides: [
-          chartOfAccountsDataSourceProvider.overrideWithValue(
-            _ChartSource(),
-          ),
-        ],
-      ),
+      _app(const ChartOfAccountsScreen(), chartSource: _ChartSource()),
     );
     await tester.pumpAndSettle();
 
@@ -154,9 +153,7 @@ void main() {
           kind: InvoiceKind.purchase,
           summary: {'id': 'inv-1', 'invoiceNumber': 'PI-1'},
         ),
-        overrides: [
-          apiClientProvider.overrideWithValue(_InvoiceApi()),
-        ],
+        api: _InvoiceApi(),
       ),
     );
     await tester.pumpAndSettle();
