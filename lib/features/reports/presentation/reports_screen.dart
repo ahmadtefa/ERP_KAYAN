@@ -102,7 +102,7 @@ class ReportsScreen extends ConsumerStatefulWidget {
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 20, vsync: this)
+  late final TabController _tabs = TabController(length: 21, vsync: this)
     ..addListener(() => setState(() {}));
 
   @override
@@ -172,6 +172,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               Tab(text: _t(context, 'الإيرادات', 'Income')),
               Tab(text: _t(context, 'تسوية العملاء', 'Receivables reconciliation')),
               Tab(text: _t(context, 'تسوية الموردين', 'Payables reconciliation')),
+              Tab(text: l10n.fixedAssets),
               Tab(text: l10n.costCenterReport),
               Tab(text: l10n.budgetReport),
             ],
@@ -185,7 +186,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               // The exported report catalogue does not include the two
               // cost-centre reports yet, so the button is not offered for a
               // report it would fail to produce.
-              child: _tabs.index >= 18
+              child: _tabs.index >= 19
                   ? const SizedBox.shrink()
                   : ReportExportActions(
                       report: _reportSlug,
@@ -228,7 +229,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               15 => const _ExpensesIncomeTab(isExpense: false),
               16 => const _ReconciliationTab(side: 'receivables'),
               17 => const _ReconciliationTab(side: 'payables'),
-              18 => const _CostCentersTab(),
+              18 => const _FixedAssetsReportTab(),
+              19 => const _CostCentersTab(),
               _ => const _BudgetReportTab(),
             },
           ),
@@ -257,7 +259,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
     15 => 'income',
     16 => 'receivables-reconciliation',
     17 => 'payables-reconciliation',
-    18 => 'cost-centers',
+    18 => 'fixed-assets',
+    19 => 'cost-centers',
     _ => 'budgets',
   };
 
@@ -1065,6 +1068,92 @@ class _ReconciliationTab extends ConsumerWidget {
                     _t(context, 'المبلغ', 'Amount'),
                     numeric: true,
                     value: (r) => formatAmount(asString(r['amount'])),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// The asset register as a report: what the company owns, what has
+/// been charged against it, and what it is still worth on the books.
+class _FixedAssetsReportTab extends ConsumerWidget {
+  const _FixedAssetsReportTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    final async = ref.watch(
+      reportProvider('/fixed-assets/reports/summary'),
+    );
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final totals = data['totals'] is Map
+            ? Map<String, dynamic>.from(data['totals'] as Map)
+            : <String, dynamic>{};
+        final rows = listOf(data['items']);
+        return Column(
+          children: [
+            _SummaryStrip(
+              entries: [
+                MapEntry(
+                  l10n.assetCost,
+                  formatAmount(asString(totals['cost'])),
+                ),
+                MapEntry(
+                  l10n.accumulatedDepreciation,
+                  formatAmount(asString(totals['accumulatedDepreciation'])),
+                ),
+                MapEntry(
+                  l10n.bookValue,
+                  formatAmount(asString(totals['bookValue'])),
+                ),
+              ],
+            ),
+            Expanded(
+              child: RecordsTable(
+                rows: rows,
+                columns: [
+                  ColumnSpec(
+                    l10n.assetCode,
+                    value: (r) => text(r, 'code'),
+                    emphasise: true,
+                  ),
+                  ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
+                  ColumnSpec(
+                    _t(context, 'الاسم بالعربية', 'Name (Arabic)'),
+                    value: (r) => text(r, 'nameAr'),
+                  ),
+                  ColumnSpec(
+                    l10n.assetCategory,
+                    value: (r) => text(r, 'category'),
+                  ),
+                  ColumnSpec(
+                    l10n.status,
+                    value: (r) => text(r, 'status'),
+                  ),
+                  ColumnSpec(
+                    l10n.assetCost,
+                    numeric: true,
+                    value: (r) => formatAmount(asString(r['cost'])),
+                  ),
+                  ColumnSpec(
+                    l10n.accumulatedDepreciation,
+                    numeric: true,
+                    value: (r) =>
+                        formatAmount(asString(r['accumulatedDepreciation'])),
+                  ),
+                  ColumnSpec(
+                    l10n.bookValue,
+                    numeric: true,
+                    emphasise: true,
+                    value: (r) => formatAmount(asString(r['bookValue'])),
                   ),
                 ],
               ),
