@@ -7,6 +7,7 @@ import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/reports/presentation/reports_screen.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -330,8 +331,14 @@ void main() {
     final previousOnError = FlutterError.onError;
     FlutterError.onError = (details) {
       caught ??= details.exception;
+      // The exception's own string is the one-line summary; the rich
+      // "which widget" sections live in the diagnostics node.
       // ignore: avoid_print — deliberate: CI needs the whole text.
-      print('DIAG-BEGIN\n${details.exception}\nDIAG-END');
+      print(
+        'DIAG-BEGIN\n'
+        '${details.toDiagnosticsNode(style: DiagnosticsTreeStyle.error).toStringDeep()}\n'
+        'DIAG-END',
+      );
     };
     try {
       await _pump(tester, size: const Size(320, 700));
