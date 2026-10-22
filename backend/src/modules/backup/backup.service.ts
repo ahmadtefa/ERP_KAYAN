@@ -235,6 +235,11 @@ const TABLES: TableSpec[] = [
   { model: 'cashVoucher', scope: 'company' },
   { model: 'cashTransfer', scope: 'company' },
   { model: 'cashVoucherAllocation', scope: 'child', parent: 'cashVoucher', foreignKey: 'voucherId' },
+  // The asset register points at accounts, branches and cost centres, all
+  // written above; a depreciation charge points at its run and its asset.
+  { model: 'fixedAsset', scope: 'company' },
+  { model: 'depreciationRun', scope: 'company' },
+  { model: 'assetDepreciation', scope: 'company' },
   { model: 'documentSequence', scope: 'company' },
   { model: 'auditLog', scope: 'company' },
 ];

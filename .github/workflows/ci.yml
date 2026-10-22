@@ -121,16 +121,16 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
-          echo "Running the accounting reconciliation scenario (hand-computed 2024 year, closed at the end)..."
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-accounting-reconciliation.mjs http://127.0.0.1:3000/api/v1; then
-            echo "::group::API logs after reconciliation scenario failure"
+          echo "Running the end-to-end API check: real full backup (create, PGDMP download, upload, rehearsed restore), import-template download and import, exports and print..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 KAYAN_E2E_ALLOW_RESET=1 python ../scripts/ci-diagnose.py node scripts/api-check.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after api-check failure"
             cat /tmp/kayan-api.log
             echo "::endgroup::"
             exit 1
           fi
-          echo "Running the end-to-end API check: real full backup (create, PGDMP download, upload, rehearsed restore), import-template download and import, exports and print..."
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 KAYAN_E2E_ALLOW_RESET=1 python ../scripts/ci-diagnose.py node scripts/api-check.mjs http://127.0.0.1:3000/api/v1; then
-            echo "::group::API logs after api-check failure"
+          echo "Running the full accounting lifecycle scenario (hand-computed 2024: assets, depreciation, trading, reconciliations, close)..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-accounting-reconciliation.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after lifecycle scenario failure"
             cat /tmp/kayan-api.log
             echo "::endgroup::"
             exit 1
