@@ -352,6 +352,14 @@ void main() {
 
     expect(caught, isNull, reason: 'no overflow in the phone-width centre');
     expect(find.text('Matched'), findsWidgets);
+    // The differing section is further down the list than a phone
+    // screen shows at once; scroll it into existence, as a user does.
+    await tester.scrollUntilVisible(
+      find.textContaining('-25.00'),
+      150,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
     expect(find.textContaining('-25.00'), findsWidgets);
   });
 }

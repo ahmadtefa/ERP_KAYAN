@@ -64,7 +64,8 @@ class _FakeApiClient extends ApiClient {
       'bookValue': '1200.0000',
       'assetAccountId': 'acc-asset',
       'accumulatedAccountId': 'acc-accum',
-      'depreciationExpenseAccountId': 'acc-expense',
+      // The form's key for the depreciation expense account.
+      'expenseAccountId': 'acc-expense',
       'purchaseDate': '2025-03-01',
       'inServiceDate': '2025-03-01',
       // A draft capitalised from a purchase line: the edit form can
@@ -447,7 +448,7 @@ void main() {
   testWidgets('disposing sends the date and proceeds typed', (tester) async {
     final api = await _pump(tester);
 
-    final disposeButton = find.byTooltip('Dispose asset');
+    final disposeButton = find.byTooltip('Dispose of asset');
     await tester.ensureVisible(disposeButton);
     await tester.pumpAndSettle();
     await tester.tap(disposeButton);
@@ -457,14 +458,11 @@ void main() {
       find.widgetWithText(TextField, 'Disposal date'),
       '2025-12-31',
     );
-    await tester.enterText(
-      find.widgetWithText(TextField, 'Disposal proceeds'),
-      '1000',
-    );
+    await tester.enterText(find.widgetWithText(TextField, 'Proceeds'), '1000');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     // The destructive confirmation, then the post.
-    await tester.tap(find.widgetWithText(FilledButton, 'Dispose asset'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Dispose of asset'));
     await tester.pumpAndSettle();
 
     final disposals = api.posts.where((p) => p.path.endsWith('/dispose'));
