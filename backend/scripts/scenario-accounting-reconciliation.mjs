@@ -234,8 +234,12 @@ async function main() {
       near(closingOf(trial, '3101'), -5000),
     `cash ${closingOf(trial, cashCode)}, revenue ${closingOf(trial, '4101')}, rent ${closingOf(trial, '5103')}, capital ${closingOf(trial, '3101')}`,
   );
-  for (const [label, c] of [['cash', cashCode], ['revenue', '4101'], ['capital', '3101']]) {
-    const ledger = await api(`/reports/account-ledger/${code(c)}?from=${YEAR_FROM}&to=${YEAR_TO}`);
+  for (const [label, c, accountId] of [
+    ['cash', cashCode, cashLedger.id],
+    ['revenue', '4101', code('4101')],
+    ['capital', '3101', code('3101')],
+  ]) {
+    const ledger = await api(`/reports/account-ledger/${accountId}?from=${YEAR_FROM}&to=${YEAR_TO}`);
     check(
       `the ${label} ledger closing equals its trial-balance closing`,
       ledger.status === 200 && near(ledger.data?.closing, closingOf(trial, c)),
@@ -296,6 +300,31 @@ async function main() {
     near(subledgerTotal, closingOf(trialToday, '1103')),
     `subledger ${subledgerTotal}, control ${closingOf(trialToday, '1103')}, difference ${money(subledgerTotal - closingOf(trialToday, '1103'))}`,
   );
+  const stray = await postManualEntry('post straight to the AR control account', today, [
+    { accountId: code('1103'), debit: '250' },
+    { accountId: code('4101'), credit: '250' },
+  ]);
+  if (stray) {
+    const trialStray = await trialBalance(`${today.slice(0, 4)}-01-01`, today);
+    const customersStray = (await api(`/reports/customer-balances?asOf=${today}`)).data;
+    const subledgerStray = (customersStray?.rows ?? []).reduce((sum, r) => sum + money(r.balance), 0);
+    check(
+      'a manual posting to the control account surfaces as exactly that difference',
+      near(closingOf(trialStray, '1103') - subledgerStray, 250),
+      `control ${closingOf(trialStray, '1103')}, subledger ${subledgerStray}, difference ${money(closingOf(trialStray, '1103') - subledgerStray)}`,
+    );
+    await must('reverse the stray control posting', `/accounting/journal-entries/${stray.id}/reverse`, {
+      method: 'POST',
+    });
+    const trialRestored = await trialBalance(`${today.slice(0, 4)}-01-01`, today);
+    const customersRestored = (await api(`/reports/customer-balances?asOf=${today}`)).data;
+    const subledgerRestored = (customersRestored?.rows ?? []).reduce((sum, r) => sum + money(r.balance), 0);
+    check(
+      'reversing it brings subledger and control back into agreement',
+      near(subledgerRestored, closingOf(trialRestored, '1103')),
+      `subledger ${subledgerRestored}, control ${closingOf(trialRestored, '1103')}`,
+    );
+  }
   const valuation = (await api('/inventory/reports/valuation')).data;
   check(
     'inventory valuation equals the inventory account',
