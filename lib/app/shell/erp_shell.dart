@@ -210,6 +210,13 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         group: _NavGroup.accounting,
       ),
       _NavItem(
+        AppRoutes.fixedAssets,
+        Icons.precision_manufacturing_outlined,
+        l10n.fixedAssets,
+        permissions: const ['accounting.fixedassets.read'],
+        group: _NavGroup.accounting,
+      ),
+      _NavItem(
         AppRoutes.openingBalances,
         Icons.tune_outlined,
         l10n.openingBalancesTitle,

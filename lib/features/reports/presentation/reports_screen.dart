@@ -102,7 +102,7 @@ class ReportsScreen extends ConsumerStatefulWidget {
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 18, vsync: this)
+  late final TabController _tabs = TabController(length: 20, vsync: this)
     ..addListener(() => setState(() {}));
 
   @override
@@ -170,6 +170,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               ),
               Tab(text: l10n.expenses),
               Tab(text: _t(context, 'الإيرادات', 'Income')),
+              Tab(text: _t(context, 'تسوية العملاء', 'Receivables reconciliation')),
+              Tab(text: _t(context, 'تسوية الموردين', 'Payables reconciliation')),
               Tab(text: l10n.costCenterReport),
               Tab(text: l10n.budgetReport),
             ],
@@ -183,7 +185,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               // The exported report catalogue does not include the two
               // cost-centre reports yet, so the button is not offered for a
               // report it would fail to produce.
-              child: _tabs.index >= 16
+              child: _tabs.index >= 18
                   ? const SizedBox.shrink()
                   : ReportExportActions(
                       report: _reportSlug,
@@ -197,7 +199,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
           ),
           Expanded(
             child: switch (_tabs.index) {
-              0 => const _TrialBalanceTab(),
+              0 => _TrialBalanceTab(
+                onOpenAccount: (accountId) {
+                  ref.read(ledgerAccountProvider.notifier).choose(accountId);
+                  _tabs.animateTo(7);
+                },
+              ),
               1 => const _ProfitAndLossTab(),
               2 => const _BalanceSheetTab(),
               3 => const _CashFlowTab(),
@@ -219,7 +226,9 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               13 => const _OutstandingInvoicesTab(),
               14 => const _ExpensesIncomeTab(isExpense: true),
               15 => const _ExpensesIncomeTab(isExpense: false),
-              16 => const _CostCentersTab(),
+              16 => const _ReconciliationTab(side: 'receivables'),
+              17 => const _ReconciliationTab(side: 'payables'),
+              18 => const _CostCentersTab(),
               _ => const _BudgetReportTab(),
             },
           ),
@@ -246,7 +255,9 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
     13 => 'outstanding-invoices',
     14 => 'expenses',
     15 => 'income',
-    16 => 'cost-centers',
+    16 => 'receivables-reconciliation',
+    17 => 'payables-reconciliation',
+    18 => 'cost-centers',
     _ => 'budgets',
   };
 
@@ -273,7 +284,11 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
 }
 
 class _TrialBalanceTab extends ConsumerWidget {
-  const _TrialBalanceTab();
+  const _TrialBalanceTab({required this.onOpenAccount});
+
+  /// Opens the ledger tab on the tapped account: a trial-balance figure
+  /// is a claim, and the ledger behind it is one tap away.
+  final void Function(String accountId) onOpenAccount;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -300,6 +315,7 @@ class _TrialBalanceTab extends ConsumerWidget {
             Expanded(
               child: RecordsTable(
                 rows: rows,
+                onTap: (row) => onOpenAccount(text(row, 'accountId')),
                 columns: [
                   ColumnSpec(
                     l10n.accountCode,
@@ -930,6 +946,16 @@ class _CashFlowTab extends ConsumerWidget {
                   _t(context, 'النقدية آخر الفترة', 'Closing cash'),
                   formatAmount(asString(totals['closing'])),
                 ),
+                for (final section in listOf(data['sections']))
+                  if ((double.tryParse(asString(section['net']) ?? '') ?? 0) !=
+                      0)
+                    MapEntry(
+                      _cashFlowClassLabel(
+                        context,
+                        asString(section['cashFlowClass']),
+                      ),
+                      formatAmount(asString(section['net'])),
+                    ),
               ],
             ),
             Expanded(
@@ -947,6 +973,98 @@ class _CashFlowTab extends ConsumerWidget {
                     numeric: true,
                     value: (r) => formatAmount(asString(r['movement'])),
                     emphasise: true,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+String _cashFlowClassLabel(BuildContext context, String? value) =>
+    switch (value) {
+      'operating' => _t(context, 'تشغيلية', 'Operating'),
+      'investing' => _t(context, 'استثمارية', 'Investing'),
+      'financing' => _t(context, 'تمويلية', 'Financing'),
+      _ => _t(context, 'غير مصنّفة', 'Unclassified'),
+    };
+
+/// Subledger against control account, with the difference explained:
+/// advances held, the postings no party document wrote (listed), and
+/// whatever is left unexplained — zero on consistent books.
+class _ReconciliationTab extends ConsumerWidget {
+  const _ReconciliationTab({required this.side});
+
+  final String side;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    final async = ref.watch(
+      reportProvider('/reports/$side-reconciliation?asOf=${period.to}'),
+    );
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final subledger = data['subledger'] is Map
+            ? Map<String, dynamic>.from(data['subledger'] as Map)
+            : <String, dynamic>{};
+        final rows = listOf(data['otherPostings']);
+        return Column(
+          children: [
+            _SummaryStrip(
+              entries: [
+                MapEntry(
+                  _t(context, 'الأستاذ المساعد', 'Subledger'),
+                  formatAmount(asString(subledger['total'])),
+                ),
+                MapEntry(
+                  _t(context, 'حساب الرقابة', 'Control account'),
+                  formatAmount(asString(data['controlBalance'])),
+                ),
+                MapEntry(
+                  _t(context, 'مقدّمات غير مطبّقة', 'Advances held'),
+                  formatAmount(asString(data['advances'])),
+                ),
+                MapEntry(
+                  _t(context, 'الفرق', 'Difference'),
+                  formatAmount(asString(data['difference'])),
+                ),
+                MapEntry(
+                  _t(context, 'غير مفسَّر', 'Unexplained'),
+                  formatAmount(asString(data['unexplained'])),
+                ),
+              ],
+            ),
+            Expanded(
+              child: RecordsTable(
+                rows: rows,
+                columns: [
+                  ColumnSpec(
+                    _t(context, 'القيد', 'Entry'),
+                    value: (r) => text(r, 'entryNumber'),
+                    emphasise: true,
+                  ),
+                  ColumnSpec(
+                    _t(context, 'التاريخ', 'Date'),
+                    value: (r) => text(r, 'entryDate'),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'المصدر', 'Source'),
+                    value: (r) => text(r, 'sourceType'),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'المستند', 'Document'),
+                    value: (r) => text(r, 'sourceNumber'),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'المبلغ', 'Amount'),
+                    numeric: true,
+                    value: (r) => formatAmount(asString(r['amount'])),
                   ),
                 ],
               ),

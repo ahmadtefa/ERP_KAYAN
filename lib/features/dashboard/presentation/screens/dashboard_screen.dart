@@ -932,6 +932,7 @@ _modules(AppLocalizations l10n) => [
   (icon: Icons.point_of_sale_outlined, label: l10n.salesInvoices, path: AppRoutes.salesInvoices, accent: SectionAccents.sales),
   (icon: Icons.shopping_cart_outlined, label: l10n.purchaseInvoices, path: AppRoutes.purchaseInvoices, accent: SectionAccents.purchases),
   (icon: Icons.account_tree_outlined, label: l10n.chartOfAccounts, path: AppRoutes.chartOfAccounts, accent: SectionAccents.accounting),
+  (icon: Icons.precision_manufacturing_outlined, label: l10n.fixedAssets, path: AppRoutes.fixedAssets, accent: SectionAccents.accounting),
   (icon: Icons.bar_chart_outlined, label: l10n.reports, path: AppRoutes.reports, accent: SectionAccents.insights),
   (icon: Icons.settings_outlined, label: l10n.settings, path: AppRoutes.settings, accent: SectionAccents.administration),
 ];
