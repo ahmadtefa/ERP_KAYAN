@@ -514,19 +514,31 @@ Write-Host "PASS: fresh install, upgrade and repair all left the original databa
 
 $resetTool = Join-Path $installRoot "reset-kayan.ps1"
 if (-not (Test-Path $resetTool)) { Fail "The installed package is missing reset-kayan.ps1." }
+# NOTE the quotes around the script path: it lives under
+# "C:\Program Files\KAYAN ERP", Start-Process does not quote
+# ArgumentList items for you, and an unquoted path makes
+# powershell.exe look for C:\Program and die with -196608.
+function Invoke-SafeReset([string]$Word) {
+  $out = Join-Path $env:TEMP ("kayan-reset-smoke-out-" + [Guid]::NewGuid().ToString('N') + ".log")
+  $err = Join-Path $env:TEMP ("kayan-reset-smoke-err-" + [Guid]::NewGuid().ToString('N') + ".log")
+  $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $resetTool + '"'), '-ConfirmText', $Word, '-Quiet') -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+  $text = ((Get-Content -LiteralPath $out -Raw -ErrorAction SilentlyContinue) + " " + (Get-Content -LiteralPath $err -Raw -ErrorAction SilentlyContinue)).Trim()
+  Remove-Item -LiteralPath $out, $err -Force -ErrorAction SilentlyContinue
+  return @{ ExitCode = $process.ExitCode; Output = $text }
+}
 $settingsHashBefore = (Get-FileHash $settings -Algorithm SHA256).Hash
-$resetCancelled = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $resetTool, '-ConfirmText', 'NOPE', '-Quiet') -Wait -PassThru
+$resetCancelled = Invoke-SafeReset 'NOPE'
 if ($resetCancelled.ExitCode -ne 2) {
-  Fail "Safe reset with a wrong confirmation word exited $($resetCancelled.ExitCode), expected 2 (cancelled)."
+  Fail "Safe reset with a wrong confirmation word exited $($resetCancelled.ExitCode), expected 2 (cancelled). Output: $($resetCancelled.Output)"
 }
 if ((Get-FileHash $settings -Algorithm SHA256).Hash -ne $settingsHashBefore) {
   Fail "Safe reset with a wrong confirmation word still changed kayan.env."
 }
 Write-Host "PASS: safe reset cancelled by a wrong confirmation word changed nothing."
 
-$resetRun = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $resetTool, '-ConfirmText', 'RESET', '-Quiet') -Wait -PassThru
+$resetRun = Invoke-SafeReset 'RESET'
 if ($resetRun.ExitCode -ne 0) {
-  Fail "Safe reset failed with exit code $($resetRun.ExitCode). See $runtimeLog (KAYAN-RESET-* markers)."
+  Fail "Safe reset failed with exit code $($resetRun.ExitCode). Output: $($resetRun.Output) See $runtimeLog (KAYAN-RESET-* markers)."
 }
 $resetSettings = Get-Content $settings
 $resetDbLine = @($resetSettings | Where-Object { $_ -match '^\s*DATABASE_URL=' })[0]
