@@ -400,23 +400,28 @@ class _TotalsBar extends StatelessWidget {
       color: balanced ? scheme.surfaceContainerHighest : scheme.errorContainer,
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
+        // A Wrap, not a Row: a verdict plus three totals cannot share
+        // one phone-width line; on narrow screens the totals flow to
+        // their own line, whole, instead of overflowing the card.
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Icon(
               balanced ? Icons.verified_outlined : Icons.error_outline,
               color: balanced ? scheme.primary : scheme.error,
             ),
-            const SizedBox(width: 8),
             Text(balanced ? l10n.balanced : l10n.outOfBalance),
-            const Spacer(),
+            const SizedBox(width: 12),
             Text(
               '${l10n.debit}: ${formatAmount(asString(totals['closingDebit']))}',
             ),
-            const SizedBox(width: 20),
+            const SizedBox(width: 12),
             Text(
               '${l10n.credit}: ${formatAmount(asString(totals['closingCredit']))}',
             ),
-            const SizedBox(width: 20),
+            const SizedBox(width: 12),
             Text(
               '${l10n.difference}: ${formatAmount(asString(totals['difference']))}',
             ),

@@ -529,8 +529,13 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
 
     return ModuleScaffold(
       title: l10n.fixedAssets,
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
+      // A Wrap, not a Row: four actions do not fit beside the title
+      // on a phone, and a Row would overflow the header instead of
+      // flowing onto a second line.
+      trailing: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           IconButton(
             tooltip: l10n.refresh,

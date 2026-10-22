@@ -121,7 +121,12 @@ void main() {
         // Table form: the far columns start off-screen and a sideways
         // drag brings the last heading into view.
         final before = tester.getTopLeft(find.text('Note')).dx;
-        await tester.drag(find.byType(DataTable), const Offset(-500, 0));
+        // Drag from a point that is actually on screen — the centre
+        // of a 2,500px-wide table is not inside a 768px viewport.
+        await tester.dragFrom(
+          tester.getCenter(find.text('1104')),
+          const Offset(-500, 0),
+        );
         await tester.pumpAndSettle();
         final after = tester.getTopLeft(find.text('Note')).dx;
         expect(after, lessThan(before),

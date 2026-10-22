@@ -38,7 +38,7 @@ INSERT INTO "accounts" (
   "parentId", "isPostable", "isActive", "createdAt", "updatedAt"
 )
 SELECT
-  gen_random_uuid(), c."id", '5107', 'Inventory differences', 'فروق المخزون', 'EXPENSE',
+  gen_random_uuid(), c."id", '5107', 'Inventory differences', 'فروق جرد المخزون', 'EXPENSE',
   (SELECT p."id" FROM "accounts" p
     WHERE p."companyId" = c."id" AND p."code" = '5' AND p."deletedAt" IS NULL
     LIMIT 1),
