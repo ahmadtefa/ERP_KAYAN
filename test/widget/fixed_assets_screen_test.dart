@@ -454,10 +454,12 @@ void main() {
     await tester.tap(disposeButton);
     await tester.pumpAndSettle();
 
-    await tester.enterText(
-      find.widgetWithText(TextField, 'Disposal date'),
-      '2025-12-31',
-    );
+    // The date field is read-only and opens a picker; drive it the
+    // way a user does and accept the offered day (today).
+    await tester.tap(find.widgetWithText(TextField, 'Disposal date'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextField, 'Proceeds'), '1000');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
@@ -469,7 +471,12 @@ void main() {
     expect(disposals, hasLength(1));
     expect(disposals.single.path, '/fixed-assets/asset-machine/dispose');
     expect((disposals.single.body! as Map)['proceeds'], '1000');
-    expect((disposals.single.body! as Map)['date'], '2025-12-31');
+    final now = DateTime.now();
+    final today =
+        '${now.year.toString().padLeft(4, '0')}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
+    expect((disposals.single.body! as Map)['date'], today);
   });
 
   testWidgets('a draft can be unlinked from its purchase line', (
