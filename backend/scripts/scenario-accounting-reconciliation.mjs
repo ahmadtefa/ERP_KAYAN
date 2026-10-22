@@ -846,7 +846,15 @@ async function main() {
   const csvUrl = await ticketed(
     `/exports/trial-balance/download?format=csv&lang=ar&from=${YEAR_FROM}&to=${YEAR_TO}`,
   );
-  const csvRaw = await (await fetch(`${API}${csvUrl}`)).text();
+  // BOM is asserted on the BYTES: fetch's text() decoding swallows a
+  // UTF-8 BOM before the string ever reaches us, which would make a
+  // correct file look BOM-less.
+  const csvBytes = new Uint8Array(
+    await (await fetch(`${API}${csvUrl}`)).arrayBuffer(),
+  );
+  const hasBom =
+    csvBytes[0] === 0xef && csvBytes[1] === 0xbb && csvBytes[2] === 0xbf;
+  const csvRaw = new TextDecoder('utf-8').decode(csvBytes);
   const csvRows = parseCsv(csvRaw);
   const csvHeaderAt = csvRows.findIndex((r) => r[0] === 'الكود');
   const csvInv = csvRows.find((r) => r[0] === '1104') ?? [];
@@ -858,7 +866,7 @@ async function main() {
   const csvDataRows = (blankAt === -1 ? afterHeader : afterHeader.slice(0, blankAt)).length;
   check(
     'the Arabic CSV parses to the same report (BOM, Arabic headers, 1104 at 500, same row count)',
-    csvRaw.startsWith('\uFEFF') &&
+    hasBom &&
       csvHeaderAt >= 0 &&
       near(csvInv[6], 500) &&
       csvDataRows === (tbJson?.rows?.length ?? 0) + (tbJson?.groups?.length ?? 0),

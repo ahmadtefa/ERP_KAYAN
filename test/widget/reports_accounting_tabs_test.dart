@@ -326,8 +326,13 @@ void main() {
     await _pump(tester, size: const Size(320, 700));
     await _openTab(tester, 'Reconciliation center');
 
-    expect(tester.takeException(), isNull,
-        reason: 'no overflow in the phone-width centre');
+    final error = tester.takeException();
+    if (error is FlutterError) {
+      // Print the full diagnostics (which widget, which row) — the
+      // one-line summary alone cannot be diagnosed from CI output.
+      debugPrint(error.toStringDeep());
+    }
+    expect(error, isNull, reason: 'no overflow in the phone-width centre');
     expect(find.text('Matched'), findsWidgets);
     expect(find.textContaining('-25.00'), findsWidgets);
   });
