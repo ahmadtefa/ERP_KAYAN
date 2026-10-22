@@ -428,18 +428,21 @@ class LocalBackend {
         includeParentEnvironment: true,
       );
       // Line by line, so every line in the log carries its own prefix and the
-      // file stays readable with any text editor.
+      // file stays readable with any text editor. Every line is redacted the
+      // same way the preparation output is: a database driver in a bad mood
+      // will happily print the whole connection string, password included,
+      // and this log is a file other people may be asked to read or send.
       process.stdout
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
-            log?.writeln('[out] ${_plain(line)}');
+            log?.writeln('[out] ${_redactSecrets(_plain(line))}');
           });
       process.stderr
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
-            log?.writeln('[err] ${_plain(line)}');
+            log?.writeln('[err] ${_redactSecrets(_plain(line))}');
           });
       return process;
     } on Object catch (error) {
@@ -603,6 +606,17 @@ class LocalBackend {
       .replaceAll(RegExp(r'(KAYAN_ADMIN_PASSWORD=)\S+'), r'$1***')
       .replaceAll(
         RegExp(r'((?:DATABASE_URL|ADMIN_DATABASE_URL)=)\S+'),
+        r'$1***',
+      )
+      // Signing secrets and bare password assignments, the same shapes the
+      // Windows repair tooling strips from its own logs - one definition of
+      // "never in a log" across the product.
+      .replaceAll(
+        RegExp(r'((?:JWT_ACCESS_SECRET|JWT_REFRESH_SECRET)=)\S+'),
+        r'$1***',
+      )
+      .replaceAll(
+        RegExp(r'([Pp]assword\s*[=:]\s*)[^\s;]+'),
         r'$1***',
       );
 
