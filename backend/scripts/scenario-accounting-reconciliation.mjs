@@ -844,6 +844,231 @@ async function main() {
     `asset entries ${auditRows.length}, run entries ${runRows.length}`,
   );
 
+  // ── 12. a discounted sale in the new year (discount before tax) ────────
+  const sale2025 = await must('2025: sell 1 unit at 150 with a 10% document discount', '/sales/invoices', {
+    method: 'POST',
+    json: {
+      invoiceDate: '2025-01-05',
+      dueDate: '2025-02-04',
+      customerId: customer.id,
+      discountType: 'PERCENT',
+      discountPercent: '10',
+      lines: [{ itemId: item.id, quantity: '1', unitPrice: '150' }],
+    },
+  });
+  if (sale2025) {
+    await must('post the discounted sale', `/sales/invoices/${sale2025.id}/post`, { method: 'POST' });
+    const detail = (await api(`/sales/invoices/${sale2025.id}`)).data;
+    check(
+      'discount before tax: 150 − 15 = 135 taxable, VAT 18.90, total 153.90, journal linked',
+      near(detail?.discountAmount, 15) &&
+        near(detail?.taxAmount, 18.9) &&
+        near(detail?.totalAmount, 153.9) &&
+        Boolean(detail?.journalEntryId),
+      `discount ${detail?.discountAmount}, tax ${detail?.taxAmount}, total ${detail?.totalAmount}`,
+    );
+    const t25 = await trialBalance('2025-01-01', '2025-12-31');
+    check(
+      'the receivable is the advance −250 plus the discounted total',
+      near(closingOf(t25, '1103'), -96.1),
+      `receivable ${closingOf(t25, '1103')}`,
+    );
+    const collect = await must('collect the 153.90', '/cash/vouchers', {
+      method: 'POST',
+      json: {
+        kind: 'RECEIPT',
+        voucherDate: '2025-01-06',
+        cashAccountId: cashAccount.id,
+        customerId: customer.id,
+        amount: '153.90',
+        allocations: [{ salesInvoiceId: sale2025.id, amount: '153.90' }],
+      },
+    });
+    if (collect) {
+      await must('post the collection', `/cash/vouchers/${collect.id}/post`, { method: 'POST' });
+    }
+    const t25b = await trialBalance('2025-01-01', '2025-12-31');
+    check(
+      'after collection the receivable is the untouched −250 advance; stock is 4',
+      near(closingOf(t25b, '1103'), -250) &&
+        near(quantityOf((await api(`/inventory/stock?itemId=${item.id}`)).data, item.id), 4),
+      `receivable ${closingOf(t25b, '1103')}`,
+    );
+  }
+
+  // ── 13. closed year refuses depreciation too; the open year works ──────
+  const press = await must('register a press (in service since 2024, capitalised in 2025)', '/fixed-assets', {
+    method: 'POST',
+    json: {
+      code: `FA-P-${stamp}`,
+      nameEn: `Lifecycle press ${stamp}`,
+      nameAr: `مكبس دورة الحياة ${stamp}`,
+      purchaseDate: '2025-01-02',
+      inServiceDate: '2024-01-01',
+      cost: '1200',
+      salvageValue: '0',
+      usefulLifeMonths: 12,
+      assetAccountId: assetLedger.id,
+      accumulatedAccountId: accumLedger.id,
+      expenseAccountId: deprLedger.id,
+    },
+  });
+  if (press) {
+    await must('activate the press in the open year', `/fixed-assets/${press.id}/activate`, {
+      method: 'POST',
+      json: { fundingAccountId: cashLedger.id, date: '2025-01-02' },
+    });
+    await mustRefuse(
+      'depreciating June 2024 (inside the closed year) is refused',
+      '/fixed-assets/depreciation-runs',
+      { method: 'POST', json: { period: '2024-06', assetIds: [press.id] } },
+    );
+    await must('depreciating January 2025 works', '/fixed-assets/depreciation-runs', {
+      method: 'POST',
+      json: { period: '2025-01', assetIds: [press.id] },
+    });
+    const pressAfter = (await api(`/fixed-assets/${press.id}`)).data;
+    check(
+      'exactly one month was charged — the refused closed-year run left nothing',
+      near(pressAfter?.accumulatedDepreciation, 100),
+      `accumulated ${pressAfter?.accumulatedDepreciation}`,
+    );
+    await mustRefuse('deleting an asset that has postings is refused', `/fixed-assets/${press.id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // ── 14. invalid input leaves no trace ──────────────────────────────────
+  const arBefore = closingOf(await trialBalance('2025-01-01', '2025-12-31'), '1103');
+  await mustRefuse('a sales invoice with no lines is refused', '/sales/invoices', {
+    method: 'POST',
+    json: { invoiceDate: '2025-01-10', customerId: customer.id, lines: [] },
+  });
+  await mustRefuse('a line with zero quantity is refused', '/sales/invoices', {
+    method: 'POST',
+    json: {
+      invoiceDate: '2025-01-10',
+      customerId: customer.id,
+      lines: [{ itemId: item.id, quantity: '0', unitPrice: '150' }],
+    },
+  });
+  await mustRefuse('a line with a negative quantity is refused', '/sales/invoices', {
+    method: 'POST',
+    json: {
+      invoiceDate: '2025-01-10',
+      customerId: customer.id,
+      lines: [{ itemId: item.id, quantity: '-1', unitPrice: '150' }],
+    },
+  });
+  await mustRefuse('a voucher with a negative amount is refused', '/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'RECEIPT',
+      voucherDate: '2025-01-10',
+      cashAccountId: cashAccount.id,
+      customerId: customer.id,
+      amount: '-100',
+      allocations: [],
+    },
+  });
+  if (sale2025) {
+    const over = await must('draft a collection of 999 against the settled 153.90 invoice', '/cash/vouchers', {
+      method: 'POST',
+      json: {
+        kind: 'RECEIPT',
+        voucherDate: '2025-01-10',
+        cashAccountId: cashAccount.id,
+        customerId: customer.id,
+        amount: '999',
+        allocations: [{ salesInvoiceId: sale2025.id, amount: '999' }],
+      },
+    });
+    if (over) {
+      await mustRefuse(
+        'collecting more than the invoice has left is refused at posting',
+        `/cash/vouchers/${over.id}/post`,
+        { method: 'POST' },
+      );
+    }
+  }
+  const afterInvalid = await trialBalance('2025-01-01', '2025-12-31');
+  check(
+    'none of the refused input changed the books',
+    near(closingOf(afterInvalid, '1103'), arBefore) && near(afterInvalid?.totals?.difference, 0),
+    `receivable before ${arBefore}, after ${closingOf(afterInvalid, '1103')}`,
+  );
+
+  // ── 15. what was saved can be read back; aging agrees with the ledger ──
+  const supplierBack = (await api(`/parties/suppliers/${supplier.id}`)).data;
+  const itemBack = (await api(`/inventory/items/${item.id}`)).data;
+  check(
+    'the supplier and the item read back exactly as saved',
+    supplierBack?.code === `REC-S-${stamp}` && itemBack?.code === `REC-I-${stamp}`,
+    `supplier ${supplierBack?.code}, item ${itemBack?.code}`,
+  );
+  const aging = (await api(`/reports/payables-aging?asOf=${today}`)).data;
+  const agingParties = aging?.parties ?? aging?.rows ?? [];
+  const supplierAging = agingParties.find((row) => row.partyId === supplier.id);
+  check(
+    'the supplier owes nothing in aging either (settled; the debit note reduced the debt)',
+    supplierAging === undefined || near(supplierAging?.total, 0),
+    `aging total ${supplierAging?.total ?? 'no open row'}`,
+  );
+
+  // ── 16. the whole company, backed up and put back ──────────────────────
+  const backup = (await api('/backup/download')).data;
+  check(
+    'the company backup carries the fixed-asset and depreciation tables',
+    Array.isArray(backup?.tables?.fixedAsset) &&
+      backup.tables.fixedAsset.length >= 4 &&
+      Array.isArray(backup?.tables?.assetDepreciation) &&
+      backup.tables.assetDepreciation.length >= 14 &&
+      Array.isArray(backup?.tables?.account),
+    `assets ${backup?.tables?.fixedAsset?.length}, depreciation rows ${backup?.tables?.assetDepreciation?.length}`,
+  );
+  if (backup?.tables) {
+    const form = new FormData();
+    form.append(
+      'file',
+      new Blob([JSON.stringify(backup)], { type: 'application/json' }),
+      'kayan-backup.json',
+    );
+    const restoredResponse = await fetch(`${API}/backup/restore?replace=true`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    check(
+      'restoring the backup over the same (isolated CI) company succeeds',
+      restoredResponse.status < 300,
+      `status ${restoredResponse.status}`,
+    );
+    // A restore replaces identity tables; sign in afresh before reading.
+    const relogin = await api('/auth/login', {
+      method: 'POST',
+      json: { username: USERNAME, password: PASSWORD },
+      noAuth: true,
+    });
+    if (relogin.data?.accessToken) token = relogin.data.accessToken;
+    const restoredTrial = await yearTrial();
+    check(
+      'after restore, the books are the same books (2024 cash 148,351; loss 1,150 in retained)',
+      near(closingOf(restoredTrial, cashCode), 148351) &&
+        near(closingOf(restoredTrial, '3102'), 1150) &&
+        near(restoredTrial?.totals?.difference, 0),
+      `cash ${closingOf(restoredTrial, cashCode)}, retained ${closingOf(restoredTrial, '3102')}`,
+    );
+    const restoredRegister = (await api('/fixed-assets/reports/summary')).data;
+    check(
+      'after restore, the register still ties to the ledger (tool + press)',
+      near(restoredRegister?.totals?.cost, 2400) &&
+        near(restoredRegister?.totals?.accumulatedDepreciation, 1100) &&
+        (restoredRegister?.assetAccounts ?? []).every((r) => near(r.difference, 0)) &&
+        (restoredRegister?.accumulatedAccounts ?? []).every((r) => near(r.difference, 0)),
+      `cost ${restoredRegister?.totals?.cost}, accumulated ${restoredRegister?.totals?.accumulatedDepreciation}`,
+    );
+  }
+
   const failed = results.filter((row) => !row.ok);
   console.log(
     `\n${results.length - failed.length}/${results.length} checks passed` +
