@@ -232,6 +232,35 @@ class ReportLinkBuilder {
     return '$_base/exports/documents/$kind/$id/print?${_encode(query)}';
   }
 
+  /// Opens the branded quotation print preview in a new tab. It carries a
+  /// one-minute ticket, like every other browser-facing file.
+  Future<String> quotationPrint({
+    required String id,
+    required String language,
+    bool auto = true,
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      if (auto) 'auto': '1',
+      'ticket': await _downloadTicket(),
+    };
+    return '$_base/sales/quotations/$id/print?${_encode(query)}';
+  }
+
+  /// The quotation as the finished PDF the customer receives.
+  Future<DownloadRequest> quotationPdf({
+    required String id,
+    required String language,
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      'ticket': await _downloadTicket(),
+    };
+    return DownloadRequest(
+      url: '$_base/sales/quotations/$id/pdf?${_encode(query)}',
+    );
+  }
+
   /// A blank spreadsheet to fill in, for one kind of import.
   Future<DownloadRequest> importTemplate({
     required String kind,
@@ -253,6 +282,15 @@ class ReportLinkBuilder {
     return DownloadRequest(url: '$_base/backup/download?${_encode(query)}');
   }
 
+  /// The bundled sample company backup, not a restore shortcut.
+  Future<DownloadRequest> demoBackup() async {
+    final query = <String, String>{'ticket': await _downloadTicket()};
+    return DownloadRequest(
+      url: '$_base/backup/demo/download?${_encode(query)}',
+      fileName: 'kayan-company-backup-demo.json',
+    );
+  }
+
   /// One full-database backup file, sitting on the server.
   Future<DownloadRequest> fullBackupDownload(String name) async {
     final query = <String, String>{'ticket': await _downloadTicket()};
@@ -267,18 +305,26 @@ class ReportLinkBuilder {
       .join('&');
 }
 
-/// The three kinds of master data a file can carry.
+/// The spreadsheet templates supported by the import service.
 enum ImportKind {
   customers,
   suppliers,
-  items;
+  items,
+  chartOfAccounts,
+  openingBalances;
 
   /// The name the API uses.
   String get slug => switch (this) {
     ImportKind.customers => 'customers',
     ImportKind.suppliers => 'suppliers',
     ImportKind.items => 'items',
+    ImportKind.chartOfAccounts => 'chart-of-accounts',
+    ImportKind.openingBalances => 'opening-balances',
   };
+
+  bool get supportsUpsert => this == ImportKind.customers ||
+      this == ImportKind.suppliers ||
+      this == ImportKind.items;
 }
 
 /// What happens to a record the file carries that already exists.
@@ -504,7 +550,14 @@ class FullBackupService {
   }
 
   Future<Map<String, dynamic>> create() async {
-    final response = await _dio.post<Map<String, dynamic>>(_path);
+    // A full pg_dump plus its read-back validation legitimately takes
+    // longer than the client's ordinary 30-second receive timeout; with
+    // the default, the request was aborted on the client while the server
+    // was still working, which looked like a backup that hangs forever.
+    final response = await _dio.post<Map<String, dynamic>>(
+      _path,
+      options: Options(receiveTimeout: const Duration(minutes: 15)),
+    );
     return Map<String, dynamic>.from(response.data ?? const {});
   }
 
@@ -530,7 +583,13 @@ class FullBackupService {
       '$_path/restore',
       data: form,
       queryParameters: {'confirm': confirm},
-      options: Options(contentType: 'multipart/form-data'),
+      // Uploading an archive and restoring it (rehearsal + safety copy +
+      // restore + checks) is the longest operation in the program.
+      options: Options(
+        contentType: 'multipart/form-data',
+        sendTimeout: const Duration(minutes: 30),
+        receiveTimeout: const Duration(minutes: 30),
+      ),
     );
     return Map<String, dynamic>.from(response.data ?? const {});
   }

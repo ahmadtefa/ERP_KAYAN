@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
+import '../../../../shared/widgets/status_pill.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
@@ -36,10 +37,13 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
 
   String get _basePath => widget.kind.basePath;
 
-  Future<void> _openEditor() async {
+  Future<void> _openEditor({String? invoiceId}) async {
     await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => InvoiceEditorScreen(kind: widget.kind),
+        builder: (_) => InvoiceEditorScreen(
+          kind: widget.kind,
+          invoiceId: invoiceId,
+        ),
       ),
     );
   }
@@ -94,10 +98,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
   }
 
   void _openDetail(Json row) {
-    showDialog<void>(
-      context: context,
-      builder: (_) => InvoiceDetailDialog(kind: widget.kind, summary: row),
-    );
+    showInvoiceDetail(context, kind: widget.kind, summary: row);
   }
 
   @override
@@ -120,7 +121,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
           DropdownButton<String>(
             value: _status,
             items: [
-              DropdownMenuItem(value: '', child: Text(l10n.reports)),
+              DropdownMenuItem(value: '', child: Text(l10n.allStatuses)),
               DropdownMenuItem(value: 'draft', child: Text(l10n.draft)),
               DropdownMenuItem(value: 'posted', child: Text(l10n.posted)),
               DropdownMenuItem(value: 'reversed', child: Text(l10n.reversed)),
@@ -177,11 +178,23 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
                 numeric: true,
                 value: (r) => formatAmount(asString(r['balanceDue'])),
               ),
-            ColumnSpec(l10n.status, value: (r) => statusLabel(context, r)),
+            ColumnSpec(
+              l10n.status,
+              value: (r) => statusLabel(context, r),
+              tone: (r) => toneForStatus(text(r, 'status')),
+            ),
           ],
           actions: (row) {
             final status = text(row, 'status').toLowerCase();
             return [
+              if (status == 'draft' && !isSales)
+                IconButton(
+                  tooltip: l10n.editDraftInvoice,
+                  icon: const Icon(Icons.edit_outlined, size: 20),
+                  onPressed: _busy
+                      ? null
+                      : () => _openEditor(invoiceId: text(row, 'id')),
+                ),
               IconButton(
                 tooltip: l10n.viewDetails,
                 icon: const Icon(Icons.receipt_long_outlined, size: 20),

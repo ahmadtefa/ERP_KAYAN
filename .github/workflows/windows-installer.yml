@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: windows-installer-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -57,6 +57,15 @@ jobs:
           python -m pip install --disable-pip-version-check Pillow
           python scripts/generate_app_icons.py
 
+      - name: Compile RepairTool.exe (early check)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = Join-Path $env:RUNNER_TEMP 'RepairTool.exe'
+          .\distribution\windows\build-repair-tool.ps1 -OutputPath $output -IconPath '.\windows\runner\resources\app_icon.ico'
+          $item = Get-Item -LiteralPath $output
+          Write-Host "RepairTool.exe compiled early: $($item.Length) bytes"
+
       - name: Enable Flutter Windows desktop
         run: flutter config --enable-windows-desktop
 
@@ -97,10 +106,18 @@ jobs:
         run: flutter pub get
 
       - name: Analyze Flutter
-        run: flutter analyze
+        run: python scripts/ci-diagnose.py flutter analyze
+
+      # Same screenshot generation as the ERP CI jobs: the design-screenshot
+      # goldens are not committed, so they must be rendered in this job's own
+      # workspace before the test run below compares against them. Without
+      # this step every Windows run failed at "Test Flutter" with missing
+      # golden files even when all real tests passed on Linux.
+      - name: Render design screenshots
+        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
 
       - name: Test Flutter
-        run: flutter test
+        run: python scripts/ci-diagnose.py flutter test --reporter expanded
 
       - name: Build Windows installer
         shell: powershell
@@ -117,6 +134,8 @@ jobs:
           $files = @(Get-ChildItem .\build\windows-installer\KAYAN-ERP-Setup-*-x64.exe -File)
           if ($files.Count -lt 1) { throw "Expected at least one versioned installer EXE; found $($files.Count)." }
           Get-FileHash $setupCanonical, $files[0].FullName -Algorithm SHA256 | Format-List Algorithm, Hash, Path
+          $canonicalHash = (Get-FileHash $setupCanonical -Algorithm SHA256).Hash
+          Write-Host "::notice title=Installer SHA256::KAYAN-ERP-Setup.exe SHA256=$canonicalHash"
 
       - name: Smoke-test the actual installed Windows application
         shell: powershell
@@ -136,12 +155,37 @@ jobs:
           generateReleaseNotes: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # A branch build publishes the same Setup.exe as a prerelease, so it
+      # can be handed over with a direct .exe download address before
+      # anything reaches main. Manual dispatches qualify on any branch;
+      # pull-request builds qualify only for the handover branch named
+      # below (the automation token cannot dispatch workflows itself).
+      # Everywhere else a pull-request build only uploads the diagnostic
+      # artifact further down; the official release above stays main-only.
+      - name: Publish branch prerelease with direct Setup.exe download
+        if: (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'arena/13bf1607-erp-kayan')
+        uses: ncipollo/release-action@v1
+        with:
+          tag: windows-v${{ steps.app-version.outputs.version }}-pre-${{ github.run_id }}
+          commit: ${{ github.event.pull_request.head.sha || github.sha }}
+          name: KAYAN ERP Windows ${{ steps.app-version.outputs.version }} (branch build ${{ github.run_id }})
+          artifacts: build/windows-installer/KAYAN-ERP-Setup.exe
+          artifactContentType: application/vnd.microsoft.portable-executable
+          prerelease: true
+          makeLatest: false
+          body: |
+            Automatic branch build for testing and handover. This is not an
+            official release; the official download is published from main.
+
+            Branch: ${{ github.event.pull_request.head.ref || github.ref_name }}
+            Commit: ${{ github.event.pull_request.head.sha || github.sha }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload Windows installer (diagnostic build artifact)
         uses: actions/upload-artifact@v4
         with:
           name: KAYAN-ERP-Windows-x64-Installer
           path: |
             build/windows-installer/KAYAN-ERP-Setup.exe
-            build/windows-installer/KAYAN-ERP-Setup-*-x64.exe
           if-no-files-found: error
           retention-days: 14

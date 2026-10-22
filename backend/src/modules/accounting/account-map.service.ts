@@ -23,6 +23,11 @@ export const ACCOUNT_CODES = {
   inventoryDifference: '5107',
   retainedEarnings: '3102',
   openingBalanceEquity: '3103',
+  // Disposal results land in other income (4103) by default — a credit for
+  // a gain, a debit for a loss — until the company maps dedicated accounts.
+  // A single disposal can always name its own gain/loss account instead.
+  assetDisposalGain: '4103',
+  assetDisposalLoss: '4103',
 } as const;
 
 export type AccountKey = keyof typeof ACCOUNT_CODES;

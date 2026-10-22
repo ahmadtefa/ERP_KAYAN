@@ -22,12 +22,20 @@ export class AuditLogsService {
       companyId,
       ...(query.action ? { action: query.action } : {}),
       ...(query.entity ? { entity: query.entity } : {}),
+      ...(query.entityId ? { entityId: query.entityId } : {}),
       ...(query.userId ? { userId: query.userId } : {}),
       ...(query.from || query.to
         ? {
             createdAt: {
               ...(query.from ? { gte: new Date(query.from) } : {}),
-              ...(query.to ? { lte: new Date(query.to) } : {}),
+              // A bare date means "through that day", not its first instant.
+              ...(query.to
+                ? {
+                    lte: /^\d{4}-\d{2}-\d{2}$/.test(query.to)
+                      ? new Date(`${query.to}T23:59:59.999Z`)
+                      : new Date(query.to),
+                  }
+                : {}),
             },
           }
         : {}),

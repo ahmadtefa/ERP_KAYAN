@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -273,7 +276,15 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
               l10n.lastLogin,
               value: (r) => _moment(text(r, 'lastLoginAt')) ?? l10n.never,
             ),
-            ColumnSpec(l10n.status, value: (r) => _status(r)),
+            ColumnSpec(
+              l10n.status,
+              value: (r) => _status(r),
+              tone: (r) => !flag(r, 'isActive', fallback: true)
+                  ? AppTone.neutral
+                  : flag(r, 'isSuperAdmin')
+                  ? AppTone.info
+                  : AppTone.success,
+            ),
           ],
           actions: (row) => [
             IconButton(
@@ -472,6 +483,7 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
             ColumnSpec(
               l10n.status,
               value: (r) => flag(r, 'isSystem') ? l10n.systemRole : l10n.customRole,
+              tone: (r) => flag(r, 'isSystem') ? AppTone.neutral : AppTone.info,
             ),
           ],
           actions: (row) => [
@@ -669,33 +681,113 @@ class _AuditTab extends ConsumerStatefulWidget {
 }
 
 class _AuditTabState extends ConsumerState<_AuditTab> {
-  final _action = TextEditingController();
   final _entity = TextEditingController();
+  String? _actionFilter;
+  String? _userFilter;
+  DateTime? _from;
+  DateTime? _to;
+  List<Json> _users = const [];
   AsyncValue<Json> _state = const AsyncValue.loading();
+
+  static const _actions = [
+    'CREATE',
+    'UPDATE',
+    'DELETE',
+    'POST',
+    'REVERSE',
+    'SUBMIT',
+    'APPROVE',
+    'CANCEL',
+    'ACTIVATE',
+    'DEACTIVATE',
+    'DEPRECIATE',
+    'DISPOSE',
+    'INVOICE',
+    'RECONCILE',
+    'IMPORT',
+    'BACKUP',
+    'RESTORE',
+    'RESET',
+    'LOGIN',
+    'LOGIN_FAILED',
+    'LOGOUT',
+  ];
+
+  String _t(String ar, String en) =>
+      Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
+
+  /// The trail stores action codes; the reader gets words.
+  String _actionLabel(String code) {
+    const ar = {
+      'CREATE': 'إنشاء',
+      'UPDATE': 'تعديل',
+      'DELETE': 'حذف',
+      'POST': 'ترحيل',
+      'REVERSE': 'عكس',
+      'SUBMIT': 'تقديم',
+      'APPROVE': 'اعتماد',
+      'CANCEL': 'إلغاء',
+      'ACTIVATE': 'تفعيل',
+      'DEACTIVATE': 'تعطيل',
+      'DEPRECIATE': 'إهلاك',
+      'DISPOSE': 'استبعاد',
+      'INVOICE': 'فاتورة',
+      'RECONCILE': 'تسوية',
+      'IMPORT': 'استيراد',
+      'BACKUP': 'نسخ احتياطي',
+      'RESTORE': 'استعادة',
+      'RESET': 'تصفير',
+      'LOGIN': 'تسجيل دخول',
+      'LOGIN_FAILED': 'فشل دخول',
+      'LOGOUT': 'تسجيل خروج',
+    };
+    if (Localizations.localeOf(context).languageCode == 'ar') {
+      return ar[code] ?? code;
+    }
+    return code
+        .split('_')
+        .map((w) => w.isEmpty ? w : '${w[0]}${w.substring(1).toLowerCase()}')
+        .join(' ');
+  }
 
   @override
   void initState() {
     super.initState();
     _load();
+    _loadUsers();
   }
 
   @override
   void dispose() {
-    _action.dispose();
     _entity.dispose();
     super.dispose();
   }
+
+  Future<void> _loadUsers() async {
+    try {
+      final body = await ref.read(apiClientProvider).getObject('/admin/users');
+      if (mounted) setState(() => _users = listOf(body['items']));
+    } catch (_) {
+      // The user filter is a convenience; the trail itself still loads.
+    }
+  }
+
+  String _isoDay(DateTime day) =>
+      '${day.year.toString().padLeft(4, '0')}-'
+      '${day.month.toString().padLeft(2, '0')}-'
+      '${day.day.toString().padLeft(2, '0')}';
 
   Future<void> _load() async {
     setState(() => _state = const AsyncValue.loading());
     try {
       final query = <String, dynamic>{'pageSize': 100};
-      if (_action.text.trim().isNotEmpty) {
-        query['action'] = _action.text.trim();
-      }
+      if (_actionFilter != null) query['action'] = _actionFilter;
+      if (_userFilter != null) query['userId'] = _userFilter;
       if (_entity.text.trim().isNotEmpty) {
         query['entity'] = _entity.text.trim();
       }
+      if (_from != null) query['from'] = _isoDay(_from!);
+      if (_to != null) query['to'] = _isoDay(_to!);
       final body = await ref
           .read(apiClientProvider)
           .getObject('/admin/audit-logs', query: query);
@@ -703,6 +795,88 @@ class _AuditTabState extends ConsumerState<_AuditTab> {
     } catch (error, stack) {
       if (mounted) setState(() => _state = AsyncValue.error(error, stack));
     }
+  }
+
+  Future<void> _pickDate(bool isFrom) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: (isFrom ? _from : _to) ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+    );
+    if (picked == null) return;
+    setState(() {
+      if (isFrom) {
+        _from = picked;
+      } else {
+        _to = picked;
+      }
+    });
+    await _load();
+  }
+
+  void _showDetails(Json row) {
+    String pretty(Object? value) {
+      if (value == null) return '—';
+      try {
+        return const JsonEncoder.withIndent('  ').convert(value);
+      } catch (_) {
+        return value.toString();
+      }
+    }
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(_actionLabel(text(row, 'action'))),
+        content: SizedBox(
+          width: 560,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${text(row, 'entity')} · ${text(row, 'entityId')}',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${_moment(text(row, 'createdAt')) ?? ''} · '
+                  '${text(row, 'username', fallback: '—')} · '
+                  '${text(row, 'ipAddress')}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  _t('بعد العملية', 'After'),
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                SelectableText(
+                  pretty(row['after']),
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  _t('قبل العملية', 'Before'),
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                SelectableText(
+                  pretty(row['before']),
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(context.l10n.close),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -715,20 +889,69 @@ class _AuditTabState extends ConsumerState<_AuditTab> {
       trailing: Row(
         children: [
           SizedBox(
-            width: 160,
-            child: TextField(
-              controller: _action,
-              onSubmitted: (_) => _load(),
+            width: 150,
+            child: DropdownButtonFormField<String?>(
+              key: ValueKey(_actionFilter),
+              initialValue: _actionFilter,
+              isDense: true,
+              isExpanded: true,
               decoration: InputDecoration(
                 labelText: l10n.action,
                 isDense: true,
                 border: const OutlineInputBorder(),
               ),
+              items: [
+                DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text(_t('الكل', 'All')),
+                ),
+                for (final action in _actions)
+                  DropdownMenuItem<String?>(
+                    value: action,
+                    child: Text(_actionLabel(action)),
+                  ),
+              ],
+              onChanged: (value) {
+                setState(() => _actionFilter = value);
+                _load();
+              },
             ),
           ),
           const SizedBox(width: 8),
           SizedBox(
-            width: 160,
+            width: 150,
+            child: DropdownButtonFormField<String?>(
+              key: ValueKey(_userFilter),
+              initialValue: _userFilter,
+              isDense: true,
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: _t('المستخدم', 'User'),
+                isDense: true,
+                border: const OutlineInputBorder(),
+              ),
+              items: [
+                DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text(_t('الكل', 'All')),
+                ),
+                for (final user in _users)
+                  DropdownMenuItem<String?>(
+                    value: text(user, 'id'),
+                    child: Text(
+                      text(user, 'username', fallback: text(user, 'id')),
+                    ),
+                  ),
+              ],
+              onChanged: (value) {
+                setState(() => _userFilter = value);
+                _load();
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 140,
             child: TextField(
               controller: _entity,
               onSubmitted: (_) => _load(),
@@ -739,7 +962,29 @@ class _AuditTabState extends ConsumerState<_AuditTab> {
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 4),
+          TextButton.icon(
+            onPressed: () => _pickDate(true),
+            icon: const Icon(Icons.calendar_month_outlined, size: 18),
+            label: Text(_from == null ? _t('من', 'From') : _isoDay(_from!)),
+          ),
+          TextButton.icon(
+            onPressed: () => _pickDate(false),
+            icon: const Icon(Icons.calendar_month_outlined, size: 18),
+            label: Text(_to == null ? _t('إلى', 'To') : _isoDay(_to!)),
+          ),
+          if (_from != null || _to != null)
+            IconButton(
+              tooltip: _t('مسح التاريخ', 'Clear dates'),
+              onPressed: () {
+                setState(() {
+                  _from = null;
+                  _to = null;
+                });
+                _load();
+              },
+              icon: const Icon(Icons.clear, size: 18),
+            ),
           IconButton(
             tooltip: l10n.refresh,
             onPressed: _load,
@@ -756,13 +1001,17 @@ class _AuditTabState extends ConsumerState<_AuditTab> {
           final rows = listOf(body['items']);
           return RecordsTable(
             rows: rows,
+            onTap: _showDetails,
             columns: [
               ColumnSpec(
                 l10n.when,
                 value: (r) => _moment(text(r, 'createdAt')) ?? '',
                 emphasise: true,
               ),
-              ColumnSpec(l10n.action, value: (r) => text(r, 'action')),
+              ColumnSpec(
+                l10n.action,
+                value: (r) => _actionLabel(text(r, 'action')),
+              ),
               ColumnSpec(
                 l10n.entity,
                 value: (r) =>

@@ -5,14 +5,20 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { BudgetsService } from '../accounting/budgets.service';
 import { AgingService } from './aging.service';
 import { FinancialStatementsService } from './financial-statements.service';
 import {
   AgingQueryDto,
+  BudgetReportQueryDto,
+  CostCenterReportQueryDto,
+  CostCenterTransactionsQueryDto,
   OperationsQueryDto,
   PeriodQueryDto,
 } from './dto/report-query.dto';
 import { OperationsReportsService } from './operations-reports.service';
+import { PartyReconciliationService } from './party-reconciliation.service';
+import { ReconciliationCenterService } from './reconciliation-center.service';
 import { ReportsService } from './reports.service';
 
 @Controller('reports')
@@ -22,7 +28,30 @@ export class ReportsController {
     private readonly statements: FinancialStatementsService,
     private readonly aging: AgingService,
     private readonly operations: OperationsReportsService,
+    private readonly budgets: BudgetsService,
+    private readonly reconciliation: PartyReconciliationService,
+    private readonly reconciliationCenter: ReconciliationCenterService,
   ) {}
+
+  @Get('reconciliation-center')
+  @RequirePermissions('reports.read')
+  reconciliationCenterReport(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
+    return this.reconciliationCenter.center(user.companyId, {
+      asOf: query.asOf ?? query.to,
+    });
+  }
+
+  @Get('receivables-reconciliation')
+  @RequirePermissions('reports.read')
+  receivablesReconciliation(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
+    return this.reconciliation.receivables(user.companyId, { asOf: query.asOf ?? query.to });
+  }
+
+  @Get('payables-reconciliation')
+  @RequirePermissions('reports.read')
+  payablesReconciliation(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
+    return this.reconciliation.payables(user.companyId, { asOf: query.asOf ?? query.to });
+  }
 
   @Get('trial-balance')
   @RequirePermissions('reports.read')
@@ -68,6 +97,12 @@ export class ReportsController {
     return this.statements.balanceSheet(user.companyId, query);
   }
 
+  @Get('equity-changes')
+  @RequirePermissions('reports.read')
+  equityChanges(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
+    return this.statements.equityChanges(user.companyId, query);
+  }
+
   @Get('cash-flow')
   @RequirePermissions('reports.read')
   cashFlow(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
@@ -75,9 +110,36 @@ export class ReportsController {
   }
 
   @Get('cost-centers')
-  @RequirePermissions('reports.read')
-  costCenters(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
+  @RequirePermissions('accounting.costcenters.read')
+  costCenters(@CurrentUser() user: AuthUser, @Query() query: CostCenterReportQueryDto) {
     return this.statements.costCenterReport(user.companyId, query);
+  }
+
+  /// The lines behind one centre's figure. `costCenterId=unallocated` lists the
+  /// lines that carry no centre at all, which is the other half of the report.
+  @Get('cost-centers/:costCenterId/transactions')
+  @RequirePermissions('accounting.costcenters.read')
+  costCenterTransactions(
+    @CurrentUser() user: AuthUser,
+    @Param('costCenterId') costCenterId: string,
+    @Query() query: CostCenterTransactionsQueryDto,
+  ) {
+    return this.statements.costCenterTransactions(
+      user.companyId,
+      costCenterId === 'unallocated' ? null : costCenterId,
+      query,
+    );
+  }
+
+  /// Budget against actual. The actual is read from posted ledger lines only;
+  /// nothing is estimated, prorated or converted.
+  @Get('budgets')
+  @RequirePermissions('accounting.budgets.read')
+  budgetReport(
+    @CurrentUser() user: AuthUser,
+    @Query() query: BudgetReportQueryDto,
+  ) {
+    return this.budgets.report(user.companyId, query);
   }
 
   @Get('receivables-aging')

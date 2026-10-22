@@ -23,6 +23,11 @@ OutputBaseFilename=KAYAN-ERP-Setup-{#AppVersion}-x64
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
+; The KAYAN mark on Setup.exe itself and on the uninstall entry. setup.ico
+; is staged next to this script by build-installer.ps1, which generates it
+; from the approved brand image before Inno Setup runs.
+SetupIconFile={#SourcePath}setup.ico
+UninstallDisplayIcon={app}\erp_kayan.exe
 WizardStyle=modern
 Compression=lzma2/max
 SolidCompression=yes
@@ -44,7 +49,14 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdi
 
 [Icons]
 Name: "{group}\KAYAN ERP"; Filename: "{app}\erp_kayan.exe"; WorkingDir: "{app}"
-Name: "{group}\Repair KAYAN ERP"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\repair-runtime.ps1"""; WorkingDir: "{app}"
+Name: "{group}\Repair KAYAN ERP"; Filename: "{app}\RepairTool.exe"; WorkingDir: "{app}"
+Name: "{group}\Repair KAYAN ERP (command line)"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\repair-runtime.ps1"""; WorkingDir: "{app}"
+; Safe reset is a separate, manual tool: it is never run by Setup, by an
+; update, by Repair or by the program. It requires typing RESET, takes a
+; verified backup first, creates a NEW database beside the old one (the
+; old database is never emptied or deleted), and only then points the
+; settings at it - with automatic rollback if verification fails.
+Name: "{group}\Reset KAYAN ERP (start fresh)"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\reset-kayan.ps1"""; WorkingDir: "{app}"
 Name: "{group}\Start PostgreSQL"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\database-control.ps1"" -Action start"; WorkingDir: "{app}"
 Name: "{group}\Stop PostgreSQL"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\database-control.ps1"" -Action stop"; WorkingDir: "{app}"
 Name: "{group}\Restart PostgreSQL"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\database-control.ps1"" -Action restart"; WorkingDir: "{app}"

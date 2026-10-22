@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/settings/presentation/providers/locale_provider.dart';
+import '../features/settings/presentation/providers/text_scale_provider.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../shared/extensions/l10n_extension.dart';
 import 'router/app_router.dart';
 import 'theme/app_theme.dart';
+import 'theme/text_scale.dart';
 
 /// Application root.
 ///
@@ -18,16 +20,20 @@ class ErpApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
     final locale = ref.watch(localeControllerProvider).value;
+    // The user's text size reaches every screen here and nowhere else: one
+    // MediaQuery override for the text, one theme build for the geometry.
+    final textScale = ref.watch(effectiveTextScaleProvider);
 
     return MaterialApp.router(
       onGenerateTitle: (context) => context.l10n.appTitle,
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light(),
-      darkTheme: AppTheme.dark(),
+      theme: AppTheme.light(textScale: textScale),
+      darkTheme: AppTheme.dark(textScale: textScale),
       routerConfig: router,
       locale: locale,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
+      builder: (context, child) => applyTextScale(context, child, textScale),
     );
   }
 }

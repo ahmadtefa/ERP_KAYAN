@@ -21,6 +21,10 @@ export interface CompanySettings {
   backupRetentionCount: number;
   backupIntervalHours: number;
   maxDiscountPercent: string;
+  showTaxIdOnQuotations: boolean;
+  managerName: string | null;
+  salesManagerName: string | null;
+  salesManagerPhone: string | null;
 }
 
 /// The company's own policies, in one place.
@@ -57,6 +61,17 @@ export class CompanySettingsService {
     }
     if (dto.maxDiscountPercent !== undefined) {
       data.maxDiscountPercent = this.rate(dto.maxDiscountPercent, 'maxDiscountPercent', 0, 100);
+    }
+    if (dto.showTaxIdOnQuotations !== undefined) {
+      data.showTaxIdOnQuotations = this.flag(
+        dto.showTaxIdOnQuotations,
+        'showTaxIdOnQuotations',
+      );
+    }
+    for (const field of ['managerName', 'salesManagerName', 'salesManagerPhone'] as const) {
+      if (dto[field] !== undefined) {
+        data[field] = this.optionalText(dto[field], field);
+      }
     }
     if (dto.pricesIncludeTax !== undefined) {
       data.pricesIncludeTax = this.flag(dto.pricesIncludeTax, 'pricesIncludeTax');
@@ -131,6 +146,20 @@ export class CompanySettingsService {
     throw new BadRequestException(`${field} must be true or false`);
   }
 
+  /// Free text shown on documents. An empty value clears the field; it is not
+  /// replaced by a guessed name.
+  private optionalText(value: unknown, field: string): string | null {
+    if (value === null) return null;
+    if (typeof value !== 'string') {
+      throw new BadRequestException(`${field} must be text`);
+    }
+    const text = value.trim();
+    if (text.length > 160) {
+      throw new BadRequestException(`${field} cannot be longer than 160 characters`);
+    }
+    return text.length === 0 ? null : text;
+  }
+
   private rate(value: unknown, field: string, min: number, max: number): Prisma.Decimal {
     let decimal: Prisma.Decimal;
     try {
@@ -163,6 +192,10 @@ export class CompanySettingsService {
     backupRetentionCount: number;
     backupIntervalHours: number;
     maxDiscountPercent: Prisma.Decimal;
+    showTaxIdOnQuotations: boolean;
+    managerName: string | null;
+    salesManagerName: string | null;
+    salesManagerPhone: string | null;
   }): CompanySettings & { companyId: string } {
     return {
       companyId: row.companyId,
@@ -175,6 +208,10 @@ export class CompanySettingsService {
       backupRetentionCount: row.backupRetentionCount,
       backupIntervalHours: row.backupIntervalHours,
       maxDiscountPercent: row.maxDiscountPercent.toFixed(4),
+      showTaxIdOnQuotations: row.showTaxIdOnQuotations,
+      managerName: row.managerName,
+      salesManagerName: row.salesManagerName,
+      salesManagerPhone: row.salesManagerPhone,
     };
   }
 }

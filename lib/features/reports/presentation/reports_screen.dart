@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/theme/design_tokens.dart';
+import '../../../core/error/failure.dart';
 import '../../../core/json/amount_format.dart';
 import '../../../core/json/json_utils.dart';
 import '../../../shared/extensions/l10n_extension.dart';
 import '../../../shared/utils/account_name.dart';
+import '../../../shared/widgets/data_dialog.dart';
 import '../../../shared/widgets/records_table.dart';
+import '../../../shared/widgets/status_pill.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../../accounting/presentation/providers/chart_of_accounts_providers.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
@@ -98,7 +102,7 @@ class ReportsScreen extends ConsumerStatefulWidget {
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 15, vsync: this)
+  late final TabController _tabs = TabController(length: 22, vsync: this)
     ..addListener(() => setState(() {}));
 
   @override
@@ -142,6 +146,13 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               Tab(text: l10n.profitAndLoss),
               Tab(text: _t(context, 'الميزانية العمومية', 'Balance sheet')),
               Tab(text: _t(context, 'التدفقات النقدية', 'Cash flow')),
+              Tab(
+                text: _t(
+                  context,
+                  'التغيرات في حقوق الملكية',
+                  'Changes in equity',
+                ),
+              ),
               Tab(text: l10n.customerBalances),
               Tab(text: l10n.supplierBalances),
               Tab(text: l10n.accountLedger),
@@ -159,6 +170,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               ),
               Tab(text: l10n.expenses),
               Tab(text: _t(context, 'الإيرادات', 'Income')),
+              Tab(text: _t(context, 'تسوية العملاء', 'Receivables reconciliation')),
+              Tab(text: _t(context, 'تسوية الموردين', 'Payables reconciliation')),
+              Tab(text: l10n.fixedAssets),
+              Tab(text: l10n.costCenterReport),
+              Tab(text: l10n.budgetReport),
+              Tab(text: _t(context, 'مركز التسويات', 'Reconciliation center')),
             ],
           ),
           // Download and print always reflect the tab that is open and the
@@ -167,39 +184,58 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: Align(
               alignment: AlignmentDirectional.centerEnd,
-              child: ReportExportActions(
-                report: _reportSlug,
-                from: period.from,
-                to: period.to,
-                accountId: _tabs.index == 6
-                    ? ref.watch(ledgerAccountProvider)
-                    : null,
-              ),
+              // The exported report catalogue does not include the two
+              // cost-centre reports yet, so the button is not offered for a
+              // report it would fail to produce.
+              child: _tabs.index >= 19
+                  ? const SizedBox.shrink()
+                  : ReportExportActions(
+                      report: _reportSlug,
+                      from: period.from,
+                      to: period.to,
+                      accountId: _tabs.index == 7
+                          ? ref.watch(ledgerAccountProvider)
+                          : null,
+                    ),
             ),
           ),
           Expanded(
             child: switch (_tabs.index) {
-              0 => const _TrialBalanceTab(),
+              0 => _TrialBalanceTab(
+                onOpenAccount: (accountId) {
+                  ref.read(ledgerAccountProvider.notifier).choose(accountId);
+                  _tabs.animateTo(7);
+                },
+              ),
               1 => const _ProfitAndLossTab(),
               2 => const _BalanceSheetTab(),
               3 => const _CashFlowTab(),
-              4 => const _BalancesTab(
+              4 => const _EquityChangesTab(),
+              5 => const _BalancesTab(
                 path: '/reports/customer-balances',
                 isCustomer: true,
               ),
-              5 => const _BalancesTab(
+              6 => const _BalancesTab(
                 path: '/reports/supplier-balances',
                 isCustomer: false,
               ),
-              6 => const _AccountLedgerTab(),
-              7 => const _GeneralJournalTab(),
-              8 => const _SalesReportTab(),
-              9 => const _PurchasesReportTab(),
-              10 => const _PaymentsReportTab(),
-              11 => const _CashReportTab(),
-              12 => const _OutstandingInvoicesTab(),
-              13 => const _ExpensesIncomeTab(isExpense: true),
-              _ => const _ExpensesIncomeTab(isExpense: false),
+              7 => const _AccountLedgerTab(),
+              8 => const _GeneralJournalTab(),
+              9 => const _SalesReportTab(),
+              10 => const _PurchasesReportTab(),
+              11 => const _PaymentsReportTab(),
+              12 => const _CashReportTab(),
+              13 => const _OutstandingInvoicesTab(),
+              14 => const _ExpensesIncomeTab(isExpense: true),
+              15 => const _ExpensesIncomeTab(isExpense: false),
+              16 => const _ReconciliationTab(side: 'receivables'),
+              17 => const _ReconciliationTab(side: 'payables'),
+              18 => const _FixedAssetsReportTab(),
+              19 => const _CostCentersTab(),
+              20 => const _BudgetReportTab(),
+              _ => _ReconciliationCenterTab(
+                onOpenTab: (index) => _tabs.animateTo(index),
+              ),
             },
           ),
         ],
@@ -213,17 +249,23 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
     1 => 'profit-and-loss',
     2 => 'balance-sheet',
     3 => 'cash-flow',
-    4 => 'customer-balances',
-    5 => 'supplier-balances',
-    6 => 'account-ledger',
-    7 => 'general-journal',
-    8 => 'sales',
-    9 => 'purchases',
-    10 => 'payments',
-    11 => 'cash',
-    12 => 'outstanding-invoices',
-    13 => 'expenses',
-    _ => 'income',
+    4 => 'equity-changes',
+    5 => 'customer-balances',
+    6 => 'supplier-balances',
+    7 => 'account-ledger',
+    8 => 'general-journal',
+    9 => 'sales',
+    10 => 'purchases',
+    11 => 'payments',
+    12 => 'cash',
+    13 => 'outstanding-invoices',
+    14 => 'expenses',
+    15 => 'income',
+    16 => 'receivables-reconciliation',
+    17 => 'payables-reconciliation',
+    18 => 'fixed-assets',
+    19 => 'cost-centers',
+    _ => 'budgets',
   };
 
   Future<void> _pickPeriod() async {
@@ -249,7 +291,11 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
 }
 
 class _TrialBalanceTab extends ConsumerWidget {
-  const _TrialBalanceTab();
+  const _TrialBalanceTab({required this.onOpenAccount});
+
+  /// Opens the ledger tab on the tapped account: a trial-balance figure
+  /// is a claim, and the ledger behind it is one tap away.
+  final void Function(String accountId) onOpenAccount;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -265,7 +311,16 @@ class _TrialBalanceTab extends ConsumerWidget {
       value: async,
       onRetry: () => ref.invalidate(reportProvider),
       data: (data) {
-        final rows = listOf(data['rows']);
+        // Heading subtotals interleave with their accounts by code so the
+        // page reads as the chart does. A subtotal is a sum of the rows
+        // under it — never an extra row in the totals, and tapping one
+        // opens nothing (a heading has no ledger of its own).
+        final isArabic = Localizations.localeOf(context).languageCode == 'ar';
+        final rows = <Json>[
+          ...listOf(data['rows']),
+          for (final group in listOf(data['groups']))
+            {...group, 'isGroup': true},
+        ]..sort((a, b) => text(a, 'code').compareTo(text(b, 'code')));
         final totals = data['totals'] is Map
             ? Map<String, dynamic>.from(data['totals'] as Map)
             : <String, dynamic>{};
@@ -276,13 +331,29 @@ class _TrialBalanceTab extends ConsumerWidget {
             Expanded(
               child: RecordsTable(
                 rows: rows,
+                onTap: (row) {
+                  if (flag(row, 'isGroup')) return;
+                  onOpenAccount(text(row, 'accountId'));
+                },
                 columns: [
                   ColumnSpec(
                     l10n.accountCode,
-                    value: (r) => text(r, 'code'),
+                    value: (r) => flag(r, 'isGroup')
+                        ? '${text(r, 'code')} ▸'
+                        : text(r, 'code'),
                     emphasise: true,
                   ),
-                  ColumnSpec(l10n.accountName, value: (r) => text(r, 'nameEn')),
+                  ColumnSpec(
+                    l10n.accountName,
+                    value: (r) {
+                      final name = isArabic
+                          ? text(r, 'nameAr', fallback: text(r, 'nameEn'))
+                          : text(r, 'nameEn', fallback: text(r, 'nameAr'));
+                      if (!flag(r, 'isGroup')) return name;
+                      final depth = (r['depth'] as num?)?.toInt() ?? 0;
+                      return '${'   ' * depth}▸ $name';
+                    },
+                  ),
                   ColumnSpec(
                     l10n.opening,
                     numeric: true,
@@ -329,23 +400,28 @@ class _TotalsBar extends StatelessWidget {
       color: balanced ? scheme.surfaceContainerHighest : scheme.errorContainer,
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
+        // A Wrap, not a Row: a verdict plus three totals cannot share
+        // one phone-width line; on narrow screens the totals flow to
+        // their own line, whole, instead of overflowing the card.
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Icon(
               balanced ? Icons.verified_outlined : Icons.error_outline,
               color: balanced ? scheme.primary : scheme.error,
             ),
-            const SizedBox(width: 8),
             Text(balanced ? l10n.balanced : l10n.outOfBalance),
-            const Spacer(),
+            const SizedBox(width: 12),
             Text(
               '${l10n.debit}: ${formatAmount(asString(totals['closingDebit']))}',
             ),
-            const SizedBox(width: 20),
+            const SizedBox(width: 12),
             Text(
               '${l10n.credit}: ${formatAmount(asString(totals['closingCredit']))}',
             ),
-            const SizedBox(width: 20),
+            const SizedBox(width: 12),
             Text(
               '${l10n.difference}: ${formatAmount(asString(totals['difference']))}',
             ),
@@ -887,6 +963,10 @@ class _CashFlowTab extends ConsumerWidget {
             _SummaryStrip(
               entries: [
                 MapEntry(
+                  _t(context, 'النقدية أول الفترة', 'Opening cash'),
+                  formatAmount(asString(totals['opening'])),
+                ),
+                MapEntry(
                   _t(context, 'وارد', 'Inflow'),
                   formatAmount(asString(totals['inflow'])),
                 ),
@@ -898,6 +978,20 @@ class _CashFlowTab extends ConsumerWidget {
                   _t(context, 'الصافي', 'Net'),
                   formatAmount(asString(totals['net'])),
                 ),
+                MapEntry(
+                  _t(context, 'النقدية آخر الفترة', 'Closing cash'),
+                  formatAmount(asString(totals['closing'])),
+                ),
+                for (final section in listOf(data['sections']))
+                  if ((double.tryParse(asString(section['net']) ?? '') ?? 0) !=
+                      0)
+                    MapEntry(
+                      _cashFlowClassLabel(
+                        context,
+                        asString(section['cashFlowClass']),
+                      ),
+                      formatAmount(asString(section['net'])),
+                    ),
               ],
             ),
             Expanded(
@@ -913,7 +1007,504 @@ class _CashFlowTab extends ConsumerWidget {
                   ColumnSpec(
                     _t(context, 'المبلغ', 'Amount'),
                     numeric: true,
+                    value: (r) => formatAmount(asString(r['movement'])),
+                    emphasise: true,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+String _cashFlowClassLabel(BuildContext context, String? value) =>
+    switch (value) {
+      'operating' => _t(context, 'تشغيلية', 'Operating'),
+      'investing' => _t(context, 'استثمارية', 'Investing'),
+      'financing' => _t(context, 'تمويلية', 'Financing'),
+      _ => _t(context, 'غير مصنّفة', 'Unclassified'),
+    };
+
+/// Subledger against control account, with the difference explained:
+/// advances held, the postings no party document wrote (listed), and
+/// whatever is left unexplained — zero on consistent books.
+class _ReconciliationTab extends ConsumerWidget {
+  const _ReconciliationTab({required this.side});
+
+  final String side;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    final async = ref.watch(
+      reportProvider('/reports/$side-reconciliation?asOf=${period.to}'),
+    );
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final subledger = data['subledger'] is Map
+            ? Map<String, dynamic>.from(data['subledger'] as Map)
+            : <String, dynamic>{};
+        final rows = listOf(data['otherPostings']);
+        return Column(
+          children: [
+            _SummaryStrip(
+              entries: [
+                MapEntry(
+                  _t(context, 'الأستاذ المساعد', 'Subledger'),
+                  formatAmount(asString(subledger['total'])),
+                ),
+                MapEntry(
+                  _t(context, 'حساب الرقابة', 'Control account'),
+                  formatAmount(asString(data['controlBalance'])),
+                ),
+                MapEntry(
+                  _t(context, 'مقدّمات غير مطبّقة', 'Advances held'),
+                  formatAmount(asString(data['advances'])),
+                ),
+                MapEntry(
+                  _t(context, 'الفرق', 'Difference'),
+                  formatAmount(asString(data['difference'])),
+                ),
+                MapEntry(
+                  _t(context, 'غير مفسَّر', 'Unexplained'),
+                  formatAmount(asString(data['unexplained'])),
+                ),
+              ],
+            ),
+            Expanded(
+              child: RecordsTable(
+                rows: rows,
+                columns: [
+                  ColumnSpec(
+                    _t(context, 'القيد', 'Entry'),
+                    value: (r) => text(r, 'entryNumber'),
+                    emphasise: true,
+                  ),
+                  ColumnSpec(
+                    _t(context, 'التاريخ', 'Date'),
+                    value: (r) => text(r, 'entryDate'),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'المصدر', 'Source'),
+                    value: (r) => text(r, 'sourceType'),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'المستند', 'Document'),
+                    value: (r) => text(r, 'sourceNumber'),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'المبلغ', 'Amount'),
+                    numeric: true,
                     value: (r) => formatAmount(asString(r['amount'])),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Every subledger against its control account, on one page: the
+/// receivables and payables reconciliations in summary, the stock
+/// valuation against the inventory account, and the asset register
+/// against its ledger accounts. A difference is shown with what
+/// explains it — advances held, postings with no document — and a
+/// section that cannot be computed says so instead of pretending.
+/// Nothing here adjusts a balance; tapping a section opens the detail
+/// report where the difference can be chased.
+class _ReconciliationCenterTab extends ConsumerWidget {
+  const _ReconciliationCenterTab({required this.onOpenTab});
+
+  final void Function(int index) onOpenTab;
+
+  /// The detail tab behind each section, where one exists.
+  static const _detailTab = {
+    'receivables': 16,
+    'payables': 17,
+    'fixedAssets': 18,
+  };
+
+  String _title(BuildContext context, String key) => switch (key) {
+    'receivables' => _t(context, 'تسوية العملاء', 'Receivables reconciliation'),
+    'payables' => _t(context, 'تسوية الموردين', 'Payables reconciliation'),
+    'inventory' => _t(context, 'تسوية المخزون', 'Inventory reconciliation'),
+    _ => _t(context, 'تسوية الأصول الثابتة', 'Fixed assets reconciliation'),
+  };
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    final async = ref.watch(
+      reportProvider('/reports/reconciliation-center?asOf=${period.to}'),
+    );
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final sections = listOf(data['sections']);
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text(
+              '${_t(context, 'حتى تاريخ', 'As of')}: ${text(data, 'asOf')}',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: 12),
+            for (final section in sections)
+              _ReconciliationSectionCard(
+                section: section,
+                title: _title(context, text(section, 'key')),
+                onOpen: _detailTab[text(section, 'key')] == null
+                    ? null
+                    : () => onOpenTab(_detailTab[text(section, 'key')]!),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _ReconciliationSectionCard extends StatelessWidget {
+  const _ReconciliationSectionCard({
+    required this.section,
+    required this.title,
+    required this.onOpen,
+  });
+
+  final Json section;
+  final String title;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = text(section, 'status');
+    final explained = flag(section, 'fullyExplained');
+    final (tone, statusLabel, icon) = switch (status) {
+      'matched' => (
+        AppTone.success,
+        _t(context, 'متطابق', 'Matched'),
+        Icons.check_circle_outline,
+      ),
+      'incomplete' => (
+        AppTone.neutral,
+        _t(context, 'غير مكتمل', 'Incomplete'),
+        Icons.help_outline,
+      ),
+      _ when explained => (
+        AppTone.warning,
+        _t(context, 'يوجد فرق مفسَّر', 'Explained difference'),
+        Icons.info_outline,
+      ),
+      _ => (
+        AppTone.danger,
+        _t(context, 'يوجد فرق', 'Difference'),
+        Icons.error_outline,
+      ),
+    };
+    final details = section['details'] is Map
+        ? Map<String, dynamic>.from(section['details'] as Map)
+        : <String, dynamic>{};
+
+    Widget line(String label, String? raw) => Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: [
+          Expanded(child: Text(label)),
+          Text(
+            raw == null ? '—' : formatAmount(raw),
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        onTap: onOpen,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, size: 20, color: tone.foreground),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  if (onOpen != null) ...[
+                    const SizedBox(width: 4),
+                    const Icon(Icons.chevron_right, size: 20),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 8),
+              // The status pill gets its own line: beside the title it
+              // left so little room on a phone that a single long word
+              // ('reconciliation') overflowed the header row outright.
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: tone.background,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    statusLabel,
+                    style: TextStyle(
+                      color: tone.foreground,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              if (status == 'incomplete')
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(text(section, 'reason')),
+                )
+              else ...[
+                line(
+                  _t(context, 'الأستاذ المساعد', 'Subledger'),
+                  asString(section['subledger']),
+                ),
+                line(
+                  _t(context, 'حساب الرقابة', 'Control account'),
+                  asString(section['control']),
+                ),
+                line(
+                  _t(context, 'الفرق', 'Difference'),
+                  asString(section['difference']),
+                ),
+                if (details['advances'] != null &&
+                    asString(details['advances']) != '0.0000')
+                  line(
+                    _t(context, 'مقدّمات غير مطبّقة', 'Advances held'),
+                    asString(details['advances']),
+                  ),
+                if (details['otherPostings'] != null &&
+                    (details['otherPostings'] as num? ?? 0) > 0)
+                  line(
+                    _t(
+                      context,
+                      'قيود دون مستند فرعي',
+                      'Postings without a document',
+                    ),
+                    asString(details['otherPostingsTotal']),
+                  ),
+                if (details['unexplained'] != null)
+                  line(
+                    _t(context, 'غير مفسَّر', 'Unexplained'),
+                    asString(details['unexplained']),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The asset register as a report: what the company owns, what has
+/// been charged against it, and what it is still worth on the books.
+class _FixedAssetsReportTab extends ConsumerWidget {
+  const _FixedAssetsReportTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    final async = ref.watch(
+      reportProvider('/fixed-assets/reports/summary'),
+    );
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final totals = data['totals'] is Map
+            ? Map<String, dynamic>.from(data['totals'] as Map)
+            : <String, dynamic>{};
+        final rows = listOf(data['items']);
+        return Column(
+          children: [
+            _SummaryStrip(
+              entries: [
+                MapEntry(
+                  l10n.assetCost,
+                  formatAmount(asString(totals['cost'])),
+                ),
+                MapEntry(
+                  l10n.accumulatedDepreciation,
+                  formatAmount(asString(totals['accumulatedDepreciation'])),
+                ),
+                MapEntry(
+                  l10n.bookValue,
+                  formatAmount(asString(totals['bookValue'])),
+                ),
+              ],
+            ),
+            Expanded(
+              child: RecordsTable(
+                rows: rows,
+                columns: [
+                  ColumnSpec(
+                    l10n.assetCode,
+                    value: (r) => text(r, 'code'),
+                    emphasise: true,
+                  ),
+                  ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
+                  ColumnSpec(
+                    _t(context, 'الاسم بالعربية', 'Name (Arabic)'),
+                    value: (r) => text(r, 'nameAr'),
+                  ),
+                  ColumnSpec(
+                    l10n.assetCategory,
+                    value: (r) => text(r, 'category'),
+                  ),
+                  ColumnSpec(
+                    l10n.status,
+                    value: (r) => text(r, 'status'),
+                  ),
+                  ColumnSpec(
+                    l10n.assetCost,
+                    numeric: true,
+                    value: (r) => formatAmount(asString(r['cost'])),
+                  ),
+                  ColumnSpec(
+                    l10n.accumulatedDepreciation,
+                    numeric: true,
+                    value: (r) =>
+                        formatAmount(asString(r['accumulatedDepreciation'])),
+                  ),
+                  ColumnSpec(
+                    l10n.bookValue,
+                    numeric: true,
+                    emphasise: true,
+                    value: (r) => formatAmount(asString(r['bookValue'])),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _EquityChangesTab extends ConsumerWidget {
+  const _EquityChangesTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    final async = ref.watch(
+      reportProvider(
+        '/reports/equity-changes?from=${period.from}&to=${period.to}',
+      ),
+    );
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final result = data['result'] is Map
+            ? Map<String, dynamic>.from(data['result'] as Map)
+            : <String, dynamic>{};
+        final totals = data['totals'] is Map
+            ? Map<String, dynamic>.from(data['totals'] as Map)
+            : <String, dynamic>{};
+        // The unclosed-result row reads opening - transferred + period
+        // result = closing, so its transferred amount flips sign to keep
+        // every row adding up on screen the way the statement is printed.
+        final transferred = asString(result['transferredToEquity']) ?? '';
+        final unclosedTransferred = transferred.startsWith('-')
+            ? transferred.substring(1)
+            : (double.tryParse(transferred) ?? 0) == 0
+            ? transferred
+            : '-$transferred';
+        final rows = [
+          ...listOf(data['accounts']),
+          {
+            'code': '',
+            'nameEn': 'Result not yet closed',
+            'nameAr': 'نتيجة لم تُرحَّل بعد',
+            'opening': result['openingUnclosed'],
+            'transferredResult': unclosedTransferred,
+            'otherMovements': result['forPeriod'],
+            'closing': result['closingUnclosed'],
+          },
+        ];
+        return Column(
+          children: [
+            _SummaryStrip(
+              entries: [
+                MapEntry(
+                  _t(context, 'أول الفترة', 'Opening equity'),
+                  formatAmount(asString(totals['opening'])),
+                ),
+                MapEntry(
+                  _t(context, 'نتيجة الفترة', 'Result for the period'),
+                  formatAmount(asString(totals['resultForPeriod'])),
+                ),
+                MapEntry(
+                  _t(context, 'حركات أخرى', 'Other movements'),
+                  formatAmount(asString(totals['otherMovements'])),
+                ),
+                MapEntry(
+                  _t(context, 'آخر الفترة', 'Closing equity'),
+                  formatAmount(asString(totals['closing'])),
+                ),
+              ],
+            ),
+            Expanded(
+              child: RecordsTable(
+                rows: rows,
+                columns: [
+                  ColumnSpec('Code', value: (r) => text(r, 'code')),
+                  ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
+                  ColumnSpec(
+                    _t(context, 'الاسم بالعربية', 'Name (Arabic)'),
+                    value: (r) => text(r, 'nameAr'),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'أول الفترة', 'Opening'),
+                    numeric: true,
+                    value: (r) => formatAmount(asString(r['opening'])),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'النتيجة المرحَّلة', 'Transferred result'),
+                    numeric: true,
+                    value: (r) =>
+                        formatAmount(asString(r['transferredResult'])),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'الحركات', 'Movements'),
+                    numeric: true,
+                    value: (r) =>
+                        formatAmount(asString(r['otherMovements'])),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'آخر الفترة', 'Closing'),
+                    numeric: true,
+                    value: (r) => formatAmount(asString(r['closing'])),
                     emphasise: true,
                   ),
                 ],
@@ -1356,6 +1947,334 @@ class _ExpensesIncomeTab extends ConsumerWidget {
           emphasise: true,
         ),
       ],
+    );
+  }
+}
+
+
+/// Cost-center revenue, expenses and result, with the unattributed bucket and
+/// the ledger reconciliation the API returns. The figures come from posted
+/// entries only; the screen adds nothing to them.
+class _CostCentersTab extends ConsumerWidget {
+  const _CostCentersTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    final period = ref.watch(periodProvider);
+    final language = Localizations.localeOf(context).languageCode;
+    final path =
+        '/reports/cost-centers?from=${period.from}&to=${period.to}&includeInactive=true';
+    final async = ref.watch(reportProvider(path));
+
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final rows = listOf(data['items']);
+        final unallocated = data['unallocated'] is Map
+            ? Map<String, dynamic>.from(data['unallocated'] as Map)
+            : <String, dynamic>{};
+        final totals = data['totals'] is Map
+            ? Map<String, dynamic>.from(data['totals'] as Map)
+            : <String, dynamic>{};
+        return Column(
+          children: [
+            _SummaryStrip(
+              entries: [
+                MapEntry(l10n.revenue, formatAmount(asString(totals['revenue']))),
+                MapEntry(l10n.expenses, formatAmount(asString(totals['expenses']))),
+                MapEntry(l10n.netProfit, formatAmount(asString(totals['result']))),
+                MapEntry(
+                  l10n.unallocated,
+                  '${formatAmount(asString(unallocated['revenue']))} / '
+                      '${formatAmount(asString(unallocated['expenses']))}',
+                ),
+              ],
+            ),
+            Expanded(
+              child: RecordsTable(
+                rows: rows,
+                columns: [
+                  ColumnSpec(
+                    l10n.costCenter,
+                    emphasise: true,
+                    value: (row) =>
+                        '${text(row, 'code')} — '
+                        '${language == 'ar' ? text(row, 'nameAr') : text(row, 'nameEn')}',
+                  ),
+                  ColumnSpec(
+                    l10n.costCenterType,
+                    value: (row) => _costCenterTypeLabel(context, text(row, 'type')),
+                  ),
+                  ColumnSpec(
+                    l10n.ownAmount,
+                    numeric: true,
+                    value: (row) =>
+                        '${formatAmount(asString(row['ownRevenue']))} / '
+                        '${formatAmount(asString(row['ownExpenses']))}',
+                  ),
+                  ColumnSpec(
+                    l10n.rolledUp,
+                    numeric: true,
+                    value: (row) =>
+                        '${formatAmount(asString(row['revenue']))} / '
+                        '${formatAmount(asString(row['expenses']))}',
+                  ),
+                  ColumnSpec(
+                    l10n.netProfit,
+                    numeric: true,
+                    value: (row) => formatAmount(asString(row['result'])),
+                    emphasise: true,
+                  ),
+                  ColumnSpec(
+                    l10n.status,
+                    value: (row) => flag(row, 'isActive', fallback: true)
+                        ? l10n.active
+                        : l10n.inactive,
+                    tone: (row) => flag(row, 'isActive', fallback: true)
+                        ? AppTone.success
+                        : AppTone.neutral,
+                  ),
+                ],
+                actions: (row) => [
+                  IconButton(
+                    tooltip: l10n.drillDown,
+                    icon: const Icon(Icons.list_alt_outlined, size: 20),
+                    onPressed: () => _showLines(
+                      context,
+                      ref,
+                      id: text(row, 'costCenterId'),
+                      title: '${text(row, 'code')} — ${text(row, 'nameEn')}',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (unallocated.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton.icon(
+                    onPressed: () => _showLines(
+                      context,
+                      ref,
+                      id: 'unallocated',
+                      title: l10n.unallocated,
+                    ),
+                    icon: const Icon(Icons.list_alt_outlined),
+                    label: Text(
+                      '${l10n.unallocated}: '
+                      '${formatAmount(asString(unallocated['revenue']))} / '
+                      '${formatAmount(asString(unallocated['expenses']))}',
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showLines(
+    BuildContext context,
+    WidgetRef ref, {
+    required String id,
+    required String title,
+  }) async {
+    final period = ref.read(periodProvider);
+    Json data;
+    try {
+      data = await ref.read(apiClientProvider).getObject(
+        '/reports/cost-centers/$id/transactions',
+        query: {'from': period.from, 'to': period.to, 'pageSize': '200'},
+      );
+    } on Failure catch (error) {
+      if (context.mounted) showMessage(context, error.message, error: true);
+      return;
+    }
+    if (!context.mounted) return;
+    final l10n = context.l10n;
+    final rows = listOf(data['items']);
+    await showDataDialog<void>(
+      context,
+      storageKey: 'cost-center-transactions',
+      title: title,
+      icon: Icons.account_tree_outlined,
+      initialSize: const Size(900, 560),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: rows.isEmpty
+            ? Center(child: Text(l10n.noTransactions))
+            : RecordsTable(
+                rows: rows,
+                columns: [
+                  ColumnSpec(
+                    l10n.entryNumber,
+                    emphasise: true,
+                    value: (row) => text(row, 'entryNumber'),
+                  ),
+                  ColumnSpec(l10n.invoiceDate, value: (row) => text(row, 'entryDate')),
+                  ColumnSpec(
+                    l10n.account,
+                    value: (row) => '${text(row, 'accountCode')} — '
+                        '${text(row, 'accountName')}',
+                  ),
+                  ColumnSpec(
+                    l10n.description,
+                    value: (row) => text(row, 'description'),
+                  ),
+                  ColumnSpec(
+                    l10n.amount,
+                    numeric: true,
+                    value: (row) => formatAmount(asString(row['amount'])),
+                  ),
+                  ColumnSpec(
+                    l10n.status,
+                    value: (row) => text(row, 'status'),
+                    tone: (row) => toneForStatus(text(row, 'status')),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+String _costCenterTypeLabel(BuildContext context, String type) {
+  final l10n = context.l10n;
+  return switch (type) {
+    'DEPARTMENT' => l10n.department,
+    'ADMINISTRATIVE_UNIT' => l10n.administrativeUnit,
+    'PROJECT' => l10n.project,
+    _ => type,
+  };
+}
+
+/// Budget against actual, row by row. Every figure is the API's answer from
+/// posted ledger lines; the screen only arranges it.
+class _BudgetReportTab extends ConsumerWidget {
+  const _BudgetReportTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    final period = ref.watch(periodProvider);
+    final language = Localizations.localeOf(context).languageCode;
+    final path =
+        '/reports/budgets?from=${period.from}&to=${period.to}&includeInactive=true';
+    final async = ref.watch(reportProvider(path));
+
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final rows = listOf(data['rows']);
+        final totals = data['totals'] is Map
+            ? Map<String, dynamic>.from(data['totals'] as Map)
+            : <String, dynamic>{};
+        final expense = totals['expense'] is Map
+            ? Map<String, dynamic>.from(totals['expense'] as Map)
+            : <String, dynamic>{};
+        final revenue = totals['revenue'] is Map
+            ? Map<String, dynamic>.from(totals['revenue'] as Map)
+            : <String, dynamic>{};
+        return Column(
+          children: [
+            _SummaryStrip(
+              entries: [
+                MapEntry(
+                  '${l10n.expenses} — ${l10n.budget}',
+                  formatAmount(asString(expense['budget'])),
+                ),
+                MapEntry(
+                  '${l10n.expenses} — ${l10n.actualAmount}',
+                  formatAmount(asString(expense['actual'])),
+                ),
+                MapEntry(
+                  '${l10n.revenue} — ${l10n.budget}',
+                  formatAmount(asString(revenue['budget'])),
+                ),
+                MapEntry(
+                  '${l10n.revenue} — ${l10n.actualAmount}',
+                  formatAmount(asString(revenue['actual'])),
+                ),
+              ],
+            ),
+            Expanded(
+              child: rows.isEmpty
+                  ? Center(child: Text(l10n.noBudgets))
+                  : RecordsTable(
+                      rows: rows,
+                      columns: [
+                        ColumnSpec(
+                          l10n.costCenter,
+                          emphasise: true,
+                          value: (row) =>
+                              '${text(row, 'costCenterCode')} — '
+                              '${language == 'ar' ? text(row, 'costCenterNameAr') : text(row, 'costCenterNameEn')}',
+                        ),
+                        ColumnSpec(
+                          l10n.account,
+                          value: (row) =>
+                              '${text(row, 'accountCode')} — '
+                              '${language == 'ar' ? text(row, 'accountNameAr') : text(row, 'accountNameEn')}',
+                        ),
+                        ColumnSpec(
+                          l10n.budgetPeriod,
+                          value: (row) =>
+                              '${text(row, 'periodStart')} → ${text(row, 'periodEnd')}',
+                        ),
+                        ColumnSpec(
+                          l10n.budgetAmount,
+                          numeric: true,
+                          value: (row) => formatAmount(asString(row['budget'])),
+                        ),
+                        ColumnSpec(
+                          l10n.actualAmount,
+                          numeric: true,
+                          value: (row) => formatAmount(asString(row['actual'])),
+                        ),
+                        ColumnSpec(
+                          l10n.variance,
+                          numeric: true,
+                          value: (row) => formatAmount(asString(row['variance'])),
+                          emphasise: true,
+                        ),
+                        ColumnSpec(
+                          l10n.variancePercent,
+                          numeric: true,
+                          value: (row) => row['variancePercent'] == null
+                              ? '—'
+                              : '${text(row, 'variancePercent')}%',
+                        ),
+                        ColumnSpec(
+                          l10n.status,
+                          value: (row) => row['retired'] == true
+                              ? l10n.budgetRetired
+                              : (flag(row, 'isActive', fallback: true)
+                                    ? l10n.active
+                                    : l10n.inactive),
+                          tone: (row) => row['retired'] == true
+                              ? AppTone.neutral
+                              : (flag(row, 'isActive', fallback: true)
+                                    ? AppTone.success
+                                    : AppTone.neutral),
+                        ),
+                        ColumnSpec(
+                          l10n.resultLabel,
+                          value: (row) => row['favorable'] == true
+                              ? l10n.favorable
+                              : l10n.unfavorable,
+                        ),
+                      ],
+                    ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

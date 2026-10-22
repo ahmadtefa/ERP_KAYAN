@@ -62,4 +62,31 @@ describe('ProblemDetailsFilter', () => {
       'Company_one_active_company_idx',
     );
   });
+
+  it('turns the closed-period database backstop into a readable 400', () => {
+    const response = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn(),
+    };
+    const host = {
+      switchToHttp: () => ({ getResponse: () => response }),
+    } as any;
+    // The shape Prisma gives a trigger raise: an unknown request error whose
+    // message carries the function's own words (and the company id, which
+    // must not be echoed back).
+    const error = new Prisma.PrismaClientUnknownRequestError(
+      'Raw query failed. Code: `23514`. Message: `Fiscal period is closed ' +
+        'for company 8b0e2c1c-0000-4000-8000-000000000000 on 2024-06-01`',
+      { clientVersion: 'test' },
+    );
+
+    new ProblemDetailsFilter().catch(error, host);
+
+    expect(response.status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
+    const body = response.json.mock.calls[0][0];
+    expect(body.status).toBe(HttpStatus.BAD_REQUEST);
+    expect(body.detail).toContain('fiscal period');
+    expect(body.detail).not.toContain('8b0e2c1c');
+    expect(body.detail).not.toContain('23514');
+  });
 });

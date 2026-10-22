@@ -3,12 +3,14 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/backend/company_setup_data.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/storage/credentials_store.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/error_messages.dart';
 import '../../../../shared/widgets/company_setup_form.dart';
+import '../../../../shared/widgets/surface_card.dart';
 import '../providers/auth_providers.dart';
 
 /// Sign-in screen.
@@ -203,34 +205,30 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // anybody can sign in — and the form keeps a draft, so an interrupted
       // setup continues where it stopped.
       return Scaffold(
-        body: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 640),
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        l10n.companySettings,
-                        style: theme.textTheme.headlineSmall,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        l10n.companySettingsHint,
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                      const SizedBox(height: 20),
-                      CompanySetupForm(
+        backgroundColor: theme.colorScheme.surface,
+        body: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(AppSpacing.xxl),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 660),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const _AuthBrandMark(compact: true),
+                    const SizedBox(height: AppSpacing.xxl),
+                    SurfaceCard(
+                      title: l10n.companySettings,
+                      subtitle: l10n.companySettingsHint,
+                      icon: Icons.domain_add_outlined,
+                      padding: const EdgeInsets.all(AppSpacing.xxl),
+                      child: CompanySetupForm(
                         onSubmit: _runSetup,
                         busy: _setupBusy,
                         error: _setupError,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -239,139 +237,401 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       );
     }
 
+    final form = _SignInForm(
+      formKey: _formKey,
+      username: _username,
+      password: _password,
+      obscure: _obscure,
+      busy: _busy,
+      remember: _remember,
+      error: _error,
+      onToggleObscure: () => setState(() => _obscure = !_obscure),
+      onToggleRemember: _busy
+          ? null
+          : (value) => setState(() => _remember = value),
+      onClearSaved: _busy ? null : _clearSaved,
+      onSubmit: _busy ? null : _submit,
+    );
+
     return Scaffold(
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Icon(
-                        Icons.account_balance,
-                        size: 48,
-                        color: theme.colorScheme.primary,
+      backgroundColor: theme.colorScheme.surface,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final wide = constraints.maxWidth >= 960;
+          if (!wide) {
+            return SafeArea(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const _AuthBrandCompact(),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xxl,
+                        vertical: AppSpacing.xxxl,
                       ),
-                      const SizedBox(height: 12),
-                      Text(
-                        l10n.appTitle,
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.headlineSmall,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        l10n.signIn,
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                      const SizedBox(height: 24),
-                      TextFormField(
-                        controller: _username,
-                        enabled: !_busy,
-                        autofillHints: const [AutofillHints.username],
-                        textInputAction: TextInputAction.next,
-                        decoration: InputDecoration(
-                          labelText: l10n.username,
-                          prefixIcon: const Icon(Icons.person_outline),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 420),
+                          child: form,
                         ),
-                        validator: (value) =>
-                            (value == null || value.trim().isEmpty)
-                            ? l10n.usernameRequired
-                            : null,
                       ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _password,
-                        enabled: !_busy,
-                        obscureText: _obscure,
-                        autofillHints: const [AutofillHints.password],
-                        textInputAction: TextInputAction.done,
-                        onFieldSubmitted: (_) => _submit(),
-                        decoration: InputDecoration(
-                          labelText: l10n.password,
-                          prefixIcon: const Icon(Icons.lock_outline),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscure
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                            ),
-                            onPressed: () =>
-                                setState(() => _obscure = !_obscure),
-                          ),
-                        ),
-                        validator: (value) => (value == null || value.isEmpty)
-                            ? l10n.passwordRequired
-                            : null,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: (constraints.maxWidth * 0.44).clamp(380.0, 620.0),
+                child: const _AuthBrandPanel(),
+              ),
+              Expanded(
+                child: SafeArea(
+                  child: Center(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(AppSpacing.xxxl),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 400),
+                        child: form,
                       ),
-                      const SizedBox(height: 4),
-                      // "Remember me": optional, off until asked for.
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Checkbox(
-                                value: _remember,
-                                onChanged: _busy
-                                    ? null
-                                    : (value) => setState(
-                                        () => _remember = value ?? false,
-                                      ),
-                              ),
-                              Expanded(
-                                child: InkWell(
-                                  onTap: _busy
-                                      ? null
-                                      : () => setState(
-                                          () => _remember = !_remember,
-                                        ),
-                                  child: Text(l10n.rememberMe),
-                                ),
-                              ),
-                            ],
-                          ),
-                          TextButton.icon(
-                            onPressed: _busy ? null : _clearSaved,
-                            icon: const Icon(Icons.clear_all, size: 18),
-                            label: Text(l10n.clearSavedCredentials),
-                          ),
-                        ],
-                      ),
-                      if (_error != null) ...[
-                        const SizedBox(height: 12),
-                        _ErrorBanner(message: _error!),
-                      ],
-                      const SizedBox(height: 20),
-                      FilledButton(
-                        onPressed: _busy ? null : _submit,
-                        child: _busy
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : Text(l10n.signIn),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-        ),
+            ],
+          );
+        },
       ),
     );
   }
+}
+
+/// The credentials form, shared by the wide and narrow layouts. It only
+/// lays the fields out; validation and authentication stay in the state
+/// object above.
+class _SignInForm extends StatelessWidget {
+  const _SignInForm({
+    required this.formKey,
+    required this.username,
+    required this.password,
+    required this.obscure,
+    required this.busy,
+    required this.remember,
+    required this.error,
+    required this.onToggleObscure,
+    required this.onToggleRemember,
+    required this.onClearSaved,
+    required this.onSubmit,
+  });
+
+  final GlobalKey<FormState> formKey;
+  final TextEditingController username;
+  final TextEditingController password;
+  final bool obscure;
+  final bool busy;
+  final bool remember;
+  final String? error;
+  final VoidCallback onToggleObscure;
+  final ValueChanged<bool>? onToggleRemember;
+  final VoidCallback? onClearSaved;
+  final VoidCallback? onSubmit;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final theme = Theme.of(context);
+    return Form(
+      key: formKey,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            l10n.signIn,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            l10n.welcomeBack,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xxl),
+          TextFormField(
+            controller: username,
+            enabled: !busy,
+            autofillHints: const [AutofillHints.username],
+            textInputAction: TextInputAction.next,
+            decoration: InputDecoration(
+              labelText: l10n.username,
+              prefixIcon: const Icon(Icons.person_outline),
+            ),
+            validator: (value) =>
+                (value == null || value.trim().isEmpty)
+                ? l10n.usernameRequired
+                : null,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextFormField(
+            controller: password,
+            enabled: !busy,
+            obscureText: obscure,
+            autofillHints: const [AutofillHints.password],
+            textInputAction: TextInputAction.done,
+            onFieldSubmitted: (_) => onSubmit?.call(),
+            decoration: InputDecoration(
+              labelText: l10n.password,
+              prefixIcon: const Icon(Icons.lock_outline),
+              suffixIcon: IconButton(
+                tooltip: l10n.password,
+                icon: Icon(
+                  obscure
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                ),
+                onPressed: busy ? null : onToggleObscure,
+              ),
+            ),
+            validator: (value) =>
+                (value == null || value.isEmpty) ? l10n.passwordRequired : null,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          // "Remember me": optional, off until asked for.
+          Row(
+            children: [
+              Checkbox(
+                value: remember,
+                onChanged: onToggleRemember == null
+                    ? null
+                    : (value) => onToggleRemember!(value ?? false),
+              ),
+              Expanded(
+                child: InkWell(
+                  onTap: onToggleRemember == null
+                      ? null
+                      : () => onToggleRemember!(!remember),
+                  child: Text(l10n.rememberMe, style: theme.textTheme.bodySmall),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: onClearSaved,
+                icon: const Icon(Icons.clear_all, size: 16),
+                label: Text(l10n.clearSavedCredentials),
+              ),
+            ],
+          ),
+          if (error != null) ...[
+            const SizedBox(height: AppSpacing.md),
+            _ErrorBanner(message: error!),
+          ],
+          const SizedBox(height: AppSpacing.xl),
+          FilledButton(
+            onPressed: onSubmit,
+            child: busy
+                ? const SizedBox(
+                    height: 18,
+                    width: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text(l10n.signIn),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Full-height navy brand panel for wide windows.
+class _AuthBrandPanel extends StatelessWidget {
+  const _AuthBrandPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final l10n = context.l10n;
+    final features = <(IconData, String)>[
+      (Icons.space_dashboard_outlined, l10n.dashboard),
+      (Icons.receipt_long_outlined, l10n.sales),
+      (Icons.shopping_bag_outlined, l10n.purchases),
+      (Icons.inventory_2_outlined, l10n.inventory),
+      (Icons.query_stats_outlined, l10n.reports),
+    ];
+    return DecoratedBox(
+      decoration: const BoxDecoration(gradient: AppGradients.brand),
+      child: Stack(
+        children: [
+          const Positioned.fill(child: _BrandBackdrop()),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(48, 56, 48, 40),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _AuthBrandMark(onDark: true),
+                const Spacer(),
+                Text(
+                  l10n.appTitle,
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    color: AppColors.onNavy,
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                SizedBox(
+                  width: 320,
+                  child: Text(
+                    l10n.welcomeBack,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: AppColors.onNavyMuted,
+                      height: 1.6,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xxxl),
+                for (final (icon, label) in features)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                    child: Row(
+                      children: [
+                        Icon(icon, size: 17, color: AppColors.onNavyMuted),
+                        const SizedBox(width: AppSpacing.md),
+                        Text(
+                          label,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: AppColors.onNavy,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Narrow-window header: the same identity in a single strip.
+class _AuthBrandCompact extends StatelessWidget {
+  const _AuthBrandCompact();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppColors.navy,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xxl,
+        vertical: AppSpacing.xxl,
+      ),
+      child: const _AuthBrandMark(onDark: true),
+    );
+  }
+}
+
+/// The KAYAN mark and wordmark.
+class _AuthBrandMark extends StatelessWidget {
+  const _AuthBrandMark({this.onDark = false, this.compact = false});
+
+  final bool onDark;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final l10n = context.l10n;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: compact ? 40 : 44,
+          height: compact ? 40 : 44,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: onDark ? AppColors.primary : AppColors.navy,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+          ),
+          child: Text(
+            'K',
+            style: theme.textTheme.titleLarge?.copyWith(
+              color: AppColors.onNavy,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.md),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              l10n.appTitle,
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: onDark
+                    ? AppColors.onNavy
+                    : theme.colorScheme.onSurface,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            Text(
+              'ERP',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: onDark
+                    ? AppColors.onNavyMuted
+                    : theme.colorScheme.onSurfaceVariant,
+                letterSpacing: 1.6,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Two very quiet curves behind the brand copy — nothing that competes with
+/// the form or implies data that does not exist.
+class _BrandBackdrop extends StatelessWidget {
+  const _BrandBackdrop();
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(painter: _BrandBackdropPainter());
+  }
+}
+
+class _BrandBackdropPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = Paint()
+      ..color = AppColors.accent.withValues(alpha: 0.10)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    final fill = Paint()
+      ..color = AppColors.accent.withValues(alpha: 0.05)
+      ..style = PaintingStyle.fill;
+    final center = Offset(size.width * 0.92, size.height * 0.18);
+    for (var i = 1; i <= 4; i += 1) {
+      canvas.drawCircle(center, 60.0 * i, stroke);
+    }
+    canvas.drawCircle(center, 60, fill);
+    canvas.drawLine(
+      Offset(0, size.height * 0.78),
+      Offset(size.width, size.height * 0.62),
+      stroke,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _ErrorBanner extends StatelessWidget {
@@ -381,21 +641,29 @@ class _ErrorBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: scheme.errorContainer,
-        borderRadius: BorderRadius.circular(8),
+        color: AppColors.errorSoft,
+        borderRadius: AppRadii.control,
+        border: Border.all(color: AppColors.error.withValues(alpha: 0.35)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.error_outline, color: scheme.onErrorContainer),
-          const SizedBox(width: 8),
+          const Icon(
+            Icons.error_outline,
+            size: 18,
+            color: AppColors.error,
+          ),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               message,
-              style: TextStyle(color: scheme.onErrorContainer),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: AppColors.error,
+              ),
             ),
           ),
         ],

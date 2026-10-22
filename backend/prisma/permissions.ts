@@ -9,6 +9,7 @@
  * Each entry is [code, English name, Arabic name, module].
  */
 export const PERMISSIONS: Array<[string, string, string, string]> = [
+  ['company.profile.manage', 'Manage company profile', 'إدارة بيانات الشركة', 'admin'],
   ['accounting.accounts.read', 'View chart of accounts', 'عرض دليل الحسابات', 'accounting'],
   ['accounting.accounts.create', 'Add accounts to the chart', 'إضافة حسابات للدليل', 'accounting'],
   ['accounting.accounts.update', 'Edit accounts', 'تعديل الحسابات', 'accounting'],
@@ -16,6 +17,9 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['accounting.journal.read', 'View journal entries', 'عرض القيود اليومية', 'accounting'],
   ['accounting.journal.create', 'Create journal entries', 'إنشاء قيود يومية', 'accounting'],
   ['accounting.journal.post', 'Post and reverse entries', 'ترحيل وعكس القيود', 'accounting'],
+  ['accounting.fixedassets.read', 'View fixed assets', 'عرض الأصول الثابتة', 'accounting'],
+  ['accounting.fixedassets.manage', 'Manage fixed assets', 'إدارة الأصول الثابتة', 'accounting'],
+  ['accounting.fixedassets.depreciate', 'Run depreciation', 'تشغيل الإهلاك', 'accounting'],
   ['admin.users.manage', 'Manage users', 'إدارة المستخدمين', 'admin'],
   ['admin.roles.manage', 'Manage roles', 'إدارة الأدوار', 'admin'],
   ['admin.audit.read', 'View audit trail', 'عرض سجل التدقيق', 'admin'],
@@ -50,6 +54,10 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['sales.orders.create', 'Create sales orders', 'إنشاء أوامر البيع', 'sales'],
   ['sales.orders.approve', 'Approve sales orders', 'اعتماد أوامر البيع', 'sales'],
   ['sales.orders.manage', 'Create and edit sales orders', 'إنشاء وتعديل أوامر البيع', 'sales'],
+  ['sales.quotations.read', 'View quotations', 'عرض عروض الأسعار', 'sales'],
+  ['sales.quotations.manage', 'Create and edit quotations', 'إنشاء وتعديل عروض الأسعار', 'sales'],
+  ['sales.quotations.convert', 'Convert quotations to invoices', 'تحويل عروض الأسعار إلى فواتير', 'sales'],
+  ['sales.quotations.export', 'Print and export quotations', 'طباعة وتصدير عروض الأسعار', 'sales'],
   ['sales.returns.read', 'View sales returns', 'عرض مردودات البيع', 'sales'],
   ['sales.returns.manage', 'Create sales returns', 'إنشاء مردودات البيع', 'sales'],
   ['sales.print', 'Print sales documents', 'طباعة مستندات البيع', 'sales'],
@@ -75,7 +83,10 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   // Reviewing an entry is a different job from writing one: the whole point of
   // the permission is that the two can be held by different people.
   ['accounting.journal.approve', 'Approve journal entries', 'اعتماد القيود اليومية', 'accounting'],
+  ['accounting.costcenters.read', 'View cost centers', 'عرض مراكز التكلفة', 'accounting'],
   ['accounting.costcenters.manage', 'Manage cost centers', 'إدارة مراكز التكلفة', 'accounting'],
+  ['accounting.budgets.read', 'View budgets', 'عرض الموازنات', 'accounting'],
+  ['accounting.budgets.manage', 'Manage budgets', 'إدارة الموازنات', 'accounting'],
   [
     'accounting.openingbalances.manage',
     'Open the books: opening balances',
