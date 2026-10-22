@@ -15,6 +15,7 @@ class AccountInput {
     this.isPostable,
     this.isActive,
     this.description,
+    this.cashFlowClass,
   });
 
   final String? code;
@@ -25,6 +26,10 @@ class AccountInput {
   final bool? isPostable;
   final bool? isActive;
   final String? description;
+
+  /// Cash-flow classification ('OPERATING' | 'INVESTING' | 'FINANCING'),
+  /// or null to leave the account unclassified.
+  final String? cashFlowClass;
 
   Map<String, dynamic> toJson() => {
     if (code != null && code!.isNotEmpty) 'code': code,
@@ -37,6 +42,9 @@ class AccountInput {
     if (isPostable != null) 'isPostable': isPostable,
     if (isActive != null) 'isActive': isActive,
     if (description != null) 'description': description,
+    // Always sent, null included: an explicit null clears the
+    // classification, while a missing key would leave it unchanged.
+    'cashFlowClass': cashFlowClass,
   };
 }
 
