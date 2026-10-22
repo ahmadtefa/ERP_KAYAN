@@ -38,6 +38,9 @@ export interface PostingRequest {
     | 'STOCK_DOCUMENT'
     | 'OPENING_BALANCE'
     | 'YEAR_END_CLOSE'
+    | 'FIXED_ASSET'
+    | 'ASSET_DEPRECIATION'
+    | 'ASSET_DISPOSAL'
     | 'MANUAL';
   sourceId: string;
   sourceNumber: string;
