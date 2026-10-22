@@ -787,12 +787,14 @@ async function main() {
   );
   const tbResponse = await fetch(`${API}${tbUrl}`);
   const tbCells = sheetCells(unzipTexts(Buffer.from(await tbResponse.arrayBuffer())));
+  const has1104 = tbCells.includes('1104');
+  const hasSubtotal = tbCells.some((cell) => cell.includes('(subtotal)'));
+  const has500 = tbCells.some((cell) => Math.abs(Number(cell) - 500) < 0.0001);
   check(
     'the trial-balance workbook contains the report itself (1104 at 500, a marked subtotal)',
-    tbCells.includes('1104') &&
-      tbCells.some((cell) => cell.includes('(subtotal)')) &&
-      tbCells.some((cell) => Math.abs(Number(cell) - 500) < 0.0001),
-    `cells read: ${tbCells.length}`,
+    has1104 && hasSubtotal && has500,
+    `cells ${tbCells.length}, 1104:${has1104} subtotal:${hasSubtotal} 500:${has500}; ` +
+      `sample: ${tbCells.filter((c) => c !== '').slice(0, 36).join(' | ')}`,
   );
   const csvUrl = await ticketed(
     `/exports/trial-balance/download?format=csv&lang=en&from=${YEAR_FROM}&to=${YEAR_TO}`,

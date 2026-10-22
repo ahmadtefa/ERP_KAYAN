@@ -490,12 +490,15 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
             icon: const Icon(Icons.refresh),
           ),
           const SizedBox(width: 4),
-          OutlinedButton.icon(
+          // An icon, not a third labelled button: the page header has no
+          // room for one and overflows (the widget tests caught exactly
+          // that, at 140 pixels).
+          IconButton(
+            tooltip: _t('تشغيلات الإهلاك', 'Depreciation runs'),
             onPressed: _busy ? null : _showRuns,
             icon: const Icon(Icons.history_outlined),
-            label: Text(_t('تشغيلات الإهلاك', 'Depreciation runs')),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 4),
           OutlinedButton.icon(
             onPressed: _busy ? null : _runDepreciation,
             icon: const Icon(Icons.trending_down_outlined),
