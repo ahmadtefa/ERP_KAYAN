@@ -75,7 +75,7 @@ export class ReportsController {
 
   @Get('equity-changes')
   @RequirePermissions('reports.read')
-  equityChanges(@CurrentUser() user: AuthenticatedUser, @Query() query: PeriodQueryDto) {
+  equityChanges(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
     return this.statements.equityChanges(user.companyId, query);
   }
 

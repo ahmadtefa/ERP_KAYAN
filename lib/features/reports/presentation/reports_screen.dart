@@ -982,7 +982,7 @@ class _EquityChangesTab extends ConsumerWidget {
         // The unclosed-result row reads opening - transferred + period
         // result = closing, so its transferred amount flips sign to keep
         // every row adding up on screen the way the statement is printed.
-        final transferred = asString(result['transferredToEquity']);
+        final transferred = asString(result['transferredToEquity']) ?? '';
         final unclosedTransferred = transferred.startsWith('-')
             ? transferred.substring(1)
             : (double.tryParse(transferred) ?? 0) == 0
