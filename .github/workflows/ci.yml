@@ -68,6 +68,8 @@ jobs:
         run: npm run build
       - name: Apply migrations to ephemeral PostgreSQL
         run: npx prisma migrate deploy
+      - name: Prove the required-accounts chart upgrade (old, complete and renumbered companies; run twice)
+        run: node scripts/check-chart-upgrade.mjs
       - name: Seed an isolated test company and administrator
         run: npx ts-node prisma/seed.ts
       - name: Install PostgreSQL client tools (full-backup checks and the isolated demo restore)
