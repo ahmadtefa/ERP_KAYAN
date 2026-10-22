@@ -103,6 +103,71 @@ try {
     }
   }
 
+  # Prove it, do not just say it: briefly start the real API exactly the
+  # way the desktop shell does (same bundled Node, same entry point, the
+  # same settings already loaded into this process above) and require a
+  # real answer from /api/v1/health before the repair may call itself
+  # successful. The probe binds loopback only and is always stopped
+  # afterwards. An empty database answering needsSetup=true is a PASS:
+  # the runtime, the database and the server all work, and first-run
+  # setup belongs to the program window, not to this script.
+  $mainJs = Join-Path $backendDir 'dist\src\main.js'
+  if ((Test-Path -LiteralPath $nodeExe) -and (Test-Path -LiteralPath $mainJs)) {
+    $probePort = $null
+    foreach ($candidate in @(3000, 3001, 3002, 3003, 3010, 3020)) {
+      $listener = $null
+      try {
+        $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, $candidate)
+        $listener.Start()
+        $probePort = $candidate
+        break
+      } catch { } finally { if ($listener) { $listener.Stop() } }
+    }
+    if (-not $probePort) {
+      throw 'No free local port was available to verify the repaired server.'
+    }
+
+    $probeOut = Join-Path $env:TEMP ('kayan-repair-api-out-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.log')
+    $probeErr = Join-Path $env:TEMP ('kayan-repair-api-err-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.log')
+    $probe = $null
+    try {
+      $env:PORT = [string]$probePort
+      $env:HOST = '127.0.0.1'
+      $env:NODE_ENV = 'production'
+      $env:NO_COLOR = '1'
+      $env:KAYAN_BACKUP_DIR = Join-Path $ProgramDataRoot 'backups'
+      $env:KAYAN_UPLOAD_DIR = Join-Path $ProgramDataRoot 'uploads'
+      $probe = Start-Process -FilePath $nodeExe -ArgumentList @('dist\src\main.js') -WorkingDirectory $backendDir -PassThru -NoNewWindow -RedirectStandardOutput $probeOut -RedirectStandardError $probeErr
+      $health = $null
+      $deadline = (Get-Date).AddSeconds(90)
+      while ((Get-Date) -lt $deadline) {
+        if ($probe.HasExited) { break }
+        try {
+          $candidate = Invoke-RestMethod -Uri "http://127.0.0.1:$probePort/api/v1/health" -TimeoutSec 3
+          if ($candidate.status) { $health = $candidate; break }
+        } catch { }
+        Start-Sleep -Milliseconds 700
+      }
+      if (-not $health) {
+        $details = ((Get-Content -LiteralPath $probeOut -Raw -ErrorAction SilentlyContinue) + "`n" + (Get-Content -LiteralPath $probeErr -Raw -ErrorAction SilentlyContinue)).Trim()
+        throw ("The repaired server did not answer on 127.0.0.1:$probePort within 90 seconds: " + (Protect-Secret $details))
+      }
+      if ($health.needsSetup -eq $true) {
+        Write-RepairMarker 'KAYAN-REPAIR-VERIFIED server answers; first-run setup still pending'
+        Write-Output 'Verified: the server answers and the database is reachable. First-run setup is still pending - open KAYAN ERP to create the company and the first administrator.'
+      } else {
+        Write-RepairMarker 'KAYAN-REPAIR-VERIFIED server answers; existing company database ready'
+        Write-Output 'Verified: the server answers and the existing company database is ready to use.'
+      }
+    } finally {
+      if ($probe -and -not $probe.HasExited) {
+        Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue
+        try { $probe.WaitForExit(10000) | Out-Null } catch { }
+      }
+      Remove-Item -LiteralPath $probeOut, $probeErr -Force -ErrorAction SilentlyContinue
+    }
+  }
+
   Write-RepairMarker 'KAYAN-REPAIR-OK'
   Write-Output 'KAYAN ERP runtime and PostgreSQL service were repaired successfully. Existing company data was preserved.'
   if (-not $Quiet -and [Environment]::UserInteractive) {
