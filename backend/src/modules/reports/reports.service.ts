@@ -155,7 +155,6 @@ export class ReportsService {
           nameEn: a.nameEn,
           nameAr: a.nameAr,
           type: a.type.toLowerCase(),
-          parentId: a.parentId,
           opening: v.opening.toFixed(MONEY_SCALE),
           debit: v.debit.toFixed(MONEY_SCALE),
           credit: v.credit.toFixed(MONEY_SCALE),
