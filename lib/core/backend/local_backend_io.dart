@@ -265,14 +265,33 @@ class LocalBackend {
         databaseProblem: true,
       );
     }
-    if (preparation?.state == 'empty') {
+    if (preparation?.state == 'empty' ||
+        preparation?.state == 'incomplete') {
+      // 'incomplete' = a company or users exist without the other (a
+      // first setup interrupted halfway). The remedy is the same screen:
+      // completing first-run setup upserts what is missing and touches
+      // nothing that is already there.
       log.writeln(
-        '[shell] the database is empty: asking who the first '
-        'administrator is',
+        preparation?.state == 'incomplete'
+            ? '[shell] the database is partly set up: asking who the '
+                  'first administrator is so setup can be completed'
+            : '[shell] the database is empty: asking who the first '
+                  'administrator is',
       );
       await log.flush();
       await log.close();
       return const LocalBackendStatus.needsFirstAdministrator();
+    }
+    if (preparation?.state == 'unknown') {
+      // The preparation could not determine the state (typically the
+      // database did not answer its count query). That is never read as
+      // "empty" - a failed question must not invite first-run setup over
+      // somebody's data. Start the server and let its own precise error
+      // be the one the user sees.
+      log.writeln(
+        '[shell] WARNING: database state is unknown; starting the server '
+        'so the real error can surface',
+      );
     }
 
     // 3. Start the server and wait until it answers.
