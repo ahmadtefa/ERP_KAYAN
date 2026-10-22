@@ -552,6 +552,12 @@ model FixedAsset {
   /// the register must also hold assets bought before this system did.
   supplierId        String? @db.Uuid
   purchaseInvoiceId String? @db.Uuid
+  /// The exact purchase line this asset was capitalised from, when it
+  /// was. Together with purchaseQuantity it bounds what may be
+  /// capitalised from one line: never more cost or units than the
+  /// line itself received, so a purchase is never counted twice.
+  purchaseInvoiceLineId String?  @db.Uuid
+  purchaseQuantity      Decimal? @db.Decimal(19, 4)
 
   cost             Decimal @db.Decimal(19, 4)
   salvageValue     Decimal @default(0) @db.Decimal(19, 4)

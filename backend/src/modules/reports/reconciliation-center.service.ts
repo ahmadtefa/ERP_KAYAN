@@ -10,9 +10,9 @@ const MONEY_SCALE = 4;
 const money = (value: Prisma.Decimal) => value.toFixed(MONEY_SCALE);
 const isZero = (value: string) => new Prisma.Decimal(value).isZero();
 
-type SectionStatus = 'matched' | 'difference' | 'incomplete';
+export type SectionStatus = 'matched' | 'difference' | 'incomplete';
 
-interface Section {
+export interface Section {
   key: 'receivables' | 'payables' | 'inventory' | 'fixedAssets';
   status: SectionStatus;
   /// True when a nonzero difference is entirely accounted for by known

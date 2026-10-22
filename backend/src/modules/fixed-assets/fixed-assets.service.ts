@@ -4,10 +4,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AccountType, FixedAsset, FixedAssetStatus, Prisma } from '@prisma/client';
+import {
+  AccountType,
+  FixedAsset,
+  FixedAssetStatus,
+  InvoiceStatus,
+  Prisma,
+  StockDirection,
+} from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { PostingLine, PostingService } from '../accounting/posting.service';
@@ -56,7 +64,117 @@ export class FixedAssetsService {
     private readonly posting: PostingService,
     private readonly accountMap: AccountMapService,
     private readonly audit: AuditService,
+    private readonly warehouses: WarehouseService,
   ) {}
+
+  /**
+   * Resolves and bounds a purchase-line link inside the caller's
+   * transaction. A posted purchase already debited inventory (and
+   * claimed its VAT), so what may be capitalised from one line — in
+   * cost and in units, across every asset linked to it — is at most
+   * what the line itself received. That ceiling is what stops the
+   * same purchase from becoming an asset twice.
+   */
+  private async resolvePurchaseLink(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    input: {
+      purchaseInvoiceId?: string | null;
+      purchaseInvoiceLineId?: string | null;
+      purchaseQuantity?: string | null;
+      cost: Prisma.Decimal;
+      excludeAssetId?: string;
+    },
+  ): Promise<{
+    purchaseInvoiceId: string | null;
+    purchaseInvoiceLineId: string | null;
+    purchaseQuantity: Prisma.Decimal | null;
+    supplierIdHint: string | null;
+  }> {
+    if (!input.purchaseInvoiceLineId) {
+      return {
+        purchaseInvoiceId: input.purchaseInvoiceId ?? null,
+        purchaseInvoiceLineId: null,
+        purchaseQuantity: null,
+        supplierIdHint: null,
+      };
+    }
+    const line = await tx.purchaseInvoiceLine.findFirst({
+      where: {
+        id: input.purchaseInvoiceLineId,
+        invoice: { companyId, deletedAt: null },
+      },
+      include: {
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            status: true,
+            supplierId: true,
+            warehouseId: true,
+          },
+        },
+      },
+    });
+    if (!line) {
+      throw new BadRequestException('The purchase invoice line does not exist');
+    }
+    if (
+      input.purchaseInvoiceId &&
+      input.purchaseInvoiceId !== line.invoice.id
+    ) {
+      throw new BadRequestException(
+        'The purchase line belongs to a different invoice than the one given',
+      );
+    }
+    // What the line still holds after any posted returns against it.
+    const lineCost = (
+      line.inventoryCostTotal.isZero() && !line.lineTotal.isZero()
+        ? line.lineTotal
+        : line.inventoryCostTotal
+    ).minus(line.returnedCostTotal);
+    const lineQuantity = line.quantity.minus(line.returnedQuantity);
+    const others = await tx.fixedAsset.aggregate({
+      where: {
+        companyId,
+        purchaseInvoiceLineId: line.id,
+        deletedAt: null,
+        ...(input.excludeAssetId ? { id: { not: input.excludeAssetId } } : {}),
+      },
+      _sum: { cost: true, purchaseQuantity: true },
+    });
+    const usedCost = new Prisma.Decimal(others._sum.cost ?? 0);
+    const usedQty = new Prisma.Decimal(others._sum.purchaseQuantity ?? 0);
+    if (usedCost.plus(input.cost).greaterThan(lineCost)) {
+      throw new BadRequestException(
+        `Purchase line on ${line.invoice.invoiceNumber} received ${money(lineCost)} and ` +
+          `${money(usedCost)} of it is already capitalised in other assets; ` +
+          `this asset's ${money(input.cost)} would count the same purchase twice`,
+      );
+    }
+    const quantity =
+      input.purchaseQuantity != null && input.purchaseQuantity !== ''
+        ? this.amount(input.purchaseQuantity, 'purchaseQuantity')
+        : lineQuantity.minus(usedQty);
+    if (quantity.lessThanOrEqualTo(0)) {
+      throw new BadRequestException(
+        'The quantity capitalised from a purchase line must be greater than zero',
+      );
+    }
+    if (usedQty.plus(quantity).greaterThan(lineQuantity)) {
+      throw new BadRequestException(
+        `Purchase line on ${line.invoice.invoiceNumber} received ${money(lineQuantity)} unit(s) ` +
+          `(after returns) and ${money(usedQty)} are already capitalised; ` +
+          `${money(quantity)} more cannot come from it`,
+      );
+    }
+    return {
+      purchaseInvoiceId: line.invoice.id,
+      purchaseInvoiceLineId: line.id,
+      purchaseQuantity: quantity,
+      supplierIdHint: line.invoice.supplierId,
+    };
+  }
 
   // ------------------------------------------------------------ register
 
@@ -79,6 +197,12 @@ export class FixedAssetsService {
 
     const created = await this.prisma
       .$transaction(async (tx) => {
+        const link = await this.resolvePurchaseLink(tx, companyId, {
+          purchaseInvoiceId: dto.purchaseInvoiceId,
+          purchaseInvoiceLineId: dto.purchaseInvoiceLineId,
+          purchaseQuantity: dto.purchaseQuantity,
+          cost,
+        });
         const code =
           dto.code?.trim() ||
           (await this.numbers.next(tx, companyId, 'FIXED_ASSET', 'FA'));
@@ -93,8 +217,10 @@ export class FixedAssetsService {
             category: dto.category?.trim() || null,
             purchaseDate: this.date(dto.purchaseDate, 'purchaseDate'),
             inServiceDate: this.date(dto.inServiceDate, 'inServiceDate'),
-            supplierId: dto.supplierId ?? null,
-            purchaseInvoiceId: dto.purchaseInvoiceId ?? null,
+            supplierId: dto.supplierId ?? link.supplierIdHint,
+            purchaseInvoiceId: link.purchaseInvoiceId,
+            purchaseInvoiceLineId: link.purchaseInvoiceLineId,
+            purchaseQuantity: link.purchaseQuantity,
             cost,
             salvageValue,
             usefulLifeMonths: dto.usefulLifeMonths,
@@ -135,24 +261,40 @@ export class FixedAssetsService {
       where.status = status as FixedAssetStatus;
     }
     if (query.category) where.category = query.category;
+    if (query.location) {
+      where.location = { contains: query.location, mode: 'insensitive' };
+    }
+    if (query.costCenterId) where.costCenterId = query.costCenterId;
+    if (query.from || query.to) {
+      where.inServiceDate = {
+        ...(query.from ? { gte: this.date(query.from, 'from') } : {}),
+        ...(query.to ? { lte: this.date(query.to, 'to') } : {}),
+      };
+    }
     if (query.q) {
       where.OR = [
         { code: { contains: query.q, mode: 'insensitive' } },
         { nameEn: { contains: query.q, mode: 'insensitive' } },
         { nameAr: { contains: query.q } },
+        { location: { contains: query.q, mode: 'insensitive' } },
       ];
     }
     const assets = await this.prisma.fixedAsset.findMany({
       where,
       orderBy: { code: 'asc' },
     });
-    const accumulated = await this.accumulatedByAsset(
-      companyId,
-      assets.map((a) => a.id),
-    );
+    const ids = assets.map((a) => a.id);
+    const [accumulated, lastPeriods] = await Promise.all([
+      this.accumulatedByAsset(companyId, ids),
+      this.lastDepreciationByAsset(companyId, ids),
+    ]);
     return {
       items: assets.map((asset) =>
-        this.present(asset, accumulated.get(asset.id) ?? new Prisma.Decimal(0)),
+        this.present(
+          asset,
+          accumulated.get(asset.id) ?? new Prisma.Decimal(0),
+          lastPeriods.get(asset.id) ?? null,
+        ),
       ),
     };
   }
@@ -168,8 +310,33 @@ export class FixedAssetsService {
       (sum, row) => sum.plus(row.amount),
       new Prisma.Decimal(0),
     );
+    // Entry numbers, so the detail view can name the journal entries an
+    // accountant will go looking for instead of showing bare ids.
+    const entryIds = [
+      ...new Set(
+        [
+          asset.acquisitionJournalEntryId,
+          asset.disposalJournalEntryId,
+          ...rows.map((row) => row.journalEntryId),
+        ].filter((v): v is string => Boolean(v)),
+      ),
+    ];
+    const entries =
+      entryIds.length > 0
+        ? await this.prisma.journalEntry.findMany({
+            where: { id: { in: entryIds }, companyId },
+            select: { id: true, entryNumber: true },
+          })
+        : [];
+    const numberOf = new Map(entries.map((e) => [e.id, e.entryNumber]));
     return {
-      ...this.present(asset, accumulated),
+      ...this.present(asset, accumulated, rows.at(-1)?.periodKey ?? null),
+      acquisitionEntryNumber: asset.acquisitionJournalEntryId
+        ? (numberOf.get(asset.acquisitionJournalEntryId) ?? null)
+        : null,
+      disposalEntryNumber: asset.disposalJournalEntryId
+        ? (numberOf.get(asset.disposalJournalEntryId) ?? null)
+        : null,
       depreciations: rows.map((row) => ({
         id: row.id,
         period: row.periodKey,
@@ -178,6 +345,7 @@ export class FixedAssetsService {
         amount: money(row.amount),
         accumulatedAfter: money(row.accumulatedAfter),
         journalEntryId: row.journalEntryId,
+        entryNumber: numberOf.get(row.journalEntryId) ?? null,
       })),
     };
   }
@@ -206,7 +374,24 @@ export class FixedAssetsService {
       expenseAccountId: dto.expenseAccountId ?? asset.expenseAccountId,
     });
 
-    await this.prisma.fixedAsset.update({
+    await this.prisma.$transaction(async (tx) => {
+      const link = await this.resolvePurchaseLink(tx, companyId, {
+        purchaseInvoiceId:
+          dto.purchaseInvoiceId === undefined
+            ? asset.purchaseInvoiceId
+            : dto.purchaseInvoiceId,
+        purchaseInvoiceLineId:
+          dto.purchaseInvoiceLineId === undefined
+            ? asset.purchaseInvoiceLineId
+            : dto.purchaseInvoiceLineId,
+        purchaseQuantity:
+          dto.purchaseQuantity === undefined
+            ? asset.purchaseQuantity?.toString()
+            : dto.purchaseQuantity,
+        cost,
+        excludeAssetId: id,
+      });
+      await tx.fixedAsset.update({
       where: { id },
       data: {
         nameEn: dto.nameEn?.trim(),
@@ -219,8 +404,9 @@ export class FixedAssetsService {
           ? this.date(dto.inServiceDate, 'inServiceDate')
           : undefined,
         supplierId: dto.supplierId === undefined ? undefined : dto.supplierId,
-        purchaseInvoiceId:
-          dto.purchaseInvoiceId === undefined ? undefined : dto.purchaseInvoiceId,
+        purchaseInvoiceId: link.purchaseInvoiceId,
+        purchaseInvoiceLineId: link.purchaseInvoiceLineId,
+        purchaseQuantity: link.purchaseQuantity,
         cost,
         salvageValue,
         usefulLifeMonths: dto.usefulLifeMonths,
@@ -231,6 +417,7 @@ export class FixedAssetsService {
         location: dto.location === undefined ? undefined : dto.location?.trim() || null,
         updatedBy: userId,
       },
+      });
     });
     await this.audit.record({
       companyId,
@@ -287,11 +474,50 @@ export class FixedAssetsService {
       }
       const asset = await tx.fixedAsset.findUniqueOrThrow({ where: { id } });
       await this.assertPostableAccount(tx, companyId, dto.fundingAccountId, 'funding');
+      const entryDate = dto.date ? this.date(dto.date, 'date') : asset.purchaseDate;
+
+      // An asset capitalised from a purchase invoice has already been
+      // paid for once — by the invoice, into inventory. Activation is
+      // therefore a reclassification out of inventory, never a second
+      // cost: the invoice must be posted (a draft would debit inventory
+      // later, on top of the asset), and the funding side must be the
+      // inventory account itself.
+      let linkedInvoice: {
+        invoiceNumber: string;
+        warehouseId: string | null;
+      } | null = null;
+      if (asset.purchaseInvoiceId) {
+        const invoice = await tx.purchaseInvoice.findFirst({
+          where: { id: asset.purchaseInvoiceId, companyId, deletedAt: null },
+          select: { invoiceNumber: true, status: true, warehouseId: true },
+        });
+        if (!invoice) {
+          throw new BadRequestException(
+            'The linked purchase invoice no longer exists, so this asset cannot be activated against it',
+          );
+        }
+        if (invoice.status !== InvoiceStatus.POSTED) {
+          throw new BadRequestException(
+            `Purchase invoice ${invoice.invoiceNumber} is not posted yet. ` +
+              'Post it first — activating now would record the cost twice when the invoice posts.',
+          );
+        }
+        const accounts = await this.accountMap.resolve(tx, companyId, ['inventory']);
+        if (dto.fundingAccountId !== accounts.inventory) {
+          throw new BadRequestException(
+            `This asset came from purchase invoice ${invoice.invoiceNumber}, which already ` +
+              'debited the inventory account. Activate it against the inventory account ' +
+              'so the cost moves from stock to the asset instead of being recorded twice.',
+          );
+        }
+        linkedInvoice = invoice;
+      }
+
       const posted = await this.posting.post(tx, {
         companyId,
         branchId: asset.branchId,
         userId,
-        entryDate: dto.date ? this.date(dto.date, 'date') : asset.purchaseDate,
+        entryDate,
         description: `Asset acquisition ${asset.code} — ${asset.nameEn}`,
         sourceType: 'FIXED_ASSET',
         sourceId: asset.id,
@@ -305,6 +531,84 @@ export class FixedAssetsService {
         where: { id },
         data: { acquisitionJournalEntryId: posted.id },
       });
+
+      // The units leave stock in the same transaction, at exactly the
+      // cost being capitalised, so the stock valuation and the
+      // inventory account move together and keep agreeing.
+      if (asset.purchaseInvoiceLineId) {
+        const quantity = asset.purchaseQuantity;
+        if (!quantity || quantity.lessThanOrEqualTo(0)) {
+          throw new BadRequestException(
+            'This asset is linked to a purchase line but records no quantity to issue from stock',
+          );
+        }
+        const line = await tx.purchaseInvoiceLine.findFirst({
+          where: { id: asset.purchaseInvoiceLineId },
+          select: { itemId: true },
+        });
+        if (!line?.itemId) {
+          throw new BadRequestException(
+            'The linked purchase line has no stocked item to issue',
+          );
+        }
+        const warehouseId = await this.warehouses.resolve(
+          tx,
+          companyId,
+          asset.branchId,
+          linkedInvoice?.warehouseId ?? null,
+        );
+        const locked = await tx.$queryRaw<
+          Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
+        >(Prisma.sql`
+          SELECT "quantity", "value"
+            FROM "stock_balances"
+           WHERE "companyId" = ${companyId}::uuid
+             AND "branchId" = ${asset.branchId}::uuid
+             AND "itemId" = ${line.itemId}::uuid
+           FOR UPDATE
+        `);
+        const balance = locked[0] ?? null;
+        const qtyOnHand = balance?.quantity ?? new Prisma.Decimal(0);
+        const valueOnHand = balance?.value ?? new Prisma.Decimal(0);
+        if (qtyOnHand.lessThan(quantity) || valueOnHand.lessThan(asset.cost)) {
+          throw new BadRequestException(
+            `Cannot capitalise from stock: ${money(qtyOnHand)} unit(s) worth ${money(valueOnHand)} ` +
+              `are on hand, but this asset needs ${money(quantity)} unit(s) worth ${money(asset.cost)}. ` +
+              'The stock may already have been sold or moved.',
+          );
+        }
+        await tx.stockMovement.create({
+          data: {
+            companyId,
+            branchId: asset.branchId,
+            warehouseId,
+            itemId: line.itemId,
+            movementDate: entryDate,
+            direction: StockDirection.OUT,
+            quantity,
+            unitCost: asset.cost.div(quantity).toDecimalPlaces(MONEY_SCALE),
+            totalCost: asset.cost,
+            referenceType: 'FIXED_ASSET_ACTIVATION',
+            referenceId: asset.id,
+            referenceNumber: asset.code,
+            notes: `Capitalised as fixed asset ${asset.code}`,
+            createdBy: userId,
+          },
+        });
+        await tx.stockBalance.update({
+          where: {
+            companyId_branchId_itemId: {
+              companyId,
+              branchId: asset.branchId,
+              itemId: line.itemId,
+            },
+          },
+          data: {
+            quantity: { decrement: quantity },
+            value: { decrement: asset.cost },
+          },
+        });
+      }
       return posted;
     });
 
@@ -691,6 +995,97 @@ export class FixedAssetsService {
    * outside the register, in which case the difference is shown, not
    * absorbed.
    */
+  /**
+   * Purchase lines that can still be capitalised: posted invoices
+   * only (a draft never reached inventory), each line net of returns
+   * and of what other assets already took from it. This is the source
+   * list the register form offers, so what can be picked is exactly
+   * what the create-time guard will accept.
+   */
+  async purchaseLines(companyId: string) {
+    const invoices = await this.prisma.purchaseInvoice.findMany({
+      where: { companyId, deletedAt: null, status: InvoiceStatus.POSTED },
+      orderBy: [{ invoiceDate: 'desc' }, { createdAt: 'desc' }],
+      take: 50,
+      select: {
+        id: true,
+        invoiceNumber: true,
+        invoiceDate: true,
+        supplierId: true,
+        lines: {
+          orderBy: { lineNumber: 'asc' },
+          select: {
+            id: true,
+            itemId: true,
+            description: true,
+            quantity: true,
+            returnedQuantity: true,
+            lineTotal: true,
+            inventoryCostTotal: true,
+            returnedCostTotal: true,
+            item: { select: { code: true } },
+          },
+        },
+      },
+    });
+    const lineIds = invoices.flatMap((inv) => inv.lines.map((l) => l.id));
+    const used =
+      lineIds.length > 0
+        ? await this.prisma.fixedAsset.groupBy({
+            by: ['purchaseInvoiceLineId'],
+            where: {
+              companyId,
+              deletedAt: null,
+              purchaseInvoiceLineId: { in: lineIds },
+            },
+            _sum: { cost: true, purchaseQuantity: true },
+          })
+        : [];
+    const usedByLine = new Map(
+      used.map((u) => [
+        u.purchaseInvoiceLineId as string,
+        {
+          cost: new Prisma.Decimal(u._sum.cost ?? 0),
+          quantity: new Prisma.Decimal(u._sum.purchaseQuantity ?? 0),
+        },
+      ]),
+    );
+    const items: Array<Record<string, string | null>> = [];
+    for (const invoice of invoices) {
+      for (const line of invoice.lines) {
+        const lineCost = (
+          line.inventoryCostTotal.isZero() && !line.lineTotal.isZero()
+            ? line.lineTotal
+            : line.inventoryCostTotal
+        ).minus(line.returnedCostTotal);
+        const lineQuantity = line.quantity.minus(line.returnedQuantity);
+        const taken = usedByLine.get(line.id) ?? {
+          cost: new Prisma.Decimal(0),
+          quantity: new Prisma.Decimal(0),
+        };
+        const remainingCost = lineCost.minus(taken.cost);
+        const remainingQuantity = lineQuantity.minus(taken.quantity);
+        if (remainingCost.lessThanOrEqualTo(0)) continue;
+        items.push({
+          lineId: line.id,
+          invoiceId: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          invoiceDate: day(invoice.invoiceDate),
+          supplierId: invoice.supplierId,
+          itemId: line.itemId,
+          itemCode: line.item?.code ?? null,
+          description: line.description,
+          quantity: money(lineQuantity),
+          capitalizedCost: money(taken.cost),
+          capitalizedQuantity: money(taken.quantity),
+          remainingCost: money(remainingCost),
+          remainingQuantity: money(remainingQuantity),
+        });
+      }
+    }
+    return { items };
+  }
+
   async summary(companyId: string) {
     const assets = await this.prisma.fixedAsset.findMany({
       where: { companyId, deletedAt: null },
@@ -808,7 +1203,11 @@ export class FixedAssetsService {
     return branchId;
   }
 
-  private present(asset: FixedAsset, accumulated: Prisma.Decimal) {
+  private present(
+    asset: FixedAsset,
+    accumulated: Prisma.Decimal,
+    lastDepreciationPeriod: string | null = null,
+  ) {
     return {
       id: asset.id,
       code: asset.code,
@@ -820,6 +1219,10 @@ export class FixedAssetsService {
       inServiceDate: day(asset.inServiceDate),
       supplierId: asset.supplierId,
       purchaseInvoiceId: asset.purchaseInvoiceId,
+      purchaseInvoiceLineId: asset.purchaseInvoiceLineId,
+      purchaseQuantity:
+        asset.purchaseQuantity !== null ? money(asset.purchaseQuantity) : null,
+      lastDepreciationPeriod,
       cost: money(asset.cost),
       salvageValue: money(asset.salvageValue),
       usefulLifeMonths: asset.usefulLifeMonths,
@@ -848,6 +1251,24 @@ export class FixedAssetsService {
     });
     if (!asset) throw new NotFoundException('Fixed asset not found');
     return asset;
+  }
+
+  /** The most recent month each asset was charged for, for the register. */
+  private async lastDepreciationByAsset(
+    companyId: string,
+    assetIds: string[],
+  ): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    if (assetIds.length === 0) return result;
+    const rows = await this.prisma.assetDepreciation.groupBy({
+      by: ['assetId'],
+      where: { companyId, assetId: { in: assetIds } },
+      _max: { periodKey: true },
+    });
+    for (const row of rows) {
+      if (row._max.periodKey) result.set(row.assetId, row._max.periodKey);
+    }
+    return result;
   }
 
   private async accumulatedByAsset(

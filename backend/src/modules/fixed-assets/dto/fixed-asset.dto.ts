@@ -29,6 +29,12 @@ export class CreateFixedAssetDto {
 
   @IsOptional() @IsUUID() supplierId?: string;
   @IsOptional() @IsUUID() purchaseInvoiceId?: string;
+  /// The purchase line this asset is capitalised from. Bounds the cost
+  /// and quantity that may be capitalised from that line in total.
+  @IsOptional() @IsUUID() purchaseInvoiceLineId?: string;
+  /// How many of the line's units this asset represents. Defaults to
+  /// whatever of the line is not yet capitalised.
+  @IsOptional() @IsString() @MaxLength(32) purchaseQuantity?: string;
 
   /// Money travels as strings, the way every amount in this API does, so a
   /// JSON number never gets to round an asset's cost.
@@ -54,6 +60,8 @@ export class UpdateFixedAssetDto {
   @IsOptional() @IsDateString() inServiceDate?: string;
   @IsOptional() @IsUUID() supplierId?: string | null;
   @IsOptional() @IsUUID() purchaseInvoiceId?: string | null;
+  @IsOptional() @IsUUID() purchaseInvoiceLineId?: string | null;
+  @IsOptional() @IsString() @MaxLength(32) purchaseQuantity?: string | null;
   @IsOptional() @IsString() @MaxLength(32) cost?: string;
   @IsOptional() @IsString() @MaxLength(32) salvageValue?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(1200)
@@ -100,6 +108,11 @@ export class ListFixedAssetsDto {
   @IsOptional() @IsString() @MaxLength(100) q?: string;
   @IsOptional() @IsString() @MaxLength(20) status?: string;
   @IsOptional() @IsString() @MaxLength(60) category?: string;
+  @IsOptional() @IsString() @MaxLength(200) location?: string;
+  @IsOptional() @IsUUID() costCenterId?: string;
+  /// In-service date range, inclusive on both ends.
+  @IsOptional() @IsDateString() from?: string;
+  @IsOptional() @IsDateString() to?: string;
 }
 
 export class ListDepreciationRunsDto {

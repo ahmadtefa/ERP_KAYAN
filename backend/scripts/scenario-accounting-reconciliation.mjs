@@ -1197,7 +1197,187 @@ async function main() {
     );
   }
 
-  // ── 19. the whole company, backed up and put back ──────────────────────
+  // ── 19. capitalising a purchase line: bounded, inventory-funded ────────
+  const machineItem = await must('create a stocked machine item', '/inventory/items', {
+    method: 'POST',
+    json: {
+      code: `REC-MCH-${stamp}`,
+      nameEn: `Machine unit ${stamp}`,
+      nameAr: `وحدة ماكينة ${stamp}`,
+      unit: 'PCS',
+      isStockTracked: true,
+      salePrice: '600',
+      purchasePrice: '600',
+    },
+  });
+  const machinePurchase = await must('buy two machine units at 600', '/purchases/invoices', {
+    method: 'POST',
+    json: {
+      invoiceDate: '2025-03-01',
+      supplierId: supplier.id,
+      lines: [{ itemId: machineItem.id, quantity: '2', unitPrice: '600' }],
+    },
+  });
+  if (machinePurchase) {
+    await must('post the machine purchase', `/purchases/invoices/${machinePurchase.id}/post`, {
+      method: 'POST',
+    });
+    const machineLineId = (await api(`/purchases/invoices/${machinePurchase.id}`)).data?.lines?.[0]?.id;
+    const offered = ((await api('/fixed-assets/purchase-lines')).data?.items ?? []).find(
+      (l) => l.lineId === machineLineId,
+    );
+    check(
+      'the purchase line is offered for capitalisation with its full remainder',
+      offered !== undefined && near(offered.remainingCost, 1200) && near(offered.remainingQuantity, 2),
+      `offered ${JSON.stringify(offered)}`,
+    );
+    const assetBody = {
+      nameAr: `ماكينة ${stamp}`,
+      purchaseDate: '2025-03-01',
+      inServiceDate: '2025-03-01',
+      salvageValue: '0',
+      usefulLifeMonths: 12,
+      assetAccountId: assetLedger.id,
+      accumulatedAccountId: accumLedger.id,
+      expenseAccountId: deprLedger.id,
+      location: 'Plant 7',
+    };
+    const machineOne = await must('capitalise one unit off the purchase line', '/fixed-assets', {
+      method: 'POST',
+      json: {
+        ...assetBody,
+        code: `FA-M1-${stamp}`,
+        nameEn: `Machine one ${stamp}`,
+        cost: '600',
+        purchaseInvoiceLineId: machineLineId,
+        purchaseQuantity: '1',
+      },
+    });
+    check(
+      'the asset records the invoice, the line and the quantity it took',
+      machineOne?.purchaseInvoiceId === machinePurchase.id &&
+        machineOne?.purchaseInvoiceLineId === machineLineId &&
+        near(machineOne?.purchaseQuantity, 1),
+      `asset ${JSON.stringify(machineOne)}`.slice(0, 200),
+    );
+    await mustRefuse(
+      'capitalising more cost than the line still holds is refused',
+      '/fixed-assets',
+      {
+        method: 'POST',
+        json: {
+          ...assetBody,
+          code: `FA-MX-${stamp}`,
+          nameEn: `Machine excess ${stamp}`,
+          cost: '700',
+          purchaseInvoiceLineId: machineLineId,
+          purchaseQuantity: '1',
+        },
+      },
+    );
+    const machineTwo = await must('capitalise the second unit', '/fixed-assets', {
+      method: 'POST',
+      json: {
+        ...assetBody,
+        code: `FA-M2-${stamp}`,
+        nameEn: `Machine two ${stamp}`,
+        cost: '600',
+        purchaseInvoiceLineId: machineLineId,
+        purchaseQuantity: '1',
+      },
+    });
+    await mustRefuse(
+      'a fully capitalised line cannot be capitalised a third time',
+      '/fixed-assets',
+      {
+        method: 'POST',
+        json: {
+          ...assetBody,
+          code: `FA-M3-${stamp}`,
+          nameEn: `Machine three ${stamp}`,
+          cost: '1',
+          purchaseInvoiceLineId: machineLineId,
+          purchaseQuantity: '1',
+        },
+      },
+    );
+    check(
+      'the exhausted line is no longer offered',
+      ((await api('/fixed-assets/purchase-lines')).data?.items ?? []).every(
+        (l) => l.lineId !== machineLineId,
+      ),
+    );
+    const machineStock = async () => {
+      const data = (await api(`/inventory/stock?itemId=${machineItem.id}`)).data;
+      const rows = Array.isArray(data) ? data : data?.items ?? data?.balances ?? [];
+      return rows.find((r) => r.itemId === machineItem.id || r.item?.id === machineItem.id);
+    };
+    await mustRefuse(
+      'activating a purchase-linked asset against anything but inventory is refused',
+      `/fixed-assets/${machineOne.id}/activate`,
+      { method: 'POST', json: { fundingAccountId: code('1103') } },
+    );
+    await must('activate the first machine against inventory', `/fixed-assets/${machineOne.id}/activate`, {
+      method: 'POST',
+      json: { fundingAccountId: code('1104') },
+    });
+    const afterOne = await machineStock();
+    check(
+      'one unit and exactly the capitalised cost left stock',
+      near(afterOne?.quantity, 1) && near(afterOne?.value, 600),
+      `stock ${JSON.stringify(afterOne)}`,
+    );
+    check(
+      'inventory still reconciles after the reclassification',
+      section(await centre(), 'inventory')?.status === 'matched',
+      `inventory ${JSON.stringify(section(await centre(), 'inventory'))}`,
+    );
+    await must('activate the second machine against inventory', `/fixed-assets/${machineTwo.id}/activate`, {
+      method: 'POST',
+      json: { fundingAccountId: code('1104') },
+    });
+    const afterTwo = await machineStock();
+    check(
+      "the second activation empties the line's stock exactly",
+      near(afterTwo?.quantity, 0) && near(afterTwo?.value, 0),
+      `stock ${JSON.stringify(afterTwo)}`,
+    );
+    // A draft purchase must never fund an activation.
+    const draftPurchase = await must('a further purchase, left as a draft', '/purchases/invoices', {
+      method: 'POST',
+      json: {
+        invoiceDate: '2025-03-02',
+        supplierId: supplier.id,
+        lines: [{ itemId: machineItem.id, quantity: '1', unitPrice: '50' }],
+      },
+    });
+    const draftLineId = (await api(`/purchases/invoices/${draftPurchase.id}`)).data?.lines?.[0]?.id;
+    const draftFunded = await must('register an asset against the draft line', '/fixed-assets', {
+      method: 'POST',
+      json: {
+        ...assetBody,
+        code: `FA-MD-${stamp}`,
+        nameEn: `Draft-funded machine ${stamp}`,
+        cost: '50',
+        purchaseInvoiceLineId: draftLineId,
+        purchaseQuantity: '1',
+      },
+    });
+    await mustRefuse(
+      'activating against an unposted purchase is refused',
+      `/fixed-assets/${draftFunded.id}/activate`,
+      { method: 'POST', json: { fundingAccountId: code('1104') } },
+    );
+    const byLocation = (await api('/fixed-assets?location=plant')).data;
+    check(
+      'assets filter by location and expose their last depreciation period',
+      (byLocation?.items ?? []).some((a) => a.id === machineOne.id) &&
+        'lastDepreciationPeriod' in (byLocation?.items?.[0] ?? {}),
+      `found ${(byLocation?.items ?? []).map((a) => a.code).join(',')}`,
+    );
+  }
+
+  // ── 20. the whole company, backed up and put back ──────────────────────
   const backup = (await api('/backup/download')).data;
   check(
     'the company backup carries the fixed-asset and depreciation tables',

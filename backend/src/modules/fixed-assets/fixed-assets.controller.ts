@@ -47,6 +47,12 @@ export class FixedAssetsController {
     return this.service.summary(user.companyId);
   }
 
+  @Get('purchase-lines')
+  @RequirePermissions('accounting.fixedassets.read')
+  purchaseLines(@CurrentUser() user: AuthUser) {
+    return this.service.purchaseLines(user.companyId);
+  }
+
   @Get()
   @RequirePermissions('accounting.fixedassets.read')
   findAll(@CurrentUser() user: AuthUser, @Query() query: ListFixedAssetsDto) {
