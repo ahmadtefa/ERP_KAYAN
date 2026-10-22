@@ -117,6 +117,20 @@ class _FakeApiClient extends ApiClient {
         'items': assets,
       };
     }
+    if (path == '/fixed-assets/purchase-lines') {
+      return {
+        'items': [
+          {
+            'lineId': 'line-9',
+            'invoiceId': 'inv-9',
+            'invoiceNumber': 'PI-9',
+            'description': 'Press unit',
+            'remainingQuantity': '2.0000',
+            'remainingCost': '1200.0000',
+          },
+        ],
+      };
+    }
     return {};
   }
 
@@ -170,7 +184,10 @@ const _user = AppUser(
   ],
 );
 
-Future<_FakeApiClient> _pump(WidgetTester tester) async {
+Future<_FakeApiClient> _pump(
+  WidgetTester tester, {
+  List<Override> extra = const [],
+}) async {
   tester.view.physicalSize = const Size(1500, 950);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -182,6 +199,7 @@ Future<_FakeApiClient> _pump(WidgetTester tester) async {
       overrides: [
         apiClientProvider.overrideWithValue(api),
         currentUserProvider.overrideWithValue(_user),
+        ...extra,
       ],
       child: const MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -299,5 +317,44 @@ void main() {
       (activations.single.body! as Map)['fundingAccountId'],
       'acc-cash',
     );
+  });
+
+  testWidgets('a deposited purchase line opens the create form prefilled', (
+    tester,
+  ) async {
+    // The purchase-invoice side of "create asset from this line" only
+    // deposits values and navigates; this is the receiving half.
+    await _pump(
+      tester,
+      extra: [
+        assetPrefillProvider.overrideWith(
+          (ref) => {
+            'purchaseInvoiceLineId': 'line-9',
+            'purchaseQuantity': '2',
+            'cost': '1200',
+            'purchaseDate': '2025-03-01',
+            'inServiceDate': '2025-03-01',
+            'nameEn': 'Press unit',
+            'nameAr': 'وحدة كبس',
+          },
+        ),
+      ],
+    );
+
+    expect(find.byType(AlertDialog), findsOneWidget,
+        reason: 'the create form opens on arrival');
+    final fieldTexts = tester
+        .widgetList<TextField>(find.byType(TextField))
+        .map((field) => field.controller?.text ?? '')
+        .toList();
+    expect(fieldTexts, contains('1200'),
+        reason: 'the remaining line cost is prefilled');
+    expect(fieldTexts, contains('Press unit'));
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    // And nothing was created by merely arriving with a prefill.
+    expect(find.text('FA-M-1'), findsOneWidget);
   });
 }

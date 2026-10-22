@@ -37,6 +37,12 @@ final fixedAssetsSummaryProvider = FutureProvider<Json>((ref) async {
   return ref.read(apiClientProvider).get('/fixed-assets/reports/summary');
 });
 
+/// A one-shot hand-off into the create form: another screen (a purchase
+/// invoice line) deposits the values it already knows, navigates here,
+/// and the register opens its form prefilled, then clears this so the
+/// next ordinary visit starts blank.
+final assetPrefillProvider = StateProvider<Json?>((ref) => null);
+
 class FixedAssetsScreen extends ConsumerStatefulWidget {
   const FixedAssetsScreen({super.key});
 
@@ -52,6 +58,18 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
 
   String _t(String ar, String en) =>
       Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final prefill = ref.read(assetPrefillProvider);
+      if (prefill != null && mounted) {
+        ref.read(assetPrefillProvider.notifier).state = null;
+        _save(prefill: prefill);
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -78,14 +96,20 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
         .toList();
   }
 
-  Future<void> _save({Json? existing}) async {
+  Future<void> _save({Json? existing, Json? prefill}) async {
     final l10n = context.l10n;
     final isEdit = existing != null;
     final accounts = await _accounts();
     // Purchase lines that can still be capitalised. The list comes from
     // the server already net of returns and of other assets, so what
     // can be picked here is exactly what the create guard will accept.
-    final purchaseLineOptions = <FieldOption>[];
+    // The empty first option is how a draft's link is removed: choosing
+    // it sends explicit nulls, which only a draft may do — the server
+    // refuses edits to an activated asset altogether, so accounting
+    // history is never rewritten from this form.
+    final purchaseLineOptions = <FieldOption>[
+      FieldOption('', _t('— بلا ربط —', '— No link —')),
+    ];
     try {
       final body = await ref
           .read(apiClientProvider)
@@ -103,7 +127,8 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
     } on Failure {
       // The link is optional; the form still works without the list.
     }
-    final currentLine = existing?['purchaseInvoiceLineId']?.toString();
+    final currentLine =
+        (existing ?? prefill)?['purchaseInvoiceLineId']?.toString();
     if (currentLine != null &&
         !purchaseLineOptions.any((o) => o.value == currentLine)) {
       purchaseLineOptions.add(
@@ -183,14 +208,25 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
           kind: FieldKind.decimal,
         ),
       ],
-      initial: existing,
+      initial: existing ?? prefill,
     );
     if (values == null || !mounted) return;
+    // Captured before the cleanup below: on an edit, choosing "No link"
+    // is an instruction to unlink, which must travel as explicit nulls
+    // (absence would mean "keep the old link").
+    final chosenLine = values['purchaseInvoiceLineId']?.toString() ?? '';
     // Empty optionals travel as absence, not as empty strings the API
     // would have to guess at.
     values.removeWhere(
       (key, value) => value == null || (value is String && value.trim().isEmpty),
     );
+    if (isEdit &&
+        chosenLine.isEmpty &&
+        (existing['purchaseInvoiceLineId']?.toString() ?? '').isNotEmpty) {
+      values['purchaseInvoiceLineId'] = null;
+      values['purchaseInvoiceId'] = null;
+      values['purchaseQuantity'] = null;
+    }
 
     setState(() => _busy = true);
     try {

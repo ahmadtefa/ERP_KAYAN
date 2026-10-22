@@ -1466,6 +1466,103 @@ async function main() {
         'lastDepreciationPeriod' in (byLocation?.items?.[0] ?? {}),
       `found ${(byLocation?.items ?? []).map((a) => a.code).join(',')}`,
     );
+
+    // Concurrency and link editing, on a fresh line of three units at 100.
+    const racePurchase = await must('buy three more units at 100', '/purchases/invoices', {
+      method: 'POST',
+      json: {
+        invoiceDate: '2025-03-05',
+        supplierId: supplier.id,
+        lines: [{ itemId: machineItem.id, quantity: '3', unitPrice: '100' }],
+      },
+    });
+    await must('post the race purchase', `/purchases/invoices/${racePurchase.id}/post`, {
+      method: 'POST',
+    });
+    const raceLineId = (await api(`/purchases/invoices/${racePurchase.id}`)).data?.lines?.[0]?.id;
+    const raceBody = (codeLabel) => ({
+      method: 'POST',
+      json: {
+        ...assetBody,
+        code: codeLabel,
+        nameEn: `Race machine ${codeLabel}`,
+        cost: '300',
+        purchaseInvoiceLineId: raceLineId,
+        purchaseQuantity: '3',
+      },
+    });
+    // Two requests at once, each asking for the whole line: the row
+    // lock makes exactly one of them see an empty line.
+    const attempts = await Promise.all([
+      api('/fixed-assets', raceBody(`FA-R1-${stamp}`)),
+      api('/fixed-assets', raceBody(`FA-R2-${stamp}`)),
+    ]);
+    check(
+      'two simultaneous capitalisations of one line cannot both succeed',
+      attempts.filter((r) => r.status >= 200 && r.status < 300).length === 1 &&
+        attempts.filter((r) => r.status >= 400).length === 1,
+      `statuses ${attempts.map((r) => r.status).join('/')}`,
+    );
+    const winner = attempts.find((r) => r.status < 300).data;
+
+    // A draft may change its mind: unlinking frees the line completely.
+    const unlinked = await must('unlink the winning draft', `/fixed-assets/${winner.id}`, {
+      method: 'PATCH',
+      json: {
+        purchaseInvoiceLineId: null,
+        purchaseInvoiceId: null,
+        purchaseQuantity: null,
+      },
+    });
+    check(
+      'unlinking a draft clears invoice, line and quantity',
+      unlinked?.purchaseInvoiceLineId === null &&
+        unlinked?.purchaseInvoiceId === null &&
+        (unlinked?.purchaseQuantity ?? null) === null,
+      `asset ${JSON.stringify(unlinked)}`.slice(0, 160),
+    );
+    const second = await must('capitalise the freed line with a new draft', '/fixed-assets', {
+      method: 'POST',
+      json: {
+        ...assetBody,
+        code: `FA-R3-${stamp}`,
+        nameEn: `Race machine three ${stamp}`,
+        cost: '300',
+        purchaseInvoiceLineId: raceLineId,
+        purchaseQuantity: '3',
+      },
+    });
+
+    // The unlinked draft is an ordinary cash-funded asset now, and its
+    // activation must not touch the three units in stock.
+    await must('activate the unlinked draft against cash', `/fixed-assets/${winner.id}/activate`, {
+      method: 'POST',
+      json: { fundingAccountId: cashLedger.id, date: '2025-03-06' },
+    });
+    const afterCashActivation = await machineStock();
+    check(
+      'a cash-funded activation leaves the stock alone (3 units, 300)',
+      near(afterCashActivation?.quantity, 3) && near(afterCashActivation?.value, 300),
+      `stock ${JSON.stringify(afterCashActivation)}`,
+    );
+    await mustRefuse(
+      'changing the link of an activated asset is refused',
+      `/fixed-assets/${winner.id}`,
+      { method: 'PATCH', json: { purchaseInvoiceLineId: raceLineId } },
+    );
+
+    // The linked draft activates the proper way and empties the stock.
+    await must('activate the linked draft against inventory', `/fixed-assets/${second.id}/activate`, {
+      method: 'POST',
+      json: { fundingAccountId: code('1104') },
+    });
+    const afterLinkedActivation = await machineStock();
+    check(
+      'and the linked activation takes exactly its 3 units and 300 out',
+      near(afterLinkedActivation?.quantity, 0) && near(afterLinkedActivation?.value, 0) &&
+        section(await centre(), 'inventory')?.status === 'matched',
+      `stock ${JSON.stringify(afterLinkedActivation)}`,
+    );
   }
 
   // ── 20. the whole company, backed up and put back ──────────────────────
@@ -1514,10 +1611,12 @@ async function main() {
     const restoredRegister = (await api('/fixed-assets/reports/summary')).data;
     check(
       // Tool 1,200 + press 1,200 + the two machines capitalised in §19
-      // at 600 each. Accumulated: the tool's full 1,000 depreciable base
-      // plus the press's single 100 charge; the machines were never run.
+      // at 600 each + the two race assets of §19 at 300 each (one
+      // cash-funded after unlinking, one inventory-funded). Accumulated:
+      // the tool's full 1,000 depreciable base plus the press's single
+      // 100 charge; none of the machines was ever depreciated.
       'after restore, the register still ties to the ledger (tool + press + machines)',
-      near(restoredRegister?.totals?.cost, 3600) &&
+      near(restoredRegister?.totals?.cost, 4200) &&
         near(restoredRegister?.totals?.accumulatedDepreciation, 1100) &&
         (restoredRegister?.assetAccounts ?? []).every((r) => near(r.difference, 0)) &&
         (restoredRegister?.accumulatedAccounts ?? []).every((r) => near(r.difference, 0)),

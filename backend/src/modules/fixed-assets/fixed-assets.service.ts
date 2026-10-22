@@ -119,6 +119,15 @@ export class FixedAssetsService {
     if (!line) {
       throw new BadRequestException('The purchase invoice line does not exist');
     }
+    // Serialize capitalisations of this one line. The cumulative check
+    // below reads what other assets already took; without the row lock
+    // two concurrent creates could both read "nothing taken yet" and
+    // together capitalise more than the line ever received.
+    await tx.$queryRaw(Prisma.sql`
+      SELECT "id" FROM "purchase_invoice_lines"
+       WHERE "id" = ${line.id}::uuid
+       FOR UPDATE
+    `);
     if (
       input.purchaseInvoiceId &&
       input.purchaseInvoiceId !== line.invoice.id
