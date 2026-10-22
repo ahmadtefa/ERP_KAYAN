@@ -678,26 +678,56 @@ async function main() {
   );
 
   // ── 8. the new reports export as real files ────────────────────────────
-  for (const [slug, format] of [
-    ['fixed-assets', 'xlsx'],
-    ['fixed-assets', 'pdf'],
-    ['depreciation', 'xlsx'],
-    ['receivables-reconciliation', 'xlsx'],
-    ['cash-flow', 'pdf'],
-    ['equity-changes', 'xlsx'],
-  ]) {
-    // Downloads authenticate with a one-time ticket, the way the
-    // browser gets them (see api-check).
+  // Downloads authenticate with a one-time ticket, the way the browser
+  // gets them (see api-check). Server-side PDF needs a browser binary;
+  // where the server has none, the printable page is the PDF path, and
+  // that is what gets asserted instead of a success that did not happen.
+  const ticketed = async (path) => {
     const minted = await api('/auth/download-ticket', { method: 'POST' });
+    return `${path}${path.includes('?') ? '&' : '?'}ticket=${encodeURIComponent(minted.data?.ticket ?? '')}`;
+  };
+  for (const slug of [
+    'fixed-assets',
+    'depreciation',
+    'receivables-reconciliation',
+    'payables-reconciliation',
+    'cash-flow',
+    'equity-changes',
+  ]) {
     const file = await api(
-      `/exports/${slug}/download?format=${format}&lang=en&from=${YEAR_FROM}&to=${YEAR_TO}&ticket=${encodeURIComponent(minted.data?.ticket ?? '')}`,
+      await ticketed(`/exports/${slug}/download?format=xlsx&lang=en&from=${YEAR_FROM}&to=${YEAR_TO}`),
       { binary: true, noAuth: true },
     );
     check(
-      `export ${slug} as ${format} produces a real file`,
+      `export ${slug} as xlsx produces a real file`,
       file.status === 200 && file.bytes > 200,
       `status ${file.status}, ${file.bytes} bytes, ${file.contentType}`,
     );
+  }
+  const capabilities = (await api('/exports/capabilities')).data;
+  const pdfOffered = (capabilities?.formats ?? []).includes('pdf');
+  for (const slug of ['fixed-assets', 'cash-flow']) {
+    if (pdfOffered) {
+      const file = await api(
+        await ticketed(`/exports/${slug}/pdf?lang=en&from=${YEAR_FROM}&to=${YEAR_TO}`),
+        { binary: true, noAuth: true },
+      );
+      check(
+        `export ${slug} as a server-made PDF produces a real file`,
+        file.status === 200 && file.bytes > 200 && file.contentType.includes('pdf'),
+        `status ${file.status}, ${file.bytes} bytes, ${file.contentType}`,
+      );
+    } else {
+      const page = await api(
+        await ticketed(`/exports/${slug}/print?lang=en&from=${YEAR_FROM}&to=${YEAR_TO}`),
+        { binary: true, noAuth: true },
+      );
+      check(
+        `export ${slug}: no server browser here, so the printable page (the PDF path) answers`,
+        page.status === 200 && page.contentType.includes('html') && page.bytes > 200,
+        `status ${page.status}, ${page.bytes} bytes, ${page.contentType}`,
+      );
+    }
   }
 
   // ── 9. close the year; the next opens on its balances ──────────────────
