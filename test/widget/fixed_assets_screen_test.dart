@@ -187,8 +187,9 @@ const _user = AppUser(
 Future<_FakeApiClient> _pump(
   WidgetTester tester, {
   List<Override> extra = const [],
+  Size size = const Size(1500, 950),
 }) async {
-  tester.view.physicalSize = const Size(1500, 950);
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -357,4 +358,20 @@ void main() {
     // And nothing was created by merely arriving with a prefill.
     expect(find.text('FA-M-1'), findsOneWidget);
   });
+
+  for (final size in [const Size(390, 844), const Size(320, 700)]) {
+    testWidgets('the register is readable at ${size.width}px wide', (
+      tester,
+    ) async {
+      await _pump(tester, size: size);
+
+      expect(tester.takeException(), isNull,
+          reason: 'no overflow on a phone-width register');
+      // The card stacks label over value, so the figures are on screen
+      // whole — no sideways hunt for a book value.
+      expect(find.text('FA-M-1'), findsOneWidget);
+      expect(find.textContaining('114,600'), findsWidgets);
+      expect(find.textContaining('120,000'), findsWidgets);
+    });
+  }
 }

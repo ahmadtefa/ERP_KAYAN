@@ -203,8 +203,11 @@ const _user = AppUser(
   permissions: ['reports.read', 'accounting.fixedassets.read'],
 );
 
-Future<_FakeApiClient> _pump(WidgetTester tester) async {
-  tester.view.physicalSize = const Size(1500, 950);
+Future<_FakeApiClient> _pump(
+  WidgetTester tester, {
+  Size size = const Size(1500, 950),
+}) async {
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -306,5 +309,26 @@ void main() {
     expect(find.text('Receivables reconciliation'), findsWidgets);
     expect(find.text('Inventory reconciliation'), findsOneWidget);
     expect(find.textContaining('-25.00'), findsOneWidget);
+  });
+
+  testWidgets('the trial balance is readable on a 390px phone', (tester) async {
+    await _pump(tester, size: const Size(390, 844));
+
+    expect(tester.takeException(), isNull,
+        reason: 'no overflow in the phone-width trial balance');
+    expect(find.text('1101.REC'), findsWidgets);
+    expect(find.textContaining('148,351'), findsWidgets);
+  });
+
+  testWidgets('the reconciliation centre is readable on a 320px phone', (
+    tester,
+  ) async {
+    await _pump(tester, size: const Size(320, 700));
+    await _openTab(tester, 'Reconciliation center');
+
+    expect(tester.takeException(), isNull,
+        reason: 'no overflow in the phone-width centre');
+    expect(find.text('Matched'), findsWidgets);
+    expect(find.textContaining('-25.00'), findsWidgets);
   });
 }
