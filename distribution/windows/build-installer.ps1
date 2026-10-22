@@ -193,6 +193,7 @@ Get-ChildItem $nodeFolder.FullName -Filter 'LICENSE*' -File -ErrorAction Silentl
 Write-Host '[5/8] Add database lifecycle and first-run setup scripts'
 Copy-Item (Join-Path $PSScriptRoot 'install-runtime.ps1') $app
 Copy-Item (Join-Path $PSScriptRoot 'repair-runtime.ps1') $app
+Copy-Item (Join-Path $PSScriptRoot 'reset-kayan.ps1') $app
 Copy-Item (Join-Path $PSScriptRoot 'repair-kayan.bat') $app
 Copy-Item (Join-Path $PSScriptRoot 'remove-runtime.ps1') $app
 Copy-Item (Join-Path $PSScriptRoot 'database-control.ps1') $app
@@ -212,7 +213,7 @@ $repairToolExe = Join-Path $app 'RepairTool.exe'
 if (-not (Test-Path -LiteralPath $repairToolExe)) { throw 'RepairTool.exe was not produced by the C# compiler.' }
 
 Write-Host '[6/8] Verify staged runtime essentials and absence of development .env'
-$required = @('erp_kayan.exe','backend\dist\src\main.js','backend\dist\prisma\seed.js','backend\scripts\prepare-database.mjs','backend\demo-data\kayan-company-backup-demo.json','backend\node\node.exe','backend\postgres\bin\pg_ctl.exe','backend\postgres\bin\pg_isready.exe','backend\postgres\bin\initdb.exe','backend\postgres\bin\psql.exe','build\web\index.html','install-runtime.ps1','repair-runtime.ps1','repair-kayan.bat','remove-runtime.ps1','database-control.ps1','UnelevatedProcess.cs','RepairTool.exe','prerequisites\vc_redist.x64.exe')
+$required = @('erp_kayan.exe','backend\dist\src\main.js','backend\dist\prisma\seed.js','backend\scripts\prepare-database.mjs','backend\scripts\database-state.mjs','backend\demo-data\kayan-company-backup-demo.json','backend\node\node.exe','backend\postgres\bin\pg_ctl.exe','backend\postgres\bin\pg_isready.exe','backend\postgres\bin\initdb.exe','backend\postgres\bin\psql.exe','backend\postgres\bin\pg_dump.exe','backend\postgres\bin\pg_restore.exe','build\web\index.html','install-runtime.ps1','repair-runtime.ps1','reset-kayan.ps1','repair-kayan.bat','remove-runtime.ps1','database-control.ps1','UnelevatedProcess.cs','RepairTool.exe','prerequisites\vc_redist.x64.exe')
 foreach ($item in $required) { if (-not (Test-Path (Join-Path $app $item))) { throw "Staged package is missing $item" } }
 $secretEnvironmentFiles = Get-ChildItem -LiteralPath $app -Force -File -Recurse | Where-Object { $_.Name -eq '.env' -or $_.Name -like '.env.*' }
 if ($secretEnvironmentFiles) { throw 'Environment files are forbidden in the installer package.' }

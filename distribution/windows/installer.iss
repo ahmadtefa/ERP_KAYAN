@@ -51,6 +51,12 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdi
 Name: "{group}\KAYAN ERP"; Filename: "{app}\erp_kayan.exe"; WorkingDir: "{app}"
 Name: "{group}\Repair KAYAN ERP"; Filename: "{app}\RepairTool.exe"; WorkingDir: "{app}"
 Name: "{group}\Repair KAYAN ERP (command line)"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\repair-runtime.ps1"""; WorkingDir: "{app}"
+; Safe reset is a separate, manual tool: it is never run by Setup, by an
+; update, by Repair or by the program. It requires typing RESET, takes a
+; verified backup first, creates a NEW database beside the old one (the
+; old database is never emptied or deleted), and only then points the
+; settings at it - with automatic rollback if verification fails.
+Name: "{group}\Reset KAYAN ERP (start fresh)"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\reset-kayan.ps1"""; WorkingDir: "{app}"
 Name: "{group}\Start PostgreSQL"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\database-control.ps1"" -Action start"; WorkingDir: "{app}"
 Name: "{group}\Stop PostgreSQL"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\database-control.ps1"" -Action stop"; WorkingDir: "{app}"
 Name: "{group}\Restart PostgreSQL"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\database-control.ps1"" -Action restart"; WorkingDir: "{app}"
