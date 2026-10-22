@@ -323,16 +323,27 @@ void main() {
   testWidgets('the reconciliation centre is readable on a 320px phone', (
     tester,
   ) async {
-    await _pump(tester, size: const Size(320, 700));
-    await _openTab(tester, 'Reconciliation center');
-
-    final error = tester.takeException();
-    if (error is FlutterError) {
-      // Print the full diagnostics (which widget, which row) — the
-      // one-line summary alone cannot be diagnosed from CI output.
-      debugPrint(error.toStringDeep());
+    // Capture the first framework error WITH its full text: an
+    // overflow's "which widget" section lives in the error as
+    // raised, not in the summary takeException hands back.
+    Object? caught;
+    final previousOnError = FlutterError.onError;
+    FlutterError.onError = (details) {
+      caught ??= details.exception;
+      // ignore: avoid_print — deliberate: CI needs the whole text.
+      print('DIAG-BEGIN\n${details.exception}\nDIAG-END');
+    };
+    try {
+      await _pump(tester, size: const Size(320, 700));
+      await _openTab(tester, 'Reconciliation center');
+    } finally {
+      FlutterError.onError = previousOnError;
     }
-    expect(error, isNull, reason: 'no overflow in the phone-width centre');
+    // Whatever we intercepted, the framework may also have recorded;
+    // drain it so the assertion below is the single verdict.
+    tester.takeException();
+
+    expect(caught, isNull, reason: 'no overflow in the phone-width centre');
     expect(find.text('Matched'), findsWidgets);
     expect(find.textContaining('-25.00'), findsWidgets);
   });
