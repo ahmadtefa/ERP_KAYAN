@@ -28,7 +28,7 @@
  * leaves a fresh company — so the fixed-asset and valuation figures
  * are this scenario's own, on real PostgreSQL, nothing mocked.
  */
-import { inflateRawSync } from 'node:zlib';
+import ExcelJS from 'exceljs';
 
 const API = process.argv[2] ?? process.env.APP_URL ?? 'http://127.0.0.1:3000/api/v1';
 const USERNAME = process.env.ADMIN_USERNAME ?? 'admin';
@@ -736,78 +736,133 @@ async function main() {
     );
   }
   // A file existing is not the same as the file agreeing with the
-  // report. Open the trial-balance workbook and read its cells: the
-  // inventory account, its hand-computed 500 closing, and a marked
-  // heading subtotal must all be in there.
-  const unzipTexts = (buffer) => {
-    const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-    let eocd = -1;
-    for (let i = buffer.length - 22; i >= 0; i -= 1) {
-      if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-    }
-    const entries = new Map();
-    if (eocd < 0) return entries;
-    const count = view.getUint16(eocd + 10, true);
-    let offset = view.getUint32(eocd + 16, true);
-    for (let n = 0; n < count; n += 1) {
-      const nameLength = view.getUint16(offset + 28, true);
-      const extraLength = view.getUint16(offset + 30, true);
-      const commentLength = view.getUint16(offset + 32, true);
-      const method = view.getUint16(offset + 10, true);
-      const size = view.getUint32(offset + 20, true);
-      const localOffset = view.getUint32(offset + 42, true);
-      const name = buffer.subarray(offset + 46, offset + 46 + nameLength).toString('utf8');
-      const dataStart =
-        localOffset + 30 +
-        view.getUint16(localOffset + 26, true) +
-        view.getUint16(localOffset + 28, true);
-      const raw = buffer.subarray(dataStart, dataStart + size);
-      entries.set(
-        name,
-        (method === 8 ? inflateRawSync(raw) : Buffer.from(raw)).toString('utf8'),
+  // report. The workbooks are opened with ExcelJS — the same library
+  // that wrote them, used as a reader — and their sheets, headers,
+  // rows and totals are compared with the figures this scenario
+  // computed by hand. No zip or XML is parsed by hand here, so what
+  // passes is what a person opening the file in Excel would see.
+  const readWorkbook = async (path) => {
+    const response = await fetch(`${API}${await ticketed(path)}`);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()));
+    const sheet = workbook.worksheets[0];
+    const rows = [];
+    sheet.eachRow({ includeEmpty: false }, (row) => {
+      rows.push(
+        row.values
+          .slice(1)
+          .map((v) => (v && typeof v === 'object' && 'text' in v ? v.text : v)),
       );
-      offset += 46 + nameLength + extraLength + commentLength;
-    }
-    return entries;
-  };
-  const sheetCells = (entries) => {
-    const shared = [...(entries.get('xl/sharedStrings.xml') ?? '').matchAll(/<si>([\s\S]*?)<\/si>/g)]
-      .map((m) => [...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((t) => t[1]).join(''));
-    const sheetName = [...entries.keys()].find((k) => /xl\/worksheets\/sheet\d+\.xml$/.test(k));
-    const xml = entries.get(sheetName ?? '') ?? '';
-    return [...xml.matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)].map((m) => {
-      // The cell type is read from the opening tag as a whole: folding
-      // it into the cell pattern as an optional group lets a lazy match
-      // skip right past t="s" and hand back raw shared-string indexes.
-      const type = /\bt="([^"]*)"/.exec(m[1])?.[1];
-      const inline = /<t[^>]*>([\s\S]*?)<\/t>/.exec(m[2])?.[1];
-      if (inline !== undefined) return inline;
-      const value = /<v>([\s\S]*?)<\/v>/.exec(m[2])?.[1] ?? '';
-      return type === 's' ? (shared[Number(value)] ?? '') : value;
     });
+    return { name: sheet.name, rows };
   };
-  const tbUrl = await ticketed(
+  const cellText = (v) => (v === null || v === undefined ? '' : String(v));
+  const rowStarting = (rows, first) => rows.find((r) => cellText(r[0]) === first);
+  const totalOf = (rows, label) => {
+    const row = rowStarting(rows, label);
+    return row ? Number(row[1]) : Number.NaN;
+  };
+
+  const tbBook = await readWorkbook(
     `/exports/trial-balance/download?format=xlsx&lang=en&from=${YEAR_FROM}&to=${YEAR_TO}`,
   );
-  const tbResponse = await fetch(`${API}${tbUrl}`);
-  const tbCells = sheetCells(unzipTexts(Buffer.from(await tbResponse.arrayBuffer())));
-  const has1104 = tbCells.includes('1104');
-  const hasSubtotal = tbCells.some((cell) => cell.includes('(subtotal)'));
-  const has500 = tbCells.some((cell) => Math.abs(Number(cell) - 500) < 0.0001);
+  const tbHeader = rowStarting(tbBook.rows, 'Code') ?? [];
+  const invRow = rowStarting(tbBook.rows, '1104') ?? [];
   check(
-    'the trial-balance workbook contains the report itself (1104 at 500, a marked subtotal)',
-    has1104 && hasSubtotal && has500,
-    `cells ${tbCells.length}, 1104:${has1104} subtotal:${hasSubtotal} 500:${has500}; ` +
-      `sample: ${tbCells.filter((c) => c !== '').slice(0, 36).join(' | ')}`,
+    'the trial-balance workbook: right sheet, headers, period, 1104 at 500, marked subtotals, zero difference',
+    tbBook.name === 'Trial balance' &&
+      tbHeader.includes('Account') && tbHeader.includes('Closing') &&
+      tbBook.rows.some((r) => cellText(r[1]).includes('2024')) &&
+      near(invRow[6], 500) &&
+      tbBook.rows.some((r) => cellText(r[1]).includes('(subtotal)')) &&
+      tbBook.rows.some((r) => cellText(r[2]).includes('إجمالي فرعي')) &&
+      near(totalOf(tbBook.rows, 'Difference (must be zero)'), 0),
+    `sheet ${tbBook.name}, 1104 closing ${invRow[6]}, difference ${totalOf(tbBook.rows, 'Difference (must be zero)')}`,
   );
+
+  const faBook = await readWorkbook(
+    `/exports/fixed-assets/download?format=xlsx&lang=en&from=${YEAR_FROM}&to=${YEAR_TO}`,
+  );
+  check(
+    'the fixed-assets workbook: register totals are the on-books tool alone (machine disposed)',
+    faBook.name === 'Fixed assets register' &&
+      faBook.rows.some((r) => cellText(r[0]) === `FA-M-${stamp}`) &&
+      near(totalOf(faBook.rows, 'Total cost'), 1200) &&
+      near(totalOf(faBook.rows, 'Total accumulated depreciation'), 1000) &&
+      near(totalOf(faBook.rows, 'Total book value'), 200),
+    `cost ${totalOf(faBook.rows, 'Total cost')}, book ${totalOf(faBook.rows, 'Total book value')}`,
+  );
+
+  const cfBook = await readWorkbook(
+    `/exports/cash-flow/download?format=xlsx&lang=en&from=${YEAR_FROM}&to=${YEAR_TO}`,
+  );
+  check(
+    'the cash-flow workbook: opening 0 + sections = closing 148,351 (op 4,951 / inv −6,600 / fin 150,000)',
+    near(totalOf(cfBook.rows, 'Opening cash'), 0) &&
+      near(totalOf(cfBook.rows, 'Net operating'), 4951) &&
+      near(totalOf(cfBook.rows, 'Net investing'), -6600) &&
+      near(totalOf(cfBook.rows, 'Net financing'), 150000) &&
+      near(totalOf(cfBook.rows, 'Closing cash'), 148351) &&
+      near(
+        totalOf(cfBook.rows, 'Opening cash') + totalOf(cfBook.rows, 'Net'),
+        totalOf(cfBook.rows, 'Closing cash'),
+      ),
+    `net ${totalOf(cfBook.rows, 'Net')}, closing ${totalOf(cfBook.rows, 'Closing cash')}`,
+  );
+
+  const ledgerBook = await readWorkbook(
+    `/exports/account-ledger/download?format=xlsx&lang=en&from=${YEAR_FROM}&to=${YEAR_TO}&accountId=${cashLedger.id}`,
+  );
+  const capitalRow = ledgerBook.rows.find((r) => near(r[3], 150000));
+  check(
+    'the cash ledger workbook: the 150,000 capital debit is there and it closes at 148,351',
+    ledgerBook.name.startsWith('Account ledger') &&
+      capitalRow !== undefined &&
+      near(totalOf(ledgerBook.rows, 'Closing balance'), 148351),
+    `sheet ${ledgerBook.name}, closing ${totalOf(ledgerBook.rows, 'Closing balance')}`,
+  );
+
+  // CSV: parsed as rows, not sniffed as text. Arabic labels, the same
+  // 1104 row with the same figures, and as many data rows as the JSON
+  // report has accounts plus its heading groups.
+  const parseCsv = (raw) => {
+    const out = [];
+    let row = [], field = '', quoted = false;
+    const text = raw.replace(/^\uFEFF/, '');
+    for (let i = 0; i < text.length; i += 1) {
+      const ch = text[i];
+      if (quoted) {
+        if (ch === '"' && text[i + 1] === '"') { field += '"'; i += 1; }
+        else if (ch === '"') quoted = false;
+        else field += ch;
+      } else if (ch === '"') quoted = true;
+      else if (ch === ',') { row.push(field); field = ''; }
+      else if (ch === '\n') { row.push(field.replace(/\r$/, '')); out.push(row); row = []; field = ''; }
+      else field += ch;
+    }
+    if (field !== '' || row.length) { row.push(field); out.push(row); }
+    return out;
+  };
   const csvUrl = await ticketed(
-    `/exports/trial-balance/download?format=csv&lang=en&from=${YEAR_FROM}&to=${YEAR_TO}`,
+    `/exports/trial-balance/download?format=csv&lang=ar&from=${YEAR_FROM}&to=${YEAR_TO}`,
   );
-  const csvText = await (await fetch(`${API}${csvUrl}`)).text();
+  const csvRaw = await (await fetch(`${API}${csvUrl}`)).text();
+  const csvRows = parseCsv(csvRaw);
+  const csvHeaderAt = csvRows.findIndex((r) => r[0] === 'الكود');
+  const csvInv = csvRows.find((r) => r[0] === '1104') ?? [];
+  const tbJson = await yearTrial();
+  // Data rows run from just after the header to the blank line the
+  // writer puts before the totals block.
+  const afterHeader = csvRows.slice(csvHeaderAt + 1);
+  const blankAt = afterHeader.findIndex((r) => r.every((c) => c === ''));
+  const csvDataRows = (blankAt === -1 ? afterHeader : afterHeader.slice(0, blankAt)).length;
   check(
-    'the trial-balance CSV carries the same accounts',
-    csvText.includes('1104') && csvText.includes('1103'),
-    `${csvText.length} chars`,
+    'the Arabic CSV parses to the same report (BOM, Arabic headers, 1104 at 500, same row count)',
+    csvRaw.startsWith('\uFEFF') &&
+      csvHeaderAt >= 0 &&
+      near(csvInv[6], 500) &&
+      csvDataRows === (tbJson?.rows?.length ?? 0) + (tbJson?.groups?.length ?? 0),
+    `header at ${csvHeaderAt}, 1104 closing ${csvInv[6]}, data rows ${csvDataRows} vs ${(tbJson?.rows?.length ?? 0) + (tbJson?.groups?.length ?? 0)}`,
   );
 
   const capabilities = (await api('/exports/capabilities')).data;
@@ -1565,7 +1620,82 @@ async function main() {
     );
   }
 
-  // ── 20. the whole company, backed up and put back ──────────────────────
+  // ── 20. cash-flow classification round-trips, and closing hears about it ─
+  check(
+    'the chart carries the two mapped accounts setup used to miss (3103, 5107)',
+    Boolean(code('3103')) && Boolean(code('5107')),
+    `3103 ${Boolean(code('3103'))}, 5107 ${Boolean(code('5107'))} (existing-company backfill is proven by check-chart-upgrade.mjs in CI)`,
+  );
+  const chartNow = (await api('/accounting/chart-of-accounts?includeInactive=true')).data;
+  const capitalAccountRow = (chartNow?.items ?? chartNow ?? []).find((a) => a.code === '3101');
+  check(
+    'the stored classification reads back (capital is financing)',
+    String(capitalAccountRow?.cashFlowClass ?? '').toLowerCase() === 'financing',
+    `cashFlowClass ${capitalAccountRow?.cashFlowClass}`,
+  );
+  const cfNow = async () =>
+    (await api(`/reports/cash-flow?from=${YEAR_FROM}&to=${YEAR_TO}`)).data;
+  const netOf = (cf, name) =>
+    money((cf?.sections ?? []).find((s) => s.cashFlowClass === name)?.net ?? 0);
+
+  // Clearing the class never guesses a replacement: the 150,000 of
+  // capital moves to "unclassified", the totals do not move at all,
+  // and the closing preview for that year names the account.
+  await must('clear the capital classification', `/accounting/chart-of-accounts/${code('3101')}`, {
+    method: 'PATCH',
+    json: { cashFlowClass: null },
+  });
+  const cfCleared = await cfNow();
+  check(
+    'cleared means unclassified (150,000), with opening + net = closing intact',
+    near(netOf(cfCleared, 'financing'), 0) &&
+      near(netOf(cfCleared, 'unclassified'), 150000) &&
+      near(cfCleared?.totals?.closing, 148351) &&
+      near(
+        money(cfCleared?.totals?.opening) + money(cfCleared?.totals?.net),
+        money(cfCleared?.totals?.closing),
+      ),
+    `unclassified ${netOf(cfCleared, 'unclassified')}, closing ${cfCleared?.totals?.closing}`,
+  );
+  const preview2024 = (
+    await api(`/accounting/fiscal-periods/${period.id}/closing-preview`)
+  ).data;
+  check(
+    'the closing preview separates blockers from warnings and names 3101',
+    Array.isArray(preview2024?.blockers) &&
+      Array.isArray(preview2024?.warnings) &&
+      preview2024.warnings.some((w) => String(w).includes('3101')),
+    `warnings ${JSON.stringify(preview2024?.warnings)}`,
+  );
+
+  // Reclassifying moves the section, proving the report reads the
+  // stored value rather than remembering an old answer.
+  await must('classify capital as operating', `/accounting/chart-of-accounts/${code('3101')}`, {
+    method: 'PATCH',
+    json: { cashFlowClass: 'OPERATING' },
+  });
+  const cfOperating = await cfNow();
+  check(
+    'the statement follows the stored class (operating 154,951, financing 0)',
+    near(netOf(cfOperating, 'operating'), 154951) &&
+      near(netOf(cfOperating, 'financing'), 0) &&
+      near(cfOperating?.totals?.closing, 148351),
+    `operating ${netOf(cfOperating, 'operating')}`,
+  );
+  await must('restore capital to financing', `/accounting/chart-of-accounts/${code('3101')}`, {
+    method: 'PATCH',
+    json: { cashFlowClass: 'FINANCING' },
+  });
+  const cfRestored = await cfNow();
+  check(
+    'and restoring it restores the hand-computed sections',
+    near(netOf(cfRestored, 'operating'), 4951) &&
+      near(netOf(cfRestored, 'financing'), 150000) &&
+      near(netOf(cfRestored, 'unclassified'), 0),
+    `operating ${netOf(cfRestored, 'operating')}, financing ${netOf(cfRestored, 'financing')}`,
+  );
+
+  // ── 21. the whole company, backed up and put back ──────────────────────
   const backup = (await api('/backup/download')).data;
   check(
     'the company backup carries the fixed-asset and depreciation tables',
