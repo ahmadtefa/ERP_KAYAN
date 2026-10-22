@@ -894,6 +894,7 @@ class _AuditTabState extends ConsumerState<_AuditTab> {
               key: ValueKey(_actionFilter),
               initialValue: _actionFilter,
               isDense: true,
+              isExpanded: true,
               decoration: InputDecoration(
                 labelText: l10n.action,
                 isDense: true,
@@ -923,6 +924,7 @@ class _AuditTabState extends ConsumerState<_AuditTab> {
               key: ValueKey(_userFilter),
               initialValue: _userFilter,
               isDense: true,
+              isExpanded: true,
               decoration: InputDecoration(
                 labelText: _t('المستخدم', 'User'),
                 isDense: true,

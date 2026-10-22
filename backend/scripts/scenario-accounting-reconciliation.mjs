@@ -28,6 +28,8 @@
  * leaves a fresh company — so the fixed-asset and valuation figures
  * are this scenario's own, on real PostgreSQL, nothing mocked.
  */
+import { inflateRawSync } from 'node:zlib';
+
 const API = process.argv[2] ?? process.env.APP_URL ?? 'http://127.0.0.1:3000/api/v1';
 const USERNAME = process.env.ADMIN_USERNAME ?? 'admin';
 const PASSWORD = process.env.ADMIN_PASSWORD ?? 'Admin@12345';
@@ -733,6 +735,75 @@ async function main() {
       `status ${file.status}, ${file.bytes} bytes, ${file.contentType}`,
     );
   }
+  // A file existing is not the same as the file agreeing with the
+  // report. Open the trial-balance workbook and read its cells: the
+  // inventory account, its hand-computed 500 closing, and a marked
+  // heading subtotal must all be in there.
+  const unzipTexts = (buffer) => {
+    const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    let eocd = -1;
+    for (let i = buffer.length - 22; i >= 0; i -= 1) {
+      if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+    const entries = new Map();
+    if (eocd < 0) return entries;
+    const count = view.getUint16(eocd + 10, true);
+    let offset = view.getUint32(eocd + 16, true);
+    for (let n = 0; n < count; n += 1) {
+      const nameLength = view.getUint16(offset + 28, true);
+      const extraLength = view.getUint16(offset + 30, true);
+      const commentLength = view.getUint16(offset + 32, true);
+      const method = view.getUint16(offset + 10, true);
+      const size = view.getUint32(offset + 20, true);
+      const localOffset = view.getUint32(offset + 42, true);
+      const name = buffer.subarray(offset + 46, offset + 46 + nameLength).toString('utf8');
+      const dataStart =
+        localOffset + 30 +
+        view.getUint16(localOffset + 26, true) +
+        view.getUint16(localOffset + 28, true);
+      const raw = buffer.subarray(dataStart, dataStart + size);
+      entries.set(
+        name,
+        (method === 8 ? inflateRawSync(raw) : Buffer.from(raw)).toString('utf8'),
+      );
+      offset += 46 + nameLength + extraLength + commentLength;
+    }
+    return entries;
+  };
+  const sheetCells = (entries) => {
+    const shared = [...(entries.get('xl/sharedStrings.xml') ?? '').matchAll(/<si>([\s\S]*?)<\/si>/g)]
+      .map((m) => [...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((t) => t[1]).join(''));
+    const sheetName = [...entries.keys()].find((k) => /xl\/worksheets\/sheet\d+\.xml$/.test(k));
+    const xml = entries.get(sheetName ?? '') ?? '';
+    return [...xml.matchAll(/<c[^>]*?(?:\st="([^"]*)")?[^>]*>([\s\S]*?)<\/c>/g)].map((m) => {
+      const inline = /<t[^>]*>([\s\S]*?)<\/t>/.exec(m[2])?.[1];
+      if (inline !== undefined) return inline;
+      const value = /<v>([\s\S]*?)<\/v>/.exec(m[2])?.[1] ?? '';
+      return m[1] === 's' ? (shared[Number(value)] ?? '') : value;
+    });
+  };
+  const tbUrl = await ticketed(
+    `/exports/trial-balance/download?format=xlsx&lang=en&from=${YEAR_FROM}&to=${YEAR_TO}`,
+  );
+  const tbResponse = await fetch(`${API}${tbUrl}`);
+  const tbCells = sheetCells(unzipTexts(Buffer.from(await tbResponse.arrayBuffer())));
+  check(
+    'the trial-balance workbook contains the report itself (1104 at 500, a marked subtotal)',
+    tbCells.includes('1104') &&
+      tbCells.some((cell) => cell.includes('(subtotal)')) &&
+      tbCells.some((cell) => Math.abs(Number(cell) - 500) < 0.0001),
+    `cells read: ${tbCells.length}`,
+  );
+  const csvUrl = await ticketed(
+    `/exports/trial-balance/download?format=csv&lang=en&from=${YEAR_FROM}&to=${YEAR_TO}`,
+  );
+  const csvText = await (await fetch(`${API}${csvUrl}`)).text();
+  check(
+    'the trial-balance CSV carries the same accounts',
+    csvText.includes('1104') && csvText.includes('1103'),
+    `${csvText.length} chars`,
+  );
+
   const capabilities = (await api('/exports/capabilities')).data;
   const pdfOffered = (capabilities?.formats ?? []).includes('pdf');
   for (const slug of ['fixed-assets', 'cash-flow']) {
@@ -1097,7 +1168,10 @@ async function main() {
       method: 'POST',
     });
     const reversedDetail = (await api(`/sales/invoices/${saleToReverse.id}`)).data;
-    const t25c = await trialBalance('2025-01-01', '2025-12-31');
+    // A reversal is dated the day it is made (today), never back into
+    // the document's own period — so the window that can see both the
+    // 2025 sale and its mirror runs to today, not to 2025's end.
+    const t25c = await trialBalance('2025-01-01', today);
     check(
       'the reversal put the unit and the money back (stock 3, receivable −250 again)',
       String(reversedDetail?.status).toUpperCase() === 'REVERSED' &&
@@ -1126,7 +1200,7 @@ async function main() {
     await must('reverse the purchase', `/purchases/invoices/${purchaseToReverse.id}/reverse`, {
       method: 'POST',
     });
-    const t25d = await trialBalance('2025-01-01', '2025-12-31');
+    const t25d = await trialBalance('2025-01-01', today);
     check(
       'the purchase reversal returned stock and payable (stock 3, payable 0)',
       near(await stockNow(), 3) && near(closingOf(t25d, '2101'), 0),
@@ -1198,6 +1272,17 @@ async function main() {
   }
 
   // ── 19. capitalising a purchase line: bounded, inventory-funded ────────
+  // This section creates and capitalises new documents, so — the same
+  // rule the application asks of its users — a backup of the company is
+  // taken first and must be complete before anything below writes.
+  const preCapitalisation = (await api('/backup/download')).data;
+  check(
+    'a full backup was taken before the capitalisation changes',
+    Array.isArray(preCapitalisation?.tables?.fixedAsset) &&
+      Array.isArray(preCapitalisation?.tables?.purchaseInvoice) &&
+      Array.isArray(preCapitalisation?.tables?.stockBalance),
+    `tables present: ${Object.keys(preCapitalisation?.tables ?? {}).length}`,
+  );
   const machineItem = await must('create a stocked machine item', '/inventory/items', {
     method: 'POST',
     json: {
@@ -1422,8 +1507,11 @@ async function main() {
     );
     const restoredRegister = (await api('/fixed-assets/reports/summary')).data;
     check(
-      'after restore, the register still ties to the ledger (tool + press)',
-      near(restoredRegister?.totals?.cost, 2400) &&
+      // Tool 1,200 + press 1,200 + the two machines capitalised in §19
+      // at 600 each. Accumulated: the tool's full 1,000 depreciable base
+      // plus the press's single 100 charge; the machines were never run.
+      'after restore, the register still ties to the ledger (tool + press + machines)',
+      near(restoredRegister?.totals?.cost, 3600) &&
         near(restoredRegister?.totals?.accumulatedDepreciation, 1100) &&
         (restoredRegister?.assetAccounts ?? []).every((r) => near(r.difference, 0)) &&
         (restoredRegister?.accumulatedAccounts ?? []).every((r) => near(r.difference, 0)),

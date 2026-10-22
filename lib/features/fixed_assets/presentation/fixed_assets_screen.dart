@@ -565,6 +565,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                     key: ValueKey(_statusFilter),
                     initialValue: _statusFilter,
                     isDense: true,
+                    isExpanded: true,
                     decoration: InputDecoration(
                       labelText: l10n.status,
                       isDense: true,
@@ -597,6 +598,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                     key: ValueKey(_categoryFilter),
                     initialValue: _categoryFilter,
                     isDense: true,
+                    isExpanded: true,
                     decoration: InputDecoration(
                       labelText: l10n.assetCategory,
                       isDense: true,

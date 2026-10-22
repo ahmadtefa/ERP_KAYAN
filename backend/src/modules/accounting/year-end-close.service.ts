@@ -58,6 +58,7 @@ export class YearEndCloseService {
         resultLabel: result.isNegative() ? 'loss' : 'profit',
       },
       blockers: await this.blockers(companyId, period),
+      warnings: await this.warnings(companyId, period),
     };
   }
 
