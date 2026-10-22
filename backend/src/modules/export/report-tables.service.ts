@@ -238,12 +238,16 @@ export class ReportTablesService {
         { key: 'credit', labelEn: 'Credit', labelAr: 'دائن', numeric: true, width: 16 },
         { key: 'closing', labelEn: 'Closing', labelAr: 'رصيد ختامي', numeric: true, width: 16 },
       ],
-      rows: data.rows,
+      rows: printRows,
       totals,
       notes: [
         {
           en: 'Every figure comes from the posted journal, and reversals are included.',
           ar: 'كل رقم جاي من القيود المُرحَّلة، والقيود المعكوسة داخلة في الحساب.',
+        },
+        {
+          en: 'Rows marked ▸ are heading subtotals and are not included in the totals.',
+          ar: 'الصفوف المميزة بـ ▸ إجماليات فرعية للحسابات الرئيسية وليست داخلة في الإجمالي.',
         },
       ],
     });

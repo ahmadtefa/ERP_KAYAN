@@ -7,6 +7,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { buildTrialBalanceGroups } from './trial-balance-groups';
 
 const MONEY_SCALE = 4;
 

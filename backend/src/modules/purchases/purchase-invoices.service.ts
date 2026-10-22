@@ -699,43 +699,17 @@ export class PurchaseInvoicesService {
         });
       }
 
-      const entryNumber = await this.numbers.next(tx, companyId, 'JOURNAL', 'JV');
-      const mirror = await tx.journalEntry.create({
-        data: {
-          companyId,
-          branchId: original.branchId,
-          entryNumber,
-          entryDate: new Date(),
-          description: `Reversal of purchase invoice ${invoice.invoiceNumber}`,
-          status: JournalStatus.POSTED,
-          currency: original.currency,
-          totalDebit: original.totalCredit,
-          totalCredit: original.totalDebit,
-          reversalOfId: original.id,
-          postedAt: new Date(),
-          postedBy: userId,
-          createdBy: userId,
-          lines: {
-            create: original.lines.map((l) => ({
-              lineNumber: l.lineNumber,
-              accountId: l.accountId,
-              debit: l.credit,
-              credit: l.debit,
-              description: l.description,
-              costCenterId: l.costCenterId,
-              allocations: {
-                create: (l.allocations ?? []).map((allocation) => ({
-                  costCenterId: allocation.costCenterId,
-                  amount: allocation.amount,
-                })),
-              },
-            })),
-          },
-        },
-        select: { id: true, entryNumber: true },
-      });
-
-      return mirror;
+      // One reversal path for the whole system: it claims the original,
+      // refuses a closed period with a readable message (instead of the
+      // database trigger surfacing as a 500), and stamps the mirror with
+      // the invoice as its source so a ledger reader can drill back to it.
+      return this.posting.reverse(
+        tx,
+        companyId,
+        userId,
+        original.id,
+        `Reversal of purchase invoice ${invoice.invoiceNumber}`,
+      );
     });
 
     await this.audit.record({
@@ -1097,6 +1071,18 @@ export class PurchaseInvoicesService {
       discountPercent: (invoice.discountPercent ?? new Prisma.Decimal(0)).toFixed(RATE_SCALE),
       discountAmount: (invoice.discountAmount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
       lineDiscountTotal: (invoice.lineDiscountTotal ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
+      subTotal: invoice.subTotal.toFixed(MONEY_SCALE),
+      taxAmount: invoice.taxAmount.toFixed(MONEY_SCALE),
+      totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),
+      landedCostAmount: invoice.landedCostAmount.toFixed(MONEY_SCALE),
+      landedCostCharges: this.toLandedCostCharges(invoice.landedCostCharges),
+      paidAmount: invoice.paidAmount.toFixed(MONEY_SCALE),
+      balanceDue: invoice.totalAmount.minus(invoice.paidAmount).toFixed(MONEY_SCALE),
+      createdAt: invoice.createdAt.toISOString(),
+    };
+  }
+}
+iscountTotal: (invoice.lineDiscountTotal ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
       subTotal: invoice.subTotal.toFixed(MONEY_SCALE),
       taxAmount: invoice.taxAmount.toFixed(MONEY_SCALE),
       totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),

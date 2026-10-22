@@ -307,7 +307,16 @@ class _TrialBalanceTab extends ConsumerWidget {
       value: async,
       onRetry: () => ref.invalidate(reportProvider),
       data: (data) {
-        final rows = listOf(data['rows']);
+        // Heading subtotals interleave with their accounts by code so the
+        // page reads as the chart does. A subtotal is a sum of the rows
+        // under it — never an extra row in the totals, and tapping one
+        // opens nothing (a heading has no ledger of its own).
+        final isArabic = Localizations.localeOf(context).languageCode == 'ar';
+        final rows = <Json>[
+          ...listOf(data['rows']),
+          for (final group in listOf(data['groups']))
+            {...group, 'isGroup': true},
+        ]..sort((a, b) => text(a, 'code').compareTo(text(b, 'code')));
         final totals = data['totals'] is Map
             ? Map<String, dynamic>.from(data['totals'] as Map)
             : <String, dynamic>{};
@@ -318,14 +327,29 @@ class _TrialBalanceTab extends ConsumerWidget {
             Expanded(
               child: RecordsTable(
                 rows: rows,
-                onTap: (row) => onOpenAccount(text(row, 'accountId')),
+                onTap: (row) {
+                  if (flag(row, 'isGroup')) return;
+                  onOpenAccount(text(row, 'accountId'));
+                },
                 columns: [
                   ColumnSpec(
                     l10n.accountCode,
-                    value: (r) => text(r, 'code'),
+                    value: (r) => flag(r, 'isGroup')
+                        ? '${text(r, 'code')} ▸'
+                        : text(r, 'code'),
                     emphasise: true,
                   ),
-                  ColumnSpec(l10n.accountName, value: (r) => text(r, 'nameEn')),
+                  ColumnSpec(
+                    l10n.accountName,
+                    value: (r) {
+                      final name = isArabic
+                          ? text(r, 'nameAr', fallback: text(r, 'nameEn'))
+                          : text(r, 'nameEn', fallback: text(r, 'nameAr'));
+                      if (!flag(r, 'isGroup')) return name;
+                      final depth = (r['depth'] as num?)?.toInt() ?? 0;
+                      return '${'   ' * depth}▸ $name';
+                    },
+                  ),
                   ColumnSpec(
                     l10n.opening,
                     numeric: true,

@@ -616,6 +616,35 @@ async function main() {
       near(closingOf(trial, '4101'), -600),
     `cash ${closingOf(trial, cashCode)}, AR ${closingOf(trial, '1103')}, inventory ${closingOf(trial, '1104')}, capital ${closingOf(trial, '3101')}`,
   );
+  {
+    // Heading subtotals must equal the sum of the postable rows beneath
+    // them — and exist for headings only, so nothing is counted twice.
+    const chartNow = (await api('/accounting/chart-of-accounts')).data?.items ?? [];
+    const childrenOf = new Map();
+    for (const a of chartNow) {
+      if (a.parentId) childrenOf.set(a.parentId, [...(childrenOf.get(a.parentId) ?? []), a]);
+    }
+    const subtreeClosing = (id, seen = new Set()) => {
+      if (seen.has(id)) return 0;
+      seen.add(id);
+      let sum = money(rowOf(trial, chartNow.find((a) => a.id === id)?.code ?? '')?.closing ?? 0);
+      for (const child of childrenOf.get(id) ?? []) sum = money(sum + subtreeClosing(child.id, seen));
+      return sum;
+    };
+    const groups = trial?.groups ?? [];
+    const allRight =
+      groups.length > 0 &&
+      groups.every((g) => near(g.closing, subtreeClosing(g.accountId))) &&
+      groups.every((g) => {
+        const acc = chartNow.find((a) => a.id === g.accountId);
+        return acc && acc.isPostable === false;
+      });
+    check(
+      'trial-balance heading subtotals equal their leaves and cover headings only',
+      allRight,
+      `${groups.length} subtotal rows, e.g. ${groups[0]?.code} = ${groups[0]?.closing}`,
+    );
+  }
   for (const [label, c, accountId] of [
     ['cash', cashCode, cashLedger.id],
     ['revenue', '4101', code('4101')],
@@ -1015,7 +1044,97 @@ async function main() {
     `aging total ${supplierAging?.total ?? 'no open row'}`,
   );
 
-  // ── 16. the whole company, backed up and put back ──────────────────────
+  // ── 16. reversal and double-posting: one central, claimed path ─────────
+  const stockNow = async () =>
+    quantityOf((await api(`/inventory/stock?itemId=${item.id}`)).data, item.id);
+  const saleToReverse = await must('2025: a plain sale of 1 unit at 150', '/sales/invoices', {
+    method: 'POST',
+    json: {
+      invoiceDate: '2025-02-01',
+      customerId: customer.id,
+      lines: [{ itemId: item.id, quantity: '1', unitPrice: '150' }],
+    },
+  });
+  if (saleToReverse) {
+    await must('post it', `/sales/invoices/${saleToReverse.id}/post`, { method: 'POST' });
+  }
+  const raceSale = await must('2025: another draft sale of 1 unit', '/sales/invoices', {
+    method: 'POST',
+    json: {
+      invoiceDate: '2025-02-02',
+      customerId: customer.id,
+      lines: [{ itemId: item.id, quantity: '1', unitPrice: '150' }],
+    },
+  });
+  if (raceSale) {
+    const [first, second] = await Promise.all([
+      api(`/sales/invoices/${raceSale.id}/post`, { method: 'POST' }),
+      api(`/sales/invoices/${raceSale.id}/post`, { method: 'POST' }),
+    ]);
+    const wins = [first, second].filter((r) => r.status < 300).length;
+    check(
+      'two simultaneous posts of one invoice produce exactly one posting',
+      wins === 1 && near(await stockNow(), 2),
+      `statuses ${first.status}/${second.status}, stock ${await stockNow()}`,
+    );
+    const collectRace = await must('collect the raced invoice in full', '/cash/vouchers', {
+      method: 'POST',
+      json: {
+        kind: 'RECEIPT',
+        voucherDate: '2025-02-03',
+        cashAccountId: cashAccount.id,
+        customerId: customer.id,
+        amount: '171',
+        allocations: [{ salesInvoiceId: raceSale.id, amount: '171' }],
+      },
+    });
+    if (collectRace) {
+      await must('post that collection', `/cash/vouchers/${collectRace.id}/post`, { method: 'POST' });
+    }
+  }
+  if (saleToReverse) {
+    await must('reverse the plain sale', `/sales/invoices/${saleToReverse.id}/reverse`, {
+      method: 'POST',
+    });
+    const reversedDetail = (await api(`/sales/invoices/${saleToReverse.id}`)).data;
+    const t25c = await trialBalance('2025-01-01', '2025-12-31');
+    check(
+      'the reversal put the unit and the money back (stock 3, receivable −250 again)',
+      String(reversedDetail?.status).toUpperCase() === 'REVERSED' &&
+        near(await stockNow(), 3) &&
+        near(closingOf(t25c, '1103'), -250),
+      `status ${reversedDetail?.status}, stock ${await stockNow()}, AR ${closingOf(t25c, '1103')}`,
+    );
+    await mustRefuse(
+      'reversing the same invoice a second time is refused',
+      `/sales/invoices/${saleToReverse.id}/reverse`,
+      { method: 'POST' },
+    );
+  }
+  const purchaseToReverse = await must('2025: buy 2 units at 100 on credit', '/purchases/invoices', {
+    method: 'POST',
+    json: {
+      invoiceDate: '2025-02-05',
+      supplierId: supplier.id,
+      lines: [{ itemId: item.id, quantity: '2', unitPrice: '100' }],
+    },
+  });
+  if (purchaseToReverse) {
+    await must('post the purchase', `/purchases/invoices/${purchaseToReverse.id}/post`, {
+      method: 'POST',
+    });
+    await must('reverse the purchase', `/purchases/invoices/${purchaseToReverse.id}/reverse`, {
+      method: 'POST',
+    });
+    const t25d = await trialBalance('2025-01-01', '2025-12-31');
+    check(
+      'the purchase reversal returned stock and payable (stock 3, payable 0)',
+      near(await stockNow(), 3) && near(closingOf(t25d, '2101'), 0),
+      `stock ${await stockNow()}, AP ${closingOf(t25d, '2101')}`,
+    );
+  }
+
+  // ── 17. the whole company, backed up and put back ──────────────────────
   const backup = (await api('/backup/download')).data;
   check(
     'the company backup carries the fixed-asset and depreciation tables',
