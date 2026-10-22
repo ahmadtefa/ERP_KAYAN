@@ -1,22 +1,19 @@
-#!/usr/bin/env node
 /**
- * Proves the 3103/5107 chart backfill on real PostgreSQL:
+ * Proves the required-accounts data upgrade (3103 opening-balance
+ * equity, 5107 inventory differences) behaves for the three chart
+ * shapes a real installation can be in, and that running it again
+ * changes nothing.
  *
- *   node backend/scripts/check-chart-upgrade.mjs
- *
- * Three throwaway companies — one created the old way (chart without
- * the two required accounts), one that already has them, one whose
- * '3' heading was renumbered away — then the migration SQL itself is
- * executed twice. Afterwards: exactly one of each account per
- * company, the pre-existing ones untouched (same ids), correct
- * type/names/parent, and not a single journal line created. The
- * script deletes everything it made, pass or fail, and never touches
- * a company it did not create.
+ * The database allows exactly one live company (partial unique
+ * index), so the three shapes are exercised in sequence inside one
+ * throwaway company on the isolated CI database: first an OLD chart
+ * that predates both accounts, then the same chart edited into a
+ * COMPLETE one with a renamed 3103 and a soft-deleted 5107, finally
+ * a RENUMBERED chart whose '3'/'5' headings are gone. The company is
+ * deleted afterwards whatever happens.
  */
-import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 
@@ -25,128 +22,182 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
 });
-const stamp = String(Date.now()).slice(-8);
-const results = [];
-const check = (name, ok, detail = '') => {
-  results.push(ok);
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
+
+let failures = 0;
+const check = (label, ok) => {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`);
+  if (!ok) failures += 1;
 };
 
-const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'prisma', 'migrations');
-const dir = readdirSync(migrationsDir).find((d) => d.endsWith('chart_required_accounts_backfill'));
-// One statement per raw call (comments stripped first — they may
-// contain semicolons of their own).
-const statements = readFileSync(join(migrationsDir, dir, 'migration.sql'), 'utf8')
-  .split('\n')
-  .filter((line) => !line.trim().startsWith('--'))
-  .join('\n')
-  .split(';')
-  .map((s) => s.trim())
-  .filter(Boolean);
-const runMigration = async () => {
-  for (const statement of statements) await prisma.$executeRawUnsafe(statement);
+async function runMigration() {
+  const dir = join(process.cwd(), 'prisma', 'migrations');
+  const folder = (await readdir(dir)).find((name) =>
+    name.endsWith('_chart_required_accounts_backfill'),
+  );
+  const sql = await readFile(join(dir, folder, 'migration.sql'), 'utf8');
+  // Single statements only: comment lines are stripped first because
+  // prose may contain semicolons of its own.
+  const statements = sql
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('--'))
+    .join('\n')
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  for (const statement of statements) {
+    await prisma.$executeRawUnsafe(statement);
+  }
+}
+
+const stamp = Date.now().toString(36).toUpperCase();
+let companyId = null;
+
+const byCode = async () => {
+  const rows = await prisma.account.findMany({ where: { companyId } });
+  return new Map(rows.map((row) => [row.code, row]));
 };
+const countCode = async (code) =>
+  prisma.account.count({ where: { companyId, code } });
 
-const root = (companyId, code, nameEn, nameAr, type) => ({
-  companyId, code, nameEn, nameAr, type, isPostable: false,
-});
-const leaf = (companyId, code, nameEn, nameAr, type, parentId) => ({
-  companyId, code, nameEn, nameAr, type, isPostable: true, parentId,
-});
-
-const companyIds = [];
 try {
-  // Company A: created before the fix — headings exist, 3103/5107 do not.
-  const a = await prisma.company.create({
-    data: { code: `UPGA-${stamp}`, nameEn: 'Upgrade A', nameAr: 'ترقية أ' },
+  const company = await prisma.company.create({
+    data: {
+      code: `UPG-${stamp}`,
+      nameEn: `Upgrade check ${stamp}`,
+      nameAr: `فحص ترقية ${stamp}`,
+    },
   });
-  companyIds.push(a.id);
-  const aEquity = await prisma.account.create({ data: root(a.id, '3', 'Equity', 'حقوق الملكية', 'EQUITY') });
-  const aExpense = await prisma.account.create({ data: root(a.id, '5', 'Expenses', 'المصروفات', 'EXPENSE') });
+  companyId = company.id;
 
-  // Company B: already complete — the upgrade must be a no-op for it.
-  const b = await prisma.company.create({
-    data: { code: `UPGB-${stamp}`, nameEn: 'Upgrade B', nameAr: 'ترقية ب' },
+  const root = (code, type, nameEn, nameAr) => ({
+    companyId,
+    code,
+    nameEn,
+    nameAr,
+    type,
+    isPostable: false,
   });
-  companyIds.push(b.id);
-  const bEquity = await prisma.account.create({ data: root(b.id, '3', 'Equity', 'حقوق الملكية', 'EQUITY') });
-  const bExpense = await prisma.account.create({ data: root(b.id, '5', 'Expenses', 'المصروفات', 'EXPENSE') });
-  const bOpening = await prisma.account.create({
-    data: leaf(b.id, '3103', 'Opening balance equity', 'أرصدة افتتاحية', 'EQUITY', bEquity.id),
-  });
-  const bDifference = await prisma.account.create({
-    data: leaf(b.id, '5107', 'Inventory differences', 'فروق المخزون', 'EXPENSE', bExpense.id),
+  const postable = (code, type, nameEn, nameAr, parentId) => ({
+    companyId,
+    code,
+    nameEn,
+    nameAr,
+    type,
+    parentId,
   });
 
-  // Company C: renumbered chart — no '3' heading to parent under.
-  const c = await prisma.company.create({
-    data: { code: `UPGC-${stamp}`, nameEn: 'Upgrade C', nameAr: 'ترقية ج' },
+  // ---- Shape 1: an old chart that predates both accounts. ----
+  const equity = await prisma.account.create({
+    data: root('3', 'EQUITY', 'Equity', 'حقوق الملكية'),
   });
-  companyIds.push(c.id);
-  await prisma.account.create({ data: root(c.id, '5', 'Expenses', 'المصروفات', 'EXPENSE') });
+  const expense = await prisma.account.create({
+    data: root('5', 'EXPENSE', 'Expenses', 'المصروفات'),
+  });
+  await prisma.account.create({
+    data: postable('3101', 'EQUITY', 'Capital', 'رأس المال', equity.id),
+  });
+  await prisma.account.create({
+    data: postable('5101', 'EXPENSE', 'Cost of sales', 'تكلفة المبيعات', expense.id),
+  });
+  const before = await byCode();
+  const entriesBefore = await prisma.journalEntry.count({ where: { companyId } });
 
-  // The migration, twice: the second run must change nothing.
   await runMigration();
+  await runMigration(); // twice: the second run must be a no-op
+
+  let accounts = await byCode();
+  const opening = accounts.get('3103');
+  const difference = accounts.get('5107');
+  check('old chart gains 3103 exactly once', (await countCode('3103')) === 1);
+  check('old chart gains 5107 exactly once', (await countCode('5107')) === 1);
+  check(
+    '3103 is a postable EQUITY account under heading 3',
+    opening?.type === 'EQUITY' && opening.isPostable && opening.parentId === equity.id,
+  );
+  check(
+    '5107 is a postable EXPENSE account under heading 5',
+    difference?.type === 'EXPENSE' && difference.isPostable && difference.parentId === expense.id,
+  );
+  check(
+    'names match the application template (EN + AR)',
+    opening?.nameEn === 'Opening balance equity' &&
+      opening?.nameAr === 'أرصدة افتتاحية' &&
+      difference?.nameEn === 'Inventory differences' &&
+      difference?.nameAr === 'فروق جرد المخزون',
+  );
+  check(
+    'pre-existing accounts are the very same rows',
+    ['3', '5', '3101', '5101'].every(
+      (code) => accounts.get(code)?.id === before.get(code)?.id,
+    ),
+  );
+  check(
+    'the upgrade bookkept nothing: no journal entries appeared',
+    (await prisma.journalEntry.count({ where: { companyId } })) === entriesBefore,
+  );
+
+  // ---- Shape 2: complete chart, locally renamed + retired. ----
+  await prisma.account.update({
+    where: { id: opening.id },
+    data: { nameEn: 'Owner opening balances (custom)' },
+  });
+  await prisma.account.update({
+    where: { id: difference.id },
+    data: { deletedAt: new Date() },
+  });
+
   await runMigration();
 
-  const byCompany = async (companyId) =>
-    prisma.account.findMany({
-      where: { companyId, code: { in: ['3103', '5107'] } },
-      orderBy: { code: 'asc' },
-    });
-
-  const aRows = await byCompany(a.id);
+  accounts = await byCode();
   check(
-    'an old company gains exactly one 3103 and one 5107',
-    aRows.length === 2 &&
-      aRows.filter((r) => r.code === '3103').length === 1 &&
-      aRows.filter((r) => r.code === '5107').length === 1,
-    `rows ${aRows.map((r) => r.code).join(',')}`,
+    'a renamed 3103 keeps the owner’s name (never overwritten)',
+    accounts.get('3103')?.nameEn === 'Owner opening balances (custom)',
   );
-  const aOpening = aRows.find((r) => r.code === '3103');
-  const aDifference = aRows.find((r) => r.code === '5107');
   check(
-    'with the mapped names, types and parents',
-    aOpening?.type === 'EQUITY' && aOpening.parentId === aEquity.id &&
-      aOpening.nameEn === 'Opening balance equity' && aOpening.isPostable &&
-      aDifference?.type === 'EXPENSE' && aDifference.parentId === aExpense.id &&
-      aDifference.nameEn === 'Inventory differences' && aDifference.isPostable,
-    `3103 parent ${aOpening?.parentId === aEquity.id}, 5107 parent ${aDifference?.parentId === aExpense.id}`,
+    'a soft-deleted 5107 is not revived or duplicated',
+    (await countCode('5107')) === 1 && accounts.get('5107')?.deletedAt !== null,
   );
 
-  const bRows = await byCompany(b.id);
-  check(
-    'a complete company is untouched (same rows, no duplicates)',
-    bRows.length === 2 &&
-      bRows.find((r) => r.code === '3103')?.id === bOpening.id &&
-      bRows.find((r) => r.code === '5107')?.id === bDifference.id,
-    `rows ${bRows.length}`,
-  );
-
-  const cRows = await byCompany(c.id);
-  check(
-    'a renumbered chart gets the accounts top-level instead of a broken parent',
-    cRows.length === 2 && cRows.find((r) => r.code === '3103')?.parentId === null,
-    `3103 parent ${cRows.find((r) => r.code === '3103')?.parentId}`,
-  );
-
-  const lines = await prisma.journalLine.count({
-    where: { accountId: { in: [...aRows, ...bRows, ...cRows].map((r) => r.id) } },
-  });
-  check('no journal line was created by adding accounts', lines === 0, `lines ${lines}`);
-} finally {
-  // Unparent first: the self-reference is Restrict, so deleting a
-  // heading while its children still point at it would fail the whole
-  // cleanup depending on row order.
+  // ---- Shape 3: renumbered chart, the '3'/'5' headings gone. ----
   await prisma.account.updateMany({
-    where: { companyId: { in: companyIds } },
+    where: { companyId },
     data: { parentId: null },
   });
-  await prisma.account.deleteMany({ where: { companyId: { in: companyIds } } });
-  await prisma.company.deleteMany({ where: { id: { in: companyIds } } });
+  await prisma.account.deleteMany({
+    where: { companyId, code: { in: ['3103', '5107', '3', '5'] } },
+  });
+
+  await runMigration();
+
+  accounts = await byCode();
+  check(
+    'renumbered chart still gains both accounts, parentless',
+    (await countCode('3103')) === 1 &&
+      (await countCode('5107')) === 1 &&
+      accounts.get('3103')?.parentId === null &&
+      accounts.get('5107')?.parentId === null,
+  );
+  check(
+    'types stay correct without the headings',
+    accounts.get('3103')?.type === 'EQUITY' && accounts.get('5107')?.type === 'EXPENSE',
+  );
+} finally {
+  if (companyId) {
+    // Unparent first: the self-reference is Restrict, so deleting a
+    // heading while its children still point at it could fail.
+    await prisma.account.updateMany({
+      where: { companyId },
+      data: { parentId: null },
+    });
+    await prisma.account.deleteMany({ where: { companyId } });
+    await prisma.company.deleteMany({ where: { id: companyId } });
+  }
   await prisma.$disconnect();
 }
 
-const failed = results.filter((ok) => !ok).length;
-console.log(`\n${results.length - failed}/${results.length} chart-upgrade checks passed`);
-process.exit(failed === 0 ? 0 : 1);
+console.log(
+  failures === 0
+    ? 'chart-upgrade checks: all passed'
+    : `chart-upgrade checks: ${failures} FAILED`,
+);
+process.exit(failures === 0 ? 0 : 1);

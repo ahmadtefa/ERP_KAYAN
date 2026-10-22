@@ -140,7 +140,7 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.textContaining('1104'), findsWidgets);
-    expect(find.textContaining('مخزون المواد الخام'), findsWidgets);
+    expect(find.textContaining('raw materials'), findsWidgets);
   });
 
   testWidgets('a purchase invoice document reads cleanly on a phone', (
@@ -194,7 +194,8 @@ class _ChartSource implements ChartOfAccountsDataSource {
       nameEn: 'Inventory — raw materials and spare parts, main warehouse',
       nameAr: 'مخزون المواد الخام وقطع الغيار بالمخزن الرئيسي',
       type: AccountType.asset,
-      parentId: 'a1',
+      // Top-level on purpose: the tree starts collapsed, and this
+      // test is about narrow layout, not about expanding nodes.
       cashFlowClass: 'OPERATING',
     ),
     Account(
