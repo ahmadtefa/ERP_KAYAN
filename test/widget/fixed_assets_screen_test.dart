@@ -34,6 +34,7 @@ class _FakeApiClient extends ApiClient {
       );
 
   final List<({String path, Object? body})> posts = [];
+  final List<({String path, Object? body})> patches = [];
   final Set<String> depreciatedMonths = {};
 
   List<Json> assets = [
@@ -47,6 +48,7 @@ class _FakeApiClient extends ApiClient {
       'cost': '120000.0000',
       'accumulatedDepreciation': '5400.0000',
       'bookValue': '114600.0000',
+      'lastDepreciationPeriod': '2025-01',
     },
     {
       'id': 'asset-tool',
@@ -56,8 +58,19 @@ class _FakeApiClient extends ApiClient {
       'category': 'Tools',
       'status': 'DRAFT',
       'cost': '1200.0000',
+      'salvageValue': '200.0000',
+      'usefulLifeMonths': 12,
       'accumulatedDepreciation': '0.0000',
       'bookValue': '1200.0000',
+      'assetAccountId': 'acc-asset',
+      'accumulatedAccountId': 'acc-accum',
+      'depreciationExpenseAccountId': 'acc-expense',
+      'purchaseDate': '2025-03-01',
+      'inServiceDate': '2025-03-01',
+      // A draft capitalised from a purchase line: the edit form can
+      // still change its mind and unlink it.
+      'purchaseInvoiceLineId': 'line-9',
+      'purchaseQuantity': '2.0000',
     },
   ];
 
@@ -117,6 +130,21 @@ class _FakeApiClient extends ApiClient {
         'items': assets,
       };
     }
+    if (path == '/fixed-assets/depreciation-runs') {
+      return {
+        'items': [
+          {
+            'runNumber': 'DEP-000001',
+            'period': '2025-01',
+            'runDate': '2025-01-31',
+            'totalAmount': '1000.0000',
+            'lines': [
+              {'fixedAssetId': 'asset-machine', 'amount': '1000.0000'},
+            ],
+          },
+        ],
+      };
+    }
     if (path == '/fixed-assets/purchase-lines') {
       return {
         'items': [
@@ -167,6 +195,12 @@ class _FakeApiClient extends ApiClient {
       ];
       return {'id': id, 'status': 'DISPOSED'};
     }
+    return {};
+  }
+
+  @override
+  Future<Map<String, dynamic>> patch(String path, {Object? body}) async {
+    patches.add((path: path, body: body));
     return {};
   }
 }
@@ -363,6 +397,118 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
     // And nothing was created by merely arriving with a prefill.
     expect(find.text('FA-M-1'), findsOneWidget);
+  });
+
+  testWidgets('search and the status filter narrow the register', (
+    tester,
+  ) async {
+    await _pump(tester);
+
+    // Both assets to begin with, last depreciation month visible.
+    expect(find.text('FA-M-1'), findsOneWidget);
+    expect(find.text('FA-T-1'), findsOneWidget);
+    expect(find.text('2025-01'), findsWidgets);
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search code, name or location'),
+      'Small',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('FA-T-1'), findsOneWidget);
+    expect(find.text('FA-M-1'), findsNothing);
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search code, name or location'),
+      '',
+    );
+    await tester.pumpAndSettle();
+
+    // Status filter: drafts only.
+    await tester.tap(find.byType(DropdownButtonFormField<String?>).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DRAFT').last);
+    await tester.pumpAndSettle();
+    expect(find.text('FA-T-1'), findsOneWidget);
+    expect(find.text('FA-M-1'), findsNothing);
+  });
+
+  testWidgets('the run history shows numbers, periods and totals', (
+    tester,
+  ) async {
+    await _pump(tester);
+
+    await tester.tap(find.byTooltip('Depreciation runs'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('DEP-000001 · 2025-01'), findsOneWidget);
+    expect(find.textContaining('1,000'), findsWidgets);
+  });
+
+  testWidgets('disposing sends the date and proceeds typed', (tester) async {
+    final api = await _pump(tester);
+
+    final disposeButton = find.byTooltip('Dispose asset');
+    await tester.ensureVisible(disposeButton);
+    await tester.pumpAndSettle();
+    await tester.tap(disposeButton);
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Disposal date'),
+      '2025-12-31',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Disposal proceeds'),
+      '1000',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    // The destructive confirmation, then the post.
+    await tester.tap(find.widgetWithText(FilledButton, 'Dispose asset'));
+    await tester.pumpAndSettle();
+
+    final disposals = api.posts.where((p) => p.path.endsWith('/dispose'));
+    expect(disposals, hasLength(1));
+    expect(disposals.single.path, '/fixed-assets/asset-machine/dispose');
+    expect((disposals.single.body! as Map)['proceeds'], '1000');
+    expect((disposals.single.body! as Map)['date'], '2025-12-31');
+  });
+
+  testWidgets('a draft can be unlinked from its purchase line', (
+    tester,
+  ) async {
+    final api = await _pump(tester);
+
+    final editButton = find.byTooltip('Edit');
+    await tester.ensureVisible(editButton);
+    await tester.pumpAndSettle();
+    await tester.tap(editButton);
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+
+    // The purchase-line dropdown currently shows the linked line.
+    final lineDropdown = find.ancestor(
+      of: find.textContaining('PI-9'),
+      matching: find.byType(DropdownButtonFormField<String>),
+    );
+    expect(lineDropdown, findsWidgets);
+    await tester.ensureVisible(lineDropdown.first);
+    await tester.pumpAndSettle();
+    await tester.tap(lineDropdown.first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('— No link —').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(api.patches, hasLength(1));
+    final body = api.patches.single.body! as Map;
+    // The unlink must be explicit nulls, not missing keys — a missing
+    // key would leave the old link standing on the server.
+    expect(body.containsKey('purchaseInvoiceLineId'), isTrue);
+    expect(body['purchaseInvoiceLineId'], isNull);
+    expect(body['purchaseQuantity'], isNull);
   });
 
   for (final size in [const Size(390, 844), const Size(320, 700)]) {

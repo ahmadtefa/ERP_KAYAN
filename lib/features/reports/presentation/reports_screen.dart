@@ -1246,28 +1246,35 @@ class _ReconciliationSectionCard extends StatelessWidget {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: tone.background,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      statusLabel,
-                      style: TextStyle(
-                        color: tone.foreground,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
                   if (onOpen != null) ...[
                     const SizedBox(width: 4),
                     const Icon(Icons.chevron_right, size: 20),
                   ],
                 ],
+              ),
+              const SizedBox(height: 8),
+              // The status pill gets its own line: beside the title it
+              // left so little room on a phone that a single long word
+              // ('reconciliation') overflowed the header row outright.
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: tone.background,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    statusLabel,
+                    style: TextStyle(
+                      color: tone.foreground,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ),
               if (status == 'incomplete')
                 Padding(
