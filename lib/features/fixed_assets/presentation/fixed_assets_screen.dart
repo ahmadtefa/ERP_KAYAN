@@ -46,6 +46,18 @@ class FixedAssetsScreen extends ConsumerStatefulWidget {
 
 class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
   bool _busy = false;
+  final _search = TextEditingController();
+  String? _statusFilter;
+  String? _categoryFilter;
+
+  String _t(String ar, String en) =>
+      Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
 
   Future<List<Json>> _accounts() =>
       ref.read(apiClientProvider).getList('/accounting/chart-of-accounts');
@@ -70,6 +82,34 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
     final l10n = context.l10n;
     final isEdit = existing != null;
     final accounts = await _accounts();
+    // Purchase lines that can still be capitalised. The list comes from
+    // the server already net of returns and of other assets, so what
+    // can be picked here is exactly what the create guard will accept.
+    final purchaseLineOptions = <FieldOption>[];
+    try {
+      final body = await ref
+          .read(apiClientProvider)
+          .get('/fixed-assets/purchase-lines');
+      for (final line in listOf(body['items'])) {
+        purchaseLineOptions.add(
+          FieldOption(
+            text(line, 'lineId'),
+            '${text(line, 'invoiceNumber')} · ${text(line, 'description')} · '
+            '×${formatAmount(asString(line['remainingQuantity']))} '
+            '(${formatAmount(asString(line['remainingCost']))})',
+          ),
+        );
+      }
+    } on Failure {
+      // The link is optional; the form still works without the list.
+    }
+    final currentLine = existing?['purchaseInvoiceLineId']?.toString();
+    if (currentLine != null &&
+        !purchaseLineOptions.any((o) => o.value == currentLine)) {
+      purchaseLineOptions.add(
+        FieldOption(currentLine, _t('بند شراء مرتبط', 'Linked purchase line')),
+      );
+    }
     if (!mounted) return;
     final values = await showFormSheet(
       context,
@@ -127,6 +167,21 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
           options: _options(accounts, type: 'expense'),
         ),
         FieldSpec('location', l10n.assetLocation),
+        FieldSpec(
+          'purchaseInvoiceLineId',
+          _t('بند فاتورة الشراء (اختياري)', 'Purchase invoice line (optional)'),
+          kind: FieldKind.select,
+          options: purchaseLineOptions,
+          helper: _t(
+            'عند الربط تُرحَّل التكلفة عند التفعيل من المخزون لا نقدًا، ولا يمكن رسملة البند مرتين',
+            'When linked, activation reclassifies the cost out of inventory; a line cannot be capitalised twice',
+          ),
+        ),
+        FieldSpec(
+          'purchaseQuantity',
+          _t('الكمية من البند', 'Units from the line'),
+          kind: FieldKind.decimal,
+        ),
       ],
       initial: existing,
     );
@@ -228,6 +283,58 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
     );
   }
 
+  Future<void> _showRuns() async {
+    final l10n = context.l10n;
+    try {
+      final body = await ref
+          .read(apiClientProvider)
+          .get('/fixed-assets/depreciation-runs');
+      if (!mounted) return;
+      final runs = listOf(body['items']);
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(_t('تشغيلات الإهلاك', 'Depreciation runs')),
+          content: SizedBox(
+            width: 520,
+            child: runs.isEmpty
+                ? Text(_t('لا توجد تشغيلات بعد', 'No runs yet'))
+                : SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final run in runs)
+                          ListTile(
+                            dense: true,
+                            title: Text(
+                              '${text(run, 'runNumber')} · ${text(run, 'period')}',
+                            ),
+                            subtitle: Text(
+                              '${text(run, 'runDate')} · '
+                              '${listOf(run['lines']).length} '
+                              '${_t('أصل', 'asset(s)')}',
+                            ),
+                            trailing: Text(
+                              formatAmount(asString(run['totalAmount'])),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(l10n.close),
+            ),
+          ],
+        ),
+      );
+    } on Failure catch (e) {
+      if (mounted) showMessage(context, e.message, error: true);
+    }
+  }
+
   Future<void> _runDepreciation() async {
     final l10n = context.l10n;
     final now = DateTime.now();
@@ -304,6 +411,22 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                     '${l10n.accumulatedDepreciation}: ${formatAmount(asString(detail['accumulatedDepreciation']))}  •  '
                     '${l10n.bookValue}: ${formatAmount(asString(detail['bookValue']))}',
                   ),
+                  if (text(detail, 'acquisitionEntryNumber').isNotEmpty ||
+                      text(detail, 'disposalEntryNumber').isNotEmpty ||
+                      text(detail, 'purchaseInvoiceLineId').isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      [
+                        if (text(detail, 'acquisitionEntryNumber').isNotEmpty)
+                          '${_t('قيد الشراء', 'Acquisition entry')}: ${text(detail, 'acquisitionEntryNumber')}',
+                        if (text(detail, 'disposalEntryNumber').isNotEmpty)
+                          '${_t('قيد الاستبعاد', 'Disposal entry')}: ${text(detail, 'disposalEntryNumber')}',
+                        if (text(detail, 'purchaseInvoiceLineId').isNotEmpty)
+                          '${_t('مرتبط بفاتورة شراء', 'From purchase invoice')} ×${formatAmount(asString(detail['purchaseQuantity']))}',
+                      ].join('  •  '),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Text(
                     l10n.depreciationSchedule,
@@ -315,7 +438,10 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                     ListTile(
                       dense: true,
                       title: Text(text(row, 'period')),
-                      subtitle: Text(text(row, 'runNumber')),
+                      subtitle: Text(
+                        '${text(row, 'runNumber')}'
+                        '${text(row, 'entryNumber').isEmpty ? '' : ' · ${text(row, 'entryNumber')}'}',
+                      ),
                       trailing: Text(
                         '${formatAmount(asString(row['amount']))}  →  ${formatAmount(asString(row['accumulatedAfter']))}',
                       ),
@@ -365,6 +491,12 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
           ),
           const SizedBox(width: 4),
           OutlinedButton.icon(
+            onPressed: _busy ? null : _showRuns,
+            icon: const Icon(Icons.history_outlined),
+            label: Text(_t('تشغيلات الإهلاك', 'Depreciation runs')),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
             onPressed: _busy ? null : _runDepreciation,
             icon: const Icon(Icons.trending_down_outlined),
             label: Text(l10n.runDepreciation),
@@ -407,6 +539,91 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
             },
             orElse: () => const SizedBox.shrink(),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _search,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      labelText: _t(
+                        'بحث بالكود أو الاسم أو الموقع',
+                        'Search code, name or location',
+                      ),
+                      isDense: true,
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.search, size: 18),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 170,
+                  child: DropdownButtonFormField<String?>(
+                    key: ValueKey(_statusFilter),
+                    initialValue: _statusFilter,
+                    isDense: true,
+                    decoration: InputDecoration(
+                      labelText: l10n.status,
+                      isDense: true,
+                      border: const OutlineInputBorder(),
+                    ),
+                    items: [
+                      DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text(_t('الكل', 'All')),
+                      ),
+                      for (final status in const [
+                        'DRAFT',
+                        'ACTIVE',
+                        'FULLY_DEPRECIATED',
+                        'DISPOSED',
+                      ])
+                        DropdownMenuItem<String?>(
+                          value: status,
+                          child: Text(status),
+                        ),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => _statusFilter = value),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 180,
+                  child: DropdownButtonFormField<String?>(
+                    key: ValueKey(_categoryFilter),
+                    initialValue: _categoryFilter,
+                    isDense: true,
+                    decoration: InputDecoration(
+                      labelText: l10n.assetCategory,
+                      isDense: true,
+                      border: const OutlineInputBorder(),
+                    ),
+                    items: [
+                      DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text(_t('الكل', 'All')),
+                      ),
+                      for (final category in {
+                        for (final row in async.value ?? const <Json>[])
+                          if (text(row, 'category').isNotEmpty)
+                            text(row, 'category'),
+                      })
+                        DropdownMenuItem<String?>(
+                          value: category,
+                          child: Text(category),
+                        ),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => _categoryFilter = value),
+                  ),
+                ),
+              ],
+            ),
+          ),
           Expanded(
             child: AsyncStateView<List<Json>>(
               value: async,
@@ -414,8 +631,25 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                   ref.read(fixedAssetsListProvider.notifier).reload(),
               isEmpty: (rows) => rows.isEmpty,
               emptyMessage: l10n.noAssets,
-              data: (rows) => RecordsTable(
-                rows: rows,
+              data: (rows) {
+                final query = _search.text.trim().toLowerCase();
+                final visible = rows.where((row) {
+                  if (_statusFilter != null &&
+                      text(row, 'status') != _statusFilter) {
+                    return false;
+                  }
+                  if (_categoryFilter != null &&
+                      text(row, 'category') != _categoryFilter) {
+                    return false;
+                  }
+                  if (query.isEmpty) return true;
+                  return text(row, 'code').toLowerCase().contains(query) ||
+                      text(row, 'nameEn').toLowerCase().contains(query) ||
+                      text(row, 'nameAr').contains(query) ||
+                      text(row, 'location').toLowerCase().contains(query);
+                }).toList();
+                return RecordsTable(
+                rows: visible,
                 onTap: _details,
                 columns: [
                   ColumnSpec(
@@ -434,6 +668,10 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                     value: (r) => text(r, 'category'),
                   ),
                   ColumnSpec(
+                    l10n.inServiceDate,
+                    value: (r) => text(r, 'inServiceDate'),
+                  ),
+                  ColumnSpec(
                     l10n.status,
                     value: (r) => text(r, 'status'),
                     tone: (r) => _toneFor(text(r, 'status')),
@@ -442,6 +680,16 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                     l10n.assetCost,
                     numeric: true,
                     value: (r) => formatAmount(asString(r['cost'])),
+                  ),
+                  ColumnSpec(
+                    l10n.salvageValue,
+                    numeric: true,
+                    value: (r) => formatAmount(asString(r['salvageValue'])),
+                  ),
+                  ColumnSpec(
+                    l10n.usefulLifeMonths,
+                    numeric: true,
+                    value: (r) => text(r, 'usefulLifeMonths'),
                   ),
                   ColumnSpec(
                     l10n.accumulatedDepreciation,
@@ -454,6 +702,14 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                     numeric: true,
                     emphasise: true,
                     value: (r) => formatAmount(asString(r['bookValue'])),
+                  ),
+                  ColumnSpec(
+                    _t('آخر إهلاك', 'Last depreciation'),
+                    value: (r) => text(r, 'lastDepreciationPeriod'),
+                  ),
+                  ColumnSpec(
+                    l10n.assetLocation,
+                    value: (r) => text(r, 'location'),
                   ),
                 ],
                 actions: (row) {
@@ -479,7 +735,8 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                       ),
                   ];
                 },
-              ),
+                );
+              },
             ),
           ),
         ],
