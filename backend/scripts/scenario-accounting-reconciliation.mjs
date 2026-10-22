@@ -1134,7 +1134,70 @@ async function main() {
     );
   }
 
-  // ── 17. the whole company, backed up and put back ──────────────────────
+  // ── 17. the reconciliation centre tells the four stories at once ───────
+  const centre = async () => (await api('/reports/reconciliation-center')).data;
+  const section = (data, key) => (data?.sections ?? []).find((s) => s.key === key);
+  const centreNow = await centre();
+  check(
+    'the centre: payables, inventory and assets matched; receivables an explained −250',
+    section(centreNow, 'payables')?.status === 'matched' &&
+      section(centreNow, 'inventory')?.status === 'matched' &&
+      near(section(centreNow, 'inventory')?.subledger, 300) &&
+      section(centreNow, 'fixedAssets')?.status === 'matched' &&
+      section(centreNow, 'receivables')?.status === 'difference' &&
+      section(centreNow, 'receivables')?.fullyExplained === true &&
+      near(section(centreNow, 'receivables')?.difference, -250) &&
+      near(section(centreNow, 'receivables')?.details?.advances, 250),
+    `receivables ${JSON.stringify(section(centreNow, 'receivables'))?.slice(0, 160)}`,
+  );
+  const stray = await postManualEntry('a stray debit straight onto inventory', '2025-02-10', [
+    { accountId: code('1104'), debit: '25' },
+    { accountId: code('5107'), credit: '25' },
+  ]);
+  if (stray) {
+    const centreStray = await centre();
+    check(
+      'the centre shows the known 25 inventory difference instead of hiding it',
+      section(centreStray, 'inventory')?.status === 'difference' &&
+        section(centreStray, 'inventory')?.fullyExplained === false &&
+        near(section(centreStray, 'inventory')?.difference, -25),
+      `inventory ${JSON.stringify(section(centreStray, 'inventory'))}`,
+    );
+    await must('reverse the stray debit', `/accounting/journal-entries/${stray.id}/reverse`, {
+      method: 'POST',
+    });
+    const centreFixed = await centre();
+    check(
+      'and agrees again once the stray posting is reversed',
+      section(centreFixed, 'inventory')?.status === 'matched',
+      `inventory ${JSON.stringify(section(centreFixed, 'inventory'))}`,
+    );
+  }
+
+  // ── 18. the closing preview warns without blocking ─────────────────────
+  const period2025 = await must('open the 2025 fiscal year', '/accounting/fiscal-periods', {
+    method: 'POST',
+    json: {
+      code: `REC25-${stamp}`,
+      nameEn: `Lifecycle 2025 ${stamp}`,
+      nameAr: `سنة 2025 ${stamp}`,
+      startDate: '2025-01-01',
+      endDate: '2025-12-31',
+    },
+  });
+  if (period2025) {
+    const preview25 = (
+      await api(`/accounting/fiscal-periods/${period2025.id}/closing-preview`)
+    ).data;
+    check(
+      'the 2025 preview warns that the press has no December depreciation',
+      Array.isArray(preview25?.warnings) &&
+        preview25.warnings.some((w) => String(w).includes('depreciation')),
+      `warnings ${JSON.stringify(preview25?.warnings)}`,
+    );
+  }
+
+  // ── 19. the whole company, backed up and put back ──────────────────────
   const backup = (await api('/backup/download')).data;
   check(
     'the company backup carries the fixed-asset and depreciation tables',

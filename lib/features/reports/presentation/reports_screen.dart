@@ -102,7 +102,7 @@ class ReportsScreen extends ConsumerStatefulWidget {
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 21, vsync: this)
+  late final TabController _tabs = TabController(length: 22, vsync: this)
     ..addListener(() => setState(() {}));
 
   @override
@@ -175,6 +175,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               Tab(text: l10n.fixedAssets),
               Tab(text: l10n.costCenterReport),
               Tab(text: l10n.budgetReport),
+              Tab(text: _t(context, 'مركز التسويات', 'Reconciliation center')),
             ],
           ),
           // Download and print always reflect the tab that is open and the
@@ -231,7 +232,10 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               17 => const _ReconciliationTab(side: 'payables'),
               18 => const _FixedAssetsReportTab(),
               19 => const _CostCentersTab(),
-              _ => const _BudgetReportTab(),
+              20 => const _BudgetReportTab(),
+              _ => _ReconciliationCenterTab(
+                onOpenTab: (index) => _tabs.animateTo(index),
+              ),
             },
           ),
         ],
@@ -1099,6 +1103,211 @@ class _ReconciliationTab extends ConsumerWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// Every subledger against its control account, on one page: the
+/// receivables and payables reconciliations in summary, the stock
+/// valuation against the inventory account, and the asset register
+/// against its ledger accounts. A difference is shown with what
+/// explains it — advances held, postings with no document — and a
+/// section that cannot be computed says so instead of pretending.
+/// Nothing here adjusts a balance; tapping a section opens the detail
+/// report where the difference can be chased.
+class _ReconciliationCenterTab extends ConsumerWidget {
+  const _ReconciliationCenterTab({required this.onOpenTab});
+
+  final void Function(int index) onOpenTab;
+
+  /// The detail tab behind each section, where one exists.
+  static const _detailTab = {
+    'receivables': 16,
+    'payables': 17,
+    'fixedAssets': 18,
+  };
+
+  String _title(BuildContext context, String key) => switch (key) {
+    'receivables' => _t(context, 'تسوية العملاء', 'Receivables reconciliation'),
+    'payables' => _t(context, 'تسوية الموردين', 'Payables reconciliation'),
+    'inventory' => _t(context, 'تسوية المخزون', 'Inventory reconciliation'),
+    _ => _t(context, 'تسوية الأصول الثابتة', 'Fixed assets reconciliation'),
+  };
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    final async = ref.watch(
+      reportProvider('/reports/reconciliation-center?asOf=${period.to}'),
+    );
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final sections = listOf(data['sections']);
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text(
+              '${_t(context, 'حتى تاريخ', 'As of')}: ${text(data, 'asOf')}',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: 12),
+            for (final section in sections)
+              _ReconciliationSectionCard(
+                section: section,
+                title: _title(context, text(section, 'key')),
+                onOpen: _detailTab[text(section, 'key')] == null
+                    ? null
+                    : () => onOpenTab(_detailTab[text(section, 'key')]!),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _ReconciliationSectionCard extends StatelessWidget {
+  const _ReconciliationSectionCard({
+    required this.section,
+    required this.title,
+    required this.onOpen,
+  });
+
+  final Json section;
+  final String title;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = text(section, 'status');
+    final explained = flag(section, 'fullyExplained');
+    final (tone, statusLabel, icon) = switch (status) {
+      'matched' => (
+        AppTone.success,
+        _t(context, 'متطابق', 'Matched'),
+        Icons.check_circle_outline,
+      ),
+      'incomplete' => (
+        AppTone.neutral,
+        _t(context, 'غير مكتمل', 'Incomplete'),
+        Icons.help_outline,
+      ),
+      _ when explained => (
+        AppTone.warning,
+        _t(context, 'يوجد فرق مفسَّر', 'Explained difference'),
+        Icons.info_outline,
+      ),
+      _ => (
+        AppTone.danger,
+        _t(context, 'يوجد فرق', 'Difference'),
+        Icons.error_outline,
+      ),
+    };
+    final details = section['details'] is Map
+        ? Map<String, dynamic>.from(section['details'] as Map)
+        : <String, dynamic>{};
+
+    Widget line(String label, String? raw) => Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: [
+          Expanded(child: Text(label)),
+          Text(
+            raw == null ? '—' : formatAmount(raw),
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        onTap: onOpen,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, size: 20, color: tone.foreground),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: tone.background,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      statusLabel,
+                      style: TextStyle(
+                        color: tone.foreground,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (onOpen != null) ...[
+                    const SizedBox(width: 4),
+                    const Icon(Icons.chevron_right, size: 20),
+                  ],
+                ],
+              ),
+              if (status == 'incomplete')
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(text(section, 'reason')),
+                )
+              else ...[
+                line(
+                  _t(context, 'الأستاذ المساعد', 'Subledger'),
+                  asString(section['subledger']),
+                ),
+                line(
+                  _t(context, 'حساب الرقابة', 'Control account'),
+                  asString(section['control']),
+                ),
+                line(
+                  _t(context, 'الفرق', 'Difference'),
+                  asString(section['difference']),
+                ),
+                if (details['advances'] != null &&
+                    asString(details['advances']) != '0.0000')
+                  line(
+                    _t(context, 'مقدّمات غير مطبّقة', 'Advances held'),
+                    asString(details['advances']),
+                  ),
+                if (details['otherPostings'] != null &&
+                    (details['otherPostings'] as num? ?? 0) > 0)
+                  line(
+                    _t(
+                      context,
+                      'قيود دون مستند فرعي',
+                      'Postings without a document',
+                    ),
+                    asString(details['otherPostingsTotal']),
+                  ),
+                if (details['unexplained'] != null)
+                  line(
+                    _t(context, 'غير مفسَّر', 'Unexplained'),
+                    asString(details['unexplained']),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

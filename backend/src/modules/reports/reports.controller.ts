@@ -18,6 +18,7 @@ import {
 } from './dto/report-query.dto';
 import { OperationsReportsService } from './operations-reports.service';
 import { PartyReconciliationService } from './party-reconciliation.service';
+import { ReconciliationCenterService } from './reconciliation-center.service';
 import { ReportsService } from './reports.service';
 
 @Controller('reports')

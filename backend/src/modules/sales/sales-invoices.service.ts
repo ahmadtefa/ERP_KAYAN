@@ -662,13 +662,8 @@ export class SalesInvoicesService {
           'Reverse the posted sales returns before reversing their source invoice.',
         );
       }
-      const claimedJournal = await tx.journalEntry.updateMany({
-        where: { id: original.id, companyId, status: JournalStatus.POSTED },
-        data: { status: JournalStatus.REVERSED },
-      });
-      if (claimedJournal.count !== 1) {
-        throw new BadRequestException('The original journal entry has already been reversed');
-      }
+      // The journal claim itself happens inside PostingService.reverse,
+      // below, in the same transaction as the stock coming back in.
 
       const warehouseId = await this.warehouses.resolveForReversal(
         tx,

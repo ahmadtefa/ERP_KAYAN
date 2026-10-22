@@ -629,13 +629,8 @@ export class PurchaseInvoicesService {
           data: { warehouseId },
         });
       }
-      const claimedJournal = await tx.journalEntry.updateMany({
-        where: { id: original.id, companyId, status: JournalStatus.POSTED },
-        data: { status: JournalStatus.REVERSED },
-      });
-      if (claimedJournal.count !== 1) {
-        throw new BadRequestException('The original journal entry has already been reversed');
-      }
+      // The journal claim itself happens inside PostingService.reverse,
+      // below, in the same transaction as the stock going back out.
 
       for (const line of invoice.lines) {
         if (!line.itemId) {
@@ -1071,18 +1066,6 @@ export class PurchaseInvoicesService {
       discountPercent: (invoice.discountPercent ?? new Prisma.Decimal(0)).toFixed(RATE_SCALE),
       discountAmount: (invoice.discountAmount ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
       lineDiscountTotal: (invoice.lineDiscountTotal ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
-      subTotal: invoice.subTotal.toFixed(MONEY_SCALE),
-      taxAmount: invoice.taxAmount.toFixed(MONEY_SCALE),
-      totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),
-      landedCostAmount: invoice.landedCostAmount.toFixed(MONEY_SCALE),
-      landedCostCharges: this.toLandedCostCharges(invoice.landedCostCharges),
-      paidAmount: invoice.paidAmount.toFixed(MONEY_SCALE),
-      balanceDue: invoice.totalAmount.minus(invoice.paidAmount).toFixed(MONEY_SCALE),
-      createdAt: invoice.createdAt.toISOString(),
-    };
-  }
-}
-iscountTotal: (invoice.lineDiscountTotal ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
       subTotal: invoice.subTotal.toFixed(MONEY_SCALE),
       taxAmount: invoice.taxAmount.toFixed(MONEY_SCALE),
       totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),

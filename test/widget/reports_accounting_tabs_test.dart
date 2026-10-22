@@ -106,6 +106,53 @@ class _FakeApiClient extends ApiClient {
         },
       };
     }
+    if (path.startsWith('/reports/reconciliation-center')) {
+      return {
+        'asOf': '2026-10-22',
+        'sections': [
+          {
+            'key': 'receivables',
+            'status': 'difference',
+            'fullyExplained': true,
+            'subledger': '0.0000',
+            'control': '-250.0000',
+            'difference': '-250.0000',
+            'reason': null,
+            'details': {'advances': '250.0000', 'unexplained': '0.0000'},
+          },
+          {
+            'key': 'payables',
+            'status': 'matched',
+            'fullyExplained': true,
+            'subledger': '0.0000',
+            'control': '0.0000',
+            'difference': '0.0000',
+            'reason': null,
+            'details': {'unexplained': '0.0000'},
+          },
+          {
+            'key': 'inventory',
+            'status': 'difference',
+            'fullyExplained': false,
+            'subledger': '300.0000',
+            'control': '325.0000',
+            'difference': '-25.0000',
+            'reason': null,
+            'details': {'controlCode': '1104'},
+          },
+          {
+            'key': 'fixedAssets',
+            'status': 'matched',
+            'fullyExplained': true,
+            'subledger': '1300.0000',
+            'control': '1300.0000',
+            'difference': '0.0000',
+            'reason': null,
+            'details': {},
+          },
+        ],
+      };
+    }
     if (path.startsWith('/reports/receivables-reconciliation')) {
       return {
         'controlBalance': '-250.0000',
@@ -244,5 +291,20 @@ void main() {
     expect(find.textContaining('Control account: -250'), findsOneWidget);
     expect(find.textContaining('Advances held: 250'), findsOneWidget);
     expect(find.textContaining('Unexplained: 0.00'), findsOneWidget);
+  });
+
+  testWidgets('the reconciliation centre shows every subledger at once', (
+    tester,
+  ) async {
+    await _pump(tester);
+    await _openTab(tester, 'Reconciliation center');
+
+    // Matched, explained and unexplained differences read differently.
+    expect(find.text('Matched'), findsNWidgets(2));
+    expect(find.text('Explained difference'), findsOneWidget);
+    expect(find.text('Difference'), findsWidgets);
+    expect(find.text('Receivables reconciliation'), findsWidgets);
+    expect(find.text('Inventory reconciliation'), findsOneWidget);
+    expect(find.textContaining('-25.00'), findsOneWidget);
   });
 }
