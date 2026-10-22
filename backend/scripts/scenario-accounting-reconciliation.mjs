@@ -775,11 +775,15 @@ async function main() {
       .map((m) => [...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((t) => t[1]).join(''));
     const sheetName = [...entries.keys()].find((k) => /xl\/worksheets\/sheet\d+\.xml$/.test(k));
     const xml = entries.get(sheetName ?? '') ?? '';
-    return [...xml.matchAll(/<c[^>]*?(?:\st="([^"]*)")?[^>]*>([\s\S]*?)<\/c>/g)].map((m) => {
+    return [...xml.matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)].map((m) => {
+      // The cell type is read from the opening tag as a whole: folding
+      // it into the cell pattern as an optional group lets a lazy match
+      // skip right past t="s" and hand back raw shared-string indexes.
+      const type = /\bt="([^"]*)"/.exec(m[1])?.[1];
       const inline = /<t[^>]*>([\s\S]*?)<\/t>/.exec(m[2])?.[1];
       if (inline !== undefined) return inline;
       const value = /<v>([\s\S]*?)<\/v>/.exec(m[2])?.[1] ?? '';
-      return m[1] === 's' ? (shared[Number(value)] ?? '') : value;
+      return type === 's' ? (shared[Number(value)] ?? '') : value;
     });
   };
   const tbUrl = await ticketed(
