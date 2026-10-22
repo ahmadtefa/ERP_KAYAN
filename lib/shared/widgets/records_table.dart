@@ -65,7 +65,15 @@ class RecordsTable extends StatelessWidget {
         final width = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : MediaQuery.sizeOf(context).width;
-        if (width < _wideBreakpoint) return _cardList(context);
+        if (width < _wideBreakpoint) {
+          // Inside another scroll view (a document dialog on a phone)
+          // the height is unbounded, where a lazy ListView cannot
+          // live: shrink-wrap there and let the parent scroll.
+          return _cardList(
+            context,
+            boundedHeight: constraints.maxHeight.isFinite,
+          );
+        }
         return _table(context);
       },
     );
@@ -175,11 +183,13 @@ class RecordsTable extends StatelessWidget {
     return base?.copyWith(fontWeight: FontWeight.w600);
   }
 
-  Widget _cardList(BuildContext context) {
+  Widget _cardList(BuildContext context, {required bool boundedHeight}) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return ListView.separated(
       padding: const EdgeInsets.all(AppSpacing.md),
+      shrinkWrap: !boundedHeight,
+      physics: boundedHeight ? null : const NeverScrollableScrollPhysics(),
       itemCount: rows.length,
       separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
       itemBuilder: (context, index) {

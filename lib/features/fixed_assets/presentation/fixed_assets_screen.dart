@@ -594,9 +594,15 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: Row(
+            // A Wrap, not a Row: on a phone the two filter dropdowns
+            // move to their own line instead of overflowing the row.
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Expanded(
+                SizedBox(
+                  width: 260,
                   child: TextField(
                     controller: _search,
                     onChanged: (_) => setState(() {}),
@@ -611,7 +617,6 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
                 SizedBox(
                   width: 170,
                   child: DropdownButtonFormField<String?>(

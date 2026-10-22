@@ -17,9 +17,14 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
+// The Prisma 7 client engine needs its driver adapter named
+// explicitly — the same construction the API and the seed use.
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+});
 const stamp = String(Date.now()).slice(-8);
 const results = [];
 const check = (name, ok, detail = '') => {

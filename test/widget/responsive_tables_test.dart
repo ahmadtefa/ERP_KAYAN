@@ -149,14 +149,23 @@ void main() {
     _size(tester, 390);
     await tester.pumpWidget(
       _app(
-        const InvoiceDetailDialog(
-          kind: InvoiceKind.purchase,
-          summary: {'id': 'inv-1', 'invoiceNumber': 'PI-1'},
+        // The real app mounts this inside a bounded data dialog; the
+        // box reproduces that instead of an unbounded scaffold body.
+        const SizedBox(
+          height: 760,
+          child: InvoiceDetailDialog(
+            kind: InvoiceKind.purchase,
+            summary: {'id': 'inv-1', 'invoiceNumber': 'PI-1'},
+          ),
         ),
         api: _InvoiceApi(),
       ),
     );
-    await tester.pumpAndSettle();
+    // Bounded pumps rather than pumpAndSettle: the export-actions
+    // capabilities probe can keep a spinner alive in a test binding.
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
 
     expect(tester.takeException(), isNull);
     // The line total, formatted by the screen, whole and unsplit.
@@ -238,6 +247,9 @@ class _InvoiceApi extends ApiClient {
     String path, {
     Map<String, dynamic>? query,
   }) async {
+    if (path.contains('capabilities')) {
+      return {'formats': ['xlsx', 'csv'], 'pdf': false};
+    }
     return {
       'id': 'inv-1',
       'invoiceNumber': 'PI-1',
