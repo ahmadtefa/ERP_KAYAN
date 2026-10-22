@@ -18,6 +18,7 @@ export type ExportableReport =
   | 'account-ledger'
   | 'balance-sheet'
   | 'cash-flow'
+  | 'equity-changes'
   | 'receivables-aging'
   | 'payables-aging'
   | 'sales'
@@ -38,6 +39,7 @@ export const EXPORTABLE_REPORTS: ExportableReport[] = [
   'account-ledger',
   'balance-sheet',
   'cash-flow',
+  'equity-changes',
   'receivables-aging',
   'payables-aging',
   'sales',
@@ -96,6 +98,8 @@ export class ReportTablesService {
         return this.balanceSheet(companyId, query);
       case 'cash-flow':
         return this.cashFlow(companyId, query);
+      case 'equity-changes':
+        return this.equityChanges(companyId, query);
       case 'receivables-aging':
         return this.agingTable(companyId, query, 'receivables');
       case 'payables-aging':
@@ -450,8 +454,8 @@ export class ReportTablesService {
   private async cashFlow(companyId: string, query: PeriodQueryDto) {
     const data = await this.statements.cashFlow(companyId, query);
     const rows = [
-      ...data.inflows.map((r: Record<string, unknown>) => ({ ...r, direction: 'in' })),
-      ...data.outflows.map((r: Record<string, unknown>) => ({ ...r, direction: 'out' })),
+      ...data.inflows.map((r: Record<string, unknown>) => ({ ...r, direction: 'in', amount: r.movement })),
+      ...data.outflows.map((r: Record<string, unknown>) => ({ ...r, direction: 'out', amount: r.movement })),
     ];
     return this.table({
       slug: 'cash-flow',
@@ -466,11 +470,67 @@ export class ReportTablesService {
       ],
       rows,
       totals: [
+        { labelEn: 'Opening cash', labelAr: 'النقدية أول الفترة', value: data.totals.opening },
         { labelEn: 'Inflow', labelAr: 'وارد', value: data.totals.inflow },
         { labelEn: 'Outflow', labelAr: 'صادر', value: data.totals.outflow },
         { labelEn: 'Net', labelAr: 'الصافي', value: data.totals.net },
+        { labelEn: 'Closing cash', labelAr: 'النقدية آخر الفترة', value: data.totals.closing },
       ],
       notes: [],
+    });
+  }
+
+  private async equityChanges(companyId: string, query: PeriodQueryDto) {
+    const data = await this.statements.equityChanges(companyId, query);
+    // The unclosed-result row reads opening - transferred + period result
+    // = closing, so its transferred amount flips sign (textually, to keep
+    // the exact decimal string the report produced).
+    const transferred = data.result.transferredToEquity;
+    const unclosedTransferred = transferred.startsWith('-')
+      ? transferred.slice(1)
+      : /^0(\.0*)?$/.test(transferred)
+        ? transferred
+        : `-${transferred}`;
+    const rows = [
+      ...data.accounts,
+      {
+        code: '',
+        nameEn: 'Result not yet closed',
+        nameAr: 'نتيجة لم تُرحَّل بعد',
+        opening: data.result.openingUnclosed,
+        transferredResult: unclosedTransferred,
+        otherMovements: data.result.forPeriod,
+        closing: data.result.closingUnclosed,
+      },
+    ];
+    return this.table({
+      slug: 'equity-changes',
+      titleEn: 'Statement of changes in equity',
+      titleAr: 'قائمة التغيرات في حقوق الملكية',
+      meta: this.periodMeta(data.from, data.to),
+      columns: [
+        { key: 'code', labelEn: 'Code', labelAr: 'الكود', width: 12 },
+        { key: 'nameEn', labelEn: 'Account', labelAr: 'الحساب', width: 34 },
+        { key: 'nameAr', labelEn: 'Account (Arabic)', labelAr: 'الحساب بالعربية', width: 34 },
+        { key: 'opening', labelEn: 'Opening', labelAr: 'أول الفترة', numeric: true, width: 16 },
+        { key: 'transferredResult', labelEn: 'Transferred result', labelAr: 'النتيجة المرحَّلة', numeric: true, width: 18 },
+        { key: 'otherMovements', labelEn: 'Movements', labelAr: 'الحركات', numeric: true, width: 16 },
+        { key: 'closing', labelEn: 'Closing', labelAr: 'آخر الفترة', numeric: true, width: 16 },
+      ],
+      rows,
+      totals: [
+        { labelEn: 'Opening equity', labelAr: 'حقوق الملكية أول الفترة', value: data.totals.opening },
+        { labelEn: 'Result for the period', labelAr: 'نتيجة الفترة', value: data.totals.resultForPeriod },
+        { labelEn: 'Other movements', labelAr: 'حركات أخرى', value: data.totals.otherMovements },
+        { labelEn: 'Closing equity', labelAr: 'حقوق الملكية آخر الفترة', value: data.totals.closing },
+        { labelEn: 'Difference (must be zero)', labelAr: 'الفرق (لازم يكون صفر)', value: data.totals.difference },
+      ],
+      notes: [
+        {
+          en: 'The result row shows the period result while it is still unclosed; a year-end close moves it into retained earnings as the transferred result.',
+          ar: 'صف النتيجة يعرض نتيجة الفترة قبل ترحيلها؛ وإقفال السنة ينقلها إلى الأرباح المرحَّلة في عمود النتيجة المرحَّلة.',
+        },
+      ],
     });
   }
 

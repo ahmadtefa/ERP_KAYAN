@@ -456,6 +456,23 @@ export class JournalEntriesService {
       throw new BadRequestException('This entry has already been reversed');
     }
 
+    // The mirror entry is dated today; if today falls inside a closed
+    // period it is refused like any other posting into one. (Posting into
+    // a date no period covers stays allowed, as everywhere else.)
+    const reversalDate = new Date();
+    const period = await this.periods.periodFor(
+      this.prisma,
+      companyId,
+      reversalDate,
+    );
+    if (period && period.status === 'CLOSED') {
+      throw new BadRequestException(
+        `Period ${period.code} is closed, so the reversal cannot be dated ${reversalDate
+          .toISOString()
+          .slice(0, 10)}`,
+      );
+    }
+
     const reversal = await this.prisma.$transaction(async (tx) => {
       const entryNumber = await this.numbers.next(
         tx,
@@ -469,7 +486,7 @@ export class JournalEntriesService {
           companyId,
           branchId: original.branchId,
           entryNumber,
-          entryDate: new Date(),
+          entryDate: reversalDate,
           description: `Reversal of ${original.entryNumber}`,
           status: JournalStatus.POSTED,
           currency: original.currency,

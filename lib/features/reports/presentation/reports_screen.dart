@@ -102,7 +102,7 @@ class ReportsScreen extends ConsumerStatefulWidget {
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 17, vsync: this)
+  late final TabController _tabs = TabController(length: 18, vsync: this)
     ..addListener(() => setState(() {}));
 
   @override
@@ -146,6 +146,13 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               Tab(text: l10n.profitAndLoss),
               Tab(text: _t(context, 'الميزانية العمومية', 'Balance sheet')),
               Tab(text: _t(context, 'التدفقات النقدية', 'Cash flow')),
+              Tab(
+                text: _t(
+                  context,
+                  'التغيرات في حقوق الملكية',
+                  'Changes in equity',
+                ),
+              ),
               Tab(text: l10n.customerBalances),
               Tab(text: l10n.supplierBalances),
               Tab(text: l10n.accountLedger),
@@ -176,13 +183,13 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               // The exported report catalogue does not include the two
               // cost-centre reports yet, so the button is not offered for a
               // report it would fail to produce.
-              child: _tabs.index >= 15
+              child: _tabs.index >= 16
                   ? const SizedBox.shrink()
                   : ReportExportActions(
                       report: _reportSlug,
                       from: period.from,
                       to: period.to,
-                      accountId: _tabs.index == 6
+                      accountId: _tabs.index == 7
                           ? ref.watch(ledgerAccountProvider)
                           : null,
                     ),
@@ -194,24 +201,25 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               1 => const _ProfitAndLossTab(),
               2 => const _BalanceSheetTab(),
               3 => const _CashFlowTab(),
-              4 => const _BalancesTab(
+              4 => const _EquityChangesTab(),
+              5 => const _BalancesTab(
                 path: '/reports/customer-balances',
                 isCustomer: true,
               ),
-              5 => const _BalancesTab(
+              6 => const _BalancesTab(
                 path: '/reports/supplier-balances',
                 isCustomer: false,
               ),
-              6 => const _AccountLedgerTab(),
-              7 => const _GeneralJournalTab(),
-              8 => const _SalesReportTab(),
-              9 => const _PurchasesReportTab(),
-              10 => const _PaymentsReportTab(),
-              11 => const _CashReportTab(),
-              12 => const _OutstandingInvoicesTab(),
-              13 => const _ExpensesIncomeTab(isExpense: true),
-              14 => const _ExpensesIncomeTab(isExpense: false),
-              15 => const _CostCentersTab(),
+              7 => const _AccountLedgerTab(),
+              8 => const _GeneralJournalTab(),
+              9 => const _SalesReportTab(),
+              10 => const _PurchasesReportTab(),
+              11 => const _PaymentsReportTab(),
+              12 => const _CashReportTab(),
+              13 => const _OutstandingInvoicesTab(),
+              14 => const _ExpensesIncomeTab(isExpense: true),
+              15 => const _ExpensesIncomeTab(isExpense: false),
+              16 => const _CostCentersTab(),
               _ => const _BudgetReportTab(),
             },
           ),
@@ -226,18 +234,19 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
     1 => 'profit-and-loss',
     2 => 'balance-sheet',
     3 => 'cash-flow',
-    4 => 'customer-balances',
-    5 => 'supplier-balances',
-    6 => 'account-ledger',
-    7 => 'general-journal',
-    8 => 'sales',
-    9 => 'purchases',
-    10 => 'payments',
-    11 => 'cash',
-    12 => 'outstanding-invoices',
-    13 => 'expenses',
-    14 => 'income',
-    15 => 'cost-centers',
+    4 => 'equity-changes',
+    5 => 'customer-balances',
+    6 => 'supplier-balances',
+    7 => 'account-ledger',
+    8 => 'general-journal',
+    9 => 'sales',
+    10 => 'purchases',
+    11 => 'payments',
+    12 => 'cash',
+    13 => 'outstanding-invoices',
+    14 => 'expenses',
+    15 => 'income',
+    16 => 'cost-centers',
     _ => 'budgets',
   };
 
@@ -902,6 +911,10 @@ class _CashFlowTab extends ConsumerWidget {
             _SummaryStrip(
               entries: [
                 MapEntry(
+                  _t(context, 'النقدية أول الفترة', 'Opening cash'),
+                  formatAmount(asString(totals['opening'])),
+                ),
+                MapEntry(
                   _t(context, 'وارد', 'Inflow'),
                   formatAmount(asString(totals['inflow'])),
                 ),
@@ -912,6 +925,10 @@ class _CashFlowTab extends ConsumerWidget {
                 MapEntry(
                   _t(context, 'الصافي', 'Net'),
                   formatAmount(asString(totals['net'])),
+                ),
+                MapEntry(
+                  _t(context, 'النقدية آخر الفترة', 'Closing cash'),
+                  formatAmount(asString(totals['closing'])),
                 ),
               ],
             ),
@@ -928,7 +945,114 @@ class _CashFlowTab extends ConsumerWidget {
                   ColumnSpec(
                     _t(context, 'المبلغ', 'Amount'),
                     numeric: true,
-                    value: (r) => formatAmount(asString(r['amount'])),
+                    value: (r) => formatAmount(asString(r['movement'])),
+                    emphasise: true,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _EquityChangesTab extends ConsumerWidget {
+  const _EquityChangesTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final period = ref.watch(periodProvider);
+    final async = ref.watch(
+      reportProvider(
+        '/reports/equity-changes?from=${period.from}&to=${period.to}',
+      ),
+    );
+    return AsyncStateView<Json>(
+      value: async,
+      onRetry: () => ref.invalidate(reportProvider),
+      data: (data) {
+        final result = data['result'] is Map
+            ? Map<String, dynamic>.from(data['result'] as Map)
+            : <String, dynamic>{};
+        final totals = data['totals'] is Map
+            ? Map<String, dynamic>.from(data['totals'] as Map)
+            : <String, dynamic>{};
+        // The unclosed-result row reads opening - transferred + period
+        // result = closing, so its transferred amount flips sign to keep
+        // every row adding up on screen the way the statement is printed.
+        final transferred = asString(result['transferredToEquity']);
+        final unclosedTransferred = transferred.startsWith('-')
+            ? transferred.substring(1)
+            : (double.tryParse(transferred) ?? 0) == 0
+            ? transferred
+            : '-$transferred';
+        final rows = [
+          ...listOf(data['accounts']),
+          {
+            'code': '',
+            'nameEn': 'Result not yet closed',
+            'nameAr': 'نتيجة لم تُرحَّل بعد',
+            'opening': result['openingUnclosed'],
+            'transferredResult': unclosedTransferred,
+            'otherMovements': result['forPeriod'],
+            'closing': result['closingUnclosed'],
+          },
+        ];
+        return Column(
+          children: [
+            _SummaryStrip(
+              entries: [
+                MapEntry(
+                  _t(context, 'أول الفترة', 'Opening equity'),
+                  formatAmount(asString(totals['opening'])),
+                ),
+                MapEntry(
+                  _t(context, 'نتيجة الفترة', 'Result for the period'),
+                  formatAmount(asString(totals['resultForPeriod'])),
+                ),
+                MapEntry(
+                  _t(context, 'حركات أخرى', 'Other movements'),
+                  formatAmount(asString(totals['otherMovements'])),
+                ),
+                MapEntry(
+                  _t(context, 'آخر الفترة', 'Closing equity'),
+                  formatAmount(asString(totals['closing'])),
+                ),
+              ],
+            ),
+            Expanded(
+              child: RecordsTable(
+                rows: rows,
+                columns: [
+                  ColumnSpec('Code', value: (r) => text(r, 'code')),
+                  ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
+                  ColumnSpec(
+                    _t(context, 'الاسم بالعربية', 'Name (Arabic)'),
+                    value: (r) => text(r, 'nameAr'),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'أول الفترة', 'Opening'),
+                    numeric: true,
+                    value: (r) => formatAmount(asString(r['opening'])),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'النتيجة المرحَّلة', 'Transferred result'),
+                    numeric: true,
+                    value: (r) =>
+                        formatAmount(asString(r['transferredResult'])),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'الحركات', 'Movements'),
+                    numeric: true,
+                    value: (r) =>
+                        formatAmount(asString(r['otherMovements'])),
+                  ),
+                  ColumnSpec(
+                    _t(context, 'آخر الفترة', 'Closing'),
+                    numeric: true,
+                    value: (r) => formatAmount(asString(r['closing'])),
                     emphasise: true,
                   ),
                 ],

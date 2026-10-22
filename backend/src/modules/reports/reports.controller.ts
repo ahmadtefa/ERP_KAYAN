@@ -73,6 +73,12 @@ export class ReportsController {
     return this.statements.balanceSheet(user.companyId, query);
   }
 
+  @Get('equity-changes')
+  @RequirePermissions('reports.read')
+  equityChanges(@CurrentUser() user: AuthenticatedUser, @Query() query: PeriodQueryDto) {
+    return this.statements.equityChanges(user.companyId, query);
+  }
+
   @Get('cash-flow')
   @RequirePermissions('reports.read')
   cashFlow(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
