@@ -30,7 +30,16 @@ export class ReportsController {
     private readonly operations: OperationsReportsService,
     private readonly budgets: BudgetsService,
     private readonly reconciliation: PartyReconciliationService,
+    private readonly reconciliationCenter: ReconciliationCenterService,
   ) {}
+
+  @Get('reconciliation-center')
+  @RequirePermissions('reports.read')
+  reconciliationCenterReport(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
+    return this.reconciliationCenter.center(user.companyId, {
+      asOf: query.asOf ?? query.to,
+    });
+  }
 
   @Get('receivables-reconciliation')
   @RequirePermissions('reports.read')

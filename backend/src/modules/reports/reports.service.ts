@@ -75,10 +75,19 @@ export class ReportsService {
     const branchFilter = query.branchId ? Prisma.sql`AND e."branchId" = ${query.branchId}::uuid` : Prisma.sql``;
 
     const accounts = await this.prisma.account.findMany({
-      where: { companyId, deletedAt: null, isPostable: true },
+      where: { companyId, deletedAt: null },
       orderBy: { code: 'asc' },
-      select: { id: true, code: true, nameEn: true, nameAr: true, type: true },
+      select: {
+        id: true,
+        code: true,
+        nameEn: true,
+        nameAr: true,
+        type: true,
+        parentId: true,
+        isPostable: true,
+      },
     });
+    const postable = accounts.filter((a) => a.isPostable);
 
     const opening = await this.prisma.$queryRaw<
       Array<{ accountId: string; net: Prisma.Decimal }>
@@ -118,24 +127,39 @@ export class ReportsService {
       ]),
     );
 
-    const rows = accounts
-      .map((a) => {
+    const valuesById = new Map(
+      postable.map((a) => {
         const open = openingById.get(a.id) ?? new Prisma.Decimal(0);
         const mv = movementById.get(a.id) ?? {
           debit: new Prisma.Decimal(0),
           credit: new Prisma.Decimal(0),
         };
-        const closing = open.plus(mv.debit).minus(mv.credit);
+        return [
+          a.id,
+          {
+            opening: open,
+            debit: mv.debit,
+            credit: mv.credit,
+            closing: open.plus(mv.debit).minus(mv.credit),
+          },
+        ] as const;
+      }),
+    );
+
+    const rows = postable
+      .map((a) => {
+        const v = valuesById.get(a.id)!;
         return {
           accountId: a.id,
           code: a.code,
           nameEn: a.nameEn,
           nameAr: a.nameAr,
           type: a.type.toLowerCase(),
-          opening: open.toFixed(MONEY_SCALE),
-          debit: mv.debit.toFixed(MONEY_SCALE),
-          credit: mv.credit.toFixed(MONEY_SCALE),
-          closing: closing.toFixed(MONEY_SCALE),
+          parentId: a.parentId,
+          opening: v.opening.toFixed(MONEY_SCALE),
+          debit: v.debit.toFixed(MONEY_SCALE),
+          credit: v.credit.toFixed(MONEY_SCALE),
+          closing: v.closing.toFixed(MONEY_SCALE),
         };
       })
       // An account with nothing in it and nothing carried forward is noise.
@@ -167,6 +191,9 @@ export class ReportsService {
       from: from.toISOString().slice(0, 10),
       to: to.toISOString().slice(0, 10),
       rows,
+      // Heading subtotals for readability. The totals below are computed
+      // from the postable rows alone, so these never double-count.
+      groups: buildTrialBalanceGroups(accounts, valuesById),
       totals: {
         debit: totalDebit.toFixed(MONEY_SCALE),
         credit: totalCredit.toFixed(MONEY_SCALE),

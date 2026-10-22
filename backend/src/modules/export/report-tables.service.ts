@@ -189,6 +189,18 @@ export class ReportTablesService {
 
   private async trialBalance(companyId: string, query: PeriodQueryDto) {
     const data = await this.reports.trialBalance(companyId, query);
+    // The printed page reads the way the screen does: heading subtotals
+    // interleaved by code, marked as subtotals. They are not part of the
+    // totals block below, which still comes from the postable rows alone.
+    const groupRows = (data.groups ?? []).map((group) => ({
+      ...group,
+      code: `${group.code} ▸`,
+      nameEn: `${'  '.repeat(group.depth)}${group.nameEn} (subtotal)`,
+      nameAr: `${'  '.repeat(group.depth)}${group.nameAr} (إجمالي فرعي)`,
+    }));
+    const printRows = [...data.rows, ...groupRows].sort((a, b) =>
+      a.code.localeCompare(b.code),
+    );
     const totals: TableTotal[] = [
       {
         labelEn: 'Total movement',
