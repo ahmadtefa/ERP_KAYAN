@@ -186,10 +186,15 @@ Future<void> _openTab(WidgetTester tester, String label) async {
   // Tab labels are the Tab widgets' own texts. The report strip texts
   // could collide, so look inside the TabBar only.
   final tab = find.descendant(of: find.byType(TabBar), matching: find.text(label));
-  for (var i = 0; i < 8 && tab.evaluate().isEmpty; i += 1) {
-    await tester.drag(find.byType(TabBar), const Offset(-500, 0));
-    await tester.pumpAndSettle();
-  }
+  await tester.scrollUntilVisible(
+    tab,
+    200,
+    scrollable: find.descendant(
+      of: find.byType(TabBar),
+      matching: find.byType(Scrollable),
+    ),
+  );
+  await tester.pumpAndSettle();
   await tester.tap(tab);
   await tester.pumpAndSettle();
 }

@@ -262,12 +262,27 @@ void main() {
   ) async {
     final api = await _pump(tester);
 
-    await tester.tap(find.byTooltip('Activate (post acquisition)'));
+    // The row actions sit at the far side of a wide table; bring the
+    // button on screen the way a user scrolling sideways would.
+    final activateButton = find.byTooltip('Activate (post acquisition)');
+    await tester.ensureVisible(activateButton);
     await tester.pumpAndSettle();
+    await tester.tap(activateButton);
+    await tester.pumpAndSettle();
+    expect(
+      find.byType(AlertDialog),
+      findsOneWidget,
+      reason: 'the activation form opens',
+    );
     // Pick the funding account from the dropdown.
     await tester.tap(find.byType(DropdownButtonFormField<String>).first);
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('1101.REC').last);
+    expect(
+      find.textContaining('1101.REC — Lifecycle cash'),
+      findsWidgets,
+      reason: 'the account menu lists the postable accounts',
+    );
+    await tester.tap(find.textContaining('1101.REC — Lifecycle cash').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
