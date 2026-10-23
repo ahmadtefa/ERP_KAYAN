@@ -26,13 +26,41 @@ class AccountInput {
   final bool? isActive;
   final String? description;
 
-  Map<String, dynamic> toJson() => {
+  /// The body of `POST /accounting/chart-of-accounts`.
+  ///
+  /// A new account has to state its type: that is what decides which side of
+  /// the ledger it lives on, and the server cannot guess it.
+  Map<String, dynamic> toCreateJson() => {
     if (code != null && code!.isNotEmpty) 'code': code,
     'nameEn': nameEn,
     // An empty Arabic name is left out, so an update does not overwrite the
     // stored name with blank text (the server requires at least one character).
     if (nameAr.isNotEmpty) 'nameAr': nameAr,
     'type': type.name.toUpperCase(),
+    if (parentId != null) 'parentId': parentId,
+    if (isPostable != null) 'isPostable': isPostable,
+    if (isActive != null) 'isActive': isActive,
+    if (description != null) 'description': description,
+  };
+
+  /// The body of `PATCH /accounting/chart-of-accounts/:id`.
+  ///
+  /// No `type`: an account's type is fixed once it exists. Moving a posted
+  /// account to another side of the ledger would silently rewrite every
+  /// report that already read it, so the server does not accept the field at
+  /// all — and its validation pipe rejects the whole request when an unknown
+  /// property arrives. Sending it here is what made "deactivate" answer
+  /// `400 property type should not exist` on every account.
+  ///
+  /// A status change does not come through here at all: it uses [setActive]
+  /// and sends the flag alone, so it cannot overwrite a name or a parent
+  /// somebody else edited in the meantime.
+  Map<String, dynamic> toUpdateJson() => {
+    if (code != null && code!.isNotEmpty) 'code': code,
+    'nameEn': nameEn,
+    // An empty Arabic name is left out, so an update does not overwrite the
+    // stored name with blank text (the server requires at least one character).
+    if (nameAr.isNotEmpty) 'nameAr': nameAr,
     if (parentId != null) 'parentId': parentId,
     if (isPostable != null) 'isPostable': isPostable,
     if (isActive != null) 'isActive': isActive,
@@ -45,6 +73,14 @@ abstract class ChartOfAccountsDataSource {
   Future<String> suggestCode({String? parentId});
   Future<Account> createAccount(AccountInput input);
   Future<Account> updateAccount(String id, AccountInput input);
+
+  /// Turns an account on or off. Deliberately separate from
+  /// [updateAccount]: the request carries the flag and nothing else, so a
+  /// status change can never overwrite a name or a parent somebody edited a
+  /// moment earlier — and it never sends the account type, which the server
+  /// does not accept on an update.
+  Future<Account> setActive(String id, {required bool isActive});
+
   Future<void> deleteAccount(String id);
 }
 
@@ -81,13 +117,25 @@ class RemoteChartOfAccountsDataSource implements ChartOfAccountsDataSource {
 
   @override
   Future<Account> createAccount(AccountInput input) async {
-    final json = await _client.post(_path, body: input.toJson());
+    final json = await _client.post(_path, body: input.toCreateJson());
     return AccountDto(json).toDomain();
   }
 
   @override
   Future<Account> updateAccount(String id, AccountInput input) async {
-    final json = await _client.patch('$_path/$id', body: input.toJson());
+    final json = await _client.patch('$_path/$id', body: input.toUpdateJson());
+    return AccountDto(json).toDomain();
+  }
+
+  @override
+  Future<Account> setActive(String id, {required bool isActive}) async {
+    // Only the flag: the update contract has no `type`, and sending fields
+    // the operation does not need is what broke deactivation in the first
+    // place.
+    final json = await _client.patch(
+      '$_path/$id',
+      body: {'isActive': isActive},
+    );
     return AccountDto(json).toDomain();
   }
 
@@ -147,6 +195,10 @@ class SeedChartOfAccountsDataSource implements ChartOfAccountsDataSource {
 
   @override
   Future<Account> updateAccount(String id, AccountInput input) =>
+      throw UnsupportedError('The sample chart cannot be edited');
+
+  @override
+  Future<Account> setActive(String id, {required bool isActive}) =>
       throw UnsupportedError('The sample chart cannot be edited');
 
   @override

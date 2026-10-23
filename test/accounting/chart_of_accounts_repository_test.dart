@@ -24,6 +24,24 @@ class _StubSource implements ChartOfAccountsDataSource {
   Future<Account> updateAccount(String id, AccountInput input) =>
       throw UnsupportedError('stub');
 
+  /// Records what a status change asked for, so the test can prove it is a
+  /// status change and not a full update.
+  bool? lastIsActive;
+  String? lastStatusId;
+
+  /// When set, the next status change fails with this failure instead of
+  /// succeeding — the shape the API answers with when it refuses.
+  Failure? statusFailure;
+
+  @override
+  Future<Account> setActive(String id, {required bool isActive}) async {
+    final failure = statusFailure;
+    if (failure != null) throw failure;
+    lastStatusId = id;
+    lastIsActive = isActive;
+    return account('1104');
+  }
+
   @override
   Future<void> deleteAccount(String id) => throw UnsupportedError('stub');
 }
@@ -85,6 +103,38 @@ void main() {
         expect(result.valueOrNull, isEmpty);
       },
     );
+
+    test('a status change is forwarded as a status change, nothing more',
+        () async {
+      final source = _StubSource(() async => []);
+      final repo = ChartOfAccountsRepositoryImpl(source);
+
+      final result = await repo.setAccountActive('id-1104', isActive: false);
+
+      expect(result.isSuccess, isTrue);
+      expect(source.lastStatusId, 'id-1104');
+      expect(source.lastIsActive, isFalse);
+    });
+
+    test('a refused status change comes back as a Failure, not a throw',
+        () async {
+      final source = _StubSource(() async => []);
+      source.statusFailure = const ApiFailure(
+        'Deactivate active subaccounts before deactivating their parent',
+        statusCode: 400,
+      );
+      final repo = ChartOfAccountsRepositoryImpl(source);
+
+      final result = await repo.setAccountActive('p-1', isActive: false);
+
+      expect(result.isSuccess, isFalse);
+      // The server's reason survives: the screen can explain why.
+      expect(
+        result.failureOrNull!.message,
+        contains('Deactivate active subaccounts'),
+      );
+      expect(source.lastStatusId, isNull);
+    });
   });
 
   group('SeedChartOfAccountsDataSource', () {

@@ -8,6 +8,7 @@ import '../../../../shared/utils/account_name.dart';
 import '../../../../shared/widgets/page_header.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../../data/datasources/chart_of_accounts_data_source.dart';
 import '../../domain/entities/account.dart';
@@ -449,13 +450,17 @@ Future<void> _editAccount(
       : await controller.updateAccount(existing.id, input);
 
   if (context.mounted && error != null) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    showMessage(context, error, error: true);
   }
 }
 
-/// Activates or deactivates an account in place. The server refuses to
-/// deactivate a grouping account that still has active subaccounts, and that
-/// message is shown as-is.
+/// Activates or deactivates an account in place.
+///
+/// The request carries the flag and nothing else. It used to send the whole
+/// account, including its type, which the update contract does not accept:
+/// the API answered `400 property type should not exist` and every
+/// deactivation failed. The server still refuses to deactivate a grouping
+/// account that has active subaccounts, and says why — that reason is kept.
 Future<void> _toggleActive(
   BuildContext context,
   WidgetRef ref,
@@ -463,21 +468,9 @@ Future<void> _toggleActive(
 ) async {
   final error = await ref
       .read(chartOfAccountsProvider.notifier)
-      .updateAccount(
-        account.id,
-        AccountInput(
-          code: account.code,
-          nameEn: account.nameEn ?? account.name,
-          nameAr: account.nameAr ?? '',
-          type: account.type,
-          parentId: account.parentId,
-          isPostable: account.isPostable,
-          isActive: !account.isActive,
-          description: account.description,
-        ),
-      );
+      .setActive(account.id, isActive: !account.isActive);
   if (context.mounted && error != null) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    showMessage(context, error, error: true);
   }
 }
 
@@ -515,7 +508,7 @@ Future<void> _deleteAccount(
       .read(chartOfAccountsProvider.notifier)
       .remove(account.id);
   if (context.mounted && error != null) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    showMessage(context, error, error: true);
   }
 }
 
