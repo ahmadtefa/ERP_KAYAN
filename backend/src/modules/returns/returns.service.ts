@@ -210,8 +210,12 @@ export class ReturnsService {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
     }
+    // An absent id is not a wildcard: Prisma reads `undefined` as "no filter",
+    // so leaving it out used to select an arbitrary invoice. The request must
+    // name the document it is returning.
+    const originalInvoiceId = this.requiredId(dto.originalInvoiceId, 'originalInvoiceId');
     const original = await this.prisma.salesInvoice.findFirst({
-      where: { id: dto.originalInvoiceId, companyId, deletedAt: null },
+      where: { id: originalInvoiceId, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
     if (!original) throw new BadRequestException('The original sales invoice does not exist');
@@ -247,7 +251,11 @@ export class ReturnsService {
     }> = [];
     const seenOriginalLineIds = new Set<string>();
     for (const [index, raw] of dto.lines.entries()) {
-      const originalLine = original.lines.find((line) => line.id === raw.originalLineId);
+      const originalLineId = this.requiredId(
+        raw.originalLineId,
+        `Line ${index + 1} originalLineId`,
+      );
+      const originalLine = original.lines.find((line) => line.id === originalLineId);
       if (!originalLine) {
         throw new BadRequestException(`Line ${index + 1}: that line does not belong to the invoice`);
       }
@@ -693,8 +701,9 @@ export class ReturnsService {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
     }
+    const originalInvoiceId = this.requiredId(dto.originalInvoiceId, 'originalInvoiceId');
     const original = await this.prisma.purchaseInvoice.findFirst({
-      where: { id: dto.originalInvoiceId, companyId, deletedAt: null },
+      where: { id: originalInvoiceId, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
     if (!original) throw new BadRequestException('The original purchase invoice does not exist');
@@ -730,7 +739,11 @@ export class ReturnsService {
     }> = [];
     const seenOriginalLineIds = new Set<string>();
     for (const [index, raw] of dto.lines.entries()) {
-      const originalLine = original.lines.find((line) => line.id === raw.originalLineId);
+      const originalLineId = this.requiredId(
+        raw.originalLineId,
+        `Line ${index + 1} originalLineId`,
+      );
+      const originalLine = original.lines.find((line) => line.id === originalLineId);
       if (!originalLine) {
         throw new BadRequestException(`Line ${index + 1}: that line does not belong to the invoice`);
       }
@@ -1509,6 +1522,14 @@ export class ReturnsService {
       .mul(quantity)
       .div(remainingQuantity)
       .toDecimalPlaces(MONEY_SCALE);
+  }
+
+  /// An identifier that a request must carry. An empty one is refused instead
+  /// of being handed to Prisma, where `undefined` means "match anything".
+  private requiredId(value: unknown, field: string): string {
+    const id = typeof value === 'string' ? value.trim() : '';
+    if (!id) throw new BadRequestException(`${field} is required`);
+    return id;
   }
 
   private positive(value: unknown, field: string): Prisma.Decimal {
