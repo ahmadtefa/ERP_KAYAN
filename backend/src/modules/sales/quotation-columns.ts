@@ -22,6 +22,12 @@ export interface QuotationColumn {
   numeric?: boolean;
 }
 
+/// The longest a column key may be. A printed column is a heading, not a
+/// sentence, and the key also travels in the spreadsheet and the saved layout;
+/// keeping it short stops a paste from producing a document with no room for
+/// the numbers.
+export const COLUMN_KEY_MAX_LENGTH = 60;
+
 /// Built-in column keys offered by the picker. Users are not limited to
 /// these: any free-text key can be added.
 export const COLUMN_KEYS = [

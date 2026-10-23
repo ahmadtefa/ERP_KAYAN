@@ -121,6 +121,74 @@ describe('QuotationsService subject and column layout', () => {
     ]);
   });
 
+  it('stores a user-defined column with its own labels and its line values', async () => {
+    const { instance, tx } = service();
+    await instance.create(
+      COMPANY_ID,
+      BRANCH_ID,
+      USER_ID,
+      baseDto({
+        columns: [
+          { key: 'description', width: 4 },
+          { key: 'color', labelEn: 'Color', labelAr: 'اللون', width: 2 },
+        ],
+        tables: [
+          {
+            title: 'Main',
+            lines: [
+              {
+                description: 'Line',
+                quantity: '1',
+                unitPrice: '100',
+                customValues: { color: 'Red / أحمر' },
+              },
+            ],
+          },
+        ],
+      }) as never,
+    );
+    const data = tx.quotation.create.mock.calls[0][0].data as Record<string, never>;
+    expect(data.columns).toEqual([
+      expect.objectContaining({ key: 'description', width: 4 }),
+      expect.objectContaining({
+        key: 'color',
+        labelEn: 'Color',
+        labelAr: 'اللون',
+        visible: true,
+        width: 2,
+        numeric: false,
+      }),
+    ]);
+    const tables = data.tables as { create: Array<{ lines: { create: Array<{ customValues: unknown }> } }> };
+    expect(tables.create[0].lines.create[0].customValues).toEqual({ color: 'Red / أحمر' });
+  });
+
+  it('refuses a column whose key is blank', async () => {
+    const { instance } = service();
+    await expect(
+      instance.create(
+        COMPANY_ID,
+        BRANCH_ID,
+        USER_ID,
+        baseDto({ columns: [{ key: '   ' }, { key: 'description' }] }) as never,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('refuses a column key longer than the printed heading allows', async () => {
+    const { instance } = service();
+    await expect(
+      instance.create(
+        COMPANY_ID,
+        BRANCH_ID,
+        USER_ID,
+        baseDto({
+          columns: [{ key: 'x'.repeat(61) }, { key: 'description' }],
+        }) as never,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('refuses a layout that lists the same column twice', async () => {
     const { instance } = service();
     await expect(
@@ -152,7 +220,7 @@ describe('QuotationsService subject and column layout', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  describe('the printed page', () => {
+  describe('the offer detail and the printed page', () => {
     function quotationRow(overrides: Record<string, unknown> = {}) {
       return {
         id: 'quotation-1',
@@ -270,6 +338,42 @@ describe('QuotationsService subject and column layout', () => {
       expect(html).toContain('Kitchen offer');
     });
 
+    it('prints a user-defined column as a header cell with its value on the line', async () => {
+      const base = quotationRow();
+      const tables = base.tables as Array<Record<string, unknown>>;
+      const html = await serviceFor(
+        quotationRow({
+          columns: [
+            { key: 'description', visible: true, width: 4 },
+            { key: 'color', labelEn: 'Color', labelAr: 'اللون', visible: true, width: 2 },
+          ],
+          tables: [
+            {
+              ...tables[0],
+              lines: [
+                {
+                  ...(tables[0].lines as Array<Record<string, unknown>>)[0],
+                  customValues: { color: 'Red' },
+                },
+              ],
+            },
+          ],
+        }),
+      ).printHtml(COMPANY_ID, 'quotation-1', 'en');
+
+      const items = html.slice(html.indexOf('<table class="items">'));
+      const head = items.slice(items.indexOf('<thead>'), items.indexOf('</thead>'));
+      // The index column plus the two chosen columns: three headings on one
+      // row. A user-defined column adds a column, not another line.
+      expect(head.match(/<th[ >]/g)).toHaveLength(3);
+      expect(head).toContain('Color');
+
+      const body = items.slice(items.indexOf('<tbody>'), items.indexOf('</tbody>'));
+      const lineCells = body.slice(body.indexOf('<tr>'), body.indexOf('</tr>'));
+      expect(lineCells).toContain('Red');
+      expect((body.match(/<tr>/g) ?? [])).toHaveLength(1);
+    });
+
     it('leaves the tax number off when the offer turned it off', async () => {
       const html = await serviceFor(quotationRow()).printHtml(
         COMPANY_ID,
@@ -287,5 +391,47 @@ describe('QuotationsService subject and column layout', () => {
       );
       expect(html).toContain('TAX-999');
     });
+
+  it('returns the stored custom values so reopening an offer keeps them', async () => {
+    const base = quotationRow();
+    const tables = base.tables as Array<Record<string, unknown>>;
+    const row = quotationRow({
+      columns: [
+        { key: 'description', visible: true, width: 4 },
+        { key: 'color', labelEn: 'Color', labelAr: 'اللون', visible: true, width: 2 },
+      ],
+      tables: [
+        {
+          id: 'table-1',
+          discountTotal: new Prisma.Decimal('0'),
+          ...tables[0],
+          lines: [
+            {
+              ...(tables[0].lines as Array<Record<string, unknown>>)[0],
+              customValues: { color: 'Red' },
+            },
+          ],
+        },
+      ],
+    });
+    const prisma = {
+      quotation: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn().mockResolvedValue(row),
+      },
+    };
+    const instance = new QuotationsService(
+      prisma as never,
+      {} as never,
+      settings as never,
+      {} as never,
+      { record: jest.fn() } as never,
+    );
+
+    const result = (await instance.findOne(COMPANY_ID, 'quotation-1')) as {
+      tables: Array<{ lines: Array<{ customValues: Record<string, string> }> }>;
+    };
+    expect(result.tables[0].lines[0].customValues).toEqual({ color: 'Red' });
+  });
   });
 });

@@ -29,7 +29,7 @@ import {
   UpdateQuotationDto,
 } from './dto/quotation.dto';
 import {
-  COLUMN_LABELS,
+  COLUMN_KEY_MAX_LENGTH,
   columnLabel,
   normalizeColumns,
   QuotationColumn,
@@ -1236,6 +1236,10 @@ export class QuotationsService {
           quantity: line.quantity.toFixed(MONEY_SCALE),
           unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
           lineTotal: line.lineTotal.toFixed(MONEY_SCALE),
+          // The editor reads these back when an existing offer is opened.
+          // Omitting them made a saved custom column look empty, and saving
+          // the offer again then wrote the empty values over the real ones.
+          customValues: (line.customValues as Record<string, string>) ?? {},
         })),
       }));
       response.events = quotation.events.map((event) => ({
@@ -1302,6 +1306,14 @@ export class QuotationsService {
   /// Validates what the editor sent before it is stored. A layout with no
   /// visible column would print an empty table, so it is refused rather than
   /// quietly replaced.
+  ///
+  /// The key is deliberately not limited to the built-in catalogue. The
+  /// editor offers a "custom column" whose key and labels the user types, a
+  /// template stores the same catalogue, and the printed page and the
+  /// spreadsheet already read a value for any key from `customValues`. What is
+  /// checked here is what a printed table actually needs: a key that exists,
+  /// is short enough to head a column, carries no control characters, and is
+  /// not repeated.
   private columnData(raw?: Array<{
     key: string;
     labelEn?: string | null;
@@ -1311,16 +1323,29 @@ export class QuotationsService {
   }>): QuotationColumn[] {
     if (!raw || raw.length === 0) return standardColumns();
     const seen = new Set<string>();
-    for (const entry of raw) {
-      if (!COLUMN_LABELS[entry.key]) {
-        throw new BadRequestException(`Unknown quotation column "${entry.key}"`);
+    const cleaned = raw.map((entry) => {
+      const key = typeof entry.key === 'string' ? entry.key.trim() : '';
+      if (!key) {
+        throw new BadRequestException('Every quotation column needs a key');
       }
-      if (seen.has(entry.key)) {
-        throw new BadRequestException(`The column "${entry.key}" is listed twice`);
+      if (key.length > COLUMN_KEY_MAX_LENGTH) {
+        throw new BadRequestException(
+          `The column key "${key.slice(0, 20)}…" is longer than ${COLUMN_KEY_MAX_LENGTH} characters`,
+        );
       }
-      seen.add(entry.key);
-    }
-    const columns = normalizeColumns(raw);
+      // The key reaches the HTML table, the workbook and the saved JSON. A
+      // control character would break the first two, so it is refused rather
+      // than sanitised behind the user's back.
+      if (/[\u0000-\u001f\u007f]/.test(key)) {
+        throw new BadRequestException('A column key cannot contain control characters');
+      }
+      if (seen.has(key)) {
+        throw new BadRequestException(`The column "${key}" is listed twice`);
+      }
+      seen.add(key);
+      return { ...entry, key };
+    });
+    const columns = normalizeColumns(cleaned);
     if (!columns.some((column) => column.visible)) {
       throw new BadRequestException('Keep at least one column visible');
     }

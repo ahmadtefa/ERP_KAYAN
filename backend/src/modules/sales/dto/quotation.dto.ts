@@ -17,6 +17,8 @@ import {
   ValidateNested,
 } from 'class-validator';
 
+import { COLUMN_KEY_MAX_LENGTH } from '../quotation-columns';
+
 /// The line fields an offer's table can show. Kept in one place so the client,
 /// the print and the spreadsheet agree on what a column means.
 export const QUOTATION_COLUMN_KEYS = [
@@ -31,8 +33,9 @@ export const QUOTATION_COLUMN_KEYS = [
 
 export class QuotationColumnDto {
   /// The column key. Built-in keys (itemCode, description, …) are recognised
-  /// by the printer; any other free text is a user-defined column.
-  @IsString() key!: string;
+  /// by the printer; any other free text is a user-defined column whose label
+  /// is the one stored with it.
+  @IsString() @MinLength(1) @MaxLength(COLUMN_KEY_MAX_LENGTH) key!: string;
 
   /// A label this offer uses instead of the built-in one. Left empty means the
   /// translated standard label.
