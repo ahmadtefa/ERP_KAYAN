@@ -604,6 +604,12 @@ export class CashVouchersService {
   // ------------------------------------------------------------------ helpers
 
   private async requireCashAccount(companyId: string, id: string) {
+    // Prisma treats an absent filter value as "no filter", so a voucher that
+    // did not name a box used to be recorded against the first one. Money
+    // must always say which box it moved through.
+    if (typeof id !== 'string' || id.trim().length === 0) {
+      throw new BadRequestException('Choose the cash account the money moved through');
+    }
     const cashAccount = await this.prisma.cashAccount.findFirst({
       where: { id, companyId, deletedAt: null },
       select: { id: true, accountId: true, currency: true, isActive: true, code: true },
