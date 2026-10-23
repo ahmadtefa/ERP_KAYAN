@@ -687,8 +687,123 @@ class AppErrorMessageResolver {
       final noun = _nounOrNull(m.group(1));
       return noun == null ? null : 'لا يمكن اعتماد $noun إلا وهو مسودة.';
     }),
-    _BusinessRule(_ci(r'^(?:Line \d+: )?item (\S+) is not stock-tracked$'), (m) =>
+    _BusinessRule(_ci(r'^(?:Line \\d+: )?item (\\S+) is not stock-tracked$'), (m) =>
         'الصنف ${m.group(1)} غير متتبع في المخزون.'),
+
+    // ---- the same sentences the import, returns and validation paths write --
+    // A date is a date: these arrive from the DTO when a date field is typed
+    // wrongly, and the field name is the only useful part of the sentence.
+    _BusinessRule(_ci(r'^"(\w+)" must be an ISO date or timestamp$'), (m) =>
+        'يجب أن يكون «${_fieldAr(m.group(1))}» تاريخًا صالحًا.'),
+    _BusinessRule(_ci(r'^(\w+) is not a (?:real )?date$'), (m) =>
+        'قيمة «${_fieldAr(m.group(1))}» ليست تاريخًا صالحًا.'),
+    _BusinessRule(_ci(r'^(\w+) cannot exceed (\d+) characters$'), (m) =>
+        'لا يمكن أن يزيد «${_fieldAr(m.group(1))}» عن ${m.group(2)} حرفًا.'),
+    _BusinessRule(
+        _ci(r'^(\w+) must be a whole number of days between (\d+) and (\d+)$'),
+        (m) => 'يجب أن يكون «${_fieldAr(m.group(1))}» عددًا صحيحًا من الأيام '
+            'بين ${m.group(2)} و${m.group(3)}.'),
+    _BusinessRule(_ci(r'^currency must be a three-letter code$'), (_) =>
+        'العملة يجب أن تكون رمزًا من ثلاثة أحرف، مثل EGP.'),
+
+    // Enumerations are identifiers, not words: say what is wrong and point at
+    // the list again rather than printing "RECEIPT, PAYMENT" at a cashier.
+    _BusinessRule(_ci(r'^kind must be RECEIPT or PAYMENT$'), (_) =>
+        'نوع السند يجب أن يكون قبضًا أو صرفًا.'),
+    _BusinessRule(_ci(r'^kind must be CASH or BANK$'), (_) =>
+        'نوع الحساب يجب أن يكون نقدية أو حسابًا بنكيًا.'),
+    _BusinessRule(_ci(r'^kind must be CUSTOMER or SUPPLIER$'), (_) =>
+        'النوع يجب أن يكون عميلًا أو موردًا.'),
+    _BusinessRule(_ci(r'^kind must be sales or purchases$'), (_) =>
+        'النوع يجب أن يكون مبيعات أو مشتريات.'),
+    _BusinessRule(_ci(r'^(?:kind|status|type) must be [A-Za-z, ]+$'), (_) =>
+        'القيمة المحددة غير صالحة. اختر واحدة من القائمة المتاحة.'),
+    _BusinessRule(
+        _ci(r'^Unknown (?:voucher |stock document )?(?:kind|status)(?::| ")'),
+        (_) => 'القيمة المحددة غير معروفة. أعد تحميل الصفحة واختر من القائمة.'),
+
+    // A document line: the number is what the person needs to find the row.
+    _BusinessRule(_ci(r'^Line (\d+) cannot be both a debit and a credit$'), (m) =>
+        'السطر ${m.group(1)} لا يمكن أن يكون مدينًا ودائنًا في الوقت نفسه.'),
+    _BusinessRule(_ci(r'^Line (\d+) needs either a debit or a credit$'), (m) =>
+        'السطر ${m.group(1)} يحتاج إلى مبلغ مدين أو دائن.'),
+    // "Line 3: ..." is already split into an Arabic prefix plus a body, so a
+    // colon after the number never reaches these rules.
+    _BusinessRule(_ci(r'^a quantity is required$'), (_) => 'الكمية مطلوبة.'),
+    _BusinessRule(
+        _ci(r'^a stock item needs a quantity greater than zero$'),
+        (_) => 'الصنف المخزني يحتاج كمية أكبر من صفر.'),
+    _BusinessRule(_ci(r'^the unit cost cannot be negative$'), (_) =>
+        'تكلفة الوحدة لا يمكن أن تكون سالبة.'),
+    _BusinessRule(
+        _ci(r'^an invoice line may appear only once in a return$'),
+        (_) => 'سطر الفاتورة لا يتكرر في المرتجع.'),
+    _BusinessRule(_ci(r'^that line does not belong to the invoice$'), (_) =>
+        'هذا السطر لا ينتمي إلى الفاتورة.'),
+    _BusinessRule(
+        _ci(r'^allocated inventory cost is below the returned invoice value$'),
+        (_) => 'تكلفة المخزون المخصصة أقل من قيمة الفاتورة المرتجعة.'),
+    _BusinessRule(_ci(r'^(\w+) exceeds the original line$'), (m) =>
+        'الكمية في «${_fieldAr(m.group(1))}» تتجاوز الكمية الأصلية في الفاتورة.'),
+    _BusinessRule(_ci(r'^(\w+) has an invalid negative amount$'), (m) =>
+        'قيمة «${_fieldAr(m.group(1))}» سالبة وغير صالحة.'),
+    _BusinessRule(_ci(r'^(\w+) is already fully returned or inconsistent$'), (m) =>
+        'السطر في «${_fieldAr(m.group(1))}» مُرتجَع بالكامل بالفعل، أو أن بياناته غير متسقة.'),
+
+    // A return only travels on the note that matches its direction.
+    _BusinessRule(
+        _ci(r'^Only a (sales credit note|purchase debit note) can be (posted|reversed) as a (?:sales|purchase) return\.?$'),
+        (m) {
+      final isCredit = m.group(1)!.toLowerCase() == 'sales credit note';
+      final note = isCredit ? 'إشعار دائن مبيعات' : 'إشعار مدين مشتريات';
+      final action = m.group(2)!.toLowerCase() == 'posted' ? 'ترحيل' : 'عكس';
+      return 'لا يمكن $action المرتجع إلا من خلال $note.';
+    }),
+    _BusinessRule(
+        _ci(r'^The source (?:sales|purchase) invoice is no longer posted; this return cannot be (posted|reversed)\.?$'),
+        (m) => 'لم تعد فاتورة المصدر مُرحَّلة، لذلك لا يمكن '
+            '${m.group(1)!.toLowerCase() == 'posted' ? 'ترحيل' : 'عكس'} المرتجع.'),
+
+    // Quotation editor and cash documents.
+    _BusinessRule(_ci(r'^Quotation: (?:the )?(\w+) (does not exist|is inactive)$'),
+        (m) {
+      final noun = _nounsAr[m.group(1)!.toLowerCase()] ?? m.group(1);
+      return m.group(2)!.toLowerCase() == 'is inactive'
+          ? 'العرض: $noun غير نشط.'
+          : 'العرض: $noun غير موجود.';
+    }),
+    _BusinessRule(_ci(r'^Quotation: give either an item or a description$'), (_) =>
+        'أدخل صنفًا أو وصفًا للسطر قبل الحفظ.'),
+    _BusinessRule(_ci(r'^Table (\d+): give the table a title$'), (m) =>
+        'الجدول ${m.group(1)}: أدخل عنوانًا للجدول.'),
+    _BusinessRule(
+        _ci(r'^The (\S+) cash account (does not exist|is inactive|is required)$'),
+        (m) {
+      final what = m.group(2)!.toLowerCase();
+      final reasons = <String, String>{
+        'does not exist': 'غير موجود',
+        'is inactive': 'غير نشط',
+        'is required': 'مطلوب',
+      };
+      return 'الحساب النقدي ${m.group(1)} ${reasons[what] ?? 'غير صالح'}.';
+    }),
+    _BusinessRule(
+        _ci(r'^This company has no active branch to post the closing entry to$'),
+        (_) => 'لا يوجد فرع نشط لترحيل قيد الإقفال. افتح فرعًا أولًا.'),
+    _BusinessRule(_ci(r'^Order line (\d+) does not belong to this order$'), (m) =>
+        'سطر الأمر ${m.group(1)} لا ينتمي إلى هذا الأمر.'),
+
+    // Backup files: the operator needs to know which file, not why it failed.
+    _BusinessRule(_ci(r'^The backup file is (empty|larger than .+?)\.?$'), (m) =>
+        m.group(1)!.toLowerCase() == 'empty'
+            ? 'ملف النسخة الاحتياطية فارغ.'
+            : 'ملف النسخة الاحتياطية أكبر من الحد المسموح به.'),
+    _BusinessRule(_ci(r'^The backup file has no tables in it\.?$'), (_) =>
+        'ملف النسخة الاحتياطية لا يحتوي على جداول. تأكد أنه ملف نسخة صحيح.'),
+    _BusinessRule(_ci(r'^That file is outside the backup folder\.?$'), (_) =>
+        'هذا الملف خارج مجلد النسخ الاحتياطية، ولا يمكن قراءته.'),
+    _BusinessRule(_ci(r'^No backup file named "(.+)" on this server\.?$'), (m) =>
+        'لا توجد نسخة احتياطية باسم «${m.group(1)}» على الخادم.'),
   ];
 
   /// A pattern that ignores capitalisation: the API writes "The item does
