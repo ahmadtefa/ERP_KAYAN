@@ -2298,4 +2298,31 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get unassignedWarehouse => 'Unassigned';
 
+
+  @override
+  String get errorDialogTitle => 'Something went wrong';
+
+  @override
+  String get warningDialogTitle => 'Notice';
+
+  @override
+  String get okAction => 'OK';
+
+  @override
+  String get errorGenericBody => 'The operation could not be completed because of an unexpected error. Nothing was saved. Try again, and if it keeps happening tell your system administrator.';
+
+  @override
+  String get errorInvalidInputBody => 'The submitted data is not valid, so nothing was changed. Check the fields and try again.';
+
+  @override
+  String get errorNotFoundBody => 'The record could not be found. It may have been deleted or moved, or you may not be allowed to see it. Reload the page and try again.';
+
+  @override
+  String get errorPermissionBody => 'You do not have permission to do this. Ask your system administrator if you need it.';
+
+  @override
+  String get errorConflictBody => 'Someone else changed this record while you were working on it, so your change was not saved. Reload the page to see the latest version, then try again.';
+
+  @override
+  String get errorServerBody => 'The server failed while carrying out the operation and nothing was saved. Try again shortly, and if it keeps happening tell your system administrator.';
 }

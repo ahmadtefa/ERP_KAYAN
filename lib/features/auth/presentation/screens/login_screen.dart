@@ -117,13 +117,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
       setState(() {
         _setupBusy = false;
-        _setupError = failure.message;
+        // The same mapper the rest of the interface uses: a server rule is
+        // explained, an unexpected exception is not printed.
+        _setupError = localizedError(context, failure);
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _setupBusy = false;
-        _setupError = '$error';
+        _setupError = localizedError(context, error);
       });
     }
   }

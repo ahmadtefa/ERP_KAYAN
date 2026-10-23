@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../common/presentation/screens/module_scaffold.dart';
 
 final companySettingsProvider = FutureProvider<Json>((ref) async {
   return ref.read(apiClientProvider).getObject('/accounting/settings');
@@ -64,9 +66,9 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
     final l10n = context.l10n;
     final percent = double.tryParse(_maxDiscount.text.trim());
     if (percent == null || percent < 0 || percent > 100) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.invalidSetting)),
-      );
+      // A validation problem is an error, not a note: it blocks the save and
+      // the person has to read it before correcting the field.
+      showMessage(context, l10n.invalidSetting, error: true);
       return;
     }
     setState(() => _saving = true);
@@ -83,15 +85,15 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
       );
       ref.invalidate(companySettingsProvider);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l10n.settingsSaved)),
-        );
+        showMessage(context, l10n.settingsSaved);
       }
     } on Failure catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.message)),
-        );
+        showMessage(context, error.message, error: true);
+      }
+    } catch (error) {
+      if (mounted) {
+        showMessage(context, error, error: true);
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -115,7 +117,9 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
             padding: EdgeInsets.all(12),
             child: Center(child: CircularProgressIndicator()),
           ),
-          error: (error, _) => Text('$error'),
+          // The panel is not a SnackBar, but it still must not print a
+          // transport error: the same resolver explains it.
+          error: (error, _) => Text(presentErrorText(context, error)),
           data: (settings) {
             _fill(settings);
             return Column(

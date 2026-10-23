@@ -737,5 +737,14 @@
   "sessionStorageLabel": "Session storage",
   "sessionStorageDurable": "Saved on this device",
   "sessionStorageMemoryOnly": "Memory only",
-  "sessionStorageMemoryHint": "This page is not served over HTTPS, so the browser keeps the session only until it is reloaded. Serve the program over HTTPS to keep people signed in."
+  "sessionStorageMemoryHint": "This page is not served over HTTPS, so the browser keeps the session only until it is reloaded. Serve the program over HTTPS to keep people signed in.",
+  "errorDialogTitle": "Something went wrong",
+  "warningDialogTitle": "Notice",
+  "okAction": "OK",
+  "errorGenericBody": "The operation could not be completed because of an unexpected error. Nothing was saved. Try again, and if it keeps happening tell your system administrator.",
+  "errorInvalidInputBody": "The submitted data is not valid, so nothing was changed. Check the fields and try again.",
+  "errorNotFoundBody": "The record could not be found. It may have been deleted or moved, or you may not be allowed to see it. Reload the page and try again.",
+  "errorPermissionBody": "You do not have permission to do this. Ask your system administrator if you need it.",
+  "errorConflictBody": "Someone else changed this record while you were working on it, so your change was not saved. Reload the page to see the latest version, then try again.",
+  "errorServerBody": "The server failed while carrying out the operation and nothing was saved. Try again shortly, and if it keeps happening tell your system administrator."
 }

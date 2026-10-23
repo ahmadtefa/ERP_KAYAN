@@ -4082,4 +4082,59 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   /// In en, this message translates to:
   /// **'Unassigned'**
   String get unassignedWarehouse;
+
+
+  /// No description provided for @errorDialogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Something went wrong'**
+  String get errorDialogTitle;
+
+  /// No description provided for @warningDialogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Notice'**
+  String get warningDialogTitle;
+
+  /// No description provided for @okAction.
+  ///
+  /// In en, this message translates to:
+  /// **'OK'**
+  String get okAction;
+
+  /// No description provided for @errorGenericBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The operation could not be completed because of an unexpected error. Nothing was saved. Try again, and if it keeps happening tell your system administrator.'**
+  String get errorGenericBody;
+
+  /// No description provided for @errorInvalidInputBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The submitted data is not valid, so nothing was changed. Check the fields and try again.'**
+  String get errorInvalidInputBody;
+
+  /// No description provided for @errorNotFoundBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The record could not be found. It may have been deleted or moved, or you may not be allowed to see it. Reload the page and try again.'**
+  String get errorNotFoundBody;
+
+  /// No description provided for @errorPermissionBody.
+  ///
+  /// In en, this message translates to:
+  /// **'You do not have permission to do this. Ask your system administrator if you need it.'**
+  String get errorPermissionBody;
+
+  /// No description provided for @errorConflictBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Someone else changed this record while you were working on it, so your change was not saved. Reload the page to see the latest version, then try again.'**
+  String get errorConflictBody;
+
+  /// No description provided for @errorServerBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The server failed while carrying out the operation and nothing was saved. Try again shortly, and if it keeps happening tell your system administrator.'**
+  String get errorServerBody;
 }

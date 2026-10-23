@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/error/app_error_text.dart';
 import '../../../../core/platform/download_request.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -593,12 +594,10 @@ final fullBackupServiceProvider = Provider<FullBackupService>(
 /// as it is; anything else falls back to the exception's own text rather than
 /// pretending nothing went wrong.
 String describeApiError(Object error) {
+  final status = error is DioException ? error.response?.statusCode : null;
   if (error is DioException) {
-    final data = error.response?.data;
-    if (data is Map) {
-      final detail = data['detail'] ?? data['title'];
-      if (detail is String && detail.trim().isNotEmpty) return detail;
-    }
+    final detail = _detailOf(error.response?.data);
+    if (detail != null) return _safeMessage(detail, status);
     switch (error.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.receiveTimeout:
@@ -610,7 +609,42 @@ String describeApiError(Object error) {
         break;
     }
   }
-  return error.toString();
+  return _safeMessage(error.toString(), status);
+}
+
+String? _detailOf(Object? data) {
+  if (data is Map) {
+    for (final key in const ['detail', 'message', 'error']) {
+      final value = data[key];
+      if (value is String && value.trim().isNotEmpty) return value;
+    }
+  }
+  return null;
+}
+
+/// The same resolver the central error dialog uses, so this administrative
+/// screen cannot print a DTO field name or a stack frame either. It answers
+/// in English because these panels are read by administrators next to the
+/// server log.
+String _safeMessage(String raw, int? status) {
+  final resolved = AppErrorMessageResolver(
+    isArabic: false,
+  ).resolve(raw, statusCode: status);
+  final business = resolved.businessMessage;
+  if (business != null && business.trim().isNotEmpty) return business;
+  return switch (resolved.reason) {
+    AppErrorReason.network =>
+      'The server could not be reached. Check that it is running.',
+    AppErrorReason.permission =>
+      'You do not have permission to do this.',
+    AppErrorReason.notFound => 'The record could not be found.',
+    AppErrorReason.conflict =>
+      'This record changed while you were working on it. Reload and try again.',
+    AppErrorReason.invalidInput => 'The submitted data is not valid.',
+    AppErrorReason.sessionExpired => 'The session has expired. Sign in again.',
+    AppErrorReason.server => 'The server failed while handling the request.',
+    AppErrorReason.unknown => 'The operation could not be completed.',
+  };
 }
 
 /// What this installation can produce.

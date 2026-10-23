@@ -2288,4 +2288,31 @@ class AppLocalizationsAr extends AppLocalizations {
   @override
   String get unassignedWarehouse => 'غير مُخصّص';
 
+
+  @override
+  String get errorDialogTitle => 'حدث خطأ';
+
+  @override
+  String get warningDialogTitle => 'تنبيه';
+
+  @override
+  String get okAction => 'حسنًا';
+
+  @override
+  String get errorGenericBody => 'لم تكتمل العملية بسبب خطأ غير متوقع. لم يُحفظ أي تغيير. حاول مرة أخرى، وإذا تكرر الخطأ فأبلغ مسؤول النظام.';
+
+  @override
+  String get errorInvalidInputBody => 'البيانات المرسلة غير صالحة، لذلك لم تُنفّذ العملية. راجع الحقول المدخلة وحاول مرة أخرى.';
+
+  @override
+  String get errorNotFoundBody => 'لم يتم العثور على السجل المطلوب. ربما حُذف أو نُقل، أو لا تملك صلاحية الوصول إليه. أعد تحميل الصفحة وحاول مرة أخرى.';
+
+  @override
+  String get errorPermissionBody => 'ليس لديك صلاحية لتنفيذ هذا الإجراء. راجع مسؤول النظام إذا كنت تحتاج إليها.';
+
+  @override
+  String get errorConflictBody => 'تم تعديل هذا السجل من مستخدم آخر أثناء عملك عليه، لذلك لم يُحفظ التغيير. أعد تحميل الصفحة لرؤية أحدث نسخة ثم كرّر المحاولة.';
+
+  @override
+  String get errorServerBody => 'حدث خطأ في الخادم أثناء تنفيذ العملية، ولم يُحفظ التغيير. حاول مرة أخرى بعد قليل، وإذا تكرر الخطأ فأبلغ مسؤول النظام.';
 }
