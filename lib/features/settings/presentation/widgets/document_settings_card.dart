@@ -93,7 +93,9 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
       }
     } catch (error) {
       if (mounted) {
-        showMessage(context, error, error: true);
+        // Anything that is not a Failure still goes through the central
+        // dialog, which decides what a user may be told.
+        showAppError(context, error);
       }
     } finally {
       if (mounted) setState(() => _saving = false);

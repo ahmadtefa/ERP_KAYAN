@@ -224,6 +224,10 @@ class _ChartSource implements ChartOfAccountsDataSource {
       throw UnimplementedError();
 
   @override
+  Future<Account> setActive(String id, {required bool isActive}) async =>
+      (await fetchAccounts()).first;
+
+  @override
   Future<void> deleteAccount(String id) => throw UnimplementedError();
 
   @override

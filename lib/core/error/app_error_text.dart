@@ -621,7 +621,7 @@ class AppErrorMessageResolver {
     }),
     _BusinessRule(_ci(r'^(\w+) not found$'), (m) {
       final translated = _nounsAr[m.group(1)!.toLowerCase()];
-      return translated == null ? null : 'لم يتم العثور على ${translated}.';
+      return translated == null ? null : 'لم يتم العثور على $translated.';
     }),
     // Validation-shaped: "amount is required" / "amount cannot be negative".
     _BusinessRule(_ci(r'^(\w+) is required$'), (m) =>
