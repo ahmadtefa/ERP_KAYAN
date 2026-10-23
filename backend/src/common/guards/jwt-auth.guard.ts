@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import { DOWNLOAD_TICKET_TYPE } from '../download-ticket';
 import { ALLOW_QUERY_TOKEN_KEY } from '../decorators/allow-query-token.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { AuthUser } from '../decorators/current-user.decorator';
@@ -37,18 +38,22 @@ export class JwtAuthGuard implements CanActivate {
 
     let token: string | null =
       scheme?.toLowerCase() === 'bearer' && headerToken ? headerToken : null;
+    let fromQueryCredential = false;
 
     // A browser navigation - a download, or a print page opened in a new tab -
-    // cannot send an Authorization header. Those few routes may carry the
-    // token in the query string instead, and they opt in one by one.
+    // cannot send an Authorization header. Those few routes may carry a
+    // one-minute download ticket in the query string instead, and they opt in
+    // one by one. A full access token is deliberately not accepted here: an
+    // address ends up in history and logs, and a ticket buys only one file.
     if (!token) {
       const allowsQueryToken = this.reflector.getAllAndOverride<boolean>(
         ALLOW_QUERY_TOKEN_KEY,
         [context.getHandler(), context.getClass()],
       );
-      const fromQuery = request.query?.token;
+      const fromQuery = request.query?.ticket;
       if (allowsQueryToken && typeof fromQuery === 'string' && fromQuery) {
         token = fromQuery;
+        fromQueryCredential = true;
       }
     }
 
@@ -58,11 +63,11 @@ export class JwtAuthGuard implements CanActivate {
 
     let payload: {
       sub: string;
-      username: string;
+      username?: string;
       companyId: string;
-      branchId: string | null;
-      isSuperAdmin: boolean;
-      permissions: string[];
+      branchId?: string | null;
+      tokenVersion?: number;
+      typ?: string;
     };
     try {
       payload = await this.jwt.verifyAsync<typeof payload>(token, {
@@ -73,28 +78,98 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or expired token');
     }
 
-    // Access tokens are short-lived, but account deactivation and deletion must
-    // take effect immediately rather than leaving a 15-minute access window.
+    // A download ticket is a navigation credential, not a session: it may be
+    // used only where the route opted in, and never as a bearer token.
+    if (fromQueryCredential && payload.typ !== DOWNLOAD_TICKET_TYPE) {
+      throw new UnauthorizedException('A ticket is required for this address');
+    }
+    if (!fromQueryCredential && payload.typ === DOWNLOAD_TICKET_TYPE) {
+      throw new UnauthorizedException('A download ticket cannot be used as a bearer token');
+    }
+
+    // Authorization data is loaded from the database on every request so
+    // revocations and account/branch changes take effect immediately.
     const principal = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, companyId: true, isActive: true, deletedAt: true },
+      select: {
+        id: true,
+        username: true,
+        companyId: true,
+        isActive: true,
+        isSuperAdmin: true,
+        deletedAt: true,
+        tokenVersion: true,
+        userRoles: {
+          where: {
+            companyId: payload.companyId,
+            role: {
+              deletedAt: null,
+              OR: [{ companyId: payload.companyId }, { companyId: null }],
+            },
+          },
+          select: {
+            role: {
+              select: {
+                rolePermissions: {
+                  select: { permission: { select: { code: true } } },
+                },
+              },
+            },
+          },
+        },
+        userPermissions: {
+          select: { permission: { select: { code: true } } },
+        },
+        // Do not let a stale/malformed assignment expose another tenant's
+        // branch or a branch that is inactive or soft-deleted.
+        branches: {
+          where: {
+            branch: {
+              companyId: payload.companyId,
+              isActive: true,
+              deletedAt: null,
+            },
+          },
+          select: { branchId: true },
+          orderBy: { branchId: 'asc' },
+        },
+      },
     });
     if (
       !principal ||
       !principal.isActive ||
       principal.deletedAt !== null ||
-      principal.companyId !== payload.companyId
+      principal.companyId !== payload.companyId ||
+      principal.tokenVersion !== (payload.tokenVersion ?? 0)
     ) {
       throw new UnauthorizedException('Account is inactive or unavailable');
     }
 
+    const permissions = [
+      ...new Set([
+        ...principal.userRoles.flatMap((userRole) =>
+          userRole.role.rolePermissions.map(
+            (rolePermission) => rolePermission.permission.code,
+          ),
+        ),
+        ...principal.userPermissions.map(
+          (grant) => grant.permission.code,
+        ),
+      ]),
+    ];
+    const branchId =
+      principal.branches.find((branch) => branch.branchId === payload.branchId)
+        ?.branchId ??
+      principal.branches[0]?.branchId ??
+      null;
+
     request.user = {
-      userId: payload.sub,
-      username: payload.username,
-      companyId: payload.companyId,
-      branchId: payload.branchId,
-      isSuperAdmin: payload.isSuperAdmin,
-      permissions: payload.permissions ?? [],
+      userId: principal.id,
+      username: principal.username,
+      companyId: principal.companyId,
+      branchId,
+      isSuperAdmin: principal.isSuperAdmin,
+      permissions,
     };
     return true;
   }

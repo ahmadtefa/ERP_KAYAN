@@ -72,6 +72,23 @@ class DocumentExportActions extends ConsumerWidget {
           icon: const Icon(Icons.table_view_outlined, size: 18),
           label: Text(l10n.exportExcel),
         ),
+        // CSV is written by the program itself, so it is offered even when no
+        // browser is installed for PDF; the two files are separate requests.
+        OutlinedButton.icon(
+          onPressed: ready
+              ? () => runDownload(
+                    context,
+                    links.documentFile(
+                      kind: kind,
+                      id: id,
+                      format: 'csv',
+                      language: language,
+                    ),
+                  )
+              : null,
+          icon: const Icon(Icons.description_outlined, size: 18),
+          label: Text(l10n.exportCsv),
+        ),
       ],
     );
   }

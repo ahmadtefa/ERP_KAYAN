@@ -138,6 +138,7 @@ export class CashVouchersService {
       customerId?: string;
       supplierId?: string;
       counterAccountId?: string;
+      costCenterId?: string | null;
       description?: string;
       reference?: string;
       allocations?: AllocationInput[];
@@ -158,6 +159,25 @@ export class CashVouchersService {
 
     const date = this.date(dto.voucherDate, 'voucherDate');
     const party = await this.resolveParty(companyId, dto);
+
+    // The counter account is the only line a voucher can attribute: the
+    // customer/supplier side is a balance, not a cost or a revenue.
+    const costCenterId = dto.costCenterId ?? null;
+    if (costCenterId) {
+      const center = await this.prisma.costCenter.findFirst({
+        where: { id: costCenterId, companyId, deletedAt: null },
+        select: { id: true, isActive: true, code: true },
+      });
+      if (!center) throw new BadRequestException('The cost center does not exist');
+      if (!center.isActive) {
+        throw new BadRequestException(`Cost center ${center.code} is inactive`);
+      }
+      if (!party.counterAccountId) {
+        throw new BadRequestException(
+          'A cost center can only be recorded on a voucher that names a counter account',
+        );
+      }
+    }
 
     const allocations = dto.allocations ?? [];
     const allocationTotal = allocations.reduce(
@@ -194,6 +214,7 @@ export class CashVouchersService {
           customerId: party.customerId,
           supplierId: party.supplierId,
           counterAccountId: party.counterAccountId,
+          costCenterId,
           description: dto.description?.trim() || null,
           reference: dto.reference?.trim() || null,
           status: InvoiceStatus.DRAFT,
@@ -329,6 +350,7 @@ export class CashVouchersService {
         debit?: Prisma.Decimal;
         credit?: Prisma.Decimal;
         description: string;
+        costCenterId?: string | null;
       }> = [];
 
       if (unallocated.greaterThan(0)) {
@@ -352,6 +374,7 @@ export class CashVouchersService {
             debit: voucher.kind === CashVoucherKind.RECEIPT ? undefined : unallocated,
             credit: voucher.kind === CashVoucherKind.RECEIPT ? unallocated : undefined,
             description: voucher.description ?? 'Counter account',
+            costCenterId: voucher.costCenterId ?? null,
           });
         } else {
           throw new BadRequestException(
@@ -581,6 +604,12 @@ export class CashVouchersService {
   // ------------------------------------------------------------------ helpers
 
   private async requireCashAccount(companyId: string, id: string) {
+    // Prisma treats an absent filter value as "no filter", so a voucher that
+    // did not name a box used to be recorded against the first one. Money
+    // must always say which box it moved through.
+    if (typeof id !== 'string' || id.trim().length === 0) {
+      throw new BadRequestException('Choose the cash account the money moved through');
+    }
     const cashAccount = await this.prisma.cashAccount.findFirst({
       where: { id, companyId, deletedAt: null },
       select: { id: true, accountId: true, currency: true, isActive: true, code: true },
@@ -666,6 +695,7 @@ export class CashVouchersService {
     postedAt: Date | null;
     reconciledAt: Date | null;
     createdAt: Date;
+    costCenterId?: string | null;
     cashAccount?: { code: string; nameEn: string; nameAr: string; kind?: string };
     customer?: { code: string; nameEn: string; nameAr: string } | null;
     supplier?: { code: string; nameEn: string; nameAr: string } | null;
@@ -683,6 +713,7 @@ export class CashVouchersService {
       cashAccount: voucher.cashAccount,
       customer: voucher.customer ?? null,
       supplier: voucher.supplier ?? null,
+      costCenterId: voucher.costCenterId ?? null,
       journalEntryId: voucher.journalEntryId,
       postedAt: voucher.postedAt?.toISOString() ?? null,
       reconciledAt: voucher.reconciledAt?.toISOString() ?? null,

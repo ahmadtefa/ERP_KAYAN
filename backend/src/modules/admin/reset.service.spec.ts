@@ -5,6 +5,9 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { AUDIT_PURGE_SETTING, AuditPurgeService } from '../../common/audit/audit-purge.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
@@ -25,6 +28,7 @@ describe('ResetService', () => {
 
   let deletions: string[];
   let companyUpdates: unknown[];
+  let userUpdates: unknown[];
   let auditRecords: Array<Record<string, unknown>>;
   let purgeSessions: string[];
   let purgeRecords: Array<Record<string, unknown>>;
@@ -33,19 +37,48 @@ describe('ResetService', () => {
 
   /// The models the reset clears, and the order it clears them in.
   const MODELS = [
-    'journalEntry',
+    'cashVoucherAllocation',
+    'cashVoucher',
+    'cashTransfer',
+    'bankReconciliation',
+    'cashAccount',
+    'stockDocumentLine',
+    'stockDocument',
+    'openingBalanceLine',
+    'openingBalance',
+    'salesInvoiceLine',
+    'purchaseInvoiceLine',
     'salesInvoice',
     'purchaseInvoice',
+    'salesOrderLine',
+    'purchaseOrderLine',
+    'salesOrder',
+    'purchaseOrder',
     'stockMovement',
     'stockBalance',
-    'documentSequence',
-    'fiscalPeriod',
-    'item',
+    'journalLine',
+    'journalEntry',
+    'itemUnit',
+    'priceListItem',
     'customer',
     'supplier',
+    'item',
+    'priceList',
+    'itemCategory',
+    'assetDepreciation',
+    'depreciationRun',
+    'fixedAsset',
+    'costCenter',
     'account',
-    'auditLog',
+    'companySetting',
+    'fiscalPeriod',
+    'documentSequence',
+    'warehouse',
+    'userPermission',
     'userRole',
+    'userBranch',
+    'rolePermission',
+    'auditLog',
     'role',
     'user',
     'branch',
@@ -83,6 +116,11 @@ describe('ResetService', () => {
           deletions.push(model);
           return { count: 1 };
         },
+        updateMany: async () => ({ count: 0 }),
+        update: async (args: unknown) => {
+          if (model === 'user') userUpdates.push(args);
+          return {};
+        },
         create: async (args: { data: Record<string, unknown> }) => {
           purgeRecords.push(args.data);
           return args.data;
@@ -96,6 +134,7 @@ describe('ResetService', () => {
     isSuperAdmin?: boolean;
     isActive?: boolean;
     companyDeletedAt?: Date | null;
+    companyLogoPath?: string | null;
   }) {
     const tx = transaction();
     return {
@@ -114,6 +153,7 @@ describe('ResetService', () => {
                   id: COMPANY_ID,
                   code: 'KAYAN',
                   deletedAt: user.companyDeletedAt ?? null,
+                  logoPath: user.companyLogoPath ?? null,
                 },
               },
         count: async () => 1,
@@ -220,6 +260,10 @@ describe('ResetService', () => {
           tables: { accounts: [], journalEntries: [] },
         };
       },
+      inspect: async (file: { companyId: string }, companyId: string) => {
+        if (file.companyId !== companyId) throw new Error('wrong company backup');
+        return { belongsToThisCompany: true };
+      },
     };
   }
 
@@ -236,6 +280,7 @@ describe('ResetService', () => {
   beforeEach(() => {
     deletions = [];
     companyUpdates = [];
+    userUpdates = [];
     auditRecords = [];
     purgeSessions = [];
     purgeRecords = [];
@@ -302,8 +347,44 @@ describe('ResetService', () => {
     expect(deletions).toEqual([...MODELS]);
     // The company is marked as not set up rather than destroyed.
     expect(companyUpdates).toHaveLength(1);
-    const update = companyUpdates[0] as { data: { deletedAt: Date | null } };
+    const update = companyUpdates[0] as { data: { deletedAt: Date | null; logoData: null; logoMime: null; logoPath: null } };
     expect(update.data.deletedAt).toBeInstanceOf(Date);
+    expect(update.data.logoData).toBeNull();
+    expect(update.data.logoMime).toBeNull();
+    expect(update.data.logoPath).toBeNull();
+    expect(userUpdates).toContainEqual({
+      where: { id: USER_ID },
+      data: {
+        failedLoginCount: 0,
+        lockedUntil: null,
+        tokenVersion: { increment: 1 },
+      },
+    });
+  });
+
+  it('removes the reset company’s legacy logo file without following its stored path', async () => {
+    const previousUploadDir = process.env.KAYAN_UPLOAD_DIR;
+    const uploadDir = await mkdtemp(join(tmpdir(), 'kayan-reset-logo-'));
+    const logoName = 'legacy-logo.png';
+    const logoPath = join(uploadDir, logoName);
+    await writeFile(logoPath, 'test logo');
+    process.env.KAYAN_UPLOAD_DIR = uploadDir;
+
+    try {
+      await service({ user: { companyLogoPath: `../outside/${logoName}` } }).reset(
+        admin(),
+        'pw',
+        'RESET',
+      );
+
+      await expect(stat(logoPath)).rejects.toMatchObject({ code: 'ENOENT' });
+      const update = companyUpdates[0] as { data: { logoPath: null } };
+      expect(update.data.logoPath).toBeNull();
+    } finally {
+      if (previousUploadDir === undefined) delete process.env.KAYAN_UPLOAD_DIR;
+      else process.env.KAYAN_UPLOAD_DIR = previousUploadDir;
+      await rm(uploadDir, { recursive: true, force: true });
+    }
   });
 
   it('records the reset in the audit trail without the password', async () => {
@@ -445,25 +526,35 @@ describe('ResetService', () => {
     expect(preview.counts.users).toBe(0);
   });
 
-  it('creates and verifies a company JSON safety backup when full backup tools are unavailable', async () => {
-    const noToolsBackups = {
-      capabilities: async () => ({ available: false }),
-      createFull: async () => {
-        throw new Error('pg_dump unavailable');
-      },
-      verify: async () => {
-        throw new Error('pg_restore unavailable');
-      },
-      ensureBackupDir: async () => '/tmp/kayan-spec-backups',
-    };
-    const result = await service({ backups: noToolsBackups as never }).reset(
-      admin(),
-      'pw',
-      'RESET',
-    );
-    expect(result.reset).toBe(true);
-    expect(result.backupFile).toMatch(/\.json$/);
-    expect(deletions).toEqual([...MODELS]);
+  it('creates a private, verified company JSON safety backup when full backup tools are unavailable', async () => {
+    const backupDir = await mkdtemp(join(tmpdir(), 'kayan-reset-backup-'));
+    try {
+      const noToolsBackups = {
+        capabilities: async () => ({ available: false }),
+        createFull: async () => {
+          throw new Error('pg_dump unavailable');
+        },
+        verify: async () => {
+          throw new Error('pg_restore unavailable');
+        },
+        ensureBackupDir: async () => backupDir,
+      };
+      const result = await service({ backups: noToolsBackups as never }).reset(
+        admin(),
+        'pw',
+        'RESET',
+      );
+      expect(result.reset).toBe(true);
+      expect(result.backupFile).toMatch(/\.json$/);
+      expect(result.backupBytes).toBeGreaterThan(0);
+      expect(result.backupEntries).toBeGreaterThan(0);
+      expect(deletions).toEqual([...MODELS]);
+
+      const file = await stat(join(backupDir, result.backupFile));
+      if (process.platform !== 'win32') expect(file.mode & 0o777).toBe(0o600);
+    } finally {
+      await rm(backupDir, { recursive: true, force: true });
+    }
   });
 
   it('aborts and deletes nothing when both full backup and company backup fail', async () => {

@@ -8,6 +8,8 @@ import { AuditService } from '../../common/audit/audit.service';
 import { accountName } from '../../common/localization/account-name';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import { ACCOUNT_CODES } from './account-map.service';
+import { CostCentersService } from './cost-centers.service';
 import { DocumentNumberService } from './document-number.service';
 import { CreateJournalEntryDto, JournalLineDto } from './dto/create-journal-entry.dto';
 import { FiscalPeriodsService } from './fiscal-periods.service';
@@ -21,6 +23,12 @@ const LINES_WITH_ACCOUNT = {
   orderBy: { lineNumber: 'asc' },
   include: {
     account: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+    costCenter: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+    allocations: {
+      include: {
+        costCenter: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+      },
+    },
   },
 } as const;
 
@@ -31,6 +39,7 @@ interface NormalisedLine {
   credit: Prisma.Decimal;
   description?: string;
   costCenterId?: string;
+  allocations: Array<{ costCenterId: string; amount: Prisma.Decimal }>;
 }
 
 @Injectable()
@@ -41,6 +50,7 @@ export class JournalEntriesService {
     private readonly audit: AuditService,
     private readonly periods: FiscalPeriodsService,
     private readonly settings: CompanySettingsService,
+    private readonly costCenters: CostCentersService,
   ) {}
 
   async findAll(companyId: string, page = 1, pageSize = 50) {
@@ -145,6 +155,38 @@ export class JournalEntriesService {
       );
     }
 
+    // The receivable/payable control accounts belong to the subledgers.
+    // A manual line written straight onto one of them moves the ledger
+    // without moving any customer or supplier, and the two then disagree
+    // by exactly that line — the classic unreconciled control account.
+    // It is refused here, at the door; the party documents (invoices,
+    // notes, vouchers, opening balances) are how these accounts move.
+    const control = accounts.filter((a) =>
+      [ACCOUNT_CODES.accountsReceivable, ACCOUNT_CODES.accountsPayable].includes(
+        a.code as never,
+      ),
+    );
+    if (control.length > 0) {
+      throw new BadRequestException(
+        `Manual entries cannot post directly to a control account (${control
+          .map((a) => a.code)
+          .join(', ')}). Use the customer/supplier documents so the subledger and the ledger move together.`,
+      );
+    }
+
+    // The analytical dimension is validated against this company and the entry
+    // date before anything is written: an inactive centre, another company's
+    // centre or a centre outside its validity window is refused, not stored.
+    await this.costCenters.assertPostable(
+      this.prisma,
+      companyId,
+      lines.flatMap((l) => [
+        ...(l.costCenterId ? [l.costCenterId] : []),
+        ...l.allocations.map((a) => a.costCenterId),
+      ]),
+      new Date(dto.entryDate),
+    );
+
     // Number allocation and the insert share one transaction: if the insert
     // fails, the reserved number is rolled back with it.
     const created = await this.prisma.$transaction(async (tx) => {
@@ -174,6 +216,12 @@ export class JournalEntriesService {
               credit: l.credit,
               description: l.description ?? null,
               costCenterId: l.costCenterId ?? null,
+              allocations: {
+                create: l.allocations.map((allocation) => ({
+                  costCenterId: allocation.costCenterId,
+                  amount: allocation.amount,
+                })),
+              },
             })),
           },
         },
@@ -211,6 +259,24 @@ export class JournalEntriesService {
       throw new BadRequestException(
         `Only a draft or an approved entry can be posted (current status: ${entry.status})`,
       );
+    }
+
+    if (!entry.reversalOfId) {
+      const lineAccounts = await this.prisma.account.findMany({
+        where: {
+          companyId,
+          code: { in: [ACCOUNT_CODES.accountsReceivable, ACCOUNT_CODES.accountsPayable] },
+          id: { in: entry.lines.map((l) => l.accountId) },
+        },
+        select: { code: true },
+      });
+      if (lineAccounts.length > 0) {
+        throw new BadRequestException(
+          `Manual entries cannot post directly to a control account (${lineAccounts
+            .map((a) => a.code)
+            .join(', ')}). Cancel this draft and use the customer/supplier documents instead.`,
+        );
+      }
     }
 
     const policy = await this.settings.get(companyId);
@@ -413,7 +479,7 @@ export class JournalEntriesService {
   async reverse(companyId: string, userId: string, id: string) {
     const original = await this.prisma.journalEntry.findFirst({
       where: { id, companyId },
-      include: { lines: true },
+      include: { lines: { include: { allocations: true } } },
     });
     if (!original) throw new NotFoundException('Journal entry not found');
     if (original.status !== JournalStatus.POSTED) {
@@ -428,7 +494,36 @@ export class JournalEntriesService {
       throw new BadRequestException('This entry has already been reversed');
     }
 
+    // The mirror entry is dated today; if today falls inside a closed
+    // period it is refused like any other posting into one. (Posting into
+    // a date no period covers stays allowed, as everywhere else.)
+    const reversalDate = new Date();
+    const period = await this.periods.periodFor(
+      this.prisma,
+      companyId,
+      reversalDate,
+    );
+    if (period && period.status === 'CLOSED') {
+      throw new BadRequestException(
+        `Period ${period.code} is closed, so the reversal cannot be dated ${reversalDate
+          .toISOString()
+          .slice(0, 10)}`,
+      );
+    }
+
     const reversal = await this.prisma.$transaction(async (tx) => {
+      // Claim the original first. The pre-checks above run outside the
+      // transaction, so two people reversing at the same moment could both
+      // pass them; this conditional update lets exactly one of them write
+      // the mirror entry (the same guard PostingService.reverse applies).
+      const claimed = await tx.journalEntry.updateMany({
+        where: { id: original.id, companyId, status: JournalStatus.POSTED },
+        data: { status: JournalStatus.REVERSED },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException('This entry has already been reversed');
+      }
+
       const entryNumber = await this.numbers.next(
         tx,
         companyId,
@@ -441,7 +536,7 @@ export class JournalEntriesService {
           companyId,
           branchId: original.branchId,
           entryNumber,
-          entryDate: new Date(),
+          entryDate: reversalDate,
           description: `Reversal of ${original.entryNumber}`,
           status: JournalStatus.POSTED,
           currency: original.currency,
@@ -460,14 +555,17 @@ export class JournalEntriesService {
               credit: l.debit,
               description: l.description,
               costCenterId: l.costCenterId,
+              // The split is given back exactly as it was taken, so a
+              // cost-center report nets a reversed entry to zero.
+              allocations: {
+                create: (l.allocations ?? []).map((allocation) => ({
+                  costCenterId: allocation.costCenterId,
+                  amount: allocation.amount,
+                })),
+              },
             })),
           },
         },
-      });
-
-      await tx.journalEntry.update({
-        where: { id: original.id },
-        data: { status: JournalStatus.REVERSED },
       });
 
       return created;
@@ -514,12 +612,37 @@ export class JournalEntriesService {
       );
     }
 
+    const amount = debit.plus(credit);
+    const requested = line.allocations ?? [];
+    if (requested.length > 0 && line.costCenterId) {
+      throw new BadRequestException(
+        'A journal line cannot name one cost center and also be split between several',
+      );
+    }
+    const allocations =
+      requested.length > 0
+        ? CostCentersService.validateAllocations(amount, requested)
+        : [];
+    // One allocation covering the whole line is the ordinary single-centre
+    // case; storing it on the line keeps every existing report unchanged.
+    if (allocations.length === 1) {
+      return {
+        accountId: line.accountId,
+        debit,
+        credit,
+        description: line.description,
+        costCenterId: allocations[0].costCenterId,
+        allocations: [],
+      };
+    }
+
     return {
       accountId: line.accountId,
       debit,
       credit,
       description: line.description,
       costCenterId: line.costCenterId,
+      allocations,
     };
   }
 
@@ -551,6 +674,17 @@ export class JournalEntriesService {
         nameEn: string | null;
         nameAr: string | null;
       } | null;
+      costCenter?: {
+        id: string;
+        code: string;
+        nameEn: string;
+        nameAr: string;
+      } | null;
+      allocations?: Array<{
+        costCenterId: string;
+        amount: Prisma.Decimal;
+        costCenter?: { id: string; code: string; nameEn: string; nameAr: string } | null;
+      }>;
     }>;
   }) {
     return {
@@ -586,6 +720,20 @@ export class JournalEntriesService {
           credit: l.credit.toFixed(MONEY_SCALE),
           description: l.description,
           costCenterId: l.costCenterId,
+          costCenterCode: l.costCenter?.code ?? null,
+          costCenterNameEn: l.costCenter?.nameEn ?? null,
+          costCenterNameAr: l.costCenter?.nameAr ?? null,
+          // A split line reports its allocations; a single-centre line reports
+          // an empty list and carries `costCenterId` instead. Clients must not
+          // add the two together.
+          allocations:
+            l.allocations?.map((allocation) => ({
+              costCenterId: allocation.costCenterId,
+              costCenterCode: allocation.costCenter?.code ?? null,
+              costCenterNameEn: allocation.costCenter?.nameEn ?? null,
+              costCenterNameAr: allocation.costCenter?.nameAr ?? null,
+              amount: allocation.amount.toFixed(MONEY_SCALE),
+            })) ?? [],
         })) ?? [],
     };
   }

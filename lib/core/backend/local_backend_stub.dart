@@ -8,21 +8,59 @@ library;
 import 'company_setup_data.dart';
 
 /// The outcome of asking a build to start its own server.
+///
+/// Structurally identical to the desktop implementation's class - same
+/// constructors, same fields - because code above this layer (the gate,
+/// its tests) is written once against this type and is analyzed against
+/// whichever variant the current target resolves. Only the behaviour
+/// differs: on the web [LocalBackend] only ever returns
+/// [LocalBackendStatus.unsupported].
 class LocalBackendStatus {
-  const LocalBackendStatus.unsupported();
+  const LocalBackendStatus.unsupported()
+    : baseUrl = null,
+      problem = null,
+      logPath = null,
+      databaseProblem = false,
+      needsFirstAdministrator = false;
+  const LocalBackendStatus.ready(this.baseUrl)
+    : problem = null,
+      logPath = null,
+      databaseProblem = false,
+      needsFirstAdministrator = false;
+  const LocalBackendStatus.failed(
+    this.problem, {
+    this.logPath,
+    this.databaseProblem = false,
+  }) : baseUrl = null,
+       needsFirstAdministrator = false;
 
-  final String? baseUrl = null;
-  final String? problem = null;
-  final String? logPath = null;
-  final bool databaseProblem = false;
+  /// Present for shape parity with the desktop class. A browser build
+  /// never starts a server, so it never meets an empty database either -
+  /// the pages it loads come from a server that is already set up.
+  const LocalBackendStatus.needsFirstAdministrator()
+    : baseUrl = null,
+      problem = null,
+      logPath = null,
+      databaseProblem = false,
+      needsFirstAdministrator = true;
 
-  /// A browser build never starts a server, so it never meets an empty database
-  /// either - the pages it loads come from a server that is already set up.
-  final bool needsFirstAdministrator = false;
+  /// e.g. `http://127.0.0.1:3000/api/v1` - already the value the client wants.
+  final String? baseUrl;
 
-  /// A browser build is never the one that starts a server, so it is never
-  /// "ready" either - the program treats this as "carry on as you were".
-  bool get isReady => false;
+  /// A sentence in the user's language explaining what went wrong.
+  final String? problem;
+
+  /// Where the server's own output was written, so a person can read it or
+  /// send it on.
+  final String? logPath;
+
+  /// True when the server is running but cannot reach the database.
+  final bool databaseProblem;
+
+  /// True when this machine still needs its first administrator.
+  final bool needsFirstAdministrator;
+
+  bool get isReady => baseUrl != null;
 }
 
 /// Present so the two builds share one shape. On the web there is nothing to

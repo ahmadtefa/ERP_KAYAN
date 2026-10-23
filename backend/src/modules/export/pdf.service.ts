@@ -30,11 +30,14 @@ export class PdfService {
     return this.findBrowser() !== null;
   }
 
-  /// A4 landscape, which is the shape a report with six money columns needs.
+  /// A4 portrait, the sheet the quotation's `@page` rule asks for.
+  ///
+  /// Chromium prints the page with the size its stylesheet declares; this
+  /// constant is kept for the callers that ask what shape the output has.
   private readonly paper = {
-    width: '297mm',
-    height: '210mm',
-    margin: '10mm',
+    width: '210mm',
+    height: '297mm',
+    margin: '12mm',
   };
 
   async render(html: string): Promise<Buffer> {
@@ -49,27 +52,35 @@ export class PdfService {
     const folder = await mkdtemp(join(tmpdir(), 'kayan-pdf-'));
     const page = join(folder, 'report.html');
     const output = join(folder, 'report.pdf');
+    // A browser profile that exists only for this one print. Without it the
+    // headless run shares the default profile: under a Windows service
+    // account that profile may not be creatable at all, and when the same
+    // user already has Edge/Chrome open the request is handed to the
+    // running instance, which exits "successfully" without writing any
+    // file. Both presented to the user as "Download PDF does nothing".
+    const profile = join(folder, 'profile');
 
     try {
       await writeFile(page, html, 'utf8');
 
-      const args = [
-        '--headless=new',
-        // A server container has no sandbox to use; the page is our own and
-        // never leaves the machine.
-        '--no-sandbox',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        // Nothing here fetches anything: the page is self contained.
-        '--disable-extensions',
-        '--no-first-run',
-        `--print-to-pdf=${output}`,
-        '--no-pdf-header-footer',
-        '--virtual-time-budget=5000',
-        `file://${page}`,
-      ];
+      await run(
+        browser,
+        buildPrintArgs({ output, profile, page, legacyHeadless: false }),
+        60_000,
+      );
 
-      await run(browser, args, 60_000);
+      if (!existsSync(output)) {
+        // Older browser builds reject `--headless=new`; the classic flag is
+        // the same print pipeline and worth one retry before giving up.
+        this.logger.warn(
+          'Headless print produced no file; retrying with the classic --headless flag.',
+        );
+        await run(
+          browser,
+          buildPrintArgs({ output, profile, page, legacyHeadless: true }),
+          60_000,
+        );
+      }
 
       if (!existsSync(output)) {
         throw new Error('the browser produced no file');
@@ -188,6 +199,39 @@ async function stampPageNumbers(pdf: Buffer): Promise<Buffer> {
   });
 
   return Buffer.from(await document.save());
+}
+
+/**
+ * The command line for one headless print. Kept as a pure function so the
+ * flags that make printing work on a real Windows install — above all the
+ * throwaway `--user-data-dir` profile — are pinned by a unit test instead
+ * of by somebody's memory.
+ */
+export function buildPrintArgs(options: {
+  output: string;
+  profile: string;
+  page: string;
+  legacyHeadless: boolean;
+}): string[] {
+  return [
+    options.legacyHeadless ? '--headless' : '--headless=new',
+    // A server container has no sandbox to use; the page is our own and
+    // never leaves the machine.
+    '--no-sandbox',
+    '--disable-gpu',
+    '--disable-dev-shm-usage',
+    // Nothing here fetches anything: the page is self contained.
+    '--disable-extensions',
+    '--no-first-run',
+    '--no-default-browser-check',
+    // One print, one profile: see PdfService.render for why sharing the
+    // default profile silently produces no file.
+    `--user-data-dir=${options.profile}`,
+    `--print-to-pdf=${options.output}`,
+    '--no-pdf-header-footer',
+    '--virtual-time-budget=5000',
+    `file://${options.page}`,
+  ];
 }
 
 /// Runs a command and resolves when it exits cleanly.

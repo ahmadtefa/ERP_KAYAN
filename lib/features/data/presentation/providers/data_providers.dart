@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/error/app_error_text.dart';
 import '../../../../core/platform/download_request.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -232,6 +233,35 @@ class ReportLinkBuilder {
     return '$_base/exports/documents/$kind/$id/print?${_encode(query)}';
   }
 
+  /// Opens the branded quotation print preview in a new tab. It carries a
+  /// one-minute ticket, like every other browser-facing file.
+  Future<String> quotationPrint({
+    required String id,
+    required String language,
+    bool auto = true,
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      if (auto) 'auto': '1',
+      'ticket': await _downloadTicket(),
+    };
+    return '$_base/sales/quotations/$id/print?${_encode(query)}';
+  }
+
+  /// The quotation as the finished PDF the customer receives.
+  Future<DownloadRequest> quotationPdf({
+    required String id,
+    required String language,
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      'ticket': await _downloadTicket(),
+    };
+    return DownloadRequest(
+      url: '$_base/sales/quotations/$id/pdf?${_encode(query)}',
+    );
+  }
+
   /// A blank spreadsheet to fill in, for one kind of import.
   Future<DownloadRequest> importTemplate({
     required String kind,
@@ -253,6 +283,15 @@ class ReportLinkBuilder {
     return DownloadRequest(url: '$_base/backup/download?${_encode(query)}');
   }
 
+  /// The bundled sample company backup, not a restore shortcut.
+  Future<DownloadRequest> demoBackup() async {
+    final query = <String, String>{'ticket': await _downloadTicket()};
+    return DownloadRequest(
+      url: '$_base/backup/demo/download?${_encode(query)}',
+      fileName: 'kayan-company-backup-demo.json',
+    );
+  }
+
   /// One full-database backup file, sitting on the server.
   Future<DownloadRequest> fullBackupDownload(String name) async {
     final query = <String, String>{'ticket': await _downloadTicket()};
@@ -267,18 +306,26 @@ class ReportLinkBuilder {
       .join('&');
 }
 
-/// The three kinds of master data a file can carry.
+/// The spreadsheet templates supported by the import service.
 enum ImportKind {
   customers,
   suppliers,
-  items;
+  items,
+  chartOfAccounts,
+  openingBalances;
 
   /// The name the API uses.
   String get slug => switch (this) {
     ImportKind.customers => 'customers',
     ImportKind.suppliers => 'suppliers',
     ImportKind.items => 'items',
+    ImportKind.chartOfAccounts => 'chart-of-accounts',
+    ImportKind.openingBalances => 'opening-balances',
   };
+
+  bool get supportsUpsert => this == ImportKind.customers ||
+      this == ImportKind.suppliers ||
+      this == ImportKind.items;
 }
 
 /// What happens to a record the file carries that already exists.
@@ -504,7 +551,14 @@ class FullBackupService {
   }
 
   Future<Map<String, dynamic>> create() async {
-    final response = await _dio.post<Map<String, dynamic>>(_path);
+    // A full pg_dump plus its read-back validation legitimately takes
+    // longer than the client's ordinary 30-second receive timeout; with
+    // the default, the request was aborted on the client while the server
+    // was still working, which looked like a backup that hangs forever.
+    final response = await _dio.post<Map<String, dynamic>>(
+      _path,
+      options: Options(receiveTimeout: const Duration(minutes: 15)),
+    );
     return Map<String, dynamic>.from(response.data ?? const {});
   }
 
@@ -530,7 +584,13 @@ class FullBackupService {
       '$_path/restore',
       data: form,
       queryParameters: {'confirm': confirm},
-      options: Options(contentType: 'multipart/form-data'),
+      // Uploading an archive and restoring it (rehearsal + safety copy +
+      // restore + checks) is the longest operation in the program.
+      options: Options(
+        contentType: 'multipart/form-data',
+        sendTimeout: const Duration(minutes: 30),
+        receiveTimeout: const Duration(minutes: 30),
+      ),
     );
     return Map<String, dynamic>.from(response.data ?? const {});
   }
@@ -547,12 +607,10 @@ final fullBackupServiceProvider = Provider<FullBackupService>(
 /// as it is; anything else falls back to the exception's own text rather than
 /// pretending nothing went wrong.
 String describeApiError(Object error) {
+  final status = error is DioException ? error.response?.statusCode : null;
   if (error is DioException) {
-    final data = error.response?.data;
-    if (data is Map) {
-      final detail = data['detail'] ?? data['title'];
-      if (detail is String && detail.trim().isNotEmpty) return detail;
-    }
+    final detail = _detailOf(error.response?.data);
+    if (detail != null) return _safeMessage(detail, status);
     switch (error.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.receiveTimeout:
@@ -564,7 +622,42 @@ String describeApiError(Object error) {
         break;
     }
   }
-  return error.toString();
+  return _safeMessage(error.toString(), status);
+}
+
+String? _detailOf(Object? data) {
+  if (data is Map) {
+    for (final key in const ['detail', 'message', 'error']) {
+      final value = data[key];
+      if (value is String && value.trim().isNotEmpty) return value;
+    }
+  }
+  return null;
+}
+
+/// The same resolver the central error dialog uses, so this administrative
+/// screen cannot print a DTO field name or a stack frame either. It answers
+/// in English because these panels are read by administrators next to the
+/// server log.
+String _safeMessage(String raw, int? status) {
+  final resolved = AppErrorMessageResolver(
+    isArabic: false,
+  ).resolve(raw, statusCode: status);
+  final business = resolved.businessMessage;
+  if (business != null && business.trim().isNotEmpty) return business;
+  return switch (resolved.reason) {
+    AppErrorReason.network =>
+      'The server could not be reached. Check that it is running.',
+    AppErrorReason.permission =>
+      'You do not have permission to do this.',
+    AppErrorReason.notFound => 'The record could not be found.',
+    AppErrorReason.conflict =>
+      'This record changed while you were working on it. Reload and try again.',
+    AppErrorReason.invalidInput => 'The submitted data is not valid.',
+    AppErrorReason.sessionExpired => 'The session has expired. Sign in again.',
+    AppErrorReason.server => 'The server failed while handling the request.',
+    AppErrorReason.unknown => 'The operation could not be completed.',
+  };
 }
 
 /// What this installation can produce.

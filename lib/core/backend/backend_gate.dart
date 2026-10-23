@@ -21,6 +21,43 @@ import 'local_backend.dart';
 bool get ownsItsBackend =>
     !kIsWeb && kReleaseMode && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
+/// Which screen the gate shows for a given backend state.
+///
+/// This decision is a separate, testable function because it has already been
+/// wrong once in exactly the way that matters most: the "database is empty,
+/// ask who the first administrator is" status has no server address and no
+/// problem message, so a guard written as "not ready and no problem means
+/// carry on" swallowed it and opened the whole program against a server that
+/// was never started. On a real first install that looked like «تعذر
+/// الوصول إلى الخادم» forever, with the setup screen unreachable. The order
+/// below is the fix: an empty database is asked about FIRST, before any
+/// "carry on" shortcut, and the regression tests pin every branch.
+enum BackendGateScreen { passthrough, waiting, firstAdministrator, ready, failed }
+
+BackendGateScreen backendGateScreenFor({
+  required LocalBackendStatus? status,
+  required bool working,
+}) {
+  // Nothing decided yet: a desktop copy is still starting its server, or
+  // this build never starts one (development, web) and carries on as before.
+  if (status == null) {
+    return working ? BackendGateScreen.waiting : BackendGateScreen.passthrough;
+  }
+  // An empty database is a question for the person in front of the machine,
+  // never a reason to open the program against a server that does not exist.
+  if (status.needsFirstAdministrator) {
+    return BackendGateScreen.firstAdministrator;
+  }
+  if (status.isReady) return BackendGateScreen.ready;
+  // No address and no complaint: a build that does not own a server (the web
+  // stub). It must not be confused with the empty-database state above.
+  if (status.problem == null) return BackendGateScreen.passthrough;
+  // A failure is on record; while a retry runs, say so instead of leaving
+  // the old refusal on screen as if nothing were happening.
+  if (working) return BackendGateScreen.waiting;
+  return BackendGateScreen.failed;
+}
+
 /// Starts the API server a desktop installation needs, then hands over to the
 /// program.
 ///
@@ -70,6 +107,9 @@ class _BackendGateState extends State<BackendGate> {
   }
 
   Future<void> _start() async {
+    // One start attempt at a time: a double-tapped retry must not race a
+    // second preparation (and a second child server) against the first.
+    if (_working) return;
     setState(() => _working = true);
     final status = await LocalBackend.ensureRunning(appDisplayName: 'KAYAN ERP');
     if (!mounted) return;
@@ -82,40 +122,44 @@ class _BackendGateState extends State<BackendGate> {
   @override
   Widget build(BuildContext context) {
     final status = _status;
-
-    // Not a desktop installation: straight through, exactly as before.
-    if (status == null || (!status.isReady && status.problem == null)) {
-      return _working ? const _Waiting() : widget.child;
+    // The routing decision lives in backendGateScreenFor so it is unit
+    // tested; in particular an empty database must reach the setup screen
+    // below and must never fall through to the program without a server.
+    switch (backendGateScreenFor(status: status, working: _working)) {
+      case BackendGateScreen.passthrough:
+        // Not a desktop installation: straight through, exactly as before.
+        return widget.child;
+      case BackendGateScreen.waiting:
+        return const _Waiting();
+      case BackendGateScreen.firstAdministrator:
+        // The database is ready and has nobody in it yet: this is a fresh
+        // installation. Whoever is setting the company up chooses the first
+        // administrator here, and then the program continues normally.
+        return _FirstAdministrator(
+          onCreated: _start,
+          onStatus: (next) {
+            setState(() => _status = next);
+          },
+        );
+      case BackendGateScreen.ready:
+        // The program runs against the server this machine just started. The
+        // address is injected here so no screen needs to know where it came from.
+        return ProviderScope(
+          overrides: [
+            appConfigProvider.overrideWithValue(
+              AppConfig.forLocalServer(status!.baseUrl!),
+            ),
+          ],
+          child: widget.child,
+        );
+      case BackendGateScreen.failed:
+        return _CouldNotStart(
+          message: status?.problem ?? 'unknown',
+          logPath: status?.logPath,
+          databaseProblem: status?.databaseProblem ?? false,
+          onRetry: _start,
+        );
     }
-
-    if (status.needsFirstAdministrator) {
-      // The database is ready and has nobody in it yet: this is a fresh
-      // installation. Whoever is setting the company up chooses the first
-      // administrator here, and then the program continues normally.
-      return _FirstAdministrator(onCreated: _start, onStatus: (next) {
-        setState(() => _status = next);
-      });
-    }
-
-    if (status.isReady) {
-      // The program runs against the server this machine just started. The
-      // address is injected here so no screen needs to know where it came from.
-      return ProviderScope(
-        overrides: [
-          appConfigProvider.overrideWithValue(
-            AppConfig.forLocalServer(status.baseUrl!),
-          ),
-        ],
-        child: widget.child,
-      );
-    }
-
-    return _CouldNotStart(
-      message: status.problem ?? 'unknown',
-      logPath: status.logPath,
-      databaseProblem: status.databaseProblem,
-      onRetry: _start,
-    );
   }
 }
 

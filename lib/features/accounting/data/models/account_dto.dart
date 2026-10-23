@@ -41,6 +41,7 @@ class AccountDto {
       isActive: json['isActive'] as bool? ?? json['is_active'] as bool? ?? true,
       currency: json['currency']?.toString(),
       description: json['description']?.toString(),
+      cashFlowClass: json['cashFlowClass']?.toString().toUpperCase(),
     );
   }
 

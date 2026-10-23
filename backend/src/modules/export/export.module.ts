@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { CompanyModule } from '../company/company.module';
 import { PartiesModule } from '../parties/parties.module';
+import { FixedAssetsModule } from '../fixed-assets/fixed-assets.module';
 import { ReportsModule } from '../reports/reports.module';
 import { ExportController } from './export.controller';
 import { ListTablesService } from './list-tables.service';
@@ -11,7 +12,7 @@ import { ReportTablesService } from './report-tables.service';
 
 /// The same reports as the reports screen, wrapped as files.
 @Module({
-  imports: [ReportsModule, CompanyModule, PartiesModule],
+  imports: [ReportsModule, CompanyModule, PartiesModule, FixedAssetsModule],
   controllers: [ExportController],
   providers: [ReportTablesService, PdfService, ListTablesService, DocumentsService],
   exports: [ReportTablesService, ListTablesService, PdfService, DocumentsService],

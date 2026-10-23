@@ -1,5 +1,7 @@
 import 'package:erp_kayan/app/router/app_router.dart';
 import 'package:erp_kayan/app/shell/erp_shell.dart';
+import 'package:erp_kayan/app/theme/design_tokens.dart';
+import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
@@ -115,4 +117,243 @@ void main() {
       expect(firstItemFinder, findsOneWidget);
     },
   );
+
+  testWidgets(
+    'navigation shows pages when the user has the same read permissions as their API routes',
+    (tester) async {
+      tester.view.physicalSize = const Size(1366, 768);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final router = GoRouter(
+        initialLocation: AppRoutes.dashboard,
+        routes: [
+          for (final route in [
+            AppRoutes.dashboard,
+            AppRoutes.cash,
+            AppRoutes.openingBalances,
+            AppRoutes.salesReturns,
+            AppRoutes.purchaseReturns,
+            AppRoutes.quotations,
+          ])
+            GoRoute(
+              path: route,
+              builder: (context, state) => ErpShell(
+                currentPath: state.matchedLocation,
+                child: const SizedBox.expand(),
+              ),
+            ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            authControllerProvider.overrideWith(
+              _PermissionTestAuthController.new,
+            ),
+            tokenStoreProvider.overrideWithValue(FakeTokenStore()),
+          ],
+          child: MaterialApp.router(
+            locale: const Locale('ar'),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // These permissions match the GET endpoints. The user intentionally
+      // does not hold the separate returns.read or opening-balances.manage
+      // permission codes; neither should hide a screen whose API GET is allowed.
+      for (final label in [
+        'الخزائن والبنوك',
+        'الأرصدة الافتتاحية',
+        'مرتجعات المبيعات',
+        'مرتجعات المشتريات',
+        'عروض الأسعار',
+      ]) {
+        expect(find.widgetWithText(ListTile, label), findsOneWidget, reason: label);
+      }
+    },
+  );
+
+  testWidgets(
+    'a user without a screen permission does not see its menu entry',
+    (tester) async {
+      tester.view.physicalSize = const Size(1366, 768);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final router = GoRouter(
+        initialLocation: AppRoutes.dashboard,
+        routes: [
+          for (final route in [
+            AppRoutes.dashboard,
+            AppRoutes.cash,
+            AppRoutes.quotations,
+          ])
+            GoRoute(
+              path: route,
+              builder: (context, state) => ErpShell(
+                currentPath: state.matchedLocation,
+                child: const SizedBox.expand(),
+              ),
+            ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            authControllerProvider.overrideWith(
+              _UnpermittedAuthController.new,
+            ),
+            tokenStoreProvider.overrideWithValue(FakeTokenStore()),
+          ],
+          child: MaterialApp.router(
+            locale: const Locale('ar'),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The screen is still guarded on the server; this only keeps a menu
+      // entry from offering something the API would refuse.
+      expect(find.widgetWithText(ListTile, 'الخزائن والبنوك'), findsNothing);
+      expect(find.widgetWithText(ListTile, 'عروض الأسعار'), findsNothing);
+      expect(find.widgetWithText(ListTile, 'لوحة التحكم'), findsOneWidget);
+    },
+  );
+  testWidgets(
+    'each section lights up in its own colour when it is the active one',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final router = GoRouter(
+        initialLocation: AppRoutes.salesInvoices,
+        routes: [
+          for (final route in [
+            AppRoutes.dashboard,
+            AppRoutes.customers,
+            AppRoutes.salesInvoices,
+            AppRoutes.settings,
+          ])
+            GoRoute(
+              path: route,
+              builder: (context, state) => ErpShell(
+                currentPath: state.matchedLocation,
+                child: const SizedBox.expand(),
+              ),
+            ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            tokenStoreProvider.overrideWithValue(FakeTokenStore()),
+            authRepositoryProvider.overrideWithValue(FakeAuthRepository()),
+          ],
+          child: MaterialApp.router(
+            locale: const Locale('ar'),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      Color? titleColorOf(String label) {
+        final tile = tester.widget<ListTile>(
+          find.widgetWithText(ListTile, label, skipOffstage: false),
+        );
+        return (tile.title! as Text).style?.color;
+      }
+
+      // Sales is active: its sidebar label carries the sales green in the
+      // step mixed for the navy sidebar, and the (light) top bar names
+      // the section in the base step of the same hue.
+      expect(titleColorOf('فواتير البيع'), SectionAccents.sales.darkBase);
+      expect(
+        find.byWidgetPredicate(
+          (w) =>
+              w is Text &&
+              w.data == 'المبيعات' &&
+              w.style?.color == SectionAccents.sales.base,
+        ),
+        findsOneWidget,
+      );
+      // Customers is not active yet, so its rose stays out of its label.
+      expect(
+        titleColorOf('العملاء'),
+        isNot(SectionAccents.parties.base),
+      );
+
+      // Move to customers & suppliers: the rose section identity takes
+      // over the label and the top bar, and sales goes back to neutral.
+      router.go(AppRoutes.customers);
+      await tester.pumpAndSettle();
+      expect(titleColorOf('العملاء'), SectionAccents.parties.darkBase);
+      expect(
+        find.byWidgetPredicate(
+          (w) =>
+              w is Text &&
+              w.data == 'العملاء والموردون' &&
+              w.style?.color == SectionAccents.parties.base,
+        ),
+        findsOneWidget,
+      );
+      expect(
+        titleColorOf('فواتير البيع'),
+        isNot(SectionAccents.sales.base),
+      );
+    },
+  );
+}
+
+
+class _PermissionTestAuthController extends AuthController {
+  @override
+  Future<AppUser?> build() async => const AppUser(
+        id: 'user-read-only',
+        username: 'accountant',
+        fullName: 'Test Accountant',
+        companyId: 'company-1',
+        branchId: 'branch-1',
+        permissions: [
+          'cash.accounts.read',
+          'accounting.journal.read',
+          'sales.invoices.read',
+          'purchases.invoices.read',
+          'sales.quotations.read',
+        ],
+      );
+}
+
+class _UnpermittedAuthController extends AuthController {
+  @override
+  Future<AppUser?> build() async => const AppUser(
+        id: 'user-no-permissions',
+        username: 'clerk',
+        fullName: 'Test Clerk',
+        companyId: 'company-1',
+        branchId: 'branch-1',
+      );
 }

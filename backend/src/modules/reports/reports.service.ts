@@ -1,6 +1,13 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccountType, InvoiceStatus, JournalStatus, Prisma } from '@prisma/client';
+import {
+  AccountType,
+  InvoiceDocumentType,
+  InvoiceStatus,
+  JournalStatus,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { buildTrialBalanceGroups } from './trial-balance-groups';
 
 const MONEY_SCALE = 4;
 
@@ -68,10 +75,19 @@ export class ReportsService {
     const branchFilter = query.branchId ? Prisma.sql`AND e."branchId" = ${query.branchId}::uuid` : Prisma.sql``;
 
     const accounts = await this.prisma.account.findMany({
-      where: { companyId, deletedAt: null, isPostable: true },
+      where: { companyId, deletedAt: null },
       orderBy: { code: 'asc' },
-      select: { id: true, code: true, nameEn: true, nameAr: true, type: true },
+      select: {
+        id: true,
+        code: true,
+        nameEn: true,
+        nameAr: true,
+        type: true,
+        parentId: true,
+        isPostable: true,
+      },
     });
+    const postable = accounts.filter((a) => a.isPostable);
 
     const opening = await this.prisma.$queryRaw<
       Array<{ accountId: string; net: Prisma.Decimal }>
@@ -111,24 +127,38 @@ export class ReportsService {
       ]),
     );
 
-    const rows = accounts
-      .map((a) => {
+    const valuesById = new Map(
+      postable.map((a) => {
         const open = openingById.get(a.id) ?? new Prisma.Decimal(0);
         const mv = movementById.get(a.id) ?? {
           debit: new Prisma.Decimal(0),
           credit: new Prisma.Decimal(0),
         };
-        const closing = open.plus(mv.debit).minus(mv.credit);
+        return [
+          a.id,
+          {
+            opening: open,
+            debit: mv.debit,
+            credit: mv.credit,
+            closing: open.plus(mv.debit).minus(mv.credit),
+          },
+        ] as const;
+      }),
+    );
+
+    const rows = postable
+      .map((a) => {
+        const v = valuesById.get(a.id)!;
         return {
           accountId: a.id,
           code: a.code,
           nameEn: a.nameEn,
           nameAr: a.nameAr,
           type: a.type.toLowerCase(),
-          opening: open.toFixed(MONEY_SCALE),
-          debit: mv.debit.toFixed(MONEY_SCALE),
-          credit: mv.credit.toFixed(MONEY_SCALE),
-          closing: closing.toFixed(MONEY_SCALE),
+          opening: v.opening.toFixed(MONEY_SCALE),
+          debit: v.debit.toFixed(MONEY_SCALE),
+          credit: v.credit.toFixed(MONEY_SCALE),
+          closing: v.closing.toFixed(MONEY_SCALE),
         };
       })
       // An account with nothing in it and nothing carried forward is noise.
@@ -160,6 +190,9 @@ export class ReportsService {
       from: from.toISOString().slice(0, 10),
       to: to.toISOString().slice(0, 10),
       rows,
+      // Heading subtotals for readability. The totals below are computed
+      // from the postable rows alone, so these never double-count.
+      groups: buildTrialBalanceGroups(accounts, valuesById),
       totals: {
         debit: totalDebit.toFixed(MONEY_SCALE),
         credit: totalCredit.toFixed(MONEY_SCALE),
@@ -226,31 +259,52 @@ export class ReportsService {
       select: { id: true, code: true, nameEn: true, nameAr: true, phone: true },
     });
 
+    // A return is a row in this same table (a credit note naming the
+    // invoice it returns). Summing every row's total as "invoiced" — as
+    // this report used to — adds a return to what the customer owes
+    // instead of subtracting it, so the subledger and the receivable
+    // control account disagreed by twice every return. The ageing
+    // report already reads the document type; both now tell one story:
+    // an invoice adds (total − paid), a note subtracts it. Reversed
+    // documents are excluded for the same reason ageing excludes them:
+    // their journals cancel out, so they carry no live balance.
     const invoices = await this.prisma.salesInvoice.findMany({
       where: {
         companyId,
         deletedAt: null,
-        status: { in: [InvoiceStatus.POSTED, InvoiceStatus.REVERSED] },
+        // POSTED only: a reversed invoice keeps its number but no longer
+        // carries a debt, and its journal has already been cancelled.
+        status: InvoiceStatus.POSTED,
         invoiceDate: { lte: asOf },
       },
       select: {
         customerId: true,
         invoiceNumber: true,
         invoiceDate: true,
+        documentType: true,
         totalAmount: true,
         paidAmount: true,
       },
       orderBy: { invoiceDate: 'asc' },
     });
 
-    const byCustomer = new Map<string, { invoiced: Prisma.Decimal; paid: Prisma.Decimal }>();
+    const byCustomer = new Map<
+      string,
+      { invoiced: Prisma.Decimal; notes: Prisma.Decimal; paid: Prisma.Decimal }
+    >();
     for (const inv of invoices) {
       const current = byCustomer.get(inv.customerId) ?? {
         invoiced: new Prisma.Decimal(0),
+        notes: new Prisma.Decimal(0),
         paid: new Prisma.Decimal(0),
       };
-      current.invoiced = current.invoiced.plus(inv.totalAmount);
-      current.paid = current.paid.plus(inv.paidAmount);
+      if (inv.documentType === InvoiceDocumentType.INVOICE) {
+        current.invoiced = current.invoiced.plus(inv.totalAmount);
+        current.paid = current.paid.plus(inv.paidAmount);
+      } else {
+        current.notes = current.notes.plus(inv.totalAmount);
+        current.paid = current.paid.minus(inv.paidAmount);
+      }
       byCustomer.set(inv.customerId, current);
     }
 
@@ -260,6 +314,7 @@ export class ReportsService {
         .map((c) => {
           const agg = byCustomer.get(c.id) ?? {
             invoiced: new Prisma.Decimal(0),
+            notes: new Prisma.Decimal(0),
             paid: new Prisma.Decimal(0),
           };
           return {
@@ -269,8 +324,9 @@ export class ReportsService {
             nameAr: c.nameAr,
             phone: c.phone,
             invoiced: agg.invoiced.toFixed(MONEY_SCALE),
+            notes: agg.notes.toFixed(MONEY_SCALE),
             paid: agg.paid.toFixed(MONEY_SCALE),
-            balance: agg.invoiced.minus(agg.paid).toFixed(MONEY_SCALE),
+            balance: agg.invoiced.minus(agg.notes).minus(agg.paid).toFixed(MONEY_SCALE),
           };
         })
         .filter((r) => !new Prisma.Decimal(r.balance).isZero()),
@@ -287,28 +343,40 @@ export class ReportsService {
       select: { id: true, code: true, nameEn: true, nameAr: true, phone: true },
     });
 
+    // The debit-note mirror of the customer fix above: a purchase
+    // return reduces what is owed instead of adding to it.
     const invoices = await this.prisma.purchaseInvoice.findMany({
       where: {
         companyId,
         deletedAt: null,
-        status: { in: [InvoiceStatus.POSTED, InvoiceStatus.REVERSED] },
+        status: InvoiceStatus.POSTED,
         invoiceDate: { lte: asOf },
       },
       select: {
         supplierId: true,
+        documentType: true,
         totalAmount: true,
         paidAmount: true,
       },
     });
 
-    const bySupplier = new Map<string, { invoiced: Prisma.Decimal; paid: Prisma.Decimal }>();
+    const bySupplier = new Map<
+      string,
+      { invoiced: Prisma.Decimal; notes: Prisma.Decimal; paid: Prisma.Decimal }
+    >();
     for (const inv of invoices) {
       const current = bySupplier.get(inv.supplierId) ?? {
         invoiced: new Prisma.Decimal(0),
+        notes: new Prisma.Decimal(0),
         paid: new Prisma.Decimal(0),
       };
-      current.invoiced = current.invoiced.plus(inv.totalAmount);
-      current.paid = current.paid.plus(inv.paidAmount);
+      if (inv.documentType === InvoiceDocumentType.INVOICE) {
+        current.invoiced = current.invoiced.plus(inv.totalAmount);
+        current.paid = current.paid.plus(inv.paidAmount);
+      } else {
+        current.notes = current.notes.plus(inv.totalAmount);
+        current.paid = current.paid.minus(inv.paidAmount);
+      }
       bySupplier.set(inv.supplierId, current);
     }
 
@@ -318,6 +386,7 @@ export class ReportsService {
         .map((s) => {
           const agg = bySupplier.get(s.id) ?? {
             invoiced: new Prisma.Decimal(0),
+            notes: new Prisma.Decimal(0),
             paid: new Prisma.Decimal(0),
           };
           return {
@@ -327,8 +396,9 @@ export class ReportsService {
             nameAr: s.nameAr,
             phone: s.phone,
             invoiced: agg.invoiced.toFixed(MONEY_SCALE),
+            notes: agg.notes.toFixed(MONEY_SCALE),
             paid: agg.paid.toFixed(MONEY_SCALE),
-            balance: agg.invoiced.minus(agg.paid).toFixed(MONEY_SCALE),
+            balance: agg.invoiced.minus(agg.notes).minus(agg.paid).toFixed(MONEY_SCALE),
           };
         })
         .filter((r) => !new Prisma.Decimal(r.balance).isZero()),
@@ -412,7 +482,11 @@ export class ReportsService {
               id: l.entry.sourceId,
               number: l.entry.sourceNumber,
             }
-          : null,
+          : {
+              type: 'JOURNAL_ENTRY',
+              id: l.journalEntryId,
+              number: l.entry.entryNumber,
+            },
         isReversal: Boolean(l.entry.reversalOfId),
       };
     });

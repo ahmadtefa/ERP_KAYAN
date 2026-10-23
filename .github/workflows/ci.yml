@@ -63,13 +63,22 @@ jobs:
       - name: Type-check
         run: npx tsc --noEmit
       - name: Run unit tests
-        run: npm test -- --runInBand
+        run: python ../scripts/ci-diagnose.py npm test -- --runInBand
       - name: Build API
         run: npm run build
       - name: Apply migrations to ephemeral PostgreSQL
         run: npx prisma migrate deploy
+      - name: Prove the required-accounts chart upgrade (old, complete and renumbered companies; run twice)
+        run: python ../scripts/ci-diagnose.py node scripts/check-chart-upgrade.mjs
+
+      - name: Pin the database-state classifier (empty/incomplete/ready/unknown)
+        run: python ../scripts/ci-diagnose.py node scripts/check-database-state.mjs
       - name: Seed an isolated test company and administrator
         run: npx ts-node prisma/seed.ts
+      - name: Install PostgreSQL client tools (full-backup checks and the isolated demo restore)
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y postgresql-client
       - name: Start API and smoke-test database plus login
         run: |
           npm run start:prod > /tmp/kayan-api.log 2>&1 &
@@ -90,21 +99,204 @@ jobs:
           curl -fsS -X POST http://127.0.0.1:3000/api/v1/auth/login -H 'Content-Type: application/json' -d '{"username":"ci-admin","password":"CI-only-Admin-Password-12345"}' > /tmp/kayan-login.json
           node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/kayan-login.json","utf8")); if(typeof r.accessToken!=="string" || !r.accessToken || typeof r.refreshToken!=="string" || !r.user) process.exit(1); console.log("Login smoke test passed for",r.user.username)'
           echo "Running warehouses, transfers, orders, and price-list scenario first..."
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 node scripts/scenario-warehouses-orders.mjs http://127.0.0.1:3000/api/v1; then
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-warehouses-orders.mjs http://127.0.0.1:3000/api/v1; then
             echo "::group::API logs after warehouse scenario failure"
             cat /tmp/kayan-api.log
             echo "::endgroup::"
             exit 1
           fi
+          echo "Running chart-of-accounts and opening-balance spreadsheet imports..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-imports.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after import scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+          echo "Running return-costing and reversal scenario against the disposable PostgreSQL database..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-returns.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after return scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
           echo "Running full accounting business scenario last; it intentionally rate-limits failed logins..."
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 node scripts/scenario-accounting.mjs http://127.0.0.1:3000/api/v1; then
+          if ! ENABLE_DISPOSABLE_RESET=true ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-accounting.mjs http://127.0.0.1:3000/api/v1; then
             echo "::group::API logs after accounting scenario failure"
             cat /tmp/kayan-api.log
             echo "::endgroup::"
             exit 1
           fi
+          echo "Running the end-to-end API check: real full backup (create, PGDMP download, upload, rehearsed restore), import-template download and import, exports and print..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 KAYAN_E2E_ALLOW_RESET=1 python ../scripts/ci-diagnose.py node scripts/api-check.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after api-check failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+          echo "Running the full accounting lifecycle scenario (hand-computed 2024: assets, depreciation, trading, reconciliations, close)..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-accounting-reconciliation.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after lifecycle scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+          echo "Verifying a fresh full backup restores into an ISOLATED database with identical data..."
+          export PGPASSWORD=ci
+          LOGIN_JSON=$(curl -fsS -X POST http://127.0.0.1:3000/api/v1/auth/login -H 'Content-Type: application/json' -d '{"username":"ci-admin","password":"CI-only-Admin-Password-12345"}')
+          TOKEN=$(node -e 'console.log(JSON.parse(process.argv[1]).accessToken)' "$LOGIN_JSON")
+          curl -fsS -X POST http://127.0.0.1:3000/api/v1/backup/full -H "Authorization: Bearer $TOKEN" > /tmp/kayan-full.json
+          DUMP=$(ls -t backups/*.dump | head -n 1)
+          if [ -z "$DUMP" ] || [ ! -s "$DUMP" ]; then echo "No dump file was produced."; ls -la backups || true; exit 1; fi
+          echo "Restoring $DUMP into erp_kayan_restore_check..."
+          psql -h 127.0.0.1 -U ci -d postgres -v ON_ERROR_STOP=1 -q -c 'DROP DATABASE IF EXISTS erp_kayan_restore_check' -c 'CREATE DATABASE erp_kayan_restore_check'
+          if ! pg_restore -h 127.0.0.1 -U ci -d erp_kayan_restore_check --no-owner "$DUMP" > /tmp/pg_restore.log 2>&1; then
+            cat /tmp/pg_restore.log
+            exit 1
+          fi
+          FAIL=0
+          CHECKED=0
+          for T in $(psql -h 127.0.0.1 -U ci -d erp_kayan -At -c "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1"); do
+            case "$T" in *audit*|*session*|*token*|*log*) continue;; esac
+            A=$(psql -h 127.0.0.1 -U ci -d erp_kayan -At -c "SELECT count(*) FROM \"$T\"")
+            B=$(psql -h 127.0.0.1 -U ci -d erp_kayan_restore_check -At -c "SELECT count(*) FROM \"$T\"")
+            CHECKED=$((CHECKED+1))
+            if [ "$A" != "$B" ]; then echo "ROW COUNT MISMATCH $T: source=$A restored=$B"; FAIL=1; fi
+          done
+          if [ "$FAIL" != "0" ]; then exit 1; fi
+          echo "Isolated restore verified: $CHECKED non-volatile tables have identical row counts in source and restored databases."
+      - name: Build and restore the complete demo JSON on clean disposable databases
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_demo?schema=public
+          ADMIN_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
+          KAYAN_RESTORE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_demo_restore?schema=public
+          KAYAN_BARE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_demo_bare?schema=public
+          OUT_DIR: /tmp/kayan-demo-backup-build
+        run: python ../scripts/ci-diagnose.py node scripts/build-demo-backup.mjs
+        working-directory: backend
       - name: Audit production dependencies
         run: npm audit --omit=dev
+
+  regressions:
+    name: Regression scenario (reported issues 1-9)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: erp_kayan_regressions
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d erp_kayan_regressions"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_regressions?schema=public
+      JWT_ACCESS_SECRET: ci-only-access-secret-not-for-real-use-0123456789
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-real-use-9876543210
+      JWT_ACCESS_TTL: 900
+      JWT_REFRESH_TTL: 604800
+      KAYAN_ADMIN_USERNAME: ci-admin
+      KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
+      PORT: 3000
+      NODE_ENV: test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate
+      - name: Apply migrations to a freshly created database
+        run: npx prisma migrate deploy
+      - name: Seed an isolated company and administrator
+        run: npx ts-node prisma/seed.ts
+      - name: Verify quotation migrations are present in the runtime database
+        run: |
+          node <<'NODE'
+          const { Client } = require('pg');
+          (async () => {
+            const client = new Client({ connectionString: process.env.DATABASE_URL });
+            await client.connect();
+            try {
+              const result = await client.query(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'quotations' AND column_name IN ('design', 'columns') ORDER BY column_name"
+              );
+              const columns = result.rows.map((row) => row.column_name);
+              console.log('Quotation columns verified:', columns.join(', '));
+              if (!columns.includes('design') || !columns.includes('columns')) {
+                throw new Error('The runtime database is missing quotation design/layout columns after migration and seed.');
+              }
+              const tableResult = await client.query(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'quotation_tables' AND column_name = 'columns'"
+              );
+              if (tableResult.rows.length !== 1) {
+                throw new Error('The runtime database is missing the per-table quotation columns column after migration.');
+              }
+              console.log('Per-table quotation columns verified: quotation_tables.columns');
+            } finally {
+              await client.end();
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
+      - name: Build API
+        run: npm run build
+      - name: Serve the web client and run the regression scenario
+        run: |
+          mkdir -p /tmp/kayan-web-probe/build/web
+          printf '<!doctype html><html><body><div id="app">KAYAN WEB PROBE</div></body></html>' > /tmp/kayan-web-probe/build/web/index.html
+          KAYAN_WEB_ROOT=/tmp/kayan-web-probe/build/web npm run start:prod > /tmp/kayan-regressions-api.log 2>&1 &
+          API_PID=$!
+          trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-regressions-health.json; then
+              break
+            fi
+            sleep 2
+          done
+          if [ ! -s /tmp/kayan-regressions-health.json ]; then
+            cat /tmp/kayan-regressions-api.log
+            exit 1
+          fi
+
+          echo "Checking that the server address opens the web client, not a JSON 404..."
+          curl -fsS http://127.0.0.1:3000/ > /tmp/kayan-root.html
+          curl -fsS http://127.0.0.1:3000/sales/invoices > /tmp/kayan-spa.html
+          grep -q "KAYAN WEB PROBE" /tmp/kayan-root.html
+          grep -q "KAYAN WEB PROBE" /tmp/kayan-spa.html
+          curl -fsS http://127.0.0.1:3000/api/v1/health > /dev/null
+          echo "Web client served at / and at a client-side route; API still routed."
+
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-regressions.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after regression scenario failure"
+            cat /tmp/kayan-regressions-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          echo "Running the quotation and discount scenario..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-discounts-quotations.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after quotation scenario failure"
+            cat /tmp/kayan-regressions-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
 
   flutter:
     name: Flutter Web (analyze, test, build)
@@ -128,9 +320,22 @@ jobs:
       - name: Install Flutter dependencies
         run: flutter pub get
       - name: Analyze
-        run: flutter analyze
+        run: python scripts/ci-diagnose.py flutter analyze
+      # Renders real screens (shell + dashboard, customers, sales) to PNG so
+      # a design change can be inspected visually from the run's artifacts.
+      # These are screenshot generators: baselines are regenerated here, so
+      # the normal test run below compares against this run's own render.
+      - name: Render design screenshots
+        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
+      - name: Upload design screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: design-screenshots
+          path: test/screenshots/goldens/*.png
+          if-no-files-found: warn
+          retention-days: 30
       - name: Run tests
-        run: flutter test
+        run: python scripts/ci-diagnose.py flutter test --reporter expanded
       - name: Build web
         run: flutter build web --release
       - name: Upload web build
@@ -170,8 +375,13 @@ jobs:
       - name: Install Flutter dependencies
         run: flutter pub get
       - name: Analyze
-        run: flutter analyze
+        run: python scripts/ci-diagnose.py flutter analyze
+      # Same screenshot generation as the web job: baselines are produced in
+      # this job's own workspace so the test run below has something to
+      # compare against (the PNGs themselves are uploaded by the web job).
+      - name: Render design screenshots
+        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
       - name: Run tests
-        run: flutter test
+        run: python scripts/ci-diagnose.py flutter test --reporter expanded
       - name: Build Linux desktop
         run: flutter build linux --release
