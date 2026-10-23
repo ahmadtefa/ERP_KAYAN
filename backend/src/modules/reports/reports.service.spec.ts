@@ -55,3 +55,52 @@ describe('account ledger manual journal navigation', () => {
     expect(result.closing).toBe('100.0000');
   });
 });
+
+describe('customer and supplier balance reports read returns with the right sign', () => {
+  const d = (value: string) => new (require('@prisma/client').Prisma.Decimal)(value);
+
+  const serviceFor = (invoices: unknown[]) =>
+    new ReportsService({
+      customer: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 'c1', code: 'C-1', nameEn: 'Alpha', nameAr: 'ألفا', phone: null },
+        ]),
+      },
+      supplier: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 's1', code: 'S-1', nameEn: 'Beta', nameAr: 'بيتا', phone: null },
+        ]),
+      },
+      salesInvoice: { findMany: jest.fn().mockResolvedValue(invoices) },
+      purchaseInvoice: { findMany: jest.fn().mockResolvedValue(invoices) },
+    } as any);
+
+  it('subtracts a sales return from what the customer owes', async () => {
+    const result = await serviceFor([
+      { customerId: 'c1', documentType: 'INVOICE', totalAmount: d('456'), paidAmount: d('200') },
+      { customerId: 'c1', documentType: 'CREDIT_NOTE', totalAmount: d('57'), paidAmount: d('0') },
+    ]).customerBalances('company', {});
+    // 456 invoiced, 200 collected, 57 returned: the customer owes 199, not 313.
+    expect(result.rows[0].invoiced).toBe('399.0000');
+    expect(result.rows[0].paid).toBe('200.0000');
+    expect(result.rows[0].balance).toBe('199.0000');
+  });
+
+  it('subtracts a purchase return from what the company owes the supplier', async () => {
+    const result = await serviceFor([
+      { supplierId: 's1', documentType: 'INVOICE', totalAmount: d('456'), paidAmount: d('200') },
+      { supplierId: 's1', documentType: 'DEBIT_NOTE', totalAmount: d('182.4'), paidAmount: d('0') },
+    ]).supplierBalances('company', {});
+    expect(result.rows[0].invoiced).toBe('273.6000');
+    expect(result.rows[0].balance).toBe('73.6000');
+  });
+
+  it('asks only for live invoices, so a reversed invoice is not counted again', async () => {
+    const service = serviceFor([]);
+    await service.customerBalances('company', {});
+    const where = (service as any).prisma.salesInvoice.findMany.mock.calls[0][0].where;
+    expect(where.status).toBe('POSTED');
+    const select = (service as any).prisma.salesInvoice.findMany.mock.calls[0][0].select;
+    expect(select.documentType).toBe(true);
+  });
+});

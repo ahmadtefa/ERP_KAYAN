@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccountType, InvoiceStatus, JournalStatus, Prisma } from '@prisma/client';
+import { AccountType, InvoiceDocumentType, InvoiceStatus, JournalStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 const MONEY_SCALE = 4;
@@ -230,13 +230,17 @@ export class ReportsService {
       where: {
         companyId,
         deletedAt: null,
-        status: { in: [InvoiceStatus.POSTED, InvoiceStatus.REVERSED] },
+        // A reversed invoice keeps its number but no longer carries a debt:
+        // its journal has been reversed, so counting the document again would
+        // invent money the customer never owes.
+        status: InvoiceStatus.POSTED,
         invoiceDate: { lte: asOf },
       },
       select: {
         customerId: true,
         invoiceNumber: true,
         invoiceDate: true,
+        documentType: true,
         totalAmount: true,
         paidAmount: true,
       },
@@ -249,8 +253,12 @@ export class ReportsService {
         invoiced: new Prisma.Decimal(0),
         paid: new Prisma.Decimal(0),
       };
-      current.invoiced = current.invoiced.plus(inv.totalAmount);
-      current.paid = current.paid.plus(inv.paidAmount);
+      // A credit note is a sale handed back: it reduces the receivable by the
+      // same amount the invoice raised it. Reading the sign from the document
+      // type keeps this report on the same side as the ledger control account.
+      const sign = inv.documentType === InvoiceDocumentType.INVOICE ? 1 : -1;
+      current.invoiced = current.invoiced.plus(inv.totalAmount.mul(sign));
+      current.paid = current.paid.plus(inv.paidAmount.mul(sign));
       byCustomer.set(inv.customerId, current);
     }
 
@@ -291,11 +299,12 @@ export class ReportsService {
       where: {
         companyId,
         deletedAt: null,
-        status: { in: [InvoiceStatus.POSTED, InvoiceStatus.REVERSED] },
+        status: InvoiceStatus.POSTED,
         invoiceDate: { lte: asOf },
       },
       select: {
         supplierId: true,
+        documentType: true,
         totalAmount: true,
         paidAmount: true,
       },
@@ -307,8 +316,10 @@ export class ReportsService {
         invoiced: new Prisma.Decimal(0),
         paid: new Prisma.Decimal(0),
       };
-      current.invoiced = current.invoiced.plus(inv.totalAmount);
-      current.paid = current.paid.plus(inv.paidAmount);
+      // A debit note is goods sent back: it lowers what the company owes.
+      const sign = inv.documentType === InvoiceDocumentType.INVOICE ? 1 : -1;
+      current.invoiced = current.invoiced.plus(inv.totalAmount.mul(sign));
+      current.paid = current.paid.plus(inv.paidAmount.mul(sign));
       bySupplier.set(inv.supplierId, current);
     }
 
