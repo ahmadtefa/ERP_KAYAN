@@ -127,10 +127,15 @@ const _input = AccountInput(
   isPostable: true,
   isActive: true,
   description: 'Stock on hand',
+  cashFlowClass: 'OPERATING',
 );
 
 /// What `UpdateAccountDto` on the server declares. Anything else in a PATCH
 /// body is refused with `property <name> should not exist`.
+///
+/// `cashFlowClass` joined the contract with the cash-flow classification; it
+/// is sent always, null included, because an explicit null clears the
+/// classification while a missing key would silently keep the old one.
 const _updateContract = {
   'code',
   'nameEn',
@@ -140,6 +145,7 @@ const _updateContract = {
   'isActive',
   'currency',
   'description',
+  'cashFlowClass',
 };
 
 void main() {
@@ -201,6 +207,9 @@ void main() {
       expect(data.containsKey('type'), isFalse);
       expect(data.keys.toSet().difference(_updateContract), isEmpty);
       expect(data['nameEn'], 'Inventory');
+      // The newer classification travels with the edit, so changing a name
+      // does not silently drop it.
+      expect(data['cashFlowClass'], 'OPERATING');
     });
 
     test('creation sends the type the server needs', () async {
