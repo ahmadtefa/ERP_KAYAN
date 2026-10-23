@@ -487,6 +487,24 @@ export class ResetService {
             });
             return count;
           });
+          await step('assetDepreciations', async () => {
+            const { count } = await tx.assetDepreciation.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('depreciationRuns', async () => {
+            const { count } = await tx.depreciationRun.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('fixedAssets', async () => {
+            const { count } = await tx.fixedAsset.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
           await step('costCenters', async () => {
             const { count } = await tx.costCenter.deleteMany({
               where: { companyId: me.companyId },

@@ -235,6 +235,7 @@ class QuotationDocumentColumn {
     required this.label,
     required this.numeric,
     required this.weight,
+    this.kind = 'text',
   });
 
   final String key;
@@ -243,6 +244,10 @@ class QuotationDocumentColumn {
 
   /// The relative width the offer stored, 1..6.
   final int weight;
+
+  /// How a user-defined column's values print:
+  /// text | number | quantity | price | percent.
+  final String kind;
 }
 
 class QuotationDocumentSection {
@@ -429,6 +434,12 @@ class QuotationDocument {
     final sections = <QuotationDocumentSection>[];
     for (final rawTable in rawTables) {
       final table = Map<String, dynamic>.from(rawTable);
+      // Sections carry their own layouts; the quotation-level list is the
+      // fallback for snapshots frozen before per-table columns existed.
+      final tableRawColumns = listOf(table['columns']);
+      final tableColumns = tableRawColumns.isEmpty
+          ? columns
+          : _columns(tableRawColumns, language);
       final rawLines = listOf(table['lines']);
       final rows = <QuotationDocumentRow>[];
       for (var index = 0; index < rawLines.length; index += 1) {
@@ -438,7 +449,9 @@ class QuotationDocument {
             number: text(line, 'lineNumber').isEmpty
                 ? '${index + 1}'
                 : text(line, 'lineNumber'),
-            cells: [for (final column in columns) _cell(line, column.key)],
+            cells: [
+              for (final column in tableColumns) _cell(line, column, language),
+            ],
           ),
         );
       }
@@ -446,7 +459,7 @@ class QuotationDocument {
         QuotationDocumentSection(
           title: text(table, 'title'),
           rows: rows,
-          columns: columns,
+          columns: tableColumns,
           subTotal: text(table, 'subTotal'),
           discountAmount: text(table, 'discountAmount'),
           discountPercent: text(table, 'discountPercent'),
@@ -562,18 +575,36 @@ class QuotationDocument {
       final override = language == 'ar'
           ? text(entry, 'labelAr')
           : text(entry, 'labelEn');
+      final otherLanguage = language == 'ar'
+          ? text(entry, 'labelEn')
+          : text(entry, 'labelAr');
       final weight = asNum(entry['width'])?.toInt() ?? 2;
       final builtIn = _labels[key];
+      final rawKind = text(entry, 'kind');
+      final kind = const {
+        'text',
+        'number',
+        'quantity',
+        'price',
+        'percent',
+      }.contains(rawKind)
+          ? rawKind
+          : 'text';
       result.add(
         QuotationDocumentColumn(
           key: key,
           label: override.isNotEmpty
               ? override
-              : (builtIn != null ? builtIn[language == 'ar' ? 1 : 0] : key),
-          numeric: entry['numeric'] == true
-              ? true
-              : (builtIn != null ? _numeric.contains(key) : false),
+              : (builtIn != null
+                    ? builtIn[language == 'ar' ? 1 : 0]
+                    // A column named in one language only keeps that name
+                    // in the other — never its generated key.
+                    : (otherLanguage.isNotEmpty ? otherLanguage : key)),
+          numeric: builtIn != null
+              ? _numeric.contains(key)
+              : (kind != 'text' || entry['numeric'] == true),
           weight: weight.clamp(1, 6).toInt(),
+          kind: kind,
         ),
       );
     }
@@ -601,7 +632,12 @@ class QuotationDocument {
     return result;
   }
 
-  static String _cell(Json line, String key) {
+  static String _cell(
+    Json line,
+    QuotationDocumentColumn column,
+    String language,
+  ) {
+    final key = column.key;
     switch (key) {
       case 'description':
         return text(line, 'description');
@@ -618,13 +654,22 @@ class QuotationDocument {
       case 'lineTotal':
         return formatAmount(text(line, 'lineTotal'));
       default:
-        // User-defined column: read its stored value from customValues.
+        // User-defined column: read its stored value from customValues,
+        // formatted the way its kind prints in the PDF.
         final custom = line['customValues'];
-        if (custom is Map) {
-          final value = custom[key];
-          if (value != null) return value.toString();
+        final raw = custom is Map && custom[key] != null
+            ? custom[key].toString()
+            : '';
+        if (column.numeric && raw.trim().isNotEmpty) {
+          final formatted = column.kind == 'price'
+              ? formatAmount(raw)
+              : formatQuantity(raw);
+          if (column.kind == 'percent') {
+            return '$formatted${language == 'ar' ? '٪' : '%'}';
+          }
+          return formatted;
         }
-        return '';
+        return raw;
     }
   }
 

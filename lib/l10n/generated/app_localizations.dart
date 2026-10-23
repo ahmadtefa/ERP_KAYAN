@@ -284,6 +284,12 @@ abstract class AppLocalizations {
   /// **'The server accepted the sign-in but did not send the account details. This usually means the program and the server are different versions, or the company setup was not finished. The technical detail is in the program log.'**
   String get signInIncomplete;
 
+  /// No description provided for @sessionNotPersisted.
+  ///
+  /// In en, this message translates to:
+  /// **'This session is kept in memory only: the browser will not store it on a plain http:// address. Reloading signs you out. Serve the program over HTTPS to keep the session.'**
+  String get sessionNotPersisted;
+
   /// No description provided for @sessionStorageLabel.
   ///
   /// In en, this message translates to:
@@ -349,12 +355,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Preview: invoice 1,250.00 EGP · 12.5% discount'**
   String get fontSizePreview;
-
-  /// No description provided for @sessionNotPersisted.
-  ///
-  /// In en, this message translates to:
-  /// **'This session is kept in memory only: the browser will not store it on a plain http:// address. Reloading signs you out. Serve the program over HTTPS to keep the session.'**
-  String get sessionNotPersisted;
 
   /// No description provided for @language.
   ///
@@ -2576,6 +2576,12 @@ abstract class AppLocalizations {
   /// **'Create full backup'**
   String get createFullBackup;
 
+  /// No description provided for @backupSavedIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved in: {directory}'**
+  String backupSavedIn(Object directory);
+
   /// No description provided for @backupInProgress.
   ///
   /// In en, this message translates to:
@@ -4030,6 +4036,46 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   String get columnNumeric;
 
   /// In en, this message translates to:
+  /// **'This table\'s columns'**
+  String get tableColumns;
+
+  /// In en, this message translates to:
+  /// **'Built-in columns'**
+  String get builtinColumns;
+
+  /// In en, this message translates to:
+  /// **'Column type'**
+  String get columnType;
+
+  /// In en, this message translates to:
+  /// **'Text'**
+  String get columnTypeText;
+
+  /// In en, this message translates to:
+  /// **'Number'**
+  String get columnTypeNumber;
+
+  /// In en, this message translates to:
+  /// **'Quantity'**
+  String get columnTypeQuantity;
+
+  /// In en, this message translates to:
+  /// **'Price'**
+  String get columnTypePrice;
+
+  /// In en, this message translates to:
+  /// **'Percent'**
+  String get columnTypePercent;
+
+  /// In en, this message translates to:
+  /// **'Give the column a name in Arabic or English.'**
+  String get columnNameRequired;
+
+  /// In en, this message translates to:
+  /// **'Table preview'**
+  String get tablePreview;
+
+  /// In en, this message translates to:
   /// **'Custom column…'**
   String get addCustomColumn;
 
@@ -4137,4 +4183,190 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   /// In en, this message translates to:
   /// **'The server failed while carrying out the operation and nothing was saved. Try again shortly, and if it keeps happening tell your system administrator.'**
   String get errorServerBody;
+
+  /// No description provided for @backupSavedIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved in: {directory}'**
+  String backupSavedIn(Object directory);
+
+  /// No description provided for @accumulatedAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Accumulated depreciation account'**
+  String get accumulatedAccount;
+
+  /// No description provided for @accumulatedDepreciation.
+  ///
+  /// In en, this message translates to:
+  /// **'Accumulated depreciation'**
+  String get accumulatedDepreciation;
+
+  /// No description provided for @activateAsset.
+  ///
+  /// In en, this message translates to:
+  /// **'Activate (post acquisition)'**
+  String get activateAsset;
+
+  /// No description provided for @assetAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Asset account'**
+  String get assetAccount;
+
+  /// No description provided for @assetCategory.
+  ///
+  /// In en, this message translates to:
+  /// **'Category'**
+  String get assetCategory;
+
+  /// No description provided for @assetCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Asset code'**
+  String get assetCode;
+
+  /// No description provided for @assetCost.
+  ///
+  /// In en, this message translates to:
+  /// **'Cost'**
+  String get assetCost;
+
+  /// No description provided for @assetDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Asset details'**
+  String get assetDetails;
+
+  /// No description provided for @assetLocation.
+  ///
+  /// In en, this message translates to:
+  /// **'Location'**
+  String get assetLocation;
+
+  /// No description provided for @bookValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Book value'**
+  String get bookValue;
+
+  /// No description provided for @confirmActivateAsset.
+  ///
+  /// In en, this message translates to:
+  /// **'Activation posts the acquisition entry (Dr asset / Cr funding). Continue?'**
+  String get confirmActivateAsset;
+
+  /// No description provided for @confirmDisposeAsset.
+  ///
+  /// In en, this message translates to:
+  /// **'Disposal removes the asset from the books and posts its result. Continue?'**
+  String get confirmDisposeAsset;
+
+  /// No description provided for @depreciationExpenseAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Depreciation expense account'**
+  String get depreciationExpenseAccount;
+
+  /// No description provided for @depreciationPeriod.
+  ///
+  /// In en, this message translates to:
+  /// **'Month (YYYY-MM)'**
+  String get depreciationPeriod;
+
+  /// No description provided for @depreciationSchedule.
+  ///
+  /// In en, this message translates to:
+  /// **'Depreciation schedule'**
+  String get depreciationSchedule;
+
+  /// No description provided for @disposalDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Disposal date'**
+  String get disposalDate;
+
+  /// No description provided for @disposalProceeds.
+  ///
+  /// In en, this message translates to:
+  /// **'Proceeds'**
+  String get disposalProceeds;
+
+  /// No description provided for @disposeAsset.
+  ///
+  /// In en, this message translates to:
+  /// **'Dispose of asset'**
+  String get disposeAsset;
+
+  /// No description provided for @editAsset.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit asset'**
+  String get editAsset;
+
+  /// No description provided for @fixedAssets.
+  ///
+  /// In en, this message translates to:
+  /// **'Fixed assets'**
+  String get fixedAssets;
+
+  /// No description provided for @fundingAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Funding account'**
+  String get fundingAccount;
+
+  /// No description provided for @gainLossAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Gain/loss account'**
+  String get gainLossAccount;
+
+  /// No description provided for @inServiceDate.
+  ///
+  /// In en, this message translates to:
+  /// **'In-service date'**
+  String get inServiceDate;
+
+  /// No description provided for @newAsset.
+  ///
+  /// In en, this message translates to:
+  /// **'New asset'**
+  String get newAsset;
+
+  /// No description provided for @noAssets.
+  ///
+  /// In en, this message translates to:
+  /// **'No fixed assets yet.'**
+  String get noAssets;
+
+  /// No description provided for @proceedsAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Proceeds account'**
+  String get proceedsAccount;
+
+  /// No description provided for @purchaseDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase date'**
+  String get purchaseDate;
+
+  /// No description provided for @runDepreciation.
+  ///
+  /// In en, this message translates to:
+  /// **'Run depreciation'**
+  String get runDepreciation;
+
+  /// No description provided for @salvageValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Salvage value'**
+  String get salvageValue;
+
+  /// No description provided for @usefulLifeMonths.
+  ///
+  /// In en, this message translates to:
+  /// **'Useful life (months)'**
+  String get usefulLifeMonths;
 }

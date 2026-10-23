@@ -38,6 +38,9 @@ export interface PostingRequest {
     | 'STOCK_DOCUMENT'
     | 'OPENING_BALANCE'
     | 'YEAR_END_CLOSE'
+    | 'FIXED_ASSET'
+    | 'ASSET_DEPRECIATION'
+    | 'ASSET_DISPOSAL'
     | 'MANUAL';
   sourceId: string;
   sourceNumber: string;
@@ -132,6 +135,30 @@ export class PostingService {
           difference: totalDebit.minus(totalCredit).toFixed(MONEY_SCALE),
         },
       });
+    }
+
+    // One document, one entry. Every caller already claims its document by
+    // flipping its status inside its own transaction, which is what stops
+    // two people posting the same invoice. This is the second lock on the
+    // same door, at the one place every document passes through: if a
+    // non-reversal entry for this document is already in the ledger, a
+    // retry (or a future caller that forgets to claim) is refused here
+    // instead of writing the same revenue twice and leaving the duplicate
+    // to be found months later in a reconciliation.
+    const alreadyPosted = await tx.journalEntry.findFirst({
+      where: {
+        companyId: request.companyId,
+        sourceType: request.sourceType,
+        sourceId: request.sourceId,
+        reversalOfId: null,
+        status: { in: [JournalStatus.POSTED, JournalStatus.REVERSED] },
+      },
+      select: { entryNumber: true },
+    });
+    if (alreadyPosted) {
+      throw new BadRequestException(
+        `Document ${request.sourceNumber} has already been posted as journal entry ${alreadyPosted.entryNumber}`,
+      );
     }
 
     // Accounts must exist, be postable and belong to this company. A document
@@ -265,6 +292,19 @@ export class PostingService {
     });
     if (claimed.count !== 1) {
       throw new BadRequestException('This journal entry has already been reversed');
+    }
+
+    // A reversal is a posting like any other: it may not land in a closed
+    // period either. Without this check the closed year could still be
+    // written to — backwards, but written to all the same — by reversing
+    // one of its entries with a date inside it.
+    const reversalPeriod = await this.periods.periodFor(tx, companyId, entryDate);
+    if (reversalPeriod && reversalPeriod.status === 'CLOSED') {
+      throw new BadRequestException(
+        `Period ${reversalPeriod.code} is closed, so the reversal cannot be dated ${entryDate
+          .toISOString()
+          .slice(0, 10)}`,
+      );
     }
 
     const entryNumber = await this.numbers.next(tx, companyId, 'JOURNAL', 'JV');

@@ -56,10 +56,27 @@ class RecordsTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (MediaQuery.sizeOf(context).width < _wideBreakpoint) {
-      return _cardList(context);
-    }
-    return _table(context);
+    // The available width — not the device's — decides. Inside a
+    // dialog or a narrow pane the screen may be wide while the table's
+    // actual room is not, and sizing to the screen squeezed the table
+    // into space it did not have.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        if (width < _wideBreakpoint) {
+          // Inside another scroll view (a document dialog on a phone)
+          // the height is unbounded, where a lazy ListView cannot
+          // live: shrink-wrap there and let the parent scroll.
+          return _cardList(
+            context,
+            boundedHeight: constraints.maxHeight.isFinite,
+          );
+        }
+        return _table(context);
+      },
+    );
   }
 
   Widget _table(BuildContext context) {
@@ -83,10 +100,14 @@ class RecordsTable extends StatelessWidget {
             columns: [
               for (final column in columns)
                 DataColumn(
-                  label: Text(column.label),
+                  // A heading never wraps into a tower of syllables: the
+                  // column takes the width its heading needs and the
+                  // table scrolls sideways for the rest.
+                  label: Text(column.label, softWrap: false),
                   numeric: column.numeric,
                 ),
-              if (actions != null) DataColumn(label: Text(context.l10n.actions)),
+              if (actions != null)
+                DataColumn(label: Text(context.l10n.actions, softWrap: false)),
             ],
             rows: [
               for (final row in rows)
@@ -103,10 +124,30 @@ class RecordsTable extends StatelessWidget {
                     for (final column in columns)
                       DataCell(
                         column.tone == null
-                            ? Text(
-                                column.value(row) ?? '—',
-                                style: _cellStyle(theme, column),
-                              )
+                            ? column.numeric
+                                  // A number is shown whole or not at all:
+                                  // never wrapped at a comma, never split
+                                  // across lines into a different-looking
+                                  // figure. The column grows instead, and
+                                  // the table scrolls.
+                                  ? Text(
+                                      column.value(row) ?? '—',
+                                      softWrap: false,
+                                      style: _cellStyle(theme, column),
+                                    )
+                                  // Descriptive text may wrap, but inside
+                                  // bounds: never crushed to a sliver,
+                                  // never stretching the table forever.
+                                  : ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        minWidth: 110,
+                                        maxWidth: 300,
+                                      ),
+                                      child: Text(
+                                        column.value(row) ?? '—',
+                                        style: _cellStyle(theme, column),
+                                      ),
+                                    )
                             : Align(
                                 alignment: AlignmentDirectional.centerStart,
                                 child: StatusPill(
@@ -142,11 +183,13 @@ class RecordsTable extends StatelessWidget {
     return base?.copyWith(fontWeight: FontWeight.w600);
   }
 
-  Widget _cardList(BuildContext context) {
+  Widget _cardList(BuildContext context, {required bool boundedHeight}) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return ListView.separated(
       padding: const EdgeInsets.all(AppSpacing.md),
+      shrinkWrap: !boundedHeight,
+      physics: boundedHeight ? null : const NeverScrollableScrollPhysics(),
       itemCount: rows.length,
       separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
       itemBuilder: (context, index) {
@@ -179,43 +222,48 @@ class RecordsTable extends StatelessWidget {
                     ),
                   ),
                   if (columns.length > 1) const SizedBox(height: AppSpacing.sm),
+                  // Label above, value below at full card width. Side by
+                  // side, a long Arabic account name and its amount
+                  // fought over one narrow line and both lost — the
+                  // compressed, overlapping look on phones. Stacked,
+                  // each gets the whole width; numbers still never wrap.
                   for (final column in columns.skip(1))
                     Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Expanded(
-                            child: Text(
-                              column.label,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: scheme.onSurfaceVariant,
+                          Text(
+                            column.label,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          if (column.tone != null)
+                            Align(
+                              alignment: AlignmentDirectional.centerStart,
+                              child: StatusPill(
+                                label: column.value(row) ?? '—',
+                                tone: column.tone!(row),
+                                dense: true,
                               ),
-                            ),
-                          ),
-                          Expanded(
-                            flex: 2,
-                            child: Align(
-                              alignment: AlignmentDirectional.centerEnd,
-                              child: column.tone == null
-                                  ? Text(
-                                      column.value(row) ?? '—',
-                                      textAlign: TextAlign.end,
-                                      style: column.numeric
-                                          ? theme.textTheme.bodyMedium?.copyWith(
-                                              fontFeatures: const [
-                                                FontFeature.tabularFigures(),
-                                              ],
-                                            )
-                                          : null,
-                                    )
-                                  : StatusPill(
-                                      label: column.value(row) ?? '—',
-                                      tone: column.tone!(row),
-                                      dense: true,
-                                    ),
-                            ),
-                          ),
+                            )
+                          else if (column.numeric)
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Text(
+                                column.value(row) ?? '—',
+                                softWrap: false,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                            )
+                          else
+                            Text(column.value(row) ?? '—'),
                         ],
                       ),
                     ),

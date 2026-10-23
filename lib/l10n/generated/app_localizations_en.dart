@@ -108,6 +108,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settings => 'Settings';
 
   @override
+  String get signInIncomplete => 'The server accepted the sign-in but did not send the account details. This usually means the program and the server are different versions, or the company setup was not finished. The technical detail is in the program log.';
+
+  @override
+  String get sessionNotPersisted => 'This session is kept in memory only: the browser will not store it on a plain http:// address. Reloading signs you out. Serve the program over HTTPS to keep the session.';
+
+  @override
   String get sessionStorageLabel => 'Session storage';
 
   @override
@@ -118,9 +124,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get sessionStorageMemoryHint => 'This page is not served over HTTPS, so the browser keeps the session only until it is reloaded. Serve the program over HTTPS to keep people signed in.';
-
-  @override
-  String get signInIncomplete => 'The server accepted the sign-in but did not send the account details. This usually means the program and the server are different versions, or the company setup was not finished. The technical detail is in the program log.';
 
   @override
   String get fontSize => 'Font size';
@@ -139,9 +142,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get fontSizePreview => 'Preview: invoice 1,250.00 EGP · 12.5% discount';
-
-  @override
-  String get sessionNotPersisted => 'This session is kept in memory only: the browser will not store it on a plain http:// address. Reloading signs you out. Serve the program over HTTPS to keep the session.';
 
   @override
   String get language => 'Language';
@@ -1282,7 +1282,12 @@ class AppLocalizationsEn extends AppLocalizations {
       'A complete copy of the whole database (every company and user) in PostgreSQL format. It is made on the server that hosts the database.';
 
   @override
-  String get createFullBackup => 'Create full backup';
+  String get createFullBackup => 'Create backup now';
+
+  @override
+  String backupSavedIn(Object directory) {
+    return 'Saved in: $directory';
+  }
 
   @override
   String get backupInProgress => 'Creating the backup…';
@@ -1363,13 +1368,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get printBlocked => 'The browser blocked the new tab. Allow pop-ups for this address, then press Print again.';
 
   @override
-  String get resetData => 'Reset the program\'s data';
+  String get resetData => 'Reset program';
 
   @override
   String get resetDataHint => 'Clears this company’s books and returns the program to its first run. A backup is taken and checked before anything is deleted, and the reset stops if that backup fails.';
 
   @override
-  String get resetButton => 'Reset ERP Data';
+  String get resetButton => 'Reset program';
 
   @override
   String get resetOnlyAdmins => 'Only an administrator of the program can do this.';
@@ -2259,6 +2264,36 @@ class AppLocalizationsEn extends AppLocalizations {
   String get columnNumeric => 'Numeric';
 
   @override
+  String get tableColumns => 'This table\'s columns';
+
+  @override
+  String get builtinColumns => 'Built-in columns';
+
+  @override
+  String get columnType => 'Column type';
+
+  @override
+  String get columnTypeText => 'Text';
+
+  @override
+  String get columnTypeNumber => 'Number';
+
+  @override
+  String get columnTypeQuantity => 'Quantity';
+
+  @override
+  String get columnTypePrice => 'Price';
+
+  @override
+  String get columnTypePercent => 'Percent';
+
+  @override
+  String get columnNameRequired => 'Give the column a name in Arabic or English.';
+
+  @override
+  String get tablePreview => 'Table preview';
+
+  @override
   String get addCustomColumn => 'Custom column…';
 
   @override
@@ -2325,4 +2360,99 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get errorServerBody => 'The server failed while carrying out the operation and nothing was saved. Try again shortly, and if it keeps happening tell your system administrator.';
+
+  @override
+  String backupSavedIn(Object directory) {
+    return 'Saved in: \$directory';
+  }
+
+  @override
+  String get accumulatedAccount => 'Accumulated depreciation account';
+
+  @override
+  String get accumulatedDepreciation => 'Accumulated depreciation';
+
+  @override
+  String get activateAsset => 'Activate (post acquisition)';
+
+  @override
+  String get assetAccount => 'Asset account';
+
+  @override
+  String get assetCategory => 'Category';
+
+  @override
+  String get assetCode => 'Asset code';
+
+  @override
+  String get assetCost => 'Cost';
+
+  @override
+  String get assetDetails => 'Asset details';
+
+  @override
+  String get assetLocation => 'Location';
+
+  @override
+  String get bookValue => 'Book value';
+
+  @override
+  String get confirmActivateAsset => 'Activation posts the acquisition entry (Dr asset / Cr funding). Continue?';
+
+  @override
+  String get confirmDisposeAsset => 'Disposal removes the asset from the books and posts its result. Continue?';
+
+  @override
+  String get depreciationExpenseAccount => 'Depreciation expense account';
+
+  @override
+  String get depreciationPeriod => 'Month (YYYY-MM)';
+
+  @override
+  String get depreciationSchedule => 'Depreciation schedule';
+
+  @override
+  String get disposalDate => 'Disposal date';
+
+  @override
+  String get disposalProceeds => 'Proceeds';
+
+  @override
+  String get disposeAsset => 'Dispose of asset';
+
+  @override
+  String get editAsset => 'Edit asset';
+
+  @override
+  String get fixedAssets => 'Fixed assets';
+
+  @override
+  String get fundingAccount => 'Funding account';
+
+  @override
+  String get gainLossAccount => 'Gain/loss account';
+
+  @override
+  String get inServiceDate => 'In-service date';
+
+  @override
+  String get newAsset => 'New asset';
+
+  @override
+  String get noAssets => 'No fixed assets yet.';
+
+  @override
+  String get proceedsAccount => 'Proceeds account';
+
+  @override
+  String get purchaseDate => 'Purchase date';
+
+  @override
+  String get runDepreciation => 'Run depreciation';
+
+  @override
+  String get salvageValue => 'Salvage value';
+
+  @override
+  String get usefulLifeMonths => 'Useful life (months)';
 }

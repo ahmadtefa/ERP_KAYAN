@@ -203,11 +203,199 @@ export class FinancialStatementsService {
   }
 
   /**
-   * Cash flow, direct method: the actual movements in and out of cash and
-   * bank accounts, grouped by what the money was for.
+   * Statement of changes in equity: how the owners' stake moved between
+   * two dates, and why.
    *
-   * It is built from the counterpart accounts of every cash line, so it can
-   * be traced back to documents rather than derived from balance movements.
+   * Three kinds of movement, read from the same posted lines as every
+   * other statement:
+   *
+   *  * the result *transferred* by a year-end close inside the period
+   *    (the closing entry that lands in retained earnings);
+   *  * every other equity movement — capital put in or taken out,
+   *    drawings, dividends, corrections — which are ordinary postings
+   *    against equity accounts;
+   *  * the part of the operating result that has not been closed yet and
+   *    is still sitting in the revenue and expense accounts.
+   *
+   * The columns are built so the statement ties both ways: per account,
+   * opening + transferred + other = closing; and the closing total is
+   * the balance sheet's equity at `to` (equity accounts plus the result
+   * still unclosed). The result for the period excludes the closing
+   * entries themselves, so a close inside the period shows the profit
+   * once — as the period's result — and its transfer as a movement
+   * between the unclosed column and retained earnings, never twice.
+   */
+  async equityChanges(
+    companyId: string,
+    query: { from?: string; to?: string; branchId?: string },
+  ) {
+    const { from, to } = rangeOf(query);
+    const rows = await this.balances(companyId, from, to, {
+      branchId: query.branchId,
+    });
+    const branchFilter = query.branchId
+      ? Prisma.sql`AND e."branchId" = ${query.branchId}::uuid`
+      : Prisma.sql``;
+
+    // Equity movement inside the period, split by whether the year-end
+    // close wrote it. Amounts are credit-positive, the way equity reads.
+    const split = await this.prisma.$queryRaw<
+      Array<{ accountId: string; isClose: boolean; net: Prisma.Decimal }>
+    >(Prisma.sql`
+      SELECT l."accountId"                          AS "accountId",
+             (e."sourceType" = 'YEAR_END_CLOSE')    AS "isClose",
+             COALESCE(SUM(l.credit - l.debit), 0)   AS net
+        FROM journal_lines l
+        JOIN journal_entries e ON e.id = l."journalEntryId"
+        JOIN accounts a ON a.id = l."accountId"
+       WHERE e."companyId" = ${companyId}::uuid
+         AND a.type = 'EQUITY'
+         AND e.status IN ('POSTED', 'REVERSED')
+         AND e."entryDate" >= ${from}::date
+         AND e."entryDate" <= ${to}::date
+         ${branchFilter}
+       GROUP BY l."accountId", (e."sourceType" = 'YEAR_END_CLOSE')
+    `);
+    const transferredById = new Map<string, Prisma.Decimal>();
+    const otherById = new Map<string, Prisma.Decimal>();
+    for (const row of split) {
+      (row.isClose ? transferredById : otherById).set(
+        row.accountId,
+        new Prisma.Decimal(row.net),
+      );
+    }
+
+    const accounts = rows
+      .filter((row) => row.type === AccountType.EQUITY)
+      .map((row) => {
+        const opening = row.opening.negated();
+        const closing = row.opening.plus(row.debit).minus(row.credit).negated();
+        const transferredResult =
+          transferredById.get(row.accountId) ?? new Prisma.Decimal(0);
+        const otherMovements =
+          otherById.get(row.accountId) ?? new Prisma.Decimal(0);
+        return {
+          accountId: row.accountId,
+          code: row.code,
+          nameEn: row.nameEn,
+          nameAr: row.nameAr,
+          opening: opening.toFixed(MONEY_SCALE),
+          transferredResult: transferredResult.toFixed(MONEY_SCALE),
+          otherMovements: otherMovements.toFixed(MONEY_SCALE),
+          closing: closing.toFixed(MONEY_SCALE),
+        };
+      })
+      .filter(
+        (row) =>
+          !new Prisma.Decimal(row.opening).isZero() ||
+          !new Prisma.Decimal(row.transferredResult).isZero() ||
+          !new Prisma.Decimal(row.otherMovements).isZero() ||
+          !new Prisma.Decimal(row.closing).isZero(),
+      );
+
+    // The operating result of the period itself, closing entries aside.
+    const operating = await this.prisma.$queryRaw<
+      Array<{ type: AccountType; net: Prisma.Decimal }>
+    >(Prisma.sql`
+      SELECT a.type                                  AS type,
+             COALESCE(SUM(l.debit - l.credit), 0)    AS net
+        FROM journal_lines l
+        JOIN journal_entries e ON e.id = l."journalEntryId"
+        JOIN accounts a ON a.id = l."accountId"
+       WHERE e."companyId" = ${companyId}::uuid
+         AND a.type IN ('REVENUE', 'EXPENSE')
+         AND e.status IN ('POSTED', 'REVERSED')
+         AND (e."sourceType" IS NULL OR e."sourceType" <> 'YEAR_END_CLOSE')
+         AND e."entryDate" >= ${from}::date
+         AND e."entryDate" <= ${to}::date
+         ${branchFilter}
+       GROUP BY a.type
+    `);
+    const netOf = (type: AccountType) =>
+      new Prisma.Decimal(
+        operating.find((row) => row.type === type)?.net ?? 0,
+      );
+    // Revenue is credit-natural: flip it to read as income.
+    const resultForPeriod = netOf(AccountType.REVENUE)
+      .negated()
+      .minus(netOf(AccountType.EXPENSE));
+
+    // What of earlier results was still unclosed when the period opened,
+    // and what remains unclosed at its end — read off the same balance
+    // rows as the balance sheet, so the two statements cannot disagree.
+    const unclosedAt = (closingSide: boolean) =>
+      rows.reduce((sum, row) => {
+        const balance = closingSide
+          ? row.opening.plus(row.debit).minus(row.credit)
+          : row.opening;
+        if (row.type === AccountType.REVENUE) return sum.minus(balance);
+        if (row.type === AccountType.EXPENSE) return sum.minus(balance);
+        return sum;
+      }, new Prisma.Decimal(0));
+    const openingUnclosed = unclosedAt(false);
+    const closingUnclosed = unclosedAt(true);
+
+    const totalOf = (key: 'opening' | 'transferredResult' | 'otherMovements' | 'closing') =>
+      accounts.reduce((sum, row) => sum.plus(row[key]), new Prisma.Decimal(0));
+    const transferredTotal = totalOf('transferredResult');
+    const openingTotal = totalOf('opening').plus(openingUnclosed);
+    const closingTotal = totalOf('closing').plus(closingUnclosed);
+    const difference = closingTotal
+      .minus(openingTotal)
+      .minus(resultForPeriod)
+      .minus(totalOf('otherMovements'));
+
+    return {
+      from: from.toISOString().slice(0, 10),
+      to: to.toISOString().slice(0, 10),
+      accounts,
+      result: {
+        openingUnclosed: openingUnclosed.toFixed(MONEY_SCALE),
+        forPeriod: resultForPeriod.toFixed(MONEY_SCALE),
+        transferredToEquity: transferredTotal.toFixed(MONEY_SCALE),
+        closingUnclosed: closingUnclosed.toFixed(MONEY_SCALE),
+      },
+      totals: {
+        opening: openingTotal.toFixed(MONEY_SCALE),
+        resultForPeriod: resultForPeriod.toFixed(MONEY_SCALE),
+        otherMovements: totalOf('otherMovements').toFixed(MONEY_SCALE),
+        closing: closingTotal.toFixed(MONEY_SCALE),
+        // Zero means the statement explains every movement between the
+        // two balance-sheet dates. Anything else is reported, not hidden.
+        difference: difference.toFixed(MONEY_SCALE),
+      },
+    };
+  }
+
+  /**
+   * Cash flow, direct method: the actual movements in and out of cash and
+   * bank accounts over the period, read from the journal itself.
+   *
+   * An indirect statement (start from profit, adjust) would need
+   * depreciation and working-capital schedules this system does not keep,
+   * and guessing those adjustments would print numbers nothing backs.
+   * Instead this answers the question an owner actually asks of it —
+   * where did cash come from and where did it go — from the lines on the
+   * other side of each cash entry.
+   *
+   * Two things make the statement reconcilable, and both used to be
+   * missing or wrong:
+   *
+   *  * the opening and closing cash balances, so `opening + net movement
+   *    = closing` can be checked against the cash accounts' ledger and
+   *    the balance sheet;
+   *  * each counterpart line carries *its own* amount. The old grouping
+   *    attributed an entry's whole cash amount to whichever counterpart
+   *    happened to sort first, so a sale collected in cash showed every
+   *    pound — tax included — as "revenue".
+   *
+   * The IAS 7 reading (operating / investing / financing) comes from
+   * each account's own `cashFlowClass` in the chart — set by the
+   * accountant, per account, where it belongs. Nothing is classified by
+   * guessing from the account's type or name: an account nobody has
+   * classified reports under "unclassified", with its amount, until the
+   * decision is made. The four section nets always add to the net cash
+   * movement taken from the cash lines themselves.
    */
   async cashFlow(companyId: string, query: { from?: string; to?: string; branchId?: string }) {
     const { from, to } = rangeOf(query);
@@ -220,138 +408,174 @@ export class FinancialStatementsService {
       select: { accountId: true },
     });
     const cashAccountIds = cashCodes.map((row) => row.accountId);
+    const zero = '0.0000';
     if (cashAccountIds.length === 0) {
       return {
         from: from.toISOString().slice(0, 10),
         to: to.toISOString().slice(0, 10),
         inflows: [],
         outflows: [],
-        totals: { inflow: '0.0000', outflow: '0.0000', net: '0.0000' },
+        sections: ['operating', 'investing', 'financing', 'unclassified'].map(
+          (cashFlowClass) => ({
+            cashFlowClass,
+            inflow: zero,
+            outflow: zero,
+            net: zero,
+          }),
+        ),
+        cashBalances: [],
+        totals: { opening: zero, inflow: zero, outflow: zero, net: zero, closing: zero },
         note: 'This company has no cash or bank accounts defined.',
       };
     }
 
-    // Every cash line, with the other side of its entry, so the question
-    // "where did this money come from?" is answered by the entry itself.
-    const rows = await this.prisma.$queryRaw<
+    // The cash accounts themselves: opening balance before the period,
+    // gross in and out inside it. The statement's totals come from these
+    // lines — the ledger itself — so opening + net = closing by
+    // construction and can be checked against each account's ledger.
+    const cashBalancesRaw = await this.prisma.$queryRaw<
       Array<{
-        direction: string;
-        amount: Prisma.Decimal;
-        counterpartCode: string;
-        counterpartNameEn: string;
-        counterpartNameAr: string;
-        counterpartType: AccountType | null;
-        entryNumber: string;
-        entryDate: Date;
-        description: string | null;
-        source: string | null;
+        accountId: string;
+        code: string;
+        nameEn: string;
+        nameAr: string;
+        opening: Prisma.Decimal;
+        inflow: Prisma.Decimal;
+        outflow: Prisma.Decimal;
       }>
     >(Prisma.sql`
-      WITH cash_lines AS (
-        SELECT e.id                AS entry_id,
-               e."entryNumber"     AS "entryNumber",
-               e."entryDate"       AS "entryDate",
-               e.description       AS description,
-               l.debit             AS debit,
-               l.credit            AS credit
-          FROM journal_lines l
-          JOIN journal_entries e ON e.id = l."journalEntryId"
+      SELECT a.id AS "accountId", a.code, a."nameEn", a."nameAr",
+             COALESCE(SUM(CASE WHEN e."entryDate" < ${from}::date
+                               THEN l.debit - l.credit END), 0) AS opening,
+             COALESCE(SUM(CASE WHEN e."entryDate" >= ${from}::date
+                               THEN l.debit END), 0)             AS inflow,
+             COALESCE(SUM(CASE WHEN e."entryDate" >= ${from}::date
+                               THEN l.credit END), 0)            AS outflow
+        FROM accounts a
+        LEFT JOIN journal_lines l ON l."accountId" = a.id
+        LEFT JOIN journal_entries e
+               ON e.id = l."journalEntryId"
+              AND e."companyId" = ${companyId}::uuid
+              AND e.status IN ('POSTED', 'REVERSED')
+              AND e."entryDate" <= ${to}::date
+              ${branchFilter}
+       WHERE a.id IN (${Prisma.join(cashAccountIds.map((id) => Prisma.sql`${id}::uuid`))})
+       GROUP BY a.id, a.code, a."nameEn", a."nameAr"
+       ORDER BY a.code
+    `);
+    const cashBalances = cashBalancesRaw.map((row) => {
+      const opening = new Prisma.Decimal(row.opening);
+      const inflow = new Prisma.Decimal(row.inflow);
+      const outflow = new Prisma.Decimal(row.outflow);
+      return {
+        accountId: row.accountId,
+        code: row.code,
+        nameEn: row.nameEn,
+        nameAr: row.nameAr,
+        opening: opening.toFixed(MONEY_SCALE),
+        inflow: inflow.toFixed(MONEY_SCALE),
+        outflow: outflow.toFixed(MONEY_SCALE),
+        closing: opening.plus(inflow).minus(outflow).toFixed(MONEY_SCALE),
+      };
+    });
+    const cashTotal = (key: 'opening' | 'inflow' | 'outflow' | 'closing') =>
+      cashBalances.reduce((sum, row) => sum.plus(row[key]), new Prisma.Decimal(0));
+
+    // The counterparts: for every entry that moved cash, each non-cash
+    // line explains part of it with its own amount. The entry's net cash
+    // direction decides whether the line sourced the cash (a credit
+    // funding an inflow) or consumed it (a debit funded by an outflow);
+    // transfers between cash accounts net to zero and drop out entirely.
+    const counterparts = await this.prisma.$queryRaw<
+      Array<{
+        accountId: string;
+        code: string;
+        nameEn: string;
+        nameAr: string;
+        cashFlowClass: string | null;
+        inflowSide: boolean;
+        movement: Prisma.Decimal;
+      }>
+    >(Prisma.sql`
+      WITH cash_entries AS (
+        SELECT e.id AS entry_id, SUM(l.debit - l.credit) AS net_cash
+          FROM journal_entries e
+          JOIN journal_lines l ON l."journalEntryId" = e.id
          WHERE e."companyId" = ${companyId}::uuid
            AND e.status IN ('POSTED', 'REVERSED')
+           AND l."accountId" IN (${Prisma.join(cashAccountIds.map((id) => Prisma.sql`${id}::uuid`))})
            AND e."entryDate" >= ${from}::date
            AND e."entryDate" <= ${to}::date
-           AND l."accountId" = ANY(${cashAccountIds}::uuid[])
-      ),
-      counterparts AS (
-        SELECT c.entry_id,
-               c."entryNumber",
-               c."entryDate",
-               c.description,
-               c.debit,
-               c.credit,
-               a.code       AS "counterpartCode",
-               a."nameEn"   AS "counterpartNameEn",
-               a."nameAr"   AS "counterpartNameAr",
-               a.type       AS "counterpartType",
-               ROW_NUMBER() OVER (PARTITION BY c.entry_id ORDER BY a.code) AS rn
-          FROM cash_lines c
-          JOIN journal_lines l2 ON l2."journalEntryId" = c.entry_id
-          JOIN accounts a ON a.id = l2."accountId"
-         WHERE l2."accountId" <> ALL(${cashAccountIds}::uuid[])
+           ${branchFilter}
+         GROUP BY e.id
+        HAVING SUM(l.debit - l.credit) <> 0
       )
-      SELECT "entryNumber",
-             "entryDate",
-             description,
-             "counterpartCode",
-             "counterpartNameEn",
-             "counterpartNameAr",
-             "counterpartType",
-             CASE WHEN debit > 0 THEN 'in' ELSE 'out' END AS direction,
-             CASE WHEN debit > 0 THEN debit ELSE credit END AS amount
-        FROM counterparts
-       WHERE rn = 1
-       ORDER BY "entryDate", "entryNumber"
+      SELECT a.id AS "accountId", a.code, a."nameEn", a."nameAr",
+             a."cashFlowClass"::text AS "cashFlowClass",
+             (ce.net_cash > 0) AS "inflowSide",
+             COALESCE(SUM(CASE WHEN ce.net_cash > 0
+                               THEN l.credit - l.debit
+                               ELSE l.debit - l.credit END), 0) AS movement
+        FROM cash_entries ce
+        JOIN journal_lines l ON l."journalEntryId" = ce.entry_id
+        JOIN accounts a ON a.id = l."accountId"
+       WHERE l."accountId" NOT IN (${Prisma.join(cashAccountIds.map((id) => Prisma.sql`${id}::uuid`))})
+       GROUP BY a.id, a.code, a."nameEn", a."nameAr", a."cashFlowClass", (ce.net_cash > 0)
+       ORDER BY a.code
     `);
-
-    const groupRows = (direction: 'in' | 'out') => {
-      const grouped = new Map<
-        string,
-        {
-          code: string;
-          nameEn: string;
-          nameAr: string;
-          type: string | null;
-          amount: Prisma.Decimal;
-          entries: Array<{ entryNumber: string; entryDate: string; description: string | null; amount: string }>;
-        }
-      >();
-
-      for (const row of rows.filter((item) => item.direction === direction)) {
-        const key = row.counterpartCode;
-        const current = grouped.get(key) ?? {
-          code: row.counterpartCode,
-          nameEn: row.counterpartNameEn,
-          nameAr: row.counterpartNameAr,
-          type: row.counterpartType,
-          amount: new Prisma.Decimal(0),
-          entries: [],
-        };
-        current.amount = current.amount.plus(row.amount);
-        current.entries.push({
-          entryNumber: row.entryNumber,
-          entryDate: new Date(row.entryDate).toISOString().slice(0, 10),
-          description: row.description,
-          amount: new Prisma.Decimal(row.amount).toFixed(MONEY_SCALE),
-        });
-        grouped.set(key, current);
-      }
-
-      return [...grouped.values()]
-        .map((item) => ({
-          code: item.code,
-          nameEn: item.nameEn,
-          nameAr: item.nameAr,
-          type: item.type,
-          amount: item.amount.toFixed(MONEY_SCALE),
-          entries: item.entries,
+    const side = (inflowSide: boolean) =>
+      counterparts
+        .filter((row) => row.inflowSide === inflowSide)
+        .map((row) => ({
+          accountId: row.accountId,
+          code: row.code,
+          nameEn: row.nameEn,
+          nameAr: row.nameAr,
+          cashFlowClass: row.cashFlowClass ? row.cashFlowClass.toLowerCase() : null,
+          movement: new Prisma.Decimal(row.movement).toFixed(MONEY_SCALE),
         }))
-        .sort((a, b) => new Prisma.Decimal(b.amount).minus(a.amount).toNumber());
-    };
+        .filter((row) => !new Prisma.Decimal(row.movement).isZero());
 
-    const inflows = groupRows('in');
-    const outflows = groupRows('out');
-    const totalIn = inflows.reduce((sum, row) => sum.plus(row.amount), new Prisma.Decimal(0));
-    const totalOut = outflows.reduce((sum, row) => sum.plus(row.amount), new Prisma.Decimal(0));
+    // The IAS 7 reading of the same lines: each counterpart belongs to
+    // the class its account carries in the chart. An account nobody has
+    // classified reports under "unclassified" — visible as a decision
+    // still to make, never silently filed somewhere. The four nets add
+    // to the statement's net movement, which still comes from the cash
+    // lines themselves.
+    const sections = ['operating', 'investing', 'financing', 'unclassified'].map(
+      (cashFlowClass) => {
+        const part = (inflowSide: boolean) =>
+          counterparts
+            .filter(
+              (row) =>
+                row.inflowSide === inflowSide &&
+                (row.cashFlowClass?.toLowerCase() ?? 'unclassified') === cashFlowClass,
+            )
+            .reduce((sum, row) => sum.plus(row.movement), new Prisma.Decimal(0));
+        const inflow = part(true);
+        const outflow = part(false);
+        return {
+          cashFlowClass,
+          inflow: inflow.toFixed(MONEY_SCALE),
+          outflow: outflow.toFixed(MONEY_SCALE),
+          net: inflow.minus(outflow).toFixed(MONEY_SCALE),
+        };
+      },
+    );
 
     return {
       from: from.toISOString().slice(0, 10),
       to: to.toISOString().slice(0, 10),
-      inflows,
-      outflows,
+      inflows: side(true),
+      outflows: side(false),
+      sections,
+      cashBalances,
       totals: {
-        inflow: totalIn.toFixed(MONEY_SCALE),
-        outflow: totalOut.toFixed(MONEY_SCALE),
-        net: totalIn.minus(totalOut).toFixed(MONEY_SCALE),
+        opening: cashTotal('opening').toFixed(MONEY_SCALE),
+        inflow: cashTotal('inflow').toFixed(MONEY_SCALE),
+        outflow: cashTotal('outflow').toFixed(MONEY_SCALE),
+        net: cashTotal('closing').minus(cashTotal('opening')).toFixed(MONEY_SCALE),
+        closing: cashTotal('closing').toFixed(MONEY_SCALE),
       },
     };
   }

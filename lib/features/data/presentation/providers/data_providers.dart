@@ -551,7 +551,14 @@ class FullBackupService {
   }
 
   Future<Map<String, dynamic>> create() async {
-    final response = await _dio.post<Map<String, dynamic>>(_path);
+    // A full pg_dump plus its read-back validation legitimately takes
+    // longer than the client's ordinary 30-second receive timeout; with
+    // the default, the request was aborted on the client while the server
+    // was still working, which looked like a backup that hangs forever.
+    final response = await _dio.post<Map<String, dynamic>>(
+      _path,
+      options: Options(receiveTimeout: const Duration(minutes: 15)),
+    );
     return Map<String, dynamic>.from(response.data ?? const {});
   }
 
@@ -577,7 +584,13 @@ class FullBackupService {
       '$_path/restore',
       data: form,
       queryParameters: {'confirm': confirm},
-      options: Options(contentType: 'multipart/form-data'),
+      // Uploading an archive and restoring it (rehearsal + safety copy +
+      // restore + checks) is the longest operation in the program.
+      options: Options(
+        contentType: 'multipart/form-data',
+        sendTimeout: const Duration(minutes: 30),
+        receiveTimeout: const Duration(minutes: 30),
+      ),
     );
     return Map<String, dynamic>.from(response.data ?? const {});
   }

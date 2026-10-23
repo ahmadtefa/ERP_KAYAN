@@ -81,7 +81,10 @@ describe('customer and supplier balance reports read returns with the right sign
       { customerId: 'c1', documentType: 'CREDIT_NOTE', totalAmount: d('57'), paidAmount: d('0') },
     ]).customerBalances('company', {});
     // 456 invoiced, 200 collected, 57 returned: the customer owes 199, not 313.
-    expect(result.rows[0].invoiced).toBe('399.0000');
+    // Returns are shown on their own line rather than netted into the invoice
+    // total, so a reader still sees what was originally sold.
+    expect(result.rows[0].invoiced).toBe('456.0000');
+    expect(result.rows[0].notes).toBe('57.0000');
     expect(result.rows[0].paid).toBe('200.0000');
     expect(result.rows[0].balance).toBe('199.0000');
   });
@@ -91,7 +94,8 @@ describe('customer and supplier balance reports read returns with the right sign
       { supplierId: 's1', documentType: 'INVOICE', totalAmount: d('456'), paidAmount: d('200') },
       { supplierId: 's1', documentType: 'DEBIT_NOTE', totalAmount: d('182.4'), paidAmount: d('0') },
     ]).supplierBalances('company', {});
-    expect(result.rows[0].invoiced).toBe('273.6000');
+    expect(result.rows[0].invoiced).toBe('456.0000');
+    expect(result.rows[0].notes).toBe('182.4000');
     expect(result.rows[0].balance).toBe('73.6000');
   });
 

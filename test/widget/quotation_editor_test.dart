@@ -26,6 +26,13 @@ class _FakeApiClient extends ApiClient {
 
   String? postPath;
   Map<String, dynamic>? postBody;
+  Map<String, dynamic>? objectResponse;
+
+  @override
+  Future<Map<String, dynamic>> getObject(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async => objectResponse ?? const {};
 
   @override
   Future<Map<String, dynamic>> post(
@@ -126,7 +133,7 @@ void main() {
 
     // The offer's own column layout: rename the description header, hide the
     // origin column and move the total above the unit price.
-    await tester.tap(find.byKey(const ValueKey('edit-columns')));
+    await tester.tap(find.byKey(const ValueKey('edit-columns-0')));
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('column-label-en-description')),
@@ -191,6 +198,12 @@ void main() {
     final tables = (body['tables'] as List).cast<Map>();
     expect(tables, hasLength(1));
     expect(tables.single['title'], 'Main table');
+    // The layout travels with its table as well as at the top level.
+    final tableColumns = (tables.single['columns'] as List).cast<Map>();
+    expect(
+      tableColumns.map((column) => column['key']).toList(),
+      ['description', 'countryOfOrigin', 'unit', 'quantity', 'lineTotal', 'unitPrice'],
+    );
     expect(tables.single['discountType'], 'AMOUNT');
     expect(tables.single['discountAmount'], '10');
 

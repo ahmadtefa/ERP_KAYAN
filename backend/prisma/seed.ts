@@ -320,6 +320,23 @@ async function main(): Promise<void> {
     create: { userId: admin.id, branchId: branch.id },
   });
 
+  // The upsert above only sets `isSuperAdmin` when it *creates* the account.
+  // An installation whose administrator row already exists without the flag
+  // (restored from an archive, say) would keep it missing forever — and with
+  // it, the program-reset and full-backup screens, which no screen can grant
+  // back. Seeding runs on install and repair, so this is where the invariant
+  // "the seeded company always has a super administrator" is restored: only
+  // when the company has none, and only onto the account this seed owns.
+  const superAdmins = await prisma.user.count({
+    where: { companyId: company.id, isSuperAdmin: true, isActive: true, deletedAt: null },
+  });
+  if (superAdmins === 0) {
+    await prisma.user.update({
+      where: { id: admin.id },
+      data: { isSuperAdmin: true, isActive: true, deletedAt: null },
+    });
+  }
+
   // Chart of accounts: parents first so foreign keys resolve.
   const sorted = [...ACCOUNTS].sort((a, b) => a.code.length - b.code.length);
   const idByCode = new Map<string, string>();

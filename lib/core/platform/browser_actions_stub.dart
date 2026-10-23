@@ -67,6 +67,10 @@ Future<void> downloadFile(DownloadRequest request) async {
             fromHeader ??
             (uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'download.pdf'),
       );
+      // A success status is not yet a file: an address that missed the API
+      // is answered with the web app's page, and that page must never be
+      // saved under a .pdf or .xlsx name.
+      validateDownloadedFile(payload, suggested);
       final path = await _chooseSavePath(suggested);
       if (path == null) {
         throw const DownloadFailure('Saving the file was cancelled.');
@@ -130,7 +134,11 @@ Future<String?> _chooseSavePath(String suggestedName) async {
       "\$dialog.Filter = '${filter.replaceAll("'", "''")}'\n"
       r'if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) '
       r'{ [Console]::Out.Write($dialog.FileName) }';
+  // -STA: the Windows file dialogues are COM objects that require a
+  // single-threaded apartment; a PowerShell started without it can refuse
+  // to show the dialogue at all, which reads as a dead button.
   final result = await Process.run('powershell', [
+    '-STA',
     '-NoProfile',
     '-NonInteractive',
     '-ExecutionPolicy',
@@ -218,6 +226,7 @@ Future<PickedFile?> pickFile({List<String> extensions = const []}) async {
       r'{ [Console]::Out.Write($dialog.FileName) }';
 
   final result = await Process.run('powershell', [
+    '-STA',
     '-NoProfile',
     '-NonInteractive',
     '-ExecutionPolicy',

@@ -1,4 +1,4 @@
-import { InvoiceStatus, JournalStatus, Prisma, StockDirection } from '@prisma/client';
+import { InvoiceStatus, Prisma, StockDirection } from '@prisma/client';
 
 import { SalesInvoicesService } from './sales-invoices.service';
 
@@ -13,12 +13,20 @@ const SERVICE_ITEM_ID = '88888888-8888-4888-8888-888888888888';
 
 function serviceWith(prisma: Record<string, any>, tx: Record<string, any>) {
   const numbers = { next: jest.fn().mockResolvedValue('JV-REV-1') };
+  // The mirror entry itself is the central PostingService's job now;
+  // this spec asserts the invoice delegates to it (and what the invoice
+  // still owns: the stock coming back).
+  const posting = {
+    reverse: jest
+      .fn()
+      .mockResolvedValue({ id: 'reversal-id', entryNumber: 'JV-REV-1' }),
+  };
   const warehouses = { resolveForReversal: jest.fn().mockResolvedValue(WAREHOUSE_ID) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const service = new SalesInvoicesService(
     prisma as never,
     numbers as never,
-    {} as never,
+    posting as never,
     {} as never,
     {} as never,
     warehouses as never,
@@ -26,7 +34,7 @@ function serviceWith(prisma: Record<string, any>, tx: Record<string, any>) {
     audit as never,
   );
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: INVOICE_ID } as never);
-  return { service, numbers, warehouses, audit, tx };
+  return { service, numbers, posting, warehouses, audit, tx };
 }
 
 describe('SalesInvoicesService.reverse', () => {
@@ -123,7 +131,7 @@ describe('SalesInvoicesService.reverse', () => {
       journalEntry: { findFirst: jest.fn().mockResolvedValue(originalJournal) },
       $transaction: jest.fn(async (work: (client: unknown) => unknown) => work(tx)),
     };
-    const { service, numbers, warehouses, audit } = serviceWith(prisma, tx);
+    const { service, numbers, posting, warehouses, audit } = serviceWith(prisma, tx);
 
     await service.reverse(COMPANY_ID, USER_ID, INVOICE_ID);
 
@@ -148,15 +156,17 @@ describe('SalesInvoicesService.reverse', () => {
       }),
     });
     expect(tx.stockBalance.upsert).toHaveBeenCalledTimes(1);
-    expect(numbers.next).toHaveBeenCalledWith(tx, COMPANY_ID, 'JOURNAL', 'JV');
-    expect(tx.journalEntry.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          reversalOfId: JOURNAL_ID,
-          status: JournalStatus.POSTED,
-        }),
-      }),
+    // The mirror goes through the one central reversal path — the
+    // invoice no longer claims/creates journal rows itself.
+    expect(posting.reverse).toHaveBeenCalledWith(
+      tx,
+      COMPANY_ID,
+      USER_ID,
+      JOURNAL_ID,
+      'Reversal of sales invoice SI-0001',
     );
+    expect(numbers.next).not.toHaveBeenCalledWith(tx, COMPANY_ID, 'JOURNAL', 'JV');
+    expect(tx.journalEntry.create).not.toHaveBeenCalled();
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'REVERSE', entity: 'sales_invoices' }),
     );

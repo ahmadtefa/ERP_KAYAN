@@ -185,6 +185,13 @@ class _AccountTileState extends ConsumerState<_AccountTile> {
         [
           l10n.accountTypeLabel(account.type),
           account.isPostable ? l10n.postable : l10n.grouping,
+          if (account.cashFlowClass != null)
+            switch (account.cashFlowClass) {
+              'OPERATING' => lang == 'ar' ? 'تدفق تشغيلي' : 'Operating',
+              'INVESTING' => lang == 'ar' ? 'تدفق استثماري' : 'Investing',
+              'FINANCING' => lang == 'ar' ? 'تدفق تمويلي' : 'Financing',
+              _ => account.cashFlowClass!,
+            },
           if (!account.isActive) l10n.inactiveLabel,
         ].join(' · '),
         style: theme.textTheme.bodySmall,
@@ -257,6 +264,7 @@ Future<void> _editAccount(
   var selectedType = existing?.type ?? AccountType.asset;
   var isPostable = existing?.isPostable ?? true;
   var isActive = existing?.isActive ?? true;
+  var selectedCashFlow = existing?.cashFlowClass;
 
   final codeController = TextEditingController(text: existing?.code ?? '');
   final nameArController = TextEditingController(text: existing?.nameAr ?? '');
@@ -394,6 +402,58 @@ Future<void> _editAccount(
                     },
                   ),
                   const SizedBox(height: 12),
+                  if (isPostable) ...[
+                    DropdownButtonFormField<String?>(
+                      key: ValueKey(selectedCashFlow),
+                      initialValue: selectedCashFlow,
+                      decoration: InputDecoration(
+                        labelText: Localizations.localeOf(
+                                  dialogContext,
+                                ).languageCode ==
+                                'ar'
+                            ? 'تصنيف التدفق النقدي'
+                            : 'Cash-flow classification',
+                        helperText: Localizations.localeOf(
+                                  dialogContext,
+                                ).languageCode ==
+                                'ar'
+                            ? 'يُترك غير مصنّف حتى يحدّده المحاسب — لن يخمّنه النظام'
+                            : 'Unclassified until the accountant chooses — never guessed',
+                      ),
+                      items: [
+                        DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text(
+                            Localizations.localeOf(
+                                      dialogContext,
+                                    ).languageCode ==
+                                    'ar'
+                                ? 'غير مصنّف'
+                                : 'Unclassified',
+                          ),
+                        ),
+                        for (final entry in const [
+                          ('OPERATING', 'تشغيلي', 'Operating'),
+                          ('INVESTING', 'استثماري', 'Investing'),
+                          ('FINANCING', 'تمويلي', 'Financing'),
+                        ])
+                          DropdownMenuItem<String?>(
+                            value: entry.$1,
+                            child: Text(
+                              Localizations.localeOf(
+                                        dialogContext,
+                                      ).languageCode ==
+                                      'ar'
+                                  ? entry.$2
+                                  : entry.$3,
+                            ),
+                          ),
+                      ],
+                      onChanged: (value) =>
+                          setDialogState(() => selectedCashFlow = value),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(dialogL10n.postable),
@@ -442,6 +502,7 @@ Future<void> _editAccount(
     isPostable: isPostable,
     isActive: isActive,
     description: descriptionController.text.trim(),
+    cashFlowClass: isPostable ? selectedCashFlow : null,
   );
 
   final controller = ref.read(chartOfAccountsProvider.notifier);

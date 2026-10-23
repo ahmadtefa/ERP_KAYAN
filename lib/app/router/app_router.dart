@@ -6,6 +6,7 @@ import '../../features/accounting/presentation/screens/budgets_screen.dart';
 import '../../features/accounting/presentation/screens/chart_of_accounts_screen.dart';
 import '../../features/accounting/presentation/screens/cost_centers_screen.dart';
 import '../../features/accounting/presentation/screens/fiscal_periods_screen.dart';
+import '../../features/fixed_assets/presentation/fixed_assets_screen.dart';
 import '../../features/admin/presentation/screens/admin_screen.dart';
 import '../../features/accounting/presentation/screens/journal_entries_screen.dart';
 import '../../features/accounting/presentation/screens/opening_balances_screen.dart';
@@ -50,6 +51,7 @@ class AppRoutes {
   static const budgets = '/accounting/budgets';
   static const journalEntries = '/accounting/journal-entries';
   static const fiscalPeriods = '/accounting/fiscal-periods';
+  static const fixedAssets = '/accounting/fixed-assets';
   static const openingBalances = '/accounting/opening-balances';
   static const cash = '/cash';
   static const customers = '/parties/customers';
@@ -153,6 +155,7 @@ const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.cash, child: CashScreen()),
   (path: AppRoutes.journalEntries, child: JournalEntriesScreen()),
   (path: AppRoutes.fiscalPeriods, child: FiscalPeriodsScreen()),
+  (path: AppRoutes.fixedAssets, child: FixedAssetsScreen()),
   (path: AppRoutes.openingBalances, child: OpeningBalancesScreen()),
   (
     path: AppRoutes.customers,

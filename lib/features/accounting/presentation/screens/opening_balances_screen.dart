@@ -5,8 +5,10 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/download_feedback.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../../../data/presentation/providers/data_providers.dart';
 import '../../../inventory/presentation/screens/stock_screen.dart';
 
 /// Lists imported opening-balance drafts and gives the accountant a review
@@ -92,6 +94,21 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
         spacing: 8,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
+          // The blank workbook first: it is the file this screen's documents
+          // come from, so it can be fetched from here without hunting for
+          // the import screen and the right entry in its list.
+          if (!isDetail)
+            OutlinedButton.icon(
+              onPressed: () => runDownload(
+                context,
+                ref.read(reportLinkProvider).importTemplate(
+                      kind: 'opening-balances',
+                      language: Localizations.localeOf(context).languageCode,
+                    ),
+              ),
+              icon: const Icon(Icons.download_outlined),
+              label: Text(l10n.downloadTemplate),
+            ),
           if (!isDetail)
             OutlinedButton.icon(
               onPressed: () => context.go('/data/import'),

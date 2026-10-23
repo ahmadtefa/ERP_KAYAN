@@ -465,8 +465,8 @@ class _AuthBrandPanel extends StatelessWidget {
       (Icons.inventory_2_outlined, l10n.inventory),
       (Icons.query_stats_outlined, l10n.reports),
     ];
-    return ColoredBox(
-      color: AppColors.navy,
+    return DecoratedBox(
+      decoration: const BoxDecoration(gradient: AppGradients.brand),
       child: Stack(
         children: [
           const Positioned.fill(child: _BrandBackdrop()),
