@@ -543,7 +543,10 @@ async function main() {
       lines: [{ itemId: itemA.id, quantity: '1', unitPrice: '10' }],
     },
   });
-  const draftSettled = await api('/cash/vouchers', {
+  // Creating a voucher against a draft invoice is allowed on purpose: the
+  // invoice may be posted before the money is handed over. Posting is where
+  // the status is enforced, and it is enforced there.
+  const draftVoucher = await api('/cash/vouchers', {
     method: 'POST',
     json: {
       kind: 'RECEIPT',
@@ -554,10 +557,16 @@ async function main() {
       allocations: [{ salesInvoiceId: draftSale?.id, amount: '10' }],
     },
   });
+  const draftVoucherPost =
+    draftVoucher.status === 201
+      ? await api(`/cash/vouchers/${draftVoucher.data?.id}/post`, { method: 'POST' })
+      : { status: 0, data: null };
   check(
-    'a draft invoice cannot be settled',
-    draftSettled.status === 400 && /not posted/i.test(String(draftSettled.data?.detail)),
-    `status ${draftSettled.status}: ${String(draftSettled.data?.detail).slice(0, 160)}`,
+    'a draft invoice cannot be settled: the voucher is kept, posting waits for the invoice',
+    draftVoucher.status === 201 &&
+      draftVoucherPost.status === 400 &&
+      /not posted/i.test(String(draftVoucherPost.data?.detail)),
+    `create ${draftVoucher.status}, post ${draftVoucherPost.status}: ${String(draftVoucherPost.data?.detail).slice(0, 160)}`,
   );
 
   const receipt = await must('collect 684 from the customer into the bank', '/cash/vouchers', {

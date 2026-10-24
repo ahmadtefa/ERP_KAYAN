@@ -279,6 +279,19 @@ describe('CashVouchersService allocation validation', () => {
     expect(tx.salesInvoice.update).not.toHaveBeenCalled();
   });
 
+  it('refuses to post a draft that settles an invoice nobody has posted yet', async () => {
+    const { service, prisma, tx } = buildService();
+    prisma.cashVoucher.findFirst.mockResolvedValue(draftVoucher());
+    tx.salesInvoice.findFirst.mockResolvedValue({
+      ...salesInvoice,
+      status: InvoiceStatus.DRAFT,
+    });
+
+    await expect(
+      service.post(companyId, userId, 'voucher-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('refuses to post a legacy draft whose invoice belongs to another customer', async () => {
     const { service, prisma, tx } = buildService();
     prisma.cashVoucher.findFirst.mockResolvedValue(draftVoucher());
