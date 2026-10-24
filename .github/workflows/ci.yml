@@ -79,7 +79,12 @@ jobs:
       - name: Type-check
         run: npx tsc --noEmit
       - name: Run unit tests
-        run: python ../scripts/ci-diagnose.py npm test -- --runInBand
+        run: python ../scripts/ci-diagnose.py bash -c 'npm test -- --runInBand 2>&1 | tee /tmp/kayan-jest.log'
+      - name: Record unit-test totals
+        if: always()
+        run: |
+          summary=$(grep -hE "^(Test Suites|Tests):" /tmp/kayan-jest.log 2>/dev/null | tr '\n' ' | ')
+          echo "::notice title=Unit tests::${summary:-summary not captured}"
       - name: Build API
         run: npm run build
       - name: Apply migrations to ephemeral PostgreSQL
@@ -88,6 +93,7 @@ jobs:
         run: npx ts-node prisma/seed.ts
       - name: Start API and smoke-test database plus login
         run: |
+          exec > >(tee /tmp/kayan-smoke.log) 2>&1
           npm run start:prod > /tmp/kayan-api.log 2>&1 &
           API_PID=$!
           trap 'kill "$API_PID" 2>/dev/null || true' EXIT
@@ -155,6 +161,11 @@ jobs:
             echo; echo "== /tmp/kayan-login.json =="; head -c 2000 /tmp/kayan-login.json 2>/dev/null
             echo; echo "== /tmp/kayan-api.log (tail) =="; tail -c 8000 /tmp/kayan-api.log 2>/dev/null
             exit 1'
+      - name: Record scenario totals
+        if: always()
+        run: |
+          summary=$(grep -h "checks passed" /tmp/kayan-smoke.log 2>/dev/null | tr '\n' ' | ')
+          echo "::notice title=Scenario checks::${summary:-summary not captured}"
       - name: Audit production dependencies
         run: npm audit --omit=dev
 
