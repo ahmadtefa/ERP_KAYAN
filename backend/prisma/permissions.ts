@@ -76,6 +76,10 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   // the permission is that the two can be held by different people.
   ['accounting.journal.approve', 'Approve journal entries', 'اعتماد القيود اليومية', 'accounting'],
   ['accounting.costcenters.manage', 'Manage cost centers', 'إدارة مراكز التكلفة', 'accounting'],
+  // Seeing the opening figures is a smaller privilege than changing them:
+  // the read endpoints carry their own permission, and the migration that
+  // introduced it backfilled every role that already read via journal.read.
+  ['accounting.openingbalances.read', 'View opening balances', 'عرض الأرصدة الافتتاحية', 'accounting'],
   [
     'accounting.openingbalances.manage',
     'Open the books: opening balances',
