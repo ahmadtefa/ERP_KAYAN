@@ -40,9 +40,6 @@ export class UsersService {
         userRoles: {
           include: { role: { select: { id: true, code: true, nameEn: true } } },
         },
-        userPermissions: {
-          include: { permission: { select: { code: true } } },
-        },
         branches: { include: { branch: true } },
       },
     });
@@ -55,9 +52,6 @@ export class UsersService {
       include: {
         userRoles: {
           include: { role: { select: { id: true, code: true, nameEn: true } } },
-        },
-        userPermissions: {
-          include: { permission: { select: { code: true } } },
         },
         branches: { include: { branch: true } },
       },
@@ -87,11 +81,6 @@ export class UsersService {
       isSuperAdmin,
     );
     await this.assertBranchesBelongToCompany(companyId, dto.branchIds);
-    const directGrants = await this.assertPermissionsGrantable(
-      dto.permissionCodes,
-      actorPermissions,
-      isSuperAdmin,
-    );
 
     const passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
 
@@ -111,9 +100,6 @@ export class UsersService {
       });
       await this.replaceRoles(tx, companyId, user.id, dto.roleIds);
       await this.replaceBranches(tx, user.id, dto.branchIds);
-      if (dto.permissionCodes) {
-        await this.replaceDirectPermissions(tx, user.id, directGrants);
-      }
       return user;
     });
 
@@ -154,11 +140,6 @@ export class UsersService {
       isSuperAdmin,
     );
     await this.assertBranchesBelongToCompany(companyId, dto.branchIds);
-    const directGrants = await this.assertPermissionsGrantable(
-      dto.permissionCodes,
-      actorPermissions,
-      isSuperAdmin,
-    );
 
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
@@ -173,9 +154,6 @@ export class UsersService {
       });
       if (dto.roleIds) await this.replaceRoles(tx, companyId, id, dto.roleIds);
       if (dto.branchIds) await this.replaceBranches(tx, id, dto.branchIds);
-      if (dto.permissionCodes) {
-        await this.replaceDirectPermissions(tx, id, directGrants);
-      }
       if (dto.isActive === false) {
         await tx.refreshToken.updateMany({
           where: { userId: id, revokedAt: null },
@@ -314,47 +292,6 @@ export class UsersService {
     }
   }
 
-  /// Resolves direct permission grants by code, under the same rule that
-  /// guards roles: nobody can hand out a permission they do not hold
-  /// themselves. Unknown codes are refused rather than quietly dropped, so
-  /// a mistyped grant fails loudly instead of vanishing.
-  private async assertPermissionsGrantable(
-    codes: string[] | undefined,
-    actorPermissions: string[],
-    isSuperAdmin: boolean,
-  ): Promise<Array<{ id: string; code: string }>> {
-    if (!codes?.length) return [];
-    const found = await this.prisma.permission.findMany({
-      where: { code: { in: codes } },
-      select: { id: true, code: true },
-    });
-    if (found.length !== new Set(codes).size) {
-      throw new BadRequestException('One of the permissions does not exist');
-    }
-    if (isSuperAdmin) return found;
-
-    const forbidden = codes.filter((code) => !actorPermissions.includes(code));
-    if (forbidden.length) {
-      throw new ForbiddenException(
-        `You cannot grant permissions you do not hold: ${forbidden.join(', ')}`,
-      );
-    }
-    return found;
-  }
-
-  private async replaceDirectPermissions(
-    tx: Prisma.TransactionClient,
-    userId: string,
-    permissions: Array<{ id: string; code: string }>,
-  ) {
-    await tx.userPermission.deleteMany({ where: { userId } });
-    if (permissions.length) {
-      await tx.userPermission.createMany({
-        data: permissions.map((p) => ({ userId, permissionId: p.id })),
-      });
-    }
-  }
-
   /// Prevents a user administrator from assigning a role with permissions
   /// they do not personally hold. System super-admins may assign any role.
   private async assertRolesAssignable(
@@ -423,11 +360,6 @@ export class UsersService {
         code: ur.role.code,
         nameEn: ur.role.nameEn,
       })),
-      /// Grants made to this user alone, on top of their roles. Shown here
-      /// so a grant that arrived by any path is always visible to an admin.
-      directPermissions: (user.userPermissions ?? []).map(
-        (up: any) => up.permission.code,
-      ),
       branches: (user.branches ?? []).map((ub: any) => ({
         id: ub.branch.id,
         code: ub.branch.code,

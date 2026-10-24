@@ -10,13 +10,13 @@ export class OpeningBalancesController {
   constructor(private readonly service: OpeningBalancesService) {}
 
   @Get()
-  @RequirePermissions('accounting.openingbalances.read')
+  @RequirePermissions('accounting.journal.read')
   findAll(@CurrentUser() user: AuthUser) {
     return this.service.findAll(user.companyId);
   }
 
   @Get(':id')
-  @RequirePermissions('accounting.openingbalances.read')
+  @RequirePermissions('accounting.journal.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.findOne(user.companyId, id);
   }

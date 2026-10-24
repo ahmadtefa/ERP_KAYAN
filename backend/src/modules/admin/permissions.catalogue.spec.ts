@@ -20,7 +20,5 @@ describe('permission catalogue', () => {
     expect(codes.has('reports.print')).toBe(true);
     expect(codes.has('admin.backup.restore')).toBe(true);
     expect(codes.has('admin.reset')).toBe(true);
-    // Reading opening balances is its own operation, separate from managing them.
-    expect(codes.has('accounting.openingbalances.read')).toBe(true);
   });
 });
