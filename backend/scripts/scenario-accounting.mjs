@@ -443,6 +443,123 @@ async function main() {
     `${openInvoices.data?.items?.length ?? 0} open invoices`,
   );
 
+  // ── settlements: an allocation must match the voucher it rides on ──────
+  // These run before the good receipt so the invoice is still fully due and a
+  // refusal cannot be explained by "it was already paid".
+  const secondCustomer = await must(
+    'create a second customer for the settlement checks',
+    '/parties/customers',
+    {
+      method: 'POST',
+      json: {
+        code: `E2E-C2-${stamp}`,
+        nameEn: `Scenario second customer ${stamp}`,
+        nameAr: `عميل ثانٍ للسيناريو ${stamp}`,
+        creditLimit: '10000',
+        paymentTermDays: 30,
+      },
+    },
+  );
+
+  const wrongPartyReceipt = await api('/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'RECEIPT',
+      voucherDate: today,
+      cashAccountId: bankAccount.id,
+      customerId: secondCustomer?.id,
+      amount: '10',
+      allocations: [{ salesInvoiceId: sale.id, amount: '10' }],
+    },
+  });
+  check(
+    "a receipt cannot settle another customer's invoice",
+    wrongPartyReceipt.status === 400,
+    `status ${wrongPartyReceipt.status}: ${String(wrongPartyReceipt.data?.detail).slice(0, 160)}`,
+  );
+
+  const purchaseByReceipt = await api('/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'RECEIPT',
+      voucherDate: today,
+      cashAccountId: bankAccount.id,
+      customerId: customer.id,
+      amount: '10',
+      allocations: [{ purchaseInvoiceId: purchase.id, amount: '10' }],
+    },
+  });
+  check(
+    'a receipt cannot settle a purchase invoice',
+    purchaseByReceipt.status === 400,
+    `status ${purchaseByReceipt.status}: ${String(purchaseByReceipt.data?.detail).slice(0, 160)}`,
+  );
+
+  const bothInvoiceKinds = await api('/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'RECEIPT',
+      voucherDate: today,
+      cashAccountId: bankAccount.id,
+      customerId: customer.id,
+      amount: '10',
+      allocations: [
+        { salesInvoiceId: sale.id, purchaseInvoiceId: purchase.id, amount: '10' },
+      ],
+    },
+  });
+  check(
+    'one allocation line cannot name both invoice kinds',
+    bothInvoiceKinds.status === 400,
+    `status ${bothInvoiceKinds.status}: ${String(bothInvoiceKinds.data?.detail).slice(0, 160)}`,
+  );
+
+  const repeatedRows = await api('/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'RECEIPT',
+      voucherDate: today,
+      cashAccountId: bankAccount.id,
+      customerId: customer.id,
+      amount: '690',
+      allocations: [
+        { salesInvoiceId: sale.id, amount: '400' },
+        { salesInvoiceId: sale.id, amount: '290' },
+      ],
+    },
+  });
+  check(
+    'two rows against one invoice are summed before the due check',
+    repeatedRows.status === 400 && /left to pay/i.test(String(repeatedRows.data?.detail)),
+    `status ${repeatedRows.status}: ${String(repeatedRows.data?.detail).slice(0, 160)}`,
+  );
+
+  const draftSale = await must('create a draft sales invoice for the settlement checks', '/sales/invoices', {
+    method: 'POST',
+    json: {
+      invoiceDate: today,
+      dueDate: today,
+      customerId: customer.id,
+      lines: [{ itemId: itemA.id, quantity: '1', unitPrice: '10' }],
+    },
+  });
+  const draftSettled = await api('/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'RECEIPT',
+      voucherDate: today,
+      cashAccountId: bankAccount.id,
+      customerId: customer.id,
+      amount: '10',
+      allocations: [{ salesInvoiceId: draftSale?.id, amount: '10' }],
+    },
+  });
+  check(
+    'a draft invoice cannot be settled',
+    draftSettled.status === 400 && /not posted/i.test(String(draftSettled.data?.detail)),
+    `status ${draftSettled.status}: ${String(draftSettled.data?.detail).slice(0, 160)}`,
+  );
+
   const receipt = await must('collect 684 from the customer into the bank', '/cash/vouchers', {
     method: 'POST',
     json: {
