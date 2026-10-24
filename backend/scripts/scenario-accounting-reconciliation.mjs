@@ -1141,24 +1141,32 @@ async function main() {
     },
   });
   if (sale2025) {
-    const over = await must('draft a collection of 999 against the settled 153.90 invoice', '/cash/vouchers', {
-      method: 'POST',
-      json: {
-        kind: 'RECEIPT',
-        voucherDate: '2025-01-10',
-        cashAccountId: cashAccount.id,
-        customerId: customer.id,
-        amount: '999',
-        allocations: [{ salesInvoiceId: sale2025.id, amount: '999' }],
+    // Over-allocation is now refused where it is made, not when the voucher is
+    // posted: validateAllocations() compares each claim with what the invoice
+    // still owes before the draft is stored, so one invoice can never be
+    // claimed twice in the same voucher. Over-posting a draft is still refused
+    // by post() for vouchers written by older versions; that path is pinned by
+    // cash-vouchers.service.spec.ts.
+    const over = await mustRefuse(
+      'collecting 999 against the settled 153.90 invoice is refused when the voucher is written',
+      '/cash/vouchers',
+      {
+        method: 'POST',
+        json: {
+          kind: 'RECEIPT',
+          voucherDate: '2025-01-10',
+          cashAccountId: cashAccount.id,
+          customerId: customer.id,
+          amount: '999',
+          allocations: [{ salesInvoiceId: sale2025.id, amount: '999' }],
+        },
       },
-    });
-    if (over) {
-      await mustRefuse(
-        'collecting more than the invoice has left is refused at posting',
-        `/cash/vouchers/${over.id}/post`,
-        { method: 'POST' },
-      );
-    }
+    );
+    check(
+      'and the refusal names the invoice and what it had left',
+      /left to pay/i.test(String(over?.data?.detail)),
+      String(over?.data?.detail).slice(0, 160),
+    );
   }
   const afterInvalid = await trialBalance('2025-01-01', '2025-12-31');
   check(
