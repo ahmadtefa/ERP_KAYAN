@@ -14,6 +14,7 @@ import {
 } from '../../common/audit/audit-purge.service';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { reconcileRestoredAccess } from './restore-access';
 import {
   LOGO_MAX_BYTES,
   logoDimensions,
@@ -234,6 +235,11 @@ const TABLES: TableSpec[] = [
   { model: 'cashVoucher', scope: 'company' },
   { model: 'cashTransfer', scope: 'company' },
   { model: 'cashVoucherAllocation', scope: 'child', parent: 'cashVoucher', foreignKey: 'voucherId' },
+  // The asset register points at accounts, branches and cost centres, all
+  // written above; a depreciation charge points at its run and its asset.
+  { model: 'fixedAsset', scope: 'company' },
+  { model: 'depreciationRun', scope: 'company' },
+  { model: 'assetDepreciation', scope: 'company' },
   { model: 'documentSequence', scope: 'company' },
   { model: 'auditLog', scope: 'company' },
 ];
@@ -572,6 +578,15 @@ export class BackupService {
           });
         }
 
+        // The file's role grants are a snapshot of the program that wrote
+        // it: a backup made by an older version cannot contain permissions
+        // the current version added since, and its user rows replace the
+        // current ones wholesale — possibly leaving the company with no
+        // super administrator at all, which silently disables the reset and
+        // full-backup screens. Reconcile access with the *current* program
+        // before anyone signs in to the restored data.
+        const access = await reconcileRestoredAccess(tx, requesterCompanyId);
+
         // The purge is recorded now that the accounts are back, and what was
         // put back is written right after it. Both live where the restore
         // itself cannot erase them: inside the same transaction, after the
@@ -591,6 +606,7 @@ export class BackupService {
               fileCreatedAt: file.createdAt,
               companyCode: file.companyCode,
               written,
+              accessReconciled: access,
             } as never,
           },
         });
@@ -612,6 +628,7 @@ export class BackupService {
       total: Object.values(written).reduce((sum, count) => sum + count, 0),
     };
   }
+
 
   /// What an upload would replace, shown before anything is touched.
   async inspect(file: BackupFile, requesterCompanyId: string) {

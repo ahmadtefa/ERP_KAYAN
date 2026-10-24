@@ -23,6 +23,7 @@ class Account implements AccountNames {
     this.isActive = true,
     this.currency,
     this.description,
+    this.cashFlowClass,
   });
 
   final String id;
@@ -47,6 +48,12 @@ class Account implements AccountNames {
 
   /// Free-text note on the account (desktop expense accounts keep one).
   final String? description;
+
+  /// Where this account's cash movements belong in the cash-flow
+  /// statement: 'OPERATING', 'INVESTING' or 'FINANCING'. Null means the
+  /// accountant has not classified it — the statement then shows the
+  /// movement as unclassified instead of guessing.
+  final String? cashFlowClass;
 
   bool get isLeaf => isPostable;
 

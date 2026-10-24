@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../app/theme/design_tokens.dart';
-import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/page_header.dart';
 
 /// Standard header above a module screen: title, actions and the body.
@@ -141,8 +141,18 @@ class _SearchFieldState extends State<SearchField> {
   }
 }
 
-/// Shows a short message at the bottom of the screen.
+/// Reports the outcome of an action.
+///
+/// A success is a short note at the bottom of the screen: it is good news,
+/// it can be missed without harm, and it must not interrupt what the person
+/// is doing. An error is the opposite — it needs to be read and
+/// acknowledged — so it goes to the central [AppErrorDialog] instead of
+/// sliding away after four seconds.
 void showMessage(BuildContext context, String message, {bool error = false}) {
+  if (error) {
+    showAppError(context, message);
+    return;
+  }
   final scheme = Theme.of(context).colorScheme;
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
@@ -167,9 +177,10 @@ void showMessage(BuildContext context, String message, {bool error = false}) {
 }
 
 /// Turns any thrown object into something worth showing a user.
-String describeError(BuildContext context, Object error) {
-  final text = error.toString();
-  // Failures already carry a human-readable message; strip the wrapper.
-  final match = RegExp(r'^[A-Za-z]+Failure: (.*)$').firstMatch(text);
-  return match?.group(1) ?? (text.isEmpty ? context.l10n.operationFailed : text);
-}
+///
+/// The wording comes from the same resolver the error dialog uses, so an
+/// inline message and a modal one never disagree, and no technical text
+/// (a stack trace, an SQL fragment, `property type should not exist`)
+/// reaches the screen through this path.
+String describeError(BuildContext context, Object error) =>
+    presentErrorText(context, error);

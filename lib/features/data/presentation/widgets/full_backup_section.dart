@@ -32,6 +32,12 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
   Map<String, dynamic>? _capabilities;
   List<Map<String, dynamic>> _files = const [];
   bool _busy = false;
+
+  /// True only while the first capabilities/list round-trip is in flight.
+  /// The loading bar is bound to this flag — never to "capabilities is
+  /// still null" — so a failed load ends in a message and a retry button
+  /// instead of a progress bar that spins forever over a hidden error.
+  bool _loading = true;
   String? _notice;
   String? _failure;
 
@@ -43,25 +49,41 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
 
   Future<void> _load() async {
     setState(() {
+      _loading = true;
       _failure = null;
     });
+    final service = ref.read(fullBackupServiceProvider);
+    // The two answers are read independently: coupling them in one `try`
+    // meant a failed file list discarded perfectly good capabilities and
+    // the whole section collapsed into its error branch — where the only
+    // remaining button was «تحديث الحالة», which is the dead end this
+    // layout exists to avoid. A refresh that fails now keeps the last
+    // known state and merely reports the failure.
+    var capabilities = _capabilities;
+    var files = _files;
+    Object? loadError;
     try {
-      final service = ref.read(fullBackupServiceProvider);
-      final capabilities = await service.capabilities();
-      final files = await service.list();
-      if (!mounted) return;
-      setState(() {
-        _capabilities = capabilities;
-        _files = files;
-      });
+      capabilities = await service.capabilities();
     } catch (error) {
-      if (!mounted) return;
-      setState(() => _failure = describeApiError(error));
+      loadError = error;
     }
+    try {
+      files = await service.list();
+    } catch (error) {
+      loadError ??= error;
+    }
+    if (!mounted) return;
+    setState(() {
+      _capabilities = capabilities;
+      _files = files;
+      _loading = false;
+      _failure = loadError == null ? null : describeApiError(loadError);
+    });
   }
 
   Future<void> _createBackup() async {
     final l10n = context.l10n;
+    final knownNames = {for (final file in _files) '${file['name']}'};
     setState(() {
       _busy = true;
       _notice = l10n.backupInProgress;
@@ -71,17 +93,51 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
       final result = await ref.read(fullBackupServiceProvider).create();
       final file = result['file'] as Map<String, dynamic>?;
       if (!mounted) return;
-      setState(() {
-        _notice = '${l10n.createdSuccessfully}'
-            '${file == null ? '' : ': ${file['name']}'}';
-      });
+      setState(() => _notice = _createdNotice(file));
       await _load();
     } catch (error) {
       if (!mounted) return;
-      setState(() => _failure = describeApiError(error));
+      // The request can fail on this side (a timeout, a dropped
+      // connection) while the server finishes the dump anyway. Before
+      // declaring failure, look at the folder: a file that was not there
+      // when we started means the backup actually happened, and saying
+      // "failed" over a good backup would be its own kind of lie.
+      var recovered = false;
+      try {
+        final files = await ref.read(fullBackupServiceProvider).list();
+        final fresh = files.where(
+          (file) => !knownNames.contains('${file['name']}'),
+        );
+        if (fresh.isNotEmpty && mounted) {
+          recovered = true;
+          setState(() {
+            _files = files;
+            _notice = _createdNotice(fresh.first);
+          });
+        }
+      } catch (_) {
+        // The list could not be read either; the original error stands.
+      }
+      if (!recovered && mounted) {
+        setState(() => _failure = describeApiError(error));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// What the person is told once the server has the file: its name, its
+  /// size and the folder it sits in, so «it worked» can be checked rather
+  /// than trusted. The folder is the server's own answer (capabilities),
+  /// never a path the client guesses.
+  String _createdNotice(Map<String, dynamic>? file) {
+    final l10n = context.l10n;
+    final name = file == null ? '' : '${file['name'] ?? ''}';
+    final size = file == null ? null : file['sizeBytes'];
+    final directory = '${_capabilities?['backupDirectory'] ?? ''}';
+    return '${l10n.createdSuccessfully}${name.isEmpty ? '' : ': $name'}'
+        '${size == null ? '' : ' · $size ${l10n.sizeLabel}'}'
+        '${directory.isEmpty ? '' : '\n${l10n.backupSavedIn(directory)}'}';
   }
 
   Future<void> _download(String name) => runDownload(
@@ -263,6 +319,10 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     final theme = Theme.of(context);
     final capabilities = _capabilities;
     final toolsAvailable = capabilities?['available'] == true;
+    // Only a definite answer disables the actions. «We could not ask»
+    // (capabilities still null after a failed load) leaves them enabled:
+    // the server's own reply to the attempt is clearer than a grey button.
+    final toolsUnavailable = capabilities != null && !toolsAvailable;
 
     return Card(
       child: Padding(
@@ -280,20 +340,29 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
-            if (capabilities == null)
+            // The actions are always on the screen once the first load has
+            // answered — success or failure. They used to exist only in the
+            // all-good branch, so any load error (a refused permission, a
+            // dropped connection) left «تحديث الحالة» as the only button
+            // and no visible way to take a backup at all. Now the primary
+            // action is simply there: disabled with its reason beside it
+            // when the server says the tools are missing, answerable by the
+            // server's own error otherwise.
+            if (capabilities == null && _loading)
               const LinearProgressIndicator()
-            else if (!toolsAvailable) ...[
-              // No tools on this machine: say so, and show nothing that
-              // pretends to work.
-              _Notice(
-                icon: Icons.info_outline,
-                color: theme.colorScheme.error,
-                text:
-                    '${l10n.fullBackupUnavailable}'
-                    '${capabilities['reason'] == null ? '' : '\n${capabilities['reason']}'}',
-              ),
-            ] else ...[
-              if (capabilities['maintenance'] is Map &&
+            else ...[
+              if (toolsUnavailable) ...[
+                _Notice(
+                  icon: Icons.info_outline,
+                  color: theme.colorScheme.error,
+                  text:
+                      '${l10n.fullBackupUnavailable}'
+                      '${capabilities['reason'] == null ? '' : '\n${capabilities['reason']}'}',
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (capabilities != null &&
+                  capabilities['maintenance'] is Map &&
                   (capabilities['maintenance'] as Map)['maintenance'] == true)
                 _Notice(
                   icon: Icons.warning_amber_outlined,
@@ -305,12 +374,16 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
                 runSpacing: 8,
                 children: [
                   FilledButton.icon(
-                    onPressed: _busy ? null : _createBackup,
+                    onPressed: _busy || toolsUnavailable
+                        ? null
+                        : _createBackup,
                     icon: const Icon(Icons.save_alt),
                     label: Text(l10n.createFullBackup),
                   ),
                   OutlinedButton.icon(
-                    onPressed: _busy ? null : _uploadAndRestore,
+                    onPressed: _busy || toolsUnavailable
+                        ? null
+                        : _uploadAndRestore,
                     icon: const Icon(Icons.restore),
                     label: Text(l10n.uploadDumpFile),
                   ),
@@ -321,6 +394,13 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
                   ),
                 ],
               ),
+              // Bound to flags every path resets: the person always sees
+              // motion while work runs and a result — success or failure —
+              // when it stops.
+              if (_busy || _loading) ...[
+                const SizedBox(height: 12),
+                const LinearProgressIndicator(),
+              ],
             ],
             if (_notice != null) ...[
               const SizedBox(height: 12),

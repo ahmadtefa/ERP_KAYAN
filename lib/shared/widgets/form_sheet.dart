@@ -241,6 +241,10 @@ class _FormSheetState extends State<_FormSheet> {
         return Padding(
           padding: padding,
           child: DropdownButtonFormField<String>(
+            // Expanded, or the button sizes to its widest option and
+            // a long label (an account, a purchase line) overflows
+            // the field instead of ellipsising inside it.
+            isExpanded: true,
             initialValue: _selections[field.key],
             decoration: InputDecoration(
               labelText: field.label,

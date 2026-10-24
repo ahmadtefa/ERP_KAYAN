@@ -8,6 +8,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import { accountName } from '../../common/localization/account-name';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import { ACCOUNT_CODES } from './account-map.service';
 import { CostCentersService } from './cost-centers.service';
 import { DocumentNumberService } from './document-number.service';
 import { CreateJournalEntryDto, JournalLineDto } from './dto/create-journal-entry.dto';
@@ -154,6 +155,25 @@ export class JournalEntriesService {
       );
     }
 
+    // The receivable/payable control accounts belong to the subledgers.
+    // A manual line written straight onto one of them moves the ledger
+    // without moving any customer or supplier, and the two then disagree
+    // by exactly that line — the classic unreconciled control account.
+    // It is refused here, at the door; the party documents (invoices,
+    // notes, vouchers, opening balances) are how these accounts move.
+    const control = accounts.filter((a) =>
+      [ACCOUNT_CODES.accountsReceivable, ACCOUNT_CODES.accountsPayable].includes(
+        a.code as never,
+      ),
+    );
+    if (control.length > 0) {
+      throw new BadRequestException(
+        `Manual entries cannot post directly to a control account (${control
+          .map((a) => a.code)
+          .join(', ')}). Use the customer/supplier documents so the subledger and the ledger move together.`,
+      );
+    }
+
     // The analytical dimension is validated against this company and the entry
     // date before anything is written: an inactive centre, another company's
     // centre or a centre outside its validity window is refused, not stored.
@@ -239,6 +259,24 @@ export class JournalEntriesService {
       throw new BadRequestException(
         `Only a draft or an approved entry can be posted (current status: ${entry.status})`,
       );
+    }
+
+    if (!entry.reversalOfId) {
+      const lineAccounts = await this.prisma.account.findMany({
+        where: {
+          companyId,
+          code: { in: [ACCOUNT_CODES.accountsReceivable, ACCOUNT_CODES.accountsPayable] },
+          id: { in: entry.lines.map((l) => l.accountId) },
+        },
+        select: { code: true },
+      });
+      if (lineAccounts.length > 0) {
+        throw new BadRequestException(
+          `Manual entries cannot post directly to a control account (${lineAccounts
+            .map((a) => a.code)
+            .join(', ')}). Cancel this draft and use the customer/supplier documents instead.`,
+        );
+      }
     }
 
     const policy = await this.settings.get(companyId);
@@ -456,7 +494,36 @@ export class JournalEntriesService {
       throw new BadRequestException('This entry has already been reversed');
     }
 
+    // The mirror entry is dated today; if today falls inside a closed
+    // period it is refused like any other posting into one. (Posting into
+    // a date no period covers stays allowed, as everywhere else.)
+    const reversalDate = new Date();
+    const period = await this.periods.periodFor(
+      this.prisma,
+      companyId,
+      reversalDate,
+    );
+    if (period && period.status === 'CLOSED') {
+      throw new BadRequestException(
+        `Period ${period.code} is closed, so the reversal cannot be dated ${reversalDate
+          .toISOString()
+          .slice(0, 10)}`,
+      );
+    }
+
     const reversal = await this.prisma.$transaction(async (tx) => {
+      // Claim the original first. The pre-checks above run outside the
+      // transaction, so two people reversing at the same moment could both
+      // pass them; this conditional update lets exactly one of them write
+      // the mirror entry (the same guard PostingService.reverse applies).
+      const claimed = await tx.journalEntry.updateMany({
+        where: { id: original.id, companyId, status: JournalStatus.POSTED },
+        data: { status: JournalStatus.REVERSED },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException('This entry has already been reversed');
+      }
+
       const entryNumber = await this.numbers.next(
         tx,
         companyId,
@@ -469,7 +536,7 @@ export class JournalEntriesService {
           companyId,
           branchId: original.branchId,
           entryNumber,
-          entryDate: new Date(),
+          entryDate: reversalDate,
           description: `Reversal of ${original.entryNumber}`,
           status: JournalStatus.POSTED,
           currency: original.currency,
@@ -499,11 +566,6 @@ export class JournalEntriesService {
             })),
           },
         },
-      });
-
-      await tx.journalEntry.update({
-        where: { id: original.id },
-        data: { status: JournalStatus.REVERSED },
       });
 
       return created;

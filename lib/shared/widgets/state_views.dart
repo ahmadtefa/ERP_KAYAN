@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/design_tokens.dart';
 import '../extensions/l10n_extension.dart';
+import 'app_error_dialog.dart';
 
 /// Standard loading indicator with an accessible label.
 ///
@@ -43,6 +44,10 @@ class LoadingView extends StatelessWidget {
 }
 
 /// Shown when an operation fails. Always offers a retry affordance.
+///
+/// The message goes through the same resolver as the central error dialog:
+/// a page whose data could not be loaded explains the problem in Arabic and
+/// keeps a retry button, instead of printing whatever the transport threw.
 class ErrorView extends StatelessWidget {
   const ErrorView({super.key, required this.message, this.onRetry});
 
@@ -52,6 +57,7 @@ class ErrorView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final explained = presentErrorText(context, message);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.xxl),
@@ -76,7 +82,7 @@ class ErrorView extends StatelessWidget {
               ),
               const SizedBox(height: AppSpacing.md),
               Text(
-                message,
+                explained,
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,

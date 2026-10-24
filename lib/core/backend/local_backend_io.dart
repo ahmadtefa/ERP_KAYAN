@@ -265,14 +265,33 @@ class LocalBackend {
         databaseProblem: true,
       );
     }
-    if (preparation?.state == 'empty') {
+    if (preparation?.state == 'empty' ||
+        preparation?.state == 'incomplete') {
+      // 'incomplete' = a company or users exist without the other (a
+      // first setup interrupted halfway). The remedy is the same screen:
+      // completing first-run setup upserts what is missing and touches
+      // nothing that is already there.
       log.writeln(
-        '[shell] the database is empty: asking who the first '
-        'administrator is',
+        preparation?.state == 'incomplete'
+            ? '[shell] the database is partly set up: asking who the '
+                  'first administrator is so setup can be completed'
+            : '[shell] the database is empty: asking who the first '
+                  'administrator is',
       );
       await log.flush();
       await log.close();
       return const LocalBackendStatus.needsFirstAdministrator();
+    }
+    if (preparation?.state == 'unknown') {
+      // The preparation could not determine the state (typically the
+      // database did not answer its count query). That is never read as
+      // "empty" - a failed question must not invite first-run setup over
+      // somebody's data. Start the server and let its own precise error
+      // be the one the user sees.
+      log.writeln(
+        '[shell] WARNING: database state is unknown; starting the server '
+        'so the real error can surface',
+      );
     }
 
     // 3. Start the server and wait until it answers.
@@ -428,18 +447,21 @@ class LocalBackend {
         includeParentEnvironment: true,
       );
       // Line by line, so every line in the log carries its own prefix and the
-      // file stays readable with any text editor.
+      // file stays readable with any text editor. Every line is redacted the
+      // same way the preparation output is: a database driver in a bad mood
+      // will happily print the whole connection string, password included,
+      // and this log is a file other people may be asked to read or send.
       process.stdout
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
-            log?.writeln('[out] ${_plain(line)}');
+            log?.writeln('[out] ${_redactSecrets(_plain(line))}');
           });
       process.stderr
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
-            log?.writeln('[err] ${_plain(line)}');
+            log?.writeln('[err] ${_redactSecrets(_plain(line))}');
           });
       return process;
     } on Object catch (error) {
@@ -603,6 +625,17 @@ class LocalBackend {
       .replaceAll(RegExp(r'(KAYAN_ADMIN_PASSWORD=)\S+'), r'$1***')
       .replaceAll(
         RegExp(r'((?:DATABASE_URL|ADMIN_DATABASE_URL)=)\S+'),
+        r'$1***',
+      )
+      // Signing secrets and bare password assignments, the same shapes the
+      // Windows repair tooling strips from its own logs - one definition of
+      // "never in a log" across the product.
+      .replaceAll(
+        RegExp(r'((?:JWT_ACCESS_SECRET|JWT_REFRESH_SECRET)=)\S+'),
+        r'$1***',
+      )
+      .replaceAll(
+        RegExp(r'([Pp]assword\s*[=:]\s*)[^\s;]+'),
         r'$1***',
       );
 

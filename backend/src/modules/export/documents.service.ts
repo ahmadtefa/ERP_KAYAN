@@ -1,11 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
-import {
-  COLUMN_LABELS,
-  columnLabel,
-  normalizeColumns,
-} from '../sales/quotation-columns';
+import { columnLabel, normalizeColumns } from '../sales/quotation-columns';
 import { ReportTable, TableColumn } from './report-table';
 
 export const DOCUMENT_KINDS = [
@@ -309,7 +305,10 @@ export class DocumentsService {
         key: column.key,
         labelEn: columnLabel(column, 'en'),
         labelAr: columnLabel(column, 'ar'),
-        numeric: COLUMN_LABELS[column.key].numeric,
+        // Built-in money columns carry their flag in the layout; a
+        // user-defined column is never looked up in the built-in catalogue,
+        // where its key does not exist.
+        numeric: column.numeric === true,
         width: Math.max(8, column.width * 6),
       })),
     ];
@@ -321,7 +320,7 @@ export class DocumentsService {
           line.description ||
           (lang === 'ar' ? line.item?.nameAr || line.item?.nameEn : line.item?.nameEn) ||
           '';
-        rows.push({
+        const row: Record<string, unknown> = {
           table: table.title,
           itemCode: line.item?.code ?? '',
           description,
@@ -330,7 +329,21 @@ export class DocumentsService {
           quantity: line.quantity.toFixed(MONEY),
           unitPrice: line.unitPrice.toFixed(MONEY),
           lineTotal: line.lineTotal.toFixed(MONEY),
-        });
+        };
+        // The value under each user-defined column is stored per line; a line
+        // that left it blank must still produce a cell, not shift the row.
+        const custom = (line.customValues as Record<string, unknown> | null) ?? {};
+        for (const column of layout) {
+          if (column.key in row) continue;
+          const value = custom[column.key];
+          row[column.key] =
+            typeof value === 'string'
+              ? value
+              : value === undefined || value === null
+                ? ''
+                : String(value);
+        }
+        rows.push(row);
       }
     }
 

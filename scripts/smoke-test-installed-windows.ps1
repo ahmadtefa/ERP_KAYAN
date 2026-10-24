@@ -170,12 +170,16 @@ foreach ($relative in @(
   "backend\postgres\bin\initdb.exe",
   "backend\postgres\bin\pg_ctl.exe",
   "backend\postgres\bin\pg_isready.exe",
+  "backend\postgres\bin\pg_dump.exe",
+  "backend\postgres\bin\pg_restore.exe",
   "backend\node\node.exe",
   "backend\dist\src\main.js",
   "backend\scripts\prepare-database.mjs",
+  "backend\scripts\database-state.mjs",
   "prerequisites\vc_redist.x64.exe",
   "install-runtime.ps1",
   "repair-runtime.ps1",
+  "reset-kayan.ps1",
   "repair-kayan.bat",
   "RepairTool.exe",
   "database-control.ps1",
@@ -207,6 +211,73 @@ $prepErr = Join-Path $env:TEMP "kayan-installer-prep-stderr.log"
 $prepare = Start-Process -FilePath $node -ArgumentList @("scripts\prepare-database.mjs") -WorkingDirectory $backend -Wait -PassThru -NoNewWindow -RedirectStandardOutput $prepOut -RedirectStandardError $prepErr
 if ($prepare.ExitCode -ne 0) {
   Fail (("Production database preparation failed with exit code $($prepare.ExitCode)." + [Environment]::NewLine + (Get-Content $prepOut -Raw) + [Environment]::NewLine + (Get-Content $prepErr -Raw)))
+}
+
+# FIRST-RUN REGRESSION GUARD. A real customer's first launch happens
+# against exactly this state: schema migrated, database empty, nobody
+# seeded. The desktop shell must stop at "create the company and the
+# first administrator" - process alive, the shell log saying it is
+# asking who the first administrator is, and NO API answering yet (the
+# server is deliberately not started before setup). A shipped build
+# instead opened the whole program with no server behind it ("cannot
+# reach the server") and the setup screen was unreachable; seeding an
+# administrator before this launch - as this script used to do - hid
+# exactly that failure, so this launch now happens first, unseeded.
+$firstRunLogPaths = @(
+  (Join-Path $env:APPDATA "KAYAN-ERP\logs\backend.log"),
+  (Join-Path $env:ProgramData "KAYAN-ERP\logs\backend.log")
+)
+$firstRunLogOffsets = @{}
+foreach ($logCandidate in $firstRunLogPaths) {
+  $firstRunLogOffsets[$logCandidate] = 0
+  if (Test-Path $logCandidate) { $firstRunLogOffsets[$logCandidate] = (Get-Item $logCandidate).Length }
+}
+function Read-AppendedLog {
+  foreach ($logCandidate in $firstRunLogPaths) {
+    if (-not (Test-Path $logCandidate)) { continue }
+    $stream = [System.IO.File]::Open($logCandidate, 'Open', 'Read', 'ReadWrite')
+    try {
+      $stream.Seek([int64]$firstRunLogOffsets[$logCandidate], [System.IO.SeekOrigin]::Begin) | Out-Null
+      $reader = New-Object System.IO.StreamReader($stream)
+      return $reader.ReadToEnd()
+    } finally { $stream.Dispose() }
+  }
+  return ""
+}
+$firstRunClient = Start-Process -FilePath (Join-Path $installRoot "erp_kayan.exe") -WorkingDirectory $installRoot -PassThru
+try {
+  $sawAsking = $false
+  for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    if ($firstRunClient.HasExited) {
+      Fail ("First run on an empty database: the installed client exited with code $($firstRunClient.ExitCode) instead of waiting at first-run setup.")
+    }
+    $appended = Read-AppendedLog
+    if ($appended -match 'asking who the first administrator is') { $sawAsking = $true; break }
+    if ($appended -match 'the server exited with code') {
+      Fail "First run on an empty database started (and lost) a server instead of stopping at first-run setup."
+    }
+    Start-Sleep -Seconds 1
+  }
+  if (-not $sawAsking) {
+    Fail "First run on an empty database never reached the 'asking who the first administrator is' state within 60 seconds."
+  }
+  # No KAYAN API may answer before setup completes: an answering API
+  # here means the program skipped setup against an empty database.
+  foreach ($port in @(3000,3001,3002,3003,3010,3020)) {
+    try {
+      $candidate = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/v1/health" -TimeoutSec 2
+      if ($candidate.status) {
+        Fail "First run on an empty database: an API already answers on port $port before first-run setup completed."
+      }
+    } catch { }
+  }
+  Write-Host "PASS: first launch on an empty database waits at first-run setup (no server started, no restart loop)."
+} finally {
+  if ($firstRunClient -and -not $firstRunClient.HasExited) {
+    $null = $firstRunClient.CloseMainWindow()
+    try { Wait-Process -Id $firstRunClient.Id -Timeout 10 -ErrorAction SilentlyContinue } catch { }
+    if (-not $firstRunClient.HasExited) { Stop-Process -Id $firstRunClient.Id -Force -ErrorAction SilentlyContinue }
+  }
 }
 
 # Seed only a disposable CI administrator so the desktop shell is allowed to start its API.
@@ -390,7 +461,28 @@ try {
   $restoredCustomer = Invoke-RestMethod -Uri $customerUri -Headers $headers -TimeoutSec 30
   if ($restoredCustomer.nameEn -ne $originalName) { Fail 'Installed PostgreSQL restore did not roll back the sentinel mutation.' }
   Write-Output '::notice::Installed Windows PostgreSQL backup/restore passed: real archive, mutation, checked restore, safety copy, re-login and original sentinel verified.'
-  Write-Output "::notice::Windows installer smoke test passed: service, database preparation, client startup on port $apiPort, login, company JSON and full PostgreSQL backup/restore all verified."
+
+  # A real quotation PDF from the installed runtime — the same route the
+  # «Download PDF» button calls, rendered by the bundled server through the
+  # system browser. A 200 without %PDF- bytes is a failure, not a pass.
+  $quotationBody = @{
+    quotationDate = (Get-Date -Format 'yyyy-MM-dd')
+    customerId = $customer.id
+    currency = 'EGP'
+    subject = 'Windows smoke quotation'
+    tables = @(@{
+      title = 'Smoke table'
+      lines = @(@{ description = 'Smoke line item'; quantity = '2'; unitPrice = '150'; unit = 'piece' })
+    })
+  } | ConvertTo-Json -Compress -Depth 6
+  $quotation = Invoke-RestMethod -Method Post -Uri "$base/sales/quotations" -Headers $headers -ContentType 'application/json' -Body $quotationBody -TimeoutSec 30
+  if (-not $quotation.id) { Fail 'Installed API did not create the smoke quotation.' }
+  $pdfPath = Join-Path $env:TEMP 'kayan-installed-quotation.pdf'
+  Invoke-WebRequest -UseBasicParsing -Uri "$base/sales/quotations/$($quotation.id)/pdf?lang=ar" -Headers $headers -OutFile $pdfPath -TimeoutSec 180
+  $pdfBytes = [IO.File]::ReadAllBytes($pdfPath)
+  if ($pdfBytes.Length -le 5 -or [Text.Encoding]::ASCII.GetString($pdfBytes, 0, 5) -ne '%PDF-') { Fail 'Installed quotation PDF download is not a real PDF file.' }
+  Write-Output "::notice::Installed Windows quotation PDF passed: real %PDF- file of $($pdfBytes.Length) bytes rendered by the installed runtime."
+  Write-Output "::notice::Windows installer smoke test passed: service, database preparation, client startup on port $apiPort, login, company JSON and full PostgreSQL backup/restore, and a real quotation PDF all verified."
 } finally {
   if ($client -and -not $client.HasExited) {
     $null = $client.CloseMainWindow()
@@ -399,3 +491,119 @@ try {
   }
   Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
 }
+
+# SAFE-RESET EXERCISE. Everything above ran the ordinary paths -
+# fresh install, upgrade/reinstall, Repair - and the settings must
+# STILL point at the original erp_kayan database: none of those paths
+# may ever reset or switch databases. Then the reset tool is proven
+# both ways: a wrong confirmation changes nothing at all, and the
+# real thing backs up first, creates a NEW database, keeps the old
+# one (sentinel included), and the next launch waits at first-run
+# setup again. All data here is disposable CI data.
+Start-Service -Name $serviceName
+(Get-Service -Name $serviceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(60))
+& $pgReady -h 127.0.0.1 -p 5432 -U postgres *> $null
+if ($LASTEXITCODE -ne 0) { Fail "PostgreSQL did not come back for the safe-reset exercise." }
+
+$resetSettings = Get-Content $settings
+$resetDbLine = @($resetSettings | Where-Object { $_ -match '^\s*DATABASE_URL=' })[0]
+if ($resetDbLine -notmatch '/erp_kayan\?schema=public') {
+  Fail "Install/upgrade/repair changed which database the settings point at (expected the original erp_kayan): $resetDbLine"
+}
+Write-Host "PASS: fresh install, upgrade and repair all left the original database in place (no automatic reset anywhere)."
+
+$resetTool = Join-Path $installRoot "reset-kayan.ps1"
+if (-not (Test-Path $resetTool)) { Fail "The installed package is missing reset-kayan.ps1." }
+# NOTE the quotes around the script path: it lives under
+# "C:\Program Files\KAYAN ERP", Start-Process does not quote
+# ArgumentList items for you, and an unquoted path makes
+# powershell.exe look for C:\Program and die with -196608.
+function Invoke-SafeReset([string]$Word) {
+  $out = Join-Path $env:TEMP ("kayan-reset-smoke-out-" + [Guid]::NewGuid().ToString('N') + ".log")
+  $err = Join-Path $env:TEMP ("kayan-reset-smoke-err-" + [Guid]::NewGuid().ToString('N') + ".log")
+  $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $resetTool + '"'), '-ConfirmText', $Word, '-Quiet') -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+  $text = ((Get-Content -LiteralPath $out -Raw -ErrorAction SilentlyContinue) + " " + (Get-Content -LiteralPath $err -Raw -ErrorAction SilentlyContinue)).Trim()
+  Remove-Item -LiteralPath $out, $err -Force -ErrorAction SilentlyContinue
+  return @{ ExitCode = $process.ExitCode; Output = $text }
+}
+$settingsHashBefore = (Get-FileHash $settings -Algorithm SHA256).Hash
+$resetCancelled = Invoke-SafeReset 'NOPE'
+if ($resetCancelled.ExitCode -ne 2) {
+  Fail "Safe reset with a wrong confirmation word exited $($resetCancelled.ExitCode), expected 2 (cancelled). Output: $($resetCancelled.Output)"
+}
+if ((Get-FileHash $settings -Algorithm SHA256).Hash -ne $settingsHashBefore) {
+  Fail "Safe reset with a wrong confirmation word still changed kayan.env."
+}
+Write-Host "PASS: safe reset cancelled by a wrong confirmation word changed nothing."
+
+$resetRun = Invoke-SafeReset 'RESET'
+if ($resetRun.ExitCode -ne 0) {
+  Fail "Safe reset failed with exit code $($resetRun.ExitCode). Output: $($resetRun.Output) See $runtimeLog (KAYAN-RESET-* markers)."
+}
+$resetSettings = Get-Content $settings
+$resetDbLine = @($resetSettings | Where-Object { $_ -match '^\s*DATABASE_URL=' })[0]
+if ($resetDbLine -notmatch '/(erp_kayan_\d{14})\?schema=public') {
+  Fail "After safe reset the settings do not point at a fresh timestamped database: $resetDbLine"
+}
+$newDatabase = $matches[1]
+$settingsBackups = @(Get-ChildItem (Join-Path $env:ProgramData "KAYAN-ERP") -Filter "kayan.env.before-reset-*.bak" -ErrorAction SilentlyContinue)
+if ($settingsBackups.Count -lt 1) { Fail "Safe reset did not keep the previous settings next to kayan.env." }
+$resetBackups = @(Get-ChildItem (Join-Path $env:ProgramData "KAYAN-ERP\backups") -Filter "before-reset.dump" -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+if ($resetBackups.Count -lt 1) { Fail "Safe reset produced no pre-reset backup under ProgramData\KAYAN-ERP\backups." }
+$resetDump = $resetBackups[0].FullName
+$resetDumpBytes = [IO.File]::ReadAllBytes($resetDump)
+if ($resetDumpBytes.Length -le 5 -or [Text.Encoding]::ASCII.GetString($resetDumpBytes, 0, 5) -ne 'PGDMP') {
+  Fail "The pre-reset backup is not a real PostgreSQL custom archive: $resetDump"
+}
+$pgRestore = Join-Path $installRoot "backend\postgres\bin\pg_restore.exe"
+& $pgRestore --list $resetDump *> $null
+if ($LASTEXITCODE -ne 0) { Fail "pg_restore cannot read the pre-reset backup: $resetDump" }
+if (-not (Select-String -LiteralPath $runtimeLog -Pattern 'KAYAN-RESET-OK' -Quiet)) {
+  Fail "Safe reset did not record KAYAN-RESET-OK in installer.log."
+}
+# Redaction, checked against the real secret this run created: the
+# database password must appear in NO marker the reset wrote.
+if (Select-String -LiteralPath $runtimeLog -Pattern ([regex]::Escape($databasePassword)) -Quiet) {
+  Fail "A log written during install/repair/reset contains the database password."
+}
+$env:PGPASSWORD = $databasePassword
+$oldSentinel = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT value FROM kayan_installer_upgrade_probe WHERE id=1" 2>&1)
+$oldSentinelExit = $LASTEXITCODE
+$newUsers = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d $newDatabase -t -A -c "SELECT count(*) FROM users" 2>&1)
+$newUsersExit = $LASTEXITCODE
+Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+if ($oldSentinelExit -ne 0 -or (($oldSentinel -join '').Trim() -ne 'preserved')) {
+  Fail "Safe reset harmed the OLD database: the sentinel in erp_kayan is gone."
+}
+if ($newUsersExit -ne 0 -or (($newUsers -join '').Trim() -ne '0')) {
+  Fail "The reset's new database $newDatabase is not empty."
+}
+Write-Host "PASS: safe reset backed up first, created $newDatabase empty, and left erp_kayan (sentinel included) untouched."
+
+# After a reset, the next launch must wait at first-run setup again -
+# the same assertion as the first-run guard, now post-reset.
+foreach ($logCandidate in $firstRunLogPaths) {
+  $firstRunLogOffsets[$logCandidate] = 0
+  if (Test-Path $logCandidate) { $firstRunLogOffsets[$logCandidate] = (Get-Item $logCandidate).Length }
+}
+$postResetClient = Start-Process -FilePath (Join-Path $installRoot "erp_kayan.exe") -WorkingDirectory $installRoot -PassThru
+try {
+  $sawAsking = $false
+  for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    if ($postResetClient.HasExited) {
+      Fail ("After safe reset, the client exited with code $($postResetClient.ExitCode) instead of waiting at first-run setup.")
+    }
+    if ((Read-AppendedLog) -match 'asking who the first administrator is') { $sawAsking = $true; break }
+    Start-Sleep -Seconds 1
+  }
+  if (-not $sawAsking) { Fail "After safe reset, the next launch never reached first-run setup." }
+  Write-Host "PASS: after safe reset, launching KAYAN ERP waits at first-run setup for the new company and general manager."
+} finally {
+  if ($postResetClient -and -not $postResetClient.HasExited) {
+    $null = $postResetClient.CloseMainWindow()
+    try { Wait-Process -Id $postResetClient.Id -Timeout 10 -ErrorAction SilentlyContinue } catch { }
+    if (-not $postResetClient.HasExited) { Stop-Process -Id $postResetClient.Id -Force -ErrorAction SilentlyContinue }
+  }
+  Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+}
+Write-Output "::notice::Safe-reset exercise passed: cancel changed nothing; reset backed up (PGDMP, pg_restore-readable), switched to a fresh empty database, preserved the old database and its sentinel, kept previous settings, redacted logs, and the next launch waits at first-run setup."

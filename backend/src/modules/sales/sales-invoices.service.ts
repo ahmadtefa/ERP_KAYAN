@@ -662,13 +662,8 @@ export class SalesInvoicesService {
           'Reverse the posted sales returns before reversing their source invoice.',
         );
       }
-      const claimedJournal = await tx.journalEntry.updateMany({
-        where: { id: original.id, companyId, status: JournalStatus.POSTED },
-        data: { status: JournalStatus.REVERSED },
-      });
-      if (claimedJournal.count !== 1) {
-        throw new BadRequestException('The original journal entry has already been reversed');
-      }
+      // The journal claim itself happens inside PostingService.reverse,
+      // below, in the same transaction as the stock coming back in.
 
       const warehouseId = await this.warehouses.resolveForReversal(
         tx,
@@ -733,44 +728,17 @@ export class SalesInvoicesService {
         });
       }
 
-      const entryNumber = await this.numbers.next(tx, companyId, 'JOURNAL', 'JV');
-      const reversal = await tx.journalEntry.create({
-        data: {
-          companyId,
-          branchId: original.branchId,
-          entryNumber,
-          entryDate: new Date(),
-          description: `Reversal of sales invoice ${invoice.invoiceNumber}`,
-          status: JournalStatus.POSTED,
-          currency: original.currency,
-          totalDebit: original.totalCredit,
-          totalCredit: original.totalDebit,
-          reversalOfId: original.id,
-          postedAt: new Date(),
-          postedBy: userId,
-          createdBy: userId,
-          lines: {
-            create: original.lines.map((l) => ({
-              lineNumber: l.lineNumber,
-              accountId: l.accountId,
-              debit: l.credit,
-              credit: l.debit,
-              description: l.description,
-              costCenterId: l.costCenterId,
-              // A split line is given back exactly as it was taken.
-              allocations: {
-                create: (l.allocations ?? []).map((allocation) => ({
-                  costCenterId: allocation.costCenterId,
-                  amount: allocation.amount,
-                })),
-              },
-            })),
-          },
-        },
-        select: { id: true, entryNumber: true },
-      });
-
-      return reversal;
+      // One reversal path for the whole system: it claims the original,
+      // refuses a closed period with a readable message (instead of the
+      // database trigger surfacing as a 500), and stamps the mirror with
+      // the invoice as its source so a ledger reader can drill back to it.
+      return this.posting.reverse(
+        tx,
+        companyId,
+        userId,
+        original.id,
+        `Reversal of sales invoice ${invoice.invoiceNumber}`,
+      );
     });
 
     await this.audit.record({

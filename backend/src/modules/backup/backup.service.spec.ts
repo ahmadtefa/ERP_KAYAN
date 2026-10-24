@@ -70,10 +70,16 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     for (const model of [...models, 'branch', 'account']) {
       shape[model] = {
         findMany: jest.fn(async () => []),
+        findFirst: jest.fn(async () => null),
+        // One existing super administrator by default, so the restore's
+        // access reconciliation leaves accounts alone unless a test says
+        // the restored file left the company with none.
+        count: jest.fn(async () => 1),
         deleteMany: jest.fn(async () => ({ count: 0 })),
         createMany: jest.fn(async () => ({ count: 0 })),
         updateMany: jest.fn(async () => ({ count: 0 })),
         create: jest.fn(async () => ({})),
+        update: jest.fn(async () => ({})),
       };
     }
     return shape;
@@ -659,6 +665,93 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       assertParentFirst(txMock.salesInvoiceLine.createMany.mock.calls[0][0].data, originalSalesLine, returnSalesLine);
       assertParentFirst(txMock.purchaseInvoice.createMany.mock.calls[0][0].data, originalPurchase, returnPurchase);
       assertParentFirst(txMock.purchaseInvoiceLine.createMany.mock.calls[0][0].data, originalPurchaseLine, returnPurchaseLine);
+    });
+  });
+
+  describe('Access reconciliation after a restore', () => {
+    const emptyBackup = (): BackupFile => ({
+      format: 'kayan-backup',
+      version: 1,
+      createdAt: new Date().toISOString(),
+      companyId: COMPANY_ID,
+      companyCode: 'KAYAN',
+      companyName: 'شركة كيان',
+      counts: {},
+      tables: {},
+    });
+
+    test('tops up system roles with permissions an older backup cannot contain', async () => {
+      // The catalogue the *current* program ships, including a permission
+      // introduced after the backup was written (opening balances).
+      txMock.permission.findMany.mockResolvedValue([
+        { id: 'p-open', code: 'accounting.openingbalances.manage', module: 'accounting' },
+        { id: 'p-journal', code: 'accounting.journal.read', module: 'accounting' },
+        { id: 'p-sales-create', code: 'sales.invoices.create', module: 'sales' },
+        { id: 'p-sales-read', code: 'sales.invoices.read', module: 'sales' },
+        { id: 'p-cash', code: 'cash.vouchers.read', module: 'cash' },
+      ]);
+      txMock.role.findMany.mockResolvedValue([
+        { id: 'role-admin', code: 'ADMIN' },
+        { id: 'role-accountant', code: 'ACCOUNTANT' },
+        { id: 'role-custom', code: 'SALES' },
+      ]);
+      txMock.rolePermission.createMany.mockResolvedValue({ count: 3 });
+
+      await service.restore(emptyBackup(), COMPANY_ID, { replace: true });
+
+      const calls = txMock.rolePermission.createMany.mock.calls.map((c: any[]) => c[0]);
+      const byRole = new Map<string, string[]>();
+      for (const call of calls) {
+        for (const row of call.data) {
+          byRole.set(row.roleId, [...(byRole.get(row.roleId) ?? []), row.permissionId]);
+        }
+        expect(call.skipDuplicates).toBe(true);
+      }
+      // ADMIN holds the whole catalogue; ACCOUNTANT holds the books modules
+      // plus read-only invoices — crucially including opening balances, the
+      // permission the restored demo snapshot was missing.
+      expect(byRole.get('role-admin')).toEqual(
+        expect.arrayContaining(['p-open', 'p-journal', 'p-sales-create', 'p-sales-read', 'p-cash']),
+      );
+      expect(byRole.get('role-accountant')).toEqual(
+        expect.arrayContaining(['p-open', 'p-journal', 'p-sales-read', 'p-cash']),
+      );
+      expect(byRole.get('role-accountant')).not.toContain('p-sales-create');
+      // A custom role keeps exactly what the file gave it: no top-up.
+      expect(byRole.has('role-custom')).toBe(false);
+      // The audit record says what was repaired.
+      const auditData = txMock.auditLog.create.mock.calls.at(-1)[0].data;
+      expect(auditData.afterJson.accessReconciled.grantsAdded).toBeGreaterThan(0);
+      expect(auditData.afterJson.accessReconciled.superAdminPromoted).toBeNull();
+    });
+
+    test('promotes the restored ADMIN account only when no super administrator remains', async () => {
+      txMock.permission.findMany.mockResolvedValue([]);
+      txMock.role.findMany.mockResolvedValue([{ id: 'role-admin', code: 'ADMIN' }]);
+      txMock.user.count.mockResolvedValue(0);
+      txMock.userRole.findFirst.mockResolvedValue({
+        user: { id: 'user-admin', username: 'admin' },
+      });
+
+      await service.restore(emptyBackup(), COMPANY_ID, { replace: true });
+
+      expect(txMock.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-admin' },
+        data: { isSuperAdmin: true },
+      });
+      const auditData = txMock.auditLog.create.mock.calls.at(-1)[0].data;
+      expect(auditData.afterJson.accessReconciled.superAdminPromoted).toBe('admin');
+    });
+
+    test('never promotes anyone while a super administrator still exists', async () => {
+      txMock.permission.findMany.mockResolvedValue([]);
+      txMock.role.findMany.mockResolvedValue([{ id: 'role-admin', code: 'ADMIN' }]);
+      txMock.user.count.mockResolvedValue(2);
+
+      await service.restore(emptyBackup(), COMPANY_ID, { replace: true });
+
+      expect(txMock.userRole.findFirst).not.toHaveBeenCalled();
+      expect(txMock.user.update).not.toHaveBeenCalled();
     });
   });
 

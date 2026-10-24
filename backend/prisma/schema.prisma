@@ -73,6 +73,8 @@ model Company {
   cashTransfers    CashTransfer[]
   reconciliations  BankReconciliation[]
   openingBalances  OpeningBalance[]
+  fixedAssets      FixedAsset[]
+  depreciationRuns DepreciationRun[]
   stockDocuments   StockDocument[]
   backupRuns       BackupRun[]
   items            Item[]
@@ -132,6 +134,8 @@ model Branch {
   cashVouchers     CashVoucher[]
   cashTransfers    CashTransfer[]
   openingBalances  OpeningBalance[]
+  fixedAssets      FixedAsset[]
+  depreciationRuns DepreciationRun[]
   stockDocuments   StockDocument[]
   warehouses       Warehouse[]
   purchaseOrders   PurchaseOrder[]
@@ -299,6 +303,10 @@ model Account {
   isActive    Boolean     @default(true)
   currency    String?     @db.VarChar(3)
   description String?
+  /// Where this account's cash movements belong in the cash-flow statement
+  /// (IAS 7). Null means nobody has classified it yet; the statement then
+  /// shows the movement under "unclassified" instead of guessing.
+  cashFlowClass CashFlowClass?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -314,6 +322,9 @@ model Account {
   voucherCounter   CashVoucher[]   @relation("VoucherCounterAccount")
   openingLines     OpeningBalanceLine[]
   budgets          Budget[]        @relation("BudgetAccount")
+  fixedAssetsAsAsset       FixedAsset[] @relation("AssetCostAccount")
+  fixedAssetsAsAccumulated FixedAsset[] @relation("AssetAccumulatedAccount")
+  fixedAssetsAsExpense     FixedAsset[] @relation("AssetExpenseAccount")
 
   @@unique([companyId, code])
   @@index([companyId, type])
@@ -467,6 +478,7 @@ model CostCenter {
   purchaseLines   PurchaseInvoiceLine[]
   cashVouchers    CashVoucher[]    @relation("VoucherCostCenter")
   budgets         Budget[]         @relation("CostCenterBudgets")
+  fixedAssets     FixedAsset[]
   stockDocuments  StockDocument[]  @relation("StockDocumentCostCenter")
 
   @@unique([companyId, code])
@@ -495,6 +507,144 @@ model JournalLineAllocation {
   @@unique([journalLineId, costCenterId])
   @@index([costCenterId])
   @@map("journal_line_allocations")
+}
+
+
+// ------------------------------------------------------------- fixed assets
+
+/// Where a cash movement belongs in the cash-flow statement.
+enum CashFlowClass {
+  OPERATING
+  INVESTING
+  FINANCING
+}
+
+enum FixedAssetStatus {
+  DRAFT
+  ACTIVE
+  FULLY_DEPRECIATED
+  DISPOSED
+}
+
+/// The one depreciation method the register implements. The enum exists so
+/// a second method is a deliberate addition, never a silent reinterpretation
+/// of assets already on the books.
+enum DepreciationMethod {
+  STRAIGHT_LINE
+}
+
+/// One asset on the register. The register never stores a balance: cost
+/// lives here as the acquisition fact, accumulated depreciation is the sum
+/// of AssetDepreciation rows, and both must agree with the ledger accounts
+/// named on the asset — the summary report checks exactly that.
+model FixedAsset {
+  id            String @id @default(uuid()) @db.Uuid
+  companyId     String @db.Uuid
+  branchId      String @db.Uuid
+  code          String
+  nameEn        String
+  nameAr        String
+  description   String?
+  category      String? @db.VarChar(60)
+  purchaseDate  DateTime @db.Date
+  inServiceDate DateTime @db.Date
+  /// Where it came from, when the documents exist. Kept as plain references:
+  /// the register must also hold assets bought before this system did.
+  supplierId        String? @db.Uuid
+  purchaseInvoiceId String? @db.Uuid
+  /// The exact purchase line this asset was capitalised from, when it
+  /// was. Together with purchaseQuantity it bounds what may be
+  /// capitalised from one line: never more cost or units than the
+  /// line itself received, so a purchase is never counted twice.
+  purchaseInvoiceLineId String?  @db.Uuid
+  purchaseQuantity      Decimal? @db.Decimal(19, 4)
+
+  cost             Decimal @db.Decimal(19, 4)
+  salvageValue     Decimal @default(0) @db.Decimal(19, 4)
+  usefulLifeMonths Int
+  method           DepreciationMethod @default(STRAIGHT_LINE)
+
+  assetAccountId       String @db.Uuid
+  accumulatedAccountId String @db.Uuid
+  expenseAccountId     String @db.Uuid
+  costCenterId         String? @db.Uuid
+  location             String?
+
+  status FixedAssetStatus @default(DRAFT)
+  /// The acquisition entry (Dr asset / Cr funding), written at activation.
+  acquisitionJournalEntryId String? @db.Uuid
+  disposalDate              DateTime? @db.Date
+  disposalProceeds          Decimal? @db.Decimal(19, 4)
+  disposalJournalEntryId    String? @db.Uuid
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  company     Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch      Branch     @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  assetAccount       Account @relation("AssetCostAccount", fields: [assetAccountId], references: [id], onDelete: Restrict)
+  accumulatedAccount Account @relation("AssetAccumulatedAccount", fields: [accumulatedAccountId], references: [id], onDelete: Restrict)
+  expenseAccount     Account @relation("AssetExpenseAccount", fields: [expenseAccountId], references: [id], onDelete: Restrict)
+  costCenter  CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+  depreciations AssetDepreciation[]
+
+  @@unique([companyId, code])
+  @@index([companyId, status])
+  @@map("fixed_assets")
+}
+
+/// One monthly depreciation run: one journal entry, one row per asset.
+/// Reviewing a run shows exactly which assets it charged and by how much.
+model DepreciationRun {
+  id          String @id @default(uuid()) @db.Uuid
+  companyId   String @db.Uuid
+  branchId    String @db.Uuid
+  runNumber   String
+  /// Calendar month being charged, "YYYY-MM".
+  periodKey   String @db.VarChar(7)
+  /// The journal date used: the last day of that month, so a run for a
+  /// month inside a closed period is refused by the posting guard.
+  runDate     DateTime @db.Date
+  totalAmount Decimal @db.Decimal(19, 4)
+  journalEntryId String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  createdBy String?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  lines   AssetDepreciation[]
+
+  @@index([companyId, periodKey])
+  @@map("depreciation_runs")
+}
+
+/// One asset's charge for one month. The unique (asset, period) is the
+/// database-level guarantee that no asset is ever depreciated twice for
+/// the same month, whoever asks and however many times.
+model AssetDepreciation {
+  id        String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+  runId     String @db.Uuid
+  assetId   String @db.Uuid
+  periodKey String @db.VarChar(7)
+  amount    Decimal @db.Decimal(19, 4)
+  /// Accumulated depreciation for the asset after this charge, so the
+  /// schedule reads without re-summing history.
+  accumulatedAfter Decimal @db.Decimal(19, 4)
+  journalEntryId   String  @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  run   DepreciationRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+  asset FixedAsset      @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@unique([assetId, periodKey])
+  @@index([companyId, periodKey])
+  @@map("asset_depreciations")
 }
 
 // --------------------------------------------------------- company settings
@@ -1711,6 +1861,12 @@ model QuotationTable {
   quotationId   String @db.Uuid
   title         String
   sortOrder     Int
+
+  /// This table's own line-column layout, independent of the quotation's
+  /// other tables. Null means "inherit the quotation-level layout"
+  /// (Quotation.columns), which is what every table created before
+  /// per-table layouts existed must keep doing.
+  columns Json?
   discountType    String? @db.VarChar(16)
   discountPercent Decimal @default(0) @db.Decimal(9, 4)
   discountAmount  Decimal @default(0) @db.Decimal(19, 4)

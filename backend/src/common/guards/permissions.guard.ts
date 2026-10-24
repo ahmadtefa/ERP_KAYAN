@@ -30,7 +30,11 @@ export class PermissionsGuard implements CanActivate {
 
     const missing = required.filter((p) => !user.permissions.includes(p));
     if (missing.length > 0) {
-      throw new ForbiddenException(`Missing permission: ${missing.join(', ')}`);
+      throw new ForbiddenException(
+        `ليس لديك صلاحية تنفيذ هذا الإجراء (${missing.join(', ')}). ` +
+          'اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات. ' +
+          `/ Missing permission: ${missing.join(', ')}. Ask an administrator to grant it to your role.`,
+      );
     }
     return true;
   }
