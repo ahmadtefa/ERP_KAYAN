@@ -130,6 +130,14 @@ jobs:
           OUT_DIR: /tmp/kayan-demo-backup-build
         run: python ../scripts/ci-diagnose.py node scripts/build-demo-backup.mjs
         working-directory: backend
+      - name: Report backend smoke-test diagnostics
+        if: failure()
+        run: |
+          python ../scripts/ci-diagnose.py bash -c '
+            echo "== /tmp/kayan-health.json =="; head -c 2000 /tmp/kayan-health.json 2>/dev/null
+            echo; echo "== /tmp/kayan-login.json =="; head -c 2000 /tmp/kayan-login.json 2>/dev/null
+            echo; echo "== /tmp/kayan-api.log (tail) =="; tail -c 8000 /tmp/kayan-api.log 2>/dev/null
+            exit 1'
       - name: Audit production dependencies
         run: npm audit --omit=dev
 
