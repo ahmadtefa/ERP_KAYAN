@@ -48,6 +48,7 @@ export class AuthService {
             role: { include: { rolePermissions: { include: { permission: true } } } },
           },
         },
+        userPermissions: { include: { permission: true } },
       },
     });
 
@@ -101,13 +102,7 @@ export class AuthService {
       throw invalid;
     }
 
-    const permissions = [
-      ...new Set(
-        user.userRoles.flatMap((ur) =>
-          ur.role.rolePermissions.map((rp) => rp.permission.code),
-        ),
-      ),
-    ];
+    const permissions = this.effectivePermissions(user);
     const roles = [...new Set(user.userRoles.map((ur) => ur.role.code))];
 
     const branches = await this.prisma.userBranch.findMany({
@@ -169,6 +164,7 @@ export class AuthService {
                 },
               },
             },
+            userPermissions: { include: { permission: true } },
             branches: true,
           },
         },
@@ -199,13 +195,7 @@ export class AuthService {
     if (rotation.count !== 1) {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
-    const permissions = [
-      ...new Set(
-        user.userRoles.flatMap((ur) =>
-          ur.role.rolePermissions.map((rp) => rp.permission.code),
-        ),
-      ),
-    ];
+    const permissions = this.effectivePermissions(user);
     const roles = [...new Set(user.userRoles.map((ur) => ur.role.code))];
     const branchId = user.branches[0]?.branchId ?? null;
 
@@ -249,6 +239,28 @@ export class AuthService {
       entity: 'users',
       entityId: userId,
     });
+  }
+
+  /**
+   * What a session may carry: the permissions of every role the user holds,
+   * plus the grants made to this user alone. Direct grants only ever add -
+   * removing a role permission still removes it for everyone - which is what
+   * "extra permissions on top of their roles" means on the model.
+   */
+  private effectivePermissions(user: {
+    userRoles: Array<{
+      role: { rolePermissions: Array<{ permission: { code: string } }> };
+    }>;
+    userPermissions: Array<{ permission: { code: string } }>;
+  }): string[] {
+    return [
+      ...new Set([
+        ...user.userRoles.flatMap((ur) =>
+          ur.role.rolePermissions.map((rp) => rp.permission.code),
+        ),
+        ...user.userPermissions.map((up) => up.permission.code),
+      ]),
+    ];
   }
 
   private async issueRefreshToken(userId: string): Promise<string> {
