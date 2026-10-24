@@ -195,6 +195,9 @@ export class CashVouchersService {
         'A voucher can only be allocated against invoices when it names a customer or a supplier',
       );
     }
+    if (allocations.length > 0) {
+      await this.validateAllocations(companyId, kind, cashAccount.currency, party, allocations);
+    }
 
     const created = await this.prisma.$transaction(async (tx) => {
       const key = kind === CashVoucherKind.RECEIPT ? 'RECEIPT_VOUCHER' : 'PAYMENT_VOUCHER';
@@ -291,15 +294,41 @@ export class CashVouchersService {
       // ---- allocations: what the money settled
       let allocated = new Prisma.Decimal(0);
       for (const allocation of voucher.allocations) {
+        // A draft written before create() learned to check this could still
+        // name both invoices (or neither); refuse to settle it either way.
+        if (Boolean(allocation.salesInvoiceId) === Boolean(allocation.purchaseInvoiceId)) {
+          throw new BadRequestException('Each allocation must name exactly one invoice');
+        }
         if (allocation.salesInvoiceId) {
+          if (voucher.kind !== CashVoucherKind.RECEIPT) {
+            throw new BadRequestException('A sales invoice can only be settled by a receipt');
+          }
           const invoice = await tx.salesInvoice.findFirst({
             where: { id: allocation.salesInvoiceId, companyId, deletedAt: null },
-            select: { id: true, invoiceNumber: true, totalAmount: true, paidAmount: true, status: true },
+            select: {
+              id: true,
+              invoiceNumber: true,
+              customerId: true,
+              currency: true,
+              totalAmount: true,
+              paidAmount: true,
+              status: true,
+            },
           });
           if (!invoice) throw new BadRequestException('An allocation references a missing sales invoice');
-          if (invoice.status === InvoiceStatus.DRAFT) {
+          if (invoice.status !== InvoiceStatus.POSTED) {
             throw new BadRequestException(
-              `Sales invoice ${invoice.invoiceNumber} is not posted yet, so it cannot be paid`,
+              `Sales invoice ${invoice.invoiceNumber} is not posted, so it cannot be paid`,
+            );
+          }
+          if (invoice.customerId !== voucher.customerId) {
+            throw new BadRequestException(
+              `Sales invoice ${invoice.invoiceNumber} does not belong to this voucher's customer`,
+            );
+          }
+          if (invoice.currency !== voucher.currency) {
+            throw new BadRequestException(
+              `Sales invoice ${invoice.invoiceNumber} is in ${invoice.currency}; this voucher moves ${voucher.currency}`,
             );
           }
           const due = invoice.totalAmount.minus(invoice.paidAmount);
@@ -315,14 +344,35 @@ export class CashVouchersService {
           });
         }
         if (allocation.purchaseInvoiceId) {
+          if (voucher.kind !== CashVoucherKind.PAYMENT) {
+            throw new BadRequestException('A purchase invoice can only be settled by a payment');
+          }
           const invoice = await tx.purchaseInvoice.findFirst({
             where: { id: allocation.purchaseInvoiceId, companyId, deletedAt: null },
-            select: { id: true, invoiceNumber: true, totalAmount: true, paidAmount: true, status: true },
+            select: {
+              id: true,
+              invoiceNumber: true,
+              supplierId: true,
+              currency: true,
+              totalAmount: true,
+              paidAmount: true,
+              status: true,
+            },
           });
           if (!invoice) throw new BadRequestException('An allocation references a missing purchase invoice');
-          if (invoice.status === InvoiceStatus.DRAFT) {
+          if (invoice.status !== InvoiceStatus.POSTED) {
             throw new BadRequestException(
-              `Purchase invoice ${invoice.invoiceNumber} is not posted yet, so it cannot be paid`,
+              `Purchase invoice ${invoice.invoiceNumber} is not posted, so it cannot be paid`,
+            );
+          }
+          if (invoice.supplierId !== voucher.supplierId) {
+            throw new BadRequestException(
+              `Purchase invoice ${invoice.invoiceNumber} does not belong to this voucher's supplier`,
+            );
+          }
+          if (invoice.currency !== voucher.currency) {
+            throw new BadRequestException(
+              `Purchase invoice ${invoice.invoiceNumber} is in ${invoice.currency}; this voucher moves ${voucher.currency}`,
             );
           }
           const due = invoice.totalAmount.minus(invoice.paidAmount);
@@ -602,6 +652,178 @@ export class CashVouchersService {
   }
 
   // ------------------------------------------------------------------ helpers
+
+  /**
+   * Everything an allocation claims, checked before the draft is stored, so a
+   * bad claim is rejected where it is made instead of surfacing at posting:
+   *
+   *  - each row names exactly one invoice: naming both would settle the same
+   *    money twice, naming neither would book a settlement against nothing;
+   *  - a receipt settles sales invoices and a payment settles purchase
+   *    invoices; the other pairing would post the control account backwards;
+   *  - the invoice exists in this company, belongs to the voucher's own
+   *    customer or supplier, and is kept in the cash account's currency;
+   *  - a reversed invoice is never payable again;
+   *  - repeated rows against one invoice are summed before they are compared
+   *    with what the invoice is still owed, so two half-claims cannot add up
+   *    to more than the invoice.
+   *
+   * A draft invoice may be named here: it can still be posted before the
+   * voucher is, and posting is what finally requires POSTED.
+   */
+  private async validateAllocations(
+    companyId: string,
+    kind: CashVoucherKind,
+    currency: string,
+    party: { customerId: string | null; supplierId: string | null },
+    allocations: AllocationInput[],
+  ): Promise<void> {
+    for (const allocation of allocations) {
+      const sales = Boolean(allocation.salesInvoiceId);
+      const purchase = Boolean(allocation.purchaseInvoiceId);
+      if (sales === purchase) {
+        throw new BadRequestException('Each allocation must name exactly one invoice');
+      }
+      if (sales && kind !== CashVoucherKind.RECEIPT) {
+        throw new BadRequestException('A sales invoice can only be settled by a receipt');
+      }
+      if (purchase && kind !== CashVoucherKind.PAYMENT) {
+        throw new BadRequestException('A purchase invoice can only be settled by a payment');
+      }
+    }
+
+    const salesIds = [
+      ...new Set(
+        allocations.filter((a) => a.salesInvoiceId).map((a) => a.salesInvoiceId as string),
+      ),
+    ];
+    if (salesIds.length > 0) {
+      const invoices = await this.prisma.salesInvoice.findMany({
+        where: { id: { in: salesIds }, companyId, deletedAt: null },
+        select: {
+          id: true,
+          invoiceNumber: true,
+          customerId: true,
+          status: true,
+          currency: true,
+          totalAmount: true,
+          paidAmount: true,
+        },
+      });
+      const byId = new Map(invoices.map((invoice) => [invoice.id, invoice]));
+      for (const id of salesIds) {
+        if (!byId.has(id)) {
+          throw new BadRequestException('An allocation references a missing sales invoice');
+        }
+      }
+      for (const invoice of invoices) {
+        if (invoice.customerId !== party.customerId) {
+          throw new BadRequestException(
+            `Sales invoice ${invoice.invoiceNumber} does not belong to this voucher's customer`,
+          );
+        }
+        this.assertAllocatable(invoice, 'Sales invoice', currency);
+      }
+      this.assertWithinDue(
+        allocations.filter((a) => a.salesInvoiceId),
+        (a) => a.salesInvoiceId as string,
+        byId,
+        'Sales invoice',
+      );
+    }
+
+    const purchaseIds = [
+      ...new Set(
+        allocations.filter((a) => a.purchaseInvoiceId).map((a) => a.purchaseInvoiceId as string),
+      ),
+    ];
+    if (purchaseIds.length > 0) {
+      const invoices = await this.prisma.purchaseInvoice.findMany({
+        where: { id: { in: purchaseIds }, companyId, deletedAt: null },
+        select: {
+          id: true,
+          invoiceNumber: true,
+          supplierId: true,
+          status: true,
+          currency: true,
+          totalAmount: true,
+          paidAmount: true,
+        },
+      });
+      const byId = new Map(invoices.map((invoice) => [invoice.id, invoice]));
+      for (const id of purchaseIds) {
+        if (!byId.has(id)) {
+          throw new BadRequestException('An allocation references a missing purchase invoice');
+        }
+      }
+      for (const invoice of invoices) {
+        if (invoice.supplierId !== party.supplierId) {
+          throw new BadRequestException(
+            `Purchase invoice ${invoice.invoiceNumber} does not belong to this voucher's supplier`,
+          );
+        }
+        this.assertAllocatable(invoice, 'Purchase invoice', currency);
+      }
+      this.assertWithinDue(
+        allocations.filter((a) => a.purchaseInvoiceId),
+        (a) => a.purchaseInvoiceId as string,
+        byId,
+        'Purchase invoice',
+      );
+    }
+  }
+
+  private assertAllocatable(
+    invoice: {
+      invoiceNumber: string;
+      status: InvoiceStatus;
+      currency: string;
+    },
+    label: string,
+    currency: string,
+  ): void {
+    if (invoice.status === InvoiceStatus.REVERSED) {
+      throw new BadRequestException(
+        `${label} ${invoice.invoiceNumber} has been reversed, so it cannot be paid`,
+      );
+    }
+    if (invoice.currency !== currency) {
+      throw new BadRequestException(
+        `${label} ${invoice.invoiceNumber} is in ${invoice.currency}; this voucher moves ${currency}`,
+      );
+    }
+  }
+
+  private assertWithinDue(
+    allocations: AllocationInput[],
+    invoiceId: (allocation: AllocationInput) => string,
+    byId: Map<
+      string,
+      { invoiceNumber: string; totalAmount: Prisma.Decimal; paidAmount: Prisma.Decimal }
+    >,
+    label: string,
+  ): void {
+    const claimed = new Map<string, Prisma.Decimal>();
+    for (const allocation of allocations) {
+      const id = invoiceId(allocation);
+      const amount = this.positive(allocation.amount, 'allocation amount');
+      claimed.set(id, (claimed.get(id) ?? new Prisma.Decimal(0)).plus(amount));
+    }
+    for (const [id, total] of claimed) {
+      const invoice = byId.get(id) as {
+        invoiceNumber: string;
+        totalAmount: Prisma.Decimal;
+        paidAmount: Prisma.Decimal;
+      };
+      const due = invoice.totalAmount.minus(invoice.paidAmount);
+      if (total.greaterThan(due)) {
+        throw new BadRequestException(
+          `${label} ${invoice.invoiceNumber} has only ${due.toFixed(MONEY_SCALE)} left to pay; ` +
+            `${total.toFixed(MONEY_SCALE)} was allocated to it.`,
+        );
+      }
+    }
+  }
 
   private async requireCashAccount(companyId: string, id: string) {
     const cashAccount = await this.prisma.cashAccount.findFirst({
