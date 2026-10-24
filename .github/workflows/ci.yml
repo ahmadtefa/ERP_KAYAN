@@ -48,6 +48,22 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+      # The service container is PostgreSQL 16, and a dump carries the version
+      # of the pg_dump that wrote it: a newer client writes SET statements the
+      # 16 server rejects ("unrecognized configuration parameter
+      # transaction_timeout"), which turns a rehearsal into a false alarm.
+      # Install the matching client explicitly instead of trusting whichever
+      # version the runner image happens to preinstall.
+      - name: Install PostgreSQL 16 client tools to match the server
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-16
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/16/bin/pg_dump --version
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -117,10 +133,11 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
-      - name: Install PostgreSQL client tools for the isolated demo restore
+      - name: Verify the PostgreSQL client tools used by the demo restore
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y postgresql-client
+          pg_dump --version
+          pg_restore --version
+          psql --version
       - name: Build and restore the complete demo JSON on clean disposable databases
         env:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_demo?schema=public
