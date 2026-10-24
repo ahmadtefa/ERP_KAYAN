@@ -128,3 +128,98 @@ describe('refresh session security', () => {
     expect(jwt.signAsync).not.toHaveBeenCalled();
   });
 });
+
+describe('direct per-user permission grants', () => {
+  const roleGrant = 'cash.vouchers.read';
+  const directGrant = 'cash.vouchers.post';
+
+  function userWithGrants() {
+    return {
+      id: 'user-1',
+      username: 'cashier',
+      fullNameEn: 'Cashier',
+      fullNameAr: 'أمين خزينة',
+      passwordHash: 'hash',
+      companyId: 'company-1',
+      isActive: true,
+      isSuperAdmin: false,
+      deletedAt: null,
+      lockedUntil: null,
+      failedLoginCount: 0,
+      userRoles: [
+        {
+          role: {
+            code: 'CASHIER',
+            rolePermissions: [{ permission: { code: roleGrant } }],
+          },
+        },
+      ],
+      userPermissions: [{ permission: { code: directGrant } }],
+    };
+  }
+
+  it('includes direct grants in the permissions issued at login', async () => {
+    const verify = jest.mocked(argon2.verify);
+    verify.mockResolvedValue(true as never);
+    const signAsync = jest.fn().mockResolvedValue('access-token');
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue(userWithGrants()),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      userBranch: { findMany: jest.fn().mockResolvedValue([{ branchId: 'branch-1' }]) },
+      refreshToken: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const service = new AuthService(
+      prisma as any,
+      { signAsync } as any,
+      { record: jest.fn() } as any,
+    );
+
+    try {
+      const result = await service.login('cashier', 'a-long-test-password');
+      expect(result.user.permissions).toEqual(
+        expect.arrayContaining([roleGrant, directGrant]),
+      );
+      const payload = signAsync.mock.calls[0][0];
+      expect(payload.permissions).toEqual(
+        expect.arrayContaining([roleGrant, directGrant]),
+      );
+    } finally {
+      verify.mockReset();
+    }
+  });
+
+  it('includes direct grants when a session is refreshed', async () => {
+    const signAsync = jest.fn().mockResolvedValue('access-token');
+    const prisma = {
+      refreshToken: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'refresh-id',
+          revokedAt: null,
+          expiresAt: new Date(Date.now() + 60_000),
+          user: {
+            ...userWithGrants(),
+            branches: [{ branchId: 'branch-1' }],
+          },
+        }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        create: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const service = new AuthService(
+      prisma as any,
+      { signAsync } as any,
+      { record: jest.fn() } as any,
+    );
+
+    const result = await service.refresh('presented-refresh-token');
+    expect(result.user.permissions).toEqual(
+      expect.arrayContaining([roleGrant, directGrant]),
+    );
+    const payload = signAsync.mock.calls[0][0];
+    expect(payload.permissions).toEqual(
+      expect.arrayContaining([roleGrant, directGrant]),
+    );
+  });
+});
