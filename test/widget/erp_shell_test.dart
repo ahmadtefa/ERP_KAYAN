@@ -168,7 +168,8 @@ void main() {
 
       // These permissions match the GET endpoints. The user intentionally
       // does not hold the separate returns.read or opening-balances.manage
-      // permission codes; neither should hide a screen whose API GET is allowed.
+      // codes; a view-only grant must still reveal the screen whose API GET is
+      // allowed, and manage must not be required just to look.
       for (final label in [
         'الخزائن والبنوك',
         'الأرصدة الافتتاحية',
@@ -247,6 +248,7 @@ class _PermissionTestAuthController extends AuthController {
         permissions: [
           'cash.accounts.read',
           'accounting.journal.read',
+          'accounting.openingbalances.read',
           'sales.invoices.read',
           'purchases.invoices.read',
           'sales.quotations.read',

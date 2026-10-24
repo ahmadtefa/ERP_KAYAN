@@ -186,10 +186,10 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.openingBalances,
         Icons.tune_outlined,
         l10n.openingBalancesTitle,
-        // Readable with the journal permission; changing them needs manage.
+        // Seeing the figures needs the read grant; changing them needs manage.
         permissions: const [
+          'accounting.openingbalances.read',
           'accounting.openingbalances.manage',
-          'accounting.journal.read',
         ],
         group: _NavGroup.accounting,
       ),

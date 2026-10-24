@@ -32,4 +32,38 @@ describe('spreadsheet import authorization', () => {
     await expect(controller.upload({ ...user, permissions: [] }, 'customers', file, {})).rejects.toBeInstanceOf(ForbiddenException);
     expect(run).not.toHaveBeenCalled();
   });
+
+  it('lets a read-only viewer download the opening-balance template but not upload it', async () => {
+    const template = jest.fn().mockResolvedValue(Buffer.from('xlsx-bytes'));
+    const run = jest.fn();
+    const controller = new ImportController({ template, run } as any);
+    const response = { setHeader: jest.fn(), end: jest.fn() } as any;
+    const reader: AuthUser = {
+      ...user,
+      permissions: ['accounting.openingbalances.read'],
+    };
+
+    await controller.template(reader, 'opening-balances', response);
+    expect(template).toHaveBeenCalledWith('opening-balances');
+    expect(response.end).toHaveBeenCalledWith(Buffer.from('xlsx-bytes'));
+
+    await expect(controller.upload(reader, 'opening-balances', file, {})).rejects.toBeInstanceOf(ForbiddenException);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('keeps the template reachable for a manager and closed to everyone else', async () => {
+    const template = jest.fn().mockResolvedValue(Buffer.from('xlsx-bytes'));
+    const controller = new ImportController({ template, run: jest.fn() } as any);
+    const response = { setHeader: jest.fn(), end: jest.fn() } as any;
+
+    await controller.template(
+      { ...user, permissions: ['accounting.openingbalances.manage'] },
+      'opening-balances',
+      response,
+    );
+    expect(template).toHaveBeenCalledTimes(1);
+
+    const outsider = { ...user, permissions: ['cash.vouchers.read'] };
+    await expect(controller.template(outsider, 'opening-balances', response)).rejects.toBeInstanceOf(ForbiddenException);
+  });
 });
