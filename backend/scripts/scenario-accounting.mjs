@@ -1238,7 +1238,7 @@ async function main() {
     check(
       'the backup can be restored, and the restore reports what it put back',
       restored.status < 300 && restored.data?.restored === true && restored.data?.rehearsed === true,
-      `restored ${restored.data?.source}, safety copy ${restored.data?.safetyBackup}, rehearsed ${restored.data?.rehearsed}`,
+      `status ${restored.status}: ${JSON.stringify(restored.data).slice(0, 400)}`,
     );
     const afterRestore = await api(`/parties/customers?q=${encodeURIComponent(`E2E-C-${stamp}`)}`);
     check(
