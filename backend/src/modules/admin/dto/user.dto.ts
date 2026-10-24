@@ -25,6 +25,12 @@ export class CreateUserDto {
   roleIds?: string[];
   @IsOptional() @IsArray() @ArrayUnique() @IsUUID('4', { each: true })
   branchIds?: string[];
+  /// Extra permissions granted to this user alone, on top of their roles.
+  /// Named by code because that is how the rest of the program refers to a
+  /// permission; the service resolves them and rejects unknown codes.
+  @IsOptional() @IsArray() @ArrayUnique() @IsString({ each: true })
+  @MaxLength(80, { each: true })
+  permissionCodes?: string[];
 }
 
 export class UpdateUserDto {
@@ -36,6 +42,9 @@ export class UpdateUserDto {
   roleIds?: string[];
   @IsOptional() @IsArray() @ArrayUnique() @IsUUID('4', { each: true })
   branchIds?: string[];
+  @IsOptional() @IsArray() @ArrayUnique() @IsString({ each: true })
+  @MaxLength(80, { each: true })
+  permissionCodes?: string[];
 }
 
 export class ChangePasswordDto {
