@@ -79,7 +79,11 @@ jobs:
       - name: Type-check
         run: npx tsc --noEmit
       - name: Run unit tests
-        run: python ../scripts/ci-diagnose.py bash -c 'npm test -- --runInBand 2>&1 | tee /tmp/kayan-jest.log'
+        # `| tee` reports tee's exit status, not the test run's, so without
+        # `-o pipefail` a failing suite would leave this step green and the
+        # whole job would pass. The log is kept because the summary step below
+        # reads it.
+        run: python ../scripts/ci-diagnose.py bash -o pipefail -c 'npm test -- --runInBand 2>&1 | tee /tmp/kayan-jest.log'
       - name: Record unit-test totals
         if: always()
         run: |
@@ -91,6 +95,30 @@ jobs:
         run: npx prisma migrate deploy
       - name: Prove the required-accounts chart upgrade (old, complete and renumbered companies; run twice)
         run: python ../scripts/ci-diagnose.py node scripts/check-chart-upgrade.mjs
+
+      # An upgrade of an installation that already has data, for the part of it
+      # that is easiest to get wrong: cost centers arriving as a real accounting
+      # dimension. The check builds a database at the schema that came before
+      # them, fills it with legacy rows, and applies the rest.
+      - name: Prove the cost-center upgrade on a pre-upgrade database
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGUSER: ci
+          PGPASSWORD: ci
+        run: python ../scripts/ci-diagnose.py node scripts/verify-cost-center-upgrade.mjs
+
+      # The release guard decides whether a Windows build may overwrite a
+      # published download; a wrong answer there is not recoverable.
+      - name: Prove the release guard refuses a published release
+        run: node --test ../scripts/check-release-tag.test.mjs
+
+      # The PDF verifier is what the Windows smoke test trusts on the installed
+      # machine, where nobody can look at the sheet. Its readers and its
+      # joining rule are pinned on real files so a mistake there cannot pass as
+      # a designed, joined, correctly numbered offer.
+      - name: Prove the quotation PDF verifier reads a real sheet
+        run: node --test scripts/verify-quotation-pdf.test.mjs scripts/verify-quotation-pdf.file.test.mjs
 
       - name: Pin the database-state classifier (empty/incomplete/ready/unknown)
         run: python ../scripts/ci-diagnose.py node scripts/check-database-state.mjs

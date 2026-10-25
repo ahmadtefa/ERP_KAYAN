@@ -185,6 +185,18 @@ jobs:
         shell: powershell
         run: .\scripts\smoke-test-installed-windows.ps1 -SetupPath .\build\windows-installer\KAYAN-ERP-Setup.exe
 
+      # The publish step below replaces the files of an existing release. That
+      # is right while a release is being assembled, and wrong the moment one
+      # has been handed to customers: a push to main without a version bump
+      # would overwrite the published Setup.exe of windows-v0.1.1. This guard
+      # runs first and stops the job if that tag already has files.
+      - name: Refuse to overwrite a published release
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-release-tag.mjs "windows-v${{ steps.app-version.outputs.version }}"
+
       - name: Publish direct Setup.exe download
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: ncipollo/release-action@v1

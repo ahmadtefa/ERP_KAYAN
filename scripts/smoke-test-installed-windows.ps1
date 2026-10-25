@@ -490,16 +490,46 @@ try {
   # «Download PDF» button calls, rendered by the bundled server through the
   # system browser. A 200 without %PDF- bytes is a failure, not a pass, and a
   # PDF without the design on every page is not a pass either.
+  #
+  # It has to be a LONG, ARABIC offer: a one-line sheet proves nothing about
+  # what happens on page 2. Twelve dozen line items force the sheet over three
+  # pages, so the repeating background, the logo, the Arabic face and the
+  # "n / N" stamp are checked where they usually break - after the first page.
+  # The Arabic is built from code points so this file stays ASCII and a Windows
+  # PowerShell host reads it the same way whatever the file's encoding is.
+  function From-CodePoints([int[]]$Points) { -join ($Points | ForEach-Object { [char]$_ }) }
+  $arabicSubject = From-CodePoints @(0x0639,0x0631,0x0636,0x0020,0x0633,0x0639,0x0631,0x0020,0x062A,0x062C,0x0631,0x064A,0x0628,0x064A,0x0020,0x0645,0x062A,0x0639,0x062F,0x062F,0x0020,0x0627,0x0644,0x0635,0x0641,0x062D,0x0627,0x062A)
+  $arabicLinePrefix = From-CodePoints @(0x0628,0x0646,0x062F,0x0020,0x0627,0x062E,0x062A,0x0628,0x0627,0x0631,0x0020,0x0631,0x0642,0x0645)
+  $arabicFirstTable = From-CodePoints @(0x0642,0x0633,0x0645,0x0020,0x0623,0x0648,0x0644,0x0020,0x0645,0x062A,0x0639,0x062F,0x062F,0x0020,0x0627,0x0644,0x0635,0x0641,0x062D,0x0627,0x062A)
+  $arabicSecondTable = From-CodePoints @(0x0642,0x0633,0x0645,0x0020,0x062B,0x0627,0x0646,0x064D,0x0020,0x0645,0x062A,0x0639,0x062F,0x062F,0x0020,0x0627,0x0644,0x0635,0x0641,0x062D,0x0627,0x062A)
+  $firstTableLines = @()
+  for ($lineNumber = 1; $lineNumber -le 72; $lineNumber++) {
+    $firstTableLines += @{
+      description = "$arabicLinePrefix $lineNumber"
+      quantity = '1'
+      unitPrice = '125'
+      unit = 'piece'
+    }
+  }
+  $secondTableLines = @()
+  for ($lineNumber = 73; $lineNumber -le 96; $lineNumber++) {
+    $secondTableLines += @{
+      description = "$arabicLinePrefix $lineNumber"
+      quantity = '2'
+      unitPrice = '87.50'
+      unit = 'piece'
+    }
+  }
   $quotationBody = @{
     quotationDate = (Get-Date -Format 'yyyy-MM-dd')
     customerId = $customer.id
     currency = 'EGP'
-    subject = 'Windows smoke quotation'
-    tables = @(@{
-      title = 'Smoke table'
-      lines = @(@{ description = 'Smoke line item'; quantity = '2'; unitPrice = '150'; unit = 'piece' })
-    })
-  } | ConvertTo-Json -Compress -Depth 6
+    subject = $arabicSubject
+    tables = @(
+      @{ title = $arabicFirstTable; lines = $firstTableLines },
+      @{ title = $arabicSecondTable; lines = $secondTableLines }
+    )
+  } | ConvertTo-Json -Compress -Depth 8
   $quotation = Invoke-RestMethod -Method Post -Uri "$base/sales/quotations" -Headers $headers -ContentType 'application/json' -Body $quotationBody -TimeoutSec 30
   if (-not $quotation.id) { Fail 'Installed API did not create the smoke quotation.' }
   $pdfPath = Join-Path $env:TEMP 'kayan-installed-quotation.pdf'
@@ -509,15 +539,24 @@ try {
   Write-Output "::notice::Installed Windows quotation PDF: real %PDF- file of $($pdfBytes.Length) bytes rendered by the installed runtime."
 
   # Open the file the way a viewer would and check the sheet, not just the
-  # header bytes: A4, a painted band, the logo, the bundled Arabic face and the
-  # right page number on every page, and nothing that reaches for the network.
+  # header bytes: A4, a painted band, the logo, the bundled Arabic face — drawn,
+  # not merely listed — the letters joined, and the right page number on every
+  # page, and nothing that reaches for the network. The minimum page count is
+  # the point: one sheet says nothing about the pages after it.
   $verifyScript = Join-Path $backend 'scripts\verify-quotation-pdf.mjs'
   if (-not (Test-Path $verifyScript)) { Fail "Installed runtime is missing the PDF verifier: $verifyScript" }
-  $verifyOutput = & $node $verifyScript $pdfPath --max-pages 2 2>&1
+  $verifyOutput = & $node $verifyScript $pdfPath --min-pages 3 --max-pages 8 2>&1
   if ($LASTEXITCODE -ne 0) { Fail ('Installed quotation PDF failed the printed-design checks: ' + (($verifyOutput | Out-String).Trim())) }
   foreach ($line in $verifyOutput) { Write-Output $line }
-  Write-Output "::notice::Installed Windows quotation PDF passed: %PDF- file of $($pdfBytes.Length) bytes, design and page numbers verified on every page by the installed runtime."
-  Write-Output "::notice::Windows installer smoke test passed: service, database preparation, client startup on port $apiPort, login, company JSON and full PostgreSQL backup/restore, and a designed quotation PDF all verified."
+  $jsonLine = @($verifyOutput | Where-Object { $_ -is [string] -and $_.TrimStart().StartsWith('{') }) | Select-Object -Last 1
+  if (-not $jsonLine) { Fail 'Installed quotation PDF verifier printed no machine-readable summary.' }
+  $verified = $jsonLine | ConvertFrom-Json
+  if ($verified.pages -lt 3) { Fail "Installed quotation PDF has $($verified.pages) page(s); a 96-line offer has to run onto at least 3." }
+  if (-not $verified.arabic.joined) { Fail 'Installed quotation PDF has no joined Arabic (the letters never take a contextual shape).' }
+  $pdfHash = (Get-FileHash -LiteralPath $pdfPath -Algorithm SHA256).Hash
+  Write-Output "::notice title=Installed PDF::pages=$($verified.pages) bytes=$($verified.bytes) sha256=$pdfHash arabicLetters=$($verified.arabic.mapped) joinedShapes=$($verified.arabic.joinedLetters) fonts=$($verified.arabic.fonts -join ';')"
+  Write-Output "::notice::Installed Windows quotation PDF passed: %PDF- file of $($pdfBytes.Length) bytes over $($verified.pages) pages, design, drawn Arabic face, joined letters and page numbers verified on every page by the installed runtime."
+  Write-Output "::notice::Windows installer smoke test passed: service, database preparation, client startup on port $apiPort, login, company JSON and full PostgreSQL backup/restore, and a $($verified.pages)-page designed Arabic quotation PDF all verified."
 } finally {
   if ($client -and -not $client.HasExited) {
     $null = $client.CloseMainWindow()
