@@ -126,7 +126,7 @@ end;
   still gets the answer the page would have defaulted to. }
 function SelectedCompanyMode: String;
 begin
-  if Assigned(CompanyPage) then
+  if CompanyPage <> nil then
   begin
     if CompanyPage.Values[1] then
       Result := 'Existing'

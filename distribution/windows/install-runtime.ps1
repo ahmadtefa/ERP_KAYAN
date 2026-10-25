@@ -238,15 +238,25 @@ function Invoke-DatabasePrepare([hashtable]$Settings, [int]$CompanyCount) {
     New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
     Set-PrivateAcl $backupDir @('BUILTIN\Administrators')
     $dumpFile = Join-Path $backupDir 'before-upgrade.dump'
-    Invoke-Pg -Exe (Join-Path $pgBin 'pg_dump.exe') -Arguments @('-h','127.0.0.1','-p','5432','-U','erp_app','-d','erp_kayan','-Fc','--no-password','-f',$dumpFile) | Out-Null
-    if (-not (Test-Path -LiteralPath $dumpFile)) {
-      throw 'The backup taken before the upgrade was not written, so the upgrade stopped before changing the database.'
+    # pg_dump is not given a prompt; the password comes from the same
+    # connection string the program uses.
+    $dumpPassword = ''
+    if ($Settings['DATABASE_URL'] -match '^postgresql://[^:]+:([^@]+)@') { $dumpPassword = $matches[1] }
+    if (-not $dumpPassword) { throw 'The settings do not carry a database password, so no backup could be taken before the upgrade. Nothing was changed.' }
+    $env:PGPASSWORD = $dumpPassword
+    try {
+      Invoke-Pg -Exe (Join-Path $pgBin 'pg_dump.exe') -Arguments @('-h','127.0.0.1','-p','5432','-U','erp_app','-d','erp_kayan','-Fc','--no-password','-f',$dumpFile) | Out-Null
+      if (-not (Test-Path -LiteralPath $dumpFile)) {
+        throw 'The backup taken before the upgrade was not written, so the upgrade stopped before changing the database.'
+      }
+      $file = Get-Item -LiteralPath $dumpFile
+      if ($file.Length -le 0) {
+        throw 'The backup taken before the upgrade is empty, so the upgrade stopped before changing the database.'
+      }
+      $toc = @(Invoke-Pg -Exe (Join-Path $pgBin 'pg_restore.exe') -Arguments @('--list',$dumpFile) | Where-Object { "$_" -match '^\d+;' })
+    } finally {
+      Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
     }
-    $file = Get-Item -LiteralPath $dumpFile
-    if ($file.Length -le 0) {
-      throw 'The backup taken before the upgrade is empty, so the upgrade stopped before changing the database.'
-    }
-    $toc = @(Invoke-Pg -Exe (Join-Path $pgBin 'pg_restore.exe') -Arguments @('--list',$dumpFile) | Where-Object { "$_" -match '^\d+;' })
     if ($toc.Count -eq 0) {
       throw 'The backup taken before the upgrade cannot be read back, so the upgrade stopped before changing the database.'
     }
