@@ -51,8 +51,6 @@ english.CompanyPageDescription=Setup can start a new, empty company, or keep the
 arabic.CompanyPageDescription=يمكن للمُثبِّت بدء شركة جديدة فارغة، أو الاحتفاظ بالشركة الموجودة بالفعل على هذا الجهاز. لا يحذف المُثبِّت بيانات الشركة أبدًا.
 english.CompanyNew=A new company (شركة جديدة)
 arabic.CompanyNew=شركة جديدة (A new company)
-english.CompanyNew=A new company (شركة جديدة)
-arabic.CompanyNew=شركة جديدة (A new company)
 english.CompanyExisting=An existing company (شركة موجودة)
 arabic.CompanyExisting=شركة موجودة (An existing company)
 ; The item list on an option page shows one caption per choice, so the
