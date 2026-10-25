@@ -226,8 +226,25 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $app 'runtime-m
 
 if (-not $SkipInstaller) {
   Write-Host '[8/8] Compile standalone Inno Setup installer'
-  & $iscc.Source "/DSourceDir=$app" "/DOutputDir=$outputPath" "/DAppVersion=$appVersion" (Join-Path $stage 'installer.iss')
-  if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed ($LASTEXITCODE)." }
+  if (-not (Test-Path -LiteralPath $outputPath)) { [void][IO.Directory]::CreateDirectory($outputPath) }
+  # ISCC writes its diagnosis to the log, not to the error text the caller
+  # sees. Keeping the log and repeating its last lines on failure is what turns
+  # "Inno Setup failed (2)" into the script line that is actually wrong.
+  $isccLog = Join-Path $outputPath 'iscc.log'
+  $isccArguments = @("/DSourceDir=$app", "/DOutputDir=$outputPath", "/DAppVersion=$appVersion", "/LOG=$isccLog", (Join-Path $stage 'installer.iss'))
+  $isccOutput = & $iscc.Source @isccArguments 2>&1
+  $isccOutput | ForEach-Object { Write-Host $_ }
+  $isccExit = $LASTEXITCODE
+  if ($isccExit -ne 0) {
+    $details = ''
+    if (Test-Path -LiteralPath $isccLog) {
+      $details = ((Get-Content -LiteralPath $isccLog -ErrorAction SilentlyContinue | Select-Object -Last 30) -join ' | ')
+    }
+    if (-not $details) { $details = (($isccOutput | Out-String).Trim() -split "`r?`n" | Select-Object -Last 30) -join ' | ' }
+    if ($details.Length -gt 3000) { $details = $details.Substring($details.Length - 3000) }
+    Write-Host "::error title=Inno Setup::$(($details -replace '%','%25') -replace '\r?\n','%0A')"
+    throw "Inno Setup failed ($isccExit). $details"
+  }
   $versionedSetup = Join-Path $outputPath "KAYAN-ERP-Setup-$appVersion-x64.exe"
   $canonicalSetup = Join-Path $outputPath "KAYAN-ERP-Setup.exe"
   if (Test-Path $versionedSetup) {

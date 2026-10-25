@@ -51,12 +51,15 @@ english.CompanyPageDescription=Setup can start a new, empty company, or keep the
 arabic.CompanyPageDescription=يمكن للمُثبِّت بدء شركة جديدة فارغة، أو الاحتفاظ بالشركة الموجودة بالفعل على هذا الجهاز. لا يحذف المُثبِّت بيانات الشركة أبدًا.
 english.CompanyNew=A new company (شركة جديدة)
 arabic.CompanyNew=شركة جديدة (A new company)
-english.CompanyNewHint=An empty database, then the first-run screen asks for the company and the general manager. No demo data, no old records.
-arabic.CompanyNewHint=قاعدة بيانات فارغة، ثم تسأل شاشة الإعداد الأولى عن بيانات الشركة والمدير العام. بلا بيانات تجريبية وبلا سجلات قديمة.
+english.CompanyNew=A new company (شركة جديدة)
+arabic.CompanyNew=شركة جديدة (A new company)
 english.CompanyExisting=An existing company (شركة موجودة)
 arabic.CompanyExisting=شركة موجودة (An existing company)
-english.CompanyExistingHint=Keep every record already here. Setup verifies the database, backs it up, and the program upgrades it in place.
-arabic.CompanyExistingHint=الاحتفاظ بكل البيانات الموجودة. يتحقق المُثبِّت من قاعدة البيانات ويأخذ نسخة احتياطية، ثم يرقّيها البرنامج في مكانها.
+; The item list on an option page shows one caption per choice, so the
+; consequences of each choice are spelled out under the list, in the page's
+; own sub-caption, instead of being attached to the item.
+english.CompanyChoiceHint=A new company: an empty database, and the first-run screen asks for the company and the general manager. No demo data and no old records. An existing company: every record already on this computer is kept; Setup verifies the database, backs it up, then upgrades it in place.
+arabic.CompanyChoiceHint=شركة جديدة: قاعدة بيانات فارغة، ثم تسأل شاشة الإعداد الأولى عن بيانات الشركة والمدير العام، بلا بيانات تجريبية وبلا سجلات قديمة. شركة موجودة: يُحتفظ بكل البيانات الموجودة على هذا الجهاز؛ يتحقق المُثبِّت من قاعدة البيانات ويأخذ نسخة احتياطية، ثم يرقّيها في مكانها.
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
@@ -101,24 +104,19 @@ procedure InitializeWizard;
 var
   ExistingCompany: Boolean;
 begin
+  ExistingCompany := FileExists(ExpandConstant('{commonappdata}\KAYAN-ERP\PostgreSQL\data\PG_VERSION'));
   CompanyPage := CreateInputOptionPage(wpSelectDir,
     ExpandConstant('{cm:CompanyPageCaption}'),
     ExpandConstant('{cm:CompanyPageDescription}'),
-    '',
+    ExpandConstant('{cm:CompanyChoiceHint}'),
     True, False);
-  CompanyPage.Add(ExpandConstant('{cm:CompanyNew}'), ExpandConstant('{cm:CompanyNewHint}'));
-  CompanyPage.Add(ExpandConstant('{cm:CompanyExisting}'), ExpandConstant('{cm:CompanyExistingHint}'));
-  ExistingCompany := FileExists(ExpandConstant('{commonappdata}\KAYAN-ERP\PostgreSQL\data\PG_VERSION'));
-  if ExistingCompany then
-  begin
-    CompanyPage.Values[0] := False;
-    CompanyPage.Values[1] := True;
-  end
-  else
-  begin
-    CompanyPage.Values[0] := True;
-    CompanyPage.Values[1] := False;
-  end;
+  // TInputOptionWizardPage.Add takes the caption alone - it has no slot for a
+  // description - so the consequences of both choices sit in the page's
+  // sub-caption above, which every language spells out in full.
+  CompanyPage.Add(ExpandConstant('{cm:CompanyNew}'));
+  CompanyPage.Add(ExpandConstant('{cm:CompanyExisting}'));
+  CompanyPage.Values[0] := not ExistingCompany;
+  CompanyPage.Values[1] := ExistingCompany;
 end;
 
 { What the runtime setup is told. Read when the answer is used rather than
