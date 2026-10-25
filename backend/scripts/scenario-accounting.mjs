@@ -1574,32 +1574,106 @@ async function main() {
 
   // ─────────────────────── 19. the server defends itself against a flood
   //
-  // Last on purpose: it deliberately uses up this address's sign-in
-  // allowance, and every sign-in after it would have to wait the window out.
+  // Two different defences answer a burst of wrong passwords, and both are
+  // checked here:
   //
-  // It also starts from a known state. The limiter counts every request to
-  // the sign-in route for one address in a fixed window, so a scenario that
-  // has already signed in many times (and every scenario before it in the
-  // same CI run) can leave the window closed. Reading that as "no attempt was
-  // ever let through" made this check depend on timing. When the window is
-  // closed, wait for the refusal's own Retry-After and measure from there.
-  const beforeFlood = await api('/auth/login', {
+  //  * the per-address limiter, which refuses the whole address once its
+  //    sign-in window is full, and says how long to wait;
+  //  * the per-account lock, which refuses the right password for fifteen
+  //    minutes after five failures, so guessing cannot continue slowly.
+  //
+  // Last on purpose, and on a throwaway account. Early versions of this
+  // check fired the burst at the administrator: the account lock then kept
+  // the administrator out for a quarter of an hour, and every scenario that
+  // ran afterwards - the API check, the lifecycle, the statement export -
+  // failed to sign in with nothing wrong in what it tested.
+  //
+  // The window is measured from a known state. Ten misses are sent for a name
+  // that does not exist (no account is touched by those), which is enough to
+  // fill any window; the next one must be refused, and waiting out its own
+  // Retry-After leaves a fresh window.
+  const floodStamp = Date.now().toString(36);
+  const floodUsername = `scenario_flood_${floodStamp}`;
+  const floodPassword = 'Scenario-Flood-Password-12345';
+  // A token of its own: the live-reset section above recreates the company,
+  // and the session carried in from before it is not guaranteed to still be
+  // the administrator of the company that now exists.
+  const adminForFlood = await api('/auth/login', {
     method: 'POST',
-    json: { username: USERNAME, password: 'definitely-not-the-password' },
+    json: { username: USERNAME, password: PASSWORD },
     noAuth: true,
     noRetry: true,
   });
-  if (beforeFlood.status === 429) {
-    const seconds = Number(/(\d+)\s*second/.exec(String(beforeFlood.data?.detail ?? ''))?.[1] ?? 60) + 1;
-    console.log(`  (the sign-in window was already closed; waiting ${seconds}s so the limiter is measured from the start)`);
+  const floodUser = await api('/admin/users', {
+    method: 'POST',
+    noAuth: true,
+    headers: { Authorization: `Bearer ${adminForFlood.data?.accessToken ?? ''}` },
+    json: {
+      username: floodUsername,
+      password: floodPassword,
+      fullNameEn: 'Scenario Flood',
+      fullNameAr: 'مستخدم اختبار الغمر',
+    },
+  });
+  check(
+    'a throwaway account exists for the flood check',
+    floodUser.status === 201 && Boolean(floodUser.data?.id),
+    floodUser.data?.detail ?? `HTTP ${floodUser.status}`,
+  );
+
+  // Fill this address's window with misses for a name that cannot exist.
+  const fill = await Promise.all(
+    Array.from({ length: 10 }, () =>
+      api('/auth/login', {
+        method: 'POST',
+        json: { username: `no_such_account_${floodStamp}`, password: 'not-the-password' },
+        noAuth: true,
+        noRetry: true,
+      }),
+    ),
+  );
+  const fillRefused = fill.filter((row) => row.status === 429).length;
+  const overflow = await api('/auth/login', {
+    method: 'POST',
+    json: { username: `no_such_account_${floodStamp}`, password: 'not-the-password' },
+    noAuth: true,
+    noRetry: true,
+  });
+  if (overflow.status === 429) {
+    const seconds = Number(overflow.headers?.get('retry-after') ?? 0) + 1;
+    console.log(`  (the sign-in window is full by design; waiting ${seconds}s for a fresh one)`);
     await sleep(seconds * 1000);
+  } else {
+    console.log(`  (note: the window was not full after 10 misses - HTTP ${overflow.status})`);
   }
+  console.log(`  (filled the window: ${fillRefused}/10 misses were already refused)`);
+
+  // The account lock: five wrong passwords, then the right one is refused too.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await api('/auth/login', {
+      method: 'POST',
+      json: { username: floodUsername, password: 'definitely-not-the-password' },
+      noAuth: true,
+      noRetry: true,
+    });
+  }
+  const lockedOut = await api('/auth/login', {
+    method: 'POST',
+    json: { username: floodUsername, password: floodPassword },
+    noAuth: true,
+    noRetry: true,
+  });
+  check(
+    'five wrong passwords lock the account against the right one',
+    lockedOut.status === 401 && /lock/i.test(String(lockedOut.data?.detail ?? '')),
+    `HTTP ${lockedOut.status}; ${String(lockedOut.data?.detail ?? '').slice(0, 70)}`,
+  );
 
   const flood = await Promise.all(
     Array.from({ length: 30 }, () =>
       api('/auth/login', {
         method: 'POST',
-        json: { username: USERNAME, password: 'definitely-not-the-password' },
+        json: { username: floodUsername, password: 'definitely-not-the-password' },
         noAuth: true,
         noRetry: true,
       }),
@@ -1629,12 +1703,10 @@ async function main() {
   // Leave the limiter as it was found. The window belongs to the API process,
   // not to this script, so a closed one would refuse the sign-in of whatever
   // runs next (the API check, the lifecycle scenario, the statement export) -
-  // and those are not rate-limit tests. Waiting the refused window out costs
-  // less than a minute and keeps the checks that follow independent of one
-  // another, without changing the limit itself.
+  // and those are not rate-limit tests.
   const waitSeconds = Number(firstRefusal?.headers?.get('retry-after') ?? 0);
   if (waitSeconds > 0) {
-    console.log(`  (waiting ${waitSeconds}s for this address's sign-in window to reopen before the next scenario)`);
+    console.log(`  (waiting ${waitSeconds}s for this address's sign-in window to reopen)`);
     await sleep((waitSeconds + 1) * 1000);
   }
 
