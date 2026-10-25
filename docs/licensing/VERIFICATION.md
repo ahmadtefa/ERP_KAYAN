@@ -20,6 +20,7 @@ not run is listed at the end and is **not** claimed as verified.
 | `KAYAN_TEST_ADMIN_URL=… node scripts/verify-licensing-postgres.mjs` | **46 فحصًا، 0 فشل** على PostgreSQL 16.2 حقيقي |
 | `node tools/check-l10n-keys.mjs` | 839 مفتاحًا في اللغتين، 1555 استخدامًا، كلها موجودة |
 | `node tools/check-dart-imports.mjs` | 138 ملف Dart، كل الاستيرادات تشير إلى ملفات موجودة |
+| Windows Installer (GitHub Actions على `windows-latest`) | بناء المُثبِّت، وتثبيته، وتشغيل البرنامج المثبَّت في اختبار آلي — نجح |
 | تشغيل أداة المورّد يدويًا | `init`, `licence create`, `issue activation/renewal/seats/transfer`, `list`, `verify`, `mark-used`, `revoke`, `backup`, `licence set` — كلها عملت، والمفتاح الناتج تحقق في البرنامج |
 
 ## PostgreSQL حقيقي — `scripts/verify-licensing-postgres.mjs`
@@ -140,15 +141,16 @@ not run is listed at the end and is **not** claimed as verified.
 1. **تغيير ساعة ويندوز فعليًا:** سياسة الساعة مُثبتة بساعة محقونة (K1–K6 داخل
    العملية) على قاعدة حقيقية، لا بتغيير تاريخ Windows. **Not tested — injected
    clock only.**
-2. **تثبيت المُثبِّت وتشغيل البرنامج على ويندوز:** سكربتات PowerShell وInno Setup
-   لا تُنفَّذ على Linux. GitHub Actions يبني المُثبِّت على `windows-latest` عند كل
-   دفعة، ونتيجة بناء هذه الدفعة مسجلة في تقرير المهمة؛ **التثبيت والتشغيل لم
-   يُجرَّبا**.
+2. **سلوك الترخيص على ويندوز:** لا يمكن تشغيل PowerShell أو Inno Setup على Linux.
+   GitHub Actions يبني المُثبِّت على `windows-latest`، ويُثبِّته، ويشغّل البرنامج
+   المثبَّت في اختبار آلي (النتيجة في تقرير المهمة). لكن **شاشة الترخيص وإدخال
+   مفتاح على ويندوز لم يُجرَّبا**، ولا تثبيت على جهاز عميل حقيقي.
 3. **نقل الترخيص بين جهازين حقيقيين:** مغطى على PostgreSQL وباختبار وحدة، لا
    بجهاز ثانٍ فعلي.
 4. **`flutter analyze` و`flutter test` محليًا:** لا يوجد Flutter SDK في هذه
-   البيئة. حزمتا CI (`Flutter Web` و`Linux Desktop`) تشغّلان analyze/test/build؛
-   نتيجة آخر تشغيل مسجلة في تقرير المهمة.
+   البيئة. حزمتا CI (`Flutter Web` و`Linux Desktop`) شغّلتا `flutter analyze`
+   و`flutter test` و`flutter build` ونجحتا (التشغيل مسجّل في تقرير المهمة)؛
+   المراجعة البصرية على جهاز حقيقي ما زالت غير مُختبرة.
 5. **المراجعة البصرية لشاشة الترخيص واتجاه RTL:** لم تُجرَّ، لا محليًا ولا على
    ويندوز.
 6. **تغيير `MachineGuid` على جهاز حقيقي:** الحساب مقروء من الكود، والنقل مغطى،
