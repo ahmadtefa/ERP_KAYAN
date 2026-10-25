@@ -1432,31 +1432,6 @@ async function main() {
     skip('backup and restore', `pg_dump is not available here: ${capabilities.data?.reason ?? 'unknown reason'}`);
   }
 
-  // ─────────────────────── 18. the server defends itself against a flood
-  const flood = await Promise.all(
-    Array.from({ length: 30 }, () =>
-      api('/auth/login', {
-        method: 'POST',
-        json: { username: USERNAME, password: 'definitely-not-the-password' },
-        noAuth: true,
-        noRetry: true,
-      }),
-    ),
-  );
-  const limited = flood.some((row) => row.status === 429);
-  const rejected = flood.filter((row) => row.status === 401).length;
-  check(
-    'repeated failed logins are rejected and then rate-limited',
-    rejected >= 1 && limited,
-    `${rejected} rejected, rate limited: ${limited}`,
-  );
-  const detail = flood.find((row) => row.status === 429)?.data?.detail ?? '';
-  check(
-    'the refusal does not leak whether the password or the account was wrong',
-    !/password|user not found|no such/i.test(String(detail)) || /too many requests/i.test(String(detail)),
-    String(detail).slice(0, 90),
-  );
-
   // This operation is intentionally disabled unless CI (or an operator using
   // a dedicated disposable database) opts in explicitly. Never let a routine
   // scenario run reset a real or developer database by accident.
@@ -1596,6 +1571,60 @@ async function main() {
   } else {
     skip('live reset and first-run status', 'set ENABLE_DISPOSABLE_RESET=true only for an ephemeral test database');
   }
+
+  // ─────────────────────── 19. the server defends itself against a flood
+  //
+  // Last on purpose: it deliberately uses up this address's sign-in
+  // allowance, and every sign-in after it would have to wait the window out.
+  //
+  // It also starts from a known state. The limiter counts every request to
+  // the sign-in route for one address in a fixed window, so a scenario that
+  // has already signed in many times (and every scenario before it in the
+  // same CI run) can leave the window closed. Reading that as "no attempt was
+  // ever let through" made this check depend on timing. When the window is
+  // closed, wait for the refusal's own Retry-After and measure from there.
+  const beforeFlood = await api('/auth/login', {
+    method: 'POST',
+    json: { username: USERNAME, password: 'definitely-not-the-password' },
+    noAuth: true,
+    noRetry: true,
+  });
+  if (beforeFlood.status === 429) {
+    const seconds = Number(/(\d+)\s*second/.exec(String(beforeFlood.data?.detail ?? ''))?.[1] ?? 60) + 1;
+    console.log(`  (the sign-in window was already closed; waiting ${seconds}s so the limiter is measured from the start)`);
+    await sleep(seconds * 1000);
+  }
+
+  const flood = await Promise.all(
+    Array.from({ length: 30 }, () =>
+      api('/auth/login', {
+        method: 'POST',
+        json: { username: USERNAME, password: 'definitely-not-the-password' },
+        noAuth: true,
+        noRetry: true,
+      }),
+    ),
+  );
+  const refusals = flood.filter((row) => row.status === 429);
+  const rejected = flood.filter((row) => row.status === 401).length;
+  const accepted = flood.filter((row) => row.status >= 200 && row.status < 300).length;
+  check(
+    'repeated failed logins are rejected and then rate-limited',
+    rejected >= 1 && refusals.length > 0 && accepted === 0,
+    `${rejected} rejected, ${refusals.length} rate limited, ${accepted} accepted`,
+  );
+  const firstRefusal = refusals[0];
+  const detail = firstRefusal?.data?.detail ?? '';
+  check(
+    'the refusal does not leak whether the password or the account was wrong',
+    !/password|user not found|no such/i.test(String(detail)) || /too many requests/i.test(String(detail)),
+    String(detail).slice(0, 90),
+  );
+  check(
+    'the refusal tells the client how long to wait',
+    Number(firstRefusal?.headers?.get('retry-after') ?? 0) > 0 && /second/i.test(String(detail)),
+    `Retry-After ${firstRefusal?.headers?.get('retry-after') ?? 'missing'}; ${String(detail).slice(0, 60)}`,
+  );
 
   // ─────────────────────────────────────────────────────────── the summary
   const failed = results.filter((row) => !row.ok);
