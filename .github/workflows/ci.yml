@@ -219,6 +219,18 @@ jobs:
           if [ "$FAIL" != "0" ]; then exit 1; fi
           echo "Isolated restore verified: $CHECKED non-volatile tables have identical row counts in source and restored databases."
 
+          # Last, because it deliberately recreates the shape old restored data
+          # can have: a receipt that reaches its partner only through the
+          # invoices it settled. That data is inconsistent by construction, so
+          # it must not be in place while the ageing/reconciliation checks run.
+          echo "Running the partner statement end to end: allocation-only vouchers, the card, exports, print and the ledger behind every figure..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-statement-export.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after statement scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
       - name: Verify the PostgreSQL client tools used by the backup checks
         run: |
           pg_dump --version
