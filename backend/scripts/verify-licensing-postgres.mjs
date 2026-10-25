@@ -28,6 +28,7 @@
  *   ADMIN_USERNAME / ADMIN_PASSWORD  credentials for that HTTP check
  */
 
+import { spawn } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync, rmSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -53,6 +54,7 @@ const DATABASES = {
   concurrency: `erp_kayan_licence_concurrency${SUFFIX}`,
   transfer: `erp_kayan_licence_transfer${SUFFIX}`,
   perpetual: `erp_kayan_licence_perpetual${SUFFIX}`,
+  seed: `erp_kayan_licence_seed${SUFFIX}`,
 };
 
 const MACHINE = 'KM-TEST-AAAA-BBBB-CCCC';
@@ -1125,6 +1127,106 @@ async function clockAndRestore() {
   }
 }
 
+// ─────────────────────────────────────────────── 7. the installer's first run
+
+async function installerSeed() {
+  console.log("\n== The packaged installer's first administrator");
+  await recreateDatabase(DATABASES.seed);
+  const connection = databaseUrl(DATABASES.seed);
+  await applyMigrations(connection);
+
+  // The installer creates its first administrator by running the same seeding
+  // program a developer runs, not through the setup endpoint.
+  const runSeed = () =>
+    new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [join(HERE, '..', 'dist', 'prisma', 'seed.js')], {
+        cwd: join(HERE, '..'),
+        env: {
+          ...process.env,
+          DATABASE_URL: connection,
+          KAYAN_COMPANY_CODE: 'LICS',
+          KAYAN_ADMIN_USERNAME: 'licadmin',
+          KAYAN_ADMIN_PASSWORD: 'Licence-Seed-Password-1',
+        },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+      child.on('error', reject);
+      child.on('exit', (code) =>
+        code === 0
+          ? resolve()
+          : reject(new Error(`the seed exited ${code}: ${stderr.slice(-400)}`)),
+      );
+    });
+
+  await check('S1 the first administrator created by the installer consumes one seat', async () => {
+    await runSeed();
+    assertEqual(await usersIn(DATABASES.seed), 1, 'accounts created by the seed');
+    assertEqual(await seatsIn(DATABASES.seed), 1, 'seat rows');
+    const [row] = await rows(connection, 'SELECT username, reason FROM license_seat_usage');
+    assertEqual(row.username, 'licadmin', 'the seat names the administrator');
+    assertEqual(row.reason, 'SETUP_ADMIN', 'reason');
+    return 'one account, one seat, reason SETUP_ADMIN';
+  });
+
+  await check('S2 re-running the installer seed does not take a second seat', async () => {
+    await runSeed();
+    assertEqual(await usersIn(DATABASES.seed), 1, 'accounts');
+    assertEqual(await seatsIn(DATABASES.seed), 1, 'seat rows');
+    return 'still one seat';
+  });
+
+  await check('S3 an account the migration already counted is not counted twice', async () => {
+    const upgraded = DATABASES.seed + '_upgraded';
+    await recreateDatabase(upgraded);
+    const upgradedConnection = databaseUrl(upgraded);
+    await applyMigrations(upgradedConnection, { skipLicensing: true });
+    await withClient(upgradedConnection, async (client) => {
+      const companyId = randomUUID();
+      await client.query(
+        `INSERT INTO companies (id, code, "nameEn", "nameAr", currency, timezone, "isActive", "createdAt", "updatedAt")
+         VALUES ($1, 'LICS', 'Licence seed', 'بذرة الترخيص', 'EGP', 'Africa/Cairo', true, now(), now())`,
+        [companyId],
+      );
+      await client.query(
+        `INSERT INTO users (id, "companyId", username, "fullNameEn", "fullNameAr", "passwordHash", "isActive", "isSuperAdmin", "tokenVersion", "createdAt", "updatedAt")
+         VALUES ($1, $2, 'licadmin', 'Admin', 'مدير', 'test-only-not-a-hash', true, true, 0, now(), now())`,
+        [randomUUID(), companyId],
+      );
+    });
+    await applyLicensingMigration(upgradedConnection);
+    assertEqual(await seatsIn(upgraded), 1, 'the migration counted the account once');
+    // The developer/repair path can run the seed again on the upgraded copy.
+    await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [join(HERE, '..', 'dist', 'prisma', 'seed.js')], {
+        cwd: join(HERE, '..'),
+        env: {
+          ...process.env,
+          DATABASE_URL: upgradedConnection,
+          KAYAN_COMPANY_CODE: 'LICS',
+          KAYAN_ADMIN_USERNAME: 'licadmin',
+          KAYAN_ADMIN_PASSWORD: 'Licence-Seed-Password-1',
+        },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+      child.on('error', reject);
+      child.on('exit', (code) =>
+        code === 0 ? resolve() : reject(new Error(`the seed exited ${code}: ${stderr.slice(-400)}`)),
+      );
+    });
+    assertEqual(await usersIn(upgraded), 1, 'accounts');
+    assertEqual(await seatsIn(upgraded), 1, 'seat rows after the seed ran again');
+    return 'the account still has one seat';
+  });
+}
+
 // ───────────────────────────────────────────────────────────────────── HTTP layer
 
 async function httpChecks() {
@@ -1203,6 +1305,7 @@ async function main() {
     await transfer();
     await perpetual();
     await clockAndRestore();
+    await installerSeed();
     await httpChecks();
   } finally {
     if (!process.argv.includes('--keep')) await dropDatabases();
