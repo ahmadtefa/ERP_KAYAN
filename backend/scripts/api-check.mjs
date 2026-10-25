@@ -540,23 +540,9 @@ async function main() {
       `${reset.data?.backupFile ?? ''} (${reset.data?.backupEntries ?? 0} objects)`,
     );
 
-    const accounts = await call('/accounting/chart-of-accounts');
-    const countAfter = accounts.data?.items?.length ?? -1;
-    check(
-      'the company holds no operational data afterwards',
-      countAfter === 0,
-      `${beforeCount} accounts before the reset, ${countAfter} after`,
-    );
-
-    const audit = await call('/admin/audit-logs?pageSize=50');
-    const entries = audit.data?.items ?? [];
-    check(
-      'the reset is in the audit trail, and the password is not',
-      entries.some((entry) => entry.action === 'RESET') &&
-        !JSON.stringify(entries).includes(PASSWORD),
-      `${entries.length} entries`,
-    );
-
+    // The two checks that look at the wiped company run after the setup
+    // below brings it back and this script signs in again: between the
+    // reset and the setup there is no signed-in user to read them with.
     const status = await call('/setup/status', { noAuth: true });
     check(
       'the program asks to be set up again',
@@ -590,6 +576,31 @@ async function main() {
       'the administrator can sign in after the reset and setup',
       Boolean(signedInAgain.data?.accessToken),
       `status ${signedInAgain.status}`,
+    );
+    // Everything after this point acts as the NEW administrator: the token
+    // from before the reset names a user and company that no longer exist.
+    token = signedInAgain.data?.accessToken ?? token;
+
+    const accounts = await call('/accounting/chart-of-accounts');
+    const itemsAfter = accounts.data?.items ?? [];
+    check(
+      'the company holds no operational data afterwards',
+      accounts.status === 200 &&
+        !itemsAfter.some((account) => account.code === '9001'),
+      `${beforeCount} accounts before the reset; account 9001 ${
+        itemsAfter.some((account) => account.code === '9001')
+          ? 'still there'
+          : 'gone'
+      } (${itemsAfter.length} seeded defaults after setup)`,
+    );
+
+    const audit = await call('/admin/audit-logs?pageSize=50');
+    const entries = audit.data?.items ?? [];
+    check(
+      'the reset is in the audit trail, and the password is not',
+      entries.some((entry) => entry.action === 'RESET') &&
+        !JSON.stringify(entries).includes(PASSWORD),
+      `${entries.length} entries`,
     );
   }
 

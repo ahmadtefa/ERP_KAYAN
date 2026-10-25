@@ -25,6 +25,11 @@ export class CreateUserDto {
   roleIds?: string[];
   @IsOptional() @IsArray() @ArrayUnique() @IsUUID('4', { each: true })
   branchIds?: string[];
+  /// Grant one user extra permissions on top of their roles. Codes come from
+  /// the permission catalogue; the server checks each one before saving.
+  @IsOptional() @IsArray() @ArrayUnique() @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  extraPermissions?: string[];
 }
 
 export class UpdateUserDto {
@@ -36,6 +41,11 @@ export class UpdateUserDto {
   roleIds?: string[];
   @IsOptional() @IsArray() @ArrayUnique() @IsUUID('4', { each: true })
   branchIds?: string[];
+  /// Replaces the user's extra permission grants. Omit to leave them alone;
+  /// send [] to remove them all.
+  @IsOptional() @IsArray() @ArrayUnique() @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  extraPermissions?: string[];
 }
 
 export class ChangePasswordDto {

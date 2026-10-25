@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/page_header.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../providers/company_providers.dart';
 import '../providers/locale_provider.dart';
 import '../widgets/lan_access_card.dart';
 import '../widgets/reset_data_card.dart';
+import '../widgets/document_settings_card.dart';
+import '../widgets/text_scale_card.dart';
 
 /// Application settings.
 ///
@@ -36,9 +40,23 @@ class SettingsScreen extends ConsumerWidget {
             ? user!.companyId
             : l10n.notAvailable);
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        PageHeader(title: l10n.settings, subtitle: l10n.aboutDescription),
+        Container(
+          height: 1,
+          color: Theme.of(context).colorScheme.outlineVariant,
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.xxl),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 920),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
         Card(
           child: Column(
             children: [
@@ -61,7 +79,11 @@ class SettingsScreen extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 16),
+        const TextScaleCard(),
+        const SizedBox(height: 16),
         const LanAccessCard(),
+        const SizedBox(height: 16),
+        const DocumentSettingsCard(),
         const SizedBox(height: 16),
         Card(
           child: Padding(
@@ -114,11 +136,21 @@ class SettingsScreen extends ConsumerWidget {
             ],
           ),
         ),
-        const SizedBox(height: 24),
-        FilledButton.tonalIcon(
-          onPressed: () => ref.read(authControllerProvider.notifier).signOut(),
-          icon: const Icon(Icons.logout),
-          label: Text(l10n.signOut),
+                    const SizedBox(height: AppSpacing.xxl),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: FilledButton.tonalIcon(
+                        onPressed: () =>
+                            ref.read(authControllerProvider.notifier).signOut(),
+                        icon: const Icon(Icons.logout, size: 18),
+                        label: Text(l10n.signOut),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     );

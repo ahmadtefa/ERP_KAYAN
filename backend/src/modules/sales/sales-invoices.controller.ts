@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import {
   AuthUser,
   CurrentUser,
@@ -30,6 +30,16 @@ export class SalesInvoicesController {
   @RequirePermissions('sales.invoices.create')
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateSalesInvoiceDto) {
     return this.service.create(user.companyId, user.branchId, user.userId, dto);
+  }
+
+  @Put(':id')
+  @RequirePermissions('sales.invoices.create')
+  updateDraft(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: CreateSalesInvoiceDto,
+  ) {
+    return this.service.updateDraft(user.companyId, user.branchId, user.userId, id, dto);
   }
 
   @Post(':id/post')

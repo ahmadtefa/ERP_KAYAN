@@ -248,11 +248,22 @@ async function main(): Promise<void> {
   // company rule. It is editable at any time from the roles screen, where the
   // owner decides who may do what.
   //
-  // The accountant keeps the books: the ledger, the parties, the stock and the
-  // reports. Sales and purchase invoices are added read-only, because
-  // reconciling receivables and payables needs to see them — raising and
-  // posting invoices belongs to whoever runs sales and purchasing.
-  const accountantModules = ['accounting', 'parties', 'inventory', 'reports'];
+  // The accountant keeps the books: the ledger, the parties, the stock, the
+  // cash and bank accounts, and the reports. Sales and purchase invoices are
+  // added read-only, because reconciling receivables and payables needs to see
+  // them — raising and posting invoices belongs to whoever runs sales and
+  // purchasing.
+  //
+  // Cash belongs here because a receipt or a payment is a bookkeeping entry:
+  // without it an accountant signed in with the seeded role cannot open the
+  // cash screen at all, which is what made those screens look broken.
+  const accountantModules = [
+    'accounting',
+    'parties',
+    'inventory',
+    'cash',
+    'reports',
+  ];
   const accountantReadOnly = ['sales.invoices.read', 'purchases.invoices.read'];
   for (const p of all.filter(
     (p) => accountantModules.includes(p.module) || accountantReadOnly.includes(p.code),
@@ -308,6 +319,23 @@ async function main(): Promise<void> {
     update: {},
     create: { userId: admin.id, branchId: branch.id },
   });
+
+  // The upsert above only sets `isSuperAdmin` when it *creates* the account.
+  // An installation whose administrator row already exists without the flag
+  // (restored from an archive, say) would keep it missing forever — and with
+  // it, the program-reset and full-backup screens, which no screen can grant
+  // back. Seeding runs on install and repair, so this is where the invariant
+  // "the seeded company always has a super administrator" is restored: only
+  // when the company has none, and only onto the account this seed owns.
+  const superAdmins = await prisma.user.count({
+    where: { companyId: company.id, isSuperAdmin: true, isActive: true, deletedAt: null },
+  });
+  if (superAdmins === 0) {
+    await prisma.user.update({
+      where: { id: admin.id },
+      data: { isSuperAdmin: true, isActive: true, deletedAt: null },
+    });
+  }
 
   // Chart of accounts: parents first so foreign keys resolve.
   const sorted = [...ACCOUNTS].sort((a, b) => a.code.length - b.code.length);

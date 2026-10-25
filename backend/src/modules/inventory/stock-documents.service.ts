@@ -10,6 +10,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
+import { CostCentersService } from '../accounting/cost-centers.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { PostingService } from '../accounting/posting.service';
 
@@ -45,6 +46,7 @@ export class StockDocumentsService {
     private readonly audit: AuditService,
     private readonly settings: CompanySettingsService,
     private readonly warehouses: WarehouseService,
+    private readonly costCenters: CostCentersService,
   ) {}
 
   async findAll(
@@ -75,7 +77,11 @@ export class StockDocumentsService {
         orderBy: [{ documentDate: 'desc' }, { documentNumber: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: { lines: true, branch: { select: { code: true, nameEn: true, nameAr: true } } },
+        include: {
+          lines: true,
+          branch: { select: { code: true, nameEn: true, nameAr: true } },
+          costCenter: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+        },
       }),
       this.prisma.stockDocument.count({ where }),
     ]);
@@ -99,6 +105,7 @@ export class StockDocumentsService {
       where: { id, companyId, deletedAt: null },
       include: {
         branch: { select: { code: true, nameEn: true, nameAr: true } },
+        costCenter: { select: { id: true, code: true, nameEn: true, nameAr: true } },
         lines: {
           orderBy: { lineNumber: 'asc' },
           include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } },
@@ -142,6 +149,11 @@ export class StockDocumentsService {
       documentDate: string;
       reason?: string;
       notes?: string;
+
+      /// The centre that bears an adjustment's loss or gain. Refused on a
+      /// transfer, which moves value between two balance-sheet places.
+      costCenterId?: string;
+
       lines: StockDocumentLineInput[];
     },
   ) {
@@ -164,6 +176,29 @@ export class StockDocumentsService {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
     }
     const date = this.date(dto.documentDate, 'documentDate');
+
+    // Only the documents whose posting touches a profit-and-loss account can
+    // carry a centre. A transfer moves stock between two places the company
+    // already owns, so attributing it would turn cost into a promise.
+    const costCenterId = dto.costCenterId
+      ? String(dto.costCenterId).trim()
+      : null;
+    if (costCenterId) {
+      if (kind === StockDocumentKind.TRANSFER) {
+        throw new BadRequestException(
+          'A stock transfer cannot carry a cost center: it is not a cost.',
+        );
+      }
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(costCenterId)) {
+        throw new BadRequestException('costCenterId must be a UUID');
+      }
+      await this.costCenters.assertPostable(
+        this.prisma,
+        companyId,
+        [costCenterId],
+        date,
+      );
+    }
 
     const lines: Array<{
       itemId: string;
@@ -265,6 +300,7 @@ export class StockDocumentsService {
           toWarehouseId: kind === StockDocumentKind.TRANSFER ? toWarehouseId : toWarehouseId,
           reason: dto.reason?.trim() || null,
           notes: dto.notes?.trim() || null,
+          costCenterId,
           status: InvoiceStatus.DRAFT,
           createdBy: userId,
           lines: {
@@ -343,6 +379,7 @@ export class StockDocumentsService {
         debit?: Prisma.Decimal;
         credit?: Prisma.Decimal;
         description: string;
+        costCenterId?: string | null;
       }> = [];
       let valueChange = new Prisma.Decimal(0);
 
@@ -481,11 +518,13 @@ export class StockDocumentsService {
                 accountId: accounts.inventoryDifference,
                 credit: valueChange,
                 description: document.reason ?? 'Inventory difference',
+                costCenterId: document.costCenterId,
               }
             : {
                 accountId: accounts.inventoryDifference,
                 debit: valueChange.negated(),
                 description: document.reason ?? 'Inventory difference',
+                costCenterId: document.costCenterId,
               },
         );
 
@@ -763,6 +802,8 @@ export class StockDocumentsService {
     postedAt: Date | null;
     createdAt: Date;
     branch?: { code: string; nameEn: string; nameAr: string };
+    costCenterId?: string | null;
+    costCenter?: { id: string; code: string; nameEn: string; nameAr: string } | null;
   }) {
     return {
       id: document.id,
@@ -773,6 +814,8 @@ export class StockDocumentsService {
       reason: document.reason,
       notes: document.notes,
       branch: document.branch,
+      costCenterId: document.costCenterId ?? null,
+      costCenter: document.costCenter ?? null,
       journalEntryId: document.journalEntryId,
       postedAt: document.postedAt?.toISOString() ?? null,
       createdAt: document.createdAt.toISOString(),

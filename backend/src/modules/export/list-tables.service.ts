@@ -31,6 +31,7 @@ export const LIST_SLUGS = [
   'suppliers',
   'items',
   'stock',
+  'stock-ledger',
   'sales-invoices',
   'purchase-invoices',
   'journal-entries',
@@ -157,6 +158,101 @@ export class ListTablesService {
         { key: 'isActive', labelEn: 'Active', labelAr: 'نشط', width: 10, boolean: true },
       ],
       rows: rows as unknown as Array<Record<string, unknown>>,
+    });
+  }
+
+  /// The stock card of one item: every movement in order with the running
+  /// balance, which is exactly what the item-details dialog shows on screen.
+  /// It is a server-built file rather than a picture of the dialog, so a long
+  /// history is exported in full instead of being clipped to the visible part.
+  async stockLedger(companyId: string, query: ListQuery): Promise<ReportTable> {
+    if (!query.itemId) {
+      throw new BadRequestException(
+        'The stock ledger needs itemId, the item whose movements are wanted.',
+      );
+    }
+    const item = await this.prisma.item.findFirst({
+      where: { id: query.itemId, companyId, deletedAt: null },
+      select: { code: true, nameEn: true, nameAr: true, unit: true },
+    });
+    if (!item) throw new BadRequestException('The item does not exist');
+
+    const balances = await this.prisma.stockBalance.findMany({
+      where: { companyId, itemId: query.itemId },
+    });
+    const movements = await this.prisma.stockMovement.findMany({
+      where: { companyId, itemId: query.itemId },
+      orderBy: [{ movementDate: 'asc' }, { createdAt: 'asc' }],
+      include: { warehouse: { select: { code: true, nameEn: true, nameAr: true } } },
+    });
+
+    let runningQty = new Prisma.Decimal(0);
+    let runningValue = new Prisma.Decimal(0);
+    const rows = movements.map((movement) => {
+      const signedQty =
+        movement.direction === 'IN' ? movement.quantity : movement.quantity.negated();
+      const signedValue =
+        movement.direction === 'IN' ? movement.totalCost : movement.totalCost.negated();
+      runningQty = runningQty.plus(signedQty);
+      runningValue = runningValue.plus(signedValue);
+      return {
+        date: movement.movementDate.toISOString().slice(0, 10),
+        reference: `${movement.referenceType} ${movement.referenceNumber}`,
+        direction: movement.direction,
+        warehouse: movement.warehouse?.code ?? '',
+        quantity: movement.quantity.toFixed(4),
+        unitCost: movement.unitCost.toFixed(4),
+        totalCost: movement.totalCost.toFixed(4),
+        runningQuantity: runningQty.toFixed(4),
+        runningValue: runningValue.toFixed(4),
+      };
+    });
+
+    const onHand = balances.reduce(
+      (sum, row) => sum.plus(row.quantity),
+      new Prisma.Decimal(0),
+    );
+    const stockValue = balances.reduce(
+      (sum, row) => sum.plus(row.value),
+      new Prisma.Decimal(0),
+    );
+
+    return this.table({
+      slug: 'stock-ledger',
+      titleEn: `Stock card ${item.code} — ${item.nameEn}`,
+      titleAr: `بطاقة صنف ${item.code} — ${item.nameAr}`,
+      meta: [
+        { labelEn: 'Item code', labelAr: 'كود الصنف', value: item.code },
+        { labelEn: 'Item', labelAr: 'الصنف', value: item.nameEn },
+        { labelEn: 'Unit', labelAr: 'الوحدة', value: item.unit },
+        { labelEn: 'On hand', labelAr: 'الرصيد', value: onHand.toFixed(4) },
+        { labelEn: 'Stock value', labelAr: 'قيمة المخزون', value: stockValue.toFixed(4) },
+        this.count(rows.length),
+      ],
+      columns: [
+        { key: 'date', labelEn: 'Date', labelAr: 'التاريخ', width: 12 },
+        { key: 'reference', labelEn: 'Reference', labelAr: 'المستند', width: 22 },
+        { key: 'direction', labelEn: 'Direction', labelAr: 'الحركة', width: 10 },
+        { key: 'warehouse', labelEn: 'Warehouse', labelAr: 'المخزن', width: 12 },
+        { key: 'quantity', labelEn: 'Quantity', labelAr: 'الكمية', numeric: true, width: 12 },
+        { key: 'unitCost', labelEn: 'Unit cost', labelAr: 'تكلفة الوحدة', numeric: true, width: 14 },
+        { key: 'totalCost', labelEn: 'Cost', labelAr: 'التكلفة', numeric: true, width: 14 },
+        {
+          key: 'runningQuantity',
+          labelEn: 'Running quantity',
+          labelAr: 'الرصيد الجاري',
+          numeric: true,
+          width: 14,
+        },
+        {
+          key: 'runningValue',
+          labelEn: 'Running value',
+          labelAr: 'القيمة الجارية',
+          numeric: true,
+          width: 14,
+        },
+      ],
+      rows,
     });
   }
 
@@ -912,6 +1008,13 @@ const SPECS: ListSpec[] = [
     titleAr: 'أرصدة المخزون',
     permission: 'inventory.stock.read',
     build: (service, companyId, query) => service.stock(companyId, query),
+  },
+  {
+    slug: 'stock-ledger',
+    titleEn: 'Stock card',
+    titleAr: 'بطاقة صنف',
+    permission: 'inventory.stock.read',
+    build: (service, companyId, query) => service.stockLedger(companyId, query),
   },
   {
     slug: 'sales-invoices',

@@ -16,6 +16,11 @@ abstract class ChartOfAccountsRepository {
   Future<Result<Account>> createAccount(AccountInput input);
   Future<Result<Account>> updateAccount(String id, AccountInput input);
 
+  /// Flips the account between active and inactive. A status change is not
+  /// an edit: it sends the flag alone, so it cannot carry a stale name or
+  /// the (immutable) account type back to the server.
+  Future<Result<Account>> setAccountActive(String id, {required bool isActive});
+
   /// Soft-deletes. The server refuses when the account has movements or
   /// children and says so in the failure message.
   Future<Result<void>> deleteAccount(String id);

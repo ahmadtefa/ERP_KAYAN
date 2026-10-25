@@ -127,6 +127,9 @@ export class BankReconciliationService {
       finalise?: boolean;
     },
   ) {
+    if (typeof dto.cashAccountId !== 'string' || dto.cashAccountId.trim().length === 0) {
+      throw new BadRequestException('cashAccountId is required');
+    }
     const cashAccount = await this.prisma.cashAccount.findFirst({
       where: { id: dto.cashAccountId, companyId, deletedAt: null },
       select: { id: true, accountId: true, currency: true, kind: true, code: true },

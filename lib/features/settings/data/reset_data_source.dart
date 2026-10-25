@@ -44,7 +44,7 @@ class ResetResult {
   final bool needsSetup;
 }
 
-/// «إعادة ضبط بيانات البرنامج» — Reset ERP Data.
+/// «إعادة تهيئة البرنامج» — Reset program.
 ///
 /// The most destructive thing the program offers, so the client's job here
 /// is mostly to be sure: it shows what will go before anything is typed, it

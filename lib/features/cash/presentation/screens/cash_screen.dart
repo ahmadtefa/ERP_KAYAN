@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
@@ -8,13 +9,17 @@ import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
+import '../../../../shared/widgets/status_pill.dart';
 import '../../../../shared/widgets/state_views.dart';
+import '../../../accounting/presentation/providers/cost_center_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../../../data/presentation/widgets/document_export_actions.dart';
+import '../../voucher_allocation.dart';
 import '../providers/cash_providers.dart';
+import '../widgets/voucher_details_view.dart';
 
 /// Cash boxes, bank accounts, receipts, payments and transfers.
 ///
@@ -175,6 +180,17 @@ class _CashScreenState extends ConsumerState<CashScreen>
     if (kindValues == null || !mounted) return;
     final isReceipt = text(kindValues, 'kind') == 'RECEIPT';
 
+    // A payment's expense side is somebody's cost; a receipt's counter side
+    // can be somebody's revenue. The picker is optional, because a transfer
+    // between the company's own accounts has no owner.
+    List<Json> costCenters = const <Json>[];
+    try {
+      costCenters = await ref.read(activeCostCentersProvider.future);
+    } on Failure catch (error) {
+      if (mounted) showMessage(context, error.message, error: true);
+    }
+    if (!mounted) return;
+
     List<Json> parties = const <Json>[];
     try {
       parties = isReceipt
@@ -235,6 +251,23 @@ class _CashScreenState extends ConsumerState<CashScreen>
           required: true,
           helper: l10n.settleOldestFirst,
         ),
+        if (costCenters.isNotEmpty)
+          FieldSpec(
+            'costCenterId',
+            l10n.costCenter,
+            kind: FieldKind.select,
+            options: [
+              FieldOption('', l10n.noAllocation),
+              for (final center in costCenters)
+                FieldOption(
+                  text(center, 'id'),
+                  costCenterLabel(
+                    center,
+                    Localizations.localeOf(context).languageCode,
+                  ),
+                ),
+            ],
+          ),
         FieldSpec('description', l10n.description, maxLines: 2),
       ],
       initial: {
@@ -257,22 +290,11 @@ class _CashScreenState extends ConsumerState<CashScreen>
             partyId: partyId,
           )).future,
         );
-        var left = double.tryParse(text(values, 'amount', fallback: '0')) ?? 0;
-        for (final invoice in open) {
-          if (left <= 0) break;
-          final due = double.tryParse(amount(invoice, 'balance')) ?? 0;
-          if (due <= 0) continue;
-          final applied = due < left ? due : left;
-          allocations = [
-            ...allocations,
-            {
-              if (isReceipt) 'salesInvoiceId': text(invoice, 'id')
-              else 'purchaseInvoiceId': text(invoice, 'id'),
-              'amount': applied.toStringAsFixed(4),
-            },
-          ];
-          left -= applied;
-        }
+        allocations = planAllocations(
+          openInvoices: open,
+          amount: text(values, 'amount'),
+          isReceipt: isReceipt,
+        );
       } on Failure catch (error) {
         allocationLookupFailed = true;
         if (mounted) showMessage(context, error.message, error: true);
@@ -428,6 +450,34 @@ class _CashScreenState extends ConsumerState<CashScreen>
     );
   }
 
+  /// The chain behind one row: what the voucher settled and which entry it
+  /// wrote. Opened from the list, read from the server, never recomputed here.
+  void _showVoucher(Json voucher) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(text(voucher, 'voucherNumber')),
+        content: SizedBox(
+          width: 820,
+          height: 520,
+          child: _VoucherDetails(
+            id: text(voucher, 'id'),
+            onOpen: (path) {
+              Navigator.of(dialogContext).pop();
+              context.go(path);
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(context.l10n.close),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -525,7 +575,12 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 ),
                 ColumnSpec(
                   l10n.voucherType,
-                  value: (r) => text(r, 'kind') == 'BANK' ? l10n.bank : l10n.cashBox,
+                  // The API stores and returns lowercase `cash`/`bank`, while
+                  // this screen creates accounts with `CASH`/`BANK`. Compare
+                  // without case so a bank is never labelled a cash box.
+                  value: (r) => text(r, 'kind').toUpperCase() == 'BANK'
+                      ? l10n.bank
+                      : l10n.cashBox,
                 ),
                 ColumnSpec(
                   isArabic ? l10n.fullNameAr : l10n.fullNameEn,
@@ -622,16 +677,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 ColumnSpec(
                   l10n.party,
                   flex: 2,
-                  value: (r) {
-                    final customer = isArabic
-                        ? text(r, 'customerNameAr', fallback: text(r, 'customerNameEn'))
-                        : text(r, 'customerNameEn', fallback: text(r, 'customerNameAr'));
-                    return customer.isNotEmpty
-                        ? customer
-                        : (isArabic
-                              ? text(r, 'supplierNameAr', fallback: text(r, 'supplierNameEn'))
-                              : text(r, 'supplierNameEn', fallback: text(r, 'supplierNameAr')));
-                  },
+                  value: (r) => partnerName(r, arabic: isArabic),
                 ),
                 ColumnSpec(
                   l10n.amount,
@@ -639,9 +685,20 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   emphasise: true,
                   value: (r) => formatAmount(amount(r, 'amount')),
                 ),
-                ColumnSpec(l10n.status, value: (r) => text(r, 'status')),
+                ColumnSpec(
+                  l10n.status,
+                  value: (r) => text(r, 'status'),
+                  tone: (r) => toneForStatus(text(r, 'status')),
+                ),
               ],
               actions: (row) => [
+                IconButton(
+                  tooltip: isArabic
+                      ? 'تفاصيل السند والفواتير والقيد'
+                      : 'Voucher, invoices and entry',
+                  icon: const Icon(Icons.receipt_long_outlined, size: 20),
+                  onPressed: () => _showVoucher(row),
+                ),
                 IconButton(
                   tooltip: isArabic ? 'طباعة وتنزيل المستند' : 'Print and download document',
                   icon: const Icon(Icons.print_outlined, size: 20),
@@ -740,7 +797,11 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   emphasise: true,
                   value: (r) => formatAmount(amount(r, 'amount')),
                 ),
-                ColumnSpec(l10n.status, value: (r) => text(r, 'status')),
+                ColumnSpec(
+                  l10n.status,
+                  value: (r) => text(r, 'status'),
+                  tone: (r) => toneForStatus(text(r, 'status')),
+                ),
               ],
               actions: (row) => [
                 if (text(row, 'status').toUpperCase() == 'DRAFT')
@@ -815,6 +876,24 @@ class _AccountStatement extends ConsumerWidget {
                 ),
               ],
             ),
+    );
+  }
+}
+
+/// Loads one voucher and hands it to the view that draws it.
+class _VoucherDetails extends ConsumerWidget {
+  const _VoucherDetails({required this.id, required this.onOpen});
+
+  final String id;
+  final void Function(String path) onOpen;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final detail = ref.watch(cashVoucherProvider(id));
+    return detail.when(
+      loading: () => const LoadingView(),
+      error: (error, _) => ErrorView(message: error.toString()),
+      data: (voucher) => VoucherDetailsView(voucher: voucher, onOpen: onOpen),
     );
   }
 }

@@ -1,13 +1,15 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { ReportTable } from './report-table';
+import { columnLabel, normalizeColumns } from '../sales/quotation-columns';
+import { ReportTable, TableColumn } from './report-table';
 
 export const DOCUMENT_KINDS = [
   'sales-invoice',
   'purchase-invoice',
   'sales-order',
   'purchase-order',
+  'sales-quotation',
   'cash-voucher',
   'journal-entry',
 ] as const;
@@ -51,6 +53,11 @@ export const DOCUMENT_SPECS: Record<DocumentKind, DocumentSpec> = {
     readPermission: 'accounting.journal.read',
     exportPermission: 'reports.export',
   },
+  'sales-quotation': {
+    kind: 'sales-quotation',
+    readPermission: 'sales.quotations.read',
+    exportPermission: 'sales.quotations.export',
+  },
 };
 
 const MONEY = 4;
@@ -78,6 +85,8 @@ export class DocumentsService {
         return this.salesOrder(companyId, id);
       case 'purchase-order':
         return this.purchaseOrder(companyId, id);
+      case 'sales-quotation':
+        return this.salesQuotation(companyId, id, lang);
       case 'cash-voucher':
         return this.cashVoucher(companyId, id, lang);
       case 'journal-entry':
@@ -261,6 +270,129 @@ export class DocumentsService {
       })),
       totals: [{ labelEn: 'Total', labelAr: 'الإجمالي', value: order.totalAmount.toFixed(MONEY) }],
     });
+  }
+
+  /// A quotation as a file. The columns are the offer's own layout, in its
+  /// own order and with its own labels, so the spreadsheet matches the printed
+  /// page. A table title is added as the first column because a flat file
+  /// loses the section headings the page shows.
+  private async salesQuotation(
+    companyId: string,
+    id: string,
+    lang: 'ar' | 'en',
+  ): Promise<ReportTable> {
+    const quotation = await this.prisma.quotation.findFirst({
+      where: { id, companyId, deletedAt: null },
+      include: {
+        customer: { select: { code: true, nameEn: true, nameAr: true } },
+        tables: {
+          orderBy: { sortOrder: 'asc' },
+          include: {
+            lines: {
+              orderBy: { lineNumber: 'asc' },
+              include: { item: { select: { code: true, nameEn: true, nameAr: true } } },
+            },
+          },
+        },
+      },
+    });
+    if (!quotation) throw new NotFoundException('Quotation not found');
+
+    const layout = normalizeColumns(quotation.columns).filter((column) => column.visible);
+    const columns: TableColumn[] = [
+      { key: 'table', labelEn: 'Table', labelAr: 'الجدول', width: 18 },
+      ...layout.map((column) => ({
+        key: column.key,
+        labelEn: columnLabel(column, 'en'),
+        labelAr: columnLabel(column, 'ar'),
+        // Built-in money columns carry their flag in the layout; a
+        // user-defined column is never looked up in the built-in catalogue,
+        // where its key does not exist.
+        numeric: column.numeric === true,
+        width: Math.max(8, column.width * 6),
+      })),
+    ];
+
+    const rows: Array<Record<string, unknown>> = [];
+    for (const table of quotation.tables) {
+      for (const line of table.lines) {
+        const description =
+          line.description ||
+          (lang === 'ar' ? line.item?.nameAr || line.item?.nameEn : line.item?.nameEn) ||
+          '';
+        const row: Record<string, unknown> = {
+          table: table.title,
+          itemCode: line.item?.code ?? '',
+          description,
+          countryOfOrigin: line.countryOfOrigin ?? '',
+          unit: line.unit ?? '',
+          quantity: line.quantity.toFixed(MONEY),
+          unitPrice: line.unitPrice.toFixed(MONEY),
+          lineTotal: line.lineTotal.toFixed(MONEY),
+        };
+        // The value under each user-defined column is stored per line; a line
+        // that left it blank must still produce a cell, not shift the row.
+        const custom = (line.customValues as Record<string, unknown> | null) ?? {};
+        for (const column of layout) {
+          if (column.key in row) continue;
+          const value = custom[column.key];
+          row[column.key] =
+            typeof value === 'string'
+              ? value
+              : value === undefined || value === null
+                ? ''
+                : String(value);
+        }
+        rows.push(row);
+      }
+    }
+
+    const party = quotation.customer;
+    const partyName = lang === 'ar' ? party?.nameAr || party?.nameEn : party?.nameEn;
+    const tableDiscounts = quotation.tables.reduce(
+      (sum: number, table: { discountTotal: unknown }) => sum + Number(table.discountTotal),
+      0,
+    );
+    const quotationDiscount = Number(quotation.discountTotal) - tableDiscounts;
+    return {
+      slug: 'sales-quotation',
+      titleEn: `Quotation ${quotation.quotationNumber}`,
+      titleAr: `عرض سعر ${quotation.quotationNumber}`,
+      meta: [
+        { labelEn: 'Number', labelAr: 'الرقم', value: quotation.quotationNumber },
+        { labelEn: 'Date', labelAr: 'التاريخ', value: quotation.quotationDate.toISOString().slice(0, 10) },
+        {
+          labelEn: 'Valid until',
+          labelAr: 'صالح حتى',
+          value: quotation.validUntil?.toISOString().slice(0, 10) ?? '',
+        },
+        {
+          labelEn: 'Customer',
+          labelAr: 'العميل',
+          value: `${party?.code ?? ''} ${partyName ?? ''}`.trim(),
+        },
+        { labelEn: 'Subject', labelAr: 'الموضوع', value: quotation.subject ?? '' },
+        { labelEn: 'Currency', labelAr: 'العملة', value: quotation.currency },
+        { labelEn: 'Version', labelAr: 'الإصدار', value: String(quotation.version) },
+        { labelEn: 'Status', labelAr: 'الحالة', value: quotation.status },
+      ].filter((item) => item.value.trim().length > 0),
+      columns,
+      rows,
+      totals: [
+        { labelEn: 'Subtotal', labelAr: 'الإجمالي قبل الخصم', value: quotation.subTotal.toFixed(MONEY) },
+        { labelEn: 'Table discounts', labelAr: 'خصومات الجداول', value: tableDiscounts.toFixed(MONEY) },
+        {
+          labelEn: 'Quotation discount',
+          labelAr: 'خصم العرض',
+          value: (quotationDiscount > 0 ? quotationDiscount : 0).toFixed(MONEY),
+        },
+        { labelEn: 'Total', labelAr: 'الإجمالي النهائي', value: quotation.totalAmount.toFixed(MONEY) },
+      ],
+      notes: [
+        { en: 'This offer is not a tax invoice.', ar: 'هذا العرض ليس فاتورة ضريبية.' },
+        ...(quotation.terms ? [{ en: quotation.terms, ar: quotation.terms }] : []),
+      ],
+    };
   }
 
   private async cashVoucher(companyId: string, id: string, lang: 'ar' | 'en'): Promise<ReportTable> {

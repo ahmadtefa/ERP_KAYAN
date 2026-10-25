@@ -33,6 +33,15 @@ export class AuthController {
     return this.auth.refresh(dto.refreshToken);
   }
 
+  /**
+   * Exchanges the caller's session for a one-minute ticket that a browser
+   * navigation (a download tab) may carry as `?ticket=`.
+   */
+  @Post('download-ticket')
+  issueDownloadTicket(@CurrentUser() user: AuthUser) {
+    return this.auth.issueDownloadTicket(user);
+  }
+
   @Post('logout')
   async logout(
     @CurrentUser() user: AuthUser,
@@ -42,43 +51,42 @@ export class AuthController {
     return { success: true };
   }
 
-  /** Returns the current principal, re-read from the database. */
+  /** Returns the current, already-authorized principal with current role labels. */
   @Get('me')
   async me(@CurrentUser() user: AuthUser) {
     const record = await this.prisma.user.findUniqueOrThrow({
       where: { id: user.userId },
-      include: {
+      select: {
+        id: true,
+        fullNameEn: true,
+        isActive: true,
         userRoles: {
-          include: {
+          where: {
+            companyId: user.companyId,
             role: {
-              include: { rolePermissions: { include: { permission: true } } },
+              deletedAt: null,
+              OR: [{ companyId: user.companyId }, { companyId: null }],
             },
           },
+          select: { role: { select: { code: true } } },
         },
-        branches: true,
       },
     });
 
-    const permissions = [
-      ...new Set(
-        record.userRoles.flatMap((ur) =>
-          ur.role.rolePermissions.map((rp) => rp.permission.code),
-        ),
-      ),
-    ];
     const roles = [...new Set(record.userRoles.map((ur) => ur.role.code))];
 
     return {
       user: {
-        id: record.id,
-        username: record.username,
+        id: user.userId,
+        username: user.username,
         fullName: record.fullNameEn,
-        companyId: record.companyId,
-        branchId: record.branches[0]?.branchId ?? null,
+        companyId: user.companyId,
+        branchId: user.branchId,
         roles,
-        permissions,
+        // Permissions come from JwtAuthGuard's tenant-scoped database lookup.
+        permissions: user.permissions,
         isActive: record.isActive,
-        isSuperAdmin: record.isSuperAdmin,
+        isSuperAdmin: user.isSuperAdmin,
       },
     };
   }

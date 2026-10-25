@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../data/reset_data_source.dart';
 import '../providers/reset_providers.dart';
 
-/// «إعادة ضبط بيانات البرنامج» — Reset ERP Data.
+/// «إعادة تهيئة البرنامج» — Reset program.
 ///
 /// The most destructive thing the program offers, and the only one that
 /// cannot be taken back by pressing another button — the way back is the
@@ -42,6 +43,15 @@ class ResetDataCard extends ConsumerWidget {
     final preview = ref.watch(resetPreviewProvider);
 
     return Card(
+      // A danger zone, drawn as one: the red hairline is what separates
+      // «إعادة تهيئة البرنامج» from every ordinary setting above it, so
+      // the eye slows down here instead of skimming past.
+      shape: RoundedRectangleBorder(
+        borderRadius: AppRadii.card,
+        side: BorderSide(
+          color: theme.colorScheme.error.withValues(alpha: 0.45),
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -127,6 +137,10 @@ class ResetDataCard extends ConsumerWidget {
       ),
     );
     ref.invalidate(resetPreviewProvider);
+    // The reset revokes every refresh token and returns the company to its
+    // first-run state. Drop the local JWT as well, so the router opens the
+    // setup/login flow instead of leaving a signed-in screen on empty books.
+    await ref.read(authControllerProvider.notifier).signOut();
   }
 }
 

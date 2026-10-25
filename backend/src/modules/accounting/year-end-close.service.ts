@@ -58,6 +58,7 @@ export class YearEndCloseService {
         resultLabel: result.isNegative() ? 'loss' : 'profit',
       },
       blockers: await this.blockers(companyId, period),
+      warnings: await this.warnings(companyId, period),
     };
   }
 
@@ -323,6 +324,107 @@ export class YearEndCloseService {
     }
 
     return blockers;
+  }
+
+  /**
+   * Things an accountant should look at before closing, which do not by
+   * themselves make the close wrong: closing stays possible, informed.
+   * Kept separate from blockers on purpose — a warning that blocks is a
+   * blocker that lies about its name.
+   */
+  private async warnings(
+    companyId: string,
+    period: { id: string; startDate: Date; endDate: Date },
+  ): Promise<string[]> {
+    const warnings: string[] = [];
+
+    // Cash-flow classification still undecided for accounts that moved
+    // cash in this period: they will sit in "unclassified" on the
+    // statement until the accountant decides. Worth knowing before the
+    // year is locked, not worth blocking for.
+    const cashAccounts = await this.prisma.cashAccount.findMany({
+      where: { companyId, deletedAt: null },
+      select: { accountId: true },
+    });
+    const cashIds = cashAccounts.map((row) => row.accountId);
+    if (cashIds.length > 0) {
+      const unclassified = await this.prisma.$queryRaw<
+        Array<{ code: string; nameEn: string }>
+      >(Prisma.sql`
+        SELECT DISTINCT a.code, a."nameEn"
+          FROM journal_entries e
+          JOIN journal_lines cl
+            ON cl."journalEntryId" = e.id
+           AND cl."accountId" IN (${Prisma.join(cashIds.map((id) => Prisma.sql`${id}::uuid`))})
+          JOIN journal_lines l
+            ON l."journalEntryId" = e.id
+           AND l."accountId" NOT IN (${Prisma.join(cashIds.map((id) => Prisma.sql`${id}::uuid`))})
+          JOIN accounts a ON a.id = l."accountId"
+         WHERE e."companyId" = ${companyId}::uuid
+           AND e.status IN ('POSTED', 'REVERSED')
+           AND e."entryDate" >= ${period.startDate}::date
+           AND e."entryDate" <= ${period.endDate}::date
+           AND a."cashFlowClass" IS NULL
+         ORDER BY a.code
+      `);
+      if (unclassified.length > 0) {
+        warnings.push(
+          `${unclassified.length} account(s) with cash movements have no cash-flow classification ` +
+            `(${unclassified.slice(0, 3).map((a) => a.code).join(', ')}${unclassified.length > 3 ? ', …' : ''}); ` +
+            'they will appear as "unclassified" on the cash-flow statement',
+        );
+      }
+    }
+
+    // Assets still depreciating that were not charged in the final
+    // month of the period: closing now understates the year's expense.
+    const lastMonth = period.endDate.toISOString().slice(0, 7);
+    const activeAssets = await this.prisma.fixedAsset.findMany({
+      where: {
+        companyId,
+        deletedAt: null,
+        status: 'ACTIVE',
+        inServiceDate: { lte: period.endDate },
+      },
+      select: { id: true, code: true, cost: true, salvageValue: true },
+    });
+    if (activeAssets.length > 0) {
+      const [chargedLastMonth, accumulatedRows] = await Promise.all([
+        this.prisma.assetDepreciation.findMany({
+          where: {
+            companyId,
+            periodKey: lastMonth,
+            assetId: { in: activeAssets.map((a) => a.id) },
+          },
+          select: { assetId: true },
+        }),
+        this.prisma.assetDepreciation.groupBy({
+          by: ['assetId'],
+          where: { companyId, assetId: { in: activeAssets.map((a) => a.id) } },
+          _sum: { amount: true },
+        }),
+      ]);
+      const charged = new Set(chargedLastMonth.map((r) => r.assetId));
+      const accumulatedBy = new Map(
+        accumulatedRows.map((r) => [r.assetId, new Prisma.Decimal(r._sum.amount ?? 0)]),
+      );
+      const missing = activeAssets.filter(
+        (asset) =>
+          !charged.has(asset.id) &&
+          (accumulatedBy.get(asset.id) ?? new Prisma.Decimal(0)).lessThan(
+            asset.cost.minus(asset.salvageValue),
+          ),
+      );
+      if (missing.length > 0) {
+        warnings.push(
+          `${missing.length} active asset(s) have no depreciation charge for ${lastMonth} ` +
+            `(${missing.slice(0, 3).map((a) => a.code).join(', ')}${missing.length > 3 ? ', …' : ''}); ` +
+            'run depreciation for the final month or close knowing the expense is understated',
+        );
+      }
+    }
+
+    return warnings;
   }
 
   /** Money in each revenue and expense account over the period, by account type. */

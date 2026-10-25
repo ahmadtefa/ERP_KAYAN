@@ -1,6 +1,8 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import sharp from 'sharp';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -9,6 +11,9 @@ import {
   CompanyService,
   LOGO_MAX_BYTES,
   logoDimensions,
+  logoMimeForUpload,
+  LOGO_UPLOAD_MAX_BYTES,
+  normalizeLogo,
   validateLogo,
 } from './company.service';
 
@@ -70,12 +75,65 @@ describe('validateLogo', () => {
     expect(() => validateLogo(fake, 'image/webp')).toThrow(BadRequestException);
   });
 
+  it('infers the multipart MIME from the supported filename extension when needed', () => {
+    expect(logoMimeForUpload('application/octet-stream', 'logo.png')).toBe('image/png');
+    expect(logoMimeForUpload('application/octet-stream', 'logo.jpeg')).toBe('image/jpeg');
+    expect(logoMimeForUpload('image/webp', 'logo.png')).toBe('image/webp');
+    expect(logoMimeForUpload('application/octet-stream', 'logo.svg')).toBe('application/octet-stream');
+  });
+
   it('reads the pixel size of a PNG', () => {
     const header = Buffer.alloc(24);
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header);
     header.writeUInt32BE(64, 16);
     header.writeUInt32BE(48, 20);
     expect(logoDimensions(header, 'image/png')).toEqual({ width: 64, height: 48 });
+  });
+});
+
+describe('normalizeLogo', () => {
+  it('resizes a valid large-dimension PNG and stores a compact WebP', async () => {
+    const source = await sharp({
+      create: {
+        width: 2048,
+        height: 1024,
+        channels: 4,
+        background: { r: 24, g: 80, b: 140, alpha: 1 },
+      },
+    }).png().toBuffer();
+
+    const normalized = await normalizeLogo(source, 'image/png');
+    const metadata = await sharp(Buffer.from(normalized.data)).metadata();
+
+    expect(normalized.mime).toBe('image/webp');
+    expect(metadata.format).toBe('webp');
+    expect(metadata.width).toBeLessThanOrEqual(1024);
+    expect(metadata.height).toBeLessThanOrEqual(1024);
+  });
+
+  it('compresses a valid source larger than the persisted logo limit', async () => {
+    const raw = randomBytes(1200 * 1200 * 3);
+    const largePng = await sharp(raw, {
+      raw: { width: 1200, height: 1200, channels: 3 },
+    }).png({ compressionLevel: 0 }).toBuffer();
+    expect(largePng.length).toBeGreaterThan(LOGO_MAX_BYTES);
+    expect(largePng.length).toBeLessThanOrEqual(LOGO_UPLOAD_MAX_BYTES);
+
+    const normalized = await normalizeLogo(largePng, 'image/png');
+
+    expect(normalized.mime).toBe('image/webp');
+    expect(normalized.data.length).toBeLessThanOrEqual(LOGO_MAX_BYTES);
+    expect(normalized.data.length).toBeLessThan(largePng.length);
+  });
+
+  it('rejects invalid image bytes and uploads over the hard cap', async () => {
+    await expect(normalizeLogo(Buffer.from('<script>'), 'image/png')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    const overLimit = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(LOGO_UPLOAD_MAX_BYTES)]);
+    await expect(normalizeLogo(overLimit, 'image/png')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 });
 

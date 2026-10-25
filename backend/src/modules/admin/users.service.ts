@@ -41,6 +41,9 @@ export class UsersService {
           include: { role: { select: { id: true, code: true, nameEn: true } } },
         },
         branches: { include: { branch: true } },
+        userPermissions: {
+          include: { permission: { select: { code: true } } },
+        },
       },
     });
     return { items: users.map((u) => this.toResponse(u)) };
@@ -54,6 +57,9 @@ export class UsersService {
           include: { role: { select: { id: true, code: true, nameEn: true } } },
         },
         branches: { include: { branch: true } },
+        userPermissions: {
+          include: { permission: { select: { code: true } } },
+        },
       },
     });
     if (!user) throw new NotFoundException('User not found');
@@ -81,6 +87,11 @@ export class UsersService {
       isSuperAdmin,
     );
     await this.assertBranchesBelongToCompany(companyId, dto.branchIds);
+    const extraPermissions = await this.normalizeExtraPermissions(
+      dto.extraPermissions,
+      actorPermissions,
+      isSuperAdmin,
+    );
 
     const passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
 
@@ -100,6 +111,7 @@ export class UsersService {
       });
       await this.replaceRoles(tx, companyId, user.id, dto.roleIds);
       await this.replaceBranches(tx, user.id, dto.branchIds);
+      await this.replaceExtraPermissions(tx, user.id, extraPermissions);
       return user;
     });
 
@@ -140,6 +152,14 @@ export class UsersService {
       isSuperAdmin,
     );
     await this.assertBranchesBelongToCompany(companyId, dto.branchIds);
+    const extraPermissions =
+      dto.extraPermissions === undefined
+        ? undefined
+        : await this.normalizeExtraPermissions(
+            dto.extraPermissions,
+            actorPermissions,
+            isSuperAdmin,
+          );
 
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
@@ -154,6 +174,7 @@ export class UsersService {
       });
       if (dto.roleIds) await this.replaceRoles(tx, companyId, id, dto.roleIds);
       if (dto.branchIds) await this.replaceBranches(tx, id, dto.branchIds);
+      if (extraPermissions) await this.replaceExtraPermissions(tx, id, extraPermissions);
       if (dto.isActive === false) {
         await tx.refreshToken.updateMany({
           where: { userId: id, revokedAt: null },
@@ -169,7 +190,11 @@ export class UsersService {
       entity: 'users',
       entityId: id,
       before: { fullNameEn: before.fullNameEn, isActive: before.isActive },
-      after: { fullNameEn: dto.fullNameEn, isActive: dto.isActive },
+      after: {
+      fullNameEn: dto.fullNameEn,
+      isActive: dto.isActive,
+      extraPermissions,
+    },
     });
     return this.findOne(companyId, id);
   }
@@ -332,6 +357,62 @@ export class UsersService {
     }
   }
 
+  /// Checks that every extra code exists and that the actor is not handing
+  /// out a permission they do not hold themselves. A super administrator is
+  /// the only account allowed to grant beyond its own set.
+  private async normalizeExtraPermissions(
+    codes: string[] | undefined,
+    actorPermissions: string[],
+    isSuperAdmin: boolean,
+  ): Promise<string[]> {
+    if (!codes?.length) return [];
+    const unique = [...new Set(codes.map((code) => code.trim()).filter(Boolean))];
+    if (!unique.length) return [];
+
+    const found = await this.prisma.permission.findMany({
+      where: { code: { in: unique } },
+      select: { code: true },
+    });
+    const known = new Set(found.map((permission) => permission.code));
+    const unknown = unique.filter((code) => !known.has(code));
+    if (unknown.length) {
+      throw new BadRequestException(
+        `Unknown permission code(s): ${unknown.join(', ')}`,
+      );
+    }
+    if (!isSuperAdmin) {
+      const forbidden = unique.filter((code) => !actorPermissions.includes(code));
+      if (forbidden.length) {
+        throw new ForbiddenException(
+          `You cannot grant permissions you do not hold: ${forbidden.join(', ')}`,
+        );
+      }
+    }
+    return unique.sort();
+  }
+
+  private async replaceExtraPermissions(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    codes: string[],
+  ) {
+    await tx.userPermission.deleteMany({ where: { userId } });
+    if (!codes.length) return;
+    const permissions = await tx.permission.findMany({
+      where: { code: { in: codes } },
+      select: { id: true },
+    });
+    if (permissions.length !== codes.length) {
+      throw new BadRequestException('One of the permissions no longer exists');
+    }
+    await tx.userPermission.createMany({
+      data: permissions.map((permission) => ({
+        userId,
+        permissionId: permission.id,
+      })),
+    });
+  }
+
   private async assertBranchesBelongToCompany(companyId: string, branchIds?: string[]) {
     if (!branchIds?.length) return;
     const found = await this.prisma.branch.count({
@@ -360,6 +441,10 @@ export class UsersService {
         code: ur.role.code,
         nameEn: ur.role.nameEn,
       })),
+      // Grants made to this one person on top of their roles.
+      extraPermissions: (user.userPermissions ?? [])
+        .map((grant: any) => grant.permission.code)
+        .sort(),
       branches: (user.branches ?? []).map((ub: any) => ({
         id: ub.branch.id,
         code: ub.branch.code,

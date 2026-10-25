@@ -24,17 +24,46 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       exception instanceof Prisma.PrismaClientKnownRequestError &&
       exception.code === 'P2002';
 
+    // The fiscal-period trigger is a database backstop: when a path that
+    // writes stock movements before its journal reaches it first, its
+    // raise (SQLSTATE 23514) would otherwise surface as an opaque 500 for
+    // what is really a readable business refusal — the period is closed.
+    const exceptionText =
+      exception instanceof Error ? exception.message : String(exception ?? '');
+    const isClosedPeriodTrigger =
+      exceptionText.includes('Fiscal period is closed for company') ||
+      exceptionText.includes('kayan_require_open_fiscal_period');
+
+    const rawStatus =
+      typeof exception === 'object' && exception !== null && 'status' in exception
+        ? Number((exception as { status?: unknown }).status)
+        : typeof exception === 'object' && exception !== null && 'statusCode' in exception
+          ? Number((exception as { statusCode?: unknown }).statusCode)
+          : 0;
+    const requestTooLarge = rawStatus === HttpStatus.PAYLOAD_TOO_LARGE;
     const status = isUniqueConstraint
       ? HttpStatus.CONFLICT
-      : exception instanceof HttpException
-        ? exception.getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
+      : isClosedPeriodTrigger
+        ? HttpStatus.BAD_REQUEST
+        : requestTooLarge
+        ? HttpStatus.PAYLOAD_TOO_LARGE
+        : exception instanceof HttpException
+          ? exception.getStatus()
+          : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    let detail = 'Unexpected server error';
+    let detail = requestTooLarge
+      ? 'حجم الملف أو الطلب أكبر من الحد المسموح. قلّل حجم صورة الشعار وحاول مرة أخرى.'
+      : 'Unexpected server error';
     let extra: Record<string, unknown> = {};
 
     if (isUniqueConstraint) {
       detail = 'A record with the same unique value already exists';
+    } else if (isClosedPeriodTrigger) {
+      detail =
+        'The fiscal period covering this date is closed, so nothing can be posted into it. ' +
+        'Use a date in an open period instead.';
+    } else if (requestTooLarge) {
+      // Keep the bounded-upload explanation above; do not expose parser text.
     } else if (exception instanceof HttpException) {
       const body = exception.getResponse();
       if (typeof body === 'string') {

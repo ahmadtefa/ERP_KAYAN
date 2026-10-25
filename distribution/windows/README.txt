@@ -10,11 +10,18 @@ The first launch applies the checked-in Prisma migrations and asks you to
 create the first administrator. It does not insert a default account, reset a
 database, or seed sample records.
 
-Local PostgreSQL starts automatically with Windows. Repair KAYAN ERP and
-Start/Stop/Restart PostgreSQL shortcuts are available in the KAYAN ERP Start
-menu (or by running repair-kayan.bat in the installation folder). The service
-listens only on the local machine. If another application already uses port
-5432, setup stops with an error and does not replace that application.
+Local PostgreSQL starts automatically with Windows. The Start menu includes
+Repair KAYAN ERP (RepairTool.exe): it inspects the local installation, shows
+what it found, and changes nothing until you confirm. It repairs the bundled
+runtime, file permissions, the PostgreSQL service and pending database
+migrations without deleting company data or changing database credentials.
+The same checks can be scripted with "RepairTool.exe --diagnose" and
+"RepairTool.exe --repair --quiet" (exit code 0 means no problems remain).
+repair-kayan.bat in the installation folder performs the underlying repair
+directly. Start/Stop/Restart PostgreSQL shortcuts are also in the Start menu.
+The service listens only on the local machine. If another application already
+uses port 5432, setup stops with an error and does not replace that
+application.
 
 If the setup cannot finish, the installer says which step failed and where the
 full, redacted diagnostics are written:
@@ -25,6 +32,7 @@ Company data is kept outside Program Files:
   Database: %ProgramData%\KAYAN-ERP\PostgreSQL\data
   Database logs: %ProgramData%\KAYAN-ERP\logs
   Installer diagnostics: %ProgramData%\KAYAN-ERP\logs\installer.log
+  Repair tool log: %ProgramData%\KAYAN-ERP\logs\repairtool.log
   User settings and secrets: %APPDATA%\KAYAN-ERP\kayan.env
   Company logos and backend logs: %APPDATA%\KAYAN-ERP\
 

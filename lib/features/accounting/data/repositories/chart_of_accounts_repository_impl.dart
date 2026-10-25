@@ -60,6 +60,22 @@ class ChartOfAccountsRepositoryImpl implements ChartOfAccountsRepository {
   }
 
   @override
+  Future<Result<Account>> setAccountActive(
+    String id, {
+    required bool isActive,
+  }) async {
+    try {
+      return Success(await _source.setActive(id, isActive: isActive));
+    } on Failure catch (failure) {
+      return ResultFailure(failure);
+    } catch (e) {
+      return ResultFailure(
+        ServerFailure('Could not change the account status', e),
+      );
+    }
+  }
+
+  @override
   Future<Result<void>> deleteAccount(String id) async {
     try {
       await _source.deleteAccount(id);

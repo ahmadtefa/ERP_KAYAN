@@ -1,11 +1,16 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
+import '../../../../core/image/company_logo_image.dart';
+import '../../../../core/image/company_logo_url.dart';
 import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/page_header.dart';
 import '../../../../shared/widgets/state_views.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/company_providers.dart';
 
 /// Company profile, logo and units — the records every report and document
@@ -18,25 +23,49 @@ class CompanySettingsScreen extends ConsumerWidget {
     final l10n = context.l10n;
     final profile = ref.watch(companyProfileProvider);
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          l10n.companyProfile,
-          style: Theme.of(context).textTheme.titleMedium,
+        PageHeader(title: l10n.companySettings),
+        Container(
+          height: 1,
+          color: Theme.of(context).colorScheme.outlineVariant,
         ),
-        const SizedBox(height: 8),
-        AsyncStateView<Map<String, dynamic>>(
-          value: profile,
-          onRetry: () => ref.read(companyProfileProvider.notifier).refresh(),
-          isEmpty: (map) => map.isEmpty,
-          emptyMessage: l10n.noData,
-          data: (data) => _ProfileCard(profile: data),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.xxl),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1080),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      l10n.companyProfile,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    AsyncStateView<Map<String, dynamic>>(
+                      value: profile,
+                      onRetry: () =>
+                          ref.read(companyProfileProvider.notifier).refresh(),
+                      isEmpty: (map) => map.isEmpty,
+                      emptyMessage: l10n.noData,
+                      data: (data) => _ProfileCard(profile: data),
+                    ),
+                    const SizedBox(height: AppSpacing.xxl),
+                    Text(
+                      l10n.branches,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    const _BranchesCard(),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
-        const SizedBox(height: 24),
-        Text(l10n.branches, style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
-        const _BranchesCard(),
       ],
     );
   }
@@ -119,9 +148,10 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
     final l10n = context.l10n;
     if (error == null) {
       ref.invalidate(companyProfileProvider);
+      showMessage(context, l10n.profileSaved);
+    } else {
+      showMessage(context, error, error: true);
     }
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(error ?? l10n.profileSaved)));
   }
 
   @override
@@ -135,7 +165,8 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
           children: [
             _LogoRow(
               hasLogo: widget.profile['hasLogo'] == true,
-              logoBase64: widget.profile['logoBase64'] as String?,
+              logoUrl: widget.profile['logoUrl'] as String?,
+              companyId: widget.profile['id'] as String?,
             ),
             const SizedBox(height: 16),
             Row(
@@ -210,10 +241,18 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
 }
 
 class _LogoRow extends ConsumerStatefulWidget {
-  const _LogoRow({required this.hasLogo, this.logoBase64});
+  const _LogoRow({
+    required this.hasLogo,
+    this.logoUrl,
+    this.companyId,
+  });
 
   final bool hasLogo;
-  final String? logoBase64;
+
+  /// The relative path the profile reports; [companyLogoUrl] resolves it
+  /// against the address this client talks to.
+  final String? logoUrl;
+  final String? companyId;
 
   @override
   ConsumerState<_LogoRow> createState() => _LogoRowState();
@@ -231,20 +270,68 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$error')));
+      showMessage(context, '$error', error: true);
       return;
     }
     if (picked == null || !mounted) return;
+
+    late final PickedFile normalized;
+    try {
+      final bytes = await normalizeCompanyLogo(picked.bytes);
+      normalized = PickedFile(
+        name: 'company-logo.png',
+        bytes: bytes,
+        mimeType: 'image/png',
+      );
+    } on CompanyLogoImageException catch (problem) {
+      if (!mounted) return;
+      showMessage(
+        context,
+        problem.tooLarge ? l10n.logoTooLarge : l10n.logoInvalid,
+        error: true,
+      );
+      return;
+    }
+    if (!mounted) return;
+
     setState(() => _busy = true);
     final error = await ref
         .read(companyProfileProvider.notifier)
-        .uploadLogo(picked);
+        .uploadLogo(normalized);
     if (!mounted) return;
     setState(() => _busy = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error ?? l10n.logoUpdated)),
-    );
+    if (error == null) {
+      showMessage(context, l10n.logoUpdated);
+    } else {
+      showMessage(
+        context,
+        _localizedLogoError(
+          error,
+          tooLarge: l10n.logoTooLarge,
+          invalid: l10n.logoInvalid,
+        ),
+        error: true,
+      );
+    }
+  }
+
+  String _localizedLogoError(
+    String error, {
+    required String tooLarge,
+    required String invalid,
+  }) {
+    final lower = error.toLowerCase();
+    if (lower.contains('larger than') || lower.contains('too large')) {
+      return tooLarge;
+    }
+    if (lower.contains('logo') ||
+        lower.contains('image') ||
+        lower.contains('webp') ||
+        lower.contains('png') ||
+        lower.contains('jpeg')) {
+      return invalid;
+    }
+    return error;
   }
 
   Future<void> _remove() async {
@@ -254,16 +341,24 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
         await ref.read(companyProfileProvider.notifier).removeLogo();
     if (!mounted) return;
     setState(() => _busy = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error ?? l10n.logoRemoved)),
-    );
+    if (error == null) {
+      showMessage(context, l10n.logoRemoved);
+    } else {
+      showMessage(context, error, error: true);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final hasImage =
-        widget.logoBase64 != null && widget.logoBase64!.trim().isNotEmpty;
+    final url = companyLogoUrl(
+      ref.watch(appConfigProvider).apiBaseUrl,
+      {
+        'id': widget.companyId,
+        'logoUrl': widget.logoUrl,
+        'hasLogo': widget.hasLogo,
+      },
+    );
     return Row(
       children: [
         CircleAvatar(
@@ -271,22 +366,22 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
           backgroundColor: Theme.of(context)
               .colorScheme
               .surfaceContainerHighest,
-          child: hasImage
-              ? ClipOval(
-                  child: Image.memory(
-                    base64Decode(widget.logoBase64!),
+          child: url == null
+              ? Icon(
+                  widget.hasLogo ? Icons.business : Icons.business_outlined,
+                  size: 28,
+                )
+              : ClipOval(
+                  child: Image.network(
+                    url,
                     width: 56,
                     height: 56,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => const Icon(
-                      Icons.business,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) => Icon(
+                      widget.hasLogo ? Icons.business : Icons.business_outlined,
                       size: 28,
                     ),
                   ),
-                )
-              : Icon(
-                  widget.hasLogo ? Icons.business : Icons.business_outlined,
-                  size: 28,
                 ),
         ),
         const SizedBox(width: 12),
@@ -505,9 +600,11 @@ Future<void> _editBranch(
       ? await controller.create({'code': codeController.text.trim(), ...body})
       : await controller.updateBranch('${existing['id']}', body);
 
-  if (context.mounted) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(error ?? l10n.branchSaved)));
+  if (!context.mounted) return;
+  if (error == null) {
+    showMessage(context, l10n.branchSaved);
+  } else {
+    showMessage(context, error, error: true);
   }
 }
 
@@ -541,6 +638,6 @@ Future<void> _deleteBranch(
       .read(branchesProvider.notifier)
       .remove('${branch['id']}');
   if (context.mounted && error != null) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    showMessage(context, error, error: true);
   }
 }

@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/extensions/account_type_labels.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/account_name.dart';
+import '../../../../shared/widgets/page_header.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../../data/datasources/chart_of_accounts_data_source.dart';
 import '../../domain/entities/account.dart';
@@ -24,32 +27,45 @@ class ChartOfAccountsScreen extends ConsumerWidget {
     final l10n = context.l10n;
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        PageHeader(
+          title: l10n.chartOfAccounts,
+          actions: [
+            const ListExportActions(list: 'chart-of-accounts'),
+            FilledButton.icon(
+              onPressed: () => _editAccount(context, ref, null),
+              icon: const Icon(Icons.add, size: 17),
+              label: Text(l10n.newAccount),
+            ),
+          ],
+        ),
         if (showSampleNotice) const _SampleDataBanner(),
+        Container(
+          height: 1,
+          color: Theme.of(context).colorScheme.outlineVariant,
+        ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.xxl,
+            AppSpacing.md,
+            AppSpacing.xxl,
+            AppSpacing.sm,
+          ),
           child: Row(
             children: [
               Expanded(
                 child: TextField(
                   decoration: InputDecoration(
                     hintText: l10n.searchAccounts,
-                    prefixIcon: const Icon(Icons.search),
+                    prefixIcon: const Icon(Icons.search_rounded, size: 18),
                   ),
                   onChanged: (value) =>
                       ref.read(accountSearchProvider.notifier).setQuery(value),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: AppSpacing.md),
               _TypeFilter(ref: ref),
-              const SizedBox(width: 12),
-              const ListExportActions(list: 'chart-of-accounts'),
-              const SizedBox(width: 8),
-              FilledButton.icon(
-                onPressed: () => _editAccount(context, ref, null),
-                icon: const Icon(Icons.add),
-                label: Text(l10n.newAccount),
-              ),
             ],
           ),
         ),
@@ -169,6 +185,13 @@ class _AccountTileState extends ConsumerState<_AccountTile> {
         [
           l10n.accountTypeLabel(account.type),
           account.isPostable ? l10n.postable : l10n.grouping,
+          if (account.cashFlowClass != null)
+            switch (account.cashFlowClass) {
+              'OPERATING' => lang == 'ar' ? 'تدفق تشغيلي' : 'Operating',
+              'INVESTING' => lang == 'ar' ? 'تدفق استثماري' : 'Investing',
+              'FINANCING' => lang == 'ar' ? 'تدفق تمويلي' : 'Financing',
+              _ => account.cashFlowClass!,
+            },
           if (!account.isActive) l10n.inactiveLabel,
         ].join(' · '),
         style: theme.textTheme.bodySmall,
@@ -241,6 +264,7 @@ Future<void> _editAccount(
   var selectedType = existing?.type ?? AccountType.asset;
   var isPostable = existing?.isPostable ?? true;
   var isActive = existing?.isActive ?? true;
+  var selectedCashFlow = existing?.cashFlowClass;
 
   final codeController = TextEditingController(text: existing?.code ?? '');
   final nameArController = TextEditingController(text: existing?.nameAr ?? '');
@@ -378,6 +402,58 @@ Future<void> _editAccount(
                     },
                   ),
                   const SizedBox(height: 12),
+                  if (isPostable) ...[
+                    DropdownButtonFormField<String?>(
+                      key: ValueKey(selectedCashFlow),
+                      initialValue: selectedCashFlow,
+                      decoration: InputDecoration(
+                        labelText: Localizations.localeOf(
+                                  dialogContext,
+                                ).languageCode ==
+                                'ar'
+                            ? 'تصنيف التدفق النقدي'
+                            : 'Cash-flow classification',
+                        helperText: Localizations.localeOf(
+                                  dialogContext,
+                                ).languageCode ==
+                                'ar'
+                            ? 'يُترك غير مصنّف حتى يحدّده المحاسب — لن يخمّنه النظام'
+                            : 'Unclassified until the accountant chooses — never guessed',
+                      ),
+                      items: [
+                        DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text(
+                            Localizations.localeOf(
+                                      dialogContext,
+                                    ).languageCode ==
+                                    'ar'
+                                ? 'غير مصنّف'
+                                : 'Unclassified',
+                          ),
+                        ),
+                        for (final entry in const [
+                          ('OPERATING', 'تشغيلي', 'Operating'),
+                          ('INVESTING', 'استثماري', 'Investing'),
+                          ('FINANCING', 'تمويلي', 'Financing'),
+                        ])
+                          DropdownMenuItem<String?>(
+                            value: entry.$1,
+                            child: Text(
+                              Localizations.localeOf(
+                                        dialogContext,
+                                      ).languageCode ==
+                                      'ar'
+                                  ? entry.$2
+                                  : entry.$3,
+                            ),
+                          ),
+                      ],
+                      onChanged: (value) =>
+                          setDialogState(() => selectedCashFlow = value),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(dialogL10n.postable),
@@ -426,6 +502,7 @@ Future<void> _editAccount(
     isPostable: isPostable,
     isActive: isActive,
     description: descriptionController.text.trim(),
+    cashFlowClass: isPostable ? selectedCashFlow : null,
   );
 
   final controller = ref.read(chartOfAccountsProvider.notifier);
@@ -434,13 +511,17 @@ Future<void> _editAccount(
       : await controller.updateAccount(existing.id, input);
 
   if (context.mounted && error != null) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    showMessage(context, error, error: true);
   }
 }
 
-/// Activates or deactivates an account in place. The server refuses to
-/// deactivate a grouping account that still has active subaccounts, and that
-/// message is shown as-is.
+/// Activates or deactivates an account in place.
+///
+/// The request carries the flag and nothing else. It used to send the whole
+/// account, including its type, which the update contract does not accept:
+/// the API answered `400 property type should not exist` and every
+/// deactivation failed. The server still refuses to deactivate a grouping
+/// account that has active subaccounts, and says why — that reason is kept.
 Future<void> _toggleActive(
   BuildContext context,
   WidgetRef ref,
@@ -448,21 +529,9 @@ Future<void> _toggleActive(
 ) async {
   final error = await ref
       .read(chartOfAccountsProvider.notifier)
-      .updateAccount(
-        account.id,
-        AccountInput(
-          code: account.code,
-          nameEn: account.nameEn ?? account.name,
-          nameAr: account.nameAr ?? '',
-          type: account.type,
-          parentId: account.parentId,
-          isPostable: account.isPostable,
-          isActive: !account.isActive,
-          description: account.description,
-        ),
-      );
+      .setActive(account.id, isActive: !account.isActive);
   if (context.mounted && error != null) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    showMessage(context, error, error: true);
   }
 }
 
@@ -500,7 +569,7 @@ Future<void> _deleteAccount(
       .read(chartOfAccountsProvider.notifier)
       .remove(account.id);
   if (context.mounted && error != null) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    showMessage(context, error, error: true);
   }
 }
 

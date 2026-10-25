@@ -28,6 +28,7 @@ export interface AccountResponse {
   isActive: boolean;
   currency: string | null;
   description: string | null;
+  cashFlowClass: string | null;
 }
 
 /**
@@ -160,6 +161,7 @@ export class ChartOfAccountsService {
           parentId,
           isPostable,
           currency: dto.currency ?? null,
+          cashFlowClass: dto.cashFlowClass ?? null,
           description: dto.description?.trim() || null,
           createdBy: userId,
           updatedBy: userId,
@@ -266,6 +268,7 @@ export class ChartOfAccountsService {
           isPostable: dto.isPostable,
           isActive: dto.isActive,
           currency: dto.currency,
+          cashFlowClass: dto.cashFlowClass,
           description:
             dto.description === undefined ? undefined : dto.description?.trim() || null,
           updatedBy: userId,
@@ -461,6 +464,7 @@ function toResponse(a: {
   isActive: boolean;
   currency: string | null;
   description: string | null;
+  cashFlowClass: string | null;
 }): AccountResponse {
   return {
     id: a.id,
@@ -477,5 +481,6 @@ function toResponse(a: {
     isActive: a.isActive,
     currency: a.currency,
     description: a.description,
+    cashFlowClass: a.cashFlowClass ? a.cashFlowClass.toLowerCase() : null,
   };
 }

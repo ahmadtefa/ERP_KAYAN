@@ -43,6 +43,13 @@ final cashTransfersProvider =
       CashTransfersController.new,
     );
 
+/// One voucher with the invoices it settled and the journal entries it wrote.
+/// The list is a table; this is the chain behind one row of it: receipt ->
+/// invoice -> entry, which is the question an auditor actually asks.
+final cashVoucherProvider = FutureProvider.family<Json, String>((ref, id) async {
+  return ref.read(apiClientProvider).getObject('/cash/vouchers/$id');
+});
+
 /// What each box and bank holds, read from the ledger rather than from a
 /// stored total that could drift away from it.
 final cashBalancesProvider = FutureProvider<List<Json>>((ref) async {

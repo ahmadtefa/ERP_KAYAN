@@ -112,6 +112,17 @@ describe('WarehouseService.resolve', () => {
     await expect(build().resolve(tx as never, 'company-1', 'branch-1', 'wh-3')).rejects.toThrow(/inactive/);
   });
 
+  it('allows a reversal to use the original inactive warehouse', async () => {
+    const tx = fakeTx({
+      warehouses: [
+        { id: 'wh-3', companyId: 'company-1', branchId: 'branch-1', isDefault: false, isActive: false, code: 'OLD' },
+      ],
+    });
+    await expect(
+      build().resolveForReversal(tx as never, 'company-1', 'branch-1', 'wh-3'),
+    ).resolves.toBe('wh-3');
+  });
+
   it('creates the branch default rather than refusing to post', async () => {
     const tx = fakeTx({ warehouses: [] });
     const resolved = await build().resolve(tx as never, 'company-1', 'branch-1', null);

@@ -17,10 +17,19 @@ final appConfigProvider = Provider<AppConfig>(
 
 final tokenStoreProvider = Provider<TokenStore>((ref) => TokenStore());
 
-final apiClientProvider = Provider<ApiClient>(
-  (ref) =>
-      ApiClient(ref.watch(appConfigProvider), ref.watch(tokenStoreProvider)),
-);
+final apiClientProvider = Provider<ApiClient>((ref) {
+  final client = ApiClient(
+    ref.watch(appConfigProvider),
+    ref.watch(tokenStoreProvider),
+  );
+  // The network layer clears the dead tokens; this puts the program back on
+  // the sign-in screen with a localized explanation instead of leaving every
+  // screen failing in a way that looks like a broken installation.
+  client.onSessionExpired = () {
+    ref.read(authControllerProvider.notifier).sessionExpired();
+  };
+  return client;
+});
 
 final companyBrandingProvider = FutureProvider<Map<String, dynamic>?>((
   ref,
@@ -34,6 +43,19 @@ final companyBrandingProvider = FutureProvider<Map<String, dynamic>?>((
     return null;
   }
 });
+
+/// True when the session lives only in this window because the platform
+/// refused to store the tokens. The shell says so instead of letting the
+/// person discover it when a reload signs them out.
+class SessionStorageNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void update(bool value) => state = value;
+}
+
+final volatileSessionProvider =
+    NotifierProvider<SessionStorageNotifier, bool>(SessionStorageNotifier.new);
 
 final authRemoteDataSourceProvider = Provider<AuthRemoteDataSource>(
   (ref) => AuthRemoteDataSourceImpl(ref.watch(apiClientProvider)),
@@ -70,6 +92,11 @@ class AuthController extends AsyncNotifier<AppUser?> {
       username: username,
       password: password,
     );
+    if (result.isSuccess) {
+      ref
+          .read(volatileSessionProvider.notifier)
+          .update(ref.read(tokenStoreProvider).isSessionVolatile);
+    }
     if (result.isSuccess && rememberLogin) {
       try {
         await ref
@@ -86,6 +113,16 @@ class AuthController extends AsyncNotifier<AppUser?> {
   Future<void> signOut() async {
     state = const AsyncValue.loading();
     await ref.read(authRepositoryProvider).signOut();
+    ref.read(volatileSessionProvider.notifier).update(false);
+    state = const AsyncValue.data(null);
+  }
+
+  /// The session was ended by the server: the access token expired and the
+  /// refresh token was refused. The network layer has already cleared the
+  /// stored tokens; dropping to `null` sends the router to sign-in.
+  Future<void> sessionExpired() async {
+    if (state.value == null && !state.isLoading) return;
+    ref.read(volatileSessionProvider.notifier).update(false);
     state = const AsyncValue.data(null);
   }
 }

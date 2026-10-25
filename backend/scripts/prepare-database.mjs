@@ -9,10 +9,13 @@
 //      the one in the configuration
 //   3. create the application database if it is missing
 //   4. apply every migration (a no-op once the database is up to date)
-//   5. say whether the database is empty or ready, so the desktop shell knows
+//   5. say what state the database is in (empty / incomplete / ready /
+//      unknown - see database-state.mjs), so the desktop shell knows
 //      whether this machine still needs its first administrator
-//   6. if it is empty AND a username and password were handed in for that first
-//      administrator, create them (company, branch, roles, chart of accounts)
+//   6. if it needs one AND a username and password were handed in for
+//      that first administrator, create them (company, branch, roles,
+//      chart of accounts), then ask the database again before claiming
+//      it is ready
 //
 // Step 6 is what makes a fresh installation usable without a terminal. The
 // credentials come from the environment, are chosen by the person setting the
@@ -31,6 +34,11 @@ import { fileURLToPath } from 'node:url';
 
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
+
+import {
+  classifyDatabaseState,
+  needsFirstAdministrator,
+} from './database-state.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const backendDir = join(here, '..');
@@ -120,21 +128,28 @@ function migrate() {
   });
 }
 
-/// True when the database has no users yet, which is the state of a database
-/// that has just been created: migrations make tables, not people.
+/// What state the database is in - see database-state.mjs for the four
+/// states and why "could not tell" is its own state ('unknown') instead
+/// of being quietly treated as a brand-new database. Counting COMPANIES
+/// as well as users matters: a company with no users (setup interrupted
+/// halfway) is 'incomplete', not 'empty', and the log must say so.
 ///
-/// Returns null when the question cannot be answered (the client is missing,
-/// or the schema is not there yet), so a failure here never blocks startup.
-async function isEmptyDatabase() {
+/// Any failure to ask - unreachable database, missing schema - returns
+/// 'unknown', so a broken connection is never mistaken for a fresh
+/// install and never invites first-run setup over existing data.
+async function databaseState() {
   let client = null;
   try {
     client = new PrismaClient({
       adapter: new PrismaPg({ connectionString: appUrl }),
     });
-    const users = await client.user.count();
-    return users === 0;
+    const [companies, users] = await Promise.all([
+      client.company.count(),
+      client.user.count(),
+    ]);
+    return classifyDatabaseState({ companies, users });
   } catch {
-    return null;
+    return 'unknown';
   } finally {
     await client?.$disconnect().catch(() => {});
   }
@@ -264,15 +279,18 @@ async function main() {
   }
   console.log('  migrations: up to date');
 
-  // Is this database still empty, and if so were we handed the credentials for
-  // its first administrator?
-  const empty = await isEmptyDatabase();
-  if (empty === null) {
-    // Could not tell - the server's own error, if any, is more precise.
+  // What state is this database in, and - if it still needs its first
+  // administrator - were we handed the credentials for one?
+  const state = await databaseState();
+  if (state === 'unknown') {
+    // Could not tell: unreachable or schema missing. This is NOT a new
+    // database, and it is never announced as one - the shell starts the
+    // server so its own precise error can surface instead.
+    console.log('  database state could not be determined (unreachable?)');
     announce('unknown');
     return;
   }
-  if (!empty) {
+  if (!needsFirstAdministrator(state)) {
     announce('ready');
     return;
   }
@@ -280,9 +298,15 @@ async function main() {
   const username = process.env.KAYAN_ADMIN_USERNAME?.trim();
   const password = process.env.KAYAN_ADMIN_PASSWORD;
   if (!username || !password) {
-    // Normal on a fresh machine: the program will ask for them.
-    console.log('  the database is empty: no company or administrator yet');
-    announce('empty');
+    // Normal on a fresh machine: the program will ask for them. Say which
+    // of the two setup states this is, so support can tell a brand-new
+    // database from one whose first setup was interrupted halfway.
+    console.log(
+      state === 'incomplete'
+        ? '  the database is partly set up: a company or users exist without the other'
+        : '  the database is empty: no company or administrator yet',
+    );
+    announce(state);
     return;
   }
 
@@ -291,6 +315,17 @@ async function main() {
   if (seeded !== 0) {
     console.error('  the first administrator could not be created');
     process.exit(seeded || 1);
+  }
+  // Do not take the seeding program's exit code as proof: ask the
+  // database again. Announcing 'ready' over a database that still has
+  // nobody in it would strand the user at a login form for an account
+  // that does not exist.
+  const after = await databaseState();
+  if (after !== 'ready') {
+    console.error(
+      `  the first administrator was seeded but the database state is '${after}', not ready`,
+    );
+    process.exit(1);
   }
   announce('ready');
 }

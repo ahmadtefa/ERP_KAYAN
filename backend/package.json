@@ -36,7 +36,8 @@
     "pg": "^8.23.1",
     "prisma": "^6.0.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "sharp": "0.35.5"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
@@ -65,6 +66,8 @@
   },
   "overrides": {
     "uuid": "^11.1.1",
-    "deepmerge-ts": "^8.0.2"
+    "deepmerge-ts": "^8.0.2",
+    "argparse": "2.0.1",
+    "multer": "^2.5.0"
   }
 }

@@ -52,10 +52,41 @@ trap {
 function Require-Command([string]$Name) {
   if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) { throw "Required build command '$Name' was not found. Install it on the Windows build machine." }
 }
+function Invoke-DownloadWithRetry([string]$Url, [string]$Destination, [int]$Attempts = 3) {
+  for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+    try {
+      if (Test-Path -LiteralPath $Destination) {
+        Remove-Item -LiteralPath $Destination -Force
+      }
+      Write-Host "Downloading $([IO.Path]::GetFileName($Destination)) (attempt $attempt/$Attempts)..."
+      Invoke-WebRequest -Uri $Url -OutFile $Destination -TimeoutSec 300
+      if (-not (Test-Path -LiteralPath $Destination) -or (Get-Item -LiteralPath $Destination).Length -le 0) {
+        throw "Download produced an empty file: $Destination"
+      }
+      return
+    } catch {
+      $message = $_.Exception.Message
+      Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+      if ($attempt -ge $Attempts) {
+        throw "Download failed after $Attempts attempts for $Url. Last error: $message"
+      }
+      Write-Host "Download attempt $attempt failed: $message. Retrying in $($attempt * 5) seconds..."
+      Start-Sleep -Seconds ($attempt * 5)
+    }
+  }
+}
 function Get-VerifiedArchive([string]$Url, [string]$Destination, [string]$Sha256) {
-  if (-not (Test-Path $Destination)) {
-    Write-Host "Downloading $([IO.Path]::GetFileName($Destination))..."
-    Invoke-WebRequest -Uri $Url -OutFile $Destination
+  $validExistingFile = $false
+  if (Test-Path -LiteralPath $Destination) {
+    $existingHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
+    $validExistingFile = $existingHash -eq $Sha256
+    if (-not $validExistingFile) {
+      Write-Host "Discarding incomplete or checksum-mismatched archive: $([IO.Path]::GetFileName($Destination))"
+      Remove-Item -LiteralPath $Destination -Force
+    }
+  }
+  if (-not $validExistingFile) {
+    Invoke-DownloadWithRetry -Url $Url -Destination $Destination
   }
   $actual = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actual -ne $Sha256) { throw "Checksum mismatch for $([IO.Path]::GetFileName($Destination)); refusing to use it." }
@@ -96,7 +127,7 @@ $pgZip = Join-Path $stage "downloads\$postgresArchive"
 Get-VerifiedArchive $nodeUrl $nodeZip $nodeSha256
 Get-VerifiedArchive $postgresUrl $pgZip $postgresSha256
 $vcRuntime = Join-Path $stage 'downloads\vc_redist.x64.exe'
-if (-not (Test-Path $vcRuntime)) { Invoke-WebRequest -Uri $vcRuntimeUrl -OutFile $vcRuntime }
+if (-not (Test-Path $vcRuntime)) { Invoke-DownloadWithRetry -Url $vcRuntimeUrl -Destination $vcRuntime }
 $vcSignature = Get-AuthenticodeSignature -FilePath $vcRuntime
 if ($vcSignature.Status -ne 'Valid' -or $vcSignature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') {
   throw 'The Microsoft Visual C++ x64 redistributable signature could not be verified.'
@@ -107,6 +138,13 @@ if (Test-Path $app) { Remove-Item -LiteralPath $app -Recurse -Force }
 New-Item -ItemType Directory -Force -Path (Join-Path $app 'backend'), (Join-Path $app 'backend\node'), (Join-Path $app 'backend\postgres'), (Join-Path $app 'build\web') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $app 'licenses') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $app 'prerequisites') | Out-Null
+$demoBackupSource = Join-Path $root 'demo-data\kayan-company-backup-demo.json'
+if (-not (Test-Path -LiteralPath $demoBackupSource)) {
+  throw 'The generated demo company JSON backup is missing from demo-data.'
+}
+$demoBackupDirectory = Join-Path $app 'backend\demo-data'
+New-Item -ItemType Directory -Force -Path $demoBackupDirectory | Out-Null
+Copy-Item -LiteralPath $demoBackupSource -Destination (Join-Path $demoBackupDirectory 'kayan-company-backup-demo.json') -Force
 Copy-Item $vcRuntime (Join-Path $app 'prerequisites\vc_redist.x64.exe') -Force
 
 Write-Host '[1/8] Build backend and Prisma client'
@@ -115,7 +153,9 @@ Run-Native 'npm.cmd' @('run','prisma:generate') $backend
 Run-Native 'npm.cmd' @('run','build') $backend
 
 Write-Host '[2/8] Stage production backend files (development .env is excluded)'
-foreach ($relative in @('dist','prisma','scripts','package.json','package-lock.json','nest-cli.json','tsconfig.json')) {
+# The licence of the Arabic typeface travels with the program: the font is
+# embedded in the bundle, and its licence has to ship beside it.
+foreach ($relative in @('dist','prisma','scripts','package.json','package-lock.json','nest-cli.json','tsconfig.json','OFL-NotoNaskhArabic.txt')) {
   Copy-Item -LiteralPath (Join-Path $backend $relative) -Destination (Join-Path $app 'backend') -Recurse -Force
 }
 Run-Native 'npm.cmd' @('ci','--omit=dev','--no-audit','--no-fund') (Join-Path $app 'backend')
@@ -155,6 +195,7 @@ Get-ChildItem $nodeFolder.FullName -Filter 'LICENSE*' -File -ErrorAction Silentl
 Write-Host '[5/8] Add database lifecycle and first-run setup scripts'
 Copy-Item (Join-Path $PSScriptRoot 'install-runtime.ps1') $app
 Copy-Item (Join-Path $PSScriptRoot 'repair-runtime.ps1') $app
+Copy-Item (Join-Path $PSScriptRoot 'reset-kayan.ps1') $app
 Copy-Item (Join-Path $PSScriptRoot 'repair-kayan.bat') $app
 Copy-Item (Join-Path $PSScriptRoot 'remove-runtime.ps1') $app
 Copy-Item (Join-Path $PSScriptRoot 'database-control.ps1') $app
@@ -162,9 +203,19 @@ Copy-Item (Join-Path $PSScriptRoot 'UnelevatedProcess.cs') $app
 Copy-Item (Join-Path $PSScriptRoot 'README.txt') $app
 Copy-Item (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') $app
 Copy-Item (Join-Path $PSScriptRoot 'installer.iss') (Join-Path $stage 'installer.iss')
+# The icon Inno Setup embeds into Setup.exe (SetupIconFile in installer.iss).
+# generate_app_icons.py above has just refreshed it from the brand image.
+Copy-Item (Join-Path $root 'windows\runner\resources\app_icon.ico') (Join-Path $stage 'setup.ico')
+
+# Compile the real RepairTool.exe that ships in the Start menu and is exercised
+# by scripts\smoke-test-installed-windows.ps1.
+Write-Host 'Compiling RepairTool.exe'
+$repairToolExe = Join-Path $app 'RepairTool.exe'
+& (Join-Path $PSScriptRoot 'build-repair-tool.ps1') -OutputPath $repairToolExe -IconPath (Join-Path $root 'windows\runner\resources\app_icon.ico')
+if (-not (Test-Path -LiteralPath $repairToolExe)) { throw 'RepairTool.exe was not produced by the C# compiler.' }
 
 Write-Host '[6/8] Verify staged runtime essentials and absence of development .env'
-$required = @('erp_kayan.exe','backend\dist\src\main.js','backend\dist\prisma\seed.js','backend\scripts\prepare-database.mjs','backend\node\node.exe','backend\postgres\bin\pg_ctl.exe','backend\postgres\bin\pg_isready.exe','backend\postgres\bin\initdb.exe','backend\postgres\bin\psql.exe','build\web\index.html','install-runtime.ps1','repair-runtime.ps1','repair-kayan.bat','remove-runtime.ps1','database-control.ps1','UnelevatedProcess.cs','prerequisites\vc_redist.x64.exe')
+$required = @('erp_kayan.exe','backend\dist\src\main.js','backend\dist\prisma\seed.js','backend\scripts\prepare-database.mjs','backend\scripts\database-state.mjs','backend\demo-data\kayan-company-backup-demo.json','backend\node\node.exe','backend\postgres\bin\pg_ctl.exe','backend\postgres\bin\pg_isready.exe','backend\postgres\bin\initdb.exe','backend\postgres\bin\psql.exe','backend\postgres\bin\pg_dump.exe','backend\postgres\bin\pg_restore.exe','build\web\index.html','install-runtime.ps1','repair-runtime.ps1','reset-kayan.ps1','repair-kayan.bat','remove-runtime.ps1','database-control.ps1','UnelevatedProcess.cs','RepairTool.exe','prerequisites\vc_redist.x64.exe')
 foreach ($item in $required) { if (-not (Test-Path (Join-Path $app $item))) { throw "Staged package is missing $item" } }
 $secretEnvironmentFiles = Get-ChildItem -LiteralPath $app -Force -File -Recurse | Where-Object { $_.Name -eq '.env' -or $_.Name -like '.env.*' }
 if ($secretEnvironmentFiles) { throw 'Environment files are forbidden in the installer package.' }

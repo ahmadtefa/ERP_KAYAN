@@ -58,6 +58,8 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
           const SizedBox(height: 16),
           _TakingCopy(summary: summary, onDownload: _download),
           const SizedBox(height: 16),
+          _DemoBackupSection(onDownload: _downloadDemo),
+          const SizedBox(height: 16),
           _Restoring(
             file: _file,
             preview: _preview,
@@ -76,6 +78,11 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
   Future<void> _download() => runDownload(
     context,
     ref.read(reportLinkProvider).backup(),
+  );
+
+  Future<void> _downloadDemo() => runDownload(
+    context,
+    ref.read(reportLinkProvider).demoBackup(),
   );
 
   Future<void> _choose() async {
@@ -263,6 +270,47 @@ class _TakingCopy extends StatelessWidget {
   String _label(String name) => name
       .replaceAllMapped(RegExp(r'([A-Z])'), (match) => ' ${match.group(1)!.toLowerCase()}')
       .trim();
+}
+
+class _DemoBackupSection extends StatelessWidget {
+  const _DemoBackupSection({required this.onDownload});
+
+  final Future<void> Function() onDownload;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.science_outlined),
+                const SizedBox(width: 8),
+                Text(l10n.demoBackupTitle, style: theme.textTheme.titleMedium),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(l10n.demoBackupHint, style: theme.textTheme.bodySmall),
+            const SizedBox(height: 8),
+            Text(l10n.demoLoginHint, style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            )),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: onDownload,
+              icon: const Icon(Icons.download_outlined),
+              label: Text(l10n.downloadDemoBackup),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _Restoring extends StatelessWidget {
