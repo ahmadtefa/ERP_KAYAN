@@ -1034,6 +1034,15 @@ async function main() {
     `status ${reversed?.status}`,
   );
   await assertReversalEntry('collection reversal', receipt1, receipt1Journal?.id, { amount: 400 });
+  const reversedDetail = (await api(`/cash/vouchers/${receipt1.id}`)).data;
+  check(
+    'a reversed collection shows its mirror entry beside the original',
+    (reversedDetail?.journalEntries ?? []).length === 2 &&
+      reversedDetail.journalEntries[0].isReversal === false &&
+      reversedDetail.journalEntries[1].isReversal === true &&
+      reversedDetail.journalEntries[0].entryNumber !== reversedDetail.journalEntries[1].entryNumber,
+    `${(reversedDetail?.journalEntries ?? []).map((entry) => `${entry.entryNumber}${entry.isReversal ? '(reversal)' : ''}`).join(', ')}`,
+  );
   check(
     'the reversal moved the same 400.00 back into receivables and out of the bank',
     near((await delta(AR)) - beforeReversal.receivable, 400) &&
@@ -1050,6 +1059,20 @@ async function main() {
   await refuse('the same collection cannot be posted a second time', `/cash/vouchers/${receipt3.id}/post`, {
     method: 'POST',
   });
+
+  // There is no edit and no delete on a voucher, by design: money that moved is
+  // corrected by a reversing entry, never by rewriting the document under the
+  // ledger. Pinned here so a future endpoint is a decision, not an accident.
+  const editAttempt = await api(`/cash/vouchers/${receipt3.id}`, {
+    method: 'PATCH',
+    json: { amount: '1' },
+  });
+  const deleteAttempt = await api(`/cash/vouchers/${receipt3.id}`, { method: 'DELETE' });
+  check(
+    'a posted collection cannot be edited or deleted in place',
+    [404, 405].includes(editAttempt.status) && [404, 405].includes(deleteAttempt.status),
+    `PATCH ${editAttempt.status}, DELETE ${deleteAttempt.status}`,
+  );
 
   // Re-collect what the reversal reopened: the invoice is payable again.
   const recollection = await must('collect the 400.00 the reversal reopened', '/cash/vouchers', {
@@ -1267,6 +1290,22 @@ async function main() {
       (traceInvoiceJournal.data?.lines ?? []).some((line) => line.accountCode === AR),
     `voucher ${traceVoucher.voucherNumber} -> entry ${traceJournal.data?.entryNumber}, invoice ${traceInvoice.invoiceNumber} -> entry ${traceInvoiceJournal.data?.entryNumber}`,
   );
+  // The detail endpoint is what the screen opens when someone asks "what did
+  // this receipt settle, and where did it go in the books?". The invoices and
+  // the entry have to be named there, not only found by hand in SQL.
+  const traceDetail = await api(`/cash/vouchers/${receipt3.id}`);
+  check(
+    'the voucher detail names the invoices it settled and the entry it wrote',
+    (traceDetail.data?.allocations ?? []).length === 2 &&
+      (traceDetail.data?.allocations ?? []).every(
+        (allocation) => typeof allocation.invoiceNumber === 'string' && Number(allocation.invoiceTotal) > 0,
+      ) &&
+      (traceDetail.data?.journalEntries ?? []).length === 1 &&
+      traceDetail.data.journalEntries[0].entryNumber === traceJournal.data?.entryNumber &&
+      traceDetail.data.journalEntries[0].isReversal === false,
+    `allocations ${JSON.stringify(traceDetail.data?.allocations ?? [])?.slice(0, 160)}, entries ${JSON.stringify(traceDetail.data?.journalEntries ?? [])?.slice(0, 160)}`,
+  );
+
   const traceRows = await sql(
     `SELECT j."sourceType", j."sourceId"::text AS "sourceId", j."sourceNumber", v."voucherNumber", v."customerId"::text AS "customerId"
        FROM cash_vouchers v JOIN journal_entries j ON j.id = v."journalEntryId"

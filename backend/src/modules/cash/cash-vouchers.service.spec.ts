@@ -77,6 +77,9 @@ describe('CashVouchersService allocation validation', () => {
       cashVoucher: {
         findFirst: jest.fn(),
       },
+      journalEntry: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       $transaction: jest.fn(async (cb: (tx: any) => Promise<unknown>) => cb(tx)),
     };
     const numbers = { next: jest.fn().mockResolvedValue('RC-0001') };
@@ -234,6 +237,80 @@ describe('CashVouchersService allocation validation', () => {
     ]));
     expect(created.allocations).toHaveLength(1);
     expect(created.allocations[0].amount).toBe('40.0000');
+  });
+
+  it('hands back the invoices and the journal entries behind a posted voucher', async () => {
+    const { service, prisma } = buildService();
+    prisma.cashVoucher.findFirst.mockResolvedValue({
+      id: 'voucher-1',
+      voucherNumber: 'RC-0001',
+      voucherDate: new Date('2026-10-24T00:00:00.000Z'),
+      kind: CashVoucherKind.RECEIPT,
+      amount: new Prisma.Decimal(40),
+      currency: 'SAR',
+      status: InvoiceStatus.POSTED,
+      description: null,
+      reference: null,
+      journalEntryId: 'je-1',
+      postedAt: new Date('2026-10-24T00:00:00.000Z'),
+      reconciledAt: null,
+      createdAt: new Date('2026-10-24T00:00:00.000Z'),
+      cashAccount: { code: 'CASH', nameEn: 'Cash', nameAr: 'الخزينة', kind: 'CASH' },
+      customer: { code: 'C-1', nameEn: 'Customer', nameAr: 'عميل' },
+      supplier: null,
+      allocations: [
+        {
+          id: 'alloc-1',
+          salesInvoiceId: 'si-1',
+          purchaseInvoiceId: null,
+          amount: new Prisma.Decimal(40),
+          salesInvoice: { id: 'si-1', invoiceNumber: 'SI-0001', totalAmount: new Prisma.Decimal(100), paidAmount: new Prisma.Decimal(40) },
+          purchaseInvoice: null,
+        },
+      ],
+    });
+    // The server may hand them back in either order; the original comes first.
+    prisma.journalEntry.findMany.mockResolvedValue([
+      { id: 'je-2', entryNumber: 'JV-000002', entryDate: new Date('2026-10-24T00:00:00.000Z'), status: 'POSTED', totalDebit: new Prisma.Decimal(40), reversalOfId: 'je-1' },
+      { id: 'je-1', entryNumber: 'JV-000001', entryDate: new Date('2026-10-24T00:00:00.000Z'), status: 'POSTED', totalDebit: new Prisma.Decimal(40), reversalOfId: null },
+    ]);
+
+    const detail = await service.findOne(companyId, 'voucher-1');
+    expect(detail.allocations[0].invoiceNumber).toBe('SI-0001');
+    expect(detail.allocations[0].invoiceTotal).toBe('100.0000');
+    expect(detail.journalEntries.map((entry) => entry.entryNumber)).toEqual([
+      'JV-000001',
+      'JV-000002',
+    ]);
+    expect(detail.journalEntries[0].isReversal).toBe(false);
+    expect(detail.journalEntries[1].isReversal).toBe(true);
+  });
+
+  it('asks for no journal entry at all while the voucher is still a draft', async () => {
+    const { service, prisma } = buildService();
+    prisma.cashVoucher.findFirst.mockResolvedValue({
+      id: 'voucher-1',
+      voucherNumber: 'RC-0002',
+      voucherDate: new Date('2026-10-24T00:00:00.000Z'),
+      kind: CashVoucherKind.RECEIPT,
+      amount: new Prisma.Decimal(40),
+      currency: 'SAR',
+      status: InvoiceStatus.DRAFT,
+      description: null,
+      reference: null,
+      journalEntryId: null,
+      postedAt: null,
+      reconciledAt: null,
+      createdAt: new Date('2026-10-24T00:00:00.000Z'),
+      cashAccount: { code: 'CASH', nameEn: 'Cash', nameAr: 'الخزينة', kind: 'CASH' },
+      customer: { code: 'C-1', nameEn: 'Customer', nameAr: 'عميل' },
+      supplier: null,
+      allocations: [],
+    });
+
+    const detail = await service.findOne(companyId, 'voucher-1');
+    expect(detail.journalEntries).toEqual([]);
+    expect(prisma.journalEntry.findMany).not.toHaveBeenCalled();
   });
 
   function draftVoucher(overrides: Record<string, unknown> = {}) {

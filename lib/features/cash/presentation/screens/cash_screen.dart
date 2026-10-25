@@ -458,6 +458,28 @@ class _CashScreenState extends ConsumerState<CashScreen>
     );
   }
 
+  /// The chain behind one row: what the voucher settled and which entry it
+  /// wrote. Opened from the list, read from the server, never recomputed here.
+  void _showVoucher(Json voucher) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(text(voucher, 'voucherNumber')),
+        content: SizedBox(
+          width: 720,
+          height: 480,
+          child: _VoucherDetails(id: text(voucher, 'id')),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(context.l10n.close),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -682,6 +704,13 @@ class _CashScreenState extends ConsumerState<CashScreen>
               ],
               actions: (row) => [
                 IconButton(
+                  tooltip: isArabic
+                      ? 'تفاصيل السند والفواتير والقيد'
+                      : 'Voucher, invoices and entry',
+                  icon: const Icon(Icons.receipt_long_outlined, size: 20),
+                  onPressed: () => _showVoucher(row),
+                ),
+                IconButton(
                   tooltip: isArabic ? 'طباعة وتنزيل المستند' : 'Print and download document',
                   icon: const Icon(Icons.print_outlined, size: 20),
                   onPressed: () => showDialog<void>(
@@ -858,6 +887,183 @@ class _AccountStatement extends ConsumerWidget {
                 ),
               ],
             ),
+    );
+  }
+}
+
+/// One receipt or payment with the invoices it settled and the entries it
+/// wrote. Everything shown here is the server's answer: the money, the
+/// allocation and the journal entry are the ones stored, not recomputed.
+class _VoucherDetails extends ConsumerWidget {
+  const _VoucherDetails({required this.id});
+
+  final String id;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final locale = Localizations.localeOf(context).toString();
+    final detail = ref.watch(cashVoucherProvider(id));
+
+    return detail.when(
+      loading: () => const LoadingView(),
+      error: (error, _) => ErrorView(message: error.toString()),
+      data: (voucher) {
+        final allocations = listOf(voucher['allocations']);
+        final entries = listOf(voucher['journalEntries']);
+        final draft = text(voucher, 'status').toUpperCase() == 'DRAFT';
+        final customer = arabic
+            ? text(voucher, 'customerNameAr', fallback: text(voucher, 'customerNameEn'))
+            : text(voucher, 'customerNameEn', fallback: text(voucher, 'customerNameAr'));
+        final supplier = arabic
+            ? text(voucher, 'supplierNameAr', fallback: text(voucher, 'supplierNameEn'))
+            : text(voucher, 'supplierNameEn', fallback: text(voucher, 'supplierNameAr'));
+        final party = customer.isNotEmpty ? customer : supplier;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 24,
+              runSpacing: 8,
+              children: [
+                _VoucherFact(
+                  label: l10n.invoiceDate,
+                  value: text(voucher, 'voucherDate'),
+                ),
+                _VoucherFact(
+                  label: l10n.voucherType,
+                  value: text(voucher, 'kind').toUpperCase() == 'RECEIPT'
+                      ? l10n.receipt
+                      : l10n.payment,
+                ),
+                if (party.isNotEmpty)
+                  _VoucherFact(label: l10n.party, value: party),
+                _VoucherFact(
+                  label: l10n.amount,
+                  value: formatAmount(
+                    amount(voucher, 'amount'),
+                    locale: locale,
+                  ),
+                ),
+                _VoucherFact(
+                  label: l10n.status,
+                  value: text(voucher, 'status'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              arabic ? 'الفواتير المسدَّدة' : 'Invoices settled',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: 6),
+            Expanded(
+              child: allocations.isEmpty
+                  ? Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(
+                        arabic
+                            ? 'لم تُخصَّص لفواتير: المبلغ باقٍ على حساب الطرف.'
+                            : 'Not applied to an invoice: the money stays on the party account.',
+                      ),
+                    )
+                  : RecordsTable(
+                      rows: allocations,
+                      columns: [
+                        ColumnSpec(
+                          arabic ? 'الفاتورة' : 'Invoice',
+                          value: (row) => text(row, 'invoiceNumber'),
+                          emphasise: true,
+                        ),
+                        ColumnSpec(
+                          arabic ? 'إجمالي الفاتورة' : 'Invoice total',
+                          numeric: true,
+                          value: (row) => formatAmount(
+                            amount(row, 'invoiceTotal'),
+                            locale: locale,
+                          ),
+                        ),
+                        ColumnSpec(
+                          l10n.amount,
+                          numeric: true,
+                          emphasise: true,
+                          value: (row) => formatAmount(
+                            amount(row, 'amount'),
+                            locale: locale,
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              arabic ? 'القيد المحاسبي' : 'Journal entry',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: 4),
+            if (entries.isEmpty)
+              Text(
+                draft
+                    ? (arabic
+                          ? 'لا يوجد قيد: السند لم يُرحَّل بعد.'
+                          : 'No entry yet: the voucher is still a draft.')
+                    : (arabic
+                          ? 'لا يوجد قيد مرتبط بهذا السند.'
+                          : 'No entry is linked to this voucher.'),
+              )
+            else
+              for (final entry in entries)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(
+                    children: [
+                      Text(
+                        text(entry, 'entryNumber'),
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(text(entry, 'entryDate')),
+                      const SizedBox(width: 12),
+                      Text(
+                        flag(entry, 'isReversal')
+                            ? (arabic ? 'قيد عكسي' : 'Reversal')
+                            : (arabic ? 'القيد الأصلي' : 'Original'),
+                      ),
+                      const Spacer(),
+                      Text(formatAmount(amount(entry, 'amount'), locale: locale)),
+                    ],
+                  ),
+                ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// A labelled figure in the voucher header.
+class _VoucherFact extends StatelessWidget {
+  const _VoucherFact({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        Text(value, style: theme.textTheme.bodyMedium),
+      ],
     );
   }
 }

@@ -112,6 +112,28 @@ export class CashVouchersService {
     });
     if (!voucher) throw new NotFoundException('Cash voucher not found');
 
+    /// The other half of the chain. A receipt that settled two invoices is
+    /// still one entry, and a reversed voucher has its mirror beside it; both
+    /// hang off the id the voucher stored when it was posted. Without this the
+    /// API stops at the allocation and the entry behind the money has to be
+    /// found by hand in the ledger.
+    const entries = voucher.journalEntryId
+      ? await this.prisma.journalEntry.findMany({
+          where: {
+            companyId,
+            OR: [{ id: voucher.journalEntryId }, { reversalOfId: voucher.journalEntryId }],
+          },
+          select: {
+            id: true,
+            entryNumber: true,
+            entryDate: true,
+            status: true,
+            totalDebit: true,
+            reversalOfId: true,
+          },
+        })
+      : [];
+
     return {
       ...this.toResponse(voucher),
       allocations: voucher.allocations.map((allocation) => ({
@@ -120,8 +142,23 @@ export class CashVouchersService {
         purchaseInvoiceId: allocation.purchaseInvoiceId,
         invoiceNumber:
           allocation.salesInvoice?.invoiceNumber ?? allocation.purchaseInvoice?.invoiceNumber ?? null,
+        // What the invoice still owed when the money was applied, so a reader
+        // can see the part payment was a part payment.
+        invoiceTotal: (
+          allocation.salesInvoice?.totalAmount ?? allocation.purchaseInvoice?.totalAmount ?? null
+        )?.toFixed(MONEY_SCALE) ?? null,
         amount: allocation.amount.toFixed(MONEY_SCALE),
       })),
+      journalEntries: entries
+        .sort((a, b) => Number(Boolean(a.reversalOfId)) - Number(Boolean(b.reversalOfId)))
+        .map((entry) => ({
+          id: entry.id,
+          entryNumber: entry.entryNumber,
+          entryDate: entry.entryDate.toISOString().slice(0, 10),
+          status: entry.status,
+          amount: entry.totalDebit.toFixed(MONEY_SCALE),
+          isReversal: Boolean(entry.reversalOfId),
+        })),
     };
   }
 
