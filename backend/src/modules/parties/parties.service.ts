@@ -161,10 +161,18 @@ export class PartiesService {
       orderBy: { voucherDate: 'desc' },
     });
 
+    /// A receipt is a customer's money in our hands; a payment to a customer is
+    /// a refund and works the other way. For a supplier it is the mirror image.
+    /// Everything below that has a direction is read through this one kind.
+    const creditKind = kind === 'customer' ? 'RECEIPT' : 'PAYMENT';
+
     const totalInvoiced = invoices.reduce((sum, inv) => sum.plus(inv.totalAmount), new Prisma.Decimal(0));
+    /// How much the partner's documents have been settled. Positive for both
+    /// kinds: for a customer it is what they paid us, for a supplier what we
+    /// paid them. A refund in the other direction reduces it.
     const totalPaid = vouchers.reduce(
       (sum, voucher) =>
-        voucher.kind === 'RECEIPT' ? sum.plus(voucher.amount) : sum.minus(voucher.amount),
+        voucher.kind === creditKind ? sum.plus(voucher.amount) : sum.minus(voucher.amount),
       new Prisma.Decimal(0),
     );
     const outstanding = invoices.reduce(
@@ -184,9 +192,6 @@ export class PartiesService {
     /// (a supplier payment) that no invoice claimed. It sits on the control
     /// account, so `outstanding` alone is not the balance: the balance is what
     /// is still owed on invoices less what has already been paid on account.
-    /// A receipt is a customer's money in our hands; a payment to a customer is
-    /// a refund and works the other way. For a supplier it is the mirror image.
-    const creditKind = kind === 'customer' ? 'RECEIPT' : 'PAYMENT';
     const onAccount = vouchers.reduce((sum, voucher) => {
       const settled = voucher.allocations.reduce(
         (allocated, allocation) => allocated.plus(allocation.amount),

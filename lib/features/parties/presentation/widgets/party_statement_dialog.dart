@@ -162,6 +162,12 @@ class _PartyStatementDialogState extends ConsumerState<_PartyStatementDialog> {
                                   summary['totals'] as Map,
                                 )
                               : <String, dynamic>{};
+                          // Money the partner left on account is not owed on
+                          // any document, so it only appears when there is
+                          // some; the balance then has to be the net one,
+                          // which is the figure the control account carries.
+                          final onAccount = amount(totals, 'onAccount');
+                          final showsOnAccount = onAccount != '0.0000';
                           return Padding(
                             padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
                             child: Wrap(
@@ -178,11 +184,19 @@ class _PartyStatementDialogState extends ConsumerState<_PartyStatementDialog> {
                                   arabic ? 'المسدَّد' : 'Paid',
                                   formatAmount(asString(totals['paid'])),
                                 ),
+                                if (showsOnAccount)
+                                  _chip(
+                                    context,
+                                    arabic ? 'على الحساب' : 'On account',
+                                    formatAmount(onAccount),
+                                  ),
                                 _chip(
                                   context,
                                   arabic ? 'الرصيد' : 'Balance',
                                   formatAmount(
-                                    asString(totals['outstanding']),
+                                    showsOnAccount
+                                        ? amount(totals, 'netBalance')
+                                        : asString(totals['outstanding']),
                                   ),
                                 ),
                                 _chip(

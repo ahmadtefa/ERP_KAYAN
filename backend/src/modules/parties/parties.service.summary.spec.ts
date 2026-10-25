@@ -113,6 +113,8 @@ describe('PartiesService summary money on account', () => {
 
     expect(summary.totals.onAccount).toBe('150.0000');
     expect(summary.totals.netBalance).toBe('-150.0000');
+    // The refund goes back out, so the customer's settled total is a net 150.
+    expect(summary.totals.paid).toBe('150.0000');
   });
 
   it('treats an unallocated supplier payment as a prepayment, not as a discount', async () => {
@@ -131,5 +133,28 @@ describe('PartiesService summary money on account', () => {
     expect(summary.totals.onAccount).toBe('40.0000');
     // Negative: the supplier holds 40 of ours.
     expect(summary.totals.netBalance).toBe('-40.0000');
+    // Paid is read from the supplier's side too: what we paid them, not a
+    // mirror-image negative that a reader would have to translate.
+    expect(summary.totals.paid).toBe('1000.0000');
+  });
+
+  it('treats money back from a supplier as a reduction of what was paid', async () => {
+    const prisma = stub({
+      kind: 'supplier',
+      total: 960,
+      paid: 960,
+      vouchers: [{ amount: 960, settled: 960 }],
+    });
+    (prisma.cashVoucher.findMany as jest.Mock).mockImplementation(async () => [
+      { id: 'v1', voucherNumber: 'PV-1', voucherDate: new Date('2026-10-02'), kind: 'PAYMENT', amount: money(960), status: 'POSTED', allocations: [{ amount: money(960) }] },
+      { id: 'v2', voucherNumber: 'PV-2', voucherDate: new Date('2026-10-03'), kind: 'PAYMENT', amount: money(40), status: 'POSTED', allocations: [] },
+      { id: 'v3', voucherNumber: 'RC-9', voucherDate: new Date('2026-10-04'), kind: 'RECEIPT', amount: money(10), status: 'POSTED', allocations: [] },
+    ]);
+    const summary = await new PartiesService(prisma as never, { record: jest.fn() } as never).summary('company-1', 'supplier', 's-1');
+
+    // 960 settled the invoice, 40 was a prepayment, 10 came back.
+    expect(summary.totals.paid).toBe('990.0000');
+    expect(summary.totals.onAccount).toBe('30.0000');
+    expect(summary.totals.netBalance).toBe('-30.0000');
   });
 });

@@ -562,6 +562,13 @@ class _BalancesTab extends ConsumerWidget {
       data: (data) {
         final rows = listOf(data['rows']);
         if (rows.isEmpty) return EmptyView(message: l10n.noBalances);
+        // A partner who left money on account has no document balance: the
+        // report keeps the row (it explains a control-account difference) but
+        // a table that stops at `balance` would print 0.00 and hide why. The
+        // credit and the net it produces appear only when there is one.
+        final showsOnAccount = rows.any(
+          (row) => amount(row, 'onAccount') != '0.0000',
+        );
         return RecordsTable(
           rows: rows,
           columns: [
@@ -579,8 +586,21 @@ class _BalancesTab extends ConsumerWidget {
               l10n.balance,
               numeric: true,
               value: (r) => formatAmount(asString(r['balance'])),
-              emphasise: true,
+              emphasise: !showsOnAccount,
             ),
+            if (showsOnAccount) ...[
+              ColumnSpec(
+                _t(context, 'على الحساب', 'On account'),
+                numeric: true,
+                value: (r) => formatAmount(amount(r, 'onAccount')),
+              ),
+              ColumnSpec(
+                _t(context, 'الصافي', 'Net'),
+                numeric: true,
+                value: (r) => formatAmount(amount(r, 'netBalance')),
+                emphasise: true,
+              ),
+            ],
           ],
         );
       },
