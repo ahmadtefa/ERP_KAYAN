@@ -677,7 +677,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 ColumnSpec(
                   l10n.party,
                   flex: 2,
-                  value: (r) => partyName(r, arabic: isArabic),
+                  value: (r) => partnerName(r, arabic: isArabic),
                 ),
                 ColumnSpec(
                   l10n.amount,

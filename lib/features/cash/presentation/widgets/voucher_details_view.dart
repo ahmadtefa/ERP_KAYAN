@@ -73,13 +73,11 @@ class VoucherDetailsView extends StatelessWidget {
             ),
             _Fact(
               label: l10n.party,
-              value: partyName(voucher, arabic: arabic),
+              value: partnerName(voucher, arabic: arabic),
             ),
             _Fact(
               label: l10n.amount,
-              value:
-                  '${formatAmount(amount(voucher, 'amount'), locale: locale)} '
-                  '${text(voucher, 'currency')}',
+              value: '${formatAmount(amount(voucher, 'amount'), locale: locale)} ${text(voucher, 'currency')}',
             ),
             if (cashLabel.isNotEmpty)
               _Fact(label: l10n.cashAccount, value: cashLabel),

@@ -33,7 +33,7 @@ num? asNum(Object? value) {
 /// nameAr}`); a few list endpoints send flat `customerNameEn/Ar` keys instead.
 /// Reading only one of the two shapes is how a voucher list ends up with an
 /// empty "party" column while the data is right there in the response.
-String partyName(Json json, {bool arabic = false}) {
+String partnerName(Json json, {bool arabic = false}) {
   for (final key in const ['customer', 'supplier', 'party']) {
     final value = json[key];
     if (value is! Map) continue;
