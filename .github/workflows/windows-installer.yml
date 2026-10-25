@@ -90,20 +90,32 @@ jobs:
 
       - name: Test backend
         working-directory: backend
-        # A failing test on this runner has to say *which* test failed and why:
-        # the run log archive is not always retrievable, but the annotation on
-        # the check is.
         shell: powershell
+        # A failing test on this runner has to say *which* test failed and why.
+        # Tee-Object cannot do it here: GitHub runs PowerShell steps with
+        # $ErrorActionPreference = 'Stop', and every stderr line of a piped
+        # native command becomes a terminating error - which is how the run
+        # died in silence. Start-Process redirects to files instead, so the
+        # exit code is the only thing that decides, and the log survives to be
+        # quoted in the check's annotation.
         run: |
+          $ErrorActionPreference = 'Continue'
           $log = Join-Path $env:RUNNER_TEMP 'backend-tests.log'
-          npm test -- --runInBand 2>&1 | Tee-Object -FilePath $log
-          if ($LASTEXITCODE -ne 0) {
-            $tail = ((Get-Content -LiteralPath $log -Tail 80) -join ' | ')
-            if ($tail.Length -gt 3500) { $tail = $tail.Substring($tail.Length - 3500) }
+          $err = Join-Path $env:RUNNER_TEMP 'backend-tests.err.log'
+          $proc = Start-Process -FilePath 'npm.cmd' -ArgumentList 'test','--','--runInBand' `
+            -NoNewWindow -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError $err
+          Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Select-Object -Last 150
+          Get-Content -LiteralPath $err -ErrorAction SilentlyContinue | Select-Object -Last 40
+          if ($proc.ExitCode -ne 0) {
+            $tail = @(
+              Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Select-Object -Last 60
+              Get-Content -LiteralPath $err -ErrorAction SilentlyContinue | Select-Object -Last 20
+            ) -join "`n"
+            $tail = $tail -replace "`r?`n", '%0A'
+            if ($tail.Length -gt 60000) { $tail = $tail.Substring($tail.Length - 60000) }
             Write-Host "::error title=Backend tests failed::$tail"
             exit 1
           }
-
       - name: Clean build backend
         working-directory: backend
         run: npm run build
