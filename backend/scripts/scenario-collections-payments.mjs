@@ -116,6 +116,28 @@ function balanceOf(snapshot, code) {
 let baseline = new Map();
 const delta = async (code) => money(balanceOf(await trialBalance(), code) - (baseline.get(code) ?? 0));
 
+/// What the documents say the ledger should have moved. Every posted voucher
+/// adds to it and every reversal subtracts, so the reconciliation at the end
+/// compares the ledger with the business documents rather than with a number
+/// typed into the test.
+///
+/// Signs follow the trial balance: an asset closes debit-positive, a liability
+/// closes debit-positive too (so a credit balance is negative).
+const model = { receivable: 0, payable: 0, cash: new Map() };
+function record(kind, amount, cashLedgerCode, direction = 1, party = 'customer') {
+  const moved = money(amount) * direction;
+  const incoming = kind === 'RECEIPT';
+  // A receipt from a customer and a payment to a supplier are the normal
+  // direction; the other two are refunds and move the control account back.
+  if (party === 'customer') model.receivable = money(model.receivable + (incoming ? -moved : moved));
+  else model.payable = money(model.payable + (incoming ? -moved : moved));
+  model.cash.set(cashLedgerCode, money((model.cash.get(cashLedgerCode) ?? 0) + (incoming ? moved : -moved)));
+}
+function recordInvoice(kind, total) {
+  if (kind === 'SALES') model.receivable = money(model.receivable + money(total));
+  else model.payable = money(model.payable - money(total));
+}
+
 // ─────────────────────────────────────────── the journal, as the database has it
 async function journalOfVoucher(voucherId) {
   const entries = await sql(
@@ -169,7 +191,7 @@ async function assertVoucherEntry(label, voucher, expected) {
   );
   const isReceipt = expected.kind === 'RECEIPT';
   const cashCode = expected.cashAccountCode;
-  const partyCode = isReceipt ? expected.receivableCode : expected.payableCode;
+  const partyCode = expected.partyCode;
   check(
     `${label}: cash side is ${isReceipt ? 'debited' : 'credited'} ${expected.amount} on ${cashCode}`,
     isReceipt ? near(debitOf(lines, cashCode), expected.amount) : near(creditOf(lines, cashCode), expected.amount),
@@ -354,6 +376,12 @@ async function main() {
     await post(`post invoice ${label}`, `/sales/invoices/${doc.id}/post`);
   }
   await post('reverse the reversal candidate', `/sales/invoices/${salesReversed.id}/reverse`);
+  // Only documents that stay live move the ledger at the end of the run: the
+  // pair that was posted and then reversed cancels out.
+  recordInvoice('SALES', 1000);
+  recordInvoice('SALES', 500);
+  recordInvoice('SALES', 300);
+  recordInvoice('SALES', 100);
 
   const purchase = (label, supplierId, quantity) =>
     must(label, '/purchases/invoices', {
@@ -377,6 +405,10 @@ async function main() {
     await post(`post purchase invoice ${label}`, `/purchases/invoices/${doc.id}/post`);
   }
   await post('reverse the purchase reversal candidate', `/purchases/invoices/${payReversed.id}/reverse`);
+  recordInvoice('PURCHASE', 600);
+  recordInvoice('PURCHASE', 240);
+  recordInvoice('PURCHASE', 120);
+  recordInvoice('PURCHASE', 60);
 
   const readInvoice = async (path) => (await api(path)).data;
   for (const [label, path, expected] of [
@@ -416,7 +448,9 @@ async function main() {
     },
   });
   if (!receipt1) return false;
+  const beforeReceipt1 = { receivable: await delta(AR), bank: await delta(bankLedger.code) };
   const receipt1Posted = await post('post the part collection', `/cash/vouchers/${receipt1.id}/post`);
+  record('RECEIPT', 400, bankLedger.code);
   const a1AfterPart = await readInvoice(`/sales/invoices/${salesA1.id}`);
   check(
     'invoice A1 keeps 600.00 outstanding after a 400.00 collection',
@@ -428,13 +462,14 @@ async function main() {
     amount: 400,
     currency: 'EGP',
     date: today,
-    cashAccountCode: bank.code,
-    receivableCode: AR,
+    cashAccountCode: bankLedger.code,
+    partyCode: AR,
   });
   check(
-    'the part collection moved 400.00 out of receivables and into the bank',
-    near(await delta(AR), -400) && near(await delta(bank.code), 400),
-    `receivable ${await delta(AR)}, bank ${await delta(bank.code)}`,
+    'the part collection moved exactly 400.00 out of receivables and into the bank',
+    near((await delta(AR)) - beforeReceipt1.receivable, -400) &&
+      near((await delta(bankLedger.code)) - beforeReceipt1.bank, 400),
+    `receivable ${money((await delta(AR)) - beforeReceipt1.receivable)}, bank ${money((await delta(bankLedger.code)) - beforeReceipt1.bank)}`,
   );
 
   const receipt2 = await must('collect the remaining 600.00 of invoice A1', '/cash/vouchers', {
@@ -450,6 +485,7 @@ async function main() {
   });
   if (!receipt2) return false;
   await post('post the final collection', `/cash/vouchers/${receipt2.id}/post`);
+  record('RECEIPT', 600, bankLedger.code);
   const a1AfterFull = await readInvoice(`/sales/invoices/${salesA1.id}`);
   check(
     'invoice A1 is fully settled: paid equals its total and nothing is due',
@@ -480,6 +516,7 @@ async function main() {
   });
   if (!receipt3) return false;
   await post('post the split collection', `/cash/vouchers/${receipt3.id}/post`);
+  record('RECEIPT', 500, bankLedger.code);
   const [a2, a3] = await Promise.all([
     readInvoice(`/sales/invoices/${salesA2.id}`),
     readInvoice(`/sales/invoices/${salesA3.id}`),
@@ -511,8 +548,8 @@ async function main() {
     amount: 500,
     currency: 'EGP',
     date: today,
-    cashAccountCode: bank.code,
-    receivableCode: AR,
+    cashAccountCode: bankLedger.code,
+    partyCode: AR,
   });
 
   // ───────────────────────────────────────────────── 4. money left on account
@@ -528,19 +565,22 @@ async function main() {
     },
   });
   if (!receipt4) return false;
+  const beforeReceipt4 = { receivable: await delta(AR), cash: await delta(cashLedger.code) };
   const receipt4Posted = await post('post the on-account receipt', `/cash/vouchers/${receipt4.id}/post`);
+  record('RECEIPT', 50, cashLedger.code);
   await assertVoucherEntry('on-account receipt', receipt4Posted ?? receipt4, {
     kind: 'RECEIPT',
     amount: 50,
     currency: 'EGP',
     date: today,
-    cashAccountCode: cashBox.code,
-    receivableCode: AR,
+    cashAccountCode: cashLedger.code,
+    partyCode: AR,
   });
   check(
     'money with no invoice named becomes a credit on the customer account, not a lost document',
-    near(await delta(AR), -1550),
-    `receivable movement ${await delta(AR)} for 1,550 collected`,
+    near((await delta(AR)) - beforeReceipt4.receivable, -50) &&
+      near((await delta(cashLedger.code)) - beforeReceipt4.cash, 50),
+    `receivable ${money((await delta(AR)) - beforeReceipt4.receivable)}, cash ${money((await delta(cashLedger.code)) - beforeReceipt4.cash)}`,
   );
 
   // ──────────────────────────────────── 5. balances: customer A, B and cash/bank
@@ -580,12 +620,51 @@ async function main() {
     `statement ${closingA}, summary net ${customerTotalsA.netBalance} (outstanding ${customerTotalsA.outstanding} ` +
       `less on-account ${customerTotalsA.onAccount}), report net ${reportRowA?.netBalance}`,
   );
+  // A refund goes the other way, and the credit has to shrink rather than grow.
+  const beforeRefund = { receivable: await delta(AR), bank: await delta(bankLedger.code) };
+  const refund = await must('refund 30.00 of the customer credit from the bank', '/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'PAYMENT',
+      voucherDate: today,
+      cashAccountId: bank.id,
+      customerId: customerA.id,
+      amount: '30',
+      description: `Refund ${stamp}`,
+    },
+  });
+  if (refund) {
+    const postedRefund = await post('post the refund', `/cash/vouchers/${refund.id}/post`);
+    record('PAYMENT', 30, bankLedger.code, 1, 'customer');
+    check(
+      'a refund to a customer puts 30.00 back on their account and takes it out of the bank',
+      near((await delta(AR)) - beforeRefund.receivable, 30) &&
+        near((await delta(bankLedger.code)) - beforeRefund.bank, -30),
+      `receivable ${money((await delta(AR)) - beforeRefund.receivable)}, bank ${money((await delta(bankLedger.code)) - beforeRefund.bank)}`,
+    );
+    await assertVoucherEntry('refund', postedRefund ?? refund, {
+      kind: 'PAYMENT',
+      amount: 30,
+      currency: 'EGP',
+      date: today,
+      cashAccountCode: bankLedger.code,
+      partyCode: AR,
+    });
+    const afterRefund = await api(`/parties/customers/summary/${customerA.id}`);
+    const totalsAfterRefund = afterRefund.data?.totals ?? {};
+    check(
+      'the refund uses up the credit: 20.00 left on account, 280.00 owed',
+      near(totalsAfterRefund.onAccount, 20) && near(totalsAfterRefund.netBalance, 280),
+      `on account ${totalsAfterRefund.onAccount}, net ${totalsAfterRefund.netBalance}`,
+    );
+  }
+
   const cashBalances = await api('/cash/accounts/balances');
   const cashRows = cashBalances.data?.rows ?? cashBalances.data?.accounts ?? [];
   const rowOf = (account) => cashRows.find((row) => row.code === account.code);
   check(
-    'the bank and the cash box each hold exactly what was collected into them',
-    near(rowOf(bank)?.balance, 1500) && near(rowOf(cashBox)?.balance, 50),
+    'the bank and the cash box each hold exactly what was collected into them, less the refund',
+    near(rowOf(bank)?.balance, 1470) && near(rowOf(cashBox)?.balance, 50),
     `bank ${rowOf(bank)?.balance}, cash ${rowOf(cashBox)?.balance}`,
   );
 
@@ -604,6 +683,7 @@ async function main() {
   });
   if (!payment1) return false;
   const payment1Posted = await post('post the part payment', `/cash/vouchers/${payment1.id}/post`);
+  record('PAYMENT', 200, bankLedger.code, 1, 'supplier');
   const s1AfterPart = await readInvoice(`/purchases/invoices/${payA1.id}`);
   check(
     'purchase invoice S1 keeps 400.00 unpaid after a 200.00 payment',
@@ -615,8 +695,8 @@ async function main() {
     amount: 200,
     currency: 'EGP',
     date: today,
-    cashAccountCode: bank.code,
-    payableCode: AP,
+    cashAccountCode: bankLedger.code,
+    partyCode: AP,
   });
 
   const payment2 = await must('pay the remaining 400.00 of purchase invoice S1', '/cash/vouchers', {
@@ -632,6 +712,7 @@ async function main() {
   });
   if (!payment2) return false;
   await post('post the final payment voucher', `/cash/vouchers/${payment2.id}/post`);
+  record('PAYMENT', 400, bankLedger.code, 1, 'supplier');
   const s1AfterFull = await readInvoice(`/purchases/invoices/${payA1.id}`);
   check(
     'purchase invoice S1 is fully paid: paid equals its total and nothing is due',
@@ -656,6 +737,7 @@ async function main() {
   });
   if (!payment3) return false;
   await post('post the split payment', `/cash/vouchers/${payment3.id}/post`);
+  record('PAYMENT', 360, cashLedger.code, 1, 'supplier');
   const [s2, s3] = await Promise.all([
     readInvoice(`/purchases/invoices/${payA2.id}`),
     readInvoice(`/purchases/invoices/${payA3.id}`),
@@ -670,8 +752,8 @@ async function main() {
     amount: 360,
     currency: 'EGP',
     date: today,
-    cashAccountCode: cashBox.code,
-    payableCode: AP,
+    cashAccountCode: cashLedger.code,
+    partyCode: AP,
   });
 
   // Money paid to a supplier before there is an invoice is a prepayment, not a
@@ -690,13 +772,14 @@ async function main() {
   });
   if (prepayment) {
     await post('post the prepayment', `/cash/vouchers/${prepayment.id}/post`);
+    record('PAYMENT', 40, bankLedger.code, 1, 'supplier');
     await assertVoucherEntry('prepayment', (await api(`/cash/vouchers/${prepayment.id}`)).data, {
       kind: 'PAYMENT',
       amount: 40,
       currency: 'EGP',
       date: today,
-      cashAccountCode: bank.code,
-      payableCode: AP,
+      cashAccountCode: bankLedger.code,
+      partyCode: AP,
     });
   }
 
@@ -730,13 +813,46 @@ async function main() {
   );
   const supplierStatementA = await api(`/parties/suppliers/statement/${supplierA.id}`);
   const closingSupplierA = Number(supplierStatementA.data?.closingBalance ?? 0);
+  // The supplier statement is debit-positive (a negative closing means we owe
+  // them), the summary and the report are liability-positive. They must be the
+  // same figure with opposite signs, not two different figures.
   check(
     'the supplier statement, the summary and the report agree on the 40.00 prepayment',
-    near(closingSupplierA, -40) &&
-      near(supplierTotalsA.netBalance, closingSupplierA) &&
-      near(supplierRowA?.netBalance, closingSupplierA),
+    near(closingSupplierA, 40) &&
+      near(supplierTotalsA.netBalance, -closingSupplierA) &&
+      near(supplierRowA?.netBalance, supplierTotalsA.netBalance),
     `statement ${closingSupplierA}, summary net ${supplierTotalsA.netBalance}, report net ${supplierRowA?.netBalance}`,
   );
+
+  // The mirror image: money back from a supplier uses up the prepayment.
+  const supplierBeforeRefund = { payable: await delta(AP), bank: await delta(bankLedger.code) };
+  const supplierRefund = await must('receive 10.00 back from supplier A', '/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'RECEIPT',
+      voucherDate: today,
+      cashAccountId: bank.id,
+      supplierId: supplierA.id,
+      amount: '10',
+      description: `Supplier refund ${stamp}`,
+    },
+  });
+  if (supplierRefund) {
+    await post('post the supplier refund', `/cash/vouchers/${supplierRefund.id}/post`);
+    record('RECEIPT', 10, bankLedger.code, 1, 'supplier');
+    check(
+      'money back from a supplier increases what we owe and lands in the bank',
+      near((await delta(AP)) - supplierBeforeRefund.payable, -10) &&
+        near((await delta(bankLedger.code)) - supplierBeforeRefund.bank, 10),
+      `payable ${money((await delta(AP)) - supplierBeforeRefund.payable)}, bank ${money((await delta(bankLedger.code)) - supplierBeforeRefund.bank)}`,
+    );
+    const afterSupplierRefund = await api(`/parties/suppliers/summary/${supplierA.id}`);
+    check(
+      'the supplier refund reduces the prepayment from 40.00 to 30.00',
+      near(afterSupplierRefund.data?.totals?.onAccount, 30),
+      `on account ${afterSupplierRefund.data?.totals?.onAccount}, net ${afterSupplierRefund.data?.totals?.netBalance}`,
+    );
+  }
 
   // ───────────────────────────────────────────── 8. every refusal, both sides
   const receiptOf = (customerId, amount, allocations, extra = {}) => ({
@@ -863,11 +979,13 @@ async function main() {
   }
 
   // ────────────────────────────────────────── 9. reversing a collection
+  const beforeReversal = { receivable: await delta(AR), bank: await delta(bankLedger.code) };
   const beforeReversalInvoice = await readInvoice(`/sales/invoices/${salesA1.id}`);
   const reversed = await post('reverse the first collection', `/cash/vouchers/${receipt1.id}/reverse`, {
     method: 'POST',
     json: { reason: `Reversed by ${stamp}` },
   });
+  record('RECEIPT', 400, bankLedger.code, -1);
   const afterReversalInvoice = await readInvoice(`/sales/invoices/${salesA1.id}`);
   check(
     'reversing the collection puts the 400.00 back on invoice A1',
@@ -885,8 +1003,9 @@ async function main() {
   await assertReversalEntry('collection reversal', receipt1, receipt1Journal?.id, { amount: 400 });
   check(
     'the reversal moved the same 400.00 back into receivables and out of the bank',
-    near(await delta(AR), -1150) && near(await delta(bank.code), 1100),
-    `receivable ${await delta(AR)}, bank ${await delta(bank.code)}`,
+    near((await delta(AR)) - beforeReversal.receivable, 400) &&
+      near((await delta(bankLedger.code)) - beforeReversal.bank, -400),
+    `receivable ${money((await delta(AR)) - beforeReversal.receivable)}, bank ${money((await delta(bankLedger.code)) - beforeReversal.bank)}`,
   );
   await refuse('the same collection cannot be reversed twice', `/cash/vouchers/${receipt1.id}/reverse`, {
     method: 'POST',
@@ -913,6 +1032,7 @@ async function main() {
   });
   if (recollection) {
     await post('post the re-collection', `/cash/vouchers/${recollection.id}/post`);
+    record('RECEIPT', 400, bankLedger.code);
     const recollected = await readInvoice(`/sales/invoices/${salesA1.id}`);
     check(
       'the reopened invoice can be collected again and ends fully settled',
@@ -942,6 +1062,7 @@ async function main() {
     method: 'POST',
     json: { reason: `Returned by ${stamp}` },
   });
+  record('PAYMENT', 400, bankLedger.code, -1, 'supplier');
   const s1AfterReversal = await readInvoice(`/purchases/invoices/${payA1.id}`);
   check(
     'reversing the payment gives the 400.00 back to the payable',
@@ -1059,11 +1180,13 @@ async function main() {
       posterPosts.status < 300,
       `status ${posterPosts.status}`,
     );
-    await api(`/cash/vouchers/${collectorCreates.data.id}/reverse`, {
+    if (posterPosts.status < 300) record('RECEIPT', 25, bankLedger.code);
+    const posterReverses = await api(`/cash/vouchers/${collectorCreates.data.id}/reverse`, {
       token: posterToken,
       method: 'POST',
       json: {},
     });
+    if (posterReverses.status < 300) record('RECEIPT', 25, bankLedger.code, -1);
   }
   const collectorJournal = await api(`/accounting/journal-entries/${receipt3Detail.data?.journalEntryId ?? 'x'}`, {
     token: collectorToken,
@@ -1156,6 +1279,30 @@ async function main() {
     `SELECT count(*)::int AS count FROM journal_entries WHERE "totalDebit" <> "totalCredit"`,
   );
   check('every journal entry in the company still balances', unbalanced[0].count === 0, `${unbalanced[0].count} unbalanced`);
+  const cashMismatch = [];
+  for (const [code, expected] of model.cash) {
+    if (!near(await delta(code), expected)) cashMismatch.push(`${code}: ${await delta(code)} vs ${expected}`);
+  }
+  const cashBalancesFinal = await api('/cash/accounts/balances');
+  const cashRowsFinal = cashBalancesFinal.data?.rows ?? cashBalancesFinal.data?.accounts ?? [];
+  const boxMismatch = [
+    [bank.code, await delta(bankLedger.code)],
+    [cashBox.code, await delta(cashLedger.code)],
+  ].filter(([cashCode, ledgerMovement]) => {
+    const row = cashRowsFinal.find((candidate) => candidate.code === cashCode);
+    return !near(row?.balance, ledgerMovement);
+  });
+  check(
+    'every cash box reports the balance its ledger account carries',
+    cashMismatch.length === 0 && boxMismatch.length === 0,
+    `${cashMismatch.join(', ') || 'ledger ok'}; ${boxMismatch.map(([code]) => code).join(', ') || 'cash accounts ok'}`,
+  );
+  check(
+    'the ledger matches the documents: receivable and payable movements reconcile to the last cent',
+    near(await delta(AR), model.receivable) && near(await delta(AP), model.payable),
+    `receivable ${await delta(AR)} (expected ${model.receivable}), payable ${await delta(AP)} (expected ${model.payable})`,
+  );
+
   const trial = await trialBalance();
   check(
     'the trial balance is still balanced after every collection and payment',
@@ -1165,6 +1312,16 @@ async function main() {
 
   const failed = results.filter((row) => !row.ok);
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
+  if (failed.length > 0) {
+    // The job log is not always reachable, but an annotation is. One compact
+    // line carries every failure so a run can be diagnosed from the API alone.
+    const text = failed
+      .map((row, index) => `${index + 1}) ${row.name}${row.detail ? ` — ${row.detail}` : ''}`)
+      .join(' | ');
+    console.log(
+      `::error title=Collections and payments: ${failed.length}/${results.length} checks failed::${text.slice(0, 3800)}`,
+    );
+  }
   return failed.length === 0;
 }
 

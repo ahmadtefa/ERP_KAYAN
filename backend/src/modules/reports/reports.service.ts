@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   AccountType,
+  CashVoucherKind,
   InvoiceDocumentType,
   InvoiceStatus,
   JournalStatus,
@@ -288,6 +289,42 @@ export class ReportsService {
       orderBy: { invoiceDate: 'asc' },
     });
 
+    // Money a customer paid that no invoice claimed is a credit on their
+    // account. Without it this report and the receivable control account
+    // disagree by exactly the unallocated receipts, which is how a customer
+    // can be told they owe 300 while the ledger says 250.
+    const vouchers = await this.prisma.cashVoucher.findMany({
+      where: {
+        companyId,
+        deletedAt: null,
+        status: InvoiceStatus.POSTED,
+        voucherDate: { lte: asOf },
+        // Both directions: a receipt builds the credit, a refund uses it up.
+        kind: { in: [CashVoucherKind.RECEIPT, CashVoucherKind.PAYMENT] },
+      },
+      select: {
+        customerId: true,
+        kind: true,
+        amount: true,
+        allocations: { select: { amount: true } },
+      },
+    });
+    const onAccountByCustomer = new Map<string, Prisma.Decimal>();
+    for (const voucher of vouchers) {
+      if (!voucher.customerId) continue;
+      const settled = voucher.allocations.reduce(
+        (sum, allocation) => sum.plus(allocation.amount),
+        new Prisma.Decimal(0),
+      );
+      const loose = voucher.amount.minus(settled);
+      if (!loose.isPositive()) continue;
+      const signed = voucher.kind === CashVoucherKind.RECEIPT ? loose : loose.negated();
+      onAccountByCustomer.set(
+        voucher.customerId,
+        (onAccountByCustomer.get(voucher.customerId) ?? new Prisma.Decimal(0)).plus(signed),
+      );
+    }
+
     const byCustomer = new Map<
       string,
       { invoiced: Prisma.Decimal; notes: Prisma.Decimal; paid: Prisma.Decimal }
@@ -327,9 +364,19 @@ export class ReportsService {
             notes: agg.notes.toFixed(MONEY_SCALE),
             paid: agg.paid.toFixed(MONEY_SCALE),
             balance: agg.invoiced.minus(agg.notes).minus(agg.paid).toFixed(MONEY_SCALE),
+            onAccount: (onAccountByCustomer.get(c.id) ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
+            netBalance: agg.invoiced
+              .minus(agg.notes)
+              .minus(agg.paid)
+              .minus(onAccountByCustomer.get(c.id) ?? 0)
+              .toFixed(MONEY_SCALE),
           };
         })
-        .filter((r) => !new Prisma.Decimal(r.balance).isZero()),
+        .filter(
+          (r) =>
+            !new Prisma.Decimal(r.balance).isZero() ||
+            !new Prisma.Decimal(r.onAccount).isZero(),
+        ),
     };
   }
 
@@ -359,6 +406,39 @@ export class ReportsService {
         paidAmount: true,
       },
     });
+
+    // A payment made before there is an invoice is a prepayment to the
+    // supplier, not a payment that vanished.
+    const vouchers = await this.prisma.cashVoucher.findMany({
+      where: {
+        companyId,
+        deletedAt: null,
+        status: InvoiceStatus.POSTED,
+        voucherDate: { lte: asOf },
+        kind: { in: [CashVoucherKind.RECEIPT, CashVoucherKind.PAYMENT] },
+      },
+      select: {
+        supplierId: true,
+        kind: true,
+        amount: true,
+        allocations: { select: { amount: true } },
+      },
+    });
+    const onAccountBySupplier = new Map<string, Prisma.Decimal>();
+    for (const voucher of vouchers) {
+      if (!voucher.supplierId) continue;
+      const settled = voucher.allocations.reduce(
+        (sum, allocation) => sum.plus(allocation.amount),
+        new Prisma.Decimal(0),
+      );
+      const loose = voucher.amount.minus(settled);
+      if (!loose.isPositive()) continue;
+      const signed = voucher.kind === CashVoucherKind.PAYMENT ? loose : loose.negated();
+      onAccountBySupplier.set(
+        voucher.supplierId,
+        (onAccountBySupplier.get(voucher.supplierId) ?? new Prisma.Decimal(0)).plus(signed),
+      );
+    }
 
     const bySupplier = new Map<
       string,
@@ -399,9 +479,19 @@ export class ReportsService {
             notes: agg.notes.toFixed(MONEY_SCALE),
             paid: agg.paid.toFixed(MONEY_SCALE),
             balance: agg.invoiced.minus(agg.notes).minus(agg.paid).toFixed(MONEY_SCALE),
+            onAccount: (onAccountBySupplier.get(s.id) ?? new Prisma.Decimal(0)).toFixed(MONEY_SCALE),
+            netBalance: agg.invoiced
+              .minus(agg.notes)
+              .minus(agg.paid)
+              .minus(onAccountBySupplier.get(s.id) ?? 0)
+              .toFixed(MONEY_SCALE),
           };
         })
-        .filter((r) => !new Prisma.Decimal(r.balance).isZero()),
+        .filter(
+          (r) =>
+            !new Prisma.Decimal(r.balance).isZero() ||
+            !new Prisma.Decimal(r.onAccount).isZero(),
+        ),
     };
   }
 

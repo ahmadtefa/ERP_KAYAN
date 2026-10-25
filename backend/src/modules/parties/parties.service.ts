@@ -153,6 +153,10 @@ export class PartiesService {
         kind: true,
         amount: true,
         status: true,
+        // What each voucher settled. Whatever it did not settle is money on
+        // the partner's account, and leaving it out is how a card ends up
+        // disagreeing with the statement and with the control account.
+        allocations: { select: { amount: true } },
       },
       orderBy: { voucherDate: 'desc' },
     });
@@ -175,6 +179,24 @@ export class PartiesService {
           inv.totalAmount.minus(inv.paidAmount).isPositive(),
       )
       .reduce((sum, inv) => sum.plus(inv.totalAmount).minus(inv.paidAmount), new Prisma.Decimal(0));
+
+    /// Money this partner has with us (a customer receipt) or we have with them
+    /// (a supplier payment) that no invoice claimed. It sits on the control
+    /// account, so `outstanding` alone is not the balance: the balance is what
+    /// is still owed on invoices less what has already been paid on account.
+    /// A receipt is a customer's money in our hands; a payment to a customer is
+    /// a refund and works the other way. For a supplier it is the mirror image.
+    const creditKind = kind === 'customer' ? 'RECEIPT' : 'PAYMENT';
+    const onAccount = vouchers.reduce((sum, voucher) => {
+      const settled = voucher.allocations.reduce(
+        (allocated, allocation) => allocated.plus(allocation.amount),
+        new Prisma.Decimal(0),
+      );
+      const loose = voucher.amount.minus(settled);
+      if (!loose.isPositive()) return sum;
+      return voucher.kind === creditKind ? sum.plus(loose) : sum.minus(loose);
+    }, new Prisma.Decimal(0));
+    const netBalance = outstanding.minus(onAccount);
 
     const recentDocuments = [
       ...invoices.slice(0, 5).map((inv) => ({
@@ -203,6 +225,13 @@ export class PartiesService {
         invoiced: totalInvoiced.toFixed(MONEY_SCALE),
         paid: totalPaid.toFixed(MONEY_SCALE),
         outstanding: outstanding.toFixed(MONEY_SCALE),
+        /// Positive when the partner has left money with us (a customer
+        /// credit or a supplier prepayment). Kept separate from `outstanding`
+        /// so a reader can see both what is unpaid and what is already paid.
+        onAccount: onAccount.toFixed(MONEY_SCALE),
+        /// outstanding - onAccount: the figure the statement closes on and the
+        /// one the control account carries.
+        netBalance: netBalance.toFixed(MONEY_SCALE),
         overdue: overdue.toFixed(MONEY_SCALE),
         invoices: invoices.length,
         vouchers: vouchers.length,
