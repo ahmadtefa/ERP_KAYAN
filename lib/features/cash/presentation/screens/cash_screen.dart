@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
@@ -16,7 +17,9 @@ import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../../../data/presentation/widgets/document_export_actions.dart';
+import '../../voucher_allocation.dart';
 import '../providers/cash_providers.dart';
+import '../widgets/voucher_details_view.dart';
 
 /// Cash boxes, bank accounts, receipts, payments and transfers.
 ///
@@ -287,22 +290,11 @@ class _CashScreenState extends ConsumerState<CashScreen>
             partyId: partyId,
           )).future,
         );
-        var left = double.tryParse(text(values, 'amount', fallback: '0')) ?? 0;
-        for (final invoice in open) {
-          if (left <= 0) break;
-          final due = double.tryParse(amount(invoice, 'balance')) ?? 0;
-          if (due <= 0) continue;
-          final applied = due < left ? due : left;
-          allocations = [
-            ...allocations,
-            {
-              if (isReceipt) 'salesInvoiceId': text(invoice, 'id')
-              else 'purchaseInvoiceId': text(invoice, 'id'),
-              'amount': applied.toStringAsFixed(4),
-            },
-          ];
-          left -= applied;
-        }
+        allocations = planAllocations(
+          openInvoices: open,
+          amount: text(values, 'amount'),
+          isReceipt: isReceipt,
+        );
       } on Failure catch (error) {
         allocationLookupFailed = true;
         if (mounted) showMessage(context, error.message, error: true);
@@ -468,7 +460,13 @@ class _CashScreenState extends ConsumerState<CashScreen>
         content: SizedBox(
           width: 720,
           height: 480,
-          child: _VoucherDetails(id: text(voucher, 'id')),
+          child: _VoucherDetails(
+            id: text(voucher, 'id'),
+            onOpen: (path) {
+              Navigator.of(dialogContext).pop();
+              context.go(path);
+            },
+          ),
         ),
         actions: [
           TextButton(
@@ -679,16 +677,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 ColumnSpec(
                   l10n.party,
                   flex: 2,
-                  value: (r) {
-                    final customer = isArabic
-                        ? text(r, 'customerNameAr', fallback: text(r, 'customerNameEn'))
-                        : text(r, 'customerNameEn', fallback: text(r, 'customerNameAr'));
-                    return customer.isNotEmpty
-                        ? customer
-                        : (isArabic
-                              ? text(r, 'supplierNameAr', fallback: text(r, 'supplierNameEn'))
-                              : text(r, 'supplierNameEn', fallback: text(r, 'supplierNameAr')));
-                  },
+                  value: (r) => partyName(r, arabic: isArabic),
                 ),
                 ColumnSpec(
                   l10n.amount,
@@ -891,179 +880,20 @@ class _AccountStatement extends ConsumerWidget {
   }
 }
 
-/// One receipt or payment with the invoices it settled and the entries it
-/// wrote. Everything shown here is the server's answer: the money, the
-/// allocation and the journal entry are the ones stored, not recomputed.
+/// Loads one voucher and hands it to the view that draws it.
 class _VoucherDetails extends ConsumerWidget {
-  const _VoucherDetails({required this.id});
+  const _VoucherDetails({required this.id, required this.onOpen});
 
   final String id;
+  final void Function(String path) onOpen;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final l10n = context.l10n;
-    final arabic = Localizations.localeOf(context).languageCode == 'ar';
-    final locale = Localizations.localeOf(context).toString();
     final detail = ref.watch(cashVoucherProvider(id));
-
     return detail.when(
       loading: () => const LoadingView(),
       error: (error, _) => ErrorView(message: error.toString()),
-      data: (voucher) {
-        final allocations = listOf(voucher['allocations']);
-        final entries = listOf(voucher['journalEntries']);
-        final draft = text(voucher, 'status').toUpperCase() == 'DRAFT';
-        final customer = arabic
-            ? text(voucher, 'customerNameAr', fallback: text(voucher, 'customerNameEn'))
-            : text(voucher, 'customerNameEn', fallback: text(voucher, 'customerNameAr'));
-        final supplier = arabic
-            ? text(voucher, 'supplierNameAr', fallback: text(voucher, 'supplierNameEn'))
-            : text(voucher, 'supplierNameEn', fallback: text(voucher, 'supplierNameAr'));
-        final party = customer.isNotEmpty ? customer : supplier;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Wrap(
-              spacing: 24,
-              runSpacing: 8,
-              children: [
-                _VoucherFact(
-                  label: l10n.invoiceDate,
-                  value: text(voucher, 'voucherDate'),
-                ),
-                _VoucherFact(
-                  label: l10n.voucherType,
-                  value: text(voucher, 'kind').toUpperCase() == 'RECEIPT'
-                      ? l10n.receipt
-                      : l10n.payment,
-                ),
-                if (party.isNotEmpty)
-                  _VoucherFact(label: l10n.party, value: party),
-                _VoucherFact(
-                  label: l10n.amount,
-                  value: formatAmount(
-                    amount(voucher, 'amount'),
-                    locale: locale,
-                  ),
-                ),
-                _VoucherFact(
-                  label: l10n.status,
-                  value: text(voucher, 'status'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Text(
-              arabic ? 'الفواتير المسدَّدة' : 'Invoices settled',
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
-            const SizedBox(height: 6),
-            Expanded(
-              child: allocations.isEmpty
-                  ? Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: Text(
-                        arabic
-                            ? 'لم تُخصَّص لفواتير: المبلغ باقٍ على حساب الطرف.'
-                            : 'Not applied to an invoice: the money stays on the party account.',
-                      ),
-                    )
-                  : RecordsTable(
-                      rows: allocations,
-                      columns: [
-                        ColumnSpec(
-                          arabic ? 'الفاتورة' : 'Invoice',
-                          value: (row) => text(row, 'invoiceNumber'),
-                          emphasise: true,
-                        ),
-                        ColumnSpec(
-                          arabic ? 'إجمالي الفاتورة' : 'Invoice total',
-                          numeric: true,
-                          value: (row) => formatAmount(
-                            amount(row, 'invoiceTotal'),
-                            locale: locale,
-                          ),
-                        ),
-                        ColumnSpec(
-                          l10n.amount,
-                          numeric: true,
-                          emphasise: true,
-                          value: (row) => formatAmount(
-                            amount(row, 'amount'),
-                            locale: locale,
-                          ),
-                        ),
-                      ],
-                    ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              arabic ? 'القيد المحاسبي' : 'Journal entry',
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
-            const SizedBox(height: 4),
-            if (entries.isEmpty)
-              Text(
-                draft
-                    ? (arabic
-                          ? 'لا يوجد قيد: السند لم يُرحَّل بعد.'
-                          : 'No entry yet: the voucher is still a draft.')
-                    : (arabic
-                          ? 'لا يوجد قيد مرتبط بهذا السند.'
-                          : 'No entry is linked to this voucher.'),
-              )
-            else
-              for (final entry in entries)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: Row(
-                    children: [
-                      Text(
-                        text(entry, 'entryNumber'),
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(text(entry, 'entryDate')),
-                      const SizedBox(width: 12),
-                      Text(
-                        flag(entry, 'isReversal')
-                            ? (arabic ? 'قيد عكسي' : 'Reversal')
-                            : (arabic ? 'القيد الأصلي' : 'Original'),
-                      ),
-                      const Spacer(),
-                      Text(formatAmount(amount(entry, 'amount'), locale: locale)),
-                    ],
-                  ),
-                ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// A labelled figure in the voucher header.
-class _VoucherFact extends StatelessWidget {
-  const _VoucherFact({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          label,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-        Text(value, style: theme.textTheme.bodyMedium),
-      ],
+      data: (voucher) => VoucherDetailsView(voucher: voucher, onOpen: onOpen),
     );
   }
 }

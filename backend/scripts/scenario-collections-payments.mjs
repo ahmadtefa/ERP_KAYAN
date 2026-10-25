@@ -1369,6 +1369,26 @@ async function main() {
     cashMismatch.length === 0 && boxMismatch.length === 0,
     `${cashMismatch.join(', ') || 'ledger ok'}; ${boxMismatch.map(([code]) => code).join(', ') || 'cash accounts ok'}`,
   );
+  // The general ledger is what a reader opens to see the same money. Its
+  // closing must be the balance the cash screen shows, and its lines must name
+  // the receipt that caused them.
+  const bankLedgerReport = await api(`/reports/account-ledger/${bankLedger.id}?from=2000-01-01&to=${today}`);
+  const bankLines = bankLedgerReport.data?.movements ?? [];
+  const collectedLine = bankLines.find((line) => line.source?.id === receipt2?.id);
+  check(
+    'the general ledger shows the collection against the receipt that caused it',
+    Boolean(collectedLine) &&
+      near(collectedLine?.debit, 600) &&
+      collectedLine?.source?.type === 'CASH_VOUCHER' &&
+      collectedLine?.source?.number === receipt2?.voucherNumber,
+    `${collectedLine?.entryNumber} debit ${collectedLine?.debit} source ${collectedLine?.source?.number}`,
+  );
+  const bankRowFinal = cashRowsFinal.find((row) => row.code === bank.code);
+  check(
+    'the general ledger closing equals the balance the cash screen reports',
+    near(bankLedgerReport.data?.closing, bankRowFinal?.balance),
+    `ledger ${bankLedgerReport.data?.closing}, cash screen ${bankRowFinal?.balance}`,
+  );
   check(
     'the ledger matches the documents: receivable and payable movements reconcile to the last cent',
     near(await delta(AR), model.receivable) && near(await delta(AP), model.payable),

@@ -27,6 +27,27 @@ num? asNum(Object? value) {
   return null;
 }
 
+/// The partner printed on a document.
+///
+/// The server sends the party as an object (`customer: {code, nameEn,
+/// nameAr}`); a few list endpoints send flat `customerNameEn/Ar` keys instead.
+/// Reading only one of the two shapes is how a voucher list ends up with an
+/// empty "party" column while the data is right there in the response.
+String partyName(Json json, {bool arabic = false}) {
+  for (final key in const ['customer', 'supplier', 'party']) {
+    final value = json[key];
+    if (value is! Map) continue;
+    final party = Map<String, dynamic>.from(value);
+    final ar = text(party, 'nameAr');
+    final en = text(party, 'nameEn');
+    final chosen = arabic ? (ar.isNotEmpty ? ar : en) : (en.isNotEmpty ? en : ar);
+    if (chosen.isNotEmpty) return chosen;
+  }
+  final flatAr = text(json, 'customerNameAr', fallback: text(json, 'supplierNameAr'));
+  final flatEn = text(json, 'customerNameEn', fallback: text(json, 'supplierNameEn'));
+  return arabic ? (flatAr.isNotEmpty ? flatAr : flatEn) : (flatEn.isNotEmpty ? flatEn : flatAr);
+}
+
 bool flag(Json json, String key, {bool fallback = false}) =>
     json[key] is bool ? json[key] as bool : fallback;
 
