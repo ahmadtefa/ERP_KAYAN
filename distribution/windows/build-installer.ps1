@@ -153,7 +153,9 @@ Run-Native 'npm.cmd' @('run','prisma:generate') $backend
 Run-Native 'npm.cmd' @('run','build') $backend
 
 Write-Host '[2/8] Stage production backend files (development .env is excluded)'
-foreach ($relative in @('dist','prisma','scripts','package.json','package-lock.json','nest-cli.json','tsconfig.json')) {
+# The licence of the Arabic typeface travels with the program: the font is
+# embedded in the bundle, and its licence has to ship beside it.
+foreach ($relative in @('dist','prisma','scripts','package.json','package-lock.json','nest-cli.json','tsconfig.json','OFL-NotoNaskhArabic.txt')) {
   Copy-Item -LiteralPath (Join-Path $backend $relative) -Destination (Join-Path $app 'backend') -Recurse -Force
 }
 Run-Native 'npm.cmd' @('ci','--omit=dev','--no-audit','--no-fund') (Join-Path $app 'backend')

@@ -1,4 +1,15 @@
-import { buildPrintArgs } from './pdf.service';
+import {
+  PDFArray,
+  PDFDocument,
+  PDFRawStream,
+  decodePDFRawStream,
+} from 'pdf-lib';
+import {
+  PAGE_NUMBER_GEOMETRY,
+  buildDevToolsArgs,
+  buildPrintArgs,
+  stampPageNumbers,
+} from './pdf.service';
 
 /**
  * The flags, not the browser: the real end-to-end render is covered by
@@ -31,5 +42,112 @@ describe('buildPrintArgs', () => {
     const args = buildPrintArgs({ ...base, legacyHeadless: true });
     expect(args[0]).toBe('--headless');
     expect(args).toContain(`--user-data-dir=${base.profile}`);
+  });
+
+  it('allows no network at all while a document is being printed', () => {
+    // The Arabic face and the logo travel inside the page. These two flags are
+    // what make that a rule instead of a hope: a stray http(s) reference would
+    // resolve to nothing, and nothing else is fetched in the background.
+    const args = buildPrintArgs({ ...base, legacyHeadless: false });
+    expect(args).toContain('--disable-background-networking');
+    expect(args).toContain('--host-resolver-rules=MAP * ~NOTFOUND');
+    expect(args.join(' ')).not.toMatch(/https?:\/\//);
+  });
+});
+
+/**
+ * The other print route: the one that keeps a painted page design.
+ *
+ * The command line printer decides the paper size and the background for
+ * itself, and it decides both the way a print dialog would - no background,
+ * its own sheet. A quotation whose header and footer are a full-page design
+ * cannot be printed that way, so it is printed through the browser's DevTools
+ * pipe instead.
+ */
+describe('buildDevToolsArgs', () => {
+  const base = {
+    profile: 'C:\\Temp\\kayan-pdf-1\\devtools-profile',
+    page: 'C:\\Temp\\kayan-pdf-1\\report.html',
+  };
+
+  it('talks to the browser over a pipe, not a port', () => {
+    const args = buildDevToolsArgs({ ...base, legacyHeadless: false });
+    expect(args).toContain('--remote-debugging-pipe');
+    expect(args.join(' ')).not.toContain('--remote-debugging-port');
+    expect(args).toContain(`--user-data-dir=${base.profile}`);
+    expect(args[args.length - 1]).toBe(base.page);
+  });
+
+  it('opens the page with no network available', () => {
+    const args = buildDevToolsArgs({ ...base, legacyHeadless: false });
+    expect(args).toContain('--host-resolver-rules=MAP * ~NOTFOUND');
+    expect(args).toContain('--disable-background-networking');
+    expect(args.join(' ')).not.toMatch(/https?:\/\//);
+  });
+});
+
+describe('stampPageNumbers', () => {
+  const blank = async (pages: number) => {
+    const document = await PDFDocument.create();
+    for (let index = 0; index < pages; index += 1) {
+      document.addPage([595.28, 841.89]);
+    }
+    return Buffer.from(await document.save());
+  };
+
+  /// The drawing instructions of every page, decompressed. pdf-lib writes the
+  /// number into a content stream of its own, appended to whatever the browser
+  /// produced, so this reads the finished page the way a PDF viewer would.
+  const pageDrawing = async (pdf: Buffer) => {
+    const document = await PDFDocument.load(pdf);
+    const decoder = new TextDecoder('latin1');
+    return document.getPages().map((page) => {
+      const contents = page.node.Contents();
+      if (!contents) return '';
+      const streams =
+        contents instanceof PDFArray
+          ? contents.asArray().map((reference) => document.context.lookup(reference))
+          : [contents];
+      return streams
+        .map((stream) =>
+          stream instanceof PDFRawStream
+            ? decoder.decode(decodePDFRawStream(stream).decode())
+            : '',
+        )
+        .join('\n');
+    });
+  };
+
+  it('numbers every page, centred on the sheet', async () => {
+    const drawing = await pageDrawing(await stampPageNumbers(await blank(3)));
+    expect(drawing).toHaveLength(3);
+    drawing.forEach((page, index) => {
+      // pdf-lib writes the label as a hex string; this is "1 / 3" and so on.
+      const label = Buffer.from(`${index + 1} / 3`, 'latin1')
+        .toString('hex')
+        .toUpperCase();
+      expect(page).toContain(`<${label}> Tj`);
+      expect(page).toContain('0.45 0.45 0.45 rg');
+      expect(page).toMatch(/Helvetica-\d+ 9 Tf/);
+      // Centred: x is half the difference between the sheet and the label.
+      const placed = /1 0 0 1 ([\d.]+) ([\d.]+) Tm/.exec(page);
+      expect(placed).not.toBeNull();
+      const [, x, y] = placed as RegExpExecArray;
+      expect(Number(x)).toBeGreaterThan(280);
+      expect(Number(x)).toBeLessThan(300);
+      expect(Number(y)).toBe(PAGE_NUMBER_GEOMETRY.y);
+    });
+  });
+
+  it('draws the number where the caller asks, in the caller ink', async () => {
+    const [page] = await pageDrawing(
+      await stampPageNumbers(await blank(1), {
+        pageNumberColor: { r: 1, g: 1, b: 1 },
+        pageNumberY: 10,
+      }),
+    );
+    expect(page).toContain('1 1 1 rg');
+    const placed = /1 0 0 1 ([\d.]+) ([\d.]+) Tm/.exec(page);
+    expect(Number((placed as RegExpExecArray)[2])).toBe(10);
   });
 });

@@ -1,6 +1,11 @@
 import {
+  QUOTATION_BOTTOM_BAND_MM,
+  QUOTATION_FOOTER_INSET_MM,
+  QUOTATION_PAGE_NUMBER,
+  QUOTATION_TOP_BAND_MM,
   QuotationSnapshot,
   quotationDocumentFileName,
+  quotationPageNumberInk,
   renderQuotationDocument,
 } from './quotation-document';
 
@@ -194,19 +199,26 @@ describe('quotation document template', () => {
     expect(html.split('1,420.00 EGP').length - 1).toBe(1);
   });
 
-  it('places the company contact details in the footer, not the header', () => {
+  it('puts the header band above the content and the legal line in the footer band', () => {
     const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false);
-    const header = html.slice(html.indexOf('<header class="masthead">'), html.indexOf('</header>'));
-    expect(header).not.toContain('+20 2 1234 5678');
-    expect(header).not.toContain('sales@kayan.example');
+    const header = html.slice(
+      html.indexOf('<header class="masthead">'),
+      html.indexOf('</header>'),
+    );
+    // The masthead is the company speaking: its name, its address, how to
+    // reach it.
+    expect(header).toContain('كيان للحلول المتكاملة');
+    expect(header).toContain('+20 2 1234 5678');
+    expect(header).toContain('sales@kayan.example');
+    expect(header).toContain('مدينة نصر، القاهرة');
+    // The registration numbers and the disclaimer belong to the footer band:
+    // the top of the sheet is the letterhead, the bottom is the small print.
     expect(header).not.toContain('TAX-999');
+    expect(header).not.toContain('CR-123');
 
     const footer = html.slice(html.indexOf('<footer class="page-footer">'));
-    expect(footer).toContain('+20 2 1234 5678');
-    expect(footer).toContain('sales@kayan.example');
     expect(footer).toContain('TAX-999');
     expect(footer).toContain('CR-123');
-    expect(footer).toContain('مدينة نصر، القاهرة');
     expect(footer).toContain('هذا العرض ليس فاتورة ضريبية.');
   });
 
@@ -272,12 +284,93 @@ describe('quotation document template', () => {
     );
   });
 
-  it('declares A4 portrait, repeating table headers and safe breaks', () => {
+  it('declares A4 portrait with no margins, repeating headers and safe breaks', () => {
     const html = renderQuotationDocument(snapshot(), COMPANY, 'en', false);
-    expect(html).toContain('@page { size: A4 portrait; margin: 12mm 12mm 16mm; }');
+    // No page margin: the design paints to the paper's edge, and the two bands
+    // it owns are reserved by the flowing table instead.
+    expect(html).toContain('@page { size: A4 portrait; margin: 0; }');
+    expect(html).toContain('.page-flow > thead > tr > td { height: ' + (QUOTATION_TOP_BAND_MM + 4) + 'mm');
+    expect(html).toContain('.page-flow > tfoot > tr > td { height: ' + (QUOTATION_BOTTOM_BAND_MM + 3) + 'mm');
     expect(html).toContain('display: table-header-group');
     expect(html).toContain('break-inside: avoid');
     expect(html).toContain('break-after: avoid');
+  });
+
+  it('carries the company identity behind the content, as a repeatable layer', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false);
+    const layer = html.slice(
+      html.indexOf('<div class="page-bg"'),
+      html.indexOf('<table class="page-flow">'),
+    );
+    // Fixed, so Chromium paints it again at the top of every printed page, and
+    // sized to the page box so it reaches the paper's edge whatever the
+    // printer does with margins.
+    expect(html).toContain('.page-bg { position: fixed; inset: 0;');
+    // Everything the design must show on every page.
+    expect(layer).toContain('<h1>كيان للحلول المتكاملة</h1>');
+    expect(layer).toContain('مدينة نصر، القاهرة');
+    expect(layer).toContain('<bdi>+20 2 1234 5678</bdi>');
+    expect(layer).toContain('<bdi>sales@kayan.example</bdi>');
+    expect(layer).toContain('<bdi>TAX-999</bdi>');
+    expect(layer).toContain('<bdi>CR-123</bdi>');
+    expect(layer).toContain('هذا العرض ليس فاتورة ضريبية.');
+    // The real logo, inline, and a wordmark drawn behind the text.
+    expect(layer).toContain('alt="كيان للحلول المتكاملة"');
+    expect(layer).toMatch(/<img src="data:image\/png;base64,/);
+    expect(layer).toContain('class="watermark"');
+    expect(layer).toContain('class="frame"');
+    // It is a layer of its own, not a header at the top of the body.
+    expect(layer.indexOf('class="masthead"')).toBeGreaterThan(-1);
+    expect(html.indexOf('<table class="page-flow">')).toBeLessThan(html.indexOf('<div class="title-band">'));
+  });
+
+  it('keeps the page number below the footer text and inside the bottom band', () => {
+    // 10 pt from the paper's edge, in a 26 mm band whose footer stops at
+    // 9.5 mm: the digits and the legal line cannot touch, and both are inside
+    // the design's bottom band.
+    expect(QUOTATION_PAGE_NUMBER.y).toBeLessThan((QUOTATION_FOOTER_INSET_MM * 72) / 25.4 - QUOTATION_PAGE_NUMBER.size);
+    expect(QUOTATION_PAGE_NUMBER.y + QUOTATION_PAGE_NUMBER.size).toBeLessThan(
+      (QUOTATION_BOTTOM_BAND_MM * 72) / 25.4,
+    );
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'en', false);
+    expect(html).toContain('bottom: ' + QUOTATION_FOOTER_INSET_MM + 'mm');
+    // The digits are never produced by the stylesheet.
+    expect(html).not.toContain('counter(page)');
+  });
+
+  it('picks page-number ink that stays readable on the band', () => {
+    // The band is brand navy, so the stamped number must be white.
+    expect(quotationPageNumberInk(null)).toEqual({ r: 1, g: 1, b: 1 });
+    // A design that paints the footer light gets dark ink instead.
+    expect(quotationPageNumberInk({ footer: { backgroundColor: '#ffffff' } })).toEqual({
+      r: 0.086,
+      g: 0.161,
+      b: 0.29,
+    });
+    expect(quotationPageNumberInk({ footer: { backgroundColor: '#164d84' } })).toEqual({
+      r: 1,
+      g: 1,
+      b: 1,
+    });
+    // Anything unparseable is not trusted to be light.
+    expect(quotationPageNumberInk({ footer: { backgroundColor: 'navy' } })).toEqual({
+      r: 1,
+      g: 1,
+      b: 1,
+    });
+  });
+
+  it('bundles the Arabic face instead of asking the internet for it', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false);
+    // Two weights, embedded as data URIs: no request leaves the machine.
+    expect(html).toContain('@font-face');
+    expect(html).toContain("font-family: 'Kayan Naskh'");
+    expect(html.split('src: url(data:font/woff2;base64,').length - 1).toBe(2);
+    expect(html).toContain("font-family: 'Kayan Naskh', 'Tahoma'");
+    // Nothing in the page points at the network at all.
+    expect(html).not.toMatch(/https?:\/\//i);
+    expect(html).not.toContain('<link');
+    expect(html).not.toContain('@import');
   });
 
   it('builds a safe file name from the real quotation number', () => {

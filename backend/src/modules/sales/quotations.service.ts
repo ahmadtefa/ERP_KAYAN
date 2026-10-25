@@ -36,7 +36,9 @@ import {
   standardColumns,
 } from './quotation-columns';
 import {
+  PageNumberInk,
   QuotationSnapshot,
+  quotationPageNumberInk,
   renderQuotationDocument,
 } from './quotation-document';
 
@@ -858,7 +860,15 @@ export class QuotationsService {
     id: string,
     lang: 'en' | 'ar',
     autoPrint = false,
-  ): Promise<{ html: string; quotationNumber: string }> {
+  ): Promise<{
+    html: string;
+    quotationNumber: string;
+    /// The ink the stamped page number must be drawn in, decided by the design
+    /// the snapshot carries: the quotation's bottom band is brand navy unless
+    /// the offer overrode it, and a number stamped in the wrong colour is a
+    /// number nobody can read.
+    pageNumberInk: PageNumberInk;
+  }> {
     const quotation = await this.prisma.quotation.findFirst({
       where: { id, companyId, deletedAt: null },
       include: QUOTATION_INCLUDE,
@@ -872,6 +882,9 @@ export class QuotationsService {
     return {
       html: renderQuotationDocument(content, company, lang, autoPrint),
       quotationNumber: content.quotationNumber,
+      pageNumberInk: quotationPageNumberInk(
+        content.design as Record<string, unknown> | null | undefined,
+      ),
     };
   }
 

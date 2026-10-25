@@ -462,9 +462,34 @@ try {
   if ($restoredCustomer.nameEn -ne $originalName) { Fail 'Installed PostgreSQL restore did not roll back the sentinel mutation.' }
   Write-Output '::notice::Installed Windows PostgreSQL backup/restore passed: real archive, mutation, checked restore, safety copy, re-login and original sentinel verified.'
 
+  # Give the company a real logo first. The quotation's page design carries it
+  # on every page, and a printed sheet without the logo is exactly the failure
+  # this smoke test exists to catch.
+  $logoPath = Join-Path $env:TEMP 'kayan-smoke-logo.png'
+  [IO.File]::WriteAllBytes($logoPath, [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAABC0lEQVR4nO2asQ3CMBBFATFDWANqFqCBIViDFtZgCCoWoIY1YAoKN5Z9JLHvzM9J/3W2nOievxzbUubd/jzzzAJdgBYKoKEAGgqgoQCaZd712lzHP79+Hu2KqcF9AhRAQwE0FEAj7APmfLa7uNk97oYvbyuQlB53Wmm0EhBLzwfoNZqsgcHqK0b+4h9roIj37dQ/YHW4xE37BEonVRmC+8+osUDddGpCYAJoKIDGWKBuZ9Xsx0wgo3Q6lcchJiAxflL1p9FWh7lQWc8WO/X7QEDU8HQjC9hWnMBFjIYCaNwLTO5Sn9zZB3GfAAXQUAANBdBQAA0F0AhnIfj/G0W4T4ACaCiAhgJo3At8AQ4oMlkSCP3LAAAAAElFTkSuQmCC'))
+  $logoBoundary = [Guid]::NewGuid().ToString()
+  $logoPrefix = "--$logoBoundary`r`nContent-Disposition: form-data; name=`"file`"; filename=`"kayan-smoke-logo.png`"`r`nContent-Type: image/png`r`n`r`n"
+  $logoSuffix = "`r`n--$logoBoundary--`r`n"
+  $latin1 = [Text.Encoding]::GetEncoding('ISO-8859-1')
+  # Built through a stream: in Windows PowerShell `byte[] + byte[]` produces an
+  # Object[], which Invoke-RestMethod would send as something that is not the
+  # file the server is expecting.
+  $logoStream = New-Object IO.MemoryStream
+  $prefixBytes = $latin1.GetBytes($logoPrefix)
+  $logoStream.Write($prefixBytes, 0, $prefixBytes.Length)
+  $logoFileBytes = [IO.File]::ReadAllBytes($logoPath)
+  $logoStream.Write($logoFileBytes, 0, $logoFileBytes.Length)
+  $suffixBytes = $latin1.GetBytes($logoSuffix)
+  $logoStream.Write($suffixBytes, 0, $suffixBytes.Length)
+  $logoBody = $logoStream.ToArray()
+  $logoStream.Dispose()
+  $logoUpload = Invoke-RestMethod -Method Post -Uri "$base/company/logo" -Headers $headers -ContentType "multipart/form-data; boundary=$logoBoundary" -Body $logoBody -TimeoutSec 60
+  if (-not $logoUpload.hasLogo) { Fail 'Installed API did not accept a company logo, so the printed design cannot be verified.' }
+
   # A real quotation PDF from the installed runtime — the same route the
   # «Download PDF» button calls, rendered by the bundled server through the
-  # system browser. A 200 without %PDF- bytes is a failure, not a pass.
+  # system browser. A 200 without %PDF- bytes is a failure, not a pass, and a
+  # PDF without the design on every page is not a pass either.
   $quotationBody = @{
     quotationDate = (Get-Date -Format 'yyyy-MM-dd')
     customerId = $customer.id
@@ -481,8 +506,18 @@ try {
   Invoke-WebRequest -UseBasicParsing -Uri "$base/sales/quotations/$($quotation.id)/pdf?lang=ar" -Headers $headers -OutFile $pdfPath -TimeoutSec 180
   $pdfBytes = [IO.File]::ReadAllBytes($pdfPath)
   if ($pdfBytes.Length -le 5 -or [Text.Encoding]::ASCII.GetString($pdfBytes, 0, 5) -ne '%PDF-') { Fail 'Installed quotation PDF download is not a real PDF file.' }
-  Write-Output "::notice::Installed Windows quotation PDF passed: real %PDF- file of $($pdfBytes.Length) bytes rendered by the installed runtime."
-  Write-Output "::notice::Windows installer smoke test passed: service, database preparation, client startup on port $apiPort, login, company JSON and full PostgreSQL backup/restore, and a real quotation PDF all verified."
+  Write-Output "::notice::Installed Windows quotation PDF: real %PDF- file of $($pdfBytes.Length) bytes rendered by the installed runtime."
+
+  # Open the file the way a viewer would and check the sheet, not just the
+  # header bytes: A4, a painted band, the logo, the bundled Arabic face and the
+  # right page number on every page, and nothing that reaches for the network.
+  $verifyScript = Join-Path $backend 'scripts\verify-quotation-pdf.mjs'
+  if (-not (Test-Path $verifyScript)) { Fail "Installed runtime is missing the PDF verifier: $verifyScript" }
+  $verifyOutput = & $node $verifyScript $pdfPath --max-pages 2 2>&1
+  if ($LASTEXITCODE -ne 0) { Fail ('Installed quotation PDF failed the printed-design checks: ' + (($verifyOutput | Out-String).Trim())) }
+  foreach ($line in $verifyOutput) { Write-Output $line }
+  Write-Output "::notice::Installed Windows quotation PDF passed: %PDF- file of $($pdfBytes.Length) bytes, design and page numbers verified on every page by the installed runtime."
+  Write-Output "::notice::Windows installer smoke test passed: service, database preparation, client startup on port $apiPort, login, company JSON and full PostgreSQL backup/restore, and a designed quotation PDF all verified."
 } finally {
   if ($client -and -not $client.HasExited) {
     $null = $client.CloseMainWindow()
