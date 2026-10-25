@@ -944,7 +944,33 @@ async function clockAndRestore() {
       return `warning recorded (${events} event(s))`;
     });
 
-    await check('K3 five days back suspends the licence and keeps every row', async () => {
+    await check('K3 three warnings inside seven days suspend the licence', async () => {
+      // K2 was the first warning. Two more, spread over hours rather than
+      // months, reach the limit even though none of them is 72 hours deep.
+      const base = now.getTime();
+      now = new Date(base + 3_600_000);
+      const second = await instance.service.status({ fresh: true });
+      assertEqual(second.clock.state, 'WARNING', 'second occurrence is still a warning');
+      assertEqual(second.state, 'ACTIVE', 'still working');
+      now = new Date(base + 2 * 3_600_000);
+      const third = await instance.service.status({ fresh: true });
+      assertEqual(third.clock.state, 'TAMPERED', 'third occurrence inside seven days');
+      assertEqual(third.state, 'SUSPENDED', 'licence suspended');
+      assertEqual(await usersIn(DATABASES.runtime + '_clock'), 2, 'accounts kept');
+      assertEqual(await seatsIn(DATABASES.runtime + '_clock'), 2, 'seat rows kept');
+      const events = await count(
+        connection,
+        `SELECT count(*) FROM license_events WHERE type = 'CLOCK_TAMPERED'`,
+      );
+      assert(events >= 1, 'no CLOCK_TAMPERED event was written');
+      // Correct the date so the next check can isolate the 72-hour rule.
+      now = new Date();
+      const cleared = await instance.service.confirmClock({ userId: null });
+      assertEqual(cleared.state, 'ACTIVE', 'cleared after the correction');
+      return 'warning, warning, warning → suspended; nothing deleted';
+    });
+
+    await check('K4 five days back suspends the licence and keeps every row', async () => {
       now = new Date(Date.now() - 5 * 86_400_000);
       const status = await instance.service.status({ fresh: true });
       assertEqual(status.clock.state, 'TAMPERED', 'clock state');
@@ -960,14 +986,14 @@ async function clockAndRestore() {
       return 'state SUSPENDED, 2 accounts and 2 seats intact';
     });
 
-    await check('K4 confirming is refused while the date is still behind', async () => {
+    await check('K5 confirming is refused while the date is still behind', async () => {
       const outcome = await refusal(instance.service.confirmClock({ userId: null }));
       assertCode(outcome, 'LICENSE_CLOCK_STILL_BEHIND');
       assertEqual((await instance.service.status({ fresh: true })).state, 'SUSPENDED', 'still suspended');
       return 'refused';
     });
 
-    await check('K5 confirming after the date is corrected clears the suspension', async () => {
+    await check('K6 confirming after the date is corrected clears the suspension', async () => {
       now = new Date();
       const status = await instance.service.confirmClock({ userId: null });
       assertEqual(status.state, 'ACTIVE', 'state');
@@ -1055,6 +1081,25 @@ async function clockAndRestore() {
         await close(restarted);
       }
       return 'edited file refused; the database counters still apply';
+    });
+
+    await check('B5 a database newer than the state file raises the file, not the other way round', async () => {
+      // What a fresh installation, or a lost state file, looks like: an empty
+      // file beside a database that already holds three accounts. The file must
+      // learn the database's count, and the database must not be lowered.
+      const directory = mkdtempSync(join(tmpdir(), 'kayan-licence-state-'));
+      cleanup.push({ directory });
+      const rebuilt = await installation({ database: DATABASES.runtime + '_clock', directory });
+      try {
+        const status = await rebuilt.service.status({ fresh: true });
+        assertEqual(status.seats.used, 3, 'used seats come from the database');
+      } finally {
+        await close(rebuilt);
+      }
+      assertEqual(await seatsIn(DATABASES.runtime + '_clock'), 3, 'no ledger row was added or removed');
+      const store = new LicenseStore(directory);
+      assertEqual(store.current.maxSeatsUsed, 3, 'the empty file was raised to the database count');
+      return 'file raised from 0 to 3, database untouched';
     });
   } finally {
     await close(instance);
