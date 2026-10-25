@@ -409,6 +409,12 @@ jobs:
           retention-days: 30
       - name: Run tests
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
+      # A failing test's own message sits in the middle of a long log, and the
+      # log host is not always reachable. Re-running the one file leaves that
+      # message inside the annotated tail.
+      - name: Diagnose the voucher details widget test
+        if: failure()
+        run: python scripts/ci-diagnose.py flutter test test/widget/voucher_details_view_test.dart --reporter expanded
       - name: Build web
         run: flutter build web --release
       - name: Upload web build
