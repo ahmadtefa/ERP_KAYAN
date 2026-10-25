@@ -375,7 +375,9 @@ jobs:
       - name: Record scenario totals
         if: always()
         run: |
-          summary=$(grep -h "checks passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log 2>/dev/null | tr '\n' ' | ')
+          # The two scenarios word their summary differently ("checks passed"
+          # and "passed"), so both shapes are looked for.
+          summary=$(grep -hE "checks passed|[0-9]+/[0-9]+ passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Regression scenario checks::${summary:-summary not captured}"
 
   flutter:
