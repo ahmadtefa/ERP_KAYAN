@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   OnModuleInit,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -147,7 +148,9 @@ export class LicensingService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    options: LicensingOptions = {},
+    // Not a provider: the options are a plain object the tests pass in, so
+    // Nest must not try to resolve it from the container.
+    @Optional() options: LicensingOptions = {},
   ) {
     this.directory =
       options.directory ??
@@ -175,9 +178,7 @@ export class LicensingService implements OnModuleInit {
       // A licence subsystem that cannot start must never take the program
       // down: the guard fails closed for business routes but the operator can
       // still reach the licence screen and the backups.
-      this.logger.error(
-        `Licensing did not start: ${(error as Error).message}`,
-      );
+      this.logger.error(`Licensing did not start: ${describeError(error)}`);
     }
   }
 
@@ -1278,6 +1279,17 @@ function readBackendVersion(): string {
     }
   }
   return '0.0.0';
+}
+
+/** A failure line that is never empty, even for a driver error with no text. */
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    const code = (error as { code?: unknown }).code;
+    const name = error.name || 'Error';
+    const message = error.message || String(error);
+    return code ? `${name} ${String(code)}: ${message}` : `${name}: ${message}`;
+  }
+  return String(error);
 }
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
