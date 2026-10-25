@@ -481,6 +481,25 @@ async function activationAndSeats() {
       return 'refused by the key ledger and by the protected state file';
     });
 
+    await check('R5b a tampered key and a key signed by someone else are refused', async () => {
+      const original = key({ licenseId: `lic_${'e'.repeat(16)}` });
+      const parts = original.split('.');
+      const last = parts[2].slice(-1) === 'A' ? 'B' : 'A';
+      const tampered = `${parts[0]}.${parts[1]}.${parts[2].slice(0, -1)}${last}`;
+      const first = await refusal(instance.service.activate(tampered));
+      assertCode(first, 'LICENSE_KEY_BAD_SIGNATURE');
+
+      const stranger = generateKeyPairSync('ed25519');
+      const foreign = signPayload(
+        payload({ licenseId: `lic_${'d'.repeat(16)}` }),
+        stranger.privateKey,
+      );
+      const second = await refusal(instance.service.activate(foreign));
+      assertCode(second, 'LICENSE_KEY_BAD_SIGNATURE');
+      assertEqual(await count(connection, 'SELECT count(*) FROM license_installations'), 1, 'licence rows');
+      return 'both refused before touching the licence';
+    });
+
     let firstUserId = null;
 
     await check('R6 a retried request with the same Idempotency-Key consumes no second seat', async () => {

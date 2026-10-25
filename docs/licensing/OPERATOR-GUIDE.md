@@ -97,6 +97,19 @@ node kayan-license.mjs issue transfer --licence lic_xxx --machine KM-NEW-... --r
   ولا يستطيع العميل نقل الترخيص بنفسه.
 - مفتاح النقل لا يصلح للزيادة ولا للتجديد، والبرنامج يرفض تقديمه في هذين الموضعين.
 
+## ما يحمله المفتاح / What a key carries
+
+المفتاح الموقّع يحمل: رقم الترخيص، ومعرّف الجهاز (للتفعيل والنقل فقط)، والمدة،
+وحد المستخدمين، والعدّاد عند النقل. ولا يحمل اسم عميل ولا اسم شركة ولا كلمة مرور
+ولا أي بيانات محاسبية. و`--note` اختياري، لكنه يُكتب **داخل المفتاح** ويقرأه من
+يحمل المفتاح، فاكتب فيه مرجعًا إداريًا (رقم فاتورة أو أمر شراء) لا بيانات شخصية.
+
+A signed key carries the licence id, the machine id (activation/transfer only),
+the term, the seat limit and, for a transfer, the used count. It carries no
+customer name, company name, password or accounting data. `--note` is optional
+but travels **inside the key** in readable form: use an administrative
+reference (invoice or purchase-order number), never personal data.
+
 ## السجل والحالة / Register and status
 
 ```
