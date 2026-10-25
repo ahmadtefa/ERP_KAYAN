@@ -49,23 +49,27 @@ void main() {
     ],
   };
 
-  Future<void> pump(WidgetTester tester, Map<String, dynamic> voucher) async {
-    tester.view.physicalSize = const Size(900, 900);
+  /// Renders the view the way the app does: as a screen body, so it gets the
+  /// bounded height its layout expects. A single frame is enough - nothing
+  /// here animates, and waiting for a settle would only hide a layout error
+  /// behind a timeout.
+  Future<void> pump(
+    WidgetTester tester,
+    Map<String, dynamic> voucher, {
+    double width = 1200,
+  }) async {
+    tester.view.physicalSize = Size(width, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       wrapWithApp(
         child: Scaffold(
-          body: SizedBox(
-            width: 720,
-            height: 480,
-            child: VoucherDetailsView(voucher: voucher, onOpen: (_) {}),
-          ),
+          body: VoucherDetailsView(voucher: voucher, onOpen: (_) {}),
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
   }
 
   testWidgets('shows the partner, both invoices, the applied total and the entry', (
@@ -85,16 +89,23 @@ void main() {
     expect(find.textContaining('TRF-77'), findsOneWidget);
   });
 
+  testWidgets('shows the same chain on a phone, as cards', (tester) async {
+    await pump(tester, receipt(), width: 700);
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('SI-000006'), findsOneWidget);
+    expect(find.text('JV-000057'), findsOneWidget);
+    expect(find.textContaining('Applied 500.00'), findsOneWidget);
+  });
+
   testWidgets('shows what stayed on account when nothing was applied', (
     tester,
   ) async {
     final voucher = receipt()..['allocations'] = <Map<String, dynamic>>[];
     await pump(tester, voucher);
 
-    expect(
-      find.textContaining('Not applied to an invoice'),
-      findsOneWidget,
-    );
+    expect(tester.takeException(), isNull);
+    expect(find.textContaining('Not applied to an invoice'), findsOneWidget);
     expect(find.textContaining('On account 500.00'), findsOneWidget);
   });
 
@@ -106,6 +117,7 @@ void main() {
       ..['journalEntries'] = <Map<String, dynamic>>[];
     await pump(tester, voucher);
 
+    expect(tester.takeException(), isNull);
     expect(
       find.text('No entry yet: the voucher is still a draft.'),
       findsOneWidget,
@@ -126,6 +138,7 @@ void main() {
     ];
     await pump(tester, voucher);
 
+    expect(tester.takeException(), isNull);
     expect(find.text('JV-000057'), findsOneWidget);
     expect(find.text('JV-000058'), findsOneWidget);
     expect(find.text('Original'), findsOneWidget);

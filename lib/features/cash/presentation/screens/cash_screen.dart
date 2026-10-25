@@ -458,8 +458,8 @@ class _CashScreenState extends ConsumerState<CashScreen>
       builder: (dialogContext) => AlertDialog(
         title: Text(text(voucher, 'voucherNumber')),
         content: SizedBox(
-          width: 720,
-          height: 480,
+          width: 820,
+          height: 520,
           child: _VoucherDetails(
             id: text(voucher, 'id'),
             onOpen: (path) {
