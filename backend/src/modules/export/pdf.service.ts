@@ -85,12 +85,21 @@ export class PdfService {
         // Two transports for the same conversation: the pipe, which no other
         // process can reach, and a loopback socket for the platforms that do
         // not hand the browser its pipe handles.
-        for (const transport of ['pipe', 'socket'] as const) {
+        const requested = process.env.KAYAN_PDF_TRANSPORT;
+        const transports: Array<'pipe' | 'socket'> =
+          requested === 'pipe' || requested === 'socket' ? [requested] : ['pipe', 'socket'];
+        for (const transport of transports) {
           try {
             const printed = await printThroughDevTools(browser, {
               page,
               profile: join(folder, `devtools-${transport}`),
-              timeout: 25_000,
+              // A cold browser on a Windows machine is slow to open its
+              // debugging channel - the executable is large and a first run
+              // is scanned and unpacked before it says a word - while a warm
+              // one answers in a second. Long enough for the first, and the
+              // exit listener above means a browser that dies is not waited
+              // on at all.
+              timeout: transport === 'pipe' ? 90_000 : 45_000,
               transport,
             });
             await writeFile(output, printed);
@@ -408,13 +417,28 @@ function printThroughDevTools(
       binary,
       socket
         ? buildDevToolsSocketArgs({ profile: options.profile })
-        : buildDevToolsArgs({ profile: options.profile, page: '', legacyHeadless: false }),
+        : buildDevToolsArgs({
+            profile: options.profile,
+            page: 'about:blank',
+            legacyHeadless: false,
+          }),
       {
         stdio: socket
           ? ['ignore', 'ignore', 'pipe', 'ignore', 'ignore']
           : ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'],
       },
     );
+
+    // Whatever the browser says on its way out is the only clue a support call
+    // would have; keep the tail of it for the warning.
+    let complaints = '';
+    child.stderr?.on('data', (chunk: Buffer) => {
+      complaints = (complaints + chunk.toString('utf8')).slice(-600);
+    });
+    child.on('exit', (code) => {
+      stop(new Error(`the browser exited with code ${code}${complaints ? `: ${complaints.trim()}` : ''}`));
+    });
+    child.on('error', (error) => stop(error));
 
     let settled = false;
     const stop = (error: Error | null, pdf?: Buffer) => {
