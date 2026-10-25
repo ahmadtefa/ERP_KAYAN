@@ -287,6 +287,7 @@ export class PartiesService {
               invoiceDate: true,
               totalAmount: true,
               documentType: true,
+              status: true,
               notes: true,
             },
             orderBy: { invoiceDate: 'asc' },
@@ -299,6 +300,7 @@ export class PartiesService {
               invoiceDate: true,
               totalAmount: true,
               documentType: true,
+              status: true,
               notes: true,
             },
             orderBy: { invoiceDate: 'asc' },
@@ -317,6 +319,7 @@ export class PartiesService {
           kind: true,
           amount: true,
           description: true,
+          status: true,
         },
         orderBy: { voucherDate: 'asc' },
       }),
@@ -330,6 +333,9 @@ export class PartiesService {
       description: string;
       debit: Prisma.Decimal;
       credit: Prisma.Decimal;
+      /// Only posted documents reach a statement, and the status travels with
+      /// the row so a printed sheet says so on its face.
+      status: string;
     };
     const all: Entry[] = [];
     for (const invoice of invoices) {
@@ -365,6 +371,7 @@ export class PartiesService {
         description: invoice.notes ?? '',
         debit,
         credit,
+        status: invoice.status,
       });
     }
     for (const voucher of vouchers) {
@@ -382,9 +389,19 @@ export class PartiesService {
         description: voucher.description ?? '',
         debit,
         credit,
+        status: voucher.status,
       });
     }
-    all.sort((a, b) => a.date.getTime() - b.date.getTime());
+    // Two documents can share a day, and the order they come back in decides
+    // the running balance line by line. Without a tiebreaker the same
+    // statement could print two different ways, so equal dates fall back to
+    // the document number and then to the id.
+    all.sort(
+      (a, b) =>
+        a.date.getTime() - b.date.getTime() ||
+        a.number.localeCompare(b.number) ||
+        a.id.localeCompare(b.id),
+    );
 
     // Everything before the period is the opening balance; Decimal is
     // immutable, so it is one explicit sum.
@@ -406,6 +423,7 @@ export class PartiesService {
         id: entry.id,
         number: entry.number,
         description: entry.description,
+        status: entry.status,
         debit: entry.debit.toFixed(MONEY_SCALE),
         credit: entry.credit.toFixed(MONEY_SCALE),
         balance: running.toFixed(MONEY_SCALE),

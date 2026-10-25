@@ -1128,6 +1128,13 @@ class AppLocalizationsAr extends AppLocalizations {
   String get downloadList => 'تنزيل الملف';
 
   @override
+  String get downloadStatement => 'تنزيل كشف الحساب';
+
+  @override
+  String get exportStatementHint =>
+      'نزّل كشف الحساب كما هو معروض: إكسل، أو CSV، أو PDF، أو صفحة للطباعة.';
+
+  @override
   String get exportListHint =>
       'نزّل القائمة زي ما هي على الشاشة: إكسل أو CSV أو PDF أو ورقة للطباعة.';
 
@@ -1414,6 +1421,12 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get resetCountSalesInvoices => 'فواتير البيع';
+
+  @override
+  String get resetCountQuotations => 'عروض الأسعار';
+
+  @override
+  String get resetCountCashVouchers => 'سندات القبض والدفع';
 
   @override
   String get resetCountPurchaseInvoices => 'فواتير الشراء';

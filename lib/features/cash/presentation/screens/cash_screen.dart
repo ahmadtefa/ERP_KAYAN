@@ -452,31 +452,11 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
   /// The chain behind one row: what the voucher settled and which entry it
   /// wrote. Opened from the list, read from the server, never recomputed here.
-  void _showVoucher(Json voucher) {
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(text(voucher, 'voucherNumber')),
-        content: SizedBox(
-          width: 820,
-          height: 520,
-          child: _VoucherDetails(
-            id: text(voucher, 'id'),
-            onOpen: (path) {
-              Navigator.of(dialogContext).pop();
-              context.go(path);
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: Text(context.l10n.close),
-          ),
-        ],
-      ),
-    );
-  }
+  void _showVoucher(Json voucher) => showVoucherDetail(
+        context,
+        id: text(voucher, 'id'),
+        title: text(voucher, 'voucherNumber'),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -878,6 +858,47 @@ class _AccountStatement extends ConsumerWidget {
             ),
     );
   }
+}
+
+/// The chain behind one voucher: what it settled and which entry it wrote.
+///
+/// Opened from the cash list and from a partner's statement of account; the
+/// dialog is the same one in both places, read from the server either way.
+/// `onOpen` is how the caller answers "show me the screen behind this": the
+/// list simply goes there, while a statement closes itself first.
+void showVoucherDetail(
+  BuildContext context, {
+  required String id,
+  required String title,
+  void Function(String path)? onOpen,
+}) {
+  showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(title),
+      content: SizedBox(
+        width: 820,
+        height: 520,
+        child: _VoucherDetails(
+          id: id,
+          onOpen: (path) {
+            Navigator.of(dialogContext).pop();
+            if (onOpen != null) {
+              onOpen(path);
+            } else {
+              context.go(path);
+            }
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: Text(context.l10n.close),
+        ),
+      ],
+    ),
+  );
 }
 
 /// Loads one voucher and hands it to the view that draws it.

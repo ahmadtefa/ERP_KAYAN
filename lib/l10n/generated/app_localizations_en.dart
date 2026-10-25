@@ -1136,6 +1136,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get downloadList => 'Download the list';
 
   @override
+  String get downloadStatement => 'Download the statement';
+
+  @override
+  String get exportStatementHint =>
+      'Download this statement as it stands: Excel, CSV, PDF, or a page to print.';
+
+  @override
   String get exportListHint =>
       'Download this list as it stands: Excel, CSV, PDF, or a page to print.';
 
@@ -1422,6 +1429,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get resetCountSalesInvoices => 'Sales invoices';
+
+  @override
+  String get resetCountQuotations => 'Quotations';
+
+  @override
+  String get resetCountCashVouchers => 'Receipts and payments';
 
   @override
   String get resetCountPurchaseInvoices => 'Purchase invoices';

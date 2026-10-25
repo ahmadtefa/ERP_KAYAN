@@ -62,6 +62,7 @@ describe('PartiesService statement', () => {
           invoiceDate: new Date('2026-01-10'),
           totalAmount: money(100),
           documentType: 'INVOICE',
+          status: 'POSTED',
           notes: null,
         },
         {
@@ -70,6 +71,7 @@ describe('PartiesService statement', () => {
           invoiceDate: new Date('2026-03-01'),
           totalAmount: money(50),
           documentType: 'INVOICE',
+          status: 'POSTED',
           notes: null,
         },
       ],
@@ -79,6 +81,7 @@ describe('PartiesService statement', () => {
           voucherNumber: 'R-1',
           voucherDate: new Date('2026-02-15'),
           kind: 'RECEIPT',
+          status: 'POSTED',
           amount: money(30),
           description: null,
         },
@@ -87,6 +90,7 @@ describe('PartiesService statement', () => {
           voucherNumber: 'R-0',
           voucherDate: new Date('2026-01-20'),
           kind: 'RECEIPT',
+          status: 'POSTED',
           amount: money(10),
           description: null,
         },
@@ -106,6 +110,11 @@ describe('PartiesService statement', () => {
     expect(statement.rows[0].balance).toBe('60.0000');
     expect(statement.rows[1].balance).toBe('110.0000');
     expect(statement.closingBalance).toBe('110.0000');
+    // Every row says on its face that it is a posted document, so a printed
+    // statement can be read without asking the screen what it left out.
+    expect(statement.rows.every((row: { status: string }) => row.status === 'POSTED')).toBe(
+      true,
+    );
   });
 
   it('mirrors the direction for a supplier: purchases are credits', async () => {
@@ -118,6 +127,7 @@ describe('PartiesService statement', () => {
           invoiceDate: new Date('2026-02-02'),
           totalAmount: money(200),
           documentType: 'INVOICE',
+          status: 'POSTED',
           notes: null,
         },
       ],
@@ -127,6 +137,7 @@ describe('PartiesService statement', () => {
           voucherNumber: 'PAY-1',
           voucherDate: new Date('2026-02-10'),
           kind: 'PAYMENT',
+          status: 'POSTED',
           amount: money(80),
           description: null,
         },
@@ -145,5 +156,71 @@ describe('PartiesService statement', () => {
     expect(statement.rows[1].debit).toBe('80.0000');
     // Negative closing for a supplier means we owe them 120.
     expect(statement.closingBalance).toBe('-120.0000');
+  });
+
+  it('orders documents that share a date, so the statement never changes shape', async () => {
+    const sameDay = new Date('2026-02-05');
+    const prisma = stub({
+      party: baseParty,
+      invoices: [
+        {
+          id: 'inv-b',
+          invoiceNumber: 'S-2',
+          invoiceDate: sameDay,
+          totalAmount: money(50),
+          documentType: 'INVOICE',
+          status: 'POSTED',
+          notes: null,
+        },
+        {
+          id: 'inv-a',
+          invoiceNumber: 'S-1',
+          invoiceDate: sameDay,
+          totalAmount: money(100),
+          documentType: 'INVOICE',
+          status: 'POSTED',
+          notes: null,
+        },
+      ],
+      vouchers: [
+        {
+          // The stub hands the rows back in this order; the service must not
+          // keep it, because the database is free to return any order it likes.
+          id: 'v-1',
+          voucherNumber: 'R-9',
+          voucherDate: sameDay,
+          kind: 'RECEIPT',
+          status: 'POSTED',
+          amount: money(30),
+          description: null,
+        },
+      ],
+    });
+    const service = new PartiesService(prisma as never, { record: jest.fn() } as never);
+
+    const statement = await service.statement('company-1', 'customer', 'c-1', {
+      from: '2026-02-01',
+      to: '2026-02-28',
+    });
+
+    expect(statement.rows.map((row: { number: string }) => row.number)).toEqual([
+      'R-9',
+      'S-1',
+      'S-2',
+    ]);
+    // Receipt 30, then +100, then +50 - one balance per row, in that order.
+    expect(statement.rows.map((row: { balance: string }) => row.balance)).toEqual([
+      '-30.0000',
+      '70.0000',
+      '120.0000',
+    ]);
+    expect(statement.closingBalance).toBe('120.0000');
+    // Opening plus the period's own movements has to land on the closing,
+    // whatever order the rows arrived in.
+    const net = Number(statement.totalDebit) - Number(statement.totalCredit);
+    expect(Number(statement.openingBalance) + net).toBeCloseTo(
+      Number(statement.closingBalance),
+      4,
+    );
   });
 });

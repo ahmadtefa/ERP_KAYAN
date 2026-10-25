@@ -2276,6 +2276,18 @@ abstract class AppLocalizations {
   /// **'Download the list'**
   String get downloadList;
 
+  /// No description provided for @downloadStatement.
+  ///
+  /// In en, this message translates to:
+  /// **'Download the statement'**
+  String get downloadStatement;
+
+  /// No description provided for @exportStatementHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Download this statement as it stands: Excel, CSV, PDF, or a page to print.'**
+  String get exportStatementHint;
+
   /// No description provided for @exportListHint.
   ///
   /// In en, this message translates to:
@@ -2871,6 +2883,18 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   /// In en, this message translates to:
   /// **'Sales invoices'**
   String get resetCountSalesInvoices;
+
+  /// No description provided for @resetCountQuotations.
+  ///
+  /// In en, this message translates to:
+  /// **'Quotations'**
+  String get resetCountQuotations;
+
+  /// No description provided for @resetCountCashVouchers.
+  ///
+  /// In en, this message translates to:
+  /// **'Receipts and payments'**
+  String get resetCountCashVouchers;
 
   /// No description provided for @resetCountPurchaseInvoices.
   ///
