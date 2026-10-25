@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { execFile, spawn } from 'child_process';
+import { pathToFileURL } from 'url';
 
 /// Turns a report page into a PDF file.
 ///
@@ -23,6 +24,14 @@ export class PdfService {
 
   /// The browser is looked for once and remembered: the search walks the disk.
   private binary: string | null | undefined;
+
+  /// How the last document was printed: through the browser's own protocol, or
+  /// by the command line printer it fell back to. The fallback cannot paint a
+  /// page background, so the difference matters and a test pins it.
+  lastRenderRoute: 'devtools' | 'command-line' | null = null;
+
+  /// Why the browser protocol was not used, when it was not.
+  lastRenderNote: string | null = null;
 
   /// Whether this installation can make PDFs at all. The screen asks, so a
   /// button that cannot work is never shown.
@@ -73,19 +82,30 @@ export class PdfService {
       await writeFile(page, html, 'utf8');
 
       if (options.fullBleed) {
-        try {
-          const printed = await printThroughDevTools(browser, {
-            page,
-            profile: join(folder, 'devtools-profile'),
-            timeout: 60_000,
-          });
-          await writeFile(output, printed);
-          fullBleed = true;
-        } catch (error) {
+        // Two transports for the same conversation: the pipe, which no other
+        // process can reach, and a loopback socket for the platforms that do
+        // not hand the browser its pipe handles.
+        for (const transport of ['pipe', 'socket'] as const) {
+          try {
+            const printed = await printThroughDevTools(browser, {
+              page,
+              profile: join(folder, `devtools-${transport}`),
+              timeout: 25_000,
+              transport,
+            });
+            await writeFile(output, printed);
+            fullBleed = true;
+            break;
+          } catch (error) {
+            this.lastRenderNote = `${transport}: ${(error as Error).message}`;
+            this.logger.warn(
+              `The browser would not print over its ${transport}: ${(error as Error).message}`,
+            );
+          }
+        }
+        if (!fullBleed) {
           this.logger.warn(
-            'The browser would not print through its DevTools pipe ' +
-              `(${(error as Error).message}); falling back to the command line printer, ` +
-              'which cannot keep the page background.',
+            'Falling back to the command line printer, which cannot keep the page background.',
           );
         }
       }
@@ -119,6 +139,8 @@ export class PdfService {
       if (pdf.length === 0 || pdf.subarray(0, 4).toString('latin1') !== '%PDF') {
         throw new Error('the browser produced something that is not a PDF');
       }
+
+      this.lastRenderRoute = fullBleed ? 'devtools' : 'command-line';
 
       // Page numbers, stamped across the whole document: a report printed on
       // paper has to be able to say "page 3 of 7". The digits are Western in
@@ -329,13 +351,34 @@ export function buildDevToolsArgs(options: {
     '--no-default-browser-check',
     `--user-data-dir=${options.profile}`,
     // Commands arrive on file descriptor 3 and answers leave on 4, so the
-    // browser never opens a debugging port anyone else could talk to.
+    // browser never opens a port anyone else could talk to.
     '--remote-debugging-pipe',
-    options.page,
+    ...(options.page ? [options.page] : []),
   ];
 }
 
-/// Prints one page through the browser's DevTools pipe and returns the PDF.
+/// The same browser, asked for a debugging port of its own choosing: the route
+/// that still works where the platform does not hand the browser its pipe
+/// handles. Port zero means the browser picks one and prints it on its error
+/// stream, on the loopback interface, for this process only.
+export function buildDevToolsSocketArgs(options: { profile: string }): string[] {
+  return [
+    '--headless=new',
+    '--no-sandbox',
+    '--disable-gpu',
+    '--disable-dev-shm-usage',
+    '--disable-background-networking',
+    '--host-resolver-rules=MAP * ~NOTFOUND',
+    '--disable-extensions',
+    '--no-first-run',
+    '--no-default-browser-check',
+    `--user-data-dir=${options.profile}`,
+    '--remote-debugging-port=0',
+    'about:blank',
+  ];
+}
+
+/// Prints one page through the browser's own DevTools protocol.
 ///
 /// Why not the command line printer: `--print-to-pdf` decides the paper size
 /// and the background on its own, and it decides both the way the browser's
@@ -345,24 +388,91 @@ export function buildDevToolsArgs(options: {
 /// page's CSS size, no margins. Chromium then writes exactly the sheet the
 /// stylesheet describes, painted to its edge.
 ///
-/// The pipe protocol is a stream of JSON messages separated by a NUL byte, so
-/// it needs no dependency and no socket; this is the same route Playwright and
-/// Puppeteer take, written out in the hundred lines they would have cost.
+/// Two ways to talk: `--remote-debugging-pipe` hands the conversation to file
+/// descriptors 3 and 4, which needs no port and no loopback socket; the socket
+/// transport asks the browser for a port of its own choosing and speaks the
+/// same protocol over a WebSocket. The pipe is tried first, because nothing
+/// outside this process can reach it.
 function printThroughDevTools(
   binary: string,
-  options: { page: string; profile: string; timeout: number },
+  options: {
+    page: string;
+    profile: string;
+    timeout: number;
+    transport: 'pipe' | 'socket';
+  },
 ): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
+    const socket = options.transport === 'socket';
     const child = spawn(
       binary,
-      buildDevToolsArgs({
-        profile: options.profile,
-        page: `file://${options.page}`,
-        legacyHeadless: false,
-      }),
-      { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] },
+      socket
+        ? buildDevToolsSocketArgs({ profile: options.profile })
+        : buildDevToolsArgs({ profile: options.profile, page: '', legacyHeadless: false }),
+      {
+        stdio: socket
+          ? ['ignore', 'ignore', 'pipe', 'ignore', 'ignore']
+          : ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'],
+      },
     );
 
+    let settled = false;
+    const stop = (error: Error | null, pdf?: Buffer) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // The browser's own children - renderer, GPU - inherit the pipe, so the
+      // handles have to be closed here instead of being left to the operating
+      // system: an open handle keeps the printing process - and the test run
+      // around it - alive after the browser itself was killed.
+      for (const handle of [child.stdio[3], child.stdio[4]]) {
+        const stream = handle as unknown as { destroy?: () => void } | null;
+        try {
+          stream?.destroy?.();
+        } catch {
+          // A handle that is already gone needs no closing.
+        }
+      }
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // Killing a process that has already exited is not an error here.
+      }
+      child.unref();
+      if (error) reject(error);
+      else resolve(pdf as Buffer);
+    };
+
+    const timer = setTimeout(
+      () => stop(new Error(`the browser did not finish printing in ${options.timeout} ms`)),
+      options.timeout,
+    );
+
+    const conversation = socket
+      ? webSocketConversation(child)
+      : pipeConversation(child);
+
+    void (async () => {
+      const client = await conversation;
+      const pdf = await printOnePage(client, options.page);
+      stop(null, pdf);
+    })().catch((error) => stop(error as Error));
+  });
+}
+
+/// One command channel to the browser: a NUL-terminated JSON stream over the
+/// pipe, or the same messages as WebSocket frames.
+interface CdpClient {
+  send(
+    method: string,
+    params?: Record<string, unknown>,
+    sessionId?: string,
+  ): Promise<Record<string, unknown>>;
+  when(method: string): Promise<void>;
+}
+
+function pipeConversation(child: ReturnType<typeof spawn>): Promise<CdpClient> {
+  return new Promise((resolve) => {
     const commands = child.stdio[3] as NodeJS.WritableStream;
     const answers = child.stdio[4] as NodeJS.ReadableStream;
     const pending = new Map<
@@ -372,21 +482,6 @@ function printThroughDevTools(
     const waiting: Array<{ method: string; resolve: () => void }> = [];
     let received = Buffer.alloc(0);
     let nextId = 0;
-    let settled = false;
-
-    const stop = (error: Error | null, pdf?: Buffer) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      child.kill('SIGKILL');
-      if (error) reject(error);
-      else resolve(pdf as Buffer);
-    };
-
-    const timer = setTimeout(
-      () => stop(new Error(`the browser did not finish printing in ${options.timeout} ms`)),
-      options.timeout,
-    );
 
     const dispatch = (message: Record<string, unknown>) => {
       const id = message.id as number | undefined;
@@ -419,85 +514,150 @@ function printThroughDevTools(
         end = received.indexOf(0);
       }
     });
-    answers.on('error', (error) => stop(error as Error));
-    child.on('error', (error) => stop(error));
-    child.on('exit', (code) => {
-      if (!settled) {
-        stop(new Error(`the browser exited with code ${code} before printing`));
-      }
+    answers.on('error', () => undefined);
+
+    resolve({
+      send: (method, params = {}, session) =>
+        new Promise<Record<string, unknown>>((accept, refuse) => {
+          const id = ++nextId;
+          pending.set(id, { resolve: accept, reject: refuse });
+          const message = session
+            ? { id, method, params, sessionId: session }
+            : { id, method, params };
+          commands.write(`${JSON.stringify(message)}\0`);
+        }),
+      when: (method) =>
+        new Promise<void>((accept) => waiting.push({ method, resolve: accept })),
     });
-
-    const send = (method: string, params: Record<string, unknown> = {}, session?: string) =>
-      new Promise<Record<string, unknown>>((accept, refuse) => {
-        const id = ++nextId;
-        pending.set(id, { resolve: accept, reject: refuse });
-        const message = session ? { id, method, params, sessionId: session } : { id, method, params };
-        commands.write(`${JSON.stringify(message)}\0`);
-      });
-
-    const when = (method: string) =>
-      new Promise<void>((accept) => waiting.push({ method, resolve: accept }));
-
-    void (async () => {
-      // The browser answers the first command only once it is listening, so
-      // this doubles as "is it up yet".
-      await send('Browser.getVersion');
-      const target = await send('Target.createTarget', { url: 'about:blank' });
-      const attached = await send('Target.attachToTarget', {
-        targetId: target.targetId,
-        flatten: true,
-      });
-      const session = attached.sessionId as string;
-
-      await send('Page.enable', {}, session);
-      const loaded = when('Page.loadEventFired');
-      await send('Page.navigate', { url: `file://${options.page}` }, session);
-      await loaded;
-
-      // The Arabic face is embedded in the page as a data URI, but the layout
-      // is measured the moment the font arrives: printing before that is how
-      // a quotation ends up in a fallback face, or with the wrong line breaks.
-      await send(
-        'Runtime.evaluate',
-        {
-          expression: 'document.fonts.ready.then(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))',
-          awaitPromise: true,
-          returnByValue: true,
-        },
-        session,
-      );
-
-      const printed = await send(
-        'Page.printToPDF',
-        {
-          // The design is painted with the page's own colours; without this
-          // Chromium prints it blank.
-          printBackground: true,
-          // A4 and a zero margin, as the stylesheet writes them.
-          preferCSSPageSize: true,
-          marginTop: 0,
-          marginBottom: 0,
-          marginLeft: 0,
-          marginRight: 0,
-          scale: 1,
-          transferMode: 'ReturnAsBase64',
-        },
-        session,
-      );
-
-      const data = printed.data as string | undefined;
-      if (!data) {
-        stop(new Error('the browser returned no PDF'));
-        return;
-      }
-      const pdf = Buffer.from(data, 'base64');
-      if (pdf.subarray(0, 4).toString('latin1') !== '%PDF') {
-        stop(new Error('the browser returned something that is not a PDF'));
-        return;
-      }
-      stop(null, pdf);
-    })().catch((error) => stop(error as Error));
   });
+}
+
+/// The same conversation over the address the browser prints on its error
+/// stream when it is asked for a debugging port of its own.
+function webSocketConversation(child: ReturnType<typeof spawn>): Promise<CdpClient> {
+  return new Promise((resolve, reject) => {
+    if (typeof WebSocket !== 'function') {
+      reject(new Error('this Node.js build has no WebSocket client'));
+      return;
+    }
+    let output = '';
+    let opened = false;
+
+    child.stderr?.on('data', (chunk: Buffer) => {
+      output += chunk.toString('utf8');
+      const found = /DevTools listening on (ws:\/\/[^\s]+)/.exec(output);
+      if (!found || opened) return;
+      opened = true;
+
+      const socket = new WebSocket(found[1]);
+      const pending = new Map<
+        number,
+        { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void }
+      >();
+      const waiting: Array<{ method: string; resolve: () => void }> = [];
+      let nextId = 0;
+
+      const dispatch = (message: Record<string, unknown>) => {
+        const id = message.id as number | undefined;
+        if (id !== undefined && pending.has(id)) {
+          const request = pending.get(id)!;
+          pending.delete(id);
+          const failure = message.error as { message?: string } | undefined;
+          if (failure) request.reject(new Error(failure.message ?? 'the browser refused the request'));
+          else request.resolve((message.result ?? {}) as Record<string, unknown>);
+          return;
+        }
+        const method = message.method as string | undefined;
+        const index = method ? waiting.findIndex((entry) => entry.method === method) : -1;
+        if (index >= 0) waiting.splice(index, 1)[0].resolve();
+      };
+
+      socket.addEventListener('message', (event: { data: unknown }) => {
+        try {
+          dispatch(JSON.parse(String(event.data)) as Record<string, unknown>);
+        } catch {
+          // Not part of the protocol.
+        }
+      });
+      socket.addEventListener('error', () =>
+        reject(new Error('the debugging socket refused the connection')),
+      );
+      socket.addEventListener('open', () =>
+        resolve({
+          send: (method, params = {}, session) =>
+            new Promise<Record<string, unknown>>((accept, refuse) => {
+              const id = ++nextId;
+              pending.set(id, { resolve: accept, reject: refuse });
+              socket.send(
+                JSON.stringify(
+                  session ? { id, method, params, sessionId: session } : { id, method, params },
+                ),
+              );
+            }),
+          when: (method) =>
+            new Promise<void>((accept) => waiting.push({ method, resolve: accept })),
+        }),
+      );
+    });
+  });
+}
+
+/// Everything one print needs to say to the browser, in order.
+async function printOnePage(client: CdpClient, page: string): Promise<Buffer> {
+  // The browser answers the first command once it is listening, so this
+  // doubles as "is it up yet".
+  await client.send('Browser.getVersion');
+  const target = await client.send('Target.createTarget', { url: 'about:blank' });
+  const attached = await client.send('Target.attachToTarget', {
+    targetId: target.targetId,
+    flatten: true,
+  });
+  const session = attached.sessionId as string;
+
+  await client.send('Page.enable', {}, session);
+  const loaded = client.when('Page.loadEventFired');
+  await client.send('Page.navigate', { url: pathToFileURL(page).href }, session);
+  await loaded;
+
+  // The Arabic face is embedded in the page as a data URI, but the layout is
+  // measured the moment the font arrives: printing before that is how a
+  // quotation ends up in a fallback face, or with the wrong line breaks.
+  await client.send(
+    'Runtime.evaluate',
+    {
+      expression:
+        'document.fonts.ready.then(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))',
+      awaitPromise: true,
+      returnByValue: true,
+    },
+    session,
+  );
+
+  const printed = await client.send(
+    'Page.printToPDF',
+    {
+      // The design is painted with the page's own colours; without this
+      // Chromium prints it blank.
+      printBackground: true,
+      // A4 and a zero margin, as the stylesheet writes them.
+      preferCSSPageSize: true,
+      marginTop: 0,
+      marginBottom: 0,
+      marginLeft: 0,
+      marginRight: 0,
+      scale: 1,
+      transferMode: 'ReturnAsBase64',
+    },
+    session,
+  );
+
+  const data = printed.data as string | undefined;
+  if (!data) throw new Error('the browser returned no PDF');
+  const pdf = Buffer.from(data, 'base64');
+  if (pdf.subarray(0, 4).toString('latin1') !== '%PDF') {
+    throw new Error('the browser returned something that is not a PDF');
+  }
+  return pdf;
 }
 
 /// Runs a command and resolves when it exits cleanly.

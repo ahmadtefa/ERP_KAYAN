@@ -274,6 +274,10 @@ const render = async (content: QuotationSnapshot, language: 'en' | 'ar' = 'en') 
     pageNumberY: QUOTATION_PAGE_NUMBER.y,
     pageNumberSize: QUOTATION_PAGE_NUMBER.size,
   });
+  // The design can only be printed through the browser's own protocol: the
+  // command line printer would have dropped the background, and a test that
+  // let it pass anyway would be checking a file nobody would recognise.
+  expect(browser.lastRenderRoute).toBe('devtools');
   return { html, pdf };
 };
 

@@ -7,6 +7,7 @@ import {
 import {
   PAGE_NUMBER_GEOMETRY,
   buildDevToolsArgs,
+  buildDevToolsSocketArgs,
   buildPrintArgs,
   stampPageNumbers,
 } from './pdf.service';
@@ -75,6 +76,10 @@ describe('buildDevToolsArgs', () => {
     expect(args).toContain('--remote-debugging-pipe');
     expect(args.join(' ')).not.toContain('--remote-debugging-port');
     expect(args).toContain(`--user-data-dir=${base.profile}`);
+    // The page is opened by the protocol, after the browser is listening, so
+    // nothing about it is decided by the command line.
+    const withoutPage = buildDevToolsArgs({ ...base, page: '', legacyHeadless: false });
+    expect(withoutPage[withoutPage.length - 1]).toBe('--remote-debugging-pipe');
     expect(args[args.length - 1]).toBe(base.page);
   });
 
@@ -83,6 +88,16 @@ describe('buildDevToolsArgs', () => {
     expect(args).toContain('--host-resolver-rules=MAP * ~NOTFOUND');
     expect(args).toContain('--disable-background-networking');
     expect(args.join(' ')).not.toMatch(/https?:\/\//);
+  });
+
+  it('has a second transport for platforms that cannot hand over a pipe', () => {
+    // Port zero: the browser picks one, on the loopback interface, and prints
+    // it on its own error stream for this process alone.
+    const args = buildDevToolsSocketArgs({ profile: base.profile });
+    expect(args).toContain('--remote-debugging-port=0');
+    expect(args).not.toContain('--remote-debugging-pipe');
+    expect(args).toContain(`--user-data-dir=${base.profile}`);
+    expect(args).toContain('--host-resolver-rules=MAP * ~NOTFOUND');
   });
 });
 
