@@ -85,30 +85,44 @@ export class PdfService {
         // Two transports for the same conversation: the pipe, which no other
         // process can reach, and a loopback socket for the platforms that do
         // not hand the browser its pipe handles.
+        // Four ways to ask, cheapest first. The pipe costs nothing outside
+        // this process; the loopback socket covers platforms that do not hand
+        // the browser its pipe handles; and the second spelling of the flag
+        // covers browsers that have retired the first or have not learned it
+        // yet. A browser that refuses a flag exits at once, so a wrong guess
+        // costs milliseconds rather than a timeout.
         const requested = process.env.KAYAN_PDF_TRANSPORT;
-        const transports: Array<'pipe' | 'socket'> =
-          requested === 'pipe' || requested === 'socket' ? [requested] : ['pipe', 'socket'];
-        for (const transport of transports) {
+        const attempts: Array<{ transport: 'pipe' | 'socket'; legacyHeadless: boolean; timeout: number }> = [
+          // A cold browser on a Windows machine is slow to open its debugging
+          // channel - the executable is large, and a first run is scanned and
+          // unpacked before it says a word - while a warm one answers in a
+          // second. The budgets are for that first run.
+          { transport: 'pipe', legacyHeadless: false, timeout: 60_000 },
+          { transport: 'pipe', legacyHeadless: true, timeout: 45_000 },
+          { transport: 'socket', legacyHeadless: false, timeout: 30_000 },
+          { transport: 'socket', legacyHeadless: true, timeout: 30_000 },
+        ].filter(
+          (attempt) =>
+            !requested || requested === attempt.transport,
+        ) as typeof attempts;
+
+        for (const attempt of attempts) {
           try {
             const printed = await printThroughDevTools(browser, {
               page,
-              profile: join(folder, `devtools-${transport}`),
-              // A cold browser on a Windows machine is slow to open its
-              // debugging channel - the executable is large and a first run
-              // is scanned and unpacked before it says a word - while a warm
-              // one answers in a second. Long enough for the first, and the
-              // exit listener above means a browser that dies is not waited
-              // on at all.
-              timeout: transport === 'pipe' ? 90_000 : 45_000,
-              transport,
+              profile: join(folder, `devtools-${attempt.transport}-${attempt.legacyHeadless ? 'new' : 'plain'}`),
+              timeout: attempt.timeout,
+              transport: attempt.transport,
+              legacyHeadless: attempt.legacyHeadless,
             });
             await writeFile(output, printed);
             fullBleed = true;
             break;
           } catch (error) {
-            this.lastRenderNote = `${transport}: ${(error as Error).message}`;
+            this.lastRenderNote = `${attempt.transport}${attempt.legacyHeadless ? '=new' : ''}: ${(error as Error).message}`;
             this.logger.warn(
-              `The browser would not print over its ${transport}: ${(error as Error).message}`,
+              `The browser would not print over its ${attempt.transport} ` +
+                `(${attempt.legacyHeadless ? '--headless=new' : '--headless'}): ${(error as Error).message}`,
             );
           }
         }
@@ -348,7 +362,12 @@ export function buildDevToolsArgs(options: {
   legacyHeadless: boolean;
 }): string[] {
   return [
-    options.legacyHeadless ? '--headless' : '--headless=new',
+    // Plain `--headless`, not `--headless=new`: the spelling with `=new` is a
+    // transitional alias, and a browser new enough to have dropped it exits
+    // without printing anything. Plain `--headless` has meant "no window" in
+    // every build since 2017, and the protocol below is the same in all of
+    // them.
+    options.legacyHeadless ? '--headless=new' : '--headless',
     '--no-sandbox',
     '--disable-gpu',
     '--disable-dev-shm-usage',
@@ -370,9 +389,12 @@ export function buildDevToolsArgs(options: {
 /// that still works where the platform does not hand the browser its pipe
 /// handles. Port zero means the browser picks one and prints it on its error
 /// stream, on the loopback interface, for this process only.
-export function buildDevToolsSocketArgs(options: { profile: string }): string[] {
+export function buildDevToolsSocketArgs(options: {
+  profile: string;
+  legacyHeadless: boolean;
+}): string[] {
   return [
-    '--headless=new',
+    options.legacyHeadless ? '--headless=new' : '--headless',
     '--no-sandbox',
     '--disable-gpu',
     '--disable-dev-shm-usage',
@@ -409,6 +431,7 @@ function printThroughDevTools(
     profile: string;
     timeout: number;
     transport: 'pipe' | 'socket';
+    legacyHeadless: boolean;
   },
 ): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
@@ -416,11 +439,14 @@ function printThroughDevTools(
     const child = spawn(
       binary,
       socket
-        ? buildDevToolsSocketArgs({ profile: options.profile })
+        ? buildDevToolsSocketArgs({
+            profile: options.profile,
+            legacyHeadless: options.legacyHeadless,
+          })
         : buildDevToolsArgs({
             profile: options.profile,
             page: 'about:blank',
-            legacyHeadless: false,
+            legacyHeadless: options.legacyHeadless,
           }),
       {
         stdio: socket

@@ -90,7 +90,19 @@ jobs:
 
       - name: Test backend
         working-directory: backend
-        run: npm test -- --runInBand
+        # A failing test on this runner has to say *which* test failed and why:
+        # the run log archive is not always retrievable, but the annotation on
+        # the check is.
+        shell: powershell
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'backend-tests.log'
+          npm test -- --runInBand 2>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) {
+            $tail = ((Get-Content -LiteralPath $log -Tail 80) -join ' | ')
+            if ($tail.Length -gt 3500) { $tail = $tail.Substring($tail.Length - 3500) }
+            Write-Host "::error title=Backend tests failed::$tail"
+            exit 1
+          }
 
       - name: Clean build backend
         working-directory: backend

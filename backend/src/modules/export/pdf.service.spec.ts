@@ -73,6 +73,9 @@ describe('buildDevToolsArgs', () => {
 
   it('talks to the browser over a pipe, not a port', () => {
     const args = buildDevToolsArgs({ ...base, legacyHeadless: false });
+    // Plain --headless: the `=new` spelling is an alias a newer browser can
+    // refuse, and refusing it means no file at all.
+    expect(args[0]).toBe('--headless');
     expect(args).toContain('--remote-debugging-pipe');
     expect(args.join(' ')).not.toContain('--remote-debugging-port');
     expect(args).toContain(`--user-data-dir=${base.profile}`);
@@ -93,7 +96,7 @@ describe('buildDevToolsArgs', () => {
   it('has a second transport for platforms that cannot hand over a pipe', () => {
     // Port zero: the browser picks one, on the loopback interface, and prints
     // it on its own error stream for this process alone.
-    const args = buildDevToolsSocketArgs({ profile: base.profile });
+    const args = buildDevToolsSocketArgs({ profile: base.profile, legacyHeadless: false });
     expect(args).toContain('--remote-debugging-port=0');
     expect(args).not.toContain('--remote-debugging-pipe');
     expect(args).toContain(`--user-data-dir=${base.profile}`);
