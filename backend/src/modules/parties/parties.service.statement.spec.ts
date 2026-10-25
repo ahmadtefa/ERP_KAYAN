@@ -84,6 +84,9 @@ describe('PartiesService statement', () => {
           status: 'POSTED',
           amount: money(30),
           description: null,
+          customerId: 'c-1',
+          supplierId: null,
+          allocations: [],
         },
         {
           id: 'v-old',
@@ -93,6 +96,9 @@ describe('PartiesService statement', () => {
           status: 'POSTED',
           amount: money(10),
           description: null,
+          customerId: 'c-1',
+          supplierId: null,
+          allocations: [],
         },
       ],
     });
@@ -140,6 +146,9 @@ describe('PartiesService statement', () => {
           status: 'POSTED',
           amount: money(80),
           description: null,
+          customerId: null,
+          supplierId: 's-1',
+          allocations: [],
         },
       ],
     });
@@ -156,6 +165,139 @@ describe('PartiesService statement', () => {
     expect(statement.rows[1].debit).toBe('80.0000');
     // Negative closing for a supplier means we owe them 120.
     expect(statement.closingBalance).toBe('-120.0000');
+  });
+
+  it('shows a voucher that reaches the partner only through its allocations, once', async () => {
+    // A receipt written before the API demanded a partner can name nobody and
+    // still settle this customer's invoices. The statement must find it, and
+    // `some` must hand back one voucher however many invoices it settled -
+    // the money moved once, so it is one row.
+    const prisma = stub({
+      party: baseParty,
+      invoices: [
+        {
+          id: 'inv-1',
+          invoiceNumber: 'S-1',
+          invoiceDate: new Date('2026-02-01'),
+          totalAmount: money(100),
+          documentType: 'INVOICE',
+          status: 'POSTED',
+          notes: null,
+        },
+      ],
+      vouchers: [
+        {
+          id: 'v-alloc',
+          voucherNumber: 'R-ALLOC',
+          voucherDate: new Date('2026-02-10'),
+          kind: 'RECEIPT',
+          status: 'POSTED',
+          amount: money(100),
+          description: null,
+          // Names nobody: the only thing tying it to the customer is that it
+          // settled two of that customer's invoices.
+          customerId: null,
+          supplierId: null,
+          allocations: [{ amount: money(60) }, { amount: money(40) }],
+        },
+      ],
+    });
+    const service = new PartiesService(prisma as never, { record: jest.fn() } as never);
+
+    const statement = await service.statement('company-1', 'customer', 'c-1', {
+      from: '2026-02-01',
+      to: '2026-02-28',
+    });
+
+    expect(statement.rows.map((row: { number: string }) => row.number)).toEqual([
+      'S-1',
+      'R-ALLOC',
+    ]);
+    expect(statement.closingBalance).toBe('0.0000');
+
+    // The filter asks the database, not this service, to do the joining, so a
+    // busy partner does not load the whole voucher table.
+    const where = (prisma.cashVoucher.findMany as jest.Mock).mock.calls[0][0].where;
+    expect(where.OR).toEqual([
+      { customerId: 'c-1' },
+      {
+        allocations: {
+          some: { salesInvoice: { customerId: 'c-1', deletedAt: null } },
+        },
+      },
+    ]);
+  });
+
+  it('counts only the part of a shared legacy voucher that settled this partner', async () => {
+    // A restored old voucher can name nobody and settle invoices of two
+    // customers. The query narrows its allocations to this customer's
+    // invoices; the row must carry that part, not the whole voucher, or the
+    // statement would claim money that belonged to somebody else.
+    const prisma = stub({
+      party: baseParty,
+      invoices: [
+        {
+          id: 'inv-40',
+          invoiceNumber: 'S-40',
+          invoiceDate: new Date('2026-02-01'),
+          totalAmount: money(40),
+          documentType: 'INVOICE',
+          status: 'POSTED',
+          notes: null,
+        },
+      ],
+      vouchers: [
+        {
+          id: 'v-shared',
+          voucherNumber: 'R-SHARED',
+          voucherDate: new Date('2026-02-10'),
+          kind: 'RECEIPT',
+          status: 'POSTED',
+          amount: money(100),
+          description: null,
+          customerId: null,
+          supplierId: null,
+          // Already narrowed by the query to this customer's allocations.
+          allocations: [{ amount: money(40) }],
+        },
+      ],
+    });
+    const service = new PartiesService(prisma as never, { record: jest.fn() } as never);
+
+    const statement = await service.statement('company-1', 'customer', 'c-1', {
+      from: '2026-02-01',
+      to: '2026-02-28',
+    });
+
+    const rows = statement.rows.filter((r: { number: string }) => r.number === 'R-SHARED');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].credit).toBe('40.0000');
+    // The account balances: the 40 invoice and the 40 it settled.
+    expect(statement.closingBalance).toBe('0.0000');
+  });
+
+  it('uses the purchase side of the allocation for a supplier voucher', async () => {
+    const prisma = stub({
+      party: { ...baseParty, id: 's-1', code: 'V01' },
+      invoices: [],
+      vouchers: [],
+    });
+    const service = new PartiesService(prisma as never, { record: jest.fn() } as never);
+
+    await service.statement('company-1', 'supplier', 's-1', {
+      from: '2026-02-01',
+      to: '2026-02-28',
+    });
+
+    const where = (prisma.cashVoucher.findMany as jest.Mock).mock.calls[0][0].where;
+    expect(where.OR).toEqual([
+      { supplierId: 's-1' },
+      {
+        allocations: {
+          some: { purchaseInvoice: { supplierId: 's-1', deletedAt: null } },
+        },
+      },
+    ]);
   });
 
   it('orders documents that share a date, so the statement never changes shape', async () => {
@@ -193,6 +335,9 @@ describe('PartiesService statement', () => {
           status: 'POSTED',
           amount: money(30),
           description: null,
+          customerId: 'c-1',
+          supplierId: null,
+          allocations: [],
         },
       ],
     });

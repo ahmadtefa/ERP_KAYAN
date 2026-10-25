@@ -579,6 +579,431 @@ async function main() {
     near(payableAfter - payableBefore, Number(supplierStatement.closingBalance)),
     `control moved ${money(payableAfter - payableBefore)}, statement closed ${supplierStatement.closingBalance}`,
   );
+
+  // ── Phase B: a voucher that reaches the partner only through allocations ──
+  // Old data can hold a receipt written before the API insisted on naming a
+  // partner: the voucher itself names nobody, and the only thing tying it to
+  // this customer is the invoice it settled. The statement must still show it,
+  // once - however many invoices it settled - and the figure must be the part
+  // that settled this customer's invoices, not the whole voucher.
+  const statementBefore = await must(
+    're-read the customer statement before the old voucher',
+    `/parties/customers/statement/${customer.id}?from=${monthStart}&to=${today}`,
+  );
+  const summaryBefore = await must(
+    'read the customer card before the old voucher',
+    `/parties/customers/summary/${customer.id}`,
+  );
+  if (!statementBefore || !summaryBefore) return;
+
+  const extraInvoice = await must('sell one more unit today for 25.00', '/sales/invoices', {
+    method: 'POST',
+    json: {
+      invoiceDate: today,
+      dueDate: today,
+      customerId: customer.id,
+      lines: [{ itemId: item.id, quantity: '1', unitPrice: '25' }],
+    },
+  });
+  const extraPosted = extraInvoice?.id
+    ? await post('post that invoice', `/sales/invoices/${extraInvoice.id}/post`)
+    : null;
+  if (!extraPosted?.id) return;
+
+  const oneInvoice = await must('collect 10.00 against the new invoice', '/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'RECEIPT',
+      voucherDate: today,
+      cashAccountId: cashBox.id,
+      customerId: customer.id,
+      amount: '10',
+      description: `Old collection ${stamp}`,
+      allocations: [{ salesInvoiceId: extraInvoice.id, amount: '10' }],
+    },
+  });
+  const twoInvoices = await must('collect 10.00 split across two invoices', '/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'RECEIPT',
+      voucherDate: today,
+      cashAccountId: cashBox.id,
+      customerId: customer.id,
+      amount: '10',
+      description: `Split collection ${stamp}`,
+      allocations: [
+        { salesInvoiceId: older.id, amount: '5' },
+        { salesInvoiceId: extraInvoice.id, amount: '5' },
+      ],
+    },
+  });
+  const onePosted = oneInvoice?.id
+    ? await post('post the single-allocation collection', `/cash/vouchers/${oneInvoice.id}/post`)
+    : null;
+  const twoPosted = twoInvoices?.id
+    ? await post('post the split collection', `/cash/vouchers/${twoInvoices.id}/post`)
+    : null;
+  if (!onePosted?.voucherNumber || !twoPosted?.voucherNumber) return;
+
+  // Forget the partner on both rows, exactly as restored old data would.
+  await sql('UPDATE cash_vouchers SET "customerId" = NULL WHERE id = ANY($1::uuid[])', [
+    [oneInvoice.id, twoInvoices.id],
+  ]);
+
+  const statementAfter = await must(
+    're-read the customer statement after the old vouchers lost their partner',
+    `/parties/customers/statement/${customer.id}?from=${monthStart}&to=${today}`,
+  );
+  const summaryAfter = await must(
+    'read the customer card after the old vouchers lost their partner',
+    `/parties/customers/summary/${customer.id}`,
+  );
+  if (!statementAfter || !summaryAfter) return;
+
+  const rowsAfter = statementAfter.rows ?? [];
+  const singleRows = rowsAfter.filter((row) => row.number === onePosted.voucherNumber);
+  const splitRows = rowsAfter.filter((row) => row.number === twoPosted.voucherNumber);
+  check(
+    'a voucher that names nobody but settled an invoice still appears',
+    singleRows.length === 1 && near(singleRows[0].credit, 10),
+    `${singleRows.length} row(s): ${JSON.stringify(singleRows.map((row) => [row.debit, row.credit]))}`,
+  );
+  check(
+    'a voucher that settled two invoices is one row and its money counted once',
+    splitRows.length === 1 && near(splitRows[0].credit, 10),
+    `${splitRows.length} row(s): ${JSON.stringify(splitRows.map((row) => [row.debit, row.credit]))}`,
+  );
+  check(
+    'the closing moved by exactly the new invoice less the two collections',
+    near(
+      Number(statementAfter.closingBalance),
+      Number(statementBefore.closingBalance) + Number(extraPosted.totalAmount) - 10 - 10,
+    ),
+    `${statementBefore.closingBalance} → ${statementAfter.closingBalance}`,
+  );
+  check(
+    'the arithmetic still holds with the partner-less vouchers in it',
+    near(
+      Number(statementAfter.openingBalance) +
+        Number(statementAfter.totalDebit) -
+        Number(statementAfter.totalCredit),
+      Number(statementAfter.closingBalance),
+    ),
+    `opening ${statementAfter.openingBalance} + debit ${statementAfter.totalDebit} - credit ${statementAfter.totalCredit} = ${statementAfter.closingBalance}`,
+  );
+  const runningAfter = rowsAfter.map((row) => Number(row.balance));
+  check(
+    'the running balance still moves one row at a time',
+    runningAfter.length > 0 &&
+      near(runningAfter[runningAfter.length - 1], Number(statementAfter.closingBalance)) &&
+      rowsAfter.every((row, index) => {
+        const before =
+          index === 0 ? Number(statementAfter.openingBalance) : runningAfter[index - 1];
+        return near(before + Number(row.debit) - Number(row.credit), runningAfter[index]);
+      }),
+    runningAfter.join(' → '),
+  );
+  check(
+    'the partner card closes on the same balance as the statement',
+    near(summaryAfter.totals.netBalance, Number(statementAfter.closingBalance)),
+    `card ${summaryAfter.totals.netBalance}, statement ${statementAfter.closingBalance}`,
+  );
+  check(
+    'fully allocated collections leave nothing on account',
+    near(summaryAfter.totals.onAccount, Number(summaryBefore.totals.onAccount)),
+    `${summaryBefore.totals.onAccount} → ${summaryAfter.totals.onAccount}`,
+  );
+
+  // ── every row opens the document behind it ────────────────────────────────
+  // This is what tapping a row does in the dialog: invoices open the invoice
+  // detail, returns open the return dialog, vouchers open the voucher chain.
+  const opened = [];
+  for (const row of rowsAfter) {
+    if (row.type === 'SALES_INVOICE' || row.type === 'PURCHASE_INVOICE') {
+      const path =
+        row.type === 'SALES_INVOICE' ? `/sales/invoices/${row.id}` : `/purchases/invoices/${row.id}`;
+      const doc = await api(path);
+      opened.push({
+        row,
+        ok: doc.status === 200 && doc.data?.invoiceNumber === row.number,
+        detail: `${doc.status} ${doc.data?.invoiceNumber ?? ''}`,
+      });
+    } else if (row.type === 'CREDIT_NOTE' || row.type === 'DEBIT_NOTE') {
+      const path =
+        row.type === 'CREDIT_NOTE' ? `/returns/sales/${row.id}` : `/returns/purchases/${row.id}`;
+      const doc = await api(path);
+      opened.push({
+        row,
+        ok: doc.status === 200 && doc.data?.id === row.id,
+        detail: `${doc.status} ${doc.data?.id ?? ''}`,
+      });
+    } else if (row.type === 'CASH_RECEIPT' || row.type === 'CASH_PAYMENT') {
+      const doc = await api(`/cash/vouchers/${row.id}`);
+      opened.push({
+        row,
+        ok: doc.status === 200 && doc.data?.voucherNumber === row.number,
+        detail: `${doc.status} ${doc.data?.voucherNumber ?? ''}`,
+      });
+    } else {
+      opened.push({ row, ok: false, detail: `unknown row type ${row.type}` });
+    }
+  }
+  check(
+    'every statement row opens the document behind it',
+    opened.length === rowsAfter.length && opened.every((entry) => entry.ok),
+    opened
+      .filter((entry) => !entry.ok)
+      .map((entry) => `${entry.row.number}/${entry.row.type}: ${entry.detail}`)
+      .join('; ') || `${opened.length} rows opened`,
+  );
+
+  // ── and the file holds the partner-less voucher too, once ─────────────────
+  const csvAfter = await binary(
+    `/exports/party-statement/download?partyId=${customer.id}&kind=customer` +
+      `&from=${monthStart}&to=${today}&format=csv&lang=ar`,
+  );
+  const csvAfterText = csvAfter.buffer.toString('utf8');
+  const csvAfterRows = parseCsv(csvAfterText);
+  check(
+    'the exported CSV carries the partner-less voucher exactly once',
+    csvAfterRows.filter((row) => row.includes(onePosted.voucherNumber)).length === 1 &&
+      csvAfterRows.filter((row) => row.includes(twoPosted.voucherNumber)).length === 1,
+    `${csvAfterRows.filter((row) => row.includes(onePosted.voucherNumber)).length} + ` +
+      `${csvAfterRows.filter((row) => row.includes(twoPosted.voucherNumber)).length} lines`,
+  );
+  check(
+    'the CSV closes on the same balance as the screen after the old vouchers',
+    csvAfterRows.some(
+      (row) =>
+        row.includes('الرصيد الختامي') && row.includes(statementAfter.closingBalance),
+    ),
+    `looking for ${statementAfter.closingBalance}`,
+  );
+
+  const receivableAfterOld = await controlBalance('1103');
+  check(
+    'the receivable control account still matches after the old vouchers',
+    near(
+      receivableAfterOld - receivableAfter,
+      Number(statementAfter.closingBalance) - Number(statementBefore.closingBalance),
+    ),
+    `control moved ${money(receivableAfterOld - receivableAfter)}, statement moved ${money(
+      Number(statementAfter.closingBalance) - Number(statementBefore.closingBalance),
+    )}`,
+  );
+
+  // ── Phase C: the supplier statement on more varied data ───────────────────
+  // One purchase, one payment, one purchase return and one payment left on
+  // account: the case a single plain scenario never reaches.
+  const payableBaseline = await controlBalance('2101');
+  const supplierBefore = await must(
+    're-read the supplier statement before the return and the prepayment',
+    `/parties/suppliers/statement/${supplier.id}?from=${monthStart}&to=${today}`,
+  );
+  const supplierSummaryBefore = await must(
+    'read the supplier card before the return and the prepayment',
+    `/parties/suppliers/summary/${supplier.id}`,
+  );
+  const purchaseDetail = await must('read the purchase invoice', `/purchases/invoices/${purchase.id}`);
+  const purchaseLine = purchaseDetail?.lines?.[0];
+  if (!supplierBefore || !supplierSummaryBefore || !purchaseLine?.id) {
+    check('the purchase invoice can be read back for its line', false, 'no lines');
+    return;
+  }
+
+  const purchaseReturn = await must('return one unit to the supplier', '/returns/purchases', {
+    method: 'POST',
+    json: {
+      originalInvoiceId: purchase.id,
+      returnDate: today,
+      reason: `Supplier return ${stamp}`,
+      lines: [{ originalLineId: purchaseLine.id, quantity: '1.0000' }],
+    },
+  });
+  const purchaseReturnPosted = purchaseReturn?.id
+    ? await post('post the purchase return', `/returns/purchases/${purchaseReturn.id}/post`)
+    : null;
+  const prepayment = await must('pay the supplier 30.00 on account', '/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'PAYMENT',
+      voucherDate: today,
+      cashAccountId: cashBox.id,
+      supplierId: supplier.id,
+      amount: '30',
+      description: `Prepayment ${stamp}`,
+    },
+  });
+  const prepaymentPosted = prepayment?.id
+    ? await post('post the prepayment', `/cash/vouchers/${prepayment.id}/post`)
+    : null;
+  if (!purchaseReturnPosted?.id || !prepaymentPosted?.voucherNumber) return;
+
+  const supplierAfter = await must(
+    're-read the supplier statement after the return and the prepayment',
+    `/parties/suppliers/statement/${supplier.id}?from=${monthStart}&to=${today}`,
+  );
+  const supplierSummaryAfter = await must(
+    'read the supplier card after the return and the prepayment',
+    `/parties/suppliers/summary/${supplier.id}`,
+  );
+  if (!supplierAfter || !supplierSummaryAfter) return;
+
+  const supplierRows = supplierAfter.rows ?? [];
+  const returnRow = supplierRows.find((row) => row.id === purchaseReturnPosted.id);
+  const prepaymentRow = supplierRows.find((row) => row.number === prepaymentPosted.voucherNumber);
+  check(
+    'a purchase return shows as a debit on the supplier statement',
+    returnRow &&
+      near(returnRow.debit, Number(purchaseReturnPosted.totalAmount)) &&
+      near(returnRow.credit, 0),
+    JSON.stringify(returnRow?.debit) + ' / ' + JSON.stringify(returnRow?.credit),
+  );
+  check(
+    'a payment left on account still shows as a debit',
+    prepaymentRow && near(prepaymentRow.debit, 30) && near(prepaymentRow.credit, 0),
+    JSON.stringify(prepaymentRow?.debit),
+  );
+  check(
+    'the supplier closing is the purchase less the payment, the return and the prepayment',
+    near(
+      Number(supplierAfter.closingBalance),
+      Number(supplierBefore.closingBalance) +
+        Number(purchaseReturnPosted.totalAmount) +
+        30,
+    ),
+    `${supplierBefore.closingBalance} → ${supplierAfter.closingBalance}`,
+  );
+  check(
+    'the supplier statement arithmetic holds with four kinds of document',
+    near(
+      Number(supplierAfter.openingBalance) +
+        Number(supplierAfter.totalDebit) -
+        Number(supplierAfter.totalCredit),
+      Number(supplierAfter.closingBalance),
+    ),
+    `opening ${supplierAfter.openingBalance} + debit ${supplierAfter.totalDebit} - credit ${supplierAfter.totalCredit} = ${supplierAfter.closingBalance}`,
+  );
+  check(
+    'the supplier card nets the return and the prepayment to the same figure',
+    near(supplierSummaryAfter.totals.netBalance, -Number(supplierAfter.closingBalance)),
+    `card ${supplierSummaryAfter.totals.netBalance}, statement ${supplierAfter.closingBalance}`,
+  );
+  check(
+    'the supplier card reports the unallocated payment as money on account',
+    near(supplierSummaryAfter.totals.onAccount, Number(supplierSummaryBefore.totals.onAccount) + 30),
+    `${supplierSummaryBefore.totals.onAccount} → ${supplierSummaryAfter.totals.onAccount}`,
+  );
+
+  const openedSupplier = [];
+  for (const row of supplierRows) {
+    if (row.type === 'PURCHASE_INVOICE') {
+      const doc = await api(`/purchases/invoices/${row.id}`);
+      openedSupplier.push({ row, ok: doc.status === 200 && doc.data?.invoiceNumber === row.number });
+    } else if (row.type === 'DEBIT_NOTE') {
+      const doc = await api(`/returns/purchases/${row.id}`);
+      openedSupplier.push({ row, ok: doc.status === 200 && doc.data?.id === row.id });
+    } else if (row.type === 'CASH_PAYMENT' || row.type === 'CASH_RECEIPT') {
+      const doc = await api(`/cash/vouchers/${row.id}`);
+      openedSupplier.push({
+        row,
+        ok: doc.status === 200 && doc.data?.voucherNumber === row.number,
+      });
+    } else {
+      openedSupplier.push({ row, ok: false });
+    }
+  }
+  check(
+    'every supplier statement row opens the document behind it',
+    openedSupplier.length === supplierRows.length && openedSupplier.every((entry) => entry.ok),
+    openedSupplier
+      .filter((entry) => !entry.ok)
+      .map((entry) => `${entry.row.number}/${entry.row.type}`)
+      .join('; ') || `${openedSupplier.length} rows opened`,
+  );
+
+  const payableEnd = await controlBalance('2101');
+  check(
+    'the payable control account moved by exactly what the supplier statement moved',
+    near(
+      payableEnd - payableBaseline,
+      Number(supplierAfter.closingBalance) - Number(supplierBefore.closingBalance),
+    ),
+    `control moved ${money(payableEnd - payableBaseline)}, statement moved ${money(
+      Number(supplierAfter.closingBalance) - Number(supplierBefore.closingBalance),
+    )}`,
+  );
+
+  // ── who may look, and who may take the file away ──────────────────────────
+  // A statement on screen is one permission; the exported file is another.
+  // A reader without the report permissions must see the balance and still be
+  // refused the CSV, the spreadsheet and the print page.
+  const readerRole = await must('create a read-only partner role', '/admin/roles', {
+    method: 'POST',
+    json: {
+      code: `ST_READER_${stamp}`,
+      nameEn: `Statement reader ${stamp}`,
+      nameAr: `قارئ كشف ${stamp}`,
+      permissions: ['parties.customers.read'],
+    },
+  });
+  const readerUser = await must('create a reader without report permissions', '/admin/users', {
+    method: 'POST',
+    json: {
+      username: `stmt.reader.${stamp}`,
+      fullNameEn: `Statement reader ${stamp}`,
+      fullNameAr: `قارئ كشف ${stamp}`,
+      password: `Reader@${stamp}Pass!`,
+      roleIds: readerRole?.id ? [readerRole.id] : [],
+    },
+  });
+  if (!readerRole?.id || !readerUser?.id) return;
+
+  const readerSession = await api('/auth/login', {
+    method: 'POST',
+    noAuth: true,
+    json: { username: `stmt.reader.${stamp}`, password: `Reader@${stamp}Pass!` },
+  });
+  const readerToken = readerSession.data?.accessToken;
+  check(
+    'a reader without report permissions can sign in',
+    readerSession.status === 201 || readerSession.status === 200,
+    `${readerSession.status}`,
+  );
+  if (readerToken) {
+    const asReader = async (path) => {
+      const response = await fetch(`${API}${path}`, {
+        headers: { Authorization: `Bearer ${readerToken}` },
+      });
+      return { status: response.status, type: response.headers.get('content-type') ?? '' };
+    };
+    const readStatement = await asReader(
+      `/parties/customers/statement/${customer.id}?from=${monthStart}&to=${today}`,
+    );
+    const readCsv = await asReader(
+      `/exports/party-statement/download?partyId=${customer.id}&kind=customer` +
+        `&from=${monthStart}&to=${today}&format=csv&lang=ar`,
+    );
+    const readPrint = await asReader(
+      `/exports/party-statement/print?partyId=${customer.id}&kind=customer` +
+        `&from=${monthStart}&to=${today}&lang=ar`,
+    );
+    check(
+      'the reader may read the statement on screen',
+      readStatement.status === 200,
+      `${readStatement.status}`,
+    );
+    check(
+      'the reader is refused the CSV without the report permission',
+      readCsv.status === 403 && !readCsv.type.includes('text/csv'),
+      `${readCsv.status} ${readCsv.type}`,
+    );
+    check(
+      'the reader is refused the print page without the report permission',
+      readPrint.status === 403 && !readPrint.type.includes('text/html'),
+      `${readPrint.status} ${readPrint.type}`,
+    );
+  }
 }
 
 main()
