@@ -70,7 +70,7 @@ describe('PartiesService summary money on account', () => {
         { amount: 200, settled: 0 },
       ],
     });
-    const summary = await new PartiesService(prisma as any).summary('company-1', 'customer', 'c-1');
+    const summary = await new PartiesService(prisma as never, { record: jest.fn() } as never).summary('company-1', 'customer', 'c-1');
 
     expect(summary.totals.outstanding).toBe('400.0000');
     expect(summary.totals.onAccount).toBe('200.0000');
@@ -86,7 +86,7 @@ describe('PartiesService summary money on account', () => {
       paid: 500,
       vouchers: [{ amount: 500, settled: 500 }],
     });
-    const summary = await new PartiesService(prisma as any).summary('company-1', 'customer', 'c-1');
+    const summary = await new PartiesService(prisma as never, { record: jest.fn() } as never).summary('company-1', 'customer', 'c-1');
 
     expect(summary.totals.onAccount).toBe('0.0000');
     expect(summary.totals.netBalance).toBe('0.0000');
@@ -109,7 +109,7 @@ describe('PartiesService summary money on account', () => {
       { id: 'v1', voucherNumber: 'RC-1', voucherDate: new Date('2026-10-02'), kind: 'RECEIPT', amount: money(200), status: 'POSTED', allocations: [] },
       { id: 'v2', voucherNumber: 'PV-1', voucherDate: new Date('2026-10-03'), kind: 'PAYMENT', amount: money(50), status: 'POSTED', allocations: [] },
     ]);
-    const summary = await new PartiesService(prisma as any).summary('company-1', 'customer', 'c-1');
+    const summary = await new PartiesService(prisma as never, { record: jest.fn() } as never).summary('company-1', 'customer', 'c-1');
 
     expect(summary.totals.onAccount).toBe('150.0000');
     expect(summary.totals.netBalance).toBe('-150.0000');
@@ -125,7 +125,7 @@ describe('PartiesService summary money on account', () => {
         { amount: 40, settled: 0 },
       ],
     });
-    const summary = await new PartiesService(prisma as any).summary('company-1', 'supplier', 's-1');
+    const summary = await new PartiesService(prisma as never, { record: jest.fn() } as never).summary('company-1', 'supplier', 's-1');
 
     expect(summary.totals.outstanding).toBe('0.0000');
     expect(summary.totals.onAccount).toBe('40.0000');
