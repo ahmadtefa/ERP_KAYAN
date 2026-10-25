@@ -90,21 +90,24 @@ class VoucherDetailsView extends StatelessWidget {
           if (reference.isNotEmpty) Text('${l10n.reference}: $reference'),
         ],
         const SizedBox(height: 12),
-        Row(
+        // A wrap, not a row: on a phone with large text these three labels are
+        // wider than the dialog, and a row would simply overflow.
+        Wrap(
+          spacing: 16,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Text(
               arabic ? 'الفواتير المسدَّدة' : 'Invoices settled',
               style: Theme.of(context).textTheme.labelLarge,
             ),
-            const Spacer(),
             if (allocations.isNotEmpty)
               Text(
                 arabic
                     ? 'إجمالي التخصيص ${formatAmount(allocated.toString(), locale: locale)}'
                     : 'Applied ${formatAmount(allocated.toString(), locale: locale)}',
               ),
-            if (hasOnAccount) ...[
-              const SizedBox(width: 16),
+            if (hasOnAccount)
               Text(
                 arabic
                     ? 'على الحساب ${formatAmount(onAccount.toString(), locale: locale)}'
@@ -114,7 +117,6 @@ class VoucherDetailsView extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-            ],
           ],
         ),
         const SizedBox(height: 6),
@@ -153,13 +155,17 @@ class VoucherDetailsView extends StatelessWidget {
                 ),
         ),
         const SizedBox(height: 8),
-        Row(
+        // Same reason as above: the two labels and their buttons have to be
+        // allowed to wrap instead of running off a narrow screen.
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Text(
               arabic ? 'القيد المحاسبي' : 'Journal entry',
               style: Theme.of(context).textTheme.labelLarge,
             ),
-            const Spacer(),
             TextButton(
               onPressed: () => onOpen(AppRoutes.journalEntries),
               child: Text(arabic ? 'فتح القيود اليومية' : 'Open the journal'),
