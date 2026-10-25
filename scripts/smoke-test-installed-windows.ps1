@@ -188,6 +188,21 @@ foreach ($relative in @(
   $path = Join-Path $installRoot $relative
   if (-not (Test-Path $path)) { Fail "Installed package is missing $relative" }
 }
+
+# Building stages runtime-manifest.json naming the commit the payload was
+# built from. Without it, nothing on this machine says which code the Setup.exe
+# carried, and a report that calls the installer "the tested build" would be
+# guessing. It has to exist, and it has to name the commit under test.
+$manifestPath = Join-Path $installRoot "runtime-manifest.json"
+if (-not (Test-Path $manifestPath)) { Fail "The installed package has no runtime-manifest.json, so the build it came from cannot be identified." }
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+Write-Host ("PASS: installed manifest: product {0}, version {1}, commit {2}, Node {3}, PostgreSQL {4}." -f $manifest.product, $manifest.productVersion, $manifest.sourceCommit, $manifest.nodeVersion, $manifest.postgresqlVersion)
+$commitUnderTest = (& git -C $PSScriptRoot rev-parse HEAD 2>$null | Select-Object -First 1)
+if ($commitUnderTest -and $manifest.sourceCommit -ne $commitUnderTest) {
+  Fail "The installed payload was built from $($manifest.sourceCommit), not from the commit under test ($commitUnderTest)."
+}
+if ($commitUnderTest) { Write-Host "PASS: the installed payload is the commit under test ($commitUnderTest)." }
+
 if (-not (Test-Path $settings)) { Fail "The installer did not create $settings" }
 
 $pgReady = Join-Path $installRoot "backend\postgres\bin\pg_isready.exe"
