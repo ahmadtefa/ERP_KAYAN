@@ -90,7 +90,9 @@ async function must(label, path, options = {}) {
 async function refuse(label, path, options = {}) {
   const response = await api(path, options);
   const refused = response.status >= 400 && response.status < 500;
-  const message = String(response.data?.message ?? response.data?.error ?? '');
+  const message = String(
+    response.data?.detail ?? response.data?.message ?? response.data?.error ?? '',
+  );
   check(
     label,
     refused,
@@ -266,14 +268,14 @@ async function main() {
   baseline = new Map((await trialBalance()).rows?.map((row) => [row.code, money(row.closing)]) ?? []);
 
   // ─────────────────────────────────────────────────────── 1. fixtures
-  const item = await must('create a non-stock item priced at 100.00', '/inventory/items', {
+  const item = await must('create a stocked item priced at 100.00', '/inventory/items', {
     method: 'POST',
     json: {
       code: `CP-ITEM-${stamp}`,
       nameEn: `Collections item ${stamp}`,
       nameAr: `صنف التحصيل ${stamp}`,
       unit: 'PCS',
-      isStockTracked: false,
+      isStockTracked: true,
       salePrice: '100',
       purchasePrice: '60',
       taxRate: '0',
@@ -289,6 +291,10 @@ async function main() {
     method: 'POST',
     json: { code: `CP-CB-${stamp}`, nameEn: `Beta ${stamp}`, nameAr: `بيتا ${stamp}`, paymentTermDays: 30 },
   });
+  const stockSupplier = await must('create the supplier the stock is bought from', '/parties/suppliers', {
+    method: 'POST',
+    json: { code: `CP-ST-${stamp}`, nameEn: `Stock supplier ${stamp}`, nameAr: `مورد المخزون ${stamp}` },
+  });
   const supplierA = await must('create supplier A', '/parties/suppliers', {
     method: 'POST',
     json: { code: `CP-SA-${stamp}`, nameEn: `Supplier Alpha ${stamp}`, nameAr: `مورد ألفا ${stamp}`, paymentTermDays: 30 },
@@ -297,7 +303,29 @@ async function main() {
     method: 'POST',
     json: { code: `CP-SB-${stamp}`, nameEn: `Supplier Beta ${stamp}`, nameAr: `مورد بيتا ${stamp}`, paymentTermDays: 30 },
   });
-  if (!customerA || !customerB || !supplierA || !supplierB) return false;
+  if (!customerA || !customerB || !supplierA || !supplierB || !stockSupplier) return false;
+
+  // Selling a stocked item needs stock, and a purchase invoice is how stock
+  // arrives. It is deliberately a separate supplier so the payable checks
+  // below stay about the invoices they name.
+  const stockPurchase = await must('buy 40 units of stock at 60.00', '/purchases/invoices', {
+    method: 'POST',
+    json: {
+      invoiceDate: today,
+      supplierId: stockSupplier.id,
+      lines: [{ itemId: item.id, quantity: '40', unitPrice: '60' }],
+    },
+  });
+  if (!stockPurchase) return false;
+  const stockPosted = await must('post the stock purchase', `/purchases/invoices/${stockPurchase.id}/post`, {
+    method: 'POST',
+  });
+  check(
+    'the stock purchase is posted and the goods are on hand',
+    String(stockPosted?.status).toLowerCase() === 'posted',
+    `status ${stockPosted?.status}, total ${stockPosted?.totalAmount}`,
+  );
+  recordInvoice('PURCHASE', 2400);
 
   const newAccount = async (label, code, name) =>
     must(label, '/accounting/chart-of-accounts', {
@@ -377,11 +405,14 @@ async function main() {
   }
   await post('reverse the reversal candidate', `/sales/invoices/${salesReversed.id}/reverse`);
   // Only documents that stay live move the ledger at the end of the run: the
-  // pair that was posted and then reversed cancels out.
-  recordInvoice('SALES', 1000);
-  recordInvoice('SALES', 500);
-  recordInvoice('SALES', 300);
-  recordInvoice('SALES', 100);
+  // pair that was posted and then reversed cancels out. The amounts are read
+  // back from the server, so tax or rounding cannot invalidate the model.
+  const postedSales = [];
+  for (const doc of [salesA1, salesA2, salesA3, salesB1]) {
+    const detail = (await api(`/sales/invoices/${doc.id}`)).data;
+    if (String(detail?.status).toUpperCase() === 'POSTED') postedSales.push(detail);
+  }
+  for (const detail of postedSales) recordInvoice('SALES', Number(detail.totalAmount));
 
   const purchase = (label, supplierId, quantity) =>
     must(label, '/purchases/invoices', {
@@ -405,10 +436,12 @@ async function main() {
     await post(`post purchase invoice ${label}`, `/purchases/invoices/${doc.id}/post`);
   }
   await post('reverse the purchase reversal candidate', `/purchases/invoices/${payReversed.id}/reverse`);
-  recordInvoice('PURCHASE', 600);
-  recordInvoice('PURCHASE', 240);
-  recordInvoice('PURCHASE', 120);
-  recordInvoice('PURCHASE', 60);
+  const postedPurchases = [];
+  for (const doc of [payA1, payA2, payA3, payB1]) {
+    const detail = (await api(`/purchases/invoices/${doc.id}`)).data;
+    if (String(detail?.status).toUpperCase() === 'POSTED') postedPurchases.push(detail);
+  }
+  for (const detail of postedPurchases) recordInvoice('PURCHASE', Number(detail.totalAmount));
 
   const readInvoice = async (path) => (await api(path)).data;
   for (const [label, path, expected] of [
