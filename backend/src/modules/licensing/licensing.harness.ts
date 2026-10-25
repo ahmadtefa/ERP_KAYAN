@@ -64,9 +64,9 @@ export class FakeDb {
     }
   };
 
-  $queryRawUnsafe = async (query: string) => {
+  $executeRawUnsafe = async (query: string) => {
     this.clockLog.push(query);
-    return [{ pg_advisory_xact_lock: null }];
+    return 1;
   };
 
   licenseInstallation = {

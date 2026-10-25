@@ -93,6 +93,17 @@ jobs:
         run: npm run build
       - name: Apply migrations to ephemeral PostgreSQL
         run: npx prisma migrate deploy
+
+      # Licensing is the one subsystem whose real behaviour cannot be shown
+      # with a mocked database: the migration has to survive an installation
+      # that already has accounts, seats have to be refused at the limit, two
+      # simultaneous creations must produce exactly one account, and an old
+      # backup must not hand seats back. The script creates throwaway
+      # databases on the same server and drives the compiled service.
+      - name: Prove licensing on real PostgreSQL (populated upgrade, seats, concurrency, restore)
+        env:
+          KAYAN_TEST_ADMIN_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
+        run: python ../scripts/ci-diagnose.py node scripts/verify-licensing-postgres.mjs
       - name: Prove the required-accounts chart upgrade (old, complete and renumbered companies; run twice)
         run: python ../scripts/ci-diagnose.py node scripts/check-chart-upgrade.mjs
 

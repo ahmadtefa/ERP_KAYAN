@@ -56,6 +56,14 @@ describe('the licensing migration', () => {
     expect(sql).toMatch(/'MIGRATION_EXISTING'/);
   });
 
+  it('supplies the not-null id, because the column has no default', () => {
+    // Regression: without an explicit id the backfill fails on a database that
+    // already has accounts, which is exactly the database that upgrades.
+    const backfill = sql.slice(sql.indexOf('INSERT INTO "license_seat_usage"'));
+    expect(backfill).toMatch(/\("id", /);
+    expect(backfill).toMatch(/SELECT gen_random_uuid\(\), u\."id"/);
+  });
+
   it('records those accounts with no licence id, to be adopted by the first activation', () => {
     const backfill = sql.slice(sql.indexOf('INSERT INTO "license_seat_usage"'));
     expect(backfill).not.toMatch(/"licenseId"/);

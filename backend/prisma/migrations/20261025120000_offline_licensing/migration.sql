@@ -80,7 +80,11 @@ CREATE INDEX "license_events_licenseId_occurredAt_idx" ON "license_events"("lice
 -- accounts. They stay active, keep their roles and passwords, and are simply
 -- counted. `licenseId` is null because no licence row exists yet; the first
 -- activation adopts these rows without creating new ones.
-INSERT INTO "license_seat_usage" ("userId", "username", "reason", "idempotencyKey", "createdAt")
-SELECT u."id", u."username", 'MIGRATION_EXISTING', 'migration:' || u."id"::text, u."createdAt"
+-- The id is generated here because, unlike the other columns, it has no
+-- default: the application always supplies it (@uuid()). Without this the
+-- statement fails on every installation that has accounts, which is every
+-- installation that is upgrading.
+INSERT INTO "license_seat_usage" ("id", "userId", "username", "reason", "idempotencyKey", "createdAt")
+SELECT gen_random_uuid(), u."id", u."username", 'MIGRATION_EXISTING', 'migration:' || u."id"::text, u."createdAt"
 FROM "users" u
 ON CONFLICT ("idempotencyKey") DO NOTHING;

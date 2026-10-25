@@ -824,7 +824,11 @@ export class LicensingService implements OnModuleInit {
     input: ReserveSeatInput,
   ): Promise<{ reserved: boolean; alreadyApplied: boolean; used: number; limit: number }> {
     await this.ensureReady();
-    await tx.$queryRawUnsafe(
+    // `pg_advisory_xact_lock` returns void, which the query API cannot
+    // deserialize; `$executeRawUnsafe` runs the same statement and reports the
+    // row count, which is all this needs. The lock is held until the caller's
+    // transaction ends.
+    await tx.$executeRawUnsafe(
       "SELECT pg_advisory_xact_lock(hashtext('kayan.license.seats'))",
     );
 
@@ -1225,7 +1229,7 @@ type AppliedOutcome = {
 
 /** The subset of Prisma's transaction client this service uses. */
 export type PrismaLike = {
-  $queryRawUnsafe<T = unknown>(query: string): Promise<T>;
+  $executeRawUnsafe(query: string): Promise<number>;
   licenseInstallation: {
     create(args: unknown): Promise<unknown>;
     update(args: unknown): Promise<unknown>;
