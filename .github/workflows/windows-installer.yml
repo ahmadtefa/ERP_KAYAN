@@ -91,33 +91,47 @@ jobs:
       - name: Test backend
         working-directory: backend
         shell: powershell
-        # A failing test on this runner has to say *which* test failed and why.
-        # Tee-Object cannot do it here: GitHub runs PowerShell steps with
-        # $ErrorActionPreference = 'Stop', and every stderr line of a piped
-        # native command becomes a terminating error - which is how the run
-        # died in silence. Start-Process redirects to files instead, so the
-        # exit code is the only thing that decides, and the log survives to be
-        # quoted in the check's annotation.
+        # Two things this step has to do besides run the tests: say *which*
+        # test failed (the run log archive is not always downloadable), and
+        # say what the PDF renderer thought of this machine. Both go out as
+        # annotations, which are readable even when the log is not.
+        #
+        # Tee-Object cannot be used to capture the output: GitHub runs
+        # PowerShell steps with $ErrorActionPreference = 'Stop', so the first
+        # line a native command writes to stderr becomes a terminating error
+        # and the script dies before it can report anything. Start-Process
+        # writes to files of its own instead.
         run: |
           $ErrorActionPreference = 'Continue'
-          $env:FORCE_COLOR = '0'
           $log = Join-Path $env:RUNNER_TEMP 'backend-tests.log'
           $err = Join-Path $env:RUNNER_TEMP 'backend-tests.err.log'
           $proc = Start-Process -FilePath 'npm.cmd' -ArgumentList 'test','--','--runInBand' `
             -NoNewWindow -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError $err
-          Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Select-Object -Last 150
-          Get-Content -LiteralPath $err -ErrorAction SilentlyContinue | Select-Object -Last 40
+
+          $esc = [char]27
+          function Clean([string]$text) {
+            $text = $text -replace "$esc\[[0-9;]*m", ''
+            $text = $text -replace "`r?`n", '%0A'
+            return ($text -replace '[^\x20-\x7E%]', '.')
+          }
+
+          # What the renderer found, and what it had to say when it could not
+          # print: the browser it chose, and every attempt's complaint.
+          $notes = @(
+            Get-Content -LiteralPath $log,$err -ErrorAction SilentlyContinue |
+              Select-String -Pattern 'Making PDFs','No browser found','would not print','not finish printing','exited with code' |
+              ForEach-Object { $_.Line } |
+              Select-Object -Unique |
+              Select-Object -Last 12
+          ) -join "`n"
+          if ($notes) { Write-Host "::warning title=PDF renderer on this machine::$(Clean $notes)" }
+
+          Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Select-Object -Last 60
+
           if ($proc.ExitCode -ne 0) {
-            # The annotation is cut at about 4 kB from the end, so the summary
-            # has to come first. Jest writes its reporter output to stderr,
-            # which is why the last lines of that file are the ones that name
-            # the failing test.
-            $esc = [char]27
             $fail = @(Get-Content -LiteralPath $err -ErrorAction SilentlyContinue | Select-Object -Last 22) -join "`n"
             if (-not $fail) { $fail = @(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Select-Object -Last 22) -join "`n" }
-            $fail = $fail -replace "$esc\[[0-9;]*m", ''
-            $fail = $fail -replace "`r?`n", '%0A'
-            $fail = $fail -replace '[^\x20-\x7E%]', '.'
+            $fail = Clean $fail
             if ($fail.Length -gt 3400) { $fail = $fail.Substring($fail.Length - 3400) }
             Write-Host "::error title=Backend tests failed::$fail"
             exit 1

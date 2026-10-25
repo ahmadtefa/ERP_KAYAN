@@ -97,10 +97,10 @@ export class PdfService {
           // channel - the executable is large, and a first run is scanned and
           // unpacked before it says a word - while a warm one answers in a
           // second. The budgets are for that first run.
-          { transport: 'pipe', legacyHeadless: false, timeout: 60_000 },
-          { transport: 'pipe', legacyHeadless: true, timeout: 45_000 },
-          { transport: 'socket', legacyHeadless: false, timeout: 30_000 },
-          { transport: 'socket', legacyHeadless: true, timeout: 30_000 },
+          { transport: 'pipe', legacyHeadless: false, timeout: 30_000 },
+          { transport: 'pipe', legacyHeadless: true, timeout: 30_000 },
+          { transport: 'socket', legacyHeadless: false, timeout: 20_000 },
+          { transport: 'socket', legacyHeadless: true, timeout: 20_000 },
         ].filter(
           (attempt) =>
             !requested || requested === attempt.transport,
