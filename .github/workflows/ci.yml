@@ -187,6 +187,13 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
+          echo "Running customer collections and supplier payments end to end: invoices, allocations, reversals, refusals, permissions, balances and the journal behind each one..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-collections-payments.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after collections and payments scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
           echo "Verifying a fresh full backup restores into an ISOLATED database with identical data..."
           export PGPASSWORD=ci
           LOGIN_JSON=$(curl -fsS -X POST http://127.0.0.1:3000/api/v1/auth/login -H 'Content-Type: application/json' -d '{"username":"ci-admin","password":"CI-only-Admin-Password-12345"}')
