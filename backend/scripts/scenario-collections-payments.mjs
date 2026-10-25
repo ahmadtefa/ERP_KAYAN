@@ -1112,6 +1112,73 @@ async function main() {
     duplicateAttempt.message.slice(0, 140),
   );
 
+  // The refusal above is the safety net for money that would overpay an
+  // invoice. A copy the company *can* still absorb is accepted instead, and
+  // that is the case idempotency would have covered. No idempotency key exists,
+  // so the guarantee has to come from the ledger: the copy is a separate
+  // document with its own number and its own balanced entry, and reversing one
+  // copy leaves the other untouched. A duplicate is then an entry an accountant
+  // can see, reconcile and reverse - never a silent second posting on the
+  // first voucher, and never an unbalanced ledger.
+  const pairStart = { receivable: await delta(AR), bank: await delta(bankLedger.code) };
+  const copies = [];
+  for (const copy of [1, 2]) {
+    const document = await must(
+      `a repeated submission is taken as its own document (copy ${copy})`,
+      '/cash/vouchers',
+      receiptOf(customerB.id, '25', []),
+    );
+    if (!document) return false;
+    const postedCopy = await post(`post copy ${copy}`, `/cash/vouchers/${document.id}/post`);
+    const journal = await journalOfVoucher(document.id);
+    check(
+      `copy ${copy} keeps its own number and one balanced entry of 25.00`,
+      Boolean(postedCopy) &&
+        journal.entries.length === 1 &&
+        near(journal.entries[0]?.debit, 25) &&
+        near(journal.entries[0]?.credit, 25),
+      `${document.voucherNumber}: ${journal.entries.length} entries, debit ${journal.entries[0]?.debit}`,
+    );
+    copies.push({ document, entry: journal.entries[0] });
+  }
+  check(
+    'two copies are two documents, not one number written twice',
+    copies.length === 2 &&
+      copies[0].document.id !== copies[1].document.id &&
+      copies[0].document.voucherNumber !== copies[1].document.voucherNumber &&
+      copies[0].entry?.id !== copies[1].entry?.id,
+    `${copies.map((row) => row.document.voucherNumber).join(', ')} / ${copies
+      .map((row) => row.entry?.entryNumber)
+      .join(', ')}`,
+  );
+  check(
+    'the pair moves the customer account by exactly twice the 25.00 each carries',
+    near((await delta(AR)) - pairStart.receivable, -50),
+    `receivable ${money((await delta(AR)) - pairStart.receivable)}`,
+  );
+  const firstCopyBefore = await journalOfVoucher(copies[0].document.id);
+  await post('reverse the second copy', `/cash/vouchers/${copies[1].document.id}/reverse`, {
+    method: 'POST',
+    json: { reason: `Duplicate of ${copies[0].document.voucherNumber}` },
+  });
+  const firstCopyAfter = await journalOfVoucher(copies[0].document.id);
+  check(
+    'reversing the second copy leaves the first document and its entry exactly as they were',
+    firstCopyAfter.entries.length === firstCopyBefore.entries.length &&
+      firstCopyAfter.entries[0].id === firstCopyBefore.entries[0].id &&
+      near((await delta(AR)) - pairStart.receivable, -25),
+    `receivable ${money((await delta(AR)) - pairStart.receivable)}`,
+  );
+  await post('reverse the first copy too', `/cash/vouchers/${copies[0].document.id}/reverse`, {
+    method: 'POST',
+    json: { reason: `Deleted as a duplicate` },
+  });
+  check(
+    'reversing both copies puts the ledger back where it was before the pair',
+    near(await delta(AR), pairStart.receivable) && near(await delta(bankLedger.code), pairStart.bank),
+    `receivable ${await delta(AR)} vs ${money(pairStart.receivable)}, bank ${await delta(bankLedger.code)} vs ${money(pairStart.bank)}`,
+  );
+
   // ────────────────────────────────────────── 10. reversing a payment
   const paymentJournal = (await journalOfVoucher(payment2.id)).entries[0];
   const reversedPayment = await post('reverse the final payment', `/cash/vouchers/${payment2.id}/reverse`, {

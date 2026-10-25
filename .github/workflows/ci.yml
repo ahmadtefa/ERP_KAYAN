@@ -356,7 +356,7 @@ jobs:
           curl -fsS http://127.0.0.1:3000/api/v1/health > /dev/null
           echo "Web client served at / and at a client-side route; API still routed."
 
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-regressions.mjs http://127.0.0.1:3000/api/v1; then
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/scenario-regressions.mjs http://127.0.0.1:3000/api/v1 | tee /tmp/kayan-regressions-scenario.log'; then
             echo "::group::API logs after regression scenario failure"
             cat /tmp/kayan-regressions-api.log
             echo "::endgroup::"
@@ -364,12 +364,19 @@ jobs:
           fi
 
           echo "Running the quotation and discount scenario..."
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-discounts-quotations.mjs http://127.0.0.1:3000/api/v1; then
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/scenario-discounts-quotations.mjs http://127.0.0.1:3000/api/v1 | tee /tmp/kayan-quotations-scenario.log'; then
             echo "::group::API logs after quotation scenario failure"
             cat /tmp/kayan-regressions-api.log
             echo "::endgroup::"
             exit 1
           fi
+      # Same reason as the backend job: the per-scenario totals are the
+      # evidence a run can be read without the log host.
+      - name: Record scenario totals
+        if: always()
+        run: |
+          summary=$(grep -h "checks passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log 2>/dev/null | tr '\n' ' | ')
+          echo "::notice title=Regression scenario checks::${summary:-summary not captured}"
 
   flutter:
     name: Flutter Web (analyze, test, build)
