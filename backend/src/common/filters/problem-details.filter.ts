@@ -77,6 +77,15 @@ export class ProblemDetailsFilter implements ExceptionFilter {
               ? (b.message as string[]).join('; ')
               : String(b.message ?? detail);
         if (b.errors) extra = { errors: b.errors };
+        // A machine-readable reason travels with the sentence: the client uses
+        // it to open the right screen (an expired licence is not a permission
+        // problem), and it is safe to show - it names a category, not a secret.
+        if (typeof b.code === 'string' && /^[A-Z0-9_]{3,64}$/.test(b.code)) {
+          extra = { ...extra, code: b.code };
+        }
+        if (b.license && typeof b.license === 'object') {
+          extra = { ...extra, license: b.license };
+        }
       }
     } else {
       this.logger.error(

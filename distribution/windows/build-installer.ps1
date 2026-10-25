@@ -202,6 +202,17 @@ Copy-Item (Join-Path $PSScriptRoot 'database-control.ps1') $app
 Copy-Item (Join-Path $PSScriptRoot 'UnelevatedProcess.cs') $app
 Copy-Item (Join-Path $PSScriptRoot 'README.txt') $app
 Copy-Item (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') $app
+# Offline licensing: a build prepared for customers carries the operator's
+# PUBLIC key only. Without it the installer leaves enforcement in "warn" mode
+# and the licence screen says no key is installed; the private key never
+# leaves the supplier's key generator.
+$licencePublicKey = Join-Path $PSScriptRoot 'public-key.pem'
+if (Test-Path -LiteralPath $licencePublicKey) {
+  Copy-Item -LiteralPath $licencePublicKey -Destination $app -Force
+  Write-Host "Licensing: public key staged from $licencePublicKey"
+} else {
+  Write-Host 'Licensing: no public-key.pem found; the installed program will run unlicensed in warn mode.'
+}
 Copy-Item (Join-Path $PSScriptRoot 'installer.iss') (Join-Path $stage 'installer.iss')
 # The icon Inno Setup embeds into Setup.exe (SetupIconFile in installer.iss).
 # generate_app_icons.py above has just refreshed it from the brand image.

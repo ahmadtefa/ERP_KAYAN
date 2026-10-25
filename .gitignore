@@ -66,3 +66,14 @@ backend/.engines-offline/
 # Generated Prisma client copied for the offline runtime
 backend/prisma/.prisma/
 backend/.gen.cjs
+
+# Offline licensing: the operator's signing key and its register never belong
+# in a repository. The product ships with the PUBLIC key only, and that one is
+# written by the installer, not committed.
+.kayan-license-generator/
+**/.kayan-license-generator/
+tools/license-generator/keys/
+distribution/windows/public-key.pem
+distribution/windows/licensing/
+*.pem
+!docs/licensing/**/*.pem

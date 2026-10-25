@@ -2458,4 +2458,154 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get usefulLifeMonths => 'العمر الإنتاجي (شهور)';
+
+  @override
+  String get licence => 'الترخيص';
+
+  @override
+  String get licenceSubtitle => 'حالة الترخيص والتفعيل والتجديد';
+
+  @override
+  String get licenceSettingsSubtitle => 'التفعيل والتجديد وحد المستخدمين';
+
+  @override
+  String get licenceStateActive => 'نشط';
+
+  @override
+  String get licenceStateExpired => 'منتهي';
+
+  @override
+  String get licenceStateSuspended => 'موقوف';
+
+  @override
+  String get licenceStateUnlicensed => 'غير مرخّص';
+
+  @override
+  String get licenceMachineId => 'معرّف الجهاز';
+
+  @override
+  String get licenceLicenceId => 'رقم الترخيص';
+
+  @override
+  String get licenceIssuedAt => 'تاريخ الإصدار';
+
+  @override
+  String get licenceStartsAt => 'تاريخ البداية';
+
+  @override
+  String get licenceExpiresAt => 'تاريخ الانتهاء';
+
+  @override
+  String get licencePerpetual => 'دائم — بلا انتهاء';
+
+  @override
+  String get licenceDaysRemaining => 'الأيام المتبقية';
+
+  @override
+  String get licenceSeats => 'حسابات المستخدمين';
+
+  @override
+  String get licenceSeatsUsedLabel => 'مستخدم';
+
+  @override
+  String get licenceSeatsLimitLabel => 'الحد';
+
+  @override
+  String get licenceSeatsAvailableLabel => 'متاح';
+
+  @override
+  String get licenceSeatsExplainer => 'يُستهلك المقعد عند إنشاء حساب دخول ولا يعود بحذف الحساب.';
+
+  @override
+  String get licenceRequestCode => 'كود طلب التفعيل';
+
+  @override
+  String get licenceRequestCodeHint => 'أرسل هذا الكود للمورّد. لا يحمل إلا معرّف هذا الجهاز وإصدار البرنامج.';
+
+  @override
+  String get licenceCopy => 'نسخ';
+
+  @override
+  String get licenceCopied => 'تم النسخ';
+
+  @override
+  String get licenceEnterKey => 'مفتاح الترخيص';
+
+  @override
+  String get licenceKeyHint => 'ألصق المفتاح الذي أرسله المورّد ويبدأ بـ KYN1.';
+
+  @override
+  String get licenceApply => 'تطبيق المفتاح';
+
+  @override
+  String get licenceOperation => 'ما يفعله المفتاح';
+
+  @override
+  String get licenceOperationActivation => 'تفعيل جديد';
+
+  @override
+  String get licenceOperationRenewal => 'تجديد';
+
+  @override
+  String get licenceOperationSeats => 'زيادة مستخدمين';
+
+  @override
+  String get licenceOperationTransfer => 'نقل إلى هذا الجهاز';
+
+  @override
+  String get licenceApplied => 'تم تحديث الترخيص.';
+
+  @override
+  String get licenceClockTitle => 'فحص تاريخ الجهاز';
+
+  @override
+  String get licenceClockWarning => 'تاريخ النظام أقدم من آخر تشغيل مسجّل. اضبط التاريخ والوقت الصحيحين في ويندوز ثم أكّد.';
+
+  @override
+  String get licenceConfirmClock => 'تأكيد التاريخ والوقت';
+
+  @override
+  String get licenceEvents => 'سجل الترخيص';
+
+  @override
+  String get licenceEventsEmpty => 'لا حوادث ترخيص بعد.';
+
+  @override
+  String get licencePublicKey => 'مفتاح التحقق';
+
+  @override
+  String get licenceNotConfigured => 'هذا التثبيت بلا مفتاح تحقق، فلا يستطيع فحص أي مفتاح ترخيص. أعد التثبيت ومعك المفتاح العام من المورّد.';
+
+  @override
+  String get licenceBlockedTitle => 'العمل موقوف بسبب الترخيص';
+
+  @override
+  String get licenceBlockedBody => 'بياناتك سليمة ولم يُحذف منها شيء. افتح شاشة الترخيص وطبّق مفتاح تجديد لمواصلة العمل.';
+
+  @override
+  String get licenceSuspendedBody => 'أوقف البرنامج العمل لأن تاريخ النظام أقدم من آخر تشغيل مسجّل. صحّح التاريخ والوقت ثم أكّد من هذه الشاشة. لم تُفقد أي بيانات.';
+
+  @override
+  String get licenceOpenLicence => 'فتح شاشة الترخيص';
+
+  @override
+  String get licenceBackupStillAvailable => 'النسخ الاحتياطي والاستعادة متاحان دائمًا حتى مع انتهاء الترخيص.';
+
+  @override
+  String get licenceOpenBackup => 'النسخ الاحتياطي والاستعادة';
+
+  @override
+  String get licenceEnforcementEnforce => 'مُطبَّق';
+
+  @override
+  String get licenceEnforcementWarn => 'تحذير فقط';
+
+  @override
+  String get licenceEnforcementOff => 'معطّل';
+
+  @override
+  String get licenceSuperAdminOnly => 'لا يغيّر الترخيص إلا المسؤول الأعلى.';
+
+  @override
+  String get licenceExpiringSoon => 'هذا الترخيص ينتهي قريبًا. جدّده قبل انتهائه حتى لا يتوقف يوم عمل.';
 }

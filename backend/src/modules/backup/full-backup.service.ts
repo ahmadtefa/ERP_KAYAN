@@ -20,6 +20,7 @@ import {
 import { join, resolve, sep } from 'path';
 
 import { AuditService } from '../../common/audit/audit.service';
+import { LicensingService } from '../licensing/licensing.service';
 import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { reconcileRestoredAccess } from './restore-access';
@@ -109,6 +110,7 @@ export class FullBackupService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly maintenance: MaintenanceService,
+    private readonly licensing: LicensingService,
   ) {}
 
   /// ────────────────────────────────────────────────────────────── tools
@@ -754,6 +756,16 @@ export class FullBackupService {
           accessReconciled: accessRepair,
         },
         userId,
+      });
+
+      // The archive is a snapshot: its licence rows are as old as the file.
+      // The protected watermarks remember the latest term and seat limit, so
+      // a restore is repaired after it lands instead of quietly shrinking the
+      // licence the customer paid for (or handing seats back).
+      await this.licensing.reconcile().catch((error: Error) => {
+        this.logger.warn(
+          `The licence could not be reconciled after the restore: ${error.message}`,
+        );
       });
 
       return {

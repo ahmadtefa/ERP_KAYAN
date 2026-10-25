@@ -4393,4 +4393,304 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   /// In en, this message translates to:
   /// **'Useful life (months)'**
   String get usefulLifeMonths;
+
+  /// No description provided for @licence.
+  ///
+  /// In en, this message translates to:
+  /// **'Licence'**
+  String get licence;
+
+  /// No description provided for @licenceSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Licence status, activation and renewal'**
+  String get licenceSubtitle;
+
+  /// No description provided for @licenceSettingsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Activation, renewal and user-account limit'**
+  String get licenceSettingsSubtitle;
+
+  /// No description provided for @licenceStateActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get licenceStateActive;
+
+  /// No description provided for @licenceStateExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'Expired'**
+  String get licenceStateExpired;
+
+  /// No description provided for @licenceStateSuspended.
+  ///
+  /// In en, this message translates to:
+  /// **'Suspended'**
+  String get licenceStateSuspended;
+
+  /// No description provided for @licenceStateUnlicensed.
+  ///
+  /// In en, this message translates to:
+  /// **'Not licensed'**
+  String get licenceStateUnlicensed;
+
+  /// No description provided for @licenceMachineId.
+  ///
+  /// In en, this message translates to:
+  /// **'Machine ID'**
+  String get licenceMachineId;
+
+  /// No description provided for @licenceLicenceId.
+  ///
+  /// In en, this message translates to:
+  /// **'Licence ID'**
+  String get licenceLicenceId;
+
+  /// No description provided for @licenceIssuedAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Issued'**
+  String get licenceIssuedAt;
+
+  /// No description provided for @licenceStartsAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Started'**
+  String get licenceStartsAt;
+
+  /// No description provided for @licenceExpiresAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Expires'**
+  String get licenceExpiresAt;
+
+  /// No description provided for @licencePerpetual.
+  ///
+  /// In en, this message translates to:
+  /// **'Perpetual — no expiry'**
+  String get licencePerpetual;
+
+  /// No description provided for @licenceDaysRemaining.
+  ///
+  /// In en, this message translates to:
+  /// **'Days remaining'**
+  String get licenceDaysRemaining;
+
+  /// No description provided for @licenceSeats.
+  ///
+  /// In en, this message translates to:
+  /// **'User accounts'**
+  String get licenceSeats;
+
+  /// No description provided for @licenceSeatsUsedLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Used'**
+  String get licenceSeatsUsedLabel;
+
+  /// No description provided for @licenceSeatsLimitLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Limit'**
+  String get licenceSeatsLimitLabel;
+
+  /// No description provided for @licenceSeatsAvailableLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Available'**
+  String get licenceSeatsAvailableLabel;
+
+  /// No description provided for @licenceSeatsExplainer.
+  ///
+  /// In en, this message translates to:
+  /// **'A seat is consumed when a login account is created and is never returned by deleting the account.'**
+  String get licenceSeatsExplainer;
+
+  /// No description provided for @licenceRequestCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Activation request code'**
+  String get licenceRequestCode;
+
+  /// No description provided for @licenceRequestCodeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Send this code to the supplier. It carries only this machine's ID and the program version.'**
+  String get licenceRequestCodeHint;
+
+  /// No description provided for @licenceCopy.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy'**
+  String get licenceCopy;
+
+  /// No description provided for @licenceCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Copied'**
+  String get licenceCopied;
+
+  /// No description provided for @licenceEnterKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Licence key'**
+  String get licenceEnterKey;
+
+  /// No description provided for @licenceKeyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste the key the supplier sent, starting with KYN1.'**
+  String get licenceKeyHint;
+
+  /// No description provided for @licenceApply.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply key'**
+  String get licenceApply;
+
+  /// No description provided for @licenceOperation.
+  ///
+  /// In en, this message translates to:
+  /// **'What the key does'**
+  String get licenceOperation;
+
+  /// No description provided for @licenceOperationActivation.
+  ///
+  /// In en, this message translates to:
+  /// **'New activation'**
+  String get licenceOperationActivation;
+
+  /// No description provided for @licenceOperationRenewal.
+  ///
+  /// In en, this message translates to:
+  /// **'Renewal'**
+  String get licenceOperationRenewal;
+
+  /// No description provided for @licenceOperationSeats.
+  ///
+  /// In en, this message translates to:
+  /// **'Add user accounts'**
+  String get licenceOperationSeats;
+
+  /// No description provided for @licenceOperationTransfer.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to this computer'**
+  String get licenceOperationTransfer;
+
+  /// No description provided for @licenceApplied.
+  ///
+  /// In en, this message translates to:
+  /// **'The licence was updated.'**
+  String get licenceApplied;
+
+  /// No description provided for @licenceClockTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'System date check'**
+  String get licenceClockTitle;
+
+  /// No description provided for @licenceClockWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'The system date is earlier than the last recorded run. Set the correct date and time in Windows, then confirm.'**
+  String get licenceClockWarning;
+
+  /// No description provided for @licenceConfirmClock.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm date and time'**
+  String get licenceConfirmClock;
+
+  /// No description provided for @licenceEvents.
+  ///
+  /// In en, this message translates to:
+  /// **'Licence history'**
+  String get licenceEvents;
+
+  /// No description provided for @licenceEventsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No licence events yet.'**
+  String get licenceEventsEmpty;
+
+  /// No description provided for @licencePublicKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Verification key'**
+  String get licencePublicKey;
+
+  /// No description provided for @licenceNotConfigured.
+  ///
+  /// In en, this message translates to:
+  /// **'This installation has no verification key, so it cannot check any licence key. Reinstall with the supplier's public key.'**
+  String get licenceNotConfigured;
+
+  /// No description provided for @licenceBlockedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Work is stopped by the licence'**
+  String get licenceBlockedTitle;
+
+  /// No description provided for @licenceBlockedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Your data is intact. Nothing was deleted. Open the licence screen and apply a renewal key to continue working.'**
+  String get licenceBlockedBody;
+
+  /// No description provided for @licenceSuspendedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The program stopped because the system date is earlier than the last recorded run. Correct the date and time, then confirm on this screen. No data was lost.'**
+  String get licenceSuspendedBody;
+
+  /// No description provided for @licenceOpenLicence.
+  ///
+  /// In en, this message translates to:
+  /// **'Open the licence screen'**
+  String get licenceOpenLicence;
+
+  /// No description provided for @licenceBackupStillAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Backups and restores stay available while the licence is expired.'**
+  String get licenceBackupStillAvailable;
+
+  /// No description provided for @licenceOpenBackup.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup and restore'**
+  String get licenceOpenBackup;
+
+  /// No description provided for @licenceEnforcementEnforce.
+  ///
+  /// In en, this message translates to:
+  /// **'Enforced'**
+  String get licenceEnforcementEnforce;
+
+  /// No description provided for @licenceEnforcementWarn.
+  ///
+  /// In en, this message translates to:
+  /// **'Warning only'**
+  String get licenceEnforcementWarn;
+
+  /// No description provided for @licenceEnforcementOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get licenceEnforcementOff;
+
+  /// No description provided for @licenceSuperAdminOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Only a super administrator can change the licence.'**
+  String get licenceSuperAdminOnly;
+
+  /// No description provided for @licenceExpiringSoon.
+  ///
+  /// In en, this message translates to:
+  /// **'This licence expires soon. Renew it before it ends so no workday is interrupted.'**
+  String get licenceExpiringSoon;
 }

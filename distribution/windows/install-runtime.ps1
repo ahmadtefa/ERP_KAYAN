@@ -621,6 +621,39 @@ function Get-AuthorizedSettingsPrincipals {
   }
 }
 
+function Add-LicenceSettings([hashtable]$Values) {
+  # Offline licensing.
+  #
+  # The product holds only the operator's PUBLIC key. If the build ships one
+  # beside this script, it is installed here and enforcement is switched on;
+  # a build without a key stays in "warn" mode, so a development or test
+  # installation is never locked out by a missing key.
+  #
+  # No private key ever travels with an installation. There is nothing in this
+  # script, and nothing in the program, that could issue a licence.
+  $licenceDirectory = Join-Path $ProgramDataRoot 'license'
+  New-Item -ItemType Directory -Force -Path $licenceDirectory | Out-Null
+  Set-PrivateAcl $licenceDirectory @('BUILTIN\Administrators', $serviceAccount)
+  $Values['LICENSE_STATE_DIR'] = $licenceDirectory
+
+  $candidates = @(
+    (Join-Path $PSScriptRoot 'public-key.pem'),
+    (Join-Path $PSScriptRoot 'licensing\public-key.pem')
+  )
+  $source = $candidates | Where-Object { Test-ExistingPath $_ } | Select-Object -First 1
+  if ($source) {
+    $target = Join-Path $licenceDirectory 'public-key.pem'
+    Copy-Item -LiteralPath $source -Destination $target -Force
+    Set-PrivateAcl $target @('BUILTIN\Administrators', $serviceAccount)
+    $Values['LICENSE_PUBLIC_KEY_FILE'] = $target
+    if (-not $Values['LICENSE_ENFORCEMENT']) { $Values['LICENSE_ENFORCEMENT'] = 'enforce' }
+    Write-RuntimeMarker 'KAYAN-LICENCE-KEY-INSTALLED'
+  } else {
+    if (-not $Values['LICENSE_ENFORCEMENT']) { $Values['LICENSE_ENFORCEMENT'] = 'warn' }
+    Write-RuntimeMarker 'KAYAN-LICENCE-KEY-ABSENT'
+  }
+}
+
 function Save-UserSettings([hashtable]$Values) {
   $authInfo = Get-AuthorizedSettingsPrincipals
   $activeContext = $authInfo.Context
@@ -754,6 +787,7 @@ if (-not $clusterExists) {
     Set-Content -LiteralPath $bootstrapMarker -Value 'KAYAN PostgreSQL 17 installer bootstrap v1' -Encoding ASCII
   }
   [void](Repair-ProtectedFileAccess $bootstrapMarker @('BUILTIN\Administrators', $serviceAccount))
+  Add-LicenceSettings $settings
   Save-UserSettings $settings
   # The cluster is created inside its final directory. PostgreSQL inherits the
   # permissions of the directory it creates its files in, and the service
@@ -903,6 +937,7 @@ if (-not $clusterExists) {
   # The settings file is written back only after the database has been
   # identified, and the database itself is touched only after that - with a
   # verified backup first whenever it holds a company.
+  Add-LicenceSettings $settings
   Save-UserSettings $settings
   [void](Invoke-DatabasePrepare $settings $companyCount)
 }
