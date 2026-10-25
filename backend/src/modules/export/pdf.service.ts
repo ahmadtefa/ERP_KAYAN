@@ -189,7 +189,7 @@ export class PdfService {
           'Use the print button instead and choose "Save as PDF".',
       );
     } finally {
-      await rm(folder, { recursive: true, force: true });
+      await removeProfileFolder(folder);
     }
   }
 
@@ -409,6 +409,30 @@ export function buildDevToolsSocketArgs(options: {
   ];
 }
 
+/// Deletes the browser's profile folder, and does not make a document fail
+/// because it could not.
+///
+/// Windows keeps a killed browser's files for a moment: the lockfile it writes
+/// into its profile is still held while its helper processes are going away,
+/// and a recursive removal then fails with EBUSY - after the PDF was already
+/// made. `fs.rm` retries EBUSY, EPERM and ENOTEMPTY on its own when asked, so
+/// it is asked; and a folder that still will not go is a line in the log, not a
+/// customer staring at an error instead of their quotation.
+export async function removeProfileFolder(
+  folder: string,
+  remove: typeof rm = rm,
+): Promise<boolean> {
+  try {
+    await remove(folder, { recursive: true, force: true, maxRetries: 12, retryDelay: 150 });
+    return true;
+  } catch (error) {
+    new Logger('PdfService').warn(
+      `Left the browser profile at ${folder}: ${(error as Error).message}`,
+    );
+    return false;
+  }
+}
+
 /// Prints one page through the browser's own DevTools protocol.
 ///
 /// Why not the command line printer: `--print-to-pdf` decides the paper size
@@ -461,7 +485,12 @@ function printThroughDevTools(
     child.stderr?.on('data', (chunk: Buffer) => {
       complaints = (complaints + chunk.toString('utf8')).slice(-600);
     });
+    // A browser that was asked to close has done what it was told; one that
+    // leaves while it is still being spoken to has failed the attempt.
+    let closing = false;
+    const exited = new Promise<void>((done) => child.once('exit', () => done()));
     child.on('exit', (code) => {
+      if (closing) return;
       stop(new Error(`the browser exited with code ${code}${complaints ? `: ${complaints.trim()}` : ''}`));
     });
     child.on('error', (error) => stop(error));
@@ -505,6 +534,21 @@ function printThroughDevTools(
     void (async () => {
       const client = await conversation;
       const pdf = await printOnePage(client, options.page);
+      // Ask the browser to shut itself down before the document is handed
+      // back. On Windows its profile stays locked until every one of its
+      // processes is gone, and the folder that holds the profile cannot be
+      // deleted while it is held. The request is not awaited - a browser that
+      // is closing has no one left to answer - but the exit is.
+      closing = true;
+      void client.send('Browser.close').catch(() => undefined);
+      let grace: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        exited,
+        new Promise<void>((done) => {
+          grace = setTimeout(done, 3_000);
+        }),
+      ]);
+      if (grace) clearTimeout(grace);
       stop(null, pdf);
     })().catch((error) => stop(error as Error));
   });

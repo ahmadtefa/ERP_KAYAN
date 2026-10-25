@@ -4,11 +4,15 @@ import {
   PDFRawStream,
   decodePDFRawStream,
 } from 'pdf-lib';
+import { existsSync, mkdtempSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import {
   PAGE_NUMBER_GEOMETRY,
   buildDevToolsArgs,
   buildDevToolsSocketArgs,
   buildPrintArgs,
+  removeProfileFolder,
   stampPageNumbers,
 } from './pdf.service';
 
@@ -167,5 +171,43 @@ describe('stampPageNumbers', () => {
     expect(page).toContain('1 1 1 rg');
     const placed = /1 0 0 1 ([\d.]+) ([\d.]+) Tm/.exec(page);
     expect(Number((placed as RegExpExecArray)[2])).toBe(10);
+  });
+});
+
+/**
+ * The browser's profile, and what Windows does with it.
+ *
+ * The Windows runner found this before any customer did: the PDF was made,
+ * the browser was killed, and the throwaway profile folder would not delete
+ * because Windows still held the lockfile - and that complaint, raised inside
+ * the `finally` of a finished render, became the failure the customer saw
+ * instead of their quotation.
+ */
+describe('removeProfileFolder', () => {
+  it('deletes a profile that the browser has let go of', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'kayan-profile-'));
+    writeFileSync(join(folder, 'lockfile'), 'a lock that nobody holds');
+    await expect(removeProfileFolder(folder)).resolves.toBe(true);
+    expect(existsSync(folder)).toBe(false);
+  });
+
+  it('swallows a lock that Windows has not released yet', async () => {
+    const locked = jest
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error("EBUSY: resource busy or locked, unlink 'lockfile'"), {
+          code: 'EBUSY',
+        }),
+      );
+    await expect(removeProfileFolder('/tmp/no-such-profile-here', locked)).resolves.toBe(false);
+    expect(locked).toHaveBeenCalledTimes(1);
+    // It still asks for the retries that make the race unlikely in the first place.
+    expect(locked.mock.calls[0][1]).toMatchObject({ recursive: true, force: true, maxRetries: 12 });
+  });
+
+  it('does not mind a folder that is already gone', async () => {
+    await expect(removeProfileFolder(join(tmpdir(), 'kayan-profile-never-made'))).resolves.toBe(
+      true,
+    );
   });
 });
