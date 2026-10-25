@@ -46,11 +46,14 @@ class _CashScreenState extends ConsumerState<CashScreen>
     super.dispose();
   }
 
+  /// Re-reads everything a saved receipt, payment or transfer changes.
+  ///
+  /// The cash lists are the obvious half. The partner's card and statement,
+  /// the party lists, the invoices the money settled and the dashboard are
+  /// the other half, and they are the half that used to stay stale until the
+  /// program was restarted.
   void _reloadAll() {
-    ref.invalidate(cashAccountsProvider);
-    ref.invalidate(cashBalancesProvider);
-    ref.invalidate(cashVouchersProvider);
-    ref.invalidate(cashTransfersProvider);
+    invalidateMoneyViews(ref);
   }
 
   /// Everything thrown is shown as the server worded it, never as a stack.

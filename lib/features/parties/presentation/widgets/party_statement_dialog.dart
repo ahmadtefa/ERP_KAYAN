@@ -13,6 +13,7 @@ import '../../../data/presentation/providers/data_providers.dart';
 import '../../../invoicing/presentation/providers/invoice_providers.dart';
 import '../../../invoicing/presentation/screens/invoice_detail_dialog.dart';
 import '../../../invoicing/presentation/screens/returns_screen.dart';
+import '../providers/party_providers.dart';
 
 /// The partner statement: what they owe, what they paid, and every movement
 /// with its running balance - the sheet an accountant would otherwise build
@@ -382,16 +383,6 @@ class _PartyStatementDialogState extends ConsumerState<_PartyStatementDialog> {
             ?.copyWith(fontWeight: FontWeight.w700),
       );
 }
-
-final partySummaryProvider =
-    FutureProvider.family<Json, String>((ref, path) async {
-  return ref.read(apiClientProvider).getObject(path);
-});
-
-final partyStatementProvider =
-    FutureProvider.family<Json, String>((ref, path) async {
-  return ref.read(apiClientProvider).getObject(path);
-});
 
 /// The four ways a statement leaves the program.
 ///
