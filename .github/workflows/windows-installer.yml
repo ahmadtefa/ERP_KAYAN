@@ -100,6 +100,7 @@ jobs:
         # quoted in the check's annotation.
         run: |
           $ErrorActionPreference = 'Continue'
+          $env:FORCE_COLOR = '0'
           $log = Join-Path $env:RUNNER_TEMP 'backend-tests.log'
           $err = Join-Path $env:RUNNER_TEMP 'backend-tests.err.log'
           $proc = Start-Process -FilePath 'npm.cmd' -ArgumentList 'test','--','--runInBand' `
@@ -107,11 +108,20 @@ jobs:
           Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Select-Object -Last 150
           Get-Content -LiteralPath $err -ErrorAction SilentlyContinue | Select-Object -Last 40
           if ($proc.ExitCode -ne 0) {
+            $out = @(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue)
+            $important = @($out | Select-String -Pattern 'Tests:','Test Suites:','FAIL ','Expected','Received','at Object','● ' |
+              ForEach-Object { $_.Line } | Select-Object -First 120)
+            if ($important.Count -eq 0) { $important = @($out | Select-Object -Last 40) }
             $tail = @(
-              Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Select-Object -Last 60
-              Get-Content -LiteralPath $err -ErrorAction SilentlyContinue | Select-Object -Last 20
+              '--- failing lines ---'
+              $important
+              '--- last stdout ---'
+              ($out | Select-Object -Last 40)
+              '--- last stderr ---'
+              (Get-Content -LiteralPath $err -ErrorAction SilentlyContinue | Select-Object -Last 15)
             ) -join "`n"
             $tail = $tail -replace "`r?`n", '%0A'
+            $tail = ($tail -replace '[^\x20-\x7E%]', '.')
             if ($tail.Length -gt 60000) { $tail = $tail.Substring($tail.Length - 60000) }
             Write-Host "::error title=Backend tests failed::$tail"
             exit 1
