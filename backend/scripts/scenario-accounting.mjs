@@ -1626,6 +1626,18 @@ async function main() {
     `Retry-After ${firstRefusal?.headers?.get('retry-after') ?? 'missing'}; ${String(detail).slice(0, 60)}`,
   );
 
+  // Leave the limiter as it was found. The window belongs to the API process,
+  // not to this script, so a closed one would refuse the sign-in of whatever
+  // runs next (the API check, the lifecycle scenario, the statement export) -
+  // and those are not rate-limit tests. Waiting the refused window out costs
+  // less than a minute and keeps the checks that follow independent of one
+  // another, without changing the limit itself.
+  const waitSeconds = Number(firstRefusal?.headers?.get('retry-after') ?? 0);
+  if (waitSeconds > 0) {
+    console.log(`  (waiting ${waitSeconds}s for this address's sign-in window to reopen before the next scenario)`);
+    await sleep((waitSeconds + 1) * 1000);
+  }
+
   // ─────────────────────────────────────────────────────────── the summary
   const failed = results.filter((row) => !row.ok);
   const skipped = results.filter((row) => row.skipped);
