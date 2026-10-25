@@ -7,10 +7,23 @@
          database password and random JWT secrets,
       2. initializes the bundled PostgreSQL 17 cluster (once, and never over
          an existing one),
-      3. registers and starts the KayanERPPostgreSQL Windows service, and
-      4. creates the erp_app role and the erp_kayan database.
+      3. registers and starts the KayanERPPostgreSQL Windows service,
+      4. creates the erp_app role and the erp_kayan database, and
+      5. prepares that database for the program - a backup first, then the
+         same migrations the program would run on its own.
 
     It never deletes, resets or overwrites an existing database.
+
+    The customer's answer on Setup's company page arrives as -CompanyMode and
+    decides which of two very different things this is allowed to do:
+
+      New       an empty database and the first-run screen. If this computer
+                already holds company data, setup stops and says so; a "new
+                company" is never a quiet wipe of an old one.
+      Existing  this computer's database is kept, checked to be a KAYAN
+                database owned by this installation, backed up, and upgraded
+                in place. If no database is here, setup stops and says so
+                instead of creating an empty one over the customer's data.
 
     Two Windows details decide how this works, and both of them used to make
     the setup fail on a fresh machine:
@@ -39,7 +52,11 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory=$true)][string]$UserSettingsPath,
-  [string]$ProgramDataRoot = (Join-Path $env:ProgramData 'KAYAN-ERP')
+  [string]$ProgramDataRoot = (Join-Path $env:ProgramData 'KAYAN-ERP'),
+  # 'Auto' keeps the behaviour of callers that predate the company page: a
+  # database on disk is treated as an existing company, nothing on disk as a
+  # new one. Setup always passes the answer the customer gave.
+  [ValidateSet('New','Existing','Auto')][string]$CompanyMode = 'Auto'
 )
 $ErrorActionPreference = 'Stop'
 $bootstrapLog = Join-Path (Join-Path $env:ProgramData 'KAYAN-ERP') 'logs\installer.log'
@@ -186,6 +203,73 @@ function Invoke-Pg([string]$Exe, [string[]]$Arguments) {
     throw "PostgreSQL command failed ($exitCode): $([IO.Path]::GetFileName($Exe)). Output: $details"
   }
   if ($commandOutput.Count -gt 0) { $commandOutput | ForEach-Object { Write-Output $_ } }
+}
+
+function Get-DatabaseScalar([string]$Database, [string]$User, [string]$Sql) {
+  # One value out of the bundled psql, through the same error handling the
+  # rest of this script uses. -tA prints the value and nothing else, and
+  # ON_ERROR_STOP turns a bad query into a non-zero exit instead of an empty
+  # line that would read like a legitimate answer.
+  $psql = Join-Path $pgBin 'psql.exe'
+  $lines = Invoke-Pg -Exe $psql -Arguments @('-h','127.0.0.1','-p','5432','-U',$User,'-d',$Database,'-tA','-v','ON_ERROR_STOP=1','-c',$Sql)
+  $value = @($lines | Where-Object { $null -ne $_ -and ("$_").Trim() -ne '' } | Select-Object -Last 1)
+  if ($value.Count -eq 0) { return '' }
+  return ("$($value[0])").Trim()
+}
+
+function Invoke-DatabasePrepare([hashtable]$Settings, [int]$CompanyCount) {
+  # The program already prepares its database on every launch: the migrations
+  # and the KAYAN-DB-STATE line below come from that same script. Running it
+  # here means Setup can tell the customer whether the upgrade worked, and it
+  # happens only after the previous schema is safely in a verified backup.
+  $prepare = Join-Path $PSScriptRoot 'backend\scripts\prepare-database.mjs'
+  if (-not (Test-Path -LiteralPath $prepare)) {
+    Write-RuntimeMarker 'KAYAN-DB-PREPARE-UNAVAILABLE (script missing from the package)'
+    return ''
+  }
+  if (-not $Settings['ADMIN_DATABASE_URL']) {
+    Write-RuntimeMarker 'KAYAN-DB-PREPARE-UNAVAILABLE (no administrator connection in settings)'
+    return ''
+  }
+  if ($CompanyCount -gt 0) {
+    Set-Stage 'backing up the company database before the upgrade'
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $backupDir = Join-Path $ProgramDataRoot ('backups\before-upgrade-' + $stamp)
+    New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+    Set-PrivateAcl $backupDir @('BUILTIN\Administrators')
+    $dumpFile = Join-Path $backupDir 'before-upgrade.dump'
+    Invoke-Pg -Exe (Join-Path $pgBin 'pg_dump.exe') -Arguments @('-h','127.0.0.1','-p','5432','-U','erp_app','-d','erp_kayan','-Fc','--no-password','-f',$dumpFile) | Out-Null
+    if (-not (Test-Path -LiteralPath $dumpFile)) {
+      throw 'The backup taken before the upgrade was not written, so the upgrade stopped before changing the database.'
+    }
+    $file = Get-Item -LiteralPath $dumpFile
+    if ($file.Length -le 0) {
+      throw 'The backup taken before the upgrade is empty, so the upgrade stopped before changing the database.'
+    }
+    $toc = @(Invoke-Pg -Exe (Join-Path $pgBin 'pg_restore.exe') -Arguments @('--list',$dumpFile) | Where-Object { "$_" -match '^\d+;' })
+    if ($toc.Count -eq 0) {
+      throw 'The backup taken before the upgrade cannot be read back, so the upgrade stopped before changing the database.'
+    }
+    Write-RuntimeMarker ("KAYAN-UPGRADE-BACKUP-OK " + $dumpFile + " (" + $file.Length + " bytes, " + $toc.Count + " objects)")
+  }
+
+  Set-Stage 'applying the database upgrade'
+  $node = Join-Path $PSScriptRoot 'backend\node\node.exe'
+  if (-not (Test-Path -LiteralPath $node)) { throw 'The bundled Node runtime is missing, so the database upgrade could not run.' }
+  $env:DATABASE_URL = $Settings['DATABASE_URL']
+  $env:ADMIN_DATABASE_URL = $Settings['ADMIN_DATABASE_URL']
+  try {
+    $output = Invoke-Pg -Exe $node -Arguments @($prepare)
+  } finally {
+    Remove-Item Env:DATABASE_URL,Env:ADMIN_DATABASE_URL -ErrorAction SilentlyContinue
+  }
+  $state = ''
+  foreach ($line in @($output)) {
+    if ("$line" -match 'KAYAN-DB-STATE=(\w+)') { $state = $matches[1] }
+  }
+  if (-not $state) { $state = 'unknown' }
+  Write-RuntimeMarker ("KAYAN-UPGRADE-MIGRATIONS-OK state=" + $state)
+  return $state
 }
 
 function Invoke-PgBootstrap([string]$Exe, [string[]]$Arguments, [string]$WorkingDirectory) {
@@ -597,7 +681,26 @@ if ($machineSettings['DATABASE_URL'] -match $bundledDbUrlPattern -and
 $settingsExists = $settings.Count -gt 0
 $clusterExists = Test-Path -LiteralPath (Join-Path $pgData 'PG_VERSION')
 
+# ── A new company or the one already on this computer ───────────────────────
+# The answer decides everything below, so it is resolved before anything is
+# written, started or created.
+# Repair runs this script without the page's answer; 'Auto' then means "do
+# the safe thing", and only a mode the customer actually chose is held to the
+# strict refusals below.
+$CompanyModeChosen = $CompanyMode -ne 'Auto'
+if ($CompanyMode -eq 'Auto') {
+  $CompanyMode = if ($clusterExists) { 'Existing' } else { 'New' }
+}
+Write-RuntimeMarker ("KAYAN-COMPANY-MODE " + $CompanyMode)
+if ($CompanyMode -eq 'Existing' -and -not $clusterExists) {
+  throw 'Setup was told to keep an existing company, but this computer has no KAYAN database yet. Nothing was installed and nothing was deleted. Run Setup again and choose "A new company" on the company page.'
+}
+
 if (-not $clusterExists) {
+  # The only mode that makes sense on a machine with no database: a new
+  # company. Saying so in the log is what lets support and CI tell the two
+  # paths apart afterwards.
+  Write-RuntimeMarker 'KAYAN-COMPANY-NEW-CLUSTER'
   Set-Stage 'preparing the PostgreSQL data directory'
   if (Test-Path $pgData) {
     if (Get-ChildItem -LiteralPath $pgData -Force -ErrorAction SilentlyContinue | Select-Object -First 1) {
@@ -700,6 +803,11 @@ if (-not $clusterExists) {
     Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
   }
   Remove-Item Env:DATABASE_URL,Env:ADMIN_DATABASE_URL -ErrorAction SilentlyContinue
+  # The database is empty by construction: nothing here imports demo data,
+  # and the first-run screen is what asks for the company and the general
+  # manager. Preparing it now only creates the schema the program expects.
+  Write-RuntimeMarker 'KAYAN-COMPANY-NEW-DATABASE-EMPTY (no company, no demo data)'
+  [void](Invoke-DatabasePrepare $settings 0)
 } else {
   Set-Stage 'checking the existing PostgreSQL cluster'
   $version = (Get-Content (Join-Path $pgData 'PG_VERSION') -Raw).Trim()
@@ -711,7 +819,6 @@ if (-not $clusterExists) {
   if (-not $settings['JWT_REFRESH_SECRET']) { $settings['JWT_REFRESH_SECRET'] = New-Secret }
   if (-not $settings['JWT_ACCESS_TTL']) { $settings['JWT_ACCESS_TTL'] = '900' }
   if (-not $settings['JWT_REFRESH_TTL']) { $settings['JWT_REFRESH_TTL'] = '1209600' }
-  Save-UserSettings $settings
 
   Set-Stage 'securing the PostgreSQL data directory'
   # The same rights the first install gives the cluster, so an upgrade does
@@ -731,16 +838,63 @@ if (-not $clusterExists) {
   Set-Stage 'starting the KayanERPPostgreSQL service'
   Start-PgService
 
+  # ── Is this really the KAYAN company database of this installation? ───────
+  # The settings claim it. This proves it before anything is upgraded or even
+  # written back: the connection has to point at the bundled cluster, the
+  # database has to exist and be owned by the application role, that role has
+  # to be able to sign in, and the KAYAN tables have to be there. A familiar
+  # name is never on its own evidence that this is the right data.
+  Set-Stage 'verifying the company database'
   if ($settings['DATABASE_URL'] -match $bundledDbUrlPattern) {
     $dbPassword = $matches[1]
-    $env:PGPASSWORD = $dbPassword
-    try {
-      Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "DO `$`$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'erp_app') THEN CREATE ROLE erp_app WITH LOGIN PASSWORD '$dbPassword'; END IF; END `$`$;"
-      Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "SELECT 'CREATE DATABASE erp_kayan OWNER erp_app' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'erp_kayan')\gexec"
-    } finally {
-      Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
-    }
+  } else {
+    throw 'The settings on this computer point at a database outside the bundled KAYAN PostgreSQL. Nothing was changed. Run Setup again and choose "A new company" on the company page, or point the settings back at the local database first.'
   }
+  $env:PGPASSWORD = $dbPassword
+  $companyCount = 0
+  try {
+    $owner = Get-DatabaseScalar 'postgres' 'postgres' "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'erp_kayan'"
+    if ($owner -eq '') {
+      if ($CompanyMode -eq 'Existing' -and $CompanyModeChosen) {
+        throw 'Setup was told to keep an existing company, but this computer has no company database to keep. Nothing was changed. Run Setup again and choose "A new company" on the company page.'
+      }
+      Write-RuntimeMarker 'KAYAN-COMPANY-NEW-DATABASE-EMPTY (database not created yet)'
+    } elseif ($owner -ne 'erp_app') {
+      throw ("The database named erp_kayan on this computer belongs to another owner ('" + $owner + "'), so it is not this installation's company database. Nothing was changed. Run Setup again and choose ""A new company"", or restore this installation's own database before installing over it.")
+    } else {
+      $hasSchema = Get-DatabaseScalar 'erp_kayan' 'erp_app' "SELECT (to_regclass('public.companies') IS NOT NULL AND to_regclass('public._prisma_migrations') IS NOT NULL)::text"
+      if ($hasSchema -ne 'true') {
+        if ($CompanyMode -eq 'Existing' -and $CompanyModeChosen) {
+          throw 'Setup was told to keep an existing company, but the local KAYAN database holds no company tables yet, so there is no company here to keep. Nothing was changed. Run Setup again and choose "A new company" on the company page.'
+        }
+        Write-RuntimeMarker 'KAYAN-COMPANY-NEW-DATABASE-EMPTY (schema not created yet)'
+      } else {
+        $countText = Get-DatabaseScalar 'erp_kayan' 'erp_app' 'SELECT count(*) FROM companies'
+        if ($countText -notmatch '^\d+$') {
+          throw 'The company database did not answer a count of its companies. Nothing was changed; see the protected installer log for what PostgreSQL said.'
+        }
+        $companyCount = [int]$countText
+        if ($CompanyMode -eq 'New' -and $companyCount -gt 0) {
+          throw ("Setup was told to create a new company, but this computer already holds company data (" + $companyCount + " company record(s)) in its KAYAN database. Nothing was deleted and nothing was upgraded. Run Setup again and choose ""An existing company"" to keep it, or use the KAYAN ERP ""Reset (start fresh)"" tool, which takes a verified backup before it creates anything.")
+        }
+        if ($CompanyMode -eq 'Existing') {
+          Write-RuntimeMarker ("KAYAN-COMPANY-EXISTING-VERIFIED companies=" + $companyCount)
+        } else {
+          Write-RuntimeMarker ("KAYAN-COMPANY-NEW-DATABASE-EMPTY companies=" + $companyCount)
+        }
+      }
+    }
+    Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "DO `$`$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'erp_app') THEN CREATE ROLE erp_app WITH LOGIN PASSWORD '$dbPassword'; END IF; END `$`$;"
+    Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "SELECT 'CREATE DATABASE erp_kayan OWNER erp_app' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'erp_kayan')\gexec"
+  } finally {
+    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+  }
+
+  # The settings file is written back only after the database has been
+  # identified, and the database itself is touched only after that - with a
+  # verified backup first whenever it holds a company.
+  Save-UserSettings $settings
+  [void](Invoke-DatabasePrepare $settings $companyCount)
 }
 
 if (-not (Test-Path -LiteralPath $UserSettingsPath)) { throw 'Per-user runtime settings were not created.' }

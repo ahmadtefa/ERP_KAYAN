@@ -166,6 +166,22 @@ if (-not (Test-Path $runtimeLog) -or -not (Select-String -LiteralPath $runtimeLo
 }
 Write-Host "PASS: initdb ran with PostgreSQL's required restricted token."
 
+# The company page's answer has to reach the database, not just the screen.
+# This machine had no KAYAN database, so the unattended default is "new"; the
+# runtime setup has to say so in its own log.
+foreach ($marker in @('KAYAN-COMPANY-MODE New', 'KAYAN-COMPANY-NEW-CLUSTER', 'KAYAN-COMPANY-NEW-DATABASE-EMPTY', 'KAYAN-UPGRADE-MIGRATIONS-OK')) {
+  if (-not (Select-String -LiteralPath $runtimeLog -Pattern ([regex]::Escape($marker)) -Quiet)) {
+    Fail ("The installer log does not record '$marker', so the new-company path cannot be told apart from an upgrade.")
+  }
+}
+$modeLines = @(Select-String -LiteralPath $runtimeLog -Pattern 'KAYAN-COMPANY-MODE (\w+)' -AllMatches)
+$newModeCount = @($modeLines | Where-Object { $_.Line -match 'KAYAN-COMPANY-MODE New' }).Count
+$existingModeCount = @($modeLines | Where-Object { $_.Line -match 'KAYAN-COMPANY-MODE Existing' }).Count
+if ($newModeCount -ne 1 -or $existingModeCount -ne 0) {
+  Fail ("The first install did not take the new-company path exactly once (new=$newModeCount, existing=$existingModeCount).")
+}
+Write-Host "PASS: the first install recorded the new-company path (and nothing else)."
+
 foreach ($relative in @(
   "backend\postgres\bin\initdb.exe",
   "backend\postgres\bin\pg_ctl.exe",
@@ -219,6 +235,22 @@ if ($envValues['DATABASE_URL'] -ne ('postgresql://erp_app:' + $preExistingDbPass
 }
 Write-Host "PASS: installer recovered the 0-ACE kayan.env DACL and preserved its existing credentials."
 foreach ($entry in $envValues.GetEnumerator()) { Set-Item -Path ("Env:" + $entry.Key) -Value $entry.Value }
+
+# "A new company" is a state of the database, not a label on a page: no
+# company, no user, no customer, no invoice - nothing but the schema the
+# program expects and the bootstrap data it ships with.
+$psqlForMode = Join-Path $installRoot 'backend\postgres\bin\psql.exe'
+$env:PGPASSWORD = $preExistingDbPassword
+try {
+  $newCompanyCounts = @(& $psqlForMode -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT (SELECT count(*) FROM companies) || '/' || (SELECT count(*) FROM users) || '/' || (SELECT count(*) FROM customers) || '/' || (SELECT count(*) FROM sales_invoices) || '/' || (SELECT count(*) FROM cash_vouchers)" 2>&1)
+  $newCompanyExit = $LASTEXITCODE
+} finally {
+  Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+}
+if ($newCompanyExit -ne 0 -or (($newCompanyCounts -join '').Trim() -ne '0/0/0/0/0')) {
+  Fail ("A new company is not an empty database: companies/users/customers/invoices/vouchers = " + ($newCompanyCounts -join ' ') + " (exit $newCompanyExit).")
+}
+Write-Host "PASS: a new company means an empty database - no company, user, customer, invoice or voucher row."
 
 # Run the exact production database preparation used by the desktop shell.
 $prepOut = Join-Path $env:TEMP "kayan-installer-prep-stdout.log"
@@ -333,6 +365,68 @@ if ($sentinelExit -ne 0 -or (($sentinelResult -join '').Trim() -ne 'preserved'))
   Fail ("The disposable company-data preservation probe did not survive the upgrade/reinstall. PostgreSQL output: " + ($sentinelResult -join ' '))
 }
 Write-Host "PASS: the upgrade/reinstall retained the existing company-data probe."
+
+# The upgrade had to take the OTHER path: the company on this machine was
+# kept, verified as this installation's own database, backed up before the
+# new program's migrations ran, and then upgraded in place.
+foreach ($marker in @('KAYAN-COMPANY-MODE Existing', 'KAYAN-COMPANY-EXISTING-VERIFIED', 'KAYAN-UPGRADE-BACKUP-OK', 'KAYAN-UPGRADE-MIGRATIONS-OK')) {
+  if (-not (Select-String -LiteralPath $runtimeLog -Pattern ([regex]::Escape($marker)) -Quiet)) {
+    Fail ("The upgrade log does not record '$marker', so the existing-company path cannot be told apart from a fresh install.")
+  }
+}
+$upgradeNewModeCount = @(Select-String -LiteralPath $runtimeLog -Pattern 'KAYAN-COMPANY-MODE New').Count
+$upgradeExistingModeCount = @(Select-String -LiteralPath $runtimeLog -Pattern 'KAYAN-COMPANY-MODE Existing').Count
+if ($upgradeExistingModeCount -lt 1) {
+  Fail ("The upgrade/reinstall did not record the existing-company path (new=$upgradeNewModeCount, existing=$upgradeExistingModeCount).")
+}
+Write-Host "PASS: the upgrade recorded the existing-company path."
+
+# The backup is the promise behind "your data is kept": it has to exist, hold
+# real objects, be readable by pg_restore, and contain the probe table that
+# was written to this company minutes earlier.
+$backupRoot = Join-Path $env:ProgramData 'KAYAN-ERP\backups'
+$upgradeBackup = Get-ChildItem -Path $backupRoot -Recurse -Filter 'before-upgrade.dump' -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $upgradeBackup) { Fail "The upgrade did not leave a before-upgrade.dump backup under $backupRoot." }
+if ($upgradeBackup.Length -lt 4096) { Fail ("The before-upgrade backup is only $($upgradeBackup.Length) bytes.") }
+$pgRestore = Join-Path $installRoot 'backend\postgres\bin\pg_restore.exe'
+$backupToc = @(& $pgRestore --list $upgradeBackup.FullName 2>&1)
+if ($LASTEXITCODE -ne 0 -or $backupToc.Count -lt 1) {
+  Fail ("pg_restore cannot read the before-upgrade backup: " + ($backupToc -join ' '))
+}
+if (-not (($backupToc -join "`n") -match 'kayan_installer_upgrade_probe')) {
+  Fail "The before-upgrade backup does not contain the company-data probe table, so it is not a backup of this database."
+}
+Write-Host ("PASS: the upgrade took a readable backup first ({0} bytes, probe table included): {1}" -f $upgradeBackup.Length, $upgradeBackup.FullName)
+
+# Choosing "a new company" on a machine that already holds one must stop
+# dead. Nothing may be deleted, emptied, renamed or replaced - the customer
+# has to be told to pick "an existing company" or use the reset tool, which
+# takes a verified backup before it creates anything.
+$refusalLog = Join-Path $env:TEMP 'kayan-company-new-refusal.log'
+$refusalErrorLog = Join-Path $env:TEMP 'kayan-company-new-refusal.err.log'
+$refusal = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+  -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + (Join-Path $installRoot 'install-runtime.ps1') + '"'), '-UserSettingsPath', ('"' + $settings + '"'), '-CompanyMode', 'New') `
+  -Wait -PassThru -NoNewWindow -RedirectStandardOutput $refusalLog -RedirectStandardError $refusalErrorLog
+if ($refusal.ExitCode -eq 0) {
+  Fail "Choosing 'a new company' over a computer that already holds one succeeded; it must refuse and change nothing."
+}
+$refusalResult = Join-Path $env:ProgramData 'KAYAN-ERP\logs\installer-result.txt'
+$refusalText = if (Test-Path $refusalResult) { Get-Content -LiteralPath $refusalResult -Raw } else { '' }
+if ($refusalText -notmatch 'already holds company data') {
+  Fail ("The refusal did not tell the customer why: '" + $refusalText + "'")
+}
+$env:PGPASSWORD = $databasePassword
+try {
+  $survivor = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT (SELECT value FROM kayan_installer_upgrade_probe WHERE id=1) || '/' || (SELECT count(*) FROM companies)" 2>&1)
+  $survivorExit = $LASTEXITCODE
+} finally {
+  Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+}
+if ($survivorExit -ne 0 -or (($survivor -join '').Trim() -notmatch '^preserved/[1-9]')) {
+  Fail ("Refusing 'a new company' still changed the data: " + ($survivor -join ' '))
+}
+Write-Host "PASS: choosing 'a new company' over an existing one was refused with a clear reason, and no data changed."
 
 # Exercise the bundled RepairTool.exe against a stopped service and a
 # re-corrupted 0-ACE kayan.env file. The tool must (a) report the problems it

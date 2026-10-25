@@ -1,4 +1,4 @@
-#define AppName "KAYAN ERP"
+﻿#define AppName "KAYAN ERP"
 #define AppId "{{D1B6074C-12D1-4B4A-9F2C-650A53F15D91}"
 #ifndef AppVersion
   #define AppVersion "0.1.0"
@@ -41,6 +41,23 @@ UninstallDisplayName=KAYAN ERP
 Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl"
 
+[CustomMessages]
+; The company page. Both languages are spelled out here rather than left to
+; the .isl files, because this page is the one place where the customer has to
+; understand a decision about their data before Setup touches anything.
+english.CompanyPageCaption=The company on this computer
+arabic.CompanyPageCaption=الشركة على هذا الجهاز
+english.CompanyPageDescription=Setup can start a new, empty company, or keep the company already on this computer. Setup never deletes company data.
+arabic.CompanyPageDescription=يمكن للمُثبِّت بدء شركة جديدة فارغة، أو الاحتفاظ بالشركة الموجودة بالفعل على هذا الجهاز. لا يحذف المُثبِّت بيانات الشركة أبدًا.
+english.CompanyNew=A new company (شركة جديدة)
+arabic.CompanyNew=شركة جديدة (A new company)
+english.CompanyNewHint=An empty database, then the first-run screen asks for the company and the general manager. No demo data, no old records.
+arabic.CompanyNewHint=قاعدة بيانات فارغة، ثم تسأل شاشة الإعداد الأولى عن بيانات الشركة والمدير العام. بلا بيانات تجريبية وبلا سجلات قديمة.
+english.CompanyExisting=An existing company (شركة موجودة)
+arabic.CompanyExisting=شركة موجودة (An existing company)
+english.CompanyExistingHint=Keep every record already here. Setup verifies the database, backs it up, and the program upgrades it in place.
+arabic.CompanyExistingHint=الاحتفاظ بكل البيانات الموجودة. يتحقق المُثبِّت من قاعدة البيانات ويأخذ نسخة احتياطية، ثم يرقّيها البرنامج في مكانها.
+
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
 
@@ -69,6 +86,60 @@ Filename: "{app}\erp_kayan.exe"; Description: "Launch KAYAN ERP"; Flags: postins
 Type: dirifempty; Name: "{app}"
 
 [Code]
+var
+  CompanyPage: TInputOptionWizardPage;
+
+{ The one page this installer adds: a new company or the one already here.
+
+  It defaults to what the disk says - a machine with a KAYAN database gets
+  "existing", a clean machine gets "new" - so an unattended install does the
+  safe thing, but the customer still sees and confirms the choice. The answer
+  is enforced twice: this page decides the words on screen, and
+  install-runtime.ps1 refuses either mode when the database on disk disagrees
+  with it. }
+procedure InitializeWizard;
+var
+  ExistingCompany: Boolean;
+begin
+  CompanyPage := CreateInputOptionPage(wpSelectDir,
+    ExpandConstant('{cm:CompanyPageCaption}'),
+    ExpandConstant('{cm:CompanyPageDescription}'),
+    '',
+    True, False);
+  CompanyPage.Add(ExpandConstant('{cm:CompanyNew}'), ExpandConstant('{cm:CompanyNewHint}'));
+  CompanyPage.Add(ExpandConstant('{cm:CompanyExisting}'), ExpandConstant('{cm:CompanyExistingHint}'));
+  ExistingCompany := FileExists(ExpandConstant('{commonappdata}\KAYAN-ERP\PostgreSQL\data\PG_VERSION'));
+  if ExistingCompany then
+  begin
+    CompanyPage.Values[0] := False;
+    CompanyPage.Values[1] := True;
+  end
+  else
+  begin
+    CompanyPage.Values[0] := True;
+    CompanyPage.Values[1] := False;
+  end;
+end;
+
+{ What the runtime setup is told. Read when the answer is used rather than
+  when the page is left, so a silent install (where the page is not shown)
+  still gets the answer the page would have defaulted to. }
+function SelectedCompanyMode: String;
+begin
+  if Assigned(CompanyPage) then
+  begin
+    if CompanyPage.Values[1] then
+      Result := 'Existing'
+    else
+      Result := 'New';
+    exit;
+  end;
+  if FileExists(ExpandConstant('{commonappdata}\KAYAN-ERP\PostgreSQL\data\PG_VERSION')) then
+    Result := 'Existing'
+  else
+    Result := 'New';
+end;
+
 function RunPowerShell(const Args: String; var ResultCode: Integer): Boolean;
 var
   PowerShell: String;
@@ -148,7 +219,7 @@ var
   Args: String;
 begin
   if CurStep = ssPostInstall then begin
-    Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\install-runtime.ps1') + '" -UserSettingsPath "' + ExpandConstant('{userappdata}\KAYAN-ERP\kayan.env') + '"';
+    Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\install-runtime.ps1') + '" -UserSettingsPath "' + ExpandConstant('{userappdata}\KAYAN-ERP\kayan.env') + '" -CompanyMode ' + SelectedCompanyMode;
     if not RunPowerShell(Args, ResultCode) then
       RaiseException('Could not start the local PostgreSQL setup. Check permissions and the installer log.')
     else if ResultCode <> 0 then
