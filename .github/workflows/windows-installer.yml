@@ -108,22 +108,18 @@ jobs:
           Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Select-Object -Last 150
           Get-Content -LiteralPath $err -ErrorAction SilentlyContinue | Select-Object -Last 40
           if ($proc.ExitCode -ne 0) {
-            $out = @(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue)
-            $important = @($out | Select-String -Pattern 'Tests:','Test Suites:','FAIL ','Expected','Received','at Object','● ' |
-              ForEach-Object { $_.Line } | Select-Object -First 120)
-            if ($important.Count -eq 0) { $important = @($out | Select-Object -Last 40) }
-            $tail = @(
-              '--- failing lines ---'
-              $important
-              '--- last stdout ---'
-              ($out | Select-Object -Last 40)
-              '--- last stderr ---'
-              (Get-Content -LiteralPath $err -ErrorAction SilentlyContinue | Select-Object -Last 15)
-            ) -join "`n"
-            $tail = $tail -replace "`r?`n", '%0A'
-            $tail = ($tail -replace '[^\x20-\x7E%]', '.')
-            if ($tail.Length -gt 60000) { $tail = $tail.Substring($tail.Length - 60000) }
-            Write-Host "::error title=Backend tests failed::$tail"
+            # The annotation is cut at about 4 kB from the end, so the summary
+            # has to come first. Jest writes its reporter output to stderr,
+            # which is why the last lines of that file are the ones that name
+            # the failing test.
+            $esc = [char]27
+            $fail = @(Get-Content -LiteralPath $err -ErrorAction SilentlyContinue | Select-Object -Last 22) -join "`n"
+            if (-not $fail) { $fail = @(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Select-Object -Last 22) -join "`n" }
+            $fail = $fail -replace "$esc\[[0-9;]*m", ''
+            $fail = $fail -replace "`r?`n", '%0A'
+            $fail = $fail -replace '[^\x20-\x7E%]', '.'
+            if ($fail.Length -gt 3400) { $fail = $fail.Substring($fail.Length - 3400) }
+            Write-Host "::error title=Backend tests failed::$fail"
             exit 1
           }
       - name: Clean build backend
