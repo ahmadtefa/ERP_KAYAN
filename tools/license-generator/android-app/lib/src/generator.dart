@@ -576,7 +576,7 @@ class LicenceGenerator {
 
   void _markSuperseded(Register register, String licenceId, String type) {
     for (final key in register.keys) {
-      if (key.licenceId == licenceId && key.type == type && key.status == 'issued') {
+      if (key.licenseId == licenceId && key.type == type && key.status == 'issued') {
         key.status = 'superseded';
         key.supersededAt = iso(folder.now());
       }

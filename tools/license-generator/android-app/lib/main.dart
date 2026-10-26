@@ -308,6 +308,7 @@ class _IssueTabState extends State<IssueTab> {
           note: _note.text,
           dryRun: dryRun,
         ));
+    if (!mounted) return;
     if (result == null) {
       if (widget.state.error != null) {
         showMessage(context, widget.state.error!, error: true);
@@ -650,6 +651,7 @@ class _RegisterTabState extends State<RegisterTab> {
         term: _term,
       ),
     );
+    if (!mounted) return;
     if (result == null) {
       if (widget.state.error != null) showMessage(context, widget.state.error!, error: true);
       return;
@@ -954,6 +956,7 @@ class _KeyTabState extends State<KeyTab> {
       final signing = await SigningKey.fromPem(text);
       return signing;
     });
+    if (!mounted) return;
     if (key == null) {
       if (widget.state.error != null) showMessage(context, widget.state.error!, error: true);
       return;
@@ -965,6 +968,7 @@ class _KeyTabState extends State<KeyTab> {
       await widget.state.folder.writeKeyPair(key);
       return true;
     });
+    if (!mounted) return;
     if (bundle == null) {
       if (widget.state.error != null) showMessage(context, widget.state.error!, error: true);
       return;
@@ -1129,7 +1133,7 @@ class _KeyTabState extends State<KeyTab> {
         ),
         SectionCard(
           title: 'عن الأداة / About',
-          subtitle: 'KAYAN key generator ${toolVersion}',
+          subtitle: 'KAYAN key generator $toolVersion',
           child: const Text(
             'هذه هي أداة المورّد نفسها: نفس صيغة المفتاح، ونفس المدة والمقاعد، وملفات '
             'مجلد المفاتيح مطابقة لما يكتبه المولّد على ويندوز، فالحزمة تنتقل بين الجهازين. '

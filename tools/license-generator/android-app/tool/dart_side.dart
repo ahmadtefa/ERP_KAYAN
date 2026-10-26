@@ -11,6 +11,9 @@
 /// issued into the folder this app made must verify here.
 library;
 
+// A command-line tool: its output is the point.
+// ignore_for_file: avoid_print
+
 import 'dart:convert';
 import 'dart:io';
 

@@ -36,8 +36,10 @@ on:
 permissions:
   contents: read
 
+# A push and the pull-request event it causes both run; they must not cancel
+# each other, or the one-off scaffolding commit never gets pushed.
 concurrency:
-  group: key-generator-android-${{ github.head_ref || github.ref_name }}
+  group: key-generator-android-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
