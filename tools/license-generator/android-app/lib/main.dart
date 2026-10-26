@@ -265,6 +265,16 @@ class _IssueTabState extends State<IssueTab> {
   String _term = '';
   bool _seatModeIncrease = true;
 
+  // Built once: SegmentedButton keeps state against these widgets, and
+  // handing it fresh instances on every frame makes it re-schedule frames.
+  late final List<ButtonSegment<String>> _typeSegments = [
+    for (final type in _types)
+      ButtonSegment(
+        value: type.key,
+        label: Text(type.key, style: const TextStyle(fontSize: 11)),
+      ),
+  ];
+
   IssueResult? _result;
   Map<String, dynamic>? _preview;
 
@@ -337,10 +347,7 @@ class _IssueTabState extends State<IssueTab> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               SegmentedButton<String>(
-                segments: [
-                  for (final type in _types)
-                    ButtonSegment(value: type.key, label: Text(type.key, style: const TextStyle(fontSize: 11))),
-                ],
+                segments: _typeSegments,
                 selected: {_type},
                 showSelectedIcon: false,
                 onSelectionChanged: (selection) => setState(() {

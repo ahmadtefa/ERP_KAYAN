@@ -405,6 +405,7 @@ void main() {
     });
 
     test('two different pairs cannot share a register', () async {
+      await aLicence(); // a register to try to share
       final other = await SigningKey.fromSeed(List<int>.filled(32, 9));
       final foreignHome = Directory.systemTemp.createTempSync('kayan-foreign-');
       addTearDown(() => foreignHome.deleteSync(recursive: true));

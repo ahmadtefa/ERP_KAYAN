@@ -56,7 +56,10 @@ void main() {
     await state.refresh();
 
     await tester.pumpWidget(KayanKeyGeneratorApp(state: state));
-    await tester.pumpAndSettle();
+    // A widget in this tab keeps a frame scheduled, so pumpAndSettle would
+    // exhaust its ten-minute budget; the assertions are about content.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
 
     expect(find.textContaining('989A-6539'), findsOneWidget); // the fingerprint
     expect(find.textContaining('شركة النور'), findsOneWidget); // the licence in the dropdown

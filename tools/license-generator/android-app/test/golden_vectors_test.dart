@@ -22,7 +22,10 @@ import 'package:path/path.dart' as p;
 
 Map<String, dynamic> _golden() {
   final file = File(p.join('test', 'goldens', 'vectors.json'));
-  expect(file.existsSync(), isTrue, reason: 'the golden vectors are missing');
+  if (!file.existsSync()) {
+    // Loading happens before any test starts, where expect() is not allowed.
+    throw StateError('the golden vectors are missing at ${file.path}');
+  }
   return Map<String, dynamic>.from(jsonDecode(file.readAsStringSync()) as Map);
 }
 
