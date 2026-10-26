@@ -66,8 +66,17 @@ jobs:
         working-directory: tools/license-generator/sea
         run: node build.mjs --target win32-x64 --out "$env:GITHUB_WORKSPACE\dist\key-generator"
 
+      # The log travels with the artifact: a job that says "success" is a
+      # verdict, but the operator's own evidence is the executable plus what
+      # it printed when it ran on this machine.
       - name: Smoke-test the packaged executable
-        run: node tools/license-generator/sea/smoke.mjs --exe "dist/key-generator/KAYAN-Key-Generator.exe"
+        shell: powershell
+        run: |
+          $log = 'dist\key-generator\SMOKE-TEST.txt'
+          node tools/license-generator/sea/smoke.mjs --exe "dist/key-generator/KAYAN-Key-Generator.exe" *>&1 |
+            Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { throw "the smoke test failed (exit $LASTEXITCODE)" }
+          Get-Content $log | Write-Host
 
       - name: Report what is in the package
         shell: powershell
@@ -92,5 +101,6 @@ jobs:
           path: |
             dist/key-generator/KAYAN-Key-Generator.exe
             dist/key-generator/BUILD-INFO.txt
+            dist/key-generator/SMOKE-TEST.txt
           if-no-files-found: error
           retention-days: 30
