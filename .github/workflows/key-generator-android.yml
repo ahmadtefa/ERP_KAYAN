@@ -247,24 +247,19 @@ jobs:
       - name: Report the result on the run
         if: always()
         run: |
-          info="$GITHUB_WORKSPACE/dist/key-generator-android/BUILD-INFO.txt"
-          if [ -f "$info" ]; then
-            summary="$(grep -E '^(package|size|sha256)' "$info" | tr '\n' ' ')"
-            summary="${summary//'%'/'%25'}"
-            echo "::notice title=Key generator APK::${summary}"
-            if [ -f dist/key-generator-android/badging.txt ]; then
-              manifest="$(cat dist/key-generator-android/badging.txt | tr '\n' '|')"
-              manifest="${manifest//'%'/'%25'}"
-              echo "::notice title=Key generator APK manifest::${manifest}"
-            fi
-            if [ -f dist/key-generator-android/contents.txt ]; then
-              inside="$(cat dist/key-generator-android/contents.txt | tr -s ' ' | tr '\n' '|')"
-              inside="${inside//'%'/'%25'}"
-              echo "::notice title=Key generator APK contents::${inside}"
-            fi
-          else
-          else
+          info="dist/key-generator-android/BUILD-INFO.txt"
+          if [ ! -f "$info" ]; then
             echo '::warning::the APK was not produced'
+            exit 0
+          fi
+          echo "::notice title=Key generator APK::$(grep -E '^(package|size|sha256)' "$info" | tr '\n' ' ')"
+          manifest="dist/key-generator-android/badging.txt"
+          if [ -f "$manifest" ]; then
+            echo "::notice title=Key generator APK manifest::$(tr '\n' '|' < "$manifest")"
+          fi
+          contents="dist/key-generator-android/contents.txt"
+          if [ -f "$contents" ]; then
+            echo "::notice title=Key generator APK contents::$(tr -s ' ' < "$contents" | tr '\n' '|')"
           fi
 
       - name: Upload the APK
