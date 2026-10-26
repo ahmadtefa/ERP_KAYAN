@@ -121,8 +121,11 @@ npm ci
 
 # 3) الملف التنفيذي وتجربته على الملف نفسه
 node build.mjs --target win32-x64 --out ..\dist
-node smoke.mjs --exe ..\dist\KAYAN-Key-Generator.exe
+node smoke.mjs --exe ..\dist\KAYAN-Key-Generator.exe --log ..\dist\SMOKE-TEST.txt
 ```
+
+`--log` يكتب سجل الفحوص بنفسه **قبل** أن يخرج برمز فشل، فإذا فشل الفحص على جهاز
+المشغّل يبقى السبب مكتوبًا في ملف بدل أن يضيع مع نافذة أُغلقت.
 
 في GitHub Actions: `.github/workflows/key-generator.yml` يبني على `windows-latest`
 على كل طلب دمج، ويشغّل `smoke.mjs` على الملف الناتج، ويرفع الأثر

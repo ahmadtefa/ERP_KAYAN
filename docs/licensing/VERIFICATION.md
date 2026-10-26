@@ -16,7 +16,7 @@ not run is listed at the end and is **not** claimed as verified.
 | `npx tsc --noEmit` | بلا أخطاء |
 | `npx nest build` | نجح، `dist/src/modules/licensing` مكتمل |
 | `npx jest` | **587 نجحت، 8 متخطاة، 68 حزمة (1 متخطاة)** |
-| `npx jest src/modules/licensing` | **127 اختبارًا في 7 حزم** |
+| `npx jest src/modules/licensing` | **145 اختبارًا في 7 حزم** |
 | `KAYAN_TEST_ADMIN_URL=… node scripts/verify-licensing-postgres.mjs` | **46 فحصًا، 0 فشل** على PostgreSQL 16.2 حقيقي |
 | `node tools/check-l10n-keys.mjs` | 839 مفتاحًا في اللغتين، 1555 استخدامًا، كلها موجودة |
 | `node tools/check-dart-imports.mjs` | 138 ملف Dart، كل الاستيرادات تشير إلى ملفات موجودة |
@@ -113,7 +113,7 @@ not run is listed at the end and is **not** claimed as verified.
 التبدئة مرة واحدة بـ `ON CONFLICT DO NOTHING` وبمفتاح ثابت لكل مستخدم، العمود
 `id` يُولَّد صراحةً، ولا `DROP`/`DELETE`/`UPDATE`/`ALTER` على الجداول القائمة.
 
-### الأداة ↔ البرنامج — `license-generator.spec.ts` (15)
+### الأداة ↔ البرنامج — `license-generator.spec.ts` (33)
 
 تشغيل الأداة كعملية منفصلة ثم إدخال مفتاحها إلى الخدمة الحقيقية: التفعيل،
 التجديد، الزيادة، والنقل (مع كود طلب حقيقي)، ورفض النوع الخطأ، ورفض نقل إلى
@@ -146,7 +146,10 @@ not run is listed at the end and is **not** claimed as verified.
 | `npx tsc --noEmit` · `npm run build` | بلا أخطاء · نجح |
 | `node tools/license-generator/sea/build.mjs` | يُنتج ملفًا تنفيذيًا واحدًا (نسخة Node مضمّنة، بلا تثبيت) |
 | `node tools/license-generator/sea/smoke.mjs --exe …` | **10 فحوص، 0 فشل** على الملف التنفيذي نفسه |
-| `.github/workflows/key-generator.yml` على `windows-latest` | بناء `KAYAN-Key-Generator.exe` ثم تشغيله واختباره، ورفع الأثر `KAYAN-Key-Generator-Windows-x64` |
+| `npm run build` + `npx jest` على `91734e3` | تحقق التغيير الأخير على `main` السكربت والاختبار فقط: `tsc` بلا أخطاء، و**605 نجحت، 8 متخطاة، 613 إجمالًا** |
+| `KAYAN_TEST_ADMIN_URL=… node scripts/verify-licensing-postgres.mjs` على `91734e3` | **46 فحصًا، 0 فشل** محليًا وعلى PostgreSQL 16 في CI (`ERP KAYAN CI` رقم 40258850677) |
+| `.github/workflows/key-generator.yml` على `windows-latest` (`Key Generator` رقم 40258850715) | بناء `KAYAN-Key-Generator.exe`، ثم تشغيله ونجاح كل الفحوص العشرة، ثم رفع `KAYAN-Key-Generator-Windows-x64` — 34,349,745 بايت، `sha256:ffcf0eeb339cda1acb7cb9baee4306562e88a94bad1bc9112dd5419bb2c720d2`، صالح حتى 2026-11-25 |
+| `Windows Installer` رقم 40258850668 على `91734e3` | المُثبِّت بُني وحُصِّل كأثر: 345,311,088 بايت، `sha256:ae2ba609098a3b58706d74a13d340627ef553f126e121ba4d6ac039dff537291`، صالح حتى 2026-11-09 |
 
 ما يثبته فحص الملف التنفيذي: أنه يبدأ ويطبع نسخته، وأن `--help` لا يفتح نافذة،
 وأنه لا يحمل أي مفتاح، وأن المشغّل يُنشئ مجلد مفاتيح اختباريًا ويُسجّل ترخيصًا
@@ -157,6 +160,19 @@ not run is listed at the end and is **not** claimed as verified.
 
 **مفتاح الاختبار:** يُولَّد داخل مجلد مؤقت لحظة التشغيل ويُحذف بعده؛ لا مفتاح
 إنتاج في أي اختبار أو أثر منشور.
+
+**ما أبلغ عنه الفحص نفسه:** السكربت يكتب سجلّه بنفسه إلى `SMOKE-TEST.txt`
+(`--log`)، وخطوة النشر في سير العمل تُظهر كل سطر `FAIL` كتعليق على التشغيل
+وتضيف السجل إلى ملخص المهمة. سبب ذلك أن خطوة سابقة كانت تمرّر الخرج عبر
+`Tee-Object`، فأخفى ذلك رمز الخروج وسبب الفشل؛ صار رمز الخروج هو رمز السكربت
+نفسه، والسجل يُنشر في خطوة `if: always()` منفصلة.
+
+**عيب في اختبار كتبته أنا، التُقط في CI:** فحص «المفتاح نفسه بعد تغيير حرف»
+كان يغيّر **آخر** حرف من التوقيع. توقيع 64 بايت يُرمَّز إلى 86 حرفًا، والأخير
+منها يحمل بتّين فقط، فتغيير `A`↔`B` فيه يفكّ إلى **نفس** البايتات — أي أن
+المفتاح «المعدَّل» كان سليمًا فعلًا في نحو حالة من كل 16. عندها قُبل التفعيل
+واستقر الترخيص، فسقطت كل فحوص تلك القاعدة بعدها. الآن يُغيَّر الحرف الأول،
+وتكرار التشغيل يثبت الثبات (33/33 ثلاث مرات، و46/46 على PostgreSQL).
 
 ## ما لم يُشغَّل / Not verified here
 
