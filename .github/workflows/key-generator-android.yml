@@ -1,12 +1,12 @@
 name: Key Generator (Android APK)
 
-# The Android build of the supplier's key generator: the same tool, the same
-# key format, the same register files as KAYAN-Key-Generator.exe. This workflow
+# The Android build of the supplier's key generator: the same tool, the same key
+# format, the same register files as KAYAN-Key-Generator.exe. This workflow
 # builds the APK on a real runner, runs the Dart tests, and then proves the two
 # implementations agree in both directions:
 #
-#   dart  -> the product's verifier and the Windows generator
-#   Windows generator -> the app's verifier
+#   the app   -> the product's own verifier and the Windows generator
+#   Windows   -> the app's verifier
 #
 # It has no release step and no signing keystore: the APK is signed with the
 # standard debug key so it can be side-loaded for testing. Publishing to a store
@@ -28,12 +28,8 @@ on:
       - '.github/workflows/key-generator-android.yml'
   workflow_dispatch:
     inputs:
-      scaffold:
-        description: 'Create the missing android/ project from the Flutter template and commit it'
-        type: boolean
-        default: false
       emulator:
-        description: 'Boot an Android emulator, install the APK and launch it'
+        description: 'Also boot an Android emulator, install the APK and launch it'
         type: boolean
         default: false
 
@@ -46,15 +42,15 @@ concurrency:
 
 env:
   APP_DIR: tools/license-generator/android-app
-  FLUTTER_VERSION: ''
 
 jobs:
-  # One-off: `flutter create` writes the Gradle wrapper and the manifest that
-  # no one should type by hand. It runs when asked, then commits the result so
-  # every later build is an ordinary `flutter build apk`.
+  # One-off: `flutter create` writes the Gradle wrapper and the manifest that no
+  # one should type by hand. When the project is missing, this job generates it
+  # and commits it, so every later run is an ordinary `flutter build apk`. When
+  # it is already there, the job does nothing.
   scaffold:
     name: Create the Android project from the Flutter template
-    if: github.event_name == 'workflow_dispatch' && inputs.scaffold
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -63,13 +59,29 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
-      - uses: subosito/flutter-action@v2
+
+      - name: Is there already an android project?
+        id: check
+        run: |
+          if [ -d "${{ env.APP_DIR }}/android" ]; then
+            echo 'need=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::the android project is already in the repository'
+          else
+            echo 'need=true' >> "$GITHUB_OUTPUT"
+            echo '::notice::no android project yet; generating it from the Flutter template'
+          fi
+
+      - name: Set up Flutter
+        if: steps.check.outputs.need == 'true'
+        uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+
       # Generated in a scratch folder and copied in, never run over this
       # package: `flutter create .` would rewrite files that are not its own.
       - name: Generate the android/ project
+        if: steps.check.outputs.need == 'true'
         run: |
           flutter --version
           rm -rf "$RUNNER_TEMP/scaffold"
@@ -81,13 +93,15 @@ jobs:
           sed -i 's/android:label="kayan_key_generator"/android:label="KAYAN Key Generator"/' "$manifest"
           grep -n 'android:label' "$manifest"
           ls -la "${{ env.APP_DIR }}/android"
+
       - name: Commit the generated project
+        if: steps.check.outputs.need == 'true'
         run: |
           git config user.name 'Arena Agent'
           git config user.email 'agent@arena.ai'
           git add -A "${{ env.APP_DIR }}"
           if git diff --cached --quiet; then
-            echo '::notice::the android project already exists; nothing to commit'
+            echo '::notice::nothing to commit'
             exit 0
           fi
           git commit \
@@ -97,7 +111,6 @@ jobs:
 
   apk:
     name: Build and test KAYAN-Key-Generator.apk
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.scaffold) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -120,14 +133,6 @@ jobs:
           flutter --version
           java -version
           echo "ANDROID_HOME=${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
-
-      - name: The android/ project must exist
-        working-directory: ${{ env.APP_DIR }}
-        run: |
-          if [ ! -d android ]; then
-            echo '::error::tools/license-generator/android-app/android is missing. Run this workflow manually with scaffold=true once.'
-            exit 1
-          fi
 
       - name: Install Dart and Flutter dependencies
         working-directory: ${{ env.APP_DIR }}
@@ -153,6 +158,9 @@ jobs:
           npm ci --no-audit --no-fund
           npx prisma generate
           npx tsc -p tsconfig.json
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan?schema=public
+          PRISMA_GENERATE_SKIP_AUTOINSTALL: 'true'
 
       - name: Issue keys with the app's code
         working-directory: ${{ env.APP_DIR }}
@@ -169,12 +177,19 @@ jobs:
           dart run tool/dart_side.dart verify "$RUNNER_TEMP/cross/keyring" "$key"
 
       # ── the APK ─────────────────────────────────────────────────────────
+      - name: The android/ project must exist
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          if [ ! -d android ]; then
+            echo '::error::tools/license-generator/android-app/android is missing. The scaffold job adds it; if that failed, this job cannot build an APK.'
+            exit 1
+          fi
+
       - name: Build the APK
         working-directory: ${{ env.APP_DIR }}
         run: python ../../../scripts/ci-diagnose.py flutter build apk --release
 
       - name: Inspect what is inside the APK
-        id: apk
         working-directory: ${{ env.APP_DIR }}
         run: |
           set -euo pipefail
@@ -182,54 +197,54 @@ jobs:
           test -f "$apk" || { echo '::error::the APK was not produced'; exit 1; }
           sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           aapt2="$(ls -d "$sdk"/build-tools/*/ 2>/dev/null | sort -V | tail -1)aapt2"
-          {
-            echo "size=$(stat -c%s "$apk")"
-            echo "sha256=$(sha256sum "$apk" | cut -d' ' -f1)"
-          } >> "$GITHUB_OUTPUT"
           echo '── manifest ──'
-          "$aapt2" dump badging "$apk" | grep -E "^(package|application-label|launchable-activity|sdkVersion|targetSdkVersion)" | tee "$RUNNER_TEMP/badging.txt"
+          "$aapt2" dump badging "$apk" \
+            | grep -E "^(package|application-label|launchable-activity|sdkVersion|targetSdkVersion)" \
+            | tee "$RUNNER_TEMP/badging.txt"
           echo '── contents ──'
-          unzip -l "$apk" | grep -E "classes.*\.dex|libflutter|libapp|AndroidManifest" | tee "$RUNNER_TEMP/contents.txt"
+          unzip -l "$apk" \
+            | grep -E "classes.*\.dex|libflutter|libapp|AndroidManifest" \
+            | tee "$RUNNER_TEMP/contents.txt"
           # The tool must not carry a signing key of its own.
           if unzip -p "$apk" 2>/dev/null | grep -a -q -- '-----BEGIN PRIVATE KEY-----'; then
             echo '::error::a PEM private key was found inside the APK'
             exit 1
           fi
           echo 'no private key inside the APK'
-          grep -q 'launchable-activity' "$RUNNER_TEMP/badging.txt" || {
-            echo '::error::the APK has no launchable activity'; exit 1; }
-          grep -q 'arm64-v8a' "$RUNNER_TEMP/contents.txt" || {
-            echo '::error::the APK carries no arm64 native library'; exit 1; }
+          grep -q 'launchable-activity' "$RUNNER_TEMP/badging.txt" \
+            || { echo '::error::the APK has no launchable activity'; exit 1; }
+          grep -q 'arm64-v8a' "$RUNNER_TEMP/contents.txt" \
+            || { echo '::error::the APK carries no arm64 native library'; exit 1; }
 
       - name: Name the artifact for the operator
         working-directory: ${{ env.APP_DIR }}
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/dist/key-generator-android"
-          cp build/app/outputs/flutter-apk/app-release.apk \
-             "$GITHUB_WORKSPACE/dist/key-generator-android/KAYAN-Key-Generator-Android.apk"
-          cp "$RUNNER_TEMP/badging.txt" "$RUNNER_TEMP/contents.txt" \
-             "$GITHUB_WORKSPACE/dist/key-generator-android/" 2>/dev/null || true
+          set -euo pipefail
+          out="$GITHUB_WORKSPACE/dist/key-generator-android"
+          mkdir -p "$out"
+          cp build/app/outputs/flutter-apk/app-release.apk "$out/KAYAN-Key-Generator-Android.apk"
+          cp "$RUNNER_TEMP/badging.txt" "$RUNNER_TEMP/contents.txt" "$out/"
           {
             echo "KAYAN key generator - Android APK"
             echo "built at      : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "package       : $(grep -m1 '^package' "$RUNNER_TEMP/badging.txt" || echo unknown)"
             echo "flutter       : $(flutter --version | head -1)"
-            echo "size          : $(stat -c%s "$GITHUB_WORKSPACE/dist/key-generator-android/KAYAN-Key-Generator-Android.apk") bytes"
-            echo "sha256        : $(sha256sum "$GITHUB_WORKSPACE/dist/key-generator-android/KAYAN-Key-Generator-Android.apk" | cut -d' ' -f1)"
+            echo "size          : $(stat -c%s "$out/KAYAN-Key-Generator-Android.apk") bytes"
+            echo "sha256        : $(sha256sum "$out/KAYAN-Key-Generator-Android.apk" | cut -d' ' -f1)"
             echo
             echo "This package contains no signing key. The operator imports the key folder."
             echo "Signed with the standard debug key: side-load it, do not publish it to a store."
-          } > "$GITHUB_WORKSPACE/dist/key-generator-android/BUILD-INFO.txt"
-          cat "$GITHUB_WORKSPACE/dist/key-generator-android/BUILD-INFO.txt"
+          } > "$out/BUILD-INFO.txt"
+          cat "$out/BUILD-INFO.txt"
 
       - name: Report the result on the run
         if: always()
         run: |
           info="$GITHUB_WORKSPACE/dist/key-generator-android/BUILD-INFO.txt"
           if [ -f "$info" ]; then
-            echo "::notice title=Key generator APK::$(
-              grep -E '^(size|sha256)' "$info" | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g'
-            )"
+            summary="$(grep -E '^(package|size|sha256)' "$info" | tr '\n' ' ')"
+            summary="${summary//'%'/'%25'}"
+            echo "::notice title=Key generator APK::${summary}"
           else
             echo '::warning::the APK was not produced'
           fi
@@ -244,8 +259,8 @@ jobs:
           retention-days: 30
 
   # Not part of every run: an emulator costs ten minutes and needs a runner that
-  # allows hardware acceleration. Asked for explicitly, it installs the built
-  # APK on Android and starts it, which is the only evidence short of a phone.
+  # allows hardware acceleration. Asked for explicitly, it installs the built APK
+  # on Android and starts it - the only evidence short of a phone.
   emulator:
     name: Install and launch the APK on Android
     if: github.event_name == 'workflow_dispatch' && inputs.emulator
@@ -261,12 +276,9 @@ jobs:
         with:
           channel: stable
           cache: true
-      - name: Enable hardware acceleration for the emulator
+      - name: Can this runner accelerate an emulator?
         run: |
-          echo 'KVM check:'
           ls -l /dev/kvm || echo 'no /dev/kvm on this runner'
-          sudo usermod -aG kvm "$USER" || true
-          echo '127.0.0.1 localhost' | sudo tee -a /etc/hosts >/dev/null
       - name: Build the APK
         working-directory: ${{ env.APP_DIR }}
         run: flutter pub get && flutter build apk --release
