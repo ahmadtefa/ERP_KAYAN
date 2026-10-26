@@ -77,3 +77,8 @@ distribution/windows/public-key.pem
 distribution/windows/licensing/
 *.pem
 !docs/licensing/**/*.pem
+
+# Build output of the standalone key generator (never committed: it is a
+# 120 MB copy of a Node binary, rebuilt by .github/workflows/key-generator.yml).
+tools/license-generator/dist/
+tools/license-generator/sea/.work/

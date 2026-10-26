@@ -8,6 +8,18 @@ KAYAN is licensed per machine. Licences are issued offline as signed keys by the
 supplier; there is no licence server, no periodic call home, and nothing about
 the licence is derived from the company's name, tax number or books.
 
+## الوثائق / The documents
+
+| | |
+| --- | --- |
+| [`GENERATOR.md`](GENERATOR.md) | أداة المورّد: التشغيل، مفتاح التوقيع، العمليات الأربع، البناء والتغليف، الحدود |
+| [`OPERATOR-GUIDE.md`](OPERATOR-GUIDE.md) | إجراءات الإصدار اليومية خطوة بخطوة |
+| [`KEY-PROTECTION.md`](KEY-PROTECTION.md) | حماية المفتاح الخاص والنسخ الاحتياطي والتدوير |
+| [`MACHINE-ID.md`](MACHINE-ID.md) | كيف يُحسب معرّف الجهاز ومتى يتغير |
+| [`CLOCK-POLICY.md`](CLOCK-POLICY.md) | سياسة تاريخ الجهاز وحدودها |
+| [`LICENSEE-GUIDE.md`](LICENSEE-GUIDE.md) | ما يقوله العميل ويفعله |
+| [`VERIFICATION.md`](VERIFICATION.md) | ما شُغّل فعلًا وما لم يُشغَّل |
+
 ## ما لا يعتمد عليه الترخيص / What the licence is not bound to
 
 - اسم الشركة أو الاسم التجاري / company or trade name

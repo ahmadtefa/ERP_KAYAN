@@ -1,0 +1,154 @@
+# مولّد مفاتيح الترخيص — Key Generator
+
+أداة المورّد لإصدار مفاتيح ترخيص كيان. **داخلية. لا تُشحن مع البرنامج ولا
+تُثبَّت عند العميل، ولا تُرفق بـ`KAYAN-ERP-Setup.exe`.**
+
+The supplier's tool for issuing KAYAN licence keys. **Internal. Never shipped to
+a customer, never installed with the program, never bundled into
+`KAYAN-ERP-Setup.exe`.**
+
+| | |
+| --- | --- |
+| المصدر — source | `tools/license-generator/kayan-license.mjs` (CLI + كل قواعد الترخيص) و`license-gui.mjs` (نافذة المشغّل) |
+| التغليف — packaging | `tools/license-generator/sea/` (Node Single Executable) |
+| الاختبار — tests | `backend/src/modules/licensing/license-generator.spec.ts` (33 اختبارًا)، و`tools/license-generator/sea/smoke.mjs` على الملف التنفيذي نفسه |
+| النواتج — deliverables | `KAYAN-Key-Generator.exe` + `BUILD-INFO.txt` في مجلد واحد |
+| نظام التشغيل — OS | Windows x64 (الناتج)، وأي نظام فيه Node 20+ (التشغيل من المصدر) |
+| متطلبات التشغيل — runtime | **لا شيء غير الملف التنفيذي**: نسخة Node مضمّنة داخله |
+
+---
+
+## 1. كيف يبدأ المشغّل الأداة / How the operator starts it
+
+**النسخة المغلّفة (Windows):** انقر نقرًا مزدوجًا على `KAYAN-Key-Generator.exe`.
+تفتح الأداة صفحة محلية في المتصفح الافتراضي على `127.0.0.1` بمفتاح عشوائي
+جديد في كل تشغيل. لا تحتاج تثبيت Node ولا أي حزمة، ولا تتصل بالإنترنت.
+
+**Double-click** `KAYAN-Key-Generator.exe`: it serves a local page to the default
+browser on `127.0.0.1`, with a token that changes every start. No Node install,
+no packages, no network.
+
+سطر الأوامر يبقى موجودًا كما هو، ويفيد في الأتمتة والتشخيص:
+
+```
+KAYAN-Key-Generator.exe --help
+KAYAN-Key-Generator.exe version
+KAYAN-Key-Generator.exe gui --no-browser --port 0        (يطبع العنوان ثم ينتظر)
+```
+
+من المصدر (للمطوّر فقط): `node tools/license-generator/kayan-license.mjs`.
+
+## 2. مفتاح التوقيع / The signing key
+
+- **يُحمَّل من مجلد يحدده المشغّل**، لا من داخل الملف التنفيذي:
+  `--home <folder>` أو المتغيّر `KAYAN_LICENSE_HOME`، والافتراضي
+  `%USERPROFILE%\.kayan-license-generator`.
+- الملفات: `private-key.pem` (0600 حيث تدعمه النظم)، `public-key.pem`،
+  `register.json` + `register.mac`، و`audit.log`.
+- **الملف التنفيذي لا يحتوي أي مفتاح**، ولا يطبع المفتاح الخاص في أي أمر، ولا
+  يكتبه في السجل. `init` هو الأمر الوحيد الذي يُنشئ مفتاحًا، ويطلب `--rotate
+  --i-understand` لاستبدال مفتاح قائم.
+- النسخ الاحتياطي: `backup --out <folder>` ينسخ المفاتيح والسجل مع `SHA256SUMS`
+  و`RESTORE.txt`. التفاصيل الكاملة في [`KEY-PROTECTION.md`](KEY-PROTECTION.md).
+- **التدوير** مدعوم بـ`init --rotate --i-understand`، لكنه يجعل كل مفتاح صادر
+  بالمفتاح القديم غير مقبول حتى يُستبدل المفتاح العام في كل جهاز عميل. لا تُدوّر
+  دون هذه الخطة.
+
+## 3. سير العمل / The four operations
+
+| العملية | في النافذة | على سطر الأوامر |
+| --- | --- | --- |
+| تفعيل جهاز | اختر ACTIVATION، الصق كود العميل أو اكتب معرّف الجهاز، المدة، عدد المستخدمين | `issue activation --licence L --request KYNREQ1.… [--term 1y] [--seats 5]` |
+| تجديد | اختر RENEWAL، المدة | `issue renewal --licence L --term 1y` |
+| زيادة/سقف المستخدمين | اختر SEATS، أدخل الزيادة أو السقف الجديد | `issue seats --licence L (--increase 2 \| --cap 8)` |
+| نقل لجهاز آخر | اختر TRANSFER، الصق كود الجهاز الجديد، عدد المستخدمين الحاليين | `issue transfer --licence L --request KYNREQ1.… [--used 3]` |
+
+قبل الإصدار: زر **معاينة** (`--dry-run`) يعرض الحمولة التي ستُوقَّع دون توقيعها
+ودون أي كتابة في السجل.
+
+القواعد المفروضة في الأداة **والبرنامج** (لا تُخترع في الأداة ولا تُتجاوَز):
+
+- **نوع واحد لكل مفتاح**، مكتوب داخل الحمولة الموقّعة.
+- **المدة**: 1m, 3m, 6m, 1y, 2y, 3y, أو `P` (دائم، بلا انتهاء).
+- **حد المستخدمين لا يقل عن 1**: الصفر يعني في البرنامج «بلا حد»، فلا يُسمح به.
+- **الزيادة** تضيف إلى الحد الحالي؛ **السقف** لا يُقبل أقل من عدد المستخدمين.
+- **النقل** يحمل تاريخ الانتهاء وحد المستخدمين وعدد المستخدمين المستخدم، ولا
+  يقبل عدّادًا أكبر من الحد.
+- **مفتاح واحد = منحة واحدة**: إعادة التطبيق مرفوضة في البرنامج.
+
+## 4. تسليم المفتاح للعميل / Delivering a key
+
+1. انسخ المفتاح كاملًا من شاشة النتيجة (**نسخ** أو **حفظ في ملف**).
+2. أرسله كسطر واحد بلا فواصل ولا اقتباسات. أي كسر في السطر يجعل المفتاح مرفوضًا.
+3. سجّل `mark used` في السجل إن استُخدم، أو `revoke` مع سبب إن سُحب.
+4. لا ترسل المفتاح مع المفتاح الخاص، ولا ترفق مجلد المفاتيح بأي حال.
+
+## 5. سجل التدقيق / Audit log
+
+كل عملية تُضاف سطرًا في `audit.log` داخل مجلد المفاتيح:
+
+```json
+{"at":"2026-…","tool":"kayan-license/1.1.0","action":"issue","type":"ACTIVATION",
+ "keyId":"key_…","licenseId":"lic_…","machineId":"KM-…","seats":{"mode":"CAP","value":5},
+ "term":{"kind":"MONTHS","months":12},"result":"issued"}
+```
+
+لا يحتوي: المفتاح الخاص، ولا نص المفتاح، ولا ملاحظة العميل، ولا أي بيانات
+شركية. تكرار الدخول لنفس المفتاح لا يُسجَّل إلا بمعرّفه.
+
+## 6. مفتاح اختبار أم مفتاح إنتاج؟ / Test key or production key?
+
+| | |
+| --- | --- |
+| مفتاح اختبار | يُولَّد في مجلد مؤقت خلال الاختبارات (`mkdtemp`)، ويُحذف بعدها، ولا قيمة له خارجها. البصمة مختلفة في كل تشغيل. |
+| مفتاح إنتاج | الموجود في `%USERPROFILE%\.kayan-license-generator` على جهاز المورّد، ومقترن بالمفتاح العام المثبَّت في البرنامج. |
+
+**تأكد قبل الإرسال:** قارن البصمة في أعلى نافذة الأداة (`XXXX-XXXX-…`) بما تعرضه
+شاشة الترخيص في البرنامج. اختلافها يعني أن الأداة تحمل زوجًا آخر، والمفتاح لن
+يُقبل.
+
+## 7. البناء والاختبار / Build and test
+
+```powershell
+# 1) الاختبارات (البرنامج + المولّد) — تحتاج Node فقط
+cd backend
+npm ci; npx prisma generate; npm run build
+npx jest src/modules/licensing/license-generator.spec.ts --runInBand
+
+# 2) أدوات البناء (مرة واحدة)
+cd ..\tools\license-generator\sea
+npm ci
+
+# 3) الملف التنفيذي وتجربته على الملف نفسه
+node build.mjs --target win32-x64 --out ..\dist
+node smoke.mjs --exe ..\dist\KAYAN-Key-Generator.exe
+```
+
+في GitHub Actions: `.github/workflows/key-generator.yml` يبني على `windows-latest`
+على كل طلب دمج، ويشغّل `smoke.mjs` على الملف الناتج، ويرفع الأثر
+`KAYAN-Key-Generator-Windows-x64` (30 يومًا). **لا خطوة نشر فيه**؛ الأثر اختباري
+وليس إصدارًا.
+
+`build.mjs` يحتاج الحزمة `node.exe` من نفس القوس (Windows x64) — على ويندوز
+يستخدم نسخة Node التي يعمل بها، ومن Linux يلزم `--base-node <path to node.exe>`.
+
+## 8. الحدود والحلول / Limitations and recovery
+
+- **حجم الملف ~120 ميجابايت**: هو نسخة Node كاملة، ثمن الاستقلال عن التثبيت.
+- **لا أيقونة مخصّصة** بعد (تحتاج مورد Windows و`rcedit`)؛ الملف يعمل دونها.
+- **لا توقيع كود (Authenticode)**؛ تنبيه SmartScreen وارد، والحل: اضغط "More
+  info → Run anyway" أو وقّع الملف بشهادة المؤسسة.
+- **ضاع المفتاح الخاص:** لا يصدر مفتاح جديد يُقبل. استعد من النسخة الاحتياطية؛
+  وإن لم توجد، دوّر الزوج وأعد تثبيت المفتاح العام على كل جهاز عميل.
+- **تلف `register.json` أو `register.mac`:** الأداة ترفض العمل. استعد النسخة
+  الاحتياطية؛ لا تُعدّل السجل يدويًا.
+- **نافذة لا تفتح على المتصفح تلقائيًا:** انسخ العنوان الذي يطبعه
+  `gui --no-browser` (أو سطر `KAYAN-GUI-URL=`) والصقه في المتصفح.
+- **النافذة لا تُغني عن الاختبار البصري**: مغطّاة آليًا على مستوى HTTP وعلى
+  الملف التنفيذي، لكن المراجعة البصرية على ويندوز ليست جزءًا من هذه المهمة.
+
+## 9. أين لا يذهب هذا الملف / Where this file does not go
+
+- ليس جزءًا من `KAYAN-ERP-Setup.exe`، ولا من مجلد تثبيت العميل.
+- لا يُرفع كإصدار عام ولا كأثر عام يحتوي مفتاحًا خاصًا (لا يحتوي أصلًا أي مفتاح).
+- لا يُنسخ إلى جهاز عميل، ولا يُشارك عبر مشاركة شبكة غير مشفّرة.

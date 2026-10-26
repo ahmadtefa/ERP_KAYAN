@@ -13,6 +13,14 @@
  *     node kayan-license.mjs licence create --ref "شركة النور" --seats 5 --term 1y
  *     node kayan-license.mjs issue activation --licence lic_xxx --machine KM-...
  *
+ * Run it with no command to open the operator window (a local page in the
+ * default browser); every action there calls the same functions as the
+ * command line below, so the two front ends cannot disagree. `gui` opens it
+ * explicitly and `--no-browser` serves it without opening anything.
+ *
+ * The packaged `KAYAN-Key-Generator.exe` is this file bundled with a Node
+ * runtime; it does not contain a signing key, and it never prints one.
+ *
  * The private key lives in `--home` (default ~/.kayan-license-generator), in a
  * file readable only by the account that created it. Back that directory up:
  * without it, no new key can be issued for an installation, and a lost key
@@ -34,6 +42,7 @@ import {
   verify,
 } from 'node:crypto';
 import {
+  appendFileSync,
   chmodSync,
   copyFileSync,
   existsSync,
@@ -43,9 +52,13 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
+import { spawn } from 'node:child_process';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { startGui } from './license-gui.mjs';
+
+const VERSION = '1.1.0';
 const KEY_PREFIX = 'KYN1';
 const REQUEST_PREFIX = 'KYNREQ1';
 const REGISTER_VERSION = 1;
@@ -76,7 +89,50 @@ const paths = {
   publicKey: join(home, 'public-key.pem'),
   register: join(home, 'register.json'),
   registerMac: join(home, 'register.mac'),
+  audit: join(home, 'audit.log'),
 };
+
+/**
+ * The operator's own record of what was done with the tool.
+ *
+ * One JSON object per line, appended, never rewritten: the register says what
+ * exists, this says who did what and when. It deliberately carries no key
+ * text, no private key, no note and no free text - only identifiers that are
+ * already on the customer's licence screen.
+ */
+function audit(entry) {
+  try {
+    ensureHome();
+    const line = JSON.stringify({
+      at: new Date().toISOString(),
+      tool: `kayan-license/${VERSION}`,
+      ...entry,
+    });
+    appendFileSync(paths.audit, `${line}\n`, { mode: 0o600 });
+  } catch {
+    // A log that cannot be written must never stop a key being issued.
+  }
+}
+
+function readAudit(limit = 50) {
+  try {
+    if (!existsSync(paths.audit)) return [];
+    const lines = readFileSync(paths.audit, 'utf8')
+      .split('\n')
+      .filter((line) => line.trim().length > 0);
+    return lines
+      .slice(-limit)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return { at: null, action: 'unreadable audit line', result: '' };
+        }
+      });
+  } catch {
+    return [];
+  }
+}
 
 function ensureHome() {
   mkdirSync(home, { recursive: true, mode: 0o700 });
@@ -467,15 +523,18 @@ ${der.toString('base64')}
 -----END PUBLIC KEY-----`);
 }
 
-function commandLicenceCreate(args) {
+/**
+ * Registers a licence in the operator's register. `seats` is the limit the
+ * customer bought; every key issued for this licence is measured against it.
+ */
+function createLicence(input) {
   const { privateKey } = requireKeys();
   const register = loadRegister(privateKey);
-  const seats = requiredInt(args.seats, '--seats');
-  const termText = args.term;
-  const term = parseTerm(termText);
+  const seats = requireSeatCount(input.seats, '--seats');
+  const term = parseTerm(input.term);
   const licence = {
     licenseId: newLicenceId(),
-    ref: args.ref ? String(args.ref) : null,
+    ref: input.ref ? String(input.ref) : null,
     seats,
     seatsUsed: 0,
     term: termMonths(term),
@@ -488,9 +547,25 @@ function commandLicenceCreate(args) {
   };
   register.licences[licence.licenseId] = licence;
   saveRegister(privateKey, register);
+  audit({
+    action: 'licence.create',
+    licenseId: licence.licenseId,
+    seats,
+    term: termMonths(term),
+    result: 'registered',
+  });
+  return { licence, term };
+}
+
+function commandLicenceCreate(args) {
+  const { licence, term } = createLicence({
+    ref: args.ref,
+    seats: args.seats,
+    term: args.term,
+  });
   console.log(`تم تسجيل الترخيص. / Licence registered.
   licence   : ${licence.licenseId}
-  seats     : ${seats}
+  seats     : ${licence.seats}
   term      : ${describeTerm(term)}
   customer  : ${licence.ref ?? '(no note)'}
 
@@ -507,14 +582,60 @@ function requiredInt(value, name) {
   return parsed;
 }
 
-function commandIssue(args) {
-  const type = String(args._[1] ?? '').toUpperCase();
+/**
+ * A seat limit of zero is not "no seats": the product reads `limit > 0` before
+ * it refuses anyone, so zero would quietly mean *unlimited*. A key may not
+ * grant that by accident, so a count of people is always at least one.
+ */
+function requireSeatCount(value, name) {
+  const seats = requiredInt(value, name);
+  if (seats < 1) {
+    refuse(
+      `${name} must be at least 1. Zero would not mean "no users": the product ` +
+        'reads a limit of zero as no limit at all.',
+    );
+  }
+  return seats;
+}
+
+/** The machine a key names, from `--machine`, the request code, or both. */
+function resolveMachine(machineValue, requestCode) {
+  const fromMachine = machineValue === undefined || machineValue === true
+    ? null
+    : requireMachine(machineValue);
+  const fromRequest = requestCode ? parseRequestCode(requestCode).machineId : null;
+  if (fromRequest && !MACHINE_ID.test(fromRequest)) {
+    refuse(`The request code carries "${fromRequest}", which is not a machine id.`);
+  }
+  if (fromMachine && fromRequest && fromMachine !== fromRequest) {
+    refuse(
+      `The request code is for machine ${fromRequest}, but --machine says ` +
+        `${fromMachine}. Use the machine id from the request code.`,
+    );
+  }
+  const machine = fromMachine ?? fromRequest;
+  if (!machine) {
+    refuse('--machine is required (the KM-… id from the request code).');
+  }
+  return machine;
+}
+
+/**
+ * Builds and signs one key. This is the only place a key is produced; the
+ * command line and the operator window both call it.
+ *
+ * Returns `{ key, payload, licence, preview }`; with `dryRun` the payload is
+ * returned unsigned and nothing is written, so the operator can look at it
+ * first.
+ */
+function issueKey(input) {
+  const type = String(input.type ?? '').toUpperCase();
   if (!TYPES.includes(type)) {
     refuse('issue needs a type: activation, renewal, seats, or transfer.');
   }
   const { privateKey, publicKey } = requireKeys();
   const register = loadRegister(privateKey);
-  const licence = requireLicence(register, args.licence);
+  const licence = requireLicence(register, input.licenceId);
   const issuedAt = new Date().toISOString();
   const base = {
     v: 1,
@@ -526,9 +647,13 @@ function commandIssue(args) {
 
   let payload;
   if (type === 'ACTIVATION') {
-    const machineId = requireMachine(args.machine);
-    const term = args.term === undefined ? licenceTerm(licence) : parseTerm(args.term);
-    const seats = args.seats === undefined ? licence.seats : requiredInt(args.seats, '--seats');
+    const machineId = resolveMachine(input.machineId, input.request);
+    const term = input.term === undefined || input.term === null
+      ? licenceTerm(licence)
+      : parseTerm(input.term);
+    const seats = input.seats === undefined || input.seats === null
+      ? licence.seats
+      : requireSeatCount(input.seats, '--seats');
     if (seats < licence.seatsUsed) {
       refuse(
         `This licence already records ${licence.seatsUsed} used seat(s); a ` +
@@ -542,44 +667,54 @@ function commandIssue(args) {
       // An activation states the limit itself; it is not an increment.
       seats: { mode: 'CAP', value: seats },
       state: null,
-      note: note(args),
+      note: note({ note: input.note }),
     };
-    licence.machineId = machineId;
-    licence.seats = seats;
-    licence.status = 'active';
-    licence.startsAt = licence.startsAt ?? issuedAt;
-    if (term.kind !== 'PERPETUAL') {
-      licence.expiresAt = addMonths(new Date(), term.months).toISOString();
-      licence.term = term.months;
-    } else {
-      licence.expiresAt = null;
-      licence.term = null;
+    if (!input.dryRun) {
+      licence.machineId = machineId;
+      licence.seats = seats;
+      licence.status = 'active';
+      licence.startsAt = licence.startsAt ?? issuedAt;
+      if (term.kind !== 'PERPETUAL') {
+        licence.expiresAt = addMonths(new Date(), term.months).toISOString();
+        licence.term = term.months;
+      } else {
+        licence.expiresAt = null;
+        licence.term = null;
+      }
+      markSuperseded(register, licence.licenseId, 'ACTIVATION');
     }
-    markSuperseded(register, licence.licenseId, 'ACTIVATION');
   } else if (type === 'RENEWAL') {
-    const term = args.term === undefined ? licenceTerm(licence) : parseTerm(args.term);
+    const term = input.term === undefined || input.term === null
+      ? licenceTerm(licence)
+      : parseTerm(input.term);
     payload = {
       ...base,
       machineId: null,
       term,
       seats: null,
       state: null,
-      note: note(args),
+      note: note({ note: input.note }),
     };
-    if (term.kind === 'PERPETUAL') {
-      licence.expiresAt = null;
-      licence.term = null;
-    } else {
-      const now = new Date();
-      const current = licence.expiresAt ? new Date(licence.expiresAt) : null;
-      const from = current && current.getTime() > now.getTime() ? current : now;
-      licence.expiresAt = addMonths(from, term.months).toISOString();
-      licence.term = term.months;
+    if (!input.dryRun) {
+      if (term.kind === 'PERPETUAL') {
+        licence.expiresAt = null;
+        licence.term = null;
+      } else {
+        const now = new Date();
+        const current = licence.expiresAt ? new Date(licence.expiresAt) : null;
+        const from = current && current.getTime() > now.getTime() ? current : now;
+        licence.expiresAt = addMonths(from, term.months).toISOString();
+        licence.term = term.months;
+      }
+      licence.status = 'active';
     }
-    licence.status = 'active';
   } else if (type === 'SEATS') {
-    const increase = args.increase === undefined ? null : requiredInt(args.increase, '--increase');
-    const cap = args.cap === undefined ? null : requiredInt(args.cap, '--cap');
+    const increase = input.increase === undefined || input.increase === null
+      ? null
+      : requiredInt(input.increase, '--increase');
+    const cap = input.cap === undefined || input.cap === null
+      ? null
+      : requireSeatCount(input.cap, '--cap');
     if ((increase === null) === (cap === null)) {
       refuse('issue seats needs exactly one of --increase N or --cap N.');
     }
@@ -601,22 +736,13 @@ function commandIssue(args) {
         ? { mode: 'INCREASE', value: increase }
         : { mode: 'CAP', value: cap },
       state: null,
-      note: note(args),
+      note: note({ note: input.note }),
     };
-    licence.seats = next;
+    if (!input.dryRun) licence.seats = next;
   } else {
     // TRANSFER: the register's numbers are what travels. They must be
     // corrected from the customer's licence screen if it disagrees.
-    const machineId = requireMachine(args.machine);
-    if (args.request) {
-      const request = parseRequestCode(args.request);
-      if (request.machineId !== machineId) {
-        refuse(
-          `The request code is for machine ${request.machineId}, but --machine ` +
-            `says ${machineId}. Use the machine id from the request code.`,
-        );
-      }
-    }
+    const machineId = resolveMachine(input.machineId, input.request);
     if (!licence.machineId) {
       refuse(
         'This licence has no machine recorded, so there is nothing to transfer ' +
@@ -626,9 +752,15 @@ function commandIssue(args) {
     if (licence.machineId === machineId) {
       refuse('The licence is already recorded on that machine; nothing to transfer.');
     }
-    const used = args.used === undefined
+    const used = input.used === undefined || input.used === null
       ? licence.seatsUsed
-      : requiredInt(args.used, '--used');
+      : requiredInt(input.used, '--used');
+    if (used > licence.seats) {
+      refuse(
+        `--used ${used} is above the recorded seat limit ${licence.seats}. ` +
+          'Correct the licence first: a transfer cannot carry more accounts than the licence allows.',
+      );
+    }
     payload = {
       ...base,
       machineId,
@@ -641,11 +773,17 @@ function commandIssue(args) {
         startsAt: licence.startsAt ?? issuedAt,
         issuedAt,
       },
-      note: note(args),
+      note: note({ note: input.note }),
     };
-    licence.machineId = machineId;
-    licence.seatsUsed = used;
-    markSuperseded(register, licence.licenseId, 'TRANSFER');
+    if (!input.dryRun) {
+      licence.machineId = machineId;
+      licence.seatsUsed = used;
+      markSuperseded(register, licence.licenseId, 'TRANSFER');
+    }
+  }
+
+  if (input.dryRun) {
+    return { key: null, payload, licence, preview: previewOf(payload) };
   }
 
   const key = signPayload(payload, privateKey);
@@ -655,6 +793,57 @@ function commandIssue(args) {
 
   recordKey(register, licence, { payload, key });
   saveRegister(privateKey, register);
+  audit({
+    action: 'issue',
+    type,
+    keyId: payload.keyId,
+    licenseId: payload.licenseId,
+    machineId: payload.machineId,
+    seats: payload.seats ?? null,
+    term: payload.term ?? null,
+    result: 'issued',
+  });
+  return { key, payload, licence, preview: previewOf(payload) };
+}
+
+/** What the operator sees before signing: no key text, no signature. */
+function previewOf(payload) {
+  return {
+    type: payload.type,
+    keyId: payload.keyId,
+    licenseId: payload.licenseId,
+    machineId: payload.machineId,
+    term: payload.term,
+    seats: payload.seats,
+    state: payload.state ?? null,
+    issuedAt: payload.issuedAt,
+    note: payload.note ?? null,
+  };
+}
+
+function commandIssue(args) {
+  const type = String(args._[1] ?? '').toUpperCase();
+  if (!TYPES.includes(type)) {
+    refuse('issue needs a type: activation, renewal, seats, or transfer.');
+  }
+  const { key, payload, licence } = issueKey({
+    type,
+    licenceId: args.licence,
+    machineId: args.machine,
+    request: args.request,
+    term: args.term,
+    seats: args.seats,
+    increase: args.increase,
+    cap: args.cap,
+    used: args.used,
+    note: args.note,
+    dryRun: Boolean(args['dry-run']),
+  });
+
+  if (args['dry-run']) {
+    console.log(`معاينة فقط، لم يُوقّع شيء. / Preview only, nothing was signed.\n${JSON.stringify(previewOf(payload), null, 2)}`);
+    return;
+  }
 
   console.log(`تم إصدار المفتاح. / Key issued.
   type      : ${type}
@@ -740,34 +929,46 @@ Statuses: issued (not yet applied), used (applied by the customer),
 revoked (withdrawn), superseded (replaced by a newer key of the same type).`);
 }
 
-function commandMarkUsed(args) {
+function markUsed(keyId, at) {
   const { privateKey } = requireKeys();
   const register = loadRegister(privateKey);
-  const key = findKey(register, args.key);
+  const key = findKey(register, keyId);
   if (key.status === 'revoked') refuse(`Key ${key.keyId} is revoked; it cannot be marked used.`);
   key.status = 'used';
-  key.usedAt = args.at ? String(args.at) : new Date().toISOString();
+  key.usedAt = at ? String(at) : new Date().toISOString();
   const licence = register.licences[key.licenseId];
   if (licence && key.type === 'ACTIVATION' && key.seats) {
     licence.seats = key.seats.value;
   }
   saveRegister(privateKey, register);
+  audit({ action: 'mark-used', keyId: key.keyId, licenseId: key.licenseId, result: 'used' });
+  return key;
+}
+
+function commandMarkUsed(args) {
+  const key = markUsed(args.key, args.at);
   console.log(`تم تسجيل استخدام المفتاح. / Key ${key.keyId} marked used.`);
 }
 
-function commandRevoke(args) {
+function revokeKey(keyId, reason) {
   const { privateKey } = requireKeys();
   const register = loadRegister(privateKey);
-  const key = findKey(register, args.key);
-  if (!args.reason) {
+  const key = findKey(register, keyId);
+  if (!reason) {
     refuse(
       'A revocation needs --reason: it is the record of why the key was withdrawn.',
     );
   }
   key.status = 'revoked';
   key.revokedAt = new Date().toISOString();
-  key.reason = String(args.reason).slice(0, 300);
+  key.reason = String(reason).slice(0, 300);
   saveRegister(privateKey, register);
+  audit({ action: 'revoke', keyId: key.keyId, licenseId: key.licenseId, result: 'revoked' });
+  return key;
+}
+
+function commandRevoke(args) {
+  const key = revokeKey(args.key, args.reason);
   console.log(
     `تم إلغاء المفتاح. / Key ${key.keyId} revoked: ${key.reason}\n` +
       'Note: a key already applied cannot be un-applied from the customer\'s ' +
@@ -810,7 +1011,7 @@ function commandSetLicence(args) {
     licence.seatsUsed = used;
   }
   if (args.seats !== undefined) {
-    const seats = requiredInt(args.seats, '--seats');
+    const seats = requireSeatCount(args.seats, '--seats');
     if (seats < licence.seatsUsed) {
       refuse(`--seats ${seats} is below the ${licence.seatsUsed} seat(s) in use.`);
     }
@@ -818,14 +1019,35 @@ function commandSetLicence(args) {
   }
   licence.updatedAt = new Date().toISOString();
   saveRegister(privateKey, register);
+  audit({
+    action: 'licence.set',
+    licenseId: licence.licenseId,
+    seats: licence.seats,
+    seatsUsed: licence.seatsUsed,
+    expiresAt: licence.expiresAt,
+    result: 'updated',
+  });
   console.log(`Updated ${licence.licenseId}: expires ${licence.expiresAt ?? 'never'}, seats ${licence.seats}, used ${licence.seatsUsed}.`);
 }
 
-function commandVerify(args) {
+function verifyKeyText(key) {
   const { publicKey } = requireKeys();
+  if (!key || typeof key !== 'string') refuse('verify needs a key.');
+  const { payload, valid } = readPayload(key, publicKey);
+  audit({
+    action: 'verify',
+    keyId: payload.keyId ?? null,
+    licenseId: payload.licenseId ?? null,
+    type: payload.type ?? null,
+    result: valid ? 'valid' : 'INVALID',
+  });
+  return { payload, valid };
+}
+
+function commandVerify(args) {
   const key = args._[1] ?? args.key;
   if (!key) refuse('verify needs a key.');
-  const { payload, valid } = readPayload(key, publicKey);
+  const { payload, valid } = verifyKeyText(key);
   console.log(`signature : ${valid ? 'valid' : 'INVALID'}
 type      : ${payload.type}
 licence   : ${payload.licenseId}
@@ -887,10 +1109,15 @@ function commandHelp() {
   public-key [--base64url]            print the value the product installs
   licence create --ref TEXT --seats N --term 1y
   licence set --licence L [--expires DATE|never] [--seats N] [--used N]
-  issue activation --licence L --machine KM-... [--term 1y] [--seats N] [--cap]
+  gui [--port N] [--no-browser]       open the operator window (also: no command)
+  version                             print the tool version
+  issue activation --licence L [--machine KM-... | --request KYNREQ1...]
+                   [--term 1y] [--seats N]
   issue renewal    --licence L --term 6m
   issue seats      --licence L (--increase N | --cap N)
-  issue transfer   --licence L --machine KM-NEW [--request KYNREQ1...] [--used N]
+  issue transfer   --licence L (--machine KM-NEW | --request KYNREQ1...)
+                   [--used N]
+  issue ... --dry-run                 show the payload without signing it
   show-request KYNREQ1...             read the code the customer sent
   list [--licence L]                  the register of issued keys
   mark-used --key ID [--at ISO]       record that a customer applied a key
@@ -898,18 +1125,205 @@ function commandHelp() {
   verify KYN1...                      check a key against the public key
   backup --out FOLDER                 copy key + register with checksums
 
-Options: --home FOLDER (default ~/.kayan-license-generator), --note TEXT.
+Options: --home FOLDER (default %USERPROFILE%\.kayan-license-generator), --note TEXT.
 
 Terms: 1m 6m 1y 2y 3y, or P for perpetual (never expires).
 Seats: INCREASE adds to the current limit; CAP sets a new limit. The mode is
-signed inside the key, so the product cannot read it as the other one.`);
+signed inside the key, so the product cannot read it as the other one. A limit
+is always at least 1: zero would mean "no limit" to the product, not "no users".
+
+Every action is also written to audit.log beside the register: time, action,
+key id, licence id and result - never the private key, the key text or the note.`);
+}
+
+// ───────────────────────────────────────────────── coming from the window
+
+/** The window's view of the key directory: what exists, never what is secret. */
+function folderSnapshot() {
+  const hasKey = existsSync(paths.privateKey) && existsSync(paths.publicKey);
+  let fingerprint = null;
+  if (hasKey) {
+    try {
+      fingerprint = fingerprintOf(readFileSync(paths.publicKey, 'utf8'));
+    } catch {
+      fingerprint = null;
+    }
+  }
+  let licences = [];
+  let keys = [];
+  if (hasKey) {
+    const { privateKey } = requireKeys();
+    const register = loadRegister(privateKey);
+    licences = Object.values(register.licences);
+    keys = register.keys.map((key) => ({
+      keyId: key.keyId,
+      licenseId: key.licenseId,
+      type: key.type,
+      status: key.status,
+      issuedAt: key.issuedAt,
+      machineId: key.machineId ?? null,
+    }));
+  }
+  return {
+    home,
+    version: VERSION,
+    hasKey,
+    fingerprint,
+    licences,
+    keys,
+    audit: readAudit(50),
+  };
+}
+
+function fingerprintOf(publicKeyText) {
+  return fingerprint(createPublicKey(publicKeyText));
+}
+
+/** Creates the first key pair from the window, after the operator typed CREATE. */
+function initKeyPairFromWindow() {
+  if (existsSync(paths.privateKey)) {
+    refuse(
+      'A signing key already exists in this folder. Creating another would ' +
+        'invalidate every key already issued. Back this folder up instead.',
+    );
+  }
+  commandInit({ _: [] });
+  audit({ action: 'init', result: 'created' });
+  return { fingerprint: fingerprintOf(readFileSync(paths.publicKey, 'utf8')) };
+}
+
+/**
+ * The object the window talks to. Every method is a thin wrapper over the
+ * function the command line uses - there is no second implementation of a
+ * licensing rule anywhere.
+ */
+function guiApi() {
+  const summaryOf = (payload) => {
+    const lines = [
+      `type: ${payload.type}`,
+      `licence: ${payload.licenseId}`,
+      `key id: ${payload.keyId}`,
+      `machine: ${payload.machineId ?? '-'}`,
+      `term: ${payload.term ? describeTerm(payload.term) : '-'}`,
+      `seats: ${payload.seats ? `${payload.seats.mode} ${payload.seats.value}` : '-'}`,
+    ];
+    if (payload.state) {
+      lines.push(
+        `state: expires ${payload.state.expiresAt ?? 'never'}, ` +
+          `limit ${payload.state.seatLimit}, used ${payload.state.seatsUsed}`,
+      );
+    }
+    return lines.join('\n');
+  };
+
+  return {
+    state: () => folderSnapshot(),
+    createLicence: (body) => {
+      const { licence } = createLicence({
+        ref: body?.ref,
+        seats: body?.seats,
+        term: body?.term,
+      });
+      return { licence };
+    },
+    issueKey: (body) => {
+      const result = issueKey({
+        type: body?.type,
+        licenceId: body?.licenceId,
+        machineId: body?.machineId,
+        request: body?.request,
+        term: body?.term,
+        seats: body?.seats,
+        increase: body?.increase,
+        cap: body?.cap,
+        used: body?.used,
+        note: body?.note,
+        dryRun: Boolean(body?.dryRun),
+      });
+      if (body?.dryRun) return { preview: result.preview };
+      return {
+        key: result.key,
+        preview: result.preview,
+        summary: summaryOf(result.payload),
+      };
+    },
+    verifyKey: (key) => verifyKeyText(key),
+    inspectRequest: (code) => {
+      const request = parseRequestCode(code);
+      return {
+        machineId: request.machineId,
+        installId: request.installId ?? null,
+        appVersion: request.appVersion ?? null,
+        requestedAt: request.requestedAt ?? null,
+      };
+    },
+    markUsed: (keyId) => {
+      const key = markUsed(keyId);
+      return { keyId: key.keyId, status: key.status };
+    },
+    revokeKey: (keyId, reason) => {
+      const key = revokeKey(keyId, reason);
+      return { keyId: key.keyId, status: key.status };
+    },
+    initKeyPair: () => initKeyPairFromWindow(),
+  };
+}
+
+/**
+ * Opens the operator window. The server listens on the loopback address only
+ * and every call needs the token printed in the address.
+ */
+async function commandGui(args) {
+  await startGui({
+    home,
+    port: args.port ? Number(args.port) : 0,
+    open: !args['no-browser'],
+    api: guiApi(),
+    openBrowser: (url) => {
+      const command =
+        process.platform === 'win32'
+          ? ['cmd', ['/c', 'start', '', url]]
+          : process.platform === 'darwin'
+            ? ['open', [url]]
+            : ['xdg-open', [url]];
+      return new Promise((resolve, reject) => {
+        const child = spawn(command[0], command[1], {
+          detached: true,
+          stdio: 'ignore',
+        });
+        child.on('error', reject);
+        child.on('spawn', resolve);
+        child.unref();
+      });
+    },
+  });
+  // The window is the process: it stays up until the operator closes it with
+  // Ctrl+C or the console window.
+  return new Promise(() => {});
 }
 
 // ────────────────────────────────────────────────────────────────────── main
 
-function main() {
+
+async function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0];
+
+  // `--help` is consumed as an option by the parser, so check both spellings;
+  // without this, a bare `--help` would be read as "no command" and open the
+  // operator window.
+  if (args.help || command === '-h' || command === 'help') {
+    commandHelp();
+    return;
+  }
+  if (command === 'version' || command === '--version') {
+    console.log(`kayan-license ${VERSION} (node ${process.version}, ${process.platform})`);
+    return;
+  }
+  if (command === 'gui') {
+    await commandGui(args);
+    return;
+  }
   if (command === 'licence') {
     const action = args._[1];
     if (action === 'create') return commandLicenceCreate(args);
@@ -918,7 +1332,10 @@ function main() {
   }
 
   const run = {
-    init: commandInit,
+    init: (initArgs) => {
+      commandInit(initArgs);
+      audit({ action: 'init', result: initArgs.rotate ? 'rotated' : 'created' });
+    },
     'public-key': commandPublicKey,
     issue: commandIssue,
     'show-request': commandShowRequest,
@@ -933,18 +1350,22 @@ function main() {
   if (!run) {
     if (command) {
       console.error(`Unknown command "${command}".`);
+      commandHelp();
+      process.exitCode = 2;
+      return;
     }
-    commandHelp();
-    process.exitCode = command ? 2 : 0;
+    // No command at all: the operator window. That is what the packaged
+    // executable does when the operator double-clicks it.
+    await commandGui(args);
     return;
   }
 
-  run(args);
+  await run(args);
 }
 
-function runCli() {
+async function runCli() {
   try {
-    main();
+    await main();
   } catch (error) {
     if (error instanceof Refusal) {
       console.error(`\n  ${error.message}\n`);
@@ -961,4 +1382,25 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   runCli();
 }
 
-export { signPayload, readPayload, parseRequestCode, parseTerm, addMonths };
+export {
+  VERSION,
+  runCli,
+  main,
+  signPayload,
+  readPayload,
+  parseRequestCode,
+  parseTerm,
+  addMonths,
+  createLicence,
+  issueKey,
+  verifyKeyText,
+  markUsed,
+  revokeKey,
+  folderSnapshot,
+  readAudit,
+  previewOf,
+  requireSeatCount,
+  guiApi,
+  home,
+  paths,
+};

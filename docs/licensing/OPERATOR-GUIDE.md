@@ -97,6 +97,19 @@ node kayan-license.mjs issue transfer --licence lic_xxx --machine KM-NEW-... --r
   ولا يستطيع العميل نقل الترخيص بنفسه.
 - مفتاح النقل لا يصلح للزيادة ولا للتجديد، والبرنامج يرفض تقديمه في هذين الموضعين.
 
+## البدء السريع / Start here
+
+النافذة: شغّل `KAYAN-Key-Generator.exe` (أو `node kayan-license.mjs` من نسخة
+المصدر). الصفحة المحلية تعرض حالة مفتاح التوقيع وبصمته، وتسمح بإنشاء الترخيص،
+وإصدار المفتاح بمعاينة قبل التوقيع، ونسخه أو حفظه في ملف، وفحص أي مفتاح،
+ومتابعة السجل وسجل التدقيق. كل الأوامر أدناه تبقى صالحة كما هي.
+
+The window: run `KAYAN-Key-Generator.exe`. The local page shows the signing
+key's fingerprint, registers licences, issues keys with a preview before
+signing, copies or saves the key, inspects any key, and lists the register and
+the audit log. Every command below still works unchanged.
+التفاصيل الكاملة في [`GENERATOR.md`](GENERATOR.md).
+
 ## ما يحمله المفتاح / What a key carries
 
 المفتاح الموقّع يحمل: رقم الترخيص، ومعرّف الجهاز (للتفعيل والنقل فقط)، والمدة،
