@@ -171,7 +171,8 @@ not run is listed at the end and is **not** claimed as verified.
 | محتوى الحزمة | `package=com.kayan.kayan_key_generator`، `versionName=1.1.0`، `launchable-activity=com.kayan.kayan_key_generator.MainActivity`، targetSdk 36، و`libapp.so`/`libflutter.so` لـarm64-v8a وarmeabi-v7a وx86_64، و`classes.dex` |
 | فحص المفتاح داخل الحزمة | لا مادة مفتاح خاص (بادئة Ed25519 PKCS#8 ولا كتل RSA/EC/OpenSSH)؛ عبارة `BEGIN PRIVATE KEY` الظاهرة هي نص التلميح بجانب مربع اللصق |
 | الأثر المنشور | `KAYAN-Key-Generator-Android-apk` — 23,775,861 بايت، `sha256:c48163723b7da971e404f273cb20528a03b2bde7b6570da31bff09768293456a`، صالح حتى 2026-11-25 |
-| التثبيت والتشغيل على أندرويد (`Install and launch the APK on Android`، تشغيل 40279868268) | **نجح**: تثبيت الـAPK على محاكي Android 34 (x86_64)، ثم `am start -W` للنشاط، ثم بقاء العملية حيّة بعد 20 ثانية، وصورة شاشة (29,162 بايت) في أثر `KAYAN-Key-Generator-Android-launched` |
+| التثبيت والتشغيل على أندرويد (`Install and launch the APK on Android`، تشغيل 40279868268 على `394e5fd`) | **نجح**: تثبيت الـAPK على محاكي Android 34 (x86_64)، ثم `am start -W` للنشاط، ثم صورة شاشة من الجهاز (29,162 بايت) في أثر `KAYAN-Key-Generator-Android-launched`. كود التطبيق لم يتغيّر بعد هذا التشغيل (التغييرات اللاحقة في سير العمل والتوثيق فقط). |
+| إعادة محاولة المحاكي بعد ذلك (40284373060، 40286503917، 40288712293) | **فشلت لأسباب البنية التحتية لا التطبيق**: مهلة إقلاع المحاكي، ثم `adb` يخرج قبل تنفيذ أي سطر من الفحص. المهمة اختيارية (تُطلب بوسم `[android-emulator]` في رسالة الالتزام أو يدويًا)، ولا تُشغَّل في التشغيلات العادية. |
 
 **مفتاح الاختبار:** يُولَّد داخل مجلد مؤقت لحظة التشغيل ويُحذف بعده؛ لا مفتاح
 إنتاج في أي اختبار أو أثر منشور.

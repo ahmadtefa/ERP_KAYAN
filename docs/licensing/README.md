@@ -12,7 +12,7 @@ the licence is derived from the company's name, tax number or books.
 
 | | |
 | --- | --- |
-| [`GENERATOR.md`](GENERATOR.md) | أداة المورّد: التشغيل، مفتاح التوقيع، العمليات الأربع، البناء والتغليف، الحدود |
+| [`GENERATOR.md`](GENERATOR.md) | أداة المورّد بنسختيها — `KAYAN-Key-Generator.exe` على ويندوز و`KAYAN-Key-Generator-Android.apk` على أندرويد: التشغيل، مفتاح التوقيع، العمليات الأربع، البناء والتغليف، الحدود |
 | [`OPERATOR-GUIDE.md`](OPERATOR-GUIDE.md) | إجراءات الإصدار اليومية خطوة بخطوة |
 | [`KEY-PROTECTION.md`](KEY-PROTECTION.md) | حماية المفتاح الخاص والنسخ الاحتياطي والتدوير |
 | [`MACHINE-ID.md`](MACHINE-ID.md) | كيف يُحسب معرّف الجهاز ومتى يتغير |
