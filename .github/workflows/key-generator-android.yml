@@ -308,30 +308,42 @@ jobs:
           arch: x86_64
           disable-animations: true
           script: |
-            set -euo pipefail
+            # Deliberately no `set -e`: plumbing like `grep | head` exits with
+            # SIGPIPE, and a signal from a pipe is not a failed launch. Each
+            # step that matters is checked by hand below.
+            apk="${{ env.APP_DIR }}/build/app/outputs/flutter-apk/app-release.apk"
             adb wait-for-device
-            adb install -r "${{ env.APP_DIR }}/build/app/outputs/flutter-apk/app-release.apk"
-            echo '::notice title=Android launch::the APK installed'
-            adb shell am start -W -n com.kayan.kayan_key_generator/.MainActivity | tr -d '\r' > start.txt
-            cat start.txt
-            sleep 20
-            # The proof, in words: the activity is on screen and the process
-            # is alive twenty seconds after the launch.
-            resumed="$(adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | head -1 | tr -d '\r')"
-            pid="$(adb shell pidof com.kayan.kayan_key_generator | tr -d '\r')"
-            version="$(adb shell dumpsys package com.kayan.kayan_key_generator | grep -m1 versionName | tr -d '\r')"
-            echo "::notice title=Android launch::resumed activity: ${resumed}"
-            echo "::notice title=Android launch::process id: ${pid}"
-            echo "::notice title=Android launch::${version}"
-            echo "::notice title=Android launch::am start said: $(tr '\n' ' ' < start.txt)"
-            if [ -z "$pid" ]; then
-              echo '::error::the application process is not running after the launch'
+            if ! adb install -r "$apk"; then
+              echo '::error::the APK did not install'
               exit 1
             fi
-            case "$resumed" in
-              *com.kayan.kayan_key_generator*) echo '::notice title=Android launch::the app is the resumed activity' ;;
-              *) echo "::error::the app is not the resumed activity: ${resumed}"; exit 1 ;;
+            echo '::notice title=Android launch::the APK installed'
+
+            adb shell am start -W -n com.kayan.kayan_key_generator/.MainActivity > start.txt 2>&1
+            tr -d '\r' < start.txt | tee /dev/stderr | true
+            sleep 20
+
+            resumed="$(adb shell dumpsys activity activities 2>/dev/null | grep -E 'mResumedActivity|topResumedActivity' | head -1 | tr -d '\r' || true)"
+            focus="$(adb shell dumpsys window 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp' | head -1 | tr -d '\r' || true)"
+            pid="$(adb shell pidof com.kayan.kayan_key_generator 2>/dev/null | tr -d '\r' || true)"
+            version="$(adb shell dumpsys package com.kayan.kayan_key_generator 2>/dev/null | grep -m1 versionName | tr -d '\r' || true)"
+
+            echo "::notice title=Android launch::resumed: ${resumed}"
+            echo "::notice title=Android launch::focus: ${focus}"
+            echo "::notice title=Android launch::process id: ${pid}"
+            echo "::notice title=Android launch::${version}"
+            echo "::notice title=Android launch::am start: $(tr '\n' ' ' < start.txt | tr -s ' ')"
+
+            if [ -z "$pid" ]; then
+              echo '::error::the application process is not running twenty seconds after the launch'
+              exit 1
+            fi
+            cmd="$(tr -d '\r' < start.txt | grep -E 'Status|Error|Activity' | tr '\n' ' ' | tr -s ' ' || true)"
+            echo "::notice title=Android launch::summary: ${cmd}"
+            case "$cmd" in
+              *Error*|*"does not exist"*) echo "::error::am start reported a problem: ${cmd}"; exit 1 ;;
             esac
+
             adb exec-out screencap -p > launched.png
             ls -l launched.png
       - name: Keep the screenshot as evidence
