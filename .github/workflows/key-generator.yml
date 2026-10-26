@@ -66,17 +66,33 @@ jobs:
         working-directory: tools/license-generator/sea
         run: node build.mjs --target win32-x64 --out "$env:GITHUB_WORKSPACE\dist\key-generator"
 
-      # The log travels with the artifact: a job that says "success" is a
-      # verdict, but the operator's own evidence is the executable plus what
-      # it printed when it ran on this machine.
+      # The script writes its own log. A pipeline through Tee-Object hides the
+      # real exit code and the reason for a failure, so nothing is piped here:
+      # the step fails on the executable's own exit code, and the log is
+      # published in the next step whatever happens.
       - name: Smoke-test the packaged executable
-        shell: powershell
+        run: >-
+          node tools/license-generator/sea/smoke.mjs
+          --exe "dist/key-generator/KAYAN-Key-Generator.exe"
+          --log "dist/key-generator/SMOKE-TEST.txt"
+
+      - name: Publish the smoke-test log
+        if: always()
+        shell: pwsh
         run: |
-          $log = 'dist\key-generator\SMOKE-TEST.txt'
-          node tools/license-generator/sea/smoke.mjs --exe "dist/key-generator/KAYAN-Key-Generator.exe" *>&1 |
-            Tee-Object -FilePath $log
-          if ($LASTEXITCODE -ne 0) { throw "the smoke test failed (exit $LASTEXITCODE)" }
-          Get-Content $log | Write-Host
+          $log = 'dist/key-generator/SMOKE-TEST.txt'
+          if (-not (Test-Path -LiteralPath $log)) {
+            Write-Host '::warning::the smoke test wrote no log'
+            exit 0
+          }
+          Get-Content -LiteralPath $log | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          $lines = Get-Content -LiteralPath $log
+          $fails = @($lines | Where-Object { $_ -match '^FAIL' })
+          foreach ($line in ($fails | Select-Object -First 10)) {
+            Write-Host "::error title=Key generator smoke test::$line"
+          }
+          $summary = @($lines | Where-Object { $_ -match '^\d+ passed' })
+          if ($summary.Count -gt 0) { Write-Host "::notice title=Key generator smoke test::$($summary[-1])" }
 
       - name: Report what is in the package
         shell: powershell

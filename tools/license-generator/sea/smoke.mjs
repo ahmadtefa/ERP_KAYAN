@@ -20,6 +20,7 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -27,7 +28,6 @@ import {
   readdirSync,
   rmSync,
   statSync,
-  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -49,14 +49,36 @@ const exe = resolve(arg('exe', join(HERE, '..', 'dist', process.platform === 'wi
 let failures = 0;
 let passes = 0;
 
+/**
+ * The log file is the evidence: a CI step that says "success" is a verdict,
+ * but what the executable printed is what a person can check later. Writing it
+ * from inside the test avoids depending on how a shell redirects output.
+ */
+const logPath = arg('log');
+if (logPath) {
+  mkdirSync(dirname(resolve(logPath)), { recursive: true });
+  rmSync(logPath, { force: true });
+}
+
+function say(line = '') {
+  console.log(line);
+  if (logPath) {
+    try {
+      appendFileSync(logPath, `${line}\n`);
+    } catch {
+      /* the console still has it */
+    }
+  }
+}
+
 function ok(name, detail = '') {
   passes += 1;
-  console.log(`PASS  ${name}${detail ? ` — ${detail}` : ''}`);
+  say(`PASS  ${name}${detail ? ` — ${detail}` : ''}`);
 }
 
 function bad(name, detail) {
   failures += 1;
-  console.log(`FAIL  ${name} — ${detail}`);
+  say(`FAIL  ${name} — ${detail}`);
 }
 
 async function check(name, body) {
@@ -126,7 +148,7 @@ async function startWindow(home, port) {
 }
 
 async function main() {
-  console.log(`Key generator smoke test\n  executable: ${exe}\n`);
+  say(`Key generator smoke test\n  executable: ${exe}\n  host: ${process.platform}-${process.arch}\n  at: ${new Date().toISOString()}\n`);
 
   if (!existsSync(exe)) {
     console.error(`The executable does not exist: ${exe}`);
@@ -206,8 +228,10 @@ async function main() {
       const product = await import(pathToFileURL(BACKEND_KEY).href);
       const publicKey = product.loadPublicKey(readFileSync(join(home, 'public-key.pem'), 'utf8'));
       const parts = keyText.split('.');
-      const last = parts[2].slice(-1) === 'A' ? 'B' : 'A';
-      const tampered = `${parts[0]}.${parts[1]}.${parts[2].slice(0, -1)}${last}`;
+      // Flip the FIRST character: the last one of a 64-byte signature
+      // carries only two bits, so A<->B there can decode to the same bytes.
+      const first = parts[2][0] === 'A' ? 'B' : 'A';
+      const tampered = `${parts[0]}.${parts[1]}.${first}${parts[2].slice(1)}`;
       let refused = false;
       try {
         product.verifyKey(tampered, publicKey);
@@ -300,11 +324,11 @@ async function main() {
     }
   }
 
-  console.log(`\n${passes} passed, ${failures} failed`);
+  say(`\n${passes} passed, ${failures} failed`);
   if (failures > 0) process.exitCode = 1;
 }
 
 main().catch((error) => {
-  console.error(`The smoke test could not run: ${error?.stack ?? error}`);
+  say(`FAIL  the smoke test could not run — ${error?.stack ?? error}`);
   process.exit(2);
 });

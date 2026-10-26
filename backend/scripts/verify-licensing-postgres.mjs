@@ -413,6 +413,27 @@ async function activationAndSeats() {
   const licenseId = `lic_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
   const instance = await installation({ database: DATABASES.runtime });
   try {
+    await check('R0 a tampered key and a key signed by someone else are refused', async () => {
+      const original = key({ licenseId: `lic_${'e'.repeat(16)}` });
+      const parts = original.split('.');
+      // Flip the FIRST character: the last one of a 64-byte signature
+      // carries only two bits, so A<->B there can decode to the same bytes.
+      const first = parts[2][0] === 'A' ? 'B' : 'A';
+      const tampered = `${parts[0]}.${parts[1]}.${first}${parts[2].slice(1)}`;
+      const altered = await refusal(instance.service.activate(tampered));
+      assertCode(altered, 'LICENSE_KEY_BAD_SIGNATURE');
+
+      const stranger = generateKeyPairSync('ed25519');
+      const foreign = signPayload(
+        payload({ licenseId: `lic_${'d'.repeat(16)}` }),
+        stranger.privateKey,
+      );
+      const second = await refusal(instance.service.activate(foreign));
+      assertCode(second, 'LICENSE_KEY_BAD_SIGNATURE');
+      assertEqual(await count(connection, 'SELECT count(*) FROM license_installations'), 0, 'nothing was installed by a refused signature');
+      return 'both refused before touching the licence';
+    });
+
     const activationKey = key({ licenseId });
 
     await check('R1 an activation key installs a one-year licence with its seat limit', async () => {
@@ -481,25 +502,6 @@ async function activationAndSeats() {
       const again = await refusal(instance.service.activate(activationKey));
       assertCode(again, 'LICENSE_KEY_ALREADY_USED');
       return 'refused by the key ledger and by the protected state file';
-    });
-
-    await check('R5b a tampered key and a key signed by someone else are refused', async () => {
-      const original = key({ licenseId: `lic_${'e'.repeat(16)}` });
-      const parts = original.split('.');
-      const last = parts[2].slice(-1) === 'A' ? 'B' : 'A';
-      const tampered = `${parts[0]}.${parts[1]}.${parts[2].slice(0, -1)}${last}`;
-      const first = await refusal(instance.service.activate(tampered));
-      assertCode(first, 'LICENSE_KEY_BAD_SIGNATURE');
-
-      const stranger = generateKeyPairSync('ed25519');
-      const foreign = signPayload(
-        payload({ licenseId: `lic_${'d'.repeat(16)}` }),
-        stranger.privateKey,
-      );
-      const second = await refusal(instance.service.activate(foreign));
-      assertCode(second, 'LICENSE_KEY_BAD_SIGNATURE');
-      assertEqual(await count(connection, 'SELECT count(*) FROM license_installations'), 1, 'licence rows');
-      return 'both refused before touching the licence';
     });
 
     let firstUserId = null;
