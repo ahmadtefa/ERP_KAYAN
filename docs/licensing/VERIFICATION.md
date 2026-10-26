@@ -149,6 +149,7 @@ not run is listed at the end and is **not** claimed as verified.
 | `npm run build` + `npx jest` على `91734e3` | تحقق التغيير الأخير على `main` السكربت والاختبار فقط: `tsc` بلا أخطاء، و**605 نجحت، 8 متخطاة، 613 إجمالًا** |
 | `KAYAN_TEST_ADMIN_URL=… node scripts/verify-licensing-postgres.mjs` على `91734e3` | **46 فحصًا، 0 فشل** محليًا وعلى PostgreSQL 16 في CI (`ERP KAYAN CI` رقم 40258850677) |
 | `.github/workflows/key-generator.yml` على `windows-latest` (`Key Generator` رقم 40258850715) | بناء `KAYAN-Key-Generator.exe`، ثم تشغيله ونجاح كل الفحوص العشرة، ثم رفع `KAYAN-Key-Generator-Windows-x64` — 34,349,745 بايت، `sha256:ffcf0eeb339cda1acb7cb9baee4306562e88a94bad1bc9112dd5419bb2c720d2`، صالح حتى 2026-11-25 |
+| `Key Generator (Android APK)` رقم 40279162788 على `98d9bc9` | `flutter analyze` بلا ملاحظات، و**39 اختبارًا بلا فشل**، والفحص المتبادل في الاتجاهين، وبناء `KAYAN-Key-Generator-Android.apk` ورفعه |
 | `Windows Installer` رقم 40258850668 على `91734e3` | المُثبِّت بُني وحُصِّل كأثر: 345,311,088 بايت، `sha256:ae2ba609098a3b58706d74a13d340627ef553f126e121ba4d6ac039dff537291`، صالح حتى 2026-11-09 |
 
 ما يثبته فحص الملف التنفيذي: أنه يبدأ ويطبع نسخته، وأن `--help` لا يفتح نافذة،
@@ -157,6 +158,20 @@ not run is listed at the end and is **not** claimed as verified.
 تغيير حرف، وأن النافذة تخدم صفحتها وترفض النداء بلا رمز، وأن `audit.log` لا
 يحوي المفتاح ولا المفتاح الخاص ولا ملاحظة العميل، وأن الملف التنفيذي لا يحوي
 كتلة `BEGIN PRIVATE KEY`.
+
+**نسخة أندرويد — ما قيس فعلًا:**
+
+| الأمر | النتيجة |
+| --- | --- |
+| `flutter analyze` (SDK الحقيقي) | بلا ملاحظات |
+| `flutter test` | **39 اختبارًا، 0 فشل**: إعادة تشغيل مخرجات الأداة على ويندوز بايت ببايت، وقواعد الترخيص، ونافذة المشغّل |
+| `dart run tool/dart_side.dart emit` ← `node tool/verify_with_product.mjs` | منتج البرنامج يقبل كل مفتاح أصدره كود الهاتف (5 مفاتيح)، والبصمة واحدة، والأداة على ويندوز تفتح سجل الهاتف وتُصدر فيه مفتاحًا، والبرنامج يقبل ذلك المفتاح |
+| `dart run tool/dart_side.dart verify` على مفتاح أصدرته الأداة على ويندوز | صالح في كود الهاتف — الاتجاه المعاكس |
+| `flutter build apk --release` | نجح: `KAYAN-Key-Generator-Android.apk` — 51,353,580 بايت، `sha256:b494d822f43f81fe15284dae14b97224bb242e50476db49f301730838d41b2d2` |
+| محتوى الحزمة | `package=com.kayan.kayan_key_generator`، `versionName=1.1.0`، `launchable-activity=com.kayan.kayan_key_generator.MainActivity`، targetSdk 36، و`libapp.so`/`libflutter.so` لـarm64-v8a وarmeabi-v7a وx86_64، و`classes.dex` |
+| فحص المفتاح داخل الحزمة | لا مادة مفتاح خاص (بادئة Ed25519 PKCS#8 ولا كتل RSA/EC/OpenSSH)؛ عبارة `BEGIN PRIVATE KEY` الظاهرة هي نص التلميح بجانب مربع اللصق |
+| الأثر المنشور | `KAYAN-Key-Generator-Android-apk` — 23,775,861 بايت، `sha256:c48163723b7da971e404f273cb20528a03b2bde7b6570da31bff09768293456a`، صالح حتى 2026-11-25 |
+| التثبيت والتشغيل على أندرويد (`Install and launch the APK on Android`، تشغيل 40279868268) | **نجح**: تثبيت الـAPK على محاكي Android 34 (x86_64)، ثم `am start -W` للنشاط، ثم بقاء العملية حيّة بعد 20 ثانية، وصورة شاشة (29,162 بايت) في أثر `KAYAN-Key-Generator-Android-launched` |
 
 **مفتاح الاختبار:** يُولَّد داخل مجلد مؤقت لحظة التشغيل ويُحذف بعده؛ لا مفتاح
 إنتاج في أي اختبار أو أثر منشور.
@@ -200,3 +215,11 @@ not run is listed at the end and is **not** claimed as verified.
    ويندوز)؛ تنبيه SmartScreen وارد.
 9. `eslint` غير مهيّأ في المستودع (لا ملف إعداد، والسكربت يستدعي حزمة غير
    مثبّتة)، فلم يُشغَّل فحص ساكن.
+10. **نسخة أندرويد على هاتف حقيقي:** ثُبِّتت واشتغلت على **محاكي** Android 34 على
+    runner، لا على هاتف بيد إنسان. الفرق العملي: البصمة على أجهزة ARM الحقيقية
+    تُقرأ من `MachineGuid`-المكافئ في البرنامج لا من المحاكي — وهو أمر يخصّ
+    التحقق في البرنامج لا إصدار المفتاح، لكن «على هاتف» ما زالت **غير مُختبرة**.
+11. **المراجعة البصرية لواجهة أندرويد:** مغطّاة باختبار واجهة واحد ولقطة شاشة من
+    المحاكي (أثر)، ولم تُراجَع بالعين على هاتف.
+12. **APK للأجهزة:** الحزمة universal (arm64 + armv7 + x86_64)، ولم تُبنَ
+    `--split-per-abi` ولم تُوقَّع بشهادة مؤسسة، فغير قابلة للنشر على المتجر.

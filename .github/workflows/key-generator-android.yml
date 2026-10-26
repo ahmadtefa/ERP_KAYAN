@@ -308,14 +308,32 @@ jobs:
           arch: x86_64
           disable-animations: true
           script: |
+            set -euo pipefail
             adb wait-for-device
             adb install -r "${{ env.APP_DIR }}/build/app/outputs/flutter-apk/app-release.apk"
-            adb shell am start -W -n com.kayan.kayan_key_generator/.MainActivity
+            echo '::notice title=Android launch::the APK installed'
+            adb shell am start -W -n com.kayan.kayan_key_generator/.MainActivity | tr -d '\r' > start.txt
+            cat start.txt
             sleep 20
-            adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | head -3
-            adb shell pidof com.kayan.kayan_key_generator
+            # The proof, in words: the activity is on screen and the process
+            # is alive twenty seconds after the launch.
+            resumed="$(adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | head -1 | tr -d '\r')"
+            pid="$(adb shell pidof com.kayan.kayan_key_generator | tr -d '\r')"
+            version="$(adb shell dumpsys package com.kayan.kayan_key_generator | grep -m1 versionName | tr -d '\r')"
+            echo "::notice title=Android launch::resumed activity: ${resumed}"
+            echo "::notice title=Android launch::process id: ${pid}"
+            echo "::notice title=Android launch::${version}"
+            echo "::notice title=Android launch::am start said: $(tr '\n' ' ' < start.txt)"
+            if [ -z "$pid" ]; then
+              echo '::error::the application process is not running after the launch'
+              exit 1
+            fi
+            case "$resumed" in
+              *com.kayan.kayan_key_generator*) echo '::notice title=Android launch::the app is the resumed activity' ;;
+              *) echo "::error::the app is not the resumed activity: ${resumed}"; exit 1 ;;
+            esac
             adb exec-out screencap -p > launched.png
-            adb shell dumpsys package com.kayan.kayan_key_generator | grep -E 'versionName|firstInstallTime' | head -3
+            ls -l launched.png
       - name: Keep the screenshot as evidence
         if: always()
         uses: actions/upload-artifact@v4
