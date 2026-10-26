@@ -42,6 +42,22 @@ A licence is bound to a machine, a user-account limit, and a term.
 المطلوب للعملية قبل أن يغيّر أي شيء. مفتاح زيادة المستخدمين لا يفعّل جهازًا،
 ومفتاح التفعيل لا يتجاوز عدّاد المقاعد.
 
+## متى يُفعَّل الإلزام فعلًا / What actually switches enforcement on
+
+الترخيص موجود في الشيفرة، لكن **الإلزام** يُقرَّر عند بناء المُثبِّت وعند تثبيته،
+لا من متغيّر بيئة يضبطه من يشغّل البرنامج:
+
+| الطبقة | القاعدة |
+| --- | --- |
+| البناء (`build-installer.ps1`) | لا يُبنى مُثبِّت للعميل بلا `public-key.pem`؛ البناء بلا مفتاح يُرفض إلا بـ `-EvaluationBuild` صريح، ويُسجَّل في `runtime-manifest.json` أن النسخة تقييمية ولا تُلزم |
+| التثبيت (`Add-LicenceSettings`) | إذا شحن البناء مفتاحًا عامًّا نُسخ إلى `%ProgramData%\KAYAN-ERP\license\public-key.pem` وكُتب معه `enforcement.required`، وصار `LICENSE_ENFORCEMENT=enforce` في إعدادات الجهاز |
+| الخادم (`LicensingService`) | وجود الملفين في المجلد المحمي **يعني enforce دائمًا**: لا يستطيع `LICENSE_ENFORCEMENT=warn` ولا `LICENSE_STATE_DIR` ولا `LICENSE_PUBLIC_KEY` ولا `LICENSE_MACHINE_ID` في بيئة المستخدم أن يخفض الإلزام أو يبدّل المفتاح أو يزوّر معرّف الجهاز |
+| فشل قراءة الترخيص | قراءة فاشلة تُغلق العمل (fail closed) ولا تُفتح؛ غياب الترخيص ليس ترخيصًا |
+| سطح المكتب | قبل فتح البرنامج يتحقق من `/api/v1/health`: اسم قاعدة البيانات التي يقرأها الخادم، وأن وضع الترخيص `enforce` عندما يطلبه الجهاز؛ ولا يتصل بخادم محلي آخر لا يُلزم |
+
+مجلد `%ProgramData%\KAYAN-ERP\license` لا يملك الكتابة فيه إلا `Administrators`
+وحساب خدمة PostgreSQL، ولهذا اختير ليكون مرساة الثقة.
+
 ## التوقيع / Signing
 
 - Ed25519. المفتاح الخاص موجود **فقط** في أداة المورّد (`tools/license-generator`).

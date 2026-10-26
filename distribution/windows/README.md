@@ -30,6 +30,38 @@ The installer itself (not the build) requires elevation because it registers a P
 3. On first app start, the existing backend preparation path applies checked-in Prisma migrations and asks the first user to choose the initial administrator credentials. It does not seed a default user or reset an existing database.
 4. The Flutter client starts the bundled Nest API with the bundled Node runtime, waits for `/api/v1/health`, and renders the interface. The API is bound to loopback and serves the included web build from the same origin as well.
 
+### The company page: a new company never reuses the old database
+
+Setup asks one question: a new company, or the one already on this computer.
+
+- **A new company** creates a database of its own (`erp_kayan_<timestamp>`) with
+  the current schema and nothing in it. If this computer already holds a
+  company, Setup first takes a `pg_dump` backup of it, verifies that
+  `pg_restore --list` can read the file back, and leaves the old database
+  exactly as it is. It never empties, renames or reuses it, so the previous
+  company can always be recovered.
+- **An existing company** verifies that the database on disk really is this
+  installation's own (owner, role, tables), backs it up, and upgrades it in
+  place.
+
+Every write of `kayan.env` carries `KAYAN_SETTINGS_GENERATION`, which only
+grows. Two copies exist (the protected one in `%ProgramData%` and the per-user
+one), and the program reads the newer one, so a profile that could not be
+updated can never point the program at the previous company. The last thing
+Setup does is prove the program can reach the database its settings name
+(`KAYAN-RUNTIME-VERIFIED`); it reports success only after that.
+
+### Licence enforcement and evaluation builds
+
+A product Setup carries the operator's `public-key.pem` and switches licence
+enforcement on. `build-installer.ps1` **refuses** to build a customer installer
+without a key; `-EvaluationBuild` builds one explicitly for development and CI,
+and that fact is written into `runtime-manifest.json` (`licenseEnforcement`).
+An installed copy whose protected licence folder holds a key or the
+`enforcement.required` marker always enforces, whatever the user's environment
+says. To produce a real release, place the operator's `public-key.pem` beside
+`build-installer.ps1` and run it without `-EvaluationBuild`.
+
 ### Two Windows rules the runtime setup has to respect
 
 **PostgreSQL refuses administrative permissions.** The server aborts with
@@ -70,5 +102,7 @@ The first install needs enough disk for the bundled installer plus a PostgreSQL 
 ## Verification boundary
 
 The build pipeline validates artifact hashes, staged entry points, required dependencies, absence of development `.env`, and emits a runtime manifest. The **Windows Installer** workflow goes further: on a real `windows-latest` machine it compiles the `.exe`, installs it silently, and then verifies the installed product with `scripts/smoke-test-installed-windows.ps1` - installer exit code, the `KayanERPPostgreSQL` service exists and runs as a non-administrator account, `pg_isready` on `127.0.0.1:5432`, the cluster really was initialized in `%ProgramData%\KAYAN-ERP\PostgreSQL\data`, the production database preparation, a disposable CI administrator, and a second upgrade/reinstall that must preserve a disposable company-data row. It then launches the installed `erp_kayan.exe`, verifies `/api/v1/health` reports `status=ok` and `database=up`, and logs in against the installed database. A build that only compiles is never treated as proof.
+
+The same run also proves the reported defects are gone: choosing "a new company" over a computer that already holds one produces a new empty database while the previous company and its backup stay intact, the installed program is proven to be connected to that new database, and - with a throwaway CI signing key installed into the package - an unlicensed installation refuses every business request, a key for another machine is refused, a valid key activates it, the licence survives a restart, and deleting it blocks again.
 
 The automated second install exercises the upgrade/reinstall path and proves a disposable database row survives. It does not replace a carefully supervised update of a real customer's installation, which should still be tested before a wide rollout. Uninstall retention (service removed, database kept) is not yet automated and should also be confirmed before broad distribution.

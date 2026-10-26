@@ -1,7 +1,14 @@
 [CmdletBinding()]
 param(
   [string]$Output = 'build\windows-installer',
-  [switch]$SkipInstaller
+  [switch]$SkipInstaller,
+  # Builds the product without licences enforced. Only for development and the
+  # CI job that tests the installer: such a build refuses every customer key,
+  # and it must never be handed to a customer. Without this switch a build that
+  # cannot find the operator's public key fails instead of shipping quietly
+  # unprotected - that is how a released Setup came to run without asking for
+  # an activation key.
+  [switch]$EvaluationBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -203,15 +210,28 @@ Copy-Item (Join-Path $PSScriptRoot 'UnelevatedProcess.cs') $app
 Copy-Item (Join-Path $PSScriptRoot 'README.txt') $app
 Copy-Item (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') $app
 # Offline licensing: a build prepared for customers carries the operator's
-# PUBLIC key only. Without it the installer leaves enforcement in "warn" mode
-# and the licence screen says no key is installed; the private key never
-# leaves the supplier's key generator.
-$licencePublicKey = Join-Path $PSScriptRoot 'public-key.pem'
-if (Test-Path -LiteralPath $licencePublicKey) {
+# PUBLIC key only. The private key never leaves the supplier's key generator.
+#
+# A build with no key cannot verify any licence, so shipping one would mean
+# shipping a copy that runs without an activation key. That is a build error,
+# not a warning: the only way to produce such a build is to ask for it with
+# -EvaluationBuild, and then the manifest and the installer's own log say so.
+$licenceCandidates = @(
+  (Join-Path $PSScriptRoot 'public-key.pem'),
+  (Join-Path $PSScriptRoot 'licensing\public-key.pem')
+)
+$licencePublicKey = $licenceCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if ($licencePublicKey) {
   Copy-Item -LiteralPath $licencePublicKey -Destination $app -Force
-  Write-Host "Licensing: public key staged from $licencePublicKey"
+  $licenceMode = 'enforce'
+  $licenceKeySha256 = (Get-FileHash -LiteralPath $licencePublicKey -Algorithm SHA256).Hash
+  Write-Host "Licensing: enforcement ON; public key staged from $licencePublicKey (SHA256 $licenceKeySha256)"
+} elseif ($EvaluationBuild) {
+  $licenceMode = 'warn'
+  $licenceKeySha256 = ''
+  Write-Host '::warning title=Evaluation build::No public-key.pem was found, so this is an EVALUATION build: licences are NOT enforced and no customer key can be activated. Place the operator''s public-key.pem beside build-installer.ps1 to produce a product build.'
 } else {
-  Write-Host 'Licensing: no public-key.pem found; the installed program will run unlicensed in warn mode.'
+  throw ('A product build needs the operator''s licence public key, and none was found. Expected ' + (Join-Path $PSScriptRoot 'public-key.pem') + ' (or licensing\public-key.pem). Copy it from KAYAN-Key-Generator: public-key.pem, never private-key.pem. For a development or CI build that must not enforce licences, pass -EvaluationBuild.')
 }
 Copy-Item (Join-Path $PSScriptRoot 'installer.iss') (Join-Path $stage 'installer.iss')
 # The icon Inno Setup embeds into Setup.exe (SetupIconFile in installer.iss).
@@ -232,7 +252,7 @@ $secretEnvironmentFiles = Get-ChildItem -LiteralPath $app -Force -File -Recurse 
 if ($secretEnvironmentFiles) { throw 'Environment files are forbidden in the installer package.' }
 
 Write-Host '[7/8] Write artifact manifest with exact pinned versions'
-$manifest = [ordered]@{ product='KAYAN ERP'; productVersion=$appVersion; architecture='x64'; nodeVersion=$nodeVersion; postgresqlVersion=($postgresVersion -replace '-1$',''); flutterVersion=((flutter --version --machine | ConvertFrom-Json).frameworkVersion); sourceCommit=(git -C $root rev-parse HEAD); windowsInstallerTested=$false }
+$manifest = [ordered]@{ product='KAYAN ERP'; productVersion=$appVersion; architecture='x64'; nodeVersion=$nodeVersion; postgresqlVersion=($postgresVersion -replace '-1$',''); flutterVersion=((flutter --version --machine | ConvertFrom-Json).frameworkVersion); sourceCommit=(git -C $root rev-parse HEAD); windowsInstallerTested=$false; licenseEnforcement=$licenceMode; licensePublicKeySha256=$licenceKeySha256 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $app 'runtime-manifest.json') -Encoding UTF8
 
 if (-not $SkipInstaller) {

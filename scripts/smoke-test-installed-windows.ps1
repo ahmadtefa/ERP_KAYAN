@@ -213,6 +213,16 @@ $manifestPath = Join-Path $installRoot "runtime-manifest.json"
 if (-not (Test-Path $manifestPath)) { Fail "The installed package has no runtime-manifest.json, so the build it came from cannot be identified." }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 Write-Host ("PASS: installed manifest: product {0}, version {1}, commit {2}, Node {3}, PostgreSQL {4}." -f $manifest.product, $manifest.productVersion, $manifest.sourceCommit, $manifest.nodeVersion, $manifest.postgresqlVersion)
+# Whether this build enforces licences is a property of the build, decided when
+# it was compiled, and it has to be recorded: a build that never decided is a
+# build nobody can reason about afterwards.
+if ($manifest.PSObject.Properties.Name -notcontains 'licenseEnforcement') {
+  Fail 'The installed manifest does not record whether this build enforces licences.'
+}
+if (@('enforce','warn') -notcontains $manifest.licenseEnforcement) {
+  Fail ("The installed manifest records an unknown licence mode: " + $manifest.licenseEnforcement)
+}
+Write-Host ("PASS: the build records licence mode '{0}'." -f $manifest.licenseEnforcement)
 $commitUnderTest = (& git -C $PSScriptRoot rev-parse HEAD 2>$null | Select-Object -First 1)
 if ($commitUnderTest -and $manifest.sourceCommit -ne $commitUnderTest) {
   Fail "The installed payload was built from $($manifest.sourceCommit), not from the commit under test ($commitUnderTest)."
@@ -399,34 +409,10 @@ if (-not (($backupToc -join "`n") -match 'kayan_installer_upgrade_probe')) {
 }
 Write-Host ("PASS: the upgrade took a readable backup first ({0} bytes, probe table included): {1}" -f $upgradeBackup.Length, $upgradeBackup.FullName)
 
-# Choosing "a new company" on a machine that already holds one must stop
-# dead. Nothing may be deleted, emptied, renamed or replaced - the customer
-# has to be told to pick "an existing company" or use the reset tool, which
-# takes a verified backup before it creates anything.
-$refusalLog = Join-Path $env:TEMP 'kayan-company-new-refusal.log'
-$refusalErrorLog = Join-Path $env:TEMP 'kayan-company-new-refusal.err.log'
-$refusal = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
-  -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + (Join-Path $installRoot 'install-runtime.ps1') + '"'), '-UserSettingsPath', ('"' + $settings + '"'), '-CompanyMode', 'New') `
-  -Wait -PassThru -NoNewWindow -RedirectStandardOutput $refusalLog -RedirectStandardError $refusalErrorLog
-if ($refusal.ExitCode -eq 0) {
-  Fail "Choosing 'a new company' over a computer that already holds one succeeded; it must refuse and change nothing."
-}
-$refusalResult = Join-Path $env:ProgramData 'KAYAN-ERP\logs\installer-result.txt'
-$refusalText = if (Test-Path $refusalResult) { Get-Content -LiteralPath $refusalResult -Raw } else { '' }
-if ($refusalText -notmatch 'already holds company data') {
-  Fail ("The refusal did not tell the customer why: '" + $refusalText + "'")
-}
-$env:PGPASSWORD = $databasePassword
-try {
-  $survivor = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT (SELECT value FROM kayan_installer_upgrade_probe WHERE id=1) || '/' || (SELECT count(*) FROM companies)" 2>&1)
-  $survivorExit = $LASTEXITCODE
-} finally {
-  Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
-}
-if ($survivorExit -ne 0 -or (($survivor -join '').Trim() -notmatch '^preserved/[1-9]')) {
-  Fail ("Refusing 'a new company' still changed the data: " + ($survivor -join ' '))
-}
-Write-Host "PASS: choosing 'a new company' over an existing one was refused with a clear reason, and no data changed."
+# (Choosing "a new company" over a computer that already holds one is tested
+# at the end of this script: it now creates a new, empty database beside the
+# old one instead of refusing, and the test proves both halves of that.)
+
 
 # Exercise the bundled RepairTool.exe against a stopped service and a
 # re-corrupted 0-ACE kayan.env file. The tool must (a) report the problems it
@@ -790,3 +776,359 @@ try {
   Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
 }
 Write-Output "::notice::Safe-reset exercise passed: cancel changed nothing; reset backed up (PGDMP, pg_restore-readable), switched to a fresh empty database, preserved the old database and its sentinel, kept previous settings, redacted logs, and the next launch waits at first-run setup."
+
+# ═══════════════════════════════════════════════════════════════════════════
+# A NEW COMPANY ON A COMPUTER THAT ALREADY HOLDS ONE
+#
+# This is the defect a customer reported: choosing "a new company" still showed
+# the previous company's data. The setup used to refuse in that case (and the
+# refusal appeared at the end of Setup as a PostgreSQL error while the installed
+# program happily opened the previous company). It now creates a database of its
+# own beside the old one, after a verified backup, and the program is proven to
+# be reading THAT database before it opens.
+#
+# Everything here is disposable CI data. The "previous company" is the database
+# the safe-reset exercise just created.
+# ═══════════════════════════════════════════════════════════════════════════
+
+function Invoke-RuntimeScript([string]$Mode) {
+  $out = Join-Path $env:TEMP ("kayan-runtime-" + $Mode + "-" + [Guid]::NewGuid().ToString('N') + ".log")
+  $err = "$out.err"
+  $runtimeScript = Join-Path $installRoot 'install-runtime.ps1'
+  $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+    -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $runtimeScript + '"'), '-UserSettingsPath', ('"' + $settings + '"'), '-CompanyMode', $Mode) `
+    -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+  $text = ((Get-Content -LiteralPath $out -Raw -ErrorAction SilentlyContinue) + " " + (Get-Content -LiteralPath $err -Raw -ErrorAction SilentlyContinue)).Trim()
+  Remove-Item -LiteralPath $out, $err -Force -ErrorAction SilentlyContinue
+  return @{ ExitCode = $process.ExitCode; Output = $text }
+}
+
+function Read-SettingsValues([string]$Path) {
+  $values = @{}
+  foreach ($line in @(Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)) {
+    if ($line -match '^\s*([A-Z_]+)="?(.*?)"?\s*$') { $values[$matches[1]] = $matches[2].Trim('"') }
+  }
+  return $values
+}
+
+function Wait-ForInstalledApi([System.Diagnostics.Process]$Client, [int]$Seconds) {
+  for ($attempt = 0; $attempt -lt $Seconds; $attempt++) {
+    if ($Client.HasExited) {
+      Fail ("The installed client exited with code $($Client.ExitCode) before its server became healthy.")
+    }
+    foreach ($port in @(3000,3001,3002,3003,3010,3020)) {
+      try {
+        $candidate = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/v1/health" -TimeoutSec 2
+        if ($candidate.status -eq 'ok' -and $candidate.database -eq 'up') { return @{ Port = $port; Health = $candidate } }
+      } catch { }
+    }
+    Start-Sleep -Seconds 1
+  }
+  return $null
+}
+
+function Stop-KayanClient([System.Diagnostics.Process]$Client) {
+  if (-not $Client -or $Client.HasExited) { return }
+  $null = $Client.CloseMainWindow()
+  try { Wait-Process -Id $Client.Id -Timeout 10 -ErrorAction SilentlyContinue } catch { }
+  if (-not $Client.HasExited) { Stop-Process -Id $Client.Id -Force -ErrorAction SilentlyContinue }
+}
+
+Start-Service -Name $serviceName
+(Get-Service -Name $serviceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(60))
+& $pgReady -h 127.0.0.1 -p 5432 -U postgres *> $null
+if ($LASTEXITCODE -ne 0) { Fail "PostgreSQL did not come back for the new-company exercise." }
+
+$currentSettings = Read-SettingsValues $settings
+$dbUrlBefore = $currentSettings['DATABASE_URL']
+if ($dbUrlBefore -notmatch '/(erp_kayan_\d{14})\?schema=public') {
+  Fail ("The new-company exercise expected the safe-reset database, but the settings name: " + $dbUrlBefore)
+}
+$previousDatabase = $matches[1]
+if ($dbUrlBefore -match '^postgresql://erp_app:([a-fA-F0-9]+)@') {
+  $previousPassword = $matches[1]
+} else {
+  Fail "Could not read the database password from the installed settings."
+}
+
+# Populate the company that the customer would be leaving behind.
+$env:KAYAN_ADMIN_USERNAME = 'ci-previous-admin'
+$env:KAYAN_ADMIN_PASSWORD = 'CiSmoke-Previous-Admin-7241'
+$env:DATABASE_URL = $dbUrlBefore
+$env:ADMIN_DATABASE_URL = $currentSettings['ADMIN_DATABASE_URL']
+$seedPrevious = Start-Process -FilePath $node -ArgumentList @("scripts\prepare-database.mjs") -WorkingDirectory $backend -Wait -PassThru -NoNewWindow
+Remove-Item Env:KAYAN_ADMIN_USERNAME,Env:KAYAN_ADMIN_PASSWORD,Env:DATABASE_URL,Env:ADMIN_DATABASE_URL -ErrorAction SilentlyContinue
+if ($seedPrevious.ExitCode -ne 0) {
+  Fail ("Could not prepare the previous company for the new-company exercise (exit $($seedPrevious.ExitCode)).")
+}
+$env:PGPASSWORD = $previousPassword
+$previousCounts = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d $previousDatabase -t -A -c "SELECT (SELECT count(*) FROM companies) || '/' || (SELECT count(*) FROM users)")
+& $psql -h 127.0.0.1 -p 5432 -U erp_app -d $previousDatabase -v ON_ERROR_STOP=1 -c "CREATE TABLE IF NOT EXISTS kayan_previous_company_probe (id integer PRIMARY KEY, value text NOT NULL); INSERT INTO kayan_previous_company_probe (id,value) VALUES (1,'previous-company') ON CONFLICT (id) DO UPDATE SET value=EXCLUDED.value;" *> $null
+$probeExit = $LASTEXITCODE
+Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+if ($probeExit -ne 0) { Fail "Could not mark the previous company's database for the new-company exercise." }
+if ((($previousCounts -join '').Trim()) -notmatch '^[1-9]\d*/[1-9]') {
+  Fail ("The previous company database is not populated: " + ($previousCounts -join ' '))
+}
+Write-Host ("PASS: previous company prepared in {0} (companies/users = {1})." -f $previousDatabase, (($previousCounts -join '').Trim()))
+
+$newCompanyRun = Invoke-RuntimeScript 'New'
+if ($newCompanyRun.ExitCode -ne 0) {
+  Fail ("Choosing 'a new company' over a computer that already holds one failed (exit $($newCompanyRun.ExitCode)). Output: " + $newCompanyRun.Output)
+}
+foreach ($marker in @('KAYAN-COMPANY-NEW-FRESH-DATABASE-REQUIRED', 'KAYAN-COMPANY-NEW-BACKUP-OK', 'KAYAN-COMPANY-NEW-DATABASE-CREATED', 'KAYAN-COMPANY-NEW-DATABASE-EMPTY', 'KAYAN-COMPANY-NEW-DATABASE-READY', 'KAYAN-RUNTIME-VERIFIED')) {
+  if (-not (Select-String -LiteralPath $runtimeLog -Pattern ([regex]::Escape($marker)) -Quiet)) {
+    Fail ("The new-company run did not record '$marker', so it cannot be told apart from an upgrade.")
+  }
+}
+$afterNewCompany = Read-SettingsValues $settings
+if ($afterNewCompany['DATABASE_URL'] -notmatch '/(erp_kayan_\d{14})\?schema=public') {
+  Fail ("After choosing a new company the settings do not name a new database: " + $afterNewCompany['DATABASE_URL'])
+}
+$freshDatabase = $matches[1]
+if ($freshDatabase -eq $previousDatabase) {
+  Fail "Choosing a new company kept the previous company's database."
+}
+if ($afterNewCompany['DATABASE_URL'] -notmatch "^postgresql://erp_app:[a-fA-F0-9]+@127\.0\.0\.1:5432/$freshDatabase\?schema=public$") {
+  Fail ("The new company database URL is not the one the newly created database has: " + $afterNewCompany['DATABASE_URL'])
+}
+Write-Host ("PASS: a new company means a new database ({0}); the previous one is {1}." -f $freshDatabase, $previousDatabase)
+
+$env:PGPASSWORD = $previousPassword
+try {
+  $previousProbe = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d $previousDatabase -t -A -c "SELECT value FROM kayan_previous_company_probe WHERE id=1")
+  $previousProbeExit = $LASTEXITCODE
+  $freshCounts = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d $freshDatabase -t -A -c "SELECT (SELECT count(*) FROM companies) || '/' || (SELECT count(*) FROM users) || '/' || (SELECT count(*) FROM customers) || '/' || (SELECT count(*) FROM sales_invoices) || '/' || (SELECT count(*) FROM cash_vouchers)")
+  $freshCountsExit = $LASTEXITCODE
+  $freshProbe = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d $freshDatabase -t -A -c "SELECT coalesce(to_regclass('public.kayan_previous_company_probe')::text,'')")
+  $freshProbeExit = $LASTEXITCODE
+} finally {
+  Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+}
+if ($previousProbeExit -ne 0 -or (($previousProbe -join '').Trim() -ne 'previous-company')) {
+  Fail ("Choosing a new company changed the previous company's database: " + ($previousProbe -join ' '))
+}
+if ($freshCountsExit -ne 0 -or (($freshCounts -join '').Trim() -ne '0/0/0/0/0')) {
+  Fail ("The new company database is not empty: companies/users/customers/invoices/vouchers = " + ($freshCounts -join ' ') + " (exit $freshCountsExit).")
+}
+if ($freshProbeExit -ne 0 -or (($freshProbe -join '').Trim() -ne '')) {
+  Fail "The new company database contains a table that belongs to the previous company."
+}
+
+$newCompanyBackup = Get-ChildItem -Path (Join-Path $env:ProgramData 'KAYAN-ERP\backups') -Recurse -Filter 'before-new-company.dump' -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $newCompanyBackup) { Fail "Choosing a new company took no backup of the previous company." }
+$pgRestoreForNewCompany = Join-Path $installRoot 'backend\postgres\bin\pg_restore.exe'
+$newCompanyToc = @(& $pgRestoreForNewCompany --list $newCompanyBackup.FullName 2>&1)
+if ($LASTEXITCODE -ne 0 -or -not (($newCompanyToc -join "`n") -match 'kayan_previous_company_probe')) {
+  Fail "The backup taken before the new company does not contain the previous company's data."
+}
+Write-Host ("PASS: the previous company was kept and backed up ({0} bytes) while the new company started empty - no company, user, customer, invoice or voucher." -f $newCompanyBackup.Length)
+
+# The program itself must be looking at the new database. An empty database is
+# the state in which it has to wait at first-run setup; opening the previous
+# company instead is exactly the reported defect.
+foreach ($logCandidate in $firstRunLogPaths) {
+  $firstRunLogOffsets[$logCandidate] = 0
+  if (Test-Path $logCandidate) { $firstRunLogOffsets[$logCandidate] = (Get-Item $logCandidate).Length }
+}
+$newCompanyClient = Start-Process -FilePath (Join-Path $installRoot 'erp_kayan.exe') -WorkingDirectory $installRoot -PassThru
+try {
+  $sawAsking = $false
+  for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    if ($newCompanyClient.HasExited) {
+      Fail ("After choosing a new company the client exited with code $($newCompanyClient.ExitCode) instead of waiting at first-run setup.")
+    }
+    if ((Read-AppendedLog) -match 'asking who the first administrator is') { $sawAsking = $true; break }
+    Start-Sleep -Seconds 1
+  }
+  if (-not $sawAsking) {
+    Fail "After choosing a new company the program did not wait at first-run setup: it is not looking at the empty database that was just created."
+  }
+  Write-Host "PASS: after choosing a new company the program waits at first-run setup instead of showing the previous company."
+} finally {
+  Stop-KayanClient $newCompanyClient
+}
+
+$env:KAYAN_ADMIN_USERNAME = 'ci-new-admin'
+$env:KAYAN_ADMIN_PASSWORD = 'CiSmoke-New-Admin-7241'
+$seedNew = Start-Process -FilePath $node -ArgumentList @("scripts\prepare-database.mjs") -WorkingDirectory $backend -Wait -PassThru -NoNewWindow
+Remove-Item Env:KAYAN_ADMIN_USERNAME,Env:KAYAN_ADMIN_PASSWORD -ErrorAction SilentlyContinue
+if ($seedNew.ExitCode -ne 0) { Fail "Could not create the new company's administrator (exit $($seedNew.ExitCode))." }
+
+$newCompanyClient2 = Start-Process -FilePath (Join-Path $installRoot 'erp_kayan.exe') -WorkingDirectory $installRoot -PassThru
+try {
+  $newCompanyApi = Wait-ForInstalledApi $newCompanyClient2 90
+  if (-not $newCompanyApi) { Fail "The new company's server did not become healthy within 90 seconds." }
+  if ($newCompanyApi.Health.databaseName -ne $freshDatabase) {
+    Fail ("The program is connected to database '$($newCompanyApi.Health.databaseName)' instead of the new company database '$freshDatabase'.")
+  }
+  $newBase = "http://127.0.0.1:$($newCompanyApi.Port)/api/v1"
+  $loginNew = Invoke-RestMethod -Method Post -Uri "$newBase/auth/login" -ContentType 'application/json' -Body (@{ username = 'ci-new-admin'; password = 'CiSmoke-New-Admin-7241' } | ConvertTo-Json -Compress) -TimeoutSec 10
+  if (-not $loginNew.accessToken) { Fail "The new company's API did not accept its administrator's login." }
+  $newHeaders = @{ Authorization = "Bearer $($loginNew.accessToken)" }
+  $newCustomers = Invoke-RestMethod -Uri "$newBase/parties/customers" -Headers $newHeaders -TimeoutSec 30
+  $customerTotal = 0
+  if ($null -ne $newCustomers.total) { $customerTotal = [int]$newCustomers.total }
+  elseif ($null -ne $newCustomers.items) { $customerTotal = @($newCustomers.items).Count }
+  if ($customerTotal -ne 0) { Fail ("The new company shows $customerTotal customer record(s) from the previous company.") }
+  Write-Host ("PASS: the program is connected to the new company database '{0}' and shows no previous company data." -f $newCompanyApi.Health.databaseName)
+} finally {
+  Stop-KayanClient $newCompanyClient2
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ACTIVATION
+#
+# A build that ships the operator's public key must refuse to work without a
+# valid key. The CI build is an evaluation build (no key in the repository), so
+# this installs a throwaway test key exactly where a product build carries one,
+# then proves on the real installed program: no key blocks business use, a
+# wrong key is refused, a key for another computer is refused, a valid key
+# works, it survives a restart, and deleting it blocks again.
+#
+# Every key here is generated by the CI run itself and is worthless outside it.
+# ═══════════════════════════════════════════════════════════════════════════
+
+$licenceHome = Join-Path $env:TEMP 'kayan-ci-licence'
+Remove-Item -LiteralPath $licenceHome -Recurse -Force -ErrorAction SilentlyContinue
+$generator = (Resolve-Path (Join-Path $PSScriptRoot '..\tools\license-generator\kayan-license.mjs')).Path
+& $node $generator init --home $licenceHome *> $null
+if ($LASTEXITCODE -ne 0) { Fail "Could not create the throwaway test signing key for the activation tests." }
+$testPublicKey = Join-Path $licenceHome 'public-key.pem'
+if (-not (Test-Path $testPublicKey)) { Fail "The test signing key pair was not created." }
+Copy-Item -LiteralPath $testPublicKey -Destination (Join-Path $installRoot 'public-key.pem') -Force
+
+$enforceRun = Invoke-RuntimeScript 'Existing'
+if ($enforceRun.ExitCode -ne 0) {
+  Fail ("Installing the test licence key failed (exit $($enforceRun.ExitCode)). Output: " + $enforceRun.Output)
+}
+if (-not (Select-String -LiteralPath $runtimeLog -Pattern 'KAYAN-LICENCE-KEY-INSTALLED' -Quiet)) {
+  Fail "The runtime setup did not record that the licence key was installed."
+}
+$enforcedSettings = Read-SettingsValues $settings
+if ($enforcedSettings['LICENSE_ENFORCEMENT'] -ne 'enforce') {
+  Fail ("The installer did not switch licence enforcement on: '" + $enforcedSettings['LICENSE_ENFORCEMENT'] + "'")
+}
+Write-Host "PASS: the installer switched licence enforcement on for a build that carries a key."
+
+$licenceClient = Start-Process -FilePath (Join-Path $installRoot 'erp_kayan.exe') -WorkingDirectory $installRoot -PassThru
+try {
+  $licenceApi = Wait-ForInstalledApi $licenceClient 90
+  if (-not $licenceApi) { Fail "The licensed build's server did not become healthy within 90 seconds." }
+  if ($null -eq $licenceApi.Health.license) { Fail "The installed server does not report its licence mode on /health." }
+  if ($licenceApi.Health.license.enforcement -ne 'enforce') {
+    Fail ("The installed server is not enforcing licences (mode: " + $licenceApi.Health.license.enforcement + ").")
+  }
+  if ($licenceApi.Health.license.configured -ne $true) { Fail "The installed server says it has no licence verification key." }
+  Write-Host "PASS: the installed server reports licence enforcement 'enforce' with a verification key installed."
+
+  $base = "http://127.0.0.1:$($licenceApi.Port)/api/v1"
+  $loginLicence = Invoke-RestMethod -Method Post -Uri "$base/auth/login" -ContentType 'application/json' -Body (@{ username = 'ci-new-admin'; password = 'CiSmoke-New-Admin-7241' } | ConvertTo-Json -Compress) -TimeoutSec 10
+  if (-not $loginLicence.accessToken) { Fail "Signing in must keep working without a licence, and it did not." }
+  $headers = @{ Authorization = "Bearer $($loginLicence.accessToken)" }
+  Write-Host "PASS: signing in still works while the installation is unlicensed."
+
+  $blockedStatus = 0
+  $blockedBody = ''
+  try {
+    Invoke-WebRequest -UseBasicParsing -Uri "$base/parties/customers" -Headers $headers -TimeoutSec 15 | Out-Null
+  } catch {
+    $blockedStatus = [int]$_.Exception.Response.StatusCode
+    $blockedBody = [string]$_.ErrorDetails.Message
+  }
+  if ($blockedStatus -ne 403) {
+    Fail ("An unlicensed installation answered a business request instead of refusing it (HTTP $blockedStatus).")
+  }
+  if ($blockedBody -notmatch 'LICENSE_REQUIRED') {
+    Fail ("The refusal did not say that a licence is required: " + $blockedBody)
+  }
+  Write-Host "PASS: without a licence every business request is refused with LICENSE_REQUIRED."
+
+  $licenceStatus = Invoke-RestMethod -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
+  if ($licenceStatus.state -ne 'UNLICENSED' -or -not $licenceStatus.blocked) {
+    Fail ("The licence screen state is wrong before activation: state=" + $licenceStatus.state + " blocked=" + $licenceStatus.blocked)
+  }
+  $machineId = $licenceStatus.machineId
+  if (-not $machineId) { Fail "The installed program did not report a machine id." }
+
+  $garbageStatus = 0
+  try {
+    Invoke-RestMethod -Method Post -Uri "$base/license/activate" -Headers $headers -ContentType 'application/json' -Body (@{ key = 'KYN1.this-is-not-a-licence-key' } | ConvertTo-Json) -TimeoutSec 15 | Out-Null
+  } catch { $garbageStatus = [int]$_.Exception.Response.StatusCode }
+  if ($garbageStatus -eq 0 -or $garbageStatus -eq 500) { Fail "A bogus key was not refused cleanly (HTTP $garbageStatus)." }
+  Write-Host "PASS: a bogus key is refused."
+
+  $created = @(& $node $generator licence create --ref 'CI activation test' --seats 5 --term 1y --home $licenceHome)
+  if ($LASTEXITCODE -ne 0) { Fail "Could not register the test licence." }
+  $licenceId = ($created | Select-String -Pattern 'licence\s*:\s*(lic_[A-Za-z0-9_-]+)').Matches[0].Groups[1].Value
+  if (-not $licenceId) { Fail ("Could not read the test licence id from the generator output: " + ($created -join ' ')) }
+
+  $wrongMachineKey = @(& $node $generator issue activation --licence $licenceId --machine 'KM-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ' --home $licenceHome) | Where-Object { $_ -match '^KYN1\.' } | Select-Object -First 1
+  if (-not $wrongMachineKey) { Fail "Could not issue a key for another machine." }
+  $wrongMachineStatus = 0
+  $wrongMachineBody = ''
+  try {
+    Invoke-RestMethod -Method Post -Uri "$base/license/activate" -Headers $headers -ContentType 'application/json' -Body (@{ key = $wrongMachineKey } | ConvertTo-Json) -TimeoutSec 15 | Out-Null
+  } catch {
+    $wrongMachineStatus = [int]$_.Exception.Response.StatusCode
+    $wrongMachineBody = [string]$_.ErrorDetails.Message
+  }
+  if ($wrongMachineStatus -ne 403 -or $wrongMachineBody -notmatch 'LICENSE_KEY_WRONG_MACHINE') {
+    Fail ("A key issued for another computer was not refused as such (HTTP $wrongMachineStatus): " + $wrongMachineBody)
+  }
+  Write-Host "PASS: a key issued for another computer is refused, so a licence cannot be copied between machines."
+
+  $validKey = @(& $node $generator issue activation --licence $licenceId --machine $machineId --home $licenceHome) | Where-Object { $_ -match '^KYN1\.' } | Select-Object -First 1
+  if (-not $validKey) { Fail "Could not issue a valid activation key for this machine." }
+  $activated = Invoke-RestMethod -Method Post -Uri "$base/license/activate" -Headers $headers -ContentType 'application/json' -Body (@{ key = $validKey } | ConvertTo-Json) -TimeoutSec 20
+  if ($activated.state -ne 'ACTIVE' -or $activated.blocked) {
+    Fail ("A valid key did not activate the installation: state=" + $activated.state + " blocked=" + $activated.blocked)
+  }
+  $afterActivation = Invoke-WebRequest -UseBasicParsing -Uri "$base/parties/customers" -Headers $headers -TimeoutSec 30
+  if ($afterActivation.StatusCode -ne 200) { Fail "Business requests are still refused after activation (HTTP $($afterActivation.StatusCode))." }
+  Write-Host "PASS: a valid key activates the installation and business requests are answered again."
+
+  Stop-KayanClient $licenceClient
+  $licenceClient = Start-Process -FilePath (Join-Path $installRoot 'erp_kayan.exe') -WorkingDirectory $installRoot -PassThru
+  $restartedApi = Wait-ForInstalledApi $licenceClient 90
+  if (-not $restartedApi) { Fail "The licensed program's server did not come back after a restart." }
+  $restartedBase = "http://127.0.0.1:$($restartedApi.Port)/api/v1"
+  $loginAfterRestart = Invoke-RestMethod -Method Post -Uri "$restartedBase/auth/login" -ContentType 'application/json' -Body (@{ username = 'ci-new-admin'; password = 'CiSmoke-New-Admin-7241' } | ConvertTo-Json -Compress) -TimeoutSec 10
+  $restartHeaders = @{ Authorization = "Bearer $($loginAfterRestart.accessToken)" }
+  $statusAfterRestart = Invoke-RestMethod -Uri "$restartedBase/license/status" -Headers $restartHeaders -TimeoutSec 15
+  if ($statusAfterRestart.state -ne 'ACTIVE' -or $statusAfterRestart.blocked) {
+    Fail ("The licence did not survive a restart: state=" + $statusAfterRestart.state + " blocked=" + $statusAfterRestart.blocked)
+  }
+  $rulesAfterRestart = Invoke-WebRequest -UseBasicParsing -Uri "$restartedBase/parties/customers" -Headers $restartHeaders -TimeoutSec 30
+  if ($rulesAfterRestart.StatusCode -ne 200) { Fail "Business requests are refused after restarting a licensed installation." }
+  Write-Host "PASS: the licence survives closing and reopening the program."
+
+  # Deleting the licence (a restored or corrupted database) must block again:
+  # never 'no record' read as 'activated'.
+  $env:PGPASSWORD = $previousPassword
+  try {
+    & $psql -h 127.0.0.1 -p 5432 -U erp_app -d $freshDatabase -v ON_ERROR_STOP=1 -c "DELETE FROM license_seat_usage; DELETE FROM license_keys; DELETE FROM license_events; DELETE FROM license_installations;" *> $null
+    $deleteExit = $LASTEXITCODE
+  } finally {
+    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+  }
+  if ($deleteExit -ne 0) { Fail "Could not remove the licence rows for the deletion test." }
+  Start-Sleep -Seconds 4
+  $blockedAgainStatus = 0
+  try {
+    Invoke-WebRequest -UseBasicParsing -Uri "$restartedBase/parties/customers" -Headers $restartHeaders -TimeoutSec 15 | Out-Null
+  } catch { $blockedAgainStatus = [int]$_.Exception.Response.StatusCode }
+  if ($blockedAgainStatus -ne 403) {
+    Fail ("A deleted licence did not stop business requests (HTTP $blockedAgainStatus): a missing licence is never an activated one.")
+  }
+  $statusAfterDelete = Invoke-RestMethod -Uri "$restartedBase/license/status" -Headers $restartHeaders -TimeoutSec 15
+  if ($statusAfterDelete.state -ne 'UNLICENSED') {
+    Fail ("After removing the licence the state is still '" + $statusAfterDelete.state + "'.")
+  }
+  Write-Host "PASS: a deleted licence blocks business use again; absence is never read as activation."
+} finally {
+  Stop-KayanClient $licenceClient
+}
+
+Write-Output "::notice::Company and activation exercises passed: a new company got its own empty database while the previous company was backed up and kept; the program was proven to read the new database; and without a valid key every business request is refused, a wrong-machine key is refused, a valid key works, it survives a restart, and a deleted licence blocks again."

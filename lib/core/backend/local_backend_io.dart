@@ -72,8 +72,15 @@ class LocalBackendStatus {
 class KayanDatabaseConfig {
   const KayanDatabaseConfig._();
 
+  /// The port the Windows installer gives the bundled PostgreSQL service.
+  ///
+  /// It used to be 5433 here, the port of the older development cluster the
+  /// scripts create. That made a copy of the program with no readable settings
+  /// file look for a database that the shipped installer never uses - and, on
+  /// a computer that still had the old cluster, quietly find the previous
+  /// company in it.
   static const String host = '127.0.0.1';
-  static const int port = 5433;
+  static const int port = 5432;
   static const String databaseName = 'erp_kayan';
   static const String username = 'erp_app';
   static const String adminUsername = 'postgres';
@@ -84,9 +91,21 @@ class KayanDatabaseConfig {
     final uri = Uri.tryParse(url);
     if (uri == null) return false;
     return uri.host == host &&
-        (uri.port == port || uri.port == 5432) &&
+        uri.port == port &&
         uri.pathSegments.isNotEmpty &&
         uri.pathSegments.first == databaseName;
+  }
+
+  /// The database a connection string names, or null when there is not one.
+  ///
+  /// The desktop shell uses it to prove the server it reached is read-ing the
+  /// database its own settings name - see `_verifyServerIdentity`.
+  static String? databaseNameFromUrl(String? url) {
+    if (url == null || url.isEmpty) return null;
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.pathSegments.isEmpty) return null;
+    final name = uri.pathSegments.first;
+    return name.isEmpty ? null : name;
   }
 
   static String buildDatabaseUrl({
@@ -180,11 +199,12 @@ class LocalBackend {
     //    from fighting over the database.
     for (final port in candidatePorts) {
       if (await _isKayanApi(port)) {
+        final health = await _health(port);
         // A reachable API can still be attached to a completely empty
         // database. Check its health payload before treating it as ready;
         // otherwise an already-running API skips the first-administrator
         // screen and leaves the user stranded at the login form.
-        if (await _needsFirstAdministrator(port)) {
+        if (health != null && health['needsSetup'] == true) {
           return const LocalBackendStatus.needsFirstAdministrator();
         }
 
@@ -195,8 +215,29 @@ class LocalBackend {
         if (running != null && running.port == port) {
           return LocalBackendStatus.ready(running.baseUrl);
         }
-        // Someone else's copy - another window, or a development server. Use
-        // it, and leave its life cycle to whoever started it.
+        // Someone else's copy - another window, or a development server. It is
+        // used only if it is reading this installation's database and enforcing
+        // the licence this installation requires: a second server started with
+        // LICENSE_ENFORCEMENT=warn is otherwise a way round the licence.
+        final layoutForCheck = BackendLayout.discover();
+        if (layoutForCheck.problem == null) {
+          final installedProblem = missingInstalledSettings(layoutForCheck);
+          if (installedProblem != null) {
+            return LocalBackendStatus.failed(
+              installedProblem,
+              logPath: layoutForCheck.logPath,
+              databaseProblem: true,
+            );
+          }
+          final settings = await RuntimeSettings.load(layoutForCheck, port);
+          final problem = _verifyServerIdentity(health, settings);
+          if (problem != null) {
+            return LocalBackendStatus.failed(
+              problem,
+              logPath: layoutForCheck.logPath,
+            );
+          }
+        }
         _instance = LocalBackend._(null, port, null);
         return LocalBackendStatus.ready(_instance!.baseUrl);
       }
@@ -213,6 +254,15 @@ class LocalBackend {
       return LocalBackendStatus.failed(
         'Every port this program uses is already taken '
         '(${candidatePorts.join(', ')}).',
+      );
+    }
+
+    final settingsProblem = missingInstalledSettings(layout);
+    if (settingsProblem != null) {
+      return LocalBackendStatus.failed(
+        settingsProblem,
+        logPath: layout.logPath,
+        databaseProblem: true,
       );
     }
 
@@ -307,6 +357,23 @@ class LocalBackend {
 
     final ready = await _waitForHealth(process, port, log);
     if (ready) {
+      final health = await _health(port);
+      final identityProblem = _verifyServerIdentity(health, settings);
+      if (identityProblem != null) {
+        log?.writeln('[shell] refusing to open the program: $identityProblem');
+        await _stop(process, log);
+        return LocalBackendStatus.failed(
+          identityProblem,
+          logPath: layout.logPath,
+          databaseProblem: true,
+        );
+      }
+      log?.writeln(
+        '[shell] the server is reading database '
+        '${health?['databaseName'] ?? 'not reported'} '
+        '(settings ${settings.sourceFile?.path ?? 'none'}, generation '
+        '${settings.generation ?? 'none'})',
+      );
       _instance = LocalBackend._(process, port, log);
       return LocalBackendStatus.ready(_instance!.baseUrl);
     }
@@ -364,6 +431,72 @@ class LocalBackend {
   /// Checks whether an already-running API still needs its first
   /// administrator. This matters when another process started the API before
   /// the desktop shell: the health endpoint is the source of truth for setup.
+  /// The health answer of a KAYAN API, or null when it did not answer.
+  static Future<Map<String, dynamic>?> _health(int port) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 2);
+    try {
+      final request = await client
+          .getUrl(Uri.parse('http://127.0.0.1:$port/api/v1/health'))
+          .timeout(const Duration(seconds: 3));
+      final response = await request.close().timeout(
+        const Duration(seconds: 3),
+      );
+      if (response.statusCode != 200) return null;
+      final body = await response.transform(utf8.decoder).join();
+      final decoded = jsonDecode(body);
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } on Object {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Proves that the server in front of the program is reading the database
+  /// this installation's settings name, and enforcing the licence it requires.
+  ///
+  /// Returns a sentence for the person at the screen when it is not, or null
+  /// when everything matches. Both facts are part of the public health answer,
+  /// so this needs no signed-in user - which matters, because the check has to
+  /// happen before the program opens.
+  static String? _verifyServerIdentity(
+    Map<String, dynamic>? health,
+    RuntimeSettings settings,
+  ) {
+    if (health == null) return null; // an older build without the fields
+
+    final expected = KayanDatabaseConfig.databaseNameFromUrl(
+      settings.databaseUrl,
+    );
+    final actual = health['databaseName'];
+    if (expected != null &&
+        actual is String &&
+        actual.isNotEmpty &&
+        actual != expected) {
+      return 'The program is connected to the database "$actual", but this '
+          'installation\'s settings name "$expected". Setup did not finish '
+          'switching to the company database it created, so the program was '
+          'not opened. Run Repair KAYAN ERP, or run Setup again and choose '
+          '"An existing company" to keep the data on this computer.';
+    }
+
+    final wanted = (settings.licenceEnforcement ?? '').toLowerCase();
+    if (wanted == 'enforce') {
+      final license = health['license'];
+      final enforcement = license is Map ? license['enforcement'] : null;
+      final configured = license is Map ? license['configured'] : null;
+      if (enforcement != 'enforce' || configured != true) {
+        return 'This installation requires a licence key, but the local server '
+            'answered with licence enforcement "${enforcement ?? 'unknown'}" and '
+            'key installed = $configured. A server that does not enforce the '
+            'licence is not used: close any copy of KAYAN ERP started by hand, '
+            'then open the program from its shortcut again.';
+      }
+    }
+    return null;
+  }
+
   static Future<bool> _needsFirstAdministrator(int port) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 2);
@@ -493,7 +626,7 @@ class LocalBackend {
     // Developer-installed PostgreSQL and non-Windows desktop builds keep their
     // existing path; only the installer ships this executable.
     if (!await executable.exists()) return true;
-    final port = int.tryParse(url.port.toString()) ?? 5433;
+    final port = int.tryParse(url.port.toString()) ?? KayanDatabaseConfig.port;
     final deadline = DateTime.now().add(const Duration(seconds: 60));
     while (DateTime.now().isBefore(deadline)) {
       try {
@@ -659,6 +792,14 @@ class LocalBackend {
     final layout = BackendLayout.discover();
     final missing = layout.problem;
     if (missing != null) return LocalBackendStatus.failed(missing);
+    final settingsProblem = missingInstalledSettings(layout);
+    if (settingsProblem != null) {
+      return LocalBackendStatus.failed(
+        settingsProblem,
+        logPath: layout.logPath,
+        databaseProblem: true,
+      );
+    }
 
     final log = await layout.openLog();
     final settings = await RuntimeSettings.load(layout, 3000);
@@ -792,24 +933,64 @@ class BackendLayout {
     if (override != null && override.isNotEmpty) return File(override);
 
     final userFile = File('${dataDirectory.path}${Platform.pathSeparator}kayan.env');
-    if (userFile.existsSync()) return userFile;
+    if (!Platform.isWindows) return userFile;
 
-    if (Platform.isWindows) {
-      final programData = Platform.environment['ProgramData'] ?? r'C:\ProgramData';
-      final machineFile = File('$programData${Platform.pathSeparator}KAYAN-ERP${Platform.pathSeparator}kayan.env');
-      if (machineFile.existsSync()) {
-        try {
-          final content = machineFile.readAsStringSync();
-          userFile.parent.createSync(recursive: true);
-          userFile.writeAsStringSync(content);
-          return userFile;
-        } on Object {
-          return userFile;
-        }
-      }
+    final programData = Platform.environment['ProgramData'] ?? r'C:\ProgramData';
+    final machineFile = File(
+      '$programData${Platform.pathSeparator}KAYAN-ERP'
+      '${Platform.pathSeparator}kayan.env',
+    );
+    if (!machineFile.existsSync()) return userFile;
+
+    // Two copies of the settings can exist: the installer's protected one in
+    // ProgramData, and a per-user copy in this profile that the program reads
+    // without asking for permission. They must agree about which database the
+    // company is in. The installer stamps every copy it writes with
+    // KAYAN_SETTINGS_GENERATION; the newer stamp wins, and an older per-user
+    // copy is brought up to date. Without this, choosing a new company (or a
+    // safe reset) could leave this profile pointing at the previous company's
+    // database, and the program would open showing the previous company's
+    // data.
+    final machineGeneration = readSettingsGeneration(machineFile);
+    final userExists = userFile.existsSync();
+    final userGeneration = userExists ? readSettingsGeneration(userFile) : null;
+    final machineIsNewer =
+        !userExists ||
+        (machineGeneration != null &&
+            (userGeneration == null || machineGeneration > userGeneration));
+    if (!machineIsNewer) return userFile;
+
+    try {
+      final content = machineFile.readAsStringSync();
+      userFile.parent.createSync(recursive: true);
+      userFile.writeAsStringSync(content);
+      return userFile;
+    } on Object {
+      // The folder may be read-only for this user. Reading the protected copy
+      // in place is still better than using a stale one.
+      return machineFile;
     }
+  }
 
-    return userFile;
+  /// The `KAYAN_SETTINGS_GENERATION` stamp in a settings file, if it has one.
+  ///
+  /// It is an integer written by the installer/repair/reset scripts, larger
+  /// every time they change which database the installation uses.
+  static int? readSettingsGeneration(File file) {
+    try {
+      for (final line in file.readAsStringSync().split('\n')) {
+        final text = line.trim();
+        if (!text.startsWith('KAYAN_SETTINGS_GENERATION=')) continue;
+        final value = text
+            .substring('KAYAN_SETTINGS_GENERATION='.length)
+            .replaceAll('"', '')
+            .trim();
+        return int.tryParse(value);
+      }
+    } on Object {
+      return null;
+    }
+    return null;
   }
 
   Future<IOSink> openLog() async {
@@ -960,6 +1141,28 @@ class BackendLayout {
   }
 }
 
+/// Why this installed copy has no settings file, or null when it has one.
+///
+/// A run on a development machine is allowed to write a settings file from the
+/// defaults; a copy that Setup installed is not. Inventing settings there would
+/// mean guessing a database and a password, and guessing wrong is how a program
+/// ends up looking at another company's data - or at nothing - instead of
+/// saying that the installation did not finish.
+String? missingInstalledSettings(BackendLayout layout) {
+  if (!Platform.isWindows) return null;
+  final file = layout.settingsFile;
+  if (file.existsSync()) return null;
+  final programData = Platform.environment['ProgramData'] ?? r'C:\ProgramData';
+  final installedFolder = Directory(
+    '$programData${Platform.pathSeparator}KAYAN-ERP',
+  );
+  if (!installedFolder.existsSync()) return null;
+  return 'KAYAN ERP is installed on this computer, but the settings that say '
+      'which database it uses are missing (${file.path}). Setup did not '
+      'finish, so the program was not opened and no database was touched. '
+      'Run Repair KAYAN ERP, or run Setup again.';
+}
+
 /// The settings the desktop server runs with, kept in the machine's own folder.
 ///
 /// First run writes the file with fresh random signing secrets, so no secret
@@ -967,10 +1170,21 @@ class BackendLayout {
 /// that the file belongs to whoever administers the machine, and editing it is
 /// the supported way to point the program at a different database.
 class RuntimeSettings {
-  RuntimeSettings(this._values, this.port);
+  RuntimeSettings(
+    this._values,
+    this.port, {
+    this.sourceFile,
+    this.generation,
+  });
 
   final Map<String, String> _values;
   final int port;
+
+  /// The file these values were read from, for the log and for messages.
+  final File? sourceFile;
+
+  /// The installer's `KAYAN_SETTINGS_GENERATION` stamp, when the file has one.
+  final int? generation;
 
   static const Map<String, String> _defaults = {
     // Reachable from the other devices on the company network by default; the
@@ -980,9 +1194,9 @@ class RuntimeSettings {
     'JWT_ACCESS_TTL': '900',
     'JWT_REFRESH_TTL': '1209600',
     'DATABASE_URL':
-        'postgresql://erp_app:postgres@127.0.0.1:5433/erp_kayan?schema=public',
+        'postgresql://erp_app:postgres@127.0.0.1:5432/erp_kayan?schema=public',
     'ADMIN_DATABASE_URL':
-        'postgresql://postgres:postgres@127.0.0.1:5433/postgres',
+        'postgresql://postgres:postgres@127.0.0.1:5432/postgres',
   };
 
   static Future<RuntimeSettings> load(BackendLayout layout, int port) async {
@@ -1004,7 +1218,12 @@ class RuntimeSettings {
       }
       if (value.isNotEmpty) values[key] = value;
     }
-    return RuntimeSettings(values, port);
+    return RuntimeSettings(
+      values,
+      port,
+      sourceFile: file,
+      generation: BackendLayout.readSettingsGeneration(file),
+    );
   }
 
   /// The settings for a desktop installation, written once.
@@ -1052,4 +1271,8 @@ JWT_REFRESH_TTL=1209600
   };
 
   String? get databaseUrl => _values['DATABASE_URL'];
+
+  /// What the installer wrote: `enforce` on a copy that must hold a licence,
+  /// `warn` on a build made without a verification key.
+  String? get licenceEnforcement => _values['LICENSE_ENFORCEMENT'];
 }

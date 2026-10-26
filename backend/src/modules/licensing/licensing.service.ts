@@ -9,6 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { arch, hostname, networkInterfaces, platform } from 'node:os';
 import { join } from 'node:path';
 
@@ -123,6 +124,13 @@ export interface LicensingOptions {
   machineId?: string;
   /** In tests, skip reading registry/network for a machine id. */
   trustStore?: LicenseStore;
+  /**
+   * The protected licence folder Setup created, when this copy is an installed
+   * one. Left undefined the service looks for it itself (see
+   * [installedLicenceDirectory]); tests pass it explicitly, or pass `null` to
+   * say "this is a development copy".
+   */
+  installedDirectory?: string | null;
 }
 
 @Injectable()
@@ -133,6 +141,13 @@ export class LicensingService implements OnModuleInit {
   private readonly clock: () => Date;
   private readonly appVersion: string;
   private readonly machineIdOverride: string | null;
+  /**
+   * The licence folder that belongs to the installer, or null in a copy that
+   * was never installed. It is the difference between "a development machine
+   * may be configured by whoever runs it" and "a customer machine's licence
+   * settings cannot be changed by the person using the program".
+   */
+  private readonly installedDirectory: string | null;
 
   private trustStore?: LicenseStore;
   private enforcementExplicit = false;
@@ -152,8 +167,17 @@ export class LicensingService implements OnModuleInit {
     // Nest must not try to resolve it from the container.
     @Optional() options: LicensingOptions = {},
   ) {
+    // An installed copy keeps its licence state where Setup put it, and
+    // nowhere else: LICENSE_STATE_DIR is part of the environment of whoever
+    // started the program, so honouring it there would let any user move the
+    // licence state to a folder they can rewrite.
+    this.installedDirectory =
+      options.installedDirectory === undefined
+        ? installedLicenceDirectory()
+        : options.installedDirectory;
     this.directory =
       options.directory ??
+      this.installedDirectory ??
       process.env.LICENSE_STATE_DIR ??
       defaultStateDirectory();
     this.publicKeyTextOverride = options.publicKeyText ?? null;
@@ -162,8 +186,14 @@ export class LicensingService implements OnModuleInit {
       options.appVersion ??
       process.env.KAYAN_APP_VERSION ??
       readBackendVersion();
+    // On an installed copy the machine id comes from the machine, never from
+    // LICENSE_MACHINE_ID: that variable would let a key issued for one
+    // computer be used on another. Tests pass the id in directly.
     this.machineIdOverride =
-      options.machineId ?? ((process.env.LICENSE_MACHINE_ID ?? '').trim() || null);
+      options.machineId ??
+      (this.installedDirectory
+        ? null
+        : (process.env.LICENSE_MACHINE_ID ?? '').trim() || null);
     this.trustStore = options.trustStore;
     if (options.enforcement) {
       this.enforcement = options.enforcement;
@@ -207,6 +237,8 @@ export class LicensingService implements OnModuleInit {
     this.logger.log(
       `Licence mode ${this.enforcement}; public key ${
         this.publicKeyPrint ?? 'none'
+      }; state ${this.directory}${
+        this.installedDirectory ? ' (installed copy)' : ' (development copy)'
       }; machine ${this.machineId()}`,
     );
   }
@@ -245,19 +277,39 @@ export class LicensingService implements OnModuleInit {
   private loadKey(): void {
     const candidates: string[] = [];
     if (this.publicKeyTextOverride) candidates.push(this.publicKeyTextOverride);
+
+    if (this.installedDirectory) {
+      // The installed key file is the only key this copy accepts. Both
+      // LICENSE_PUBLIC_KEY and LICENSE_PUBLIC_KEY_FILE are set by whoever
+      // starts the program, and a key chosen that way would verify a licence
+      // signed by the user. The file itself is writable only by
+      // Administrators and the PostgreSQL service account.
+      const installedKey = join(this.installedDirectory, 'public-key.pem');
+      const text = readTextIfPresent(installedKey);
+      if (text) {
+        candidates.push(text);
+      } else {
+        this.logger.error(
+          `This is an installed copy but its licence key file is missing (${installedKey}). ` +
+            'No key can be verified until the installation is repaired.',
+        );
+      }
+      this.adoptPublicKey(candidates);
+      return;
+    }
+
     const inline = (process.env.LICENSE_PUBLIC_KEY ?? '').trim();
     if (inline) candidates.push(inline);
     const file =
       (process.env.LICENSE_PUBLIC_KEY_FILE ?? '').trim() ||
       join(this.directory, 'public-key.pem');
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const fs = require('node:fs') as typeof import('node:fs');
-      if (fs.existsSync(file)) candidates.push(fs.readFileSync(file, 'utf8'));
-    } catch {
-      // An unreadable key file is the same as no key: reported below.
-    }
+    const fromFile = readTextIfPresent(file);
+    if (fromFile) candidates.push(fromFile);
+    this.adoptPublicKey(candidates);
+  }
 
+  /** Uses the first candidate that really is an Ed25519 public key. */
+  private adoptPublicKey(candidates: string[]): void {
     for (const candidate of candidates) {
       try {
         const key = loadPublicKey(candidate);
@@ -288,6 +340,27 @@ export class LicensingService implements OnModuleInit {
    */
   private resolveEnforcement(): void {
     if (this.enforcementExplicit) return;
+
+    // An installed copy enforces, always - even if its key file has been
+    // removed, in which case no key can verify and the installation stays
+    // blocked until it is repaired. Nothing in the environment can turn this
+    // off: those two files are written by Setup into a folder the person using
+    // the program cannot change.
+    if (this.installedDirectory) {
+      if (!this.publicKeyPrint) {
+        this.logger.error(
+          'This installation is meant to enforce licences but its public key file ' +
+            'is missing, so no licence can be verified. Business operations stay ' +
+            'blocked until the installation is repaired.',
+        );
+      }
+      this.enforcement = 'enforce';
+      this.store.update((state) => {
+        state.enforcement = this.enforcement;
+      });
+      return;
+    }
+
     const env = (process.env.LICENSE_ENFORCEMENT ?? '').trim().toLowerCase();
     if (env === 'off' || env === 'warn' || env === 'enforce') {
       this.enforcement = env;
@@ -296,6 +369,18 @@ export class LicensingService implements OnModuleInit {
     } else {
       this.enforcement = this.publicKeyPrint ? 'enforce' : 'warn';
     }
+
+    // The recorded mode can be raised, never lowered: once this installation
+    // has enforced licences, an environment variable set by the person using
+    // the program cannot quietly return it to "warn".
+    if (this.store.current.enforcement === 'enforce' && this.enforcement !== 'enforce') {
+      this.logger.warn(
+        `Refusing to lower licence enforcement from enforce to ${this.enforcement}: ` +
+          'this installation already enforced licences.',
+      );
+      this.enforcement = 'enforce';
+    }
+
     this.store.update((state) => {
       state.enforcement = this.enforcement;
     });
@@ -383,18 +468,37 @@ export class LicensingService implements OnModuleInit {
     return value;
   }
 
+  /**
+   * What the desktop shell may know before anybody has signed in: whether this
+   * copy enforces licences, and whether a verification key is installed.
+   *
+   * It reads memory only - no database, no clock check - because it is served
+   * from the health route, which must answer even when the database cannot.
+   * The shell compares it with what the installation's settings demand and
+   * refuses to open the program against a server that quietly stopped
+   * enforcing (turning LICENSE_ENFORCEMENT down and pointing the program at a
+   * second server is otherwise a working way round the licence).
+   */
+  licenseSummary(): { enforcement: EnforcementMode; configured: boolean } {
+    return {
+      enforcement: this.enforcement,
+      configured: Boolean(this.publicKeyPrint),
+    };
+  }
+
   async isBlocked(): Promise<boolean> {
     try {
       const status = await this.status();
       return status.blocked;
     } catch (error) {
-      // The licence could not be read at all. Blocking every screen on a
-      // database hiccup would be worse than the risk it protects against, so
-      // the guard lets the request through and the failure is logged.
+      // The licence could not be read at all. A failure to establish that a
+      // licence is valid is never permission to work: the guard blocks and the
+      // reason is logged, and the licence/backup/sign-in routes stay reachable
+      // so the installation can be put right without losing anything.
       this.logger.error(
-        `The licence state could not be read: ${(error as Error).message}`,
+        `The licence state could not be read, so business operations are blocked: ${(error as Error).message}`,
       );
-      return false;
+      return true;
     }
   }
 
@@ -1259,6 +1363,51 @@ function describeType(type: LicensePayload['type']): string {
       return 'seat increase';
     case 'TRANSFER':
       return 'licence transfer';
+  }
+}
+
+/**
+ * The licence folder Setup creates on a Windows installation, or null when
+ * this copy was never installed.
+ *
+ * `C:\ProgramData` is spelled out first rather than read from the environment:
+ * the environment belongs to whoever launched the program, and this is the one
+ * path in the product that must not be redirectable by the person using it.
+ * The folder is created with write access for Administrators and the
+ * PostgreSQL service account only, so an ordinary user cannot replace the
+ * public key or rewrite the recorded enforcement. The environment is consulted
+ * only when the standard folder is absent, which keeps installations on a
+ * computer whose Windows drive is not C: working.
+ */
+export function installedLicenceDirectory(): string | null {
+  if (platform() !== 'win32') return null;
+  const candidates: string[] = ['C:\\ProgramData\\KAYAN-ERP\\license'];
+  if (process.env.ProgramData) {
+    candidates.push(join(process.env.ProgramData, 'KAYAN-ERP', 'license'));
+  }
+  for (const candidate of candidates) {
+    // The folder alone proves nothing: any run of the program creates it for
+    // its state file. It is the installer's two files that say this copy is
+    // meant to require a licence - the operator's public key, and the marker
+    // that records enforcement was switched on. Both are written by Setup
+    // into a folder only Administrators can change.
+    if (
+      existsSync(join(candidate, 'public-key.pem')) ||
+      existsSync(join(candidate, 'enforcement.required'))
+    ) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/** The text of a file, or null when it is absent or unreadable. */
+function readTextIfPresent(path: string): string | null {
+  try {
+    if (!existsSync(path)) return null;
+    return readFileSync(path, 'utf8');
+  } catch {
+    return null;
   }
 }
 

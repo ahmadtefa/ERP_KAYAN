@@ -1,4 +1,4 @@
-import { Controller, Get, Logger, Req } from '@nestjs/common';
+import { Controller, Get, Logger, Optional, Req } from '@nestjs/common';
 import { Request } from 'express';
 import { networkInterfaces } from 'node:os';
 import { Public } from '../../common/decorators/public.decorator';
@@ -6,10 +6,16 @@ import { advertisedHost, tlsTerminatedByProxy } from '../../common/security/expo
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { LicensingService } from '../licensing/licensing.service';
 
 @Controller('health')
 export class HealthController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // Optional so the controller can still be built in a unit test that only
+    // cares about the database half of the answer.
+    @Optional() private readonly licensing?: LicensingService,
+  ) {}
 
   /** Liveness plus a real database round-trip, so a broken DB is visible. */
   @Public()
@@ -17,8 +23,12 @@ export class HealthController {
   async check() {
     let database = 'up';
     let needsSetup = false;
+    let databaseName: string | null = null;
     try {
-      await this.prisma.$queryRaw`SELECT 1`;
+      const rows = await this.prisma.$queryRaw<Array<{ name: string }>>`
+        SELECT current_database() AS name
+      `;
+      databaseName = rows.length > 0 && rows[0]?.name ? rows[0].name : null;
       const companyCount = await this.prisma.company.count({
         where: { deletedAt: null },
       });
@@ -28,15 +38,27 @@ export class HealthController {
       needsSetup = companyCount === 0 || userCount === 0;
     } catch {
       database = 'down';
+      databaseName = null;
     }
     // Answered without a token, so it says only what a caller must know to
     // tell "the server is up" from "the server is up but the database is
     // not", plus whether the installation still needs its first account.
+    // `databaseName` is what lets the desktop shell prove it is talking to the
+    // database its settings name - the difference between a fresh company and
+    // the one that was on the computer before. It is not a secret: the name is
+    // fixed by the installer and the same on every installation.
     // The build mode, uptime and versions are behind /health/details.
+    // Whether this copy enforces licences, and whether it holds a key. The
+    // desktop shell needs both before anybody has signed in; neither says
+    // anything about the customer's licence, so both may travel with the
+    // public health answer.
+    const license = this.licensing?.licenseSummary() ?? null;
     return {
       status: database === 'up' ? 'ok' : 'degraded',
       database,
+      databaseName,
       needsSetup,
+      license,
       timestamp: new Date().toISOString(),
     };
   }

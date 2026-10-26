@@ -18,7 +18,7 @@ describe('HealthController', () => {
 
   beforeEach(() => {
     mockPrisma = {
-      $queryRaw: jest.fn().mockResolvedValue([{ 1: 1 }]),
+      $queryRaw: jest.fn().mockResolvedValue([{ name: 'erp_kayan' }]),
       company: {
         count: jest.fn().mockResolvedValue(1),
       },
@@ -31,6 +31,16 @@ describe('HealthController', () => {
     expect(res.status).toBe('ok');
     expect(res.database).toBe('up');
     expect(res.needsSetup).toBe(false);
+    // The desktop shell proves it reached the right database with this.
+    expect(res.databaseName).toBe('erp_kayan');
+  });
+
+  it('reports no database name when the database cannot be asked', async () => {
+    mockPrisma.$queryRaw.mockRejectedValueOnce(new Error('connect ECONNREFUSED'));
+    const res = await controller.check();
+    expect(res.status).toBe('degraded');
+    expect(res.database).toBe('down');
+    expect(res.databaseName).toBeNull();
   });
 
   it('reports network interface info', async () => {

@@ -56,8 +56,8 @@ arabic.CompanyExisting=شركة موجودة (An existing company)
 ; The item list on an option page shows one caption per choice, so the
 ; consequences of each choice are spelled out under the list, in the page's
 ; own sub-caption, instead of being attached to the item.
-english.CompanyChoiceHint=A new company: an empty database, and the first-run screen asks for the company and the general manager. No demo data and no old records. An existing company: every record already on this computer is kept; Setup verifies the database, backs it up, then upgrades it in place.
-arabic.CompanyChoiceHint=شركة جديدة: قاعدة بيانات فارغة، ثم تسأل شاشة الإعداد الأولى عن بيانات الشركة والمدير العام، بلا بيانات تجريبية وبلا سجلات قديمة. شركة موجودة: يُحتفظ بكل البيانات الموجودة على هذا الجهاز؛ يتحقق المُثبِّت من قاعدة البيانات ويأخذ نسخة احتياطية، ثم يرقّيها في مكانها.
+english.CompanyChoiceHint=A new company: Setup creates a brand-new empty database and the program then asks for the company and the general manager. A company already on this computer is backed up first and kept - Setup never deletes, empties or reuses it, so its data can always be recovered. No demo data is added. An existing company: every record already on this computer is kept; Setup verifies the database, backs it up, then upgrades it in place.
+arabic.CompanyChoiceHint=شركة جديدة: يُنشئ المُثبِّت قاعدة بيانات جديدة فارغة، ثم يسأل البرنامج عن بيانات الشركة والمدير العام. وأي شركة موجودة على هذا الجهاز تُؤخذ لها نسخة احتياطية أولًا وتبقى كما هي — لا يحذفها المُثبِّت ولا يفرّغها ولا يعيد استخدامها، فبياناتها قابلة للاسترجاع دائمًا. ولا تُضاف بيانات تجريبية. شركة موجودة: يُحتفظ بكل البيانات الموجودة على هذا الجهاز؛ يتحقق المُثبِّت من قاعدة البيانات ويأخذ نسخة احتياطية، ثم يرقّيها في مكانها.
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
@@ -173,6 +173,28 @@ begin
     Result := 'Failing step: not recorded.';
 end;
 
+{ True only when the runtime setup itself said it finished. A script that
+  returns 0 without reaching its last step is not a successful setup, and an
+  installation that half finished must not look like one. The last step is
+  written only after the database, the settings and the service have all been
+  checked from the inside. }
+function RuntimeConfirmed: Boolean;
+var
+  ResultFile: String;
+  Lines: TArrayOfString;
+  Content: String;
+  Index: Integer;
+begin
+  Result := False;
+  ResultFile := ExpandConstant('{commonappdata}\KAYAN-ERP\logs\installer-result.txt');
+  if not FileExists(ResultFile) then exit;
+  if not LoadStringsFromFile(ResultFile, Lines) then exit;
+  Content := '';
+  for Index := 0 to GetArrayLength(Lines) - 1 do
+    Content := Content + ' ' + Lines[Index];
+  Result := Pos('Last completed step: finished', Content) > 0;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
@@ -217,9 +239,16 @@ begin
   if CurStep = ssPostInstall then begin
     Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\install-runtime.ps1') + '" -UserSettingsPath "' + ExpandConstant('{userappdata}\KAYAN-ERP\kayan.env') + '" -CompanyMode ' + SelectedCompanyMode;
     if not RunPowerShell(Args, ResultCode) then
-      RaiseException('Could not start the local PostgreSQL setup. Check permissions and the installer log.')
+      RaiseException('Could not start the local database setup, so KAYAN ERP was not prepared. The program files are installed; fix the cause and run "Repair KAYAN ERP" from the Start menu. Diagnostics: ' +
+        ExpandConstant('{commonappdata}\KAYAN-ERP\logs\installer.log'))
     else if ResultCode <> 0 then
-      RaiseException('KAYAN PostgreSQL setup failed. Existing company data was not deleted. ' +
-        ReadRuntimeResult + ' Full diagnostics: ' + ExpandConstant('{commonappdata}\KAYAN-ERP\logs\installer.log'))
+      RaiseException('The local database step did not finish, so KAYAN ERP was not opened. ' +
+        'No company data was deleted: a database already on this computer is still there, and a new company is only switched to after it has been checked. ' +
+        ReadRuntimeResult + ' Full diagnostics: ' + ExpandConstant('{commonappdata}\KAYAN-ERP\logs\installer.log') +
+        ' - fix the cause, then run "Repair KAYAN ERP" from the Start menu.')
+    else if not RuntimeConfirmed then
+      RaiseException('The local database step reported no error but never reached its last check, so KAYAN ERP is not treated as installed. ' +
+        ReadRuntimeResult + ' Full diagnostics: ' + ExpandConstant('{commonappdata}\KAYAN-ERP\logs\installer.log') +
+        ' - run "Repair KAYAN ERP" from the Start menu.')
   end;
 end;

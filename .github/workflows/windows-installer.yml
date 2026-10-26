@@ -167,7 +167,21 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          & .\distribution\windows\build-installer.ps1
+          # A product build needs the operator's licence public key and refuses
+          # to be built without one, so a Setup that runs without activation
+          # cannot leave this job by accident. This repository does not contain
+          # the operator's key, so the job asks for an evaluation build in so
+          # many words - and says so in an annotation, so that a Setup carrying
+          # "no licence enforcement" is never mistaken for a product build.
+          $key = @('.\distribution\windows\public-key.pem', '.\distribution\windows\licensing\public-key.pem') |
+            Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if ($key) {
+            Write-Host "Building a product installer: licence key found at $key"
+            & .\distribution\windows\build-installer.ps1
+          } else {
+            Write-Host "::warning title=Evaluation installer::No public-key.pem in the repository, so this Setup does NOT enforce licences and cannot activate any real key. It tests the installer; it is not a product build. Add the operator's public-key.pem beside build-installer.ps1 to produce one."
+            & .\distribution\windows\build-installer.ps1 -EvaluationBuild
+          }
           if ($LASTEXITCODE -ne 0) { throw "Windows installer build failed." }
 
       - name: Verify installer artifact
