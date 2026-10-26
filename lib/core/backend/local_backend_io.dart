@@ -428,10 +428,13 @@ class LocalBackend {
     }
   }
 
-  /// Checks whether an already-running API still needs its first
-  /// administrator. This matters when another process started the API before
-  /// the desktop shell: the health endpoint is the source of truth for setup.
   /// The health answer of a KAYAN API, or null when it did not answer.
+  ///
+  /// It is the source of truth for two questions the shell asks before opening
+  /// the program: whether the database still needs its first administrator
+  /// (another process may have started the API first), and whether this server
+  /// is reading the database and enforcing the licence this installation's
+  /// settings name.
   static Future<Map<String, dynamic>?> _health(int port) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 2);
@@ -497,26 +500,6 @@ class LocalBackend {
     return null;
   }
 
-  static Future<bool> _needsFirstAdministrator(int port) async {
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 2);
-    try {
-      final request = await client
-          .getUrl(Uri.parse('http://127.0.0.1:$port/api/v1/health'))
-          .timeout(const Duration(seconds: 3));
-      final response = await request.close().timeout(
-        const Duration(seconds: 3),
-      );
-      if (response.statusCode != 200) return false;
-      final body = await response.transform(utf8.decoder).join();
-      final decoded = jsonDecode(body);
-      return decoded is Map && decoded['needsSetup'] == true;
-    } on Object {
-      return false;
-    } finally {
-      client.close(force: true);
-    }
-  }
 
   /// A port nothing is listening on, so two programs never share one.
   static Future<int?> _firstFreePort() async {
