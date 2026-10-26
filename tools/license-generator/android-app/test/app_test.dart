@@ -52,8 +52,13 @@ void main() {
 
     final folder = KeyFolder(home.path);
     final state = OperatorState(folder);
-    await state.generator.createLicence(ref: 'شركة النور', seats: 5, term: '1y');
-    await state.refresh();
+    // Real files, real crypto: inside testWidgets the clock is fake, so disk
+    // work has to run through runAsync or the test waits for a timer that
+    // never fires.
+    await tester.runAsync(() async {
+      await state.generator.createLicence(ref: 'شركة النور', seats: 5, term: '1y');
+      await state.refresh();
+    });
 
     await tester.pumpWidget(KayanKeyGeneratorApp(state: state));
     // A widget in this tab keeps a frame scheduled, so pumpAndSettle would
