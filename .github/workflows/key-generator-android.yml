@@ -207,12 +207,17 @@ jobs:
           unzip -l "$apk" \
             | grep -E "classes.*\.dex|libflutter|libapp|AndroidManifest" \
             | tee "$RUNNER_TEMP/contents.txt"
-          # The tool must not carry a signing key of its own.
-          if unzip -p "$apk" 2>/dev/null | grep -a -q -- '-----BEGIN PRIVATE KEY-----'; then
-            echo '::error::a PEM private key was found inside the APK'
+          # The tool must not carry a signing key of its own. The words
+          # "BEGIN PRIVATE KEY" appear in the app as a label beside the paste
+          # box, so this looks for key *material*: the base64 of an Ed25519
+          # PKCS#8 key always starts MC4CAQAwBQYDK2VwBCIEI, and the other block
+          # types are named outright.
+          if unzip -p "$apk" 2>/dev/null \
+             | grep -a -q -E 'MC4CAQAwBQYDK2VwBCIEI|BEGIN (RSA|EC|OPENSSH|ENCRYPTED) PRIVATE KEY'; then
+            echo '::error::a private key was found inside the APK'
             exit 1
           fi
-          echo 'no private key inside the APK'
+          echo 'no private key material inside the APK (the label text beside the paste box is not a key)'
           grep -q 'launchable-activity' "$RUNNER_TEMP/badging.txt" \
             || { echo '::error::the APK has no launchable activity'; exit 1; }
           grep -q 'arm64-v8a' "$RUNNER_TEMP/contents.txt" \
@@ -247,6 +252,17 @@ jobs:
             summary="$(grep -E '^(package|size|sha256)' "$info" | tr '\n' ' ')"
             summary="${summary//'%'/'%25'}"
             echo "::notice title=Key generator APK::${summary}"
+            if [ -f dist/key-generator-android/badging.txt ]; then
+              manifest="$(cat dist/key-generator-android/badging.txt | tr '\n' '|')"
+              manifest="${manifest//'%'/'%25'}"
+              echo "::notice title=Key generator APK manifest::${manifest}"
+            fi
+            if [ -f dist/key-generator-android/contents.txt ]; then
+              inside="$(cat dist/key-generator-android/contents.txt | tr -s ' ' | tr '\n' '|')"
+              inside="${inside//'%'/'%25'}"
+              echo "::notice title=Key generator APK contents::${inside}"
+            fi
+          else
           else
             echo '::warning::the APK was not produced'
           fi
