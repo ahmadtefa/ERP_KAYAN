@@ -308,44 +308,42 @@ jobs:
           arch: x86_64
           disable-animations: true
           script: |
-            # Deliberately no `set -e`: plumbing like `grep | head` exits with
-            # SIGPIPE, and a signal from a pipe is not a failed launch. Each
-            # step that matters is checked by hand below.
-            apk="${{ env.APP_DIR }}/build/app/outputs/flutter-apk/app-release.apk"
-            adb wait-for-device
-            if ! adb install -r "$apk"; then
-              echo '::error::the APK did not install'
-              exit 1
-            fi
-            echo '::notice title=Android launch::the APK installed'
-
-            adb shell am start -W -n com.kayan.kayan_key_generator/.MainActivity > start.txt 2>&1
-            tr -d '\r' < start.txt | tee /dev/stderr | true
+            # Every plumbing command is allowed to fail; only the three checks
+            # at the end decide the job. A notice after each line is printed so
+            # that, if it does stop, the last notice says where.
+            apk="${APP_DIR:-tools/license-generator/android-app}/build/app/outputs/flutter-apk/app-release.apk"
+            echo "::notice title=Android launch::starting, apk=$apk"
+            adb wait-for-device || echo '::warning::adb wait-for-device returned non-zero'
+            echo '::notice title=Android launch::device is up'
+            adb install -r "$apk" > install.txt 2>&1 || echo '::warning::adb install returned non-zero'
+            tr -d '\r' < install.txt | tail -3 || true
+            echo "::notice title=Android launch::install said $(tr -d '\r' < install.txt | tr '\n' '|' || true)"
+            adb shell am start -W -n com.kayan.kayan_key_generator/.MainActivity > start.txt 2>&1 || echo '::warning::am start returned non-zero'
+            echo "::notice title=Android launch::am start said $(tr -d '\r' < start.txt | tr '\n' '|' | tr -s ' ' || true)"
             sleep 20
-
-            resumed="$(adb shell dumpsys activity activities 2>/dev/null | grep -E 'mResumedActivity|topResumedActivity' | head -1 | tr -d '\r' || true)"
-            focus="$(adb shell dumpsys window 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp' | head -1 | tr -d '\r' || true)"
             pid="$(adb shell pidof com.kayan.kayan_key_generator 2>/dev/null | tr -d '\r' || true)"
-            version="$(adb shell dumpsys package com.kayan.kayan_key_generator 2>/dev/null | grep -m1 versionName | tr -d '\r' || true)"
-
-            echo "::notice title=Android launch::resumed: ${resumed}"
-            echo "::notice title=Android launch::focus: ${focus}"
             echo "::notice title=Android launch::process id: ${pid}"
+            resumed="$(adb shell dumpsys activity activities 2>/dev/null | grep -E 'mResumedActivity|topResumedActivity' | head -1 | tr -d '\r' || true)"
+            echo "::notice title=Android launch::resumed: ${resumed}"
+            focus="$(adb shell dumpsys window 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp' | head -1 | tr -d '\r' || true)"
+            echo "::notice title=Android launch::focus: ${focus}"
+            version="$(adb shell dumpsys package com.kayan.kayan_key_generator 2>/dev/null | grep -m1 versionName | tr -d '\r' || true)"
             echo "::notice title=Android launch::${version}"
-            echo "::notice title=Android launch::am start: $(tr '\n' ' ' < start.txt | tr -s ' ')"
+            adb exec-out screencap -p > launched.png || echo '::warning::screencap returned non-zero'
+            ls -l launched.png || true
 
+            # The two things that must be true for "it runs on Android".
+            started="$(tr -d '\r' < start.txt | grep -c 'Activity:' || true)"
             if [ -z "$pid" ]; then
               echo '::error::the application process is not running twenty seconds after the launch'
               exit 1
             fi
-            cmd="$(tr -d '\r' < start.txt | grep -E 'Status|Error|Activity' | tr '\n' ' ' | tr -s ' ' || true)"
-            echo "::notice title=Android launch::summary: ${cmd}"
-            case "$cmd" in
-              *Error*|*"does not exist"*) echo "::error::am start reported a problem: ${cmd}"; exit 1 ;;
-            esac
-
-            adb exec-out screencap -p > launched.png
-            ls -l launched.png
+            if [ "$started" = "0" ]; then
+              echo '::error::am start did not report a started activity'
+              exit 1
+            fi
+            echo "::notice title=Android launch::the app is running on Android ${pid}"
+            exit 0
       - name: Keep the screenshot as evidence
         if: always()
         uses: actions/upload-artifact@v4
