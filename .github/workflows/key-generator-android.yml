@@ -276,7 +276,12 @@ jobs:
   # on Android and starts it - the only evidence short of a phone.
   emulator:
     name: Install and launch the APK on Android
-    if: github.event_name == 'workflow_dispatch' && inputs.emulator
+    # On demand, or by putting [android-emulator] in the commit message: a
+    # dispatch needs permission this token does not always have, and the proof
+    # that the APK actually starts is worth being able to ask for from a push.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.emulator)
+      || (github.event_name == 'push' && contains(github.event.head_commit.message, '[android-emulator]'))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
