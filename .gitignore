@@ -82,3 +82,14 @@ distribution/windows/licensing/
 # 120 MB copy of a Node binary, rebuilt by .github/workflows/key-generator.yml).
 tools/license-generator/dist/
 tools/license-generator/sea/.work/
+
+# Key generator (Android): build output, Gradle caches and the machine-local
+# SDK path. The APK itself is a CI artifact, not something to commit.
+tools/license-generator/android-app/.dart_tool/
+tools/license-generator/android-app/build/
+tools/license-generator/android-app/.flutter-plugins
+tools/license-generator/android-app/.flutter-plugins-dependencies
+tools/license-generator/android-app/android/.gradle/
+tools/license-generator/android-app/android/local.properties
+tools/license-generator/android-app/android/key.properties
+tools/license-generator/android-app/*.apk
