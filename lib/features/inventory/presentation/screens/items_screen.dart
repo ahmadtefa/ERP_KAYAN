@@ -140,7 +140,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                 : ListView.separated(
                     shrinkWrap: true,
                     itemCount: units.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final unit = units[index];
                       return ListTile(
