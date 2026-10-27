@@ -1,6 +1,16 @@
 # Runs the real Windows installer on the CI runner and verifies the installed local runtime.
 [CmdletBinding()]
-param([string]$SetupPath = "build\windows-installer\KAYAN-ERP-Setup.exe")
+param(
+  [string]$SetupPath = "build\windows-installer\KAYAN-ERP-Setup.exe",
+  # The folder holding the key pair this Setup was built with, when the run
+  # generated a throwaway one. Activation keys are issued with it, so the test
+  # exercises the very key the build trusts instead of one dropped beside it.
+  [string]$LicenceHome = '',
+  # Fails the run unless the installed build really enforces licences. Without
+  # it, an evaluation build could pass the activation exercise, which would
+  # say nothing about the product.
+  [switch]$RequireLicenceEnforcement
+)
 
 $ErrorActionPreference = "Stop"
 $setup = (Resolve-Path $SetupPath).Path
@@ -80,6 +90,73 @@ function Fail([string]$Reason) {
 # failure with the same diagnostics as Fail().
 trap {
   Fail ("Unhandled error in the smoke test: " + $_.Exception.Message + [Environment]::NewLine + ($_ | Out-String))
+}
+
+function Invoke-RuntimeScript([string]$Mode) {
+  $out = Join-Path $env:TEMP ("kayan-runtime-" + $Mode + "-" + [Guid]::NewGuid().ToString('N') + ".log")
+  $err = "$out.err"
+  $runtimeScript = Join-Path $installRoot 'install-runtime.ps1'
+  $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+    -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $runtimeScript + '"'), '-UserSettingsPath', ('"' + $settings + '"'), '-CompanyMode', $Mode) `
+    -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+  $text = ((Get-Content -LiteralPath $out -Raw -ErrorAction SilentlyContinue) + " " + (Get-Content -LiteralPath $err -Raw -ErrorAction SilentlyContinue)).Trim()
+  Remove-Item -LiteralPath $out, $err -Force -ErrorAction SilentlyContinue
+  return @{ ExitCode = $process.ExitCode; Output = $text }
+}
+
+function Read-SettingsValues([string]$Path) {
+  $values = @{}
+  foreach ($line in @(Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)) {
+    if ($line -match '^\s*([A-Z_]+)="?(.*?)"?\s*$') { $values[$matches[1]] = $matches[2].Trim('"') }
+  }
+  return $values
+}
+
+function Wait-ForInstalledApi([System.Diagnostics.Process]$Client, [int]$Seconds) {
+  for ($attempt = 0; $attempt -lt $Seconds; $attempt++) {
+    if ($Client.HasExited) {
+      Fail ("The installed client exited with code $($Client.ExitCode) before its server became healthy.")
+    }
+    foreach ($port in @(3000,3001,3002,3003,3010,3020)) {
+      try {
+        $candidate = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/v1/health" -TimeoutSec 2
+        if ($candidate.status -eq 'ok' -and $candidate.database -eq 'up') { return @{ Port = $port; Health = $candidate } }
+      } catch { }
+    }
+    Start-Sleep -Seconds 1
+  }
+  return $null
+}
+
+function Stop-KayanClient([System.Diagnostics.Process]$Client) {
+  if (-not $Client -or $Client.HasExited) { return }
+  $null = $Client.CloseMainWindow()
+  try { Wait-Process -Id $Client.Id -Timeout 10 -ErrorAction SilentlyContinue } catch { }
+  if (-not $Client.HasExited) { Stop-Process -Id $Client.Id -Force -ErrorAction SilentlyContinue }
+}
+
+# The status a request really got. 0 means it never got one.
+function Get-HttpAnswer([string]$Uri, [hashtable]$Headers) {
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri $Uri -Headers $Headers -TimeoutSec 20
+    return @{ Status = [int]$response.StatusCode; Body = "" }
+  } catch {
+    $status = 0
+    if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+    return @{ Status = $status; Body = [string]$_.ErrorDetails.Message }
+  }
+}
+
+# Wait until health answers, for a server this script started itself.
+function Wait-ForHealth([int]$Port, [int]$Seconds = 90) {
+  for ($attempt = 0; $attempt -lt $Seconds; $attempt++) {
+    try {
+      $candidate = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/v1/health" -TimeoutSec 3
+      if ($candidate.status) { return $candidate }
+    } catch { }
+    Start-Sleep -Seconds 1
+  }
+  return $null
 }
 
 function New-SmokeHexSecret {
@@ -493,6 +570,116 @@ try {
   # development server. Only synthetic CI records are created/restored here.
   $base = "http://127.0.0.1:$apiPort/api/v1"
   $headers = @{ Authorization = "Bearer $($login.accessToken)" }
+
+  # Whether this installed copy enforces licences. Everything about activation
+  # below is only meaningful on a build that carries a verification key; a run
+  # on an evaluation build must skip it and say so rather than report a licence
+  # exercise it never performed.
+  $licenceEnforced = ($null -ne $health.license -and $health.license.enforcement -eq 'enforce')
+
+  # ── A LICENCE FOR THE FUNCTIONAL RUN ───────────────────────────────────
+  # On a build that enforces licences - a product build - every business
+  # request is refused until the installation holds one, including the backup,
+  # quotation and customer tests below. So the licence is exercised here,
+  # starting from the unlicensed state the installer left behind:
+  #
+  #   no licence -> a business route answers 403 LICENSE_REQUIRED
+  #   valid key  -> it answers again
+  #
+  # The ACTIVATION section at the end returns to the unlicensed state and walks
+  # the whole matrix (bogus key, wrong machine, restart, state file,
+  # environment, direct API).
+  $licenceDirectory = Join-Path $env:ProgramData 'KAYAN-ERP\license'
+  $licenceKeyFile = Join-Path $licenceDirectory 'public-key.pem'
+  $enforcementMarker = Join-Path $licenceDirectory 'enforcement.required'
+  $licenceStateFile = Join-Path $licenceDirectory 'license-state.json'
+  $generator = (Resolve-Path (Join-Path $PSScriptRoot '..\tools\license-generator\kayan-license.mjs')).Path
+
+  if ($RequireLicenceEnforcement) {
+    if ($manifest.licenseEnforcement -ne 'enforce') {
+      Fail ("This Setup is an evaluation build (manifest licence mode '" + $manifest.licenseEnforcement + "'), so it cannot prove that activation is mandatory. Build it with a licence public key.")
+    }
+    if (-not (Test-Path -LiteralPath $licenceKeyFile) -or -not (Test-Path -LiteralPath $enforcementMarker)) {
+      Fail ("The installed package does not carry the licence key and the enforcement marker a product build installs (" + $licenceDirectory + ").")
+    }
+    Write-Host "PASS: this is a product build: the licence key and the enforcement marker were installed."
+  }
+
+  # Whether this run can issue keys. Issuing needs the private half of the key
+  # the build was signed with.
+  $licenceIssuable = $false
+  if (-not $LicenceHome) {
+    if (-not $licenceEnforced) {
+      # An evaluation build has no key: generate a throwaway one and install it
+      # the way a build carrying a key does, so the rest of the exercise runs.
+      $LicenceHome = Join-Path $env:TEMP 'kayan-ci-licence'
+      Remove-Item -LiteralPath $LicenceHome -Recurse -Force -ErrorAction SilentlyContinue
+      & $node $generator init --home $LicenceHome *> $null
+      if ($LASTEXITCODE -ne 0) { Fail "Could not create the throwaway test signing key for the licence tests." }
+      Copy-Item -LiteralPath (Join-Path $LicenceHome 'public-key.pem') -Destination (Join-Path $installRoot 'public-key.pem') -Force
+      $licenceInstallRun = Invoke-RuntimeScript 'Existing'
+      if ($licenceInstallRun.ExitCode -ne 0) {
+        Fail ("Installing the test licence key failed (exit " + $licenceInstallRun.ExitCode + "). Output: " + $licenceInstallRun.Output)
+      }
+      if (-not (Select-String -LiteralPath $runtimeLog -Pattern 'KAYAN-LICENCE-KEY-INSTALLED' -Quiet)) {
+        Fail "The runtime setup did not record that the licence key was installed."
+      }
+      $licenceIssuable = $true
+      Write-Output "::notice::This run generated its own throwaway licence key and installed it, because no build key was supplied."
+    }
+  } else {
+    $buildKey = Join-Path $LicenceHome 'public-key.pem'
+    if (-not (Test-Path -LiteralPath $buildKey)) { Fail ("The licence home given to this test has no public-key.pem: " + $buildKey) }
+    if (Test-Path -LiteralPath $licenceKeyFile) {
+      $installedKeyHash = (Get-FileHash -LiteralPath $licenceKeyFile -Algorithm SHA256).Hash
+      $buildKeyHash = (Get-FileHash -LiteralPath $buildKey -Algorithm SHA256).Hash
+      if ($installedKeyHash -ne $buildKeyHash) {
+        Fail "The installed licence key is not the key this Setup was built with, so the activation test would not be about this build."
+      }
+    }
+    $licenceIssuable = $true
+    Write-Host "PASS: the installed licence key is the key this Setup was built with."
+  }
+
+  if ($licenceEnforced -and -not $licenceIssuable) {
+    Fail ("This Setup enforces licences, and this test does not hold the key pair the build was signed with, so it cannot licence the installation and every company feature would be refused. Run this test with -LicenceHome pointing at that key pair, or test a Setup built with a test key, as the Windows Installer workflow does.")
+  }
+
+  # The server must already be enforcing, before anybody has activated it.
+  if ($licenceEnforced) {
+    if ($health.license.configured -ne $true) { Fail "The installed server says it has no licence verification key." }
+    Write-Host "PASS: the installed server enforces licences and holds a verification key - before any activation."
+
+    $unlicensedAnswer = Get-HttpAnswer "$base/parties/customers" $headers
+    if ($unlicensedAnswer.Status -ne 403 -or $unlicensedAnswer.Body -notmatch 'LICENSE_REQUIRED') {
+      Fail ("An unlicensed installation answered a business request instead of refusing it (HTTP " + $unlicensedAnswer.Status + "): " + $unlicensedAnswer.Body)
+    }
+    Write-Host "PASS: without a licence every business request is refused with LICENSE_REQUIRED."
+
+    $licenceStatus = Invoke-RestMethod -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
+    if ($licenceStatus.state -ne 'UNLICENSED' -or -not $licenceStatus.blocked) {
+      Fail ("The licence state is wrong before activation: state=" + $licenceStatus.state + " blocked=" + $licenceStatus.blocked)
+    }
+    $machineId = $licenceStatus.machineId
+    if (-not $machineId) { Fail "The installed program did not report a machine id." }
+
+    $ciLicence = @(& $node $generator licence create --ref 'CI installed-build licence' --seats 5 --term 1y --home $LicenceHome)
+    if ($LASTEXITCODE -ne 0) { Fail "Could not register the test licence." }
+    $ciLicenceId = ($ciLicence | Select-String -Pattern 'licence\s*:\s*(lic_[A-Za-z0-9_-]+)').Matches[0].Groups[1].Value
+    if (-not $ciLicenceId) { Fail ("Could not read the test licence id from the generator output: " + ($ciLicence -join ' ')) }
+    $functionalKey = @(& $node $generator issue activation --licence $ciLicenceId --machine $machineId --home $LicenceHome) | Where-Object { $_ -match '^KYN1\.' } | Select-Object -First 1
+    if (-not $functionalKey) { Fail "Could not issue a valid activation key for this machine." }
+    $activatedForFunctional = Invoke-RestMethod -Method Post -Uri "$base/license/activate" -Headers $headers -ContentType 'application/json' -Body (@{ key = $functionalKey } | ConvertTo-Json) -TimeoutSec 20
+    if ($activatedForFunctional.state -ne 'ACTIVE' -or $activatedForFunctional.blocked) {
+      Fail ("A valid key did not activate the installation: state=" + $activatedForFunctional.state + " blocked=" + $activatedForFunctional.blocked)
+    }
+    $allowedAgain = Get-HttpAnswer "$base/parties/customers" $headers
+    if ($allowedAgain.Status -ne 200) { Fail ("Business requests are still refused after activation (HTTP " + $allowedAgain.Status + ").") }
+    Write-Host "PASS: a valid key activates the installation and business requests are answered again."
+  } else {
+    Write-Output "::warning title=Activation not proven::This Setup does not enforce licences (mode: $($health.license.enforcement)), so the licence-first proof and the activation matrix were skipped. A Setup built with a licence public key is required to prove that activation is mandatory."
+  }
+
   $originalName = 'Installed backup sentinel'
   $customerBody = @{ code = 'WIN-BACKUP-PROBE'; nameEn = $originalName; nameAr = 'Windows backup probe' } | ConvertTo-Json -Compress
   $customer = Invoke-RestMethod -Method Post -Uri "$base/parties/customers" -Headers $headers -ContentType 'application/json' -Body $customerBody -TimeoutSec 30
@@ -791,49 +978,6 @@ Write-Output "::notice::Safe-reset exercise passed: cancel changed nothing; rese
 # the safe-reset exercise just created.
 # ═══════════════════════════════════════════════════════════════════════════
 
-function Invoke-RuntimeScript([string]$Mode) {
-  $out = Join-Path $env:TEMP ("kayan-runtime-" + $Mode + "-" + [Guid]::NewGuid().ToString('N') + ".log")
-  $err = "$out.err"
-  $runtimeScript = Join-Path $installRoot 'install-runtime.ps1'
-  $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
-    -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $runtimeScript + '"'), '-UserSettingsPath', ('"' + $settings + '"'), '-CompanyMode', $Mode) `
-    -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
-  $text = ((Get-Content -LiteralPath $out -Raw -ErrorAction SilentlyContinue) + " " + (Get-Content -LiteralPath $err -Raw -ErrorAction SilentlyContinue)).Trim()
-  Remove-Item -LiteralPath $out, $err -Force -ErrorAction SilentlyContinue
-  return @{ ExitCode = $process.ExitCode; Output = $text }
-}
-
-function Read-SettingsValues([string]$Path) {
-  $values = @{}
-  foreach ($line in @(Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)) {
-    if ($line -match '^\s*([A-Z_]+)="?(.*?)"?\s*$') { $values[$matches[1]] = $matches[2].Trim('"') }
-  }
-  return $values
-}
-
-function Wait-ForInstalledApi([System.Diagnostics.Process]$Client, [int]$Seconds) {
-  for ($attempt = 0; $attempt -lt $Seconds; $attempt++) {
-    if ($Client.HasExited) {
-      Fail ("The installed client exited with code $($Client.ExitCode) before its server became healthy.")
-    }
-    foreach ($port in @(3000,3001,3002,3003,3010,3020)) {
-      try {
-        $candidate = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/v1/health" -TimeoutSec 2
-        if ($candidate.status -eq 'ok' -and $candidate.database -eq 'up') { return @{ Port = $port; Health = $candidate } }
-      } catch { }
-    }
-    Start-Sleep -Seconds 1
-  }
-  return $null
-}
-
-function Stop-KayanClient([System.Diagnostics.Process]$Client) {
-  if (-not $Client -or $Client.HasExited) { return }
-  $null = $Client.CloseMainWindow()
-  try { Wait-Process -Id $Client.Id -Timeout 10 -ErrorAction SilentlyContinue } catch { }
-  if (-not $Client.HasExited) { Stop-Process -Id $Client.Id -Force -ErrorAction SilentlyContinue }
-}
-
 Start-Service -Name $serviceName
 (Get-Service -Name $serviceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(60))
 & $pgReady -h 127.0.0.1 -p 5432 -U postgres *> $null
@@ -950,10 +1094,22 @@ try {
   Stop-KayanClient $newCompanyClient
 }
 
+# The new company's first administrator is created by the same production
+# script the desktop shell uses, so it needs the connection the program now
+# uses - read from the settings Setup has just written, not from a URL this
+# script remembers. (The seeding for the previous company deliberately removed
+# these from the environment; without this, the script would seed the wrong
+# database, or none.)
+$newCompanySettings = Read-SettingsValues $settings
+if (-not $newCompanySettings['DATABASE_URL'] -or $newCompanySettings['DATABASE_URL'] -notmatch [regex]::Escape($freshDatabase)) {
+  Fail ("The installed settings do not point at the new company database: " + $newCompanySettings['DATABASE_URL'])
+}
+$env:DATABASE_URL = $newCompanySettings['DATABASE_URL']
+$env:ADMIN_DATABASE_URL = $newCompanySettings['ADMIN_DATABASE_URL']
 $env:KAYAN_ADMIN_USERNAME = 'ci-new-admin'
 $env:KAYAN_ADMIN_PASSWORD = 'CiSmoke-New-Admin-7241'
 $seedNew = Start-Process -FilePath $node -ArgumentList @("scripts\prepare-database.mjs") -WorkingDirectory $backend -Wait -PassThru -NoNewWindow
-Remove-Item Env:KAYAN_ADMIN_USERNAME,Env:KAYAN_ADMIN_PASSWORD -ErrorAction SilentlyContinue
+Remove-Item Env:KAYAN_ADMIN_USERNAME,Env:KAYAN_ADMIN_PASSWORD,Env:DATABASE_URL,Env:ADMIN_DATABASE_URL -ErrorAction SilentlyContinue
 if ($seedNew.ExitCode -ne 0) { Fail "Could not create the new company's administrator (exit $($seedNew.ExitCode))." }
 
 $newCompanyClient2 = Start-Process -FilePath (Join-Path $installRoot 'erp_kayan.exe') -WorkingDirectory $installRoot -PassThru
@@ -967,6 +1123,34 @@ try {
   $loginNew = Invoke-RestMethod -Method Post -Uri "$newBase/auth/login" -ContentType 'application/json' -Body (@{ username = 'ci-new-admin'; password = 'CiSmoke-New-Admin-7241' } | ConvertTo-Json -Compress) -TimeoutSec 10
   if (-not $loginNew.accessToken) { Fail "The new company's API did not accept its administrator's login." }
   $newHeaders = @{ Authorization = "Bearer $($loginNew.accessToken)" }
+
+  # The licence lives with the company database, so a brand-new company starts
+  # without one. That is the product's real behaviour on this screen, and it is
+  # exactly the rule the activation policy asks for: no valid key, no business
+  # work - even for a company the owner just created. Prove it, then apply the
+  # same key to this database (the key is spent once per database, not once per
+  # computer) and go on.
+  $newCompanyAnswer = Get-HttpAnswer "$newBase/parties/customers" $newHeaders
+  if ($RequireLicenceEnforcement -and $newCompanyAnswer.Status -ne 403) {
+    Fail ("The new company's database answered a business request without a licence (HTTP " + $newCompanyAnswer.Status + ").")
+  }
+  if ($newCompanyAnswer.Status -eq 403) {
+    if ($newCompanyAnswer.Body -notmatch 'LICENSE_REQUIRED') {
+      Fail ("The new company's database refused a business request for a reason other than the missing licence: " + $newCompanyAnswer.Body)
+    }
+    $newCompanyLicenceStatus = Invoke-RestMethod -Uri "$newBase/license/status" -Headers $newHeaders -TimeoutSec 15
+    if ($newCompanyLicenceStatus.machineId -ne $machineId) {
+      Fail ("The new company's database reports another machine id (" + $newCompanyLicenceStatus.machineId + " instead of " + $machineId + ").")
+    }
+    $activatedOnNewCompany = Invoke-RestMethod -Method Post -Uri "$newBase/license/activate" -Headers $newHeaders -ContentType 'application/json' -Body (@{ key = $functionalKey } | ConvertTo-Json) -TimeoutSec 20
+    if ($activatedOnNewCompany.state -ne 'ACTIVE' -or $activatedOnNewCompany.blocked) {
+      Fail ("The installation's own key did not activate the new company's database: state=" + $activatedOnNewCompany.state + " blocked=" + $activatedOnNewCompany.blocked)
+    }
+    Write-Host "PASS: a new company starts without a licence - business is refused until the key is applied to it."
+  } else {
+    Write-Host "NOTE: this build does not enforce licences, so the new company's database cannot refuse business requests."
+  }
+
   $newCustomers = Invoke-RestMethod -Uri "$newBase/parties/customers" -Headers $newHeaders -TimeoutSec 30
   $customerTotal = 0
   if ($null -ne $newCustomers.total) { $customerTotal = [int]$newCustomers.total }
@@ -978,117 +1162,131 @@ try {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ACTIVATION
+# ACTIVATION, ON A PRODUCT BUILD, STARTING FROM NO LICENCE
 #
-# A build that ships the operator's public key must refuse to work without a
-# valid key. The CI build is an evaluation build (no key in the repository), so
-# this installs a throwaway test key exactly where a product build carries one,
-# then proves on the real installed program: no key blocks business use, a
-# wrong key is refused, a key for another computer is refused, a valid key
-# works, it survives a restart, and deleting it blocks again.
+# The functional run above had to activate the installation before it could do
+# anything - that is the first proof. This section returns to the unlicensed
+# state the way a restored or replaced database would leave it, and walks the
+# whole matrix on the real installed program:
 #
-# Every key here is generated by the CI run itself and is worthless outside it.
+#   * no licence              -> business routes refused with LICENSE_REQUIRED
+#   * a bogus key             -> refused, and not with a server error
+#   * a key for another PC    -> refused as a key for another computer
+#   * a valid key             -> works, and business routes answer again
+#   * restart of the program  -> still enforced, licence still there
+#   * state file deleted      -> no licence appears; enforcement stays on
+#   * state file corrupted    -> set aside, never read as a licence
+#   * environment variables   -> enforcement, machine id, state folder and key
+#                                cannot be changed by whoever starts the server
+#   * a direct API call       -> refused exactly like the program's own calls
+#   * /health and /license    -> still answer, as designed
+#
+# Every key here is generated by this run and is worthless outside it.
 # ═══════════════════════════════════════════════════════════════════════════
 
-$licenceHome = Join-Path $env:TEMP 'kayan-ci-licence'
-Remove-Item -LiteralPath $licenceHome -Recurse -Force -ErrorAction SilentlyContinue
-$generator = (Resolve-Path (Join-Path $PSScriptRoot '..\tools\license-generator\kayan-license.mjs')).Path
-& $node $generator init --home $licenceHome *> $null
-if ($LASTEXITCODE -ne 0) { Fail "Could not create the throwaway test signing key for the activation tests." }
-$testPublicKey = Join-Path $licenceHome 'public-key.pem'
-if (-not (Test-Path $testPublicKey)) { Fail "The test signing key pair was not created." }
-Copy-Item -LiteralPath $testPublicKey -Destination (Join-Path $installRoot 'public-key.pem') -Force
+if ($licenceEnforced) {
+Write-Host '--- activation: back to an installation with no licence ---'
 
-$enforceRun = Invoke-RuntimeScript 'Existing'
-if ($enforceRun.ExitCode -ne 0) {
-  Fail ("Installing the test licence key failed (exit $($enforceRun.ExitCode)). Output: " + $enforceRun.Output)
+# The rows are the licence. Removing them is what a restored backup from
+# before the purchase looks like, and it must never read as "activated".
+$env:PGPASSWORD = $previousPassword
+try {
+  & $psql -h 127.0.0.1 -p 5432 -U erp_app -d $freshDatabase -v ON_ERROR_STOP=1 -c "DELETE FROM license_seat_usage; DELETE FROM license_keys; DELETE FROM license_events; DELETE FROM license_installations;" *> $null
+  $deleteExit = $LASTEXITCODE
+} finally {
+  Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
 }
-if (-not (Select-String -LiteralPath $runtimeLog -Pattern 'KAYAN-LICENCE-KEY-INSTALLED' -Quiet)) {
-  Fail "The runtime setup did not record that the licence key was installed."
-}
-$enforcedSettings = Read-SettingsValues $settings
-if ($enforcedSettings['LICENSE_ENFORCEMENT'] -ne 'enforce') {
-  Fail ("The installer did not switch licence enforcement on: '" + $enforcedSettings['LICENSE_ENFORCEMENT'] + "'")
-}
-Write-Host "PASS: the installer switched licence enforcement on for a build that carries a key."
+if ($deleteExit -ne 0) { Fail "Could not remove the licence rows for the activation exercise." }
+
+# Deleting the state file is the cheapest thing somebody would try: it is a
+# file in a folder they can see. It must not produce a licence, and it must not
+# switch enforcement off. Do it before the server starts again.
+if (Test-Path -LiteralPath $licenceStateFile) { Remove-Item -LiteralPath $licenceStateFile -Force -ErrorAction SilentlyContinue }
+if (Test-Path -LiteralPath $licenceStateFile) { Fail "Could not remove the licence state file for the deletion test: $licenceStateFile" }
 
 $licenceClient = Start-Process -FilePath (Join-Path $installRoot 'erp_kayan.exe') -WorkingDirectory $installRoot -PassThru
 try {
   $licenceApi = Wait-ForInstalledApi $licenceClient 90
-  if (-not $licenceApi) { Fail "The licensed build's server did not become healthy within 90 seconds." }
+  if (-not $licenceApi) { Fail "The unlicensed build's server did not become healthy within 90 seconds." }
+  $licenceBase = "http://127.0.0.1:$($licenceApi.Port)/api/v1"
+
   if ($null -eq $licenceApi.Health.license) { Fail "The installed server does not report its licence mode on /health." }
   if ($licenceApi.Health.license.enforcement -ne 'enforce') {
-    Fail ("The installed server is not enforcing licences (mode: " + $licenceApi.Health.license.enforcement + ").")
+    Fail ("The installed server is not enforcing licences after the state file was deleted (mode: " + $licenceApi.Health.license.enforcement + ").")
   }
   if ($licenceApi.Health.license.configured -ne $true) { Fail "The installed server says it has no licence verification key." }
-  Write-Host "PASS: the installed server reports licence enforcement 'enforce' with a verification key installed."
+  Write-Host "PASS: deleting the licence state file does not switch enforcement off (mode: enforce, key: installed)."
 
-  $base = "http://127.0.0.1:$($licenceApi.Port)/api/v1"
-  $loginLicence = Invoke-RestMethod -Method Post -Uri "$base/auth/login" -ContentType 'application/json' -Body (@{ username = 'ci-new-admin'; password = 'CiSmoke-New-Admin-7241' } | ConvertTo-Json -Compress) -TimeoutSec 10
+  $loginLicence = Invoke-RestMethod -Method Post -Uri "$licenceBase/auth/login" -ContentType 'application/json' -Body (@{ username = 'ci-new-admin'; password = 'CiSmoke-New-Admin-7241' } | ConvertTo-Json -Compress) -TimeoutSec 10
   if (-not $loginLicence.accessToken) { Fail "Signing in must keep working without a licence, and it did not." }
   $headers = @{ Authorization = "Bearer $($loginLicence.accessToken)" }
   Write-Host "PASS: signing in still works while the installation is unlicensed."
 
-  $blockedStatus = 0
-  $blockedBody = ''
-  try {
-    Invoke-WebRequest -UseBasicParsing -Uri "$base/parties/customers" -Headers $headers -TimeoutSec 15 | Out-Null
-  } catch {
-    $blockedStatus = [int]$_.Exception.Response.StatusCode
-    $blockedBody = [string]$_.ErrorDetails.Message
+  $unlicensed = Get-HttpAnswer "$licenceBase/parties/customers" $headers
+  if ($unlicensed.Status -ne 403) {
+    Fail ("An unlicensed installation answered a business request instead of refusing it (HTTP " + $unlicensed.Status + ").")
   }
-  if ($blockedStatus -ne 403) {
-    Fail ("An unlicensed installation answered a business request instead of refusing it (HTTP $blockedStatus).")
+  if ($unlicensed.Body -notmatch 'LICENSE_REQUIRED') {
+    Fail ("The refusal did not say that a licence is required: " + $unlicensed.Body)
   }
-  if ($blockedBody -notmatch 'LICENSE_REQUIRED') {
-    Fail ("The refusal did not say that a licence is required: " + $blockedBody)
-  }
-  Write-Host "PASS: without a licence every business request is refused with LICENSE_REQUIRED."
+  Write-Host "PASS: with no licence in the database and no state file, every business request is still refused with LICENSE_REQUIRED."
 
-  $licenceStatus = Invoke-RestMethod -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
+  $licenceStatus = Invoke-RestMethod -Uri "$licenceBase/license/status" -Headers $headers -TimeoutSec 15
   if ($licenceStatus.state -ne 'UNLICENSED' -or -not $licenceStatus.blocked) {
     Fail ("The licence screen state is wrong before activation: state=" + $licenceStatus.state + " blocked=" + $licenceStatus.blocked)
   }
-  $machineId = $licenceStatus.machineId
-  if (-not $machineId) { Fail "The installed program did not report a machine id." }
+  if (-not $licenceStatus.machineId) { Fail "The installed program did not report a machine id." }
+  if ($machineId -and $licenceStatus.machineId -ne $machineId) {
+    Fail ("The machine id changed when the state file was deleted (" + $machineId + " -> " + $licenceStatus.machineId + "); the machine is what a key is bound to.")
+  }
+  # /license stays reachable while blocked: that is where the key is entered.
+  Write-Host "PASS: /license answers while blocked, so the key can still be entered."
 
   $garbageStatus = 0
   try {
-    Invoke-RestMethod -Method Post -Uri "$base/license/activate" -Headers $headers -ContentType 'application/json' -Body (@{ key = 'KYN1.this-is-not-a-licence-key' } | ConvertTo-Json) -TimeoutSec 15 | Out-Null
+    Invoke-RestMethod -Method Post -Uri "$licenceBase/license/activate" -Headers $headers -ContentType 'application/json' -Body (@{ key = 'KYN1.this-is-not-a-licence-key' } | ConvertTo-Json) -TimeoutSec 15 | Out-Null
   } catch { $garbageStatus = [int]$_.Exception.Response.StatusCode }
-  if ($garbageStatus -eq 0 -or $garbageStatus -eq 500) { Fail "A bogus key was not refused cleanly (HTTP $garbageStatus)." }
+  if ($garbageStatus -ne 400 -and $garbageStatus -ne 403) {
+    Fail ("A bogus key was not refused cleanly (HTTP " + $garbageStatus + ").")
+  }
   Write-Host "PASS: a bogus key is refused."
 
-  $created = @(& $node $generator licence create --ref 'CI activation test' --seats 5 --term 1y --home $licenceHome)
-  if ($LASTEXITCODE -ne 0) { Fail "Could not register the test licence." }
-  $licenceId = ($created | Select-String -Pattern 'licence\s*:\s*(lic_[A-Za-z0-9_-]+)').Matches[0].Groups[1].Value
-  if (-not $licenceId) { Fail ("Could not read the test licence id from the generator output: " + ($created -join ' ')) }
+  # A second licence, so this matrix never depends on a key already spent in a
+  # database the program is no longer looking at.
+  $matrixLicence = @(& $node $generator licence create --ref 'CI activation matrix' --seats 5 --term 1y --home $LicenceHome)
+  if ($LASTEXITCODE -ne 0) { Fail "Could not register the test licence for the activation matrix." }
+  $matrixLicenceId = ($matrixLicence | Select-String -Pattern 'licence\s*:\s*(lic_[A-Za-z0-9_-]+)').Matches[0].Groups[1].Value
+  if (-not $matrixLicenceId) { Fail ("Could not read the test licence id from the generator output: " + ($matrixLicence -join ' ')) }
 
-  $wrongMachineKey = @(& $node $generator issue activation --licence $licenceId --machine 'KM-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ' --home $licenceHome) | Where-Object { $_ -match '^KYN1\.' } | Select-Object -First 1
+  $wrongMachineKey = @(& $node $generator issue activation --licence $matrixLicenceId --machine 'KM-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ' --home $LicenceHome) | Where-Object { $_ -match '^KYN1\.' } | Select-Object -First 1
   if (-not $wrongMachineKey) { Fail "Could not issue a key for another machine." }
   $wrongMachineStatus = 0
   $wrongMachineBody = ''
   try {
-    Invoke-RestMethod -Method Post -Uri "$base/license/activate" -Headers $headers -ContentType 'application/json' -Body (@{ key = $wrongMachineKey } | ConvertTo-Json) -TimeoutSec 15 | Out-Null
+    Invoke-RestMethod -Method Post -Uri "$licenceBase/license/activate" -Headers $headers -ContentType 'application/json' -Body (@{ key = $wrongMachineKey } | ConvertTo-Json) -TimeoutSec 15 | Out-Null
   } catch {
     $wrongMachineStatus = [int]$_.Exception.Response.StatusCode
     $wrongMachineBody = [string]$_.ErrorDetails.Message
   }
   if ($wrongMachineStatus -ne 403 -or $wrongMachineBody -notmatch 'LICENSE_KEY_WRONG_MACHINE') {
-    Fail ("A key issued for another computer was not refused as such (HTTP $wrongMachineStatus): " + $wrongMachineBody)
+    Fail ("A key issued for another computer was not refused as such (HTTP " + $wrongMachineStatus + "): " + $wrongMachineBody)
   }
   Write-Host "PASS: a key issued for another computer is refused, so a licence cannot be copied between machines."
 
-  $validKey = @(& $node $generator issue activation --licence $licenceId --machine $machineId --home $licenceHome) | Where-Object { $_ -match '^KYN1\.' } | Select-Object -First 1
+  $validKey = @(& $node $generator issue activation --licence $matrixLicenceId --machine $licenceStatus.machineId --home $LicenceHome) | Where-Object { $_ -match '^KYN1\.' } | Select-Object -First 1
   if (-not $validKey) { Fail "Could not issue a valid activation key for this machine." }
-  $activated = Invoke-RestMethod -Method Post -Uri "$base/license/activate" -Headers $headers -ContentType 'application/json' -Body (@{ key = $validKey } | ConvertTo-Json) -TimeoutSec 20
+  $activated = Invoke-RestMethod -Method Post -Uri "$licenceBase/license/activate" -Headers $headers -ContentType 'application/json' -Body (@{ key = $validKey } | ConvertTo-Json) -TimeoutSec 20
   if ($activated.state -ne 'ACTIVE' -or $activated.blocked) {
     Fail ("A valid key did not activate the installation: state=" + $activated.state + " blocked=" + $activated.blocked)
   }
-  $afterActivation = Invoke-WebRequest -UseBasicParsing -Uri "$base/parties/customers" -Headers $headers -TimeoutSec 30
-  if ($afterActivation.StatusCode -ne 200) { Fail "Business requests are still refused after activation (HTTP $($afterActivation.StatusCode))." }
+  $afterActivation = Get-HttpAnswer "$licenceBase/parties/customers" $headers
+  if ($afterActivation.Status -ne 200) { Fail ("Business requests are still refused after activation (HTTP " + $afterActivation.Status + ").") }
   Write-Host "PASS: a valid key activates the installation and business requests are answered again."
 
+  $licensedHealth = Invoke-WebRequest -UseBasicParsing -Uri "$licenceBase/health" -TimeoutSec 15
+  if ($licensedHealth.StatusCode -ne 200) { Fail "/health did not answer while the installation is licensed." }
+
+  # ── restart ─────────────────────────────────────────────────────────────
   Stop-KayanClient $licenceClient
   $licenceClient = Start-Process -FilePath (Join-Path $installRoot 'erp_kayan.exe') -WorkingDirectory $installRoot -PassThru
   $restartedApi = Wait-ForInstalledApi $licenceClient 90
@@ -1100,29 +1298,56 @@ try {
   if ($statusAfterRestart.state -ne 'ACTIVE' -or $statusAfterRestart.blocked) {
     Fail ("The licence did not survive a restart: state=" + $statusAfterRestart.state + " blocked=" + $statusAfterRestart.blocked)
   }
-  $rulesAfterRestart = Invoke-WebRequest -UseBasicParsing -Uri "$restartedBase/parties/customers" -Headers $restartHeaders -TimeoutSec 30
-  if ($rulesAfterRestart.StatusCode -ne 200) { Fail "Business requests are refused after restarting a licensed installation." }
-  Write-Host "PASS: the licence survives closing and reopening the program."
+  $rulesAfterRestart = Get-HttpAnswer "$restartedBase/parties/customers" $restartHeaders
+  if ($rulesAfterRestart.Status -ne 200) { Fail ("Business requests are refused after restarting a licensed installation (HTTP " + $rulesAfterRestart.Status + ").") }
+  Write-Host "PASS: the licence survives closing and reopening the program, and enforcement is still on."
 
-  # Deleting the licence (a restored or corrupted database) must block again:
-  # never 'no record' read as 'activated'.
+  # ── corrupt state file, still licensed ──────────────────────────────────
+  # A file the person can write must not be able to *grant* anything, and
+  # replacing it with nonsense must not lock a paying customer out either: it
+  # is set aside and the licence stays where it is, in the database.
+  if (Test-Path -LiteralPath $licenceStateFile) {
+    Set-Content -LiteralPath $licenceStateFile -Value 'not a state file - deliberately corrupted by the smoke test' -Encoding ASCII
+  } else {
+    Fail "The licence state file was not recreated after the restart: $licenceStateFile"
+  }
+  Stop-KayanClient $licenceClient
+  $licenceClient = Start-Process -FilePath (Join-Path $installRoot 'erp_kayan.exe') -WorkingDirectory $installRoot -PassThru
+  $corruptApi = Wait-ForInstalledApi $licenceClient 90
+  if (-not $corruptApi) { Fail "The program did not come back after its licence state file was corrupted." }
+  $corruptBase = "http://127.0.0.1:$($corruptApi.Port)/api/v1"
+  if ($null -eq $corruptApi.Health.license -or $corruptApi.Health.license.enforcement -ne 'enforce') {
+    Fail "Corrupting the licence state file switched licence enforcement off."
+  }
+  $loginCorrupt = Invoke-RestMethod -Method Post -Uri "$corruptBase/auth/login" -ContentType 'application/json' -Body (@{ username = 'ci-new-admin'; password = 'CiSmoke-New-Admin-7241' } | ConvertTo-Json -Compress) -TimeoutSec 10
+  $corruptHeaders = @{ Authorization = "Bearer $($loginCorrupt.accessToken)" }
+  $statusCorrupt = Invoke-RestMethod -Uri "$corruptBase/license/status" -Headers $corruptHeaders -TimeoutSec 15
+  # Read now, while this server is still answering: the hostile-environment
+  # block below compares its own answer with this one.
+  $realMachineId = $statusCorrupt.machineId
+  if ($statusCorrupt.state -ne 'ACTIVE') {
+    Fail ("A corrupted state file changed the licence state to '" + $statusCorrupt.state + "'; the licence is in the database, not in that file.")
+  }
+  if ((Get-HttpAnswer "$corruptBase/parties/customers" $corruptHeaders).Status -ne 200) {
+    Fail "A corrupted licence state file locked a licensed installation out of business routes."
+  }
+  Write-Host "PASS: corrupting the licence state file neither grants a licence nor removes one, and enforcement stays on."
+
+  # ── the licence is deleted: absence is never activation ────────────────
   $env:PGPASSWORD = $previousPassword
   try {
     & $psql -h 127.0.0.1 -p 5432 -U erp_app -d $freshDatabase -v ON_ERROR_STOP=1 -c "DELETE FROM license_seat_usage; DELETE FROM license_keys; DELETE FROM license_events; DELETE FROM license_installations;" *> $null
-    $deleteExit = $LASTEXITCODE
+    $deleteAgainExit = $LASTEXITCODE
   } finally {
     Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
   }
-  if ($deleteExit -ne 0) { Fail "Could not remove the licence rows for the deletion test." }
+  if ($deleteAgainExit -ne 0) { Fail "Could not remove the licence rows for the deletion test." }
   Start-Sleep -Seconds 4
-  $blockedAgainStatus = 0
-  try {
-    Invoke-WebRequest -UseBasicParsing -Uri "$restartedBase/parties/customers" -Headers $restartHeaders -TimeoutSec 15 | Out-Null
-  } catch { $blockedAgainStatus = [int]$_.Exception.Response.StatusCode }
-  if ($blockedAgainStatus -ne 403) {
-    Fail ("A deleted licence did not stop business requests (HTTP $blockedAgainStatus): a missing licence is never an activated one.")
+  $blockedAgain = Get-HttpAnswer "$corruptBase/parties/customers" $corruptHeaders
+  if ($blockedAgain.Status -ne 403) {
+    Fail ("A deleted licence did not stop business requests (HTTP " + $blockedAgain.Status + "): a missing licence is never an activated one.")
   }
-  $statusAfterDelete = Invoke-RestMethod -Uri "$restartedBase/license/status" -Headers $restartHeaders -TimeoutSec 15
+  $statusAfterDelete = Invoke-RestMethod -Uri "$corruptBase/license/status" -Headers $corruptHeaders -TimeoutSec 15
   if ($statusAfterDelete.state -ne 'UNLICENSED') {
     Fail ("After removing the licence the state is still '" + $statusAfterDelete.state + "'.")
   }
@@ -1131,4 +1356,151 @@ try {
   Stop-KayanClient $licenceClient
 }
 
-Write-Output "::notice::Company and activation exercises passed: a new company got its own empty database while the previous company was backed up and kept; the program was proven to read the new database; and without a valid key every business request is refused, a wrong-machine key is refused, a valid key works, it survives a restart, and a deleted licence blocks again."
+# ═══════════════════════════════════════════════════════════════════════════
+# THE SERVER STARTED BY HAND, WITH HOSTILE ENVIRONMENT
+#
+# Everything above went through the program. This starts the installed backend
+# directly - no window, no shell - with the environment variables somebody
+# would set to get round the licence, and calls the API the way any tool could:
+#
+#   LICENSE_ENFORCEMENT=warn        -> must stay enforced
+#   LICENSE_MACHINE_ID=KM-ZZZZ...   -> must not become the machine id
+#   LICENSE_STATE_DIR=<temp folder> -> must not move the state
+#   LICENSE_PUBLIC_KEY / _FILE      -> a key of their own must not be trusted
+#
+# The installation is unlicensed when this runs (the previous block removed the
+# licence), so any hole here shows up as a business request that succeeds.
+# ═══════════════════════════════════════════════════════════════════════════
+
+Write-Host '--- activation: the server started by hand with hostile environment ---'
+$hijackStateDir = Join-Path $env:TEMP ('kayan-hijack-state-' + [Guid]::NewGuid().ToString('N').Substring(0,8))
+$attackerHome = Join-Path $env:TEMP ('kayan-attacker-' + [Guid]::NewGuid().ToString('N').Substring(0,8))
+New-Item -ItemType Directory -Force -Path $hijackStateDir | Out-Null
+& $node $generator init --home $attackerHome *> $null
+if ($LASTEXITCODE -ne 0) { Fail "Could not create the attacker's throwaway key pair." }
+$attackerLicence = @(& $node $generator licence create --ref 'CI attacker key' --seats 1 --term 1y --home $attackerHome)
+if ($LASTEXITCODE -ne 0) { Fail "Could not register the attacker's licence." }
+$attackerLicenceId = ($attackerLicence | Select-String -Pattern 'licence\s*:\s*(lic_[A-Za-z0-9_-]+)').Matches[0].Groups[1].Value
+if (-not $realMachineId) { Fail "The installed program did not report a machine id for the hostile-environment test." }
+$attackerKey = @(& $node $generator issue activation --licence $attackerLicenceId --machine $realMachineId --home $attackerHome) | Where-Object { $_ -match '^KYN1\.' } | Select-Object -First 1
+if (-not $attackerKey) { Fail "Could not issue the attacker's activation key." }
+
+$directPort = 3080
+$directOut = Join-Path $env:TEMP 'kayan-direct-api-out.log'
+$directErr = Join-Path $env:TEMP 'kayan-direct-api-err.log'
+$direct = $null
+# The environment the program itself gives its server, read from the installed
+# settings: without DATABASE_URL and the signing secrets a production server
+# cannot start at all, and a hand-started one that could would not be the
+# thing under test.
+$directSettings = Read-SettingsValues $settings
+$savedEnvironment = @{}
+$environmentNames = @($directSettings.Keys) + @(
+  'PORT','HOST','NODE_ENV','NO_COLOR','KAYAN_BACKUP_DIR','KAYAN_UPLOAD_DIR',
+  'LICENSE_ENFORCEMENT','LICENSE_MACHINE_ID','LICENSE_STATE_DIR',
+  'LICENSE_PUBLIC_KEY','LICENSE_PUBLIC_KEY_FILE'
+)
+foreach ($name in $environmentNames) {
+  if (-not $savedEnvironment.ContainsKey($name)) {
+    $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+  }
+}
+try {
+  foreach ($entry in $directSettings.GetEnumerator()) {
+    [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
+  }
+  $env:PORT = [string]$directPort
+  $env:HOST = '127.0.0.1'
+  $env:NODE_ENV = 'production'
+  $env:NO_COLOR = '1'
+  $env:KAYAN_BACKUP_DIR = Join-Path $env:ProgramData 'KAYAN-ERP\backups'
+  $env:KAYAN_UPLOAD_DIR = Join-Path $env:ProgramData 'KAYAN-ERP\uploads'
+  $env:LICENSE_ENFORCEMENT = 'warn'
+  $env:LICENSE_MACHINE_ID = 'KM-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ'
+  $env:LICENSE_STATE_DIR = $hijackStateDir
+  $env:LICENSE_PUBLIC_KEY = (Get-Content -LiteralPath (Join-Path $attackerHome 'public-key.pem') -Raw)
+  $env:LICENSE_PUBLIC_KEY_FILE = (Join-Path $attackerHome 'public-key.pem')
+  $direct = Start-Process -FilePath $node -ArgumentList @('dist\src\main.js') -WorkingDirectory (Join-Path $installRoot 'backend') -PassThru -NoNewWindow -RedirectStandardOutput $directOut -RedirectStandardError $directErr
+  $directHealth = Wait-ForHealth $directPort 120
+  if (-not $directHealth) {
+    $tail = ((Get-Content -LiteralPath $directOut -Raw -ErrorAction SilentlyContinue) + (Get-Content -LiteralPath $directErr -Raw -ErrorAction SilentlyContinue))
+    Fail ("The installed backend did not answer when started by hand: " + $tail)
+  }
+  if ($null -eq $directHealth.license) { Fail "The backend started by hand does not report a licence mode." }
+  if ($directHealth.license.enforcement -ne 'enforce') {
+    Fail ("LICENSE_ENFORCEMENT=warn lowered enforcement on the installed backend (mode: " + $directHealth.license.enforcement + ").")
+  }
+  if ($directHealth.license.configured -ne $true) { Fail "The backend started by hand reports no licence verification key." }
+  Write-Host "PASS: LICENSE_ENFORCEMENT=warn cannot lower enforcement on an installed copy."
+
+  $directBase = "http://127.0.0.1:$directPort/api/v1"
+  $directLogin = Invoke-RestMethod -Method Post -Uri "$directBase/auth/login" -ContentType 'application/json' -Body (@{ username = 'ci-new-admin'; password = 'CiSmoke-New-Admin-7241' } | ConvertTo-Json -Compress) -TimeoutSec 10
+  if (-not $directLogin.accessToken) { Fail "The backend started by hand refused the administrator's login." }
+  $directHeaders = @{ Authorization = "Bearer $($directLogin.accessToken)" }
+
+  $directStatus = Invoke-RestMethod -Uri "$directBase/license/status" -Headers $directHeaders -TimeoutSec 15
+  if ($directStatus.machineId -eq 'KM-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ') {
+    Fail "LICENSE_MACHINE_ID replaced the machine id of an installed copy."
+  }
+  if ($realMachineId -and $directStatus.machineId -ne $realMachineId) {
+    Fail ("The backend started by hand reports another machine id (" + $directStatus.machineId + " instead of " + $realMachineId + ").")
+  }
+  Write-Host "PASS: LICENSE_MACHINE_ID cannot replace the machine id of an installed copy."
+
+  if (Test-Path -LiteralPath (Join-Path $hijackStateDir 'license-state.json')) {
+    Fail "LICENSE_STATE_DIR moved the licence state into a folder the person who started the server can write."
+  }
+  if (-not (Test-Path -LiteralPath $licenceStateFile)) {
+    Fail "The backend started by hand did not use the installation's own licence state file."
+  }
+  Write-Host "PASS: LICENSE_STATE_DIR cannot move the licence state of an installed copy."
+
+  $directBusiness = Get-HttpAnswer "$directBase/parties/customers" $directHeaders
+  if ($directBusiness.Status -ne 403) {
+    Fail ("A direct API call on an unlicensed installation was answered (HTTP " + $directBusiness.Status + ").")
+  }
+  if ($directBusiness.Body -notmatch 'LICENSE_REQUIRED') {
+    Fail ("The direct refusal did not say a licence is required: " + $directBusiness.Body)
+  }
+  Write-Host "PASS: a business route called directly on the API is refused with 403 LICENSE_REQUIRED."
+
+  $attackerStatus = 0
+  $attackerBody = ''
+  try {
+    Invoke-RestMethod -Method Post -Uri "$directBase/license/activate" -Headers $directHeaders -ContentType 'application/json' -Body (@{ key = $attackerKey } | ConvertTo-Json) -TimeoutSec 20 | Out-Null
+  } catch {
+    $attackerStatus = [int]$_.Exception.Response.StatusCode
+    $attackerBody = [string]$_.ErrorDetails.Message
+  }
+  if ($attackerStatus -ne 403 -or $attackerBody -notmatch 'LICENSE_KEY_BAD_SIGNATURE') {
+    Fail ("LICENSE_PUBLIC_KEY/_FILE replaced the key of an installed copy: a key signed by another key was not refused as a bad signature (HTTP " + $attackerStatus + "): " + $attackerBody)
+  }
+  Write-Host "PASS: LICENSE_PUBLIC_KEY and LICENSE_PUBLIC_KEY_FILE cannot replace the key an installed copy trusts."
+
+  # The routes that are meant to work while blocked still do.
+  $healthWhileBlocked = Invoke-WebRequest -UseBasicParsing -Uri "$directBase/health" -TimeoutSec 15
+  if ($healthWhileBlocked.StatusCode -ne 200) { Fail "/health does not answer while the installation is blocked." }
+  $licenceWhileBlocked = Invoke-WebRequest -UseBasicParsing -Uri "$directBase/license/status" -Headers $directHeaders -TimeoutSec 15
+  if ($licenceWhileBlocked.StatusCode -ne 200) { Fail "/license/status does not answer while the installation is blocked." }
+  Write-Host "PASS: /health and /license still answer while the installation is blocked, so it can be put right."
+} finally {
+  if ($direct -and -not $direct.HasExited) {
+    Stop-Process -Id $direct.Id -Force -ErrorAction SilentlyContinue
+    try { $direct.WaitForExit(10000) | Out-Null } catch { }
+  }
+  # Put this process's own environment back: the block above borrowed it to
+  # start a second server and nothing after it may inherit those values.
+  foreach ($name in $savedEnvironment.Keys) {
+    [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process')
+  }
+  Remove-Item -LiteralPath $hijackStateDir -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $attackerHome -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+}
+
+if ($licenceEnforced) {
+  Write-Output "::notice::Company and activation exercises passed: a new company got its own empty database while the previous company was backed up and kept; the program was proven to read the new database; and on a build that enforces licences, an unlicensed installation refuses business use, a bogus key and a wrong-machine key are refused, a valid key works, it survives a restart, deleting or corrupting the licence state file changes nothing, environment variables cannot lower enforcement or move the state, and the API called directly refuses exactly as the program does."
+} else {
+  Write-Output "::warning title=Activation not proven::The company exercises passed, but this Setup does not enforce licences, so nothing about activation was proven by this run."
+}

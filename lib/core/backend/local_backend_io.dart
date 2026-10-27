@@ -86,14 +86,24 @@ class KayanDatabaseConfig {
   static const String adminUsername = 'postgres';
   static const String adminDatabaseName = 'postgres';
 
+  /// A company database this product creates: the original `erp_kayan`, or the
+  /// one a new company or a reset gets, `erp_kayan_<yyyyMMddHHmmss>`. Anything
+  /// else on the same server belongs to somebody else.
+  static final RegExp companyDatabaseName = RegExp(
+    r'^erp_kayan(?:_\d{14})?$',
+  );
+
   static bool isLocalDatabaseUrl(String? url) {
     if (url == null || url.isEmpty) return false;
     final uri = Uri.tryParse(url);
     if (uri == null) return false;
-    return uri.host == host &&
-        uri.port == port &&
-        uri.pathSegments.isNotEmpty &&
-        uri.pathSegments.first == databaseName;
+    if (uri.host != host || uri.port != port) return false;
+    if (uri.pathSegments.isEmpty) return false;
+    final name = uri.pathSegments.first;
+    // The role is checked too: a database of the same name owned by another
+    // login is not this installation's.
+    final user = uri.userInfo.split(':').first;
+    return user == username && companyDatabaseName.hasMatch(name);
   }
 
   /// The database a connection string names, or null when there is not one.

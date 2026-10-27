@@ -51,6 +51,46 @@ void main() {
       expect(KayanDatabaseConfig.isLocalDatabaseUrl(null), isFalse);
     });
 
+    test('accepts the new-company database this product itself creates', () {
+      // A new company (or a safe reset) gets erp_kayan_<timestamp> on the same
+      // cluster. Refusing it here would call the installation's own database a
+      // foreign one - the mistake that made "a new company" fail at the end of
+      // Setup.
+      expect(
+        KayanDatabaseConfig.isLocalDatabaseUrl(
+          'postgresql://erp_app:secret@127.0.0.1:5432/'
+          'erp_kayan_20261027120000?schema=public',
+        ),
+        isTrue,
+      );
+      // Still anchored: another role, another name, another server.
+      expect(
+        KayanDatabaseConfig.isLocalDatabaseUrl(
+          'postgresql://postgres:secret@127.0.0.1:5432/'
+          'erp_kayan_20261027120000?schema=public',
+        ),
+        isFalse,
+      );
+      expect(
+        KayanDatabaseConfig.isLocalDatabaseUrl(
+          'postgresql://erp_app:secret@127.0.0.1:5432/erp_kayan_other',
+        ),
+        isFalse,
+      );
+      expect(
+        KayanDatabaseConfig.isLocalDatabaseUrl(
+          'postgresql://erp_app:secret@127.0.0.1:5432/erp_kayan_2026102712000',
+        ),
+        isFalse,
+      );
+      expect(
+        KayanDatabaseConfig.isLocalDatabaseUrl(
+          'postgresql://erp_app:secret@192.168.1.5:5432/erp_kayan',
+        ),
+        isFalse,
+      );
+    });
+
     test('reads the database name out of a connection string', () {
       expect(
         KayanDatabaseConfig.databaseNameFromUrl(

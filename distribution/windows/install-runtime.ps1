@@ -18,8 +18,11 @@
     decides which of two very different things this is allowed to do:
 
       New       an empty database and the first-run screen. If this computer
-                already holds company data, setup stops and says so; a "new
-                company" is never a quiet wipe of an old one.
+                already holds company data, the previous database is backed
+                up and verified and a database of its own is created beside
+                it - never emptied, renamed or reused - and the settings are
+                pointed at the new one only after it is migrated and proved
+                empty. A "new company" is never a quiet wipe of an old one.
       Existing  this computer's database is kept, checked to be a KAYAN
                 database owned by this installation, backed up, and upgraded
                 in place. If no database is here, setup stops and says so
@@ -833,7 +836,15 @@ foreach ($entry in $machineSettings.GetEnumerator()) {
 foreach ($entry in $userSettings.GetEnumerator()) {
   $settings[$entry.Key] = $entry.Value
 }
-$bundledDbUrlPattern = '^postgresql://erp_app:([a-fA-F0-9]+)@127\.0\.0\.1:5432/erp_kayan\?schema=public$'
+# The company database of this installation is either the original
+# 'erp_kayan', or one this product created for "a new company" or a
+# reset: erp_kayan_<yyyyMMddHHmmss> (the shape New-CompanyDatabase and
+# reset-kayan.ps1 generate). The name is checked against this before it
+# is ever put into SQL. The rest of the connection is fixed too - the
+# bundled role, the loopback address and port 5432 - so a database
+# somewhere else is refused whatever it is called.
+$kayanDatabaseNamePattern = 'erp_kayan(?:_\d{14})?'
+$bundledDbUrlPattern = ('^postgresql://erp_app:([a-fA-F0-9]+)@127\.0\.0\.1:5432/(' + $kayanDatabaseNamePattern + ')\?schema=public$')
 if ($machineSettings['DATABASE_URL'] -match $bundledDbUrlPattern -and
     $userSettings['DATABASE_URL'] -and
     $userSettings['DATABASE_URL'] -notmatch $bundledDbUrlPattern) {
@@ -1012,30 +1023,36 @@ if (-not $clusterExists) {
   Set-Stage 'verifying the company database'
   if ($settings['DATABASE_URL'] -match $bundledDbUrlPattern) {
     $dbPassword = $matches[1]
+    $companyDatabase = $matches[2]
   } else {
-    throw 'The settings on this computer point at a database outside the bundled KAYAN PostgreSQL. Nothing was changed. Run Setup again and choose "A new company" on the company page, or point the settings back at the local database first.'
+    throw 'The settings on this computer point at a database outside the bundled KAYAN PostgreSQL (the local cluster on 127.0.0.1:5432, with a company database this product created). Nothing was changed. Run Setup again and choose "A new company" on the company page, or point the settings back at the local database first.'
+  }
+  # Belt and braces before the name goes into SQL: the pattern above already
+  # proved its shape, and this proves it again on its own.
+  if ($companyDatabase -notmatch ('^' + $kayanDatabaseNamePattern + '$')) {
+    throw ('The settings name a database this product did not create (' + $companyDatabase + '). Nothing was changed.')
   }
   $env:PGPASSWORD = $dbPassword
   $companyCount = 0
   $needsFreshDatabase = $false
   try {
-    $owner = Get-DatabaseScalar 'postgres' 'postgres' "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'erp_kayan'"
+    $owner = Get-DatabaseScalar 'postgres' 'postgres' ("SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = '" + $companyDatabase + "'")
     if ($owner -eq '') {
       if ($CompanyMode -eq 'Existing' -and $CompanyModeChosen) {
         throw 'Setup was told to keep an existing company, but this computer has no company database to keep. Nothing was changed. Run Setup again and choose "A new company" on the company page.'
       }
       Write-RuntimeMarker 'KAYAN-COMPANY-NEW-DATABASE-EMPTY (database not created yet)'
     } elseif ($owner -ne 'erp_app') {
-      throw ("The database named erp_kayan on this computer belongs to another owner ('" + $owner + "'), so it is not this installation's company database. Nothing was changed. Run Setup again and choose ""A new company"", or restore this installation's own database before installing over it.")
+      throw ("The database '" + $companyDatabase + "' named in the settings belongs to another owner ('" + $owner + "'), so it is not this installation's company database. Nothing was changed. Run Setup again and choose ""A new company"", or restore this installation's own database before installing over it.")
     } else {
-      $hasSchema = Get-DatabaseScalar 'erp_kayan' 'erp_app' "SELECT (to_regclass('public.companies') IS NOT NULL AND to_regclass('public._prisma_migrations') IS NOT NULL)::text"
+      $hasSchema = Get-DatabaseScalar $companyDatabase 'erp_app' "SELECT (to_regclass('public.companies') IS NOT NULL AND to_regclass('public._prisma_migrations') IS NOT NULL)::text"
       if ($hasSchema -ne 'true') {
         if ($CompanyMode -eq 'Existing' -and $CompanyModeChosen) {
           throw 'Setup was told to keep an existing company, but the local KAYAN database holds no company tables yet, so there is no company here to keep. Nothing was changed. Run Setup again and choose "A new company" on the company page.'
         }
         Write-RuntimeMarker 'KAYAN-COMPANY-NEW-DATABASE-EMPTY (schema not created yet)'
       } else {
-        $countText = Get-DatabaseScalar 'erp_kayan' 'erp_app' 'SELECT count(*) FROM companies'
+        $countText = Get-DatabaseScalar $companyDatabase 'erp_app' 'SELECT count(*) FROM companies'
         if ($countText -notmatch '^\d+$') {
           throw 'The company database did not answer a count of its companies. Nothing was changed; see the protected installer log for what PostgreSQL said.'
         }
@@ -1055,7 +1072,7 @@ if (-not $clusterExists) {
       }
     }
     Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "DO `$`$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'erp_app') THEN CREATE ROLE erp_app WITH LOGIN PASSWORD '$dbPassword'; END IF; END `$`$;"
-    Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') "SELECT 'CREATE DATABASE erp_kayan OWNER erp_app' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'erp_kayan')\gexec"
+    Invoke-PsqlInput (Join-Path $pgBin 'psql.exe') @('-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1') ("SELECT 'CREATE DATABASE " + $companyDatabase + " OWNER erp_app' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '" + $companyDatabase + "')\gexec")
   } finally {
     Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
   }

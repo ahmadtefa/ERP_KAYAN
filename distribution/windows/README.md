@@ -55,12 +55,56 @@ Setup does is prove the program can reach the database its settings name
 
 A product Setup carries the operator's `public-key.pem` and switches licence
 enforcement on. `build-installer.ps1` **refuses** to build a customer installer
-without a key; `-EvaluationBuild` builds one explicitly for development and CI,
-and that fact is written into `runtime-manifest.json` (`licenseEnforcement`).
-An installed copy whose protected licence folder holds a key or the
+without a key; `-EvaluationBuild` builds one explicitly for development, and
+that fact is written into `runtime-manifest.json` (`licenseEnforcement`). An
+installed copy whose protected licence folder holds a key or the
 `enforcement.required` marker always enforces, whatever the user's environment
 says. To produce a real release, place the operator's `public-key.pem` beside
-`build-installer.ps1` and run it without `-EvaluationBuild`.
+`build-installer.ps1` and run it without `-EvaluationBuild`, or pass
+`-LicencePublicKeyPath` with the path to it.
+
+The Windows CI job has no operator key. It therefore generates a **throwaway
+signing key for that run** and builds an enforcement build with it
+(`-LicencePublicKeyPath`), because an evaluation build cannot prove that
+activation is mandatory. Such a Setup enforces licences exactly like a product
+build, but it can never activate a customer key, so it is never published as a
+release - only uploaded as a run artifact. The smoke test is given the same
+key pair (`-LicenceHome`) and `-RequireLicenceEnforcement`, and then proves on
+the installed program: no licence refuses business use, a bogus key is refused,
+a key for another computer is refused, a valid key works, it survives a
+restart, deleting or corrupting the licence state file changes nothing,
+`LICENSE_ENFORCEMENT`/`LICENSE_MACHINE_ID`/`LICENSE_STATE_DIR`/
+`LICENSE_PUBLIC_KEY` cannot change an installed copy when set by whoever starts
+it, a business route called straight at the API is refused with
+`LICENSE_REQUIRED`, and `/health` and `/license` still answer while blocked.
+
+When the operator's public key *is* in the repository the job builds a real
+product Setup instead, and then needs the private half as the repository
+secret `KAYAN_LICENCE_PRIVATE_KEY`: it is written to the runner's temporary
+folder and used only to issue the temporary licences the smoke test applies.
+Without that secret the job fails before building, because a Setup that
+enforces licences the job cannot issue would install into a program whose
+company features could never be exercised - and a Setup nobody tested is not
+published.
+
+### Company databases and their names
+
+`install-runtime.ps1` accepts a company database only when the connection points
+at the bundled cluster (`erp_app` on `127.0.0.1:5432`) **and** the database is
+one this product created: `erp_kayan`, or the databases "a new company" and the
+safe reset create, `erp_kayan_<yyyyMMddHHmmss>`. Every step that names a
+database - the ownership check, the KAYAN-table check, the company count, the
+create-if-missing statement and the backup - takes the name from `DATABASE_URL`.
+Before this, those four places were written with the literal `erp_kayan`, so the
+first install after a reset whose settings named `erp_kayan_<stamp>` failed at
+"verifying the company database" with a PostgreSQL-looking error, and the
+program went on opening the previous company.
+
+Repair (`repair-runtime.ps1`) keeps the settings it found: it refuses to finish
+if the settings generation would go backwards or if the database name would
+change, and - when the protected licence folder says this installation must
+enforce - it fails unless the repaired server reports `enforcement: enforce`
+with its verification key readable.
 
 ### Two Windows rules the runtime setup has to respect
 

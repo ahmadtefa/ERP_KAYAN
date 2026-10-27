@@ -2,13 +2,19 @@
 param(
   [string]$Output = 'build\windows-installer',
   [switch]$SkipInstaller,
-  # Builds the product without licences enforced. Only for development and the
-  # CI job that tests the installer: such a build refuses every customer key,
-  # and it must never be handed to a customer. Without this switch a build that
-  # cannot find the operator's public key fails instead of shipping quietly
-  # unprotected - that is how a released Setup came to run without asking for
-  # an activation key.
-  [switch]$EvaluationBuild
+  # Builds the product without licences enforced. Only for development: such a
+  # build refuses every customer key, and it must never be handed to a
+  # customer. Without this switch a build that cannot find the operator's
+  # public key fails instead of shipping quietly unprotected - that is how a
+  # released Setup came to run without asking for an activation key.
+  [switch]$EvaluationBuild,
+  # Where the licence public key is when it is not beside this script. A
+  # release passes the operator's key (or drops it beside this script); the CI
+  # job passes a throwaway key it generated for that run, so the Setup it
+  # installs really does enforce licences and activation can be tested end to
+  # end. Only the public key is ever read: nothing in this build can issue a
+  # licence.
+  [string]$LicencePublicKeyPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -216,7 +222,16 @@ Copy-Item (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') $app
 # shipping a copy that runs without an activation key. That is a build error,
 # not a warning: the only way to produce such a build is to ask for it with
 # -EvaluationBuild, and then the manifest and the installer's own log say so.
-$licenceCandidates = @(
+$licenceCandidates = @()
+if ($LicencePublicKeyPath) {
+  $explicitKey = if ([IO.Path]::IsPathRooted($LicencePublicKeyPath)) { [IO.Path]::GetFullPath($LicencePublicKeyPath) } else { [IO.Path]::GetFullPath((Join-Path $root $LicencePublicKeyPath)) }
+  if (-not (Test-Path -LiteralPath $explicitKey)) {
+    throw ("The licence public key this build was given does not exist: " + $explicitKey + ". Nothing was built.")
+  }
+  $licenceCandidates += $explicitKey
+  Write-Host "Licensing: using the public key passed to the build ($explicitKey)"
+}
+$licenceCandidates += @(
   (Join-Path $PSScriptRoot 'public-key.pem'),
   (Join-Path $PSScriptRoot 'licensing\public-key.pem')
 )
