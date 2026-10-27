@@ -24,36 +24,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # TEMPORARY diagnostics for the licence step. Removed once the cause is
-      # known. They run first, so their result arrives in seconds.
-      - name: Diag A trivial step
-        shell: powershell
-        run: |
-          Write-Output "::notice::diag A ran"
-
-      - name: Diag B step with an id and an output
-        id: diagb
-        shell: powershell
-        run: |
-          "value=b" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Output "::notice::diag B ran"
-
-      - name: Diag C step with the secret env
-        shell: powershell
-        env:
-          KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
-        run: |
-          Write-Output ("::notice::diag C ran; secret empty: " + [string]([string]::IsNullOrEmpty($env:KAYAN_LICENCE_PRIVATE_KEY)))
-
-      - name: Diag D step with id, secret env and output
-        id: diagd
-        shell: powershell
-        env:
-          KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
-        run: |
-          "value=d" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Output "::notice::diag D ran"
-
       - name: Read application version
         id: app-version
         shell: powershell
@@ -201,14 +171,44 @@ jobs:
       # without a key, exactly as the product does. That key exists only in
       # this run's temporary folder, so the artifact cannot activate any
       # customer key - which is why it is never published as a release.
-      # A build that enforces licences needs a public key, and this repository
-      # does not contain the operator's. An evaluation build cannot prove that
-      # activation is mandatory, so when no operator key is present this job
-      # generates a throwaway signing key for itself and builds a real
-      # enforcement build with it: the Setup installed below refuses to work
-      # without a key, exactly as the product does. That key exists only in
-      # this run's temporary folder, so the artifact cannot activate any
-      # customer key - which is why it is never published as a release.
+      # PowerShell parses a whole script before running any of it, so one syntax
+      # error anywhere in the step below kills it before its own error handler
+      # exists: the step then fails in under a second, saying nothing that
+      # survives outside the runner log. This guard parses that step's text with
+      # PowerShell's own parser and fails with the exact message instead.
+      - name: Check the licence step parses
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $workflow = '.github/workflows/windows-installer.yml'
+          $lines = Get-Content -LiteralPath $workflow
+          $start = -1
+          for ($n = 0; $n -lt $lines.Count; $n++) {
+            if ($lines[$n] -eq '      - name: Licence key for this build') { $start = $n; break }
+          }
+          if ($start -lt 0) { throw "No licence step in $workflow" }
+          $i = $start
+          while ($i -lt $lines.Count -and $lines[$i] -notmatch 'run:\s*\|') { $i++ }
+          if ($i -ge $lines.Count) { throw "The licence step in $workflow has no run block" }
+          $runIndent = ([regex]::Match($lines[$i], '^(\s*)')).Groups[1].Value.Length
+          $body = New-Object System.Collections.Generic.List[string]
+          for ($j = $i + 1; $j -lt $lines.Count; $j++) {
+            $line = $lines[$j]
+            $indent = ([regex]::Match($line, '^(\s*)')).Groups[1].Value.Length
+            if ($line.Trim().Length -gt 0 -and $indent -le ($runIndent - 2)) { break }
+            if ($line.Length -ge $runIndent) { $body.Add($line.Substring($runIndent)) } else { $body.Add('') }
+          }
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseInput([string]::Join("`n", $body), [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            foreach ($e in $errors) {
+              Write-Output ("::error title=Licence step syntax::" + $e.Message + " (line " + $e.Extent.StartLineNumber + ")")
+            }
+            throw ("The licence step in " + $workflow + " has " + $errors.Count + " syntax error(s), so PowerShell would refuse to run it.")
+          }
+          Write-Host ("Licence step parses: " + $body.Count + " lines, " + $tokens.Count + " tokens.")
+
       - name: Licence key for this build
         id: licence
         shell: powershell
@@ -229,7 +229,7 @@ jobs:
               if (Test-Path -LiteralPath $candidate) { $operatorKey = (Resolve-Path -LiteralPath $candidate).Path; break }
             }
             if ($operatorKey) {
-              Write-Host "The repository carries the operator's licence key at $operatorKey: this is a product build."
+              Write-Host ("The repository carries the operator's licence key at " + $operatorKey + ": this is a product build.")
               if (-not $env:KAYAN_LICENCE_PRIVATE_KEY) {
                 throw 'This repository carries the operator''s public key, but no KAYAN_LICENCE_PRIVATE_KEY secret is configured for this run. The installed Setup would enforce licences this job cannot issue, so its company features could not be tested - and a Setup nobody tested is not published. Add the private key as a repository secret, or remove the public key to build a test-signed Setup.'
               }
