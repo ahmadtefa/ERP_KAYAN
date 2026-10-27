@@ -758,15 +758,15 @@ class _Sheet extends StatelessWidget {
         design?.finalTotal,
       );
       return Container(
-        color: grand ? _Doc.royal : (tax ? _Doc.wash : null),
         padding: EdgeInsets.symmetric(
           vertical: grand ? 9 * scale : 6 * scale,
           horizontal: 9 * scale,
         ),
         decoration: grand
-            ? null
-            : const BoxDecoration(
-                border: Border(
+            ? const BoxDecoration(color: _Doc.royal)
+            : BoxDecoration(
+                color: tax ? _Doc.wash : null,
+                border: const Border(
                   bottom: BorderSide(color: _Doc.line, width: 0.6),
                 ),
               ),
