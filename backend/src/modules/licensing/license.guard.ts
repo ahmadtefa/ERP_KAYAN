@@ -48,7 +48,15 @@ export class LicenseGuard implements CanActivate {
       route?: { path?: string };
     }>();
     const raw = request.route?.path ?? request.path ?? request.url ?? '';
-    const path = raw.split('?')[0];
+    const rawPath = raw.split('?')[0];
+
+    // Express/Nest can expose either the controller path (/health) or the
+    // fully prefixed URL (/api/v1/health), depending on which request property
+    // is populated. Normalize the known API prefix before checking the escape
+    // routes. Otherwise the health probe can enter licence-status/database
+    // work before the controller runs, defeating the repair tool's liveness
+    // check when the database or licence store is slow.
+    const path = rawPath.replace(/^\/api\/v1(?=\/|$)/, '') || '/';
 
     if (
       LicenseGuard.alwaysAllowed.some(
