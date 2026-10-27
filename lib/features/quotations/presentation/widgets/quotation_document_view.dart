@@ -1056,6 +1056,7 @@ abstract final class _Doc {
   static const royal = Color(0xFF1E60AA);
   static const royalDeep = Color(0xFF164D84);
   static const royalTint = Color(0xFF0088CC);
+  static const accent = Color(0xFFE67E22);
   static const ink = Color(0xFF111827);
   static const muted = Color(0xFF4B5563);
   static const line = Color(0xFFD3E4FE);
