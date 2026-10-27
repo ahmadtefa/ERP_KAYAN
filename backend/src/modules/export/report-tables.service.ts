@@ -1011,6 +1011,7 @@ export class ReportTablesService {
         { key: 'date', labelEn: 'Date', labelAr: 'التاريخ', width: 12 },
         { key: 'number', labelEn: 'Document', labelAr: 'المستند', width: 16 },
         { key: 'type', labelEn: 'Kind', labelAr: 'النوع', width: 16 },
+        { key: 'status', labelEn: 'Document status', labelAr: 'حالة المستند', width: 12 },
         { key: 'description', labelEn: 'Description', labelAr: 'البيان', width: 26 },
         { key: 'debit', labelEn: 'Debit', labelAr: 'مدين', numeric: true, width: 14 },
         { key: 'credit', labelEn: 'Credit', labelAr: 'دائن', numeric: true, width: 14 },

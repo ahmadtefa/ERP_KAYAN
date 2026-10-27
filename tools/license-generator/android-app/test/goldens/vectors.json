@@ -1,0 +1,447 @@
+{
+  "note": "Produced by tools/license-generator/kayan-license.mjs with a frozen clock. Do not edit by hand: regenerate with tool/make_goldens.mjs.",
+  "keyPair": {
+    "seedHex": "5f3d9c1a7b2e4d6089ab12cdef34567890abcdef1234567890abcdef12345678",
+    "privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIF89nBp7Lk1giasSze80VniQq83vEjRWeJCrze8SNFZ4\n-----END PRIVATE KEY-----\n",
+    "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEANw1Kzj7gprxsEff9aPhPoL5TkQKFPRz8dedmb3WmpEI=\n-----END PUBLIC KEY-----\n",
+    "spkiBase64url": "MCowBQYDK2VwAyEANw1Kzj7gprxsEff9aPhPoL5TkQKFPRz8dedmb3WmpEI",
+    "spkiHex": "302a300506032b6570032100370d4ace3ee0a6bc6c11f7fd68f84fa0be539102853d1cfc75e7666f75a6a442",
+    "fingerprint": "989A-6539-EBC7-351F-E77C-CB3F-1676-DCD8",
+    "toolVersion": "1.1.0"
+  },
+  "steps": [
+    {
+      "label": "licence create",
+      "action": "createLicence",
+      "clock": "2026-03-01T09:00:01.000Z",
+      "licenseId": "lic_3897373f735aca9d",
+      "input": {
+        "ref": "شركة النور",
+        "seats": 5,
+        "term": "1y"
+      }
+    },
+    {
+      "label": "activation",
+      "action": "issueKey",
+      "clock": "2026-03-01T09:00:02.000Z",
+      "keyId": "key_70c1f7d8a5d18a53",
+      "key": "KYN1.eyJ2IjoxLCJrZXlJZCI6ImtleV83MGMxZjdkOGE1ZDE4YTUzIiwidHlwZSI6IkFDVElWQVRJT04iLCJsaWNlbnNlSWQiOiJsaWNfMzg5NzM3M2Y3MzVhY2E5ZCIsImlzc3VlZEF0IjoiMjAyNi0wMy0wMVQwOTowMDowMi4wMDBaIiwibWFjaGluZUlkIjoiS00tVEVTVC1BQUFBLUJCQkItQ0NDQyIsInRlcm0iOnsia2luZCI6Ik1PTlRIUyIsIm1vbnRocyI6MTJ9LCJzZWF0cyI6eyJtb2RlIjoiQ0FQIiwidmFsdWUiOjV9LCJzdGF0ZSI6bnVsbCwibm90ZSI6IklOVi0yMDI2LTAwMSJ9.wbg2SKPE6aVih2rlPWpOzPkRHqc7fcVAxtFKQ9NzxzlJCVrf62tWbxQ3VZpr1rnZVk47HNh0s02pDVjNe_ULDQ",
+      "input": {
+        "type": "ACTIVATION",
+        "licenceId": "lic_3897373f735aca9d",
+        "machineId": "KM-TEST-AAAA-BBBB-CCCC",
+        "note": "INV-2026-001"
+      }
+    },
+    {
+      "label": "seats increase",
+      "action": "issueKey",
+      "clock": "2026-03-01T09:00:03.000Z",
+      "keyId": "key_86c1c14df0b0af4d",
+      "key": "KYN1.eyJ2IjoxLCJrZXlJZCI6ImtleV84NmMxYzE0ZGYwYjBhZjRkIiwidHlwZSI6IlNFQVRTIiwibGljZW5zZUlkIjoibGljXzM4OTczNzNmNzM1YWNhOWQiLCJpc3N1ZWRBdCI6IjIwMjYtMDMtMDFUMDk6MDA6MDMuMDAwWiIsIm1hY2hpbmVJZCI6bnVsbCwidGVybSI6bnVsbCwic2VhdHMiOnsibW9kZSI6IklOQ1JFQVNFIiwidmFsdWUiOjN9LCJzdGF0ZSI6bnVsbCwibm90ZSI6bnVsbH0.DLxcO3kXW8v0Xb6yDYfDCyKtPDSGVrRn8cH2H314Ao8XBPQbtPs-9ghDwFZ5WTUUpXxYidcIXp866Pxgqlg9AQ",
+      "input": {
+        "type": "SEATS",
+        "licenceId": "lic_3897373f735aca9d",
+        "increase": 3
+      }
+    },
+    {
+      "label": "renewal 6m",
+      "action": "issueKey",
+      "clock": "2026-03-01T09:00:04.000Z",
+      "keyId": "key_ede743fd3e0d81ab",
+      "key": "KYN1.eyJ2IjoxLCJrZXlJZCI6ImtleV9lZGU3NDNmZDNlMGQ4MWFiIiwidHlwZSI6IlJFTkVXQUwiLCJsaWNlbnNlSWQiOiJsaWNfMzg5NzM3M2Y3MzVhY2E5ZCIsImlzc3VlZEF0IjoiMjAyNi0wMy0wMVQwOTowMDowNC4wMDBaIiwibWFjaGluZUlkIjpudWxsLCJ0ZXJtIjp7ImtpbmQiOiJNT05USFMiLCJtb250aHMiOjZ9LCJzZWF0cyI6bnVsbCwic3RhdGUiOm51bGwsIm5vdGUiOm51bGx9.0OPtLXXHNMnI71wl-DU7GsR7dj3H23_iotv4rHvCWiVQjtJ5qSFWmpYxq2CZ82VfgbG_F_VhwpsPfLK-kjdqBQ",
+      "input": {
+        "type": "RENEWAL",
+        "licenceId": "lic_3897373f735aca9d",
+        "term": "6m"
+      }
+    },
+    {
+      "label": "transfer",
+      "action": "issueKey",
+      "clock": "2026-03-01T09:00:05.000Z",
+      "keyId": "key_d24162fa7b4f14f5",
+      "key": "KYN1.eyJ2IjoxLCJrZXlJZCI6ImtleV9kMjQxNjJmYTdiNGYxNGY1IiwidHlwZSI6IlRSQU5TRkVSIiwibGljZW5zZUlkIjoibGljXzM4OTczNzNmNzM1YWNhOWQiLCJpc3N1ZWRBdCI6IjIwMjYtMDMtMDFUMDk6MDA6MDUuMDAwWiIsIm1hY2hpbmVJZCI6IktNLVRFU1QtRERERC1FRUVFLUZGRkYiLCJ0ZXJtIjpudWxsLCJzZWF0cyI6bnVsbCwic3RhdGUiOnsiZXhwaXJlc0F0IjoiMjAyNy0wOS0wMVQwOTowMDowMi4wMDBaIiwic2VhdExpbWl0Ijo4LCJzZWF0c1VzZWQiOjQsInN0YXJ0c0F0IjoiMjAyNi0wMy0wMVQwOTowMDowMi4wMDBaIiwiaXNzdWVkQXQiOiIyMDI2LTAzLTAxVDA5OjAwOjA1LjAwMFoifSwibm90ZSI6bnVsbH0.wlXaznyZeZE8KycqrDsPbCPia6ardJpmfY_1lllMjg4q8t8mENTZCEKEwOOa3pRxFDvPeKnsUBHinDbcoqiWBA",
+      "input": {
+        "type": "TRANSFER",
+        "licenceId": "lic_3897373f735aca9d",
+        "machineId": "KM-TEST-DDDD-EEEE-FFFF",
+        "used": 4
+      }
+    },
+    {
+      "label": "renewal after expiry",
+      "action": "issueKey",
+      "clock": "2028-01-15T10:00:01.000Z",
+      "keyId": "key_40540b51f4237ac4",
+      "key": "KYN1.eyJ2IjoxLCJrZXlJZCI6ImtleV80MDU0MGI1MWY0MjM3YWM0IiwidHlwZSI6IlJFTkVXQUwiLCJsaWNlbnNlSWQiOiJsaWNfMzg5NzM3M2Y3MzVhY2E5ZCIsImlzc3VlZEF0IjoiMjAyOC0wMS0xNVQxMDowMDowMS4wMDBaIiwibWFjaGluZUlkIjpudWxsLCJ0ZXJtIjp7ImtpbmQiOiJNT05USFMiLCJtb250aHMiOjZ9LCJzZWF0cyI6bnVsbCwic3RhdGUiOm51bGwsIm5vdGUiOm51bGx9.FYbXamdE1Re8d25m05bXRxiOK-pOrXCHTFcbJ6wTj3jOFP9VCQMMm53SYd5UyVIGLVCLhSnDvHjfuQW6KaGKBQ",
+      "input": {
+        "type": "RENEWAL",
+        "licenceId": "lic_3897373f735aca9d",
+        "term": "6m"
+      }
+    },
+    {
+      "label": "renewal with awkward note",
+      "action": "issueKey",
+      "clock": "2028-01-15T10:00:02.000Z",
+      "keyId": "key_97456f2ed6942161",
+      "key": "KYN1.eyJ2IjoxLCJrZXlJZCI6ImtleV85NzQ1NmYyZWQ2OTQyMTYxIiwidHlwZSI6IlJFTkVXQUwiLCJsaWNlbnNlSWQiOiJsaWNfMzg5NzM3M2Y3MzVhY2E5ZCIsImlzc3VlZEF0IjoiMjAyOC0wMS0xNVQxMDowMDowMi4wMDBaIiwibWFjaGluZUlkIjpudWxsLCJ0ZXJtIjp7ImtpbmQiOiJNT05USFMiLCJtb250aHMiOjN9LCJzZWF0cyI6bnVsbCwic3RhdGUiOm51bGwsIm5vdGUiOiLYs9i32LEg2KPZiNmEXG7Ys9i32LEg2KvYp9mG2Y1cdFwi2YXZgtiq2KjYs1wiIn0.lJOe23RzfEAkQ9MRo2dYR944TWf4zi5s_smEbSnMnRorHL7uOmd1rM42kzIYEQ-a19YFs8D19h_phq1H3CBADw",
+      "input": {
+        "type": "RENEWAL",
+        "licenceId": "lic_3897373f735aca9d",
+        "term": "3m",
+        "note": "سطر أول\nسطر ثانٍ\t\"مقتبس\""
+      }
+    },
+    {
+      "label": "perpetual licence",
+      "action": "createLicence",
+      "clock": "2028-01-15T11:00:00.000Z",
+      "licenseId": "lic_3703218f2d9a276f",
+      "input": {
+        "ref": "Mining Co.",
+        "seats": 2,
+        "term": "P"
+      }
+    },
+    {
+      "label": "perpetual activation",
+      "action": "issueKey",
+      "clock": "2028-01-15T11:00:01.000Z",
+      "keyId": "key_a7d913943adf61d4",
+      "key": "KYN1.eyJ2IjoxLCJrZXlJZCI6ImtleV9hN2Q5MTM5NDNhZGY2MWQ0IiwidHlwZSI6IkFDVElWQVRJT04iLCJsaWNlbnNlSWQiOiJsaWNfMzcwMzIxOGYyZDlhMjc2ZiIsImlzc3VlZEF0IjoiMjAyOC0wMS0xNVQxMTowMDowMS4wMDBaIiwibWFjaGluZUlkIjoiS00tUEVSUC0xMTExLTIyMjItMzMzMyIsInRlcm0iOnsia2luZCI6IlBFUlBFVFVBTCJ9LCJzZWF0cyI6eyJtb2RlIjoiQ0FQIiwidmFsdWUiOjJ9LCJzdGF0ZSI6bnVsbCwibm90ZSI6bnVsbH0.B3QgRGeka2BAnoCxkeyXYYb7PekCTRN4CKRevJc9eP8XKk0N6kcdVDJRcDMpMv2Sln6BL92baYGKW_fQeyDbBw",
+      "input": {
+        "type": "ACTIVATION",
+        "licenceId": "lic_3703218f2d9a276f",
+        "machineId": "KM-PERP-1111-2222-3333"
+      }
+    },
+    {
+      "label": "perpetual cap 6",
+      "action": "issueKey",
+      "clock": "2028-01-15T11:00:02.000Z",
+      "keyId": "key_1c20cbff9b491a70",
+      "key": "KYN1.eyJ2IjoxLCJrZXlJZCI6ImtleV8xYzIwY2JmZjliNDkxYTcwIiwidHlwZSI6IlNFQVRTIiwibGljZW5zZUlkIjoibGljXzM3MDMyMThmMmQ5YTI3NmYiLCJpc3N1ZWRBdCI6IjIwMjgtMDEtMTVUMTE6MDA6MDIuMDAwWiIsIm1hY2hpbmVJZCI6bnVsbCwidGVybSI6bnVsbCwic2VhdHMiOnsibW9kZSI6IkNBUCIsInZhbHVlIjo2fSwic3RhdGUiOm51bGwsIm5vdGUiOm51bGx9.BFIKqu5DBEM06R4-uiG1w508V_SUxqJ92sQYbL1gKk7QcjpASl1FNbZEDUzI19qLRSnInJ__2sKni_9F011VBw",
+      "input": {
+        "type": "SEATS",
+        "licenceId": "lic_3703218f2d9a276f",
+        "cap": 6
+      }
+    },
+    {
+      "label": "seats +2",
+      "action": "issueKey",
+      "clock": "2028-01-15T11:00:03.000Z",
+      "keyId": "key_5cea6c56f777268e",
+      "key": "KYN1.eyJ2IjoxLCJrZXlJZCI6ImtleV81Y2VhNmM1NmY3NzcyNjhlIiwidHlwZSI6IlNFQVRTIiwibGljZW5zZUlkIjoibGljXzM4OTczNzNmNzM1YWNhOWQiLCJpc3N1ZWRBdCI6IjIwMjgtMDEtMTVUMTE6MDA6MDMuMDAwWiIsIm1hY2hpbmVJZCI6bnVsbCwidGVybSI6bnVsbCwic2VhdHMiOnsibW9kZSI6IklOQ1JFQVNFIiwidmFsdWUiOjJ9LCJzdGF0ZSI6bnVsbCwibm90ZSI6bnVsbH0.O7-5BbiAGuRmQtLBWe22XnK9TanaIQuOoz0LC2ovDI3SkoR1jMbMX9-FVhYduwxrNNy-gZoXSHrW3rXkH8zfCQ",
+      "input": {
+        "type": "SEATS",
+        "licenceId": "lic_3897373f735aca9d",
+        "increase": 2
+      }
+    },
+    {
+      "label": "mark used",
+      "action": "markUsed",
+      "clock": "2028-01-15T11:00:04.000Z",
+      "keyId": "key_5cea6c56f777268e"
+    },
+    {
+      "label": "revoke",
+      "action": "revokeKey",
+      "clock": "2028-01-15T11:00:05.000Z",
+      "keyId": "key_ede743fd3e0d81ab",
+      "reason": "wrong machine sent"
+    },
+    {
+      "label": "verify",
+      "action": "verifyKey",
+      "clock": "2028-01-15T11:00:06.000Z",
+      "keyId": "key_70c1f7d8a5d18a53",
+      "key": "KYN1.eyJ2IjoxLCJrZXlJZCI6ImtleV83MGMxZjdkOGE1ZDE4YTUzIiwidHlwZSI6IkFDVElWQVRJT04iLCJsaWNlbnNlSWQiOiJsaWNfMzg5NzM3M2Y3MzVhY2E5ZCIsImlzc3VlZEF0IjoiMjAyNi0wMy0wMVQwOTowMDowMi4wMDBaIiwibWFjaGluZUlkIjoiS00tVEVTVC1BQUFBLUJCQkItQ0NDQyIsInRlcm0iOnsia2luZCI6Ik1PTlRIUyIsIm1vbnRocyI6MTJ9LCJzZWF0cyI6eyJtb2RlIjoiQ0FQIiwidmFsdWUiOjV9LCJzdGF0ZSI6bnVsbCwibm90ZSI6IklOVi0yMDI2LTAwMSJ9.wbg2SKPE6aVih2rlPWpOzPkRHqc7fcVAxtFKQ9NzxzlJCVrf62tWbxQ3VZpr1rnZVk47HNh0s02pDVjNe_ULDQ"
+    }
+  ],
+  "terms": [
+    {
+      "text": "1m",
+      "term": {
+        "kind": "MONTHS",
+        "months": 1
+      }
+    },
+    {
+      "text": "3m",
+      "term": {
+        "kind": "MONTHS",
+        "months": 3
+      }
+    },
+    {
+      "text": "6m",
+      "term": {
+        "kind": "MONTHS",
+        "months": 6
+      }
+    },
+    {
+      "text": "1y",
+      "term": {
+        "kind": "MONTHS",
+        "months": 12
+      }
+    },
+    {
+      "text": "2y",
+      "term": {
+        "kind": "MONTHS",
+        "months": 24
+      }
+    },
+    {
+      "text": "3y",
+      "term": {
+        "kind": "MONTHS",
+        "months": 36
+      }
+    },
+    {
+      "text": "P",
+      "term": {
+        "kind": "PERPETUAL"
+      }
+    },
+    {
+      "text": "perpetual",
+      "term": {
+        "kind": "PERPETUAL"
+      }
+    },
+    {
+      "text": "دائم",
+      "term": {
+        "kind": "PERPETUAL"
+      }
+    },
+    {
+      "text": "12m",
+      "term": {
+        "kind": "MONTHS",
+        "months": 12
+      }
+    },
+    {
+      "text": "18y",
+      "term": {
+        "kind": "MONTHS",
+        "months": 216
+      }
+    },
+    {
+      "text": "2 months",
+      "term": {
+        "kind": "MONTHS",
+        "months": 2
+      }
+    }
+  ],
+  "monthCases": [
+    [
+      "2024-01-31T10:00:00.000Z",
+      1,
+      "2024-02-29T10:00:00.000Z"
+    ],
+    [
+      "2023-01-31T10:00:00.000Z",
+      1,
+      "2023-02-28T10:00:00.000Z"
+    ],
+    [
+      "2026-08-31T10:00:00.000Z",
+      6,
+      "2027-02-28T10:00:00.000Z"
+    ],
+    [
+      "2026-12-15T10:00:00.000Z",
+      1,
+      "2027-01-15T10:00:00.000Z"
+    ],
+    [
+      "2026-03-01T09:00:00.000Z",
+      36,
+      "2029-03-01T09:00:00.000Z"
+    ],
+    [
+      "2025-02-28T23:59:59.000Z",
+      12,
+      "2026-02-28T23:59:59.000Z"
+    ],
+    [
+      "2028-02-29T00:00:00.000Z",
+      12,
+      "2029-02-28T00:00:00.000Z"
+    ]
+  ],
+  "requestCode": "KYNREQ1.eyJ2IjoxLCJtYWNoaW5lSWQiOiJLTS1SRVExLUFBQUEtQkJCQi1DQ0NDIiwiaW5zdGFsbElkIjoiaW5zdC05ZjJjIiwiYXBwVmVyc2lvbiI6IjAuMi4wIiwicmVxdWVzdGVkQXQiOiIyMDI2LTAyLTI4VDE4OjMwOjAwLjAwMFoiLCJub25jZSI6Im4tNzdhYSJ9.GfwiJUHqD9",
+  "registerText": "{\n  \"createdAt\": \"2026-03-01T09:00:01.000Z\",\n  \"keys\": [\n    {\n      \"fingerprint\": \"48e78ec4c80f6bb4\",\n      \"issuedAt\": \"2026-03-01T09:00:02.000Z\",\n      \"keyId\": \"key_70c1f7d8a5d18a53\",\n      \"licenseId\": \"lic_3897373f735aca9d\",\n      \"machineId\": \"KM-TEST-AAAA-BBBB-CCCC\",\n      \"note\": \"INV-2026-001\",\n      \"seats\": {\n        \"mode\": \"CAP\",\n        \"value\": 5\n      },\n      \"status\": \"issued\",\n      \"term\": 12,\n      \"type\": \"ACTIVATION\"\n    },\n    {\n      \"fingerprint\": \"5079bdbdf11a519c\",\n      \"issuedAt\": \"2026-03-01T09:00:03.000Z\",\n      \"keyId\": \"key_86c1c14df0b0af4d\",\n      \"licenseId\": \"lic_3897373f735aca9d\",\n      \"machineId\": null,\n      \"note\": null,\n      \"seats\": {\n        \"mode\": \"INCREASE\",\n        \"value\": 3\n      },\n      \"status\": \"issued\",\n      \"term\": null,\n      \"type\": \"SEATS\"\n    },\n    {\n      \"fingerprint\": \"fd93a8950bc25f8a\",\n      \"issuedAt\": \"2026-03-01T09:00:04.000Z\",\n      \"keyId\": \"key_ede743fd3e0d81ab\",\n      \"licenseId\": \"lic_3897373f735aca9d\",\n      \"machineId\": null,\n      \"note\": null,\n      \"reason\": \"wrong machine sent\",\n      \"revokedAt\": \"2028-01-15T11:00:05.000Z\",\n      \"seats\": null,\n      \"status\": \"revoked\",\n      \"term\": 6,\n      \"type\": \"RENEWAL\"\n    },\n    {\n      \"fingerprint\": \"bac4322774783599\",\n      \"issuedAt\": \"2026-03-01T09:00:05.000Z\",\n      \"keyId\": \"key_d24162fa7b4f14f5\",\n      \"licenseId\": \"lic_3897373f735aca9d\",\n      \"machineId\": \"KM-TEST-DDDD-EEEE-FFFF\",\n      \"note\": null,\n      \"seats\": null,\n      \"status\": \"issued\",\n      \"term\": null,\n      \"type\": \"TRANSFER\"\n    },\n    {\n      \"fingerprint\": \"bf657a6114ed8eba\",\n      \"issuedAt\": \"2028-01-15T10:00:01.000Z\",\n      \"keyId\": \"key_40540b51f4237ac4\",\n      \"licenseId\": \"lic_3897373f735aca9d\",\n      \"machineId\": null,\n      \"note\": null,\n      \"seats\": null,\n      \"status\": \"issued\",\n      \"term\": 6,\n      \"type\": \"RENEWAL\"\n    },\n    {\n      \"fingerprint\": \"fad178492f6c80eb\",\n      \"issuedAt\": \"2028-01-15T10:00:02.000Z\",\n      \"keyId\": \"key_97456f2ed6942161\",\n      \"licenseId\": \"lic_3897373f735aca9d\",\n      \"machineId\": null,\n      \"note\": \"سطر أول\\nسطر ثانٍ\\t\\\"مقتبس\\\"\",\n      \"seats\": null,\n      \"status\": \"issued\",\n      \"term\": 3,\n      \"type\": \"RENEWAL\"\n    },\n    {\n      \"fingerprint\": \"f82c256de0eec884\",\n      \"issuedAt\": \"2028-01-15T11:00:01.000Z\",\n      \"keyId\": \"key_a7d913943adf61d4\",\n      \"licenseId\": \"lic_3703218f2d9a276f\",\n      \"machineId\": \"KM-PERP-1111-2222-3333\",\n      \"note\": null,\n      \"seats\": {\n        \"mode\": \"CAP\",\n        \"value\": 2\n      },\n      \"status\": \"issued\",\n      \"term\": null,\n      \"type\": \"ACTIVATION\"\n    },\n    {\n      \"fingerprint\": \"b62ead2d04307755\",\n      \"issuedAt\": \"2028-01-15T11:00:02.000Z\",\n      \"keyId\": \"key_1c20cbff9b491a70\",\n      \"licenseId\": \"lic_3703218f2d9a276f\",\n      \"machineId\": null,\n      \"note\": null,\n      \"seats\": {\n        \"mode\": \"CAP\",\n        \"value\": 6\n      },\n      \"status\": \"issued\",\n      \"term\": null,\n      \"type\": \"SEATS\"\n    },\n    {\n      \"fingerprint\": \"54abcde045603a1b\",\n      \"issuedAt\": \"2028-01-15T11:00:03.000Z\",\n      \"keyId\": \"key_5cea6c56f777268e\",\n      \"licenseId\": \"lic_3897373f735aca9d\",\n      \"machineId\": null,\n      \"note\": null,\n      \"seats\": {\n        \"mode\": \"INCREASE\",\n        \"value\": 2\n      },\n      \"status\": \"used\",\n      \"term\": null,\n      \"type\": \"SEATS\",\n      \"usedAt\": \"2028-01-15T11:00:04.000Z\"\n    }\n  ],\n  \"licences\": {\n    \"lic_3703218f2d9a276f\": {\n      \"createdAt\": \"2028-01-15T11:00:00.000Z\",\n      \"expiresAt\": null,\n      \"licenseId\": \"lic_3703218f2d9a276f\",\n      \"machineId\": \"KM-PERP-1111-2222-3333\",\n      \"ref\": \"Mining Co.\",\n      \"seats\": 6,\n      \"seatsUsed\": 0,\n      \"startsAt\": \"2028-01-15T11:00:01.000Z\",\n      \"status\": \"active\",\n      \"term\": null,\n      \"updatedAt\": \"2028-01-15T11:00:02.000Z\"\n    },\n    \"lic_3897373f735aca9d\": {\n      \"createdAt\": \"2026-03-01T09:00:01.000Z\",\n      \"expiresAt\": \"2028-10-15T10:00:01.000Z\",\n      \"licenseId\": \"lic_3897373f735aca9d\",\n      \"machineId\": \"KM-TEST-DDDD-EEEE-FFFF\",\n      \"ref\": \"شركة النور\",\n      \"seats\": 10,\n      \"seatsUsed\": 4,\n      \"startsAt\": \"2026-03-01T09:00:02.000Z\",\n      \"status\": \"active\",\n      \"term\": 3,\n      \"updatedAt\": \"2028-01-15T11:00:03.000Z\"\n    }\n  },\n  \"v\": 1\n}",
+  "registerMac": "9a90dba11e0719ff56900c5964fd56f6d81173082eeef9ff1d25a675183a6cd3",
+  "auditText": "{\"at\":\"2026-03-01T09:00:01.000Z\",\"tool\":\"kayan-license/1.1.0\",\"action\":\"licence.create\",\"licenseId\":\"lic_3897373f735aca9d\",\"seats\":5,\"term\":12,\"result\":\"registered\"}\n{\"at\":\"2026-03-01T09:00:02.000Z\",\"tool\":\"kayan-license/1.1.0\",\"action\":\"issue\",\"type\":\"ACTIVATION\",\"keyId\":\"key_70c1f7d8a5d18a53\",\"licenseId\":\"lic_3897373f735aca9d\",\"machineId\":\"KM-TEST-AAAA-BBBB-CCCC\",\"seats\":{\"mode\":\"CAP\",\"value\":5},\"term\":{\"kind\":\"MONTHS\",\"months\":12},\"result\":\"issued\"}\n{\"at\":\"2026-03-01T09:00:03.000Z\",\"tool\":\"kayan-license/1.1.0\",\"action\":\"issue\",\"type\":\"SEATS\",\"keyId\":\"key_86c1c14df0b0af4d\",\"licenseId\":\"lic_3897373f735aca9d\",\"machineId\":null,\"seats\":{\"mode\":\"INCREASE\",\"value\":3},\"term\":null,\"result\":\"issued\"}\n{\"at\":\"2026-03-01T09:00:04.000Z\",\"tool\":\"kayan-license/1.1.0\",\"action\":\"issue\",\"type\":\"RENEWAL\",\"keyId\":\"key_ede743fd3e0d81ab\",\"licenseId\":\"lic_3897373f735aca9d\",\"machineId\":null,\"seats\":null,\"term\":{\"kind\":\"MONTHS\",\"months\":6},\"result\":\"issued\"}\n{\"at\":\"2026-03-01T09:00:05.000Z\",\"tool\":\"kayan-license/1.1.0\",\"action\":\"issue\",\"type\":\"TRANSFER\",\"keyId\":\"key_d24162fa7b4f14f5\",\"licenseId\":\"lic_3897373f735aca9d\",\"machineId\":\"KM-TEST-DDDD-EEEE-FFFF\",\"seats\":null,\"term\":null,\"result\":\"issued\"}\n{\"at\":\"2028-01-15T10:00:01.000Z\",\"tool\":\"kayan-license/1.1.0\",\"action\":\"issue\",\"type\":\"RENEWAL\",\"keyId\":\"key_40540b51f4237ac4\",\"licenseId\":\"lic_3897373f735aca9d\",\"machineId\":null,\"seats\":null,\"term\":{\"kind\":\"MONTHS\",\"months\":6},\"result\":\"issued\"}\n{\"at\":\"2028-01-15T10:00:02.000Z\",\"tool\":\"kayan-license/1.1.0\",\"action\":\"issue\",\"type\":\"RENEWAL\",\"keyId\":\"key_97456f2ed6942161\",\"licenseId\":\"lic_3897373f735aca9d\",\"machineId\":null,\"seats\":null,\"term\":{\"kind\":\"MONTHS\",\"months\":3},\"result\":\"issued\"}\n{\"at\":\"2028-01-15T11:00:00.000Z\",\"tool\":\"kayan-license/1.1.0\",\"action\":\"licence.create\",\"licenseId\":\"lic_3703218f2d9a276f\",\"seats\":2,\"term\":null,\"result\":\"registered\"}\n{\"at\":\"2028-01-15T11:00:01.000Z\",\"tool\":\"kayan-license/1.1.0\",\"action\":\"issue\",\"type\":\"ACTIVATION\",\"keyId\":\"key_a7d913943adf61d4\",\"licenseId\":\"lic_3703218f2d9a276f\",\"machineId\":\"KM-PERP-1111-2222-3333\",\"seats\":{\"mode\":\"CAP\",\"value\":2},\"term\":{\"kind\":\"PERPETUAL\"},\"result\":\"issued\"}\n{\"at\":\"2028-01-15T11:00:02.000Z\",\"tool\":\"kayan-license/1.1.0\",\"action\":\"issue\",\"type\":\"SEATS\",\"keyId\":\"key_1c20cbff9b491a70\",\"licenseId\":\"lic_3703218f2d9a276f\",\"machineId\":null,\"seats\":{\"mode\":\"CAP\",\"value\":6},\"term\":null,\"result\":\"issued\"}\n{\"at\":\"2028-01-15T11:00:03.000Z\",\"tool\":\"kayan-license/1.1.0\",\"action\":\"issue\",\"type\":\"SEATS\",\"keyId\":\"key_5cea6c56f777268e\",\"licenseId\":\"lic_3897373f735aca9d\",\"machineId\":null,\"seats\":{\"mode\":\"INCREASE\",\"value\":2},\"term\":null,\"result\":\"issued\"}\n{\"at\":\"2028-01-15T11:00:04.000Z\",\"tool\":\"kayan-license/1.1.0\",\"action\":\"mark-used\",\"keyId\":\"key_5cea6c56f777268e\",\"licenseId\":\"lic_3897373f735aca9d\",\"result\":\"used\"}\n{\"at\":\"2028-01-15T11:00:05.000Z\",\"tool\":\"kayan-license/1.1.0\",\"action\":\"revoke\",\"keyId\":\"key_ede743fd3e0d81ab\",\"licenseId\":\"lic_3897373f735aca9d\",\"result\":\"revoked\"}\n{\"at\":\"2028-01-15T11:00:06.000Z\",\"tool\":\"kayan-license/1.1.0\",\"action\":\"verify\",\"keyId\":\"key_70c1f7d8a5d18a53\",\"licenseId\":\"lic_3897373f735aca9d\",\"type\":\"ACTIVATION\",\"result\":\"valid\"}\n",
+  "licences": {
+    "lic_3703218f2d9a276f": {
+      "createdAt": "2028-01-15T11:00:00.000Z",
+      "expiresAt": null,
+      "licenseId": "lic_3703218f2d9a276f",
+      "machineId": "KM-PERP-1111-2222-3333",
+      "ref": "Mining Co.",
+      "seats": 6,
+      "seatsUsed": 0,
+      "startsAt": "2028-01-15T11:00:01.000Z",
+      "status": "active",
+      "term": null,
+      "updatedAt": "2028-01-15T11:00:02.000Z"
+    },
+    "lic_3897373f735aca9d": {
+      "createdAt": "2026-03-01T09:00:01.000Z",
+      "expiresAt": "2028-10-15T10:00:01.000Z",
+      "licenseId": "lic_3897373f735aca9d",
+      "machineId": "KM-TEST-DDDD-EEEE-FFFF",
+      "ref": "شركة النور",
+      "seats": 10,
+      "seatsUsed": 4,
+      "startsAt": "2026-03-01T09:00:02.000Z",
+      "status": "active",
+      "term": 3,
+      "updatedAt": "2028-01-15T11:00:03.000Z"
+    }
+  },
+  "keys": [
+    {
+      "fingerprint": "48e78ec4c80f6bb4",
+      "issuedAt": "2026-03-01T09:00:02.000Z",
+      "keyId": "key_70c1f7d8a5d18a53",
+      "licenseId": "lic_3897373f735aca9d",
+      "machineId": "KM-TEST-AAAA-BBBB-CCCC",
+      "note": "INV-2026-001",
+      "seats": {
+        "mode": "CAP",
+        "value": 5
+      },
+      "status": "issued",
+      "term": 12,
+      "type": "ACTIVATION"
+    },
+    {
+      "fingerprint": "5079bdbdf11a519c",
+      "issuedAt": "2026-03-01T09:00:03.000Z",
+      "keyId": "key_86c1c14df0b0af4d",
+      "licenseId": "lic_3897373f735aca9d",
+      "machineId": null,
+      "note": null,
+      "seats": {
+        "mode": "INCREASE",
+        "value": 3
+      },
+      "status": "issued",
+      "term": null,
+      "type": "SEATS"
+    },
+    {
+      "fingerprint": "fd93a8950bc25f8a",
+      "issuedAt": "2026-03-01T09:00:04.000Z",
+      "keyId": "key_ede743fd3e0d81ab",
+      "licenseId": "lic_3897373f735aca9d",
+      "machineId": null,
+      "note": null,
+      "reason": "wrong machine sent",
+      "revokedAt": "2028-01-15T11:00:05.000Z",
+      "seats": null,
+      "status": "revoked",
+      "term": 6,
+      "type": "RENEWAL"
+    },
+    {
+      "fingerprint": "bac4322774783599",
+      "issuedAt": "2026-03-01T09:00:05.000Z",
+      "keyId": "key_d24162fa7b4f14f5",
+      "licenseId": "lic_3897373f735aca9d",
+      "machineId": "KM-TEST-DDDD-EEEE-FFFF",
+      "note": null,
+      "seats": null,
+      "status": "issued",
+      "term": null,
+      "type": "TRANSFER"
+    },
+    {
+      "fingerprint": "bf657a6114ed8eba",
+      "issuedAt": "2028-01-15T10:00:01.000Z",
+      "keyId": "key_40540b51f4237ac4",
+      "licenseId": "lic_3897373f735aca9d",
+      "machineId": null,
+      "note": null,
+      "seats": null,
+      "status": "issued",
+      "term": 6,
+      "type": "RENEWAL"
+    },
+    {
+      "fingerprint": "fad178492f6c80eb",
+      "issuedAt": "2028-01-15T10:00:02.000Z",
+      "keyId": "key_97456f2ed6942161",
+      "licenseId": "lic_3897373f735aca9d",
+      "machineId": null,
+      "note": "سطر أول\nسطر ثانٍ\t\"مقتبس\"",
+      "seats": null,
+      "status": "issued",
+      "term": 3,
+      "type": "RENEWAL"
+    },
+    {
+      "fingerprint": "f82c256de0eec884",
+      "issuedAt": "2028-01-15T11:00:01.000Z",
+      "keyId": "key_a7d913943adf61d4",
+      "licenseId": "lic_3703218f2d9a276f",
+      "machineId": "KM-PERP-1111-2222-3333",
+      "note": null,
+      "seats": {
+        "mode": "CAP",
+        "value": 2
+      },
+      "status": "issued",
+      "term": null,
+      "type": "ACTIVATION"
+    },
+    {
+      "fingerprint": "b62ead2d04307755",
+      "issuedAt": "2028-01-15T11:00:02.000Z",
+      "keyId": "key_1c20cbff9b491a70",
+      "licenseId": "lic_3703218f2d9a276f",
+      "machineId": null,
+      "note": null,
+      "seats": {
+        "mode": "CAP",
+        "value": 6
+      },
+      "status": "issued",
+      "term": null,
+      "type": "SEATS"
+    },
+    {
+      "fingerprint": "54abcde045603a1b",
+      "issuedAt": "2028-01-15T11:00:03.000Z",
+      "keyId": "key_5cea6c56f777268e",
+      "licenseId": "lic_3897373f735aca9d",
+      "machineId": null,
+      "note": null,
+      "seats": {
+        "mode": "INCREASE",
+        "value": 2
+      },
+      "status": "used",
+      "term": null,
+      "type": "SEATS",
+      "usedAt": "2028-01-15T11:00:04.000Z"
+    }
+  ]
+}

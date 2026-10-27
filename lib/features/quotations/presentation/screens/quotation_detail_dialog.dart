@@ -305,8 +305,7 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                     icon: const Icon(Icons.visibility_outlined, size: 18),
                     label: Text(l10n.printPreview),
                   ),
-                  if (canExport)
-                    OutlinedButton.icon(
+                  OutlinedButton.icon(
                       onPressed: () => runPrint(
                         context,
                         links.quotationPrint(
@@ -315,10 +314,9 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                         ),
                       ),
                       icon: const Icon(Icons.print_outlined, size: 18),
-                      label: Text(l10n.printPreview),
+                      label: Text(l10n.print),
                     ),
-                  if (canExport)
-                    OutlinedButton.icon(
+                  OutlinedButton.icon(
                       onPressed: () => runDownload(
                         context,
                         links.quotationPdf(id: widget.id, language: language),

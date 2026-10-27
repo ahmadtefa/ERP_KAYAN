@@ -1,0 +1,222 @@
+# TEMPORARY diagnostic workflow.
+#
+# The Windows Installer job fails at its "Licence key for this build" step in
+# under a second, before anything in the script runs, and the raw job log is not
+# reachable from outside the runner. This workflow isolates the suspects one
+# per step, each marked continue-on-error, so the per-step results alone say
+# which ingredient makes the step fail. It is deleted once the cause is known.
+name: Licence step diagnosis
+
+on:
+  push:
+    branches: ['arena/55b30d04-erp-kayan']
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: A plain powershell step
+        continue-on-error: true
+        shell: powershell
+        run: |
+          Write-Output "::notice::diag A plain powershell step ran"
+
+      - name: B step env with an undefined secret
+        continue-on-error: true
+        shell: powershell
+        env:
+          KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
+        run: |
+          Write-Output ("::notice::diag B ran; secret is empty: " + [string]([string]::IsNullOrEmpty($env:KAYAN_LICENCE_PRIVATE_KEY)))
+
+      - name: C notice text like the licence step
+        continue-on-error: true
+        shell: powershell
+        run: |
+          Write-Output ("::notice::Licence step started: powershell " + $PSVersionTable.PSVersion.ToString() + ", temp " + $env:RUNNER_TEMP)
+
+      - name: D node runs the generator
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $licenceDir = Join-Path $env:RUNNER_TEMP 'kayan-diag-licence'
+          Remove-Item -LiteralPath $licenceDir -Recurse -Force -ErrorAction SilentlyContinue
+          $generator = Join-Path (Get-Location) 'tools\license-generator\kayan-license.mjs'
+          & node $generator init --home $licenceDir
+          $code = $LASTEXITCODE
+          $key = Join-Path $licenceDir 'public-key.pem'
+          Write-Output ("::notice::diag D generator exit " + $code + "; key exists: " + (Test-Path -LiteralPath $key) + "; sha " + (Get-FileHash -LiteralPath $key -Algorithm SHA256).Hash)
+
+      - name: E writes step outputs
+        continue-on-error: true
+        id: writes
+        shell: powershell
+        run: |
+          "build=test-signed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "home=C:\temp\licence" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Output ("::notice::diag E outputs written; build=" + '${{ steps.writes.outputs.build }}')
+
+      - name: F the whole licence script, no env
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          try {
+            Write-Output ("::notice::diag F started")
+            $licenceDir = Join-Path $env:RUNNER_TEMP 'kayan-diag-f'
+            Remove-Item -LiteralPath $licenceDir -Recurse -Force -ErrorAction SilentlyContinue
+            $generator = Join-Path (Get-Location) 'tools\license-generator\kayan-license.mjs'
+            & node $generator init --home $licenceDir
+            $nodeExit = $LASTEXITCODE
+            $publicKey = Join-Path $licenceDir 'public-key.pem'
+            if ($nodeExit -ne 0) { throw "generator exit $nodeExit" }
+            if (-not (Test-Path -LiteralPath $publicKey)) { throw "no public key at $publicKey" }
+            Write-Output ("::notice::diag F completed with " + $publicKey)
+          } catch {
+            Write-Output ("::error title=diag F::" + $_.Exception.GetType().Name + ': ' + $_.Exception.Message)
+          }
+
+      - name: G the whole licence script, with env
+        continue-on-error: true
+        shell: powershell
+        env:
+          KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          try {
+            Write-Output ("::notice::diag G started")
+            $licenceDir = Join-Path $env:RUNNER_TEMP 'kayan-diag-g'
+            Remove-Item -LiteralPath $licenceDir -Recurse -Force -ErrorAction SilentlyContinue
+            $generator = Join-Path (Get-Location) 'tools\license-generator\kayan-license.mjs'
+            & node $generator init --home $licenceDir
+            $nodeExit = $LASTEXITCODE
+            $publicKey = Join-Path $licenceDir 'public-key.pem'
+            if ($nodeExit -ne 0) { throw "generator exit $nodeExit" }
+            if (-not (Test-Path -LiteralPath $publicKey)) { throw "no public key at $publicKey" }
+            Write-Output ("::notice::diag G completed with " + $publicKey)
+          } catch {
+            Write-Output ("::error title=diag G::" + $_.Exception.GetType().Name + ': ' + $_.Exception.Message)
+          }
+
+      # H takes the licence step's run block out of the real workflow, byte for
+      # byte, and asks PowerShell's own parser whether it is valid. A parse error
+      # is what would explain a step that dies in under a second with no output.
+      - name: H parse the real licence step body
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $workflow = '.github/workflows/windows-installer.yml'
+          $lines = Get-Content -LiteralPath $workflow
+          $start = 0
+          for ($n = 0; $n -lt $lines.Count; $n++) {
+            if ($lines[$n] -like '*name: Licence key for this build*') { $start = $n; break }
+          }
+          if ($start -eq 0) { throw "could not find the licence step in $workflow" }
+          $i = $start
+          while ($i -lt $lines.Count -and $lines[$i] -notmatch 'run:\s*\|') { $i++ }
+          if ($i -ge $lines.Count) { throw 'could not find the run block' }
+          $runIndent = ([regex]::Match($lines[$i], '^(\s*)')).Groups[1].Value.Length
+          $body = New-Object System.Collections.Generic.List[string]
+          for ($j = $i + 1; $j -lt $lines.Count; $j++) {
+            $line = $lines[$j]
+            $indent = ([regex]::Match($line, '^(\s*)')).Groups[1].Value.Length
+            if ($line.Trim().Length -gt 0 -and $indent -le ($runIndent - 2)) { break }
+            if ($line.Length -ge $runIndent) { $body.Add($line.Substring($runIndent)) } else { $body.Add('') }
+          }
+          $text = [string]::Join("`n", $body)
+          Write-Output ("::notice::diag H extracted " + $body.Count + " lines, " + $text.Length + " characters")
+          $scriptPath = Join-Path $env:RUNNER_TEMP 'licence-step-body.ps1'
+          [IO.File]::WriteAllText($scriptPath, $text, (New-Object System.Text.UTF8Encoding($false)))
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -eq 0) {
+            Write-Output '::notice::diag H parse: no syntax errors'
+          } else {
+            foreach ($e in $errors) {
+              Write-Output ("::error title=diag H parse::" + $e.Message + " (line " + $e.Extent.StartLineNumber + ", column " + $e.Extent.StartColumnNumber + ") " + $e.Extent.Text)
+            }
+          }
+          Write-Output ("::notice::diag H token count " + $tokens.Count)
+
+      # I runs that extracted body exactly as written, so a runtime failure shows
+      # up as a failed step plus its own annotation.
+      - name: I run the extracted licence step body
+        continue-on-error: true
+        shell: powershell
+        env:
+          KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
+        run: |
+          Write-Output ("::notice::diag I starting")
+          $scriptPath = Join-Path $env:RUNNER_TEMP 'licence-step-body.ps1'
+          if (-not (Test-Path -LiteralPath $scriptPath)) { Write-Output '::error title=diag I::the body file was not written by step H'; exit 1 }
+          & $scriptPath
+          Write-Output ("::notice::diag I finished with LASTEXITCODE " + $LASTEXITCODE)
+
+      # J invokes the body the way the runner does for `shell: powershell`.
+      - name: J run the body through powershell -Command dot-source
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $scriptPath = Join-Path $env:RUNNER_TEMP 'licence-step-body.ps1'
+          if (-not (Test-Path -LiteralPath $scriptPath)) { Write-Output '::error title=diag J::the body file was not written by step H'; exit 1 }
+          powershell -NoLogo -NoProfile -Command ". '$scriptPath'; Write-Output ('::notice::diag J exit ' + `$LASTEXITCODE)"
+          Write-Output ("::notice::diag J wrapper exit " + $LASTEXITCODE)
+
+      # K asks PowerShell's parser about every script the installer ships, so a
+      # syntax error anywhere is reported as an annotation instead of killing a
+      # step in under a second with nothing in the annotation list.
+      - name: K parse every PowerShell script in the repository
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(Get-ChildItem -Path 'scripts','distribution\windows' -Filter '*.ps1' -File -Recurse -ErrorAction SilentlyContinue)
+          $files += @(Get-ChildItem -Path 'tools' -Filter '*.ps1' -File -Recurse -ErrorAction SilentlyContinue)
+          $bad = 0
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $bad++
+              foreach ($e in $errors) {
+                Write-Output ("::error title=PowerShell syntax::" + $file.Name + " line " + $e.Extent.StartLineNumber + ": " + $e.Message)
+              }
+            }
+          }
+          if ($bad -eq 0) { Write-Output ("::notice::all " + $files.Count + " PowerShell scripts parse") }
+
+      # L isolates why the smoke test writes nothing at all: named arguments vs
+      # an array splat, redirection vs a child process.
+      - name: L how the smoke test behaves when started
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          New-Item -ItemType Directory -Force -Path 'build\windows-installer' | Out-Null
+          Set-Content -LiteralPath 'build\windows-installer\KAYAN-ERP-Setup.exe' -Value 'placeholder' -Encoding ASCII
+          $script = '.\scripts\smoke-test-installed-windows.ps1'
+          $info = Get-Item -LiteralPath $script
+          Write-Output ("::notice::L file " + $info.Length + " bytes; first line: " + ((Get-Content -LiteralPath $script -TotalCount 2) -join ' / '))
+
+          $log1 = Join-Path $env:RUNNER_TEMP 'smoke-named.log'
+          & $script -SetupPath '.\build\windows-installer\KAYAN-ERP-Setup.exe' -RequireLicenceEnforcement *> $log1
+          $l1 = (Get-Item -LiteralPath $log1).Length
+          Write-Output ("::notice::L named arguments wrote " + $l1 + " bytes; exit " + $LASTEXITCODE + "; first: " + (((Get-Content -LiteralPath $log1 -TotalCount 3) -join ' | ')))
+
+          $log2 = Join-Path $env:RUNNER_TEMP 'smoke-splat.log'
+          $arguments = @('-SetupPath', '.\build\windows-installer\KAYAN-ERP-Setup.exe', '-RequireLicenceEnforcement')
+          & $script @arguments *> $log2
+          $l2 = (Get-Item -LiteralPath $log2).Length
+          Write-Output ("::notice::L array splat wrote " + $l2 + " bytes; exit " + $LASTEXITCODE + "; first: " + (((Get-Content -LiteralPath $log2 -TotalCount 3) -join ' | ')))
+
+          $out3 = Join-Path $env:RUNNER_TEMP 'smoke-child.out.log'
+          $err3 = Join-Path $env:RUNNER_TEMP 'smoke-child.err.log'
+          $child = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$script,'-SetupPath','.\build\windows-installer\KAYAN-ERP-Setup.exe','-RequireLicenceEnforcement') -PassThru -NoNewWindow -RedirectStandardOutput $out3 -RedirectStandardError $err3 -Wait
+          Write-Output ("::notice::L child exit " + $child.ExitCode + "; stdout " + (Get-Item -LiteralPath $out3).Length + " bytes; stderr " + (Get-Item -LiteralPath $err3).Length + " bytes; stderr first: " + (((Get-Content -LiteralPath $err3 -TotalCount 5) -join ' | ')) + "; stdout first: " + (((Get-Content -LiteralPath $out3 -TotalCount 3) -join ' | ')))

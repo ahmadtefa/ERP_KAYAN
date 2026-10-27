@@ -10,6 +10,13 @@ import { join, resolve } from 'path';
 
 import { FullBackupService } from './full-backup.service';
 
+// Licensing is asked to re-assert its watermarks after a restore; that
+// behaviour lives in licensing.service.spec.ts.
+const licensingStub = {
+  reconcile: jest.fn().mockResolvedValue(undefined),
+  reserveSeat: jest.fn(),
+} as any;
+
 jest.mock('child_process', () => ({
   ...jest.requireActual('child_process'),
   execFile: jest.fn(),
@@ -77,6 +84,7 @@ describe('FullBackupService guards', () => {
       {} as any,
       { record: async () => {} } as any,
       { begin() {}, end() {}, isActive: false, status: {} } as any,
+      licensingStub,
     );
     return service;
   }
@@ -136,7 +144,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         audit as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
     }
 
     it('runs pg_dump with --no-password and reports the file only after validating it', async () => {
@@ -258,7 +267,8 @@ describe('FullBackupService guards', () => {
         prisma,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
 
       const caps = await service.capabilities();
       expect(caps.available).toBe(true);
@@ -279,7 +289,8 @@ describe('FullBackupService guards', () => {
         { $queryRaw: async () => [{ v: '16.2' }] } as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       const caps = await service.capabilities();
       expect(caps.warning).toBeNull();
     });
@@ -327,7 +338,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       await expect(service.createFull('u1')).rejects.toBeInstanceOf(
         ServiceUnavailableException,
       );
@@ -370,7 +382,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async (input: unknown) => audits.push(input) } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       const result = await service.createFull('u1');
       expect(result.file.name).toMatch(/^kayan-full-.*\.dump$/);
       expect(result.file.sizeBytes).toBeGreaterThan(0);
@@ -398,7 +411,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       await expect(service.createFull('u1')).rejects.toBeInstanceOf(
         ServiceUnavailableException,
       );
@@ -415,7 +429,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       await expect(service.createFull('u1')).rejects.toBeInstanceOf(
         ServiceUnavailableException,
       );
@@ -430,7 +445,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       await expect(service.createFull('u1')).rejects.toThrow(/DATABASE_URL/);
     });
   });
@@ -479,7 +495,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       const verified = await service.verify(
         'kayan-full-2026-01-01-00-00-00.dump',
       );
@@ -511,7 +528,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       await expect(service.verify('kayan-full-empty.dump')).rejects.toThrow(
         /no database objects/,
       );
@@ -526,7 +544,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: false, status: {} } as any,
-      );
+      licensingStub,
+    );
       await expect(service.verify('kayan-full-text.dump')).rejects.toBeInstanceOf(
         ServiceUnavailableException,
       );
@@ -551,7 +570,8 @@ describe('FullBackupService guards', () => {
         {} as any,
         { record: async () => {} } as any,
         { begin() {}, end() {}, isActive: true, status: {} } as any,
-      );
+      licensingStub,
+    );
       await expect(
         service.restore({ confirm: true, fileName: 'x.dump' }, 'u1'),
       ).rejects.toThrow(/already running/);

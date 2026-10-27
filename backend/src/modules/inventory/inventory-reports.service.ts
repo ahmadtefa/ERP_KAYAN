@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import { isValidEan13, randomInternalBarcode } from './barcode';
 
 const MONEY_SCALE = 4;
 
@@ -93,6 +94,237 @@ export class InventoryReportsService {
     };
   }
 
+  /// Changes a unit's name, factor, prices or barcode.
+  ///
+  /// The base unit's factor stays 1: stock is kept in base units, and a base
+  /// unit whose factor changed would silently re-value everything already on
+  /// the shelf. A unit that is not the base unit can be re-factored, which is
+  /// an honest correction of the conversion the item was set up with - it does
+  /// not rewrite history, because past documents recorded their quantities in
+  /// base units.
+  async updateUnit(
+    companyId: string,
+    userId: string,
+    itemId: string,
+    unitId: string,
+    dto: Record<string, unknown>,
+  ) {
+    const item = await this.prisma.item.findFirst({
+      where: { id: itemId, companyId, deletedAt: null },
+      select: { id: true, code: true, unit: true },
+    });
+    if (!item) throw new NotFoundException('Item not found');
+
+    const unit = await this.prisma.itemUnit.findFirst({
+      where: { id: unitId, itemId },
+    });
+    if (!unit) throw new NotFoundException('Unit not found');
+    const isBase = unit.unit === item.unit;
+
+    const data: Record<string, unknown> = {};
+    if (dto.unit !== undefined) {
+      const name = String(dto.unit ?? '').trim();
+      if (!name) throw new BadRequestException('unit is required');
+      if (isBase && name !== item.unit) {
+        throw new BadRequestException(
+          'The base unit of an item cannot be renamed; add the new name as another unit instead.',
+        );
+      }
+      const clash = await this.prisma.itemUnit.findFirst({
+        where: { itemId, unit: name, id: { not: unitId } },
+        select: { id: true },
+      });
+      if (clash) throw new ConflictException(`Item ${item.code} already has a unit called ${name}`);
+      data.unit = name;
+    }
+
+    if (dto.factor !== undefined) {
+      const factor = this.parseFactor(dto.factor);
+      if (isBase && !factor.equals(1)) {
+        throw new BadRequestException(`factor must be 1 for the base unit of ${item.code}`);
+      }
+      data.factor = factor;
+    }
+
+    if (dto.barcode !== undefined) {
+      const barcode = String(dto.barcode ?? '').trim() || null;
+      if (barcode) await this.assertBarcodeFree(companyId, barcode, itemId, unitId);
+      data.barcode = barcode;
+    }
+
+    for (const key of ['salePrice', 'purchasePrice'] as const) {
+      if (dto[key] === undefined) continue;
+      if (dto[key] === null || dto[key] === '') {
+        data[key] = null;
+        continue;
+      }
+      try {
+        const value = new Prisma.Decimal(String(dto[key])).toDecimalPlaces(MONEY_SCALE);
+        if (value.isNegative()) throw new Error('negative');
+        data[key] = value;
+      } catch {
+        throw new BadRequestException(`${key} is not a valid amount`);
+      }
+    }
+
+    const updated = await this.prisma.itemUnit.update({ where: { id: unitId }, data });
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'UPDATE',
+      entity: 'item_units',
+      entityId: unitId,
+      before: { item: item.code, unit: unit.unit, factor: unit.factor.toFixed(6), barcode: unit.barcode },
+      after: {
+        item: item.code,
+        unit: updated.unit,
+        factor: updated.factor.toFixed(6),
+        barcode: updated.barcode,
+      },
+    });
+    return this.listUnits(companyId, itemId);
+  }
+
+  /// Removes a unit.
+  ///
+  /// The base unit is not removable: it is what the stock ledger counts in.
+  /// Units referenced by nothing but the item are simply deleted; the item's
+  /// past documents did not depend on them, because quantities were stored in
+  /// base units.
+  async removeUnit(companyId: string, userId: string, itemId: string, unitId: string) {
+    const item = await this.prisma.item.findFirst({
+      where: { id: itemId, companyId, deletedAt: null },
+      select: { id: true, code: true, unit: true },
+    });
+    if (!item) throw new NotFoundException('Item not found');
+
+    const unit = await this.prisma.itemUnit.findFirst({ where: { id: unitId, itemId } });
+    if (!unit) throw new NotFoundException('Unit not found');
+    if (unit.unit === item.unit) {
+      throw new BadRequestException(
+        'The base unit cannot be removed; it is the unit stock is counted in.',
+      );
+    }
+
+    await this.prisma.itemUnit.delete({ where: { id: unitId } });
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'DELETE',
+      entity: 'item_units',
+      entityId: unitId,
+      before: { item: item.code, unit: unit.unit, factor: unit.factor.toFixed(6) },
+    });
+    return this.listUnits(companyId, itemId);
+  }
+
+  /// A code for this unit alone, generated or supplied, unique in the company.
+  async assignUnitBarcode(
+    companyId: string,
+    userId: string,
+    itemId: string,
+    unitId: string,
+    requested: string | null | undefined,
+  ) {
+    const unit = await this.prisma.itemUnit.findFirst({
+      where: { id: unitId, item: { id: itemId, companyId, deletedAt: null } },
+      include: { item: { select: { code: true } } },
+    });
+    if (!unit) throw new NotFoundException('Unit not found');
+
+    let barcode = String(requested ?? '').trim();
+    if (barcode) {
+      if (barcode.length > 60) throw new BadRequestException('barcode cannot be longer than 60 characters');
+      await this.assertBarcodeFree(companyId, barcode, itemId, unitId);
+    } else {
+      for (let attempt = 0; attempt < 20 && !barcode; attempt += 1) {
+        const candidate = randomInternalBarcode();
+        if (!isValidEan13(candidate)) continue;
+        const taken = await this.barcodeTaken(companyId, candidate, itemId, unitId);
+        if (!taken) barcode = candidate;
+      }
+      if (!barcode) {
+        throw new ConflictException('Could not generate a free internal barcode; enter one by hand');
+      }
+    }
+
+    await this.prisma.itemUnit.update({ where: { id: unitId }, data: { barcode } });
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'UPDATE',
+      entity: 'item_units',
+      entityId: unitId,
+      before: { item: unit.item.code, unit: unit.unit, barcode: unit.barcode },
+      after: { item: unit.item.code, unit: unit.unit, barcode },
+    });
+    return this.listUnits(companyId, itemId);
+  }
+
+  private parseFactor(value: unknown): Prisma.Decimal {
+    let factor: Prisma.Decimal;
+    try {
+      factor = new Prisma.Decimal(String(value ?? '0')).toDecimalPlaces(6);
+    } catch {
+      throw new BadRequestException('factor is not a valid number');
+    }
+    if (factor.lessThanOrEqualTo(0)) {
+      throw new BadRequestException('factor must be greater than zero');
+    }
+    return factor;
+  }
+
+  private async barcodeTaken(
+    companyId: string,
+    barcode: string,
+    itemId: string | null,
+    unitId: string | null,
+  ) {
+    const [item, unit] = await Promise.all([
+      this.prisma.item.findFirst({
+        where: { companyId, barcode, deletedAt: null, ...(itemId ? { id: { not: itemId } } : {}) },
+        select: { id: true },
+      }),
+      this.prisma.itemUnit.findFirst({
+        where: {
+          barcode,
+          ...(unitId ? { id: { not: unitId } } : {}),
+          item: { companyId, deletedAt: null, ...(itemId ? { id: { not: itemId } } : {}) },
+        },
+        select: { id: true },
+      }),
+    ]);
+    return Boolean(item || unit);
+  }
+
+  private async assertBarcodeFree(
+    companyId: string,
+    barcode: string,
+    itemId: string | null,
+    unitId: string | null,
+  ) {
+    const [item, unit] = await Promise.all([
+      this.prisma.item.findFirst({
+        where: { companyId, barcode, deletedAt: null, ...(itemId ? { id: { not: itemId } } : {}) },
+        select: { code: true },
+      }),
+      this.prisma.itemUnit.findFirst({
+        where: {
+          barcode,
+          ...(unitId ? { id: { not: unitId } } : {}),
+          item: { companyId, deletedAt: null, ...(itemId ? { id: { not: itemId } } : {}) },
+        },
+        include: { item: { select: { code: true } } },
+      }),
+    ]);
+    if (item) throw new ConflictException(`Barcode ${barcode} is already assigned to item ${item.code}`);
+    if (unit) {
+      throw new ConflictException(
+        `Barcode ${barcode} is already assigned to unit ${unit.unit} of item ${unit.item.code}`,
+      );
+    }
+  }
+
   /// Adds a unit and the factor that converts it to the item's base unit.
   /// The base unit itself is always 1 - a conversion that contradicts that
   /// would make the stock ledger ambiguous.
@@ -121,6 +353,26 @@ export class InventoryReportsService {
       );
     }
 
+    const barcode = String(dto.barcode ?? '').trim() || null;
+    if (barcode) {
+      const [itemBarcode, unitBarcode] = await Promise.all([
+        this.prisma.item.findFirst({
+          where: { companyId, barcode, deletedAt: null },
+          select: { id: true, code: true },
+        }),
+        this.prisma.itemUnit.findFirst({
+          where: { barcode, item: { companyId, deletedAt: null } },
+          include: { item: { select: { code: true } } },
+        }),
+      ]);
+      if (itemBarcode) {
+        throw new ConflictException(`Barcode ${barcode} is already assigned to item ${itemBarcode.code}`);
+      }
+      if (unitBarcode) {
+        throw new ConflictException(`Barcode ${barcode} is already assigned to unit ${unitBarcode.unit} of item ${unitBarcode.item.code}`);
+      }
+    }
+
     const existing = await this.prisma.itemUnit.findFirst({ where: { itemId, unit } });
     if (existing) throw new ConflictException(`Item ${item.code} already has a unit called ${unit}`);
 
@@ -129,7 +381,7 @@ export class InventoryReportsService {
         itemId,
         unit,
         factor,
-        barcode: (dto.barcode as string) ?? null,
+        barcode,
         salePrice: dto.salePrice === undefined ? null : new Prisma.Decimal(String(dto.salePrice)),
         purchasePrice:
           dto.purchasePrice === undefined ? null : new Prisma.Decimal(String(dto.purchasePrice)),

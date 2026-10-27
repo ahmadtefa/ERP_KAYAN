@@ -1136,6 +1136,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get downloadList => 'Download the list';
 
   @override
+  String get downloadStatement => 'Download the statement';
+
+  @override
+  String get exportStatementHint =>
+      'Download this statement as it stands: Excel, CSV, PDF, or a page to print.';
+
+  @override
   String get exportListHint =>
       'Download this list as it stands: Excel, CSV, PDF, or a page to print.';
 
@@ -1422,6 +1429,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get resetCountSalesInvoices => 'Sales invoices';
+
+  @override
+  String get resetCountQuotations => 'Quotations';
+
+  @override
+  String get resetCountCashVouchers => 'Receipts and payments';
 
   @override
   String get resetCountPurchaseInvoices => 'Purchase invoices';
@@ -2455,4 +2468,154 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get usefulLifeMonths => 'Useful life (months)';
+
+  @override
+  String get licence => 'Licence';
+
+  @override
+  String get licenceSubtitle => 'Licence status, activation and renewal';
+
+  @override
+  String get licenceSettingsSubtitle => 'Activation, renewal and user-account limit';
+
+  @override
+  String get licenceStateActive => 'Active';
+
+  @override
+  String get licenceStateExpired => 'Expired';
+
+  @override
+  String get licenceStateSuspended => 'Suspended';
+
+  @override
+  String get licenceStateUnlicensed => 'Not licensed';
+
+  @override
+  String get licenceMachineId => 'Machine ID';
+
+  @override
+  String get licenceLicenceId => 'Licence ID';
+
+  @override
+  String get licenceIssuedAt => 'Issued';
+
+  @override
+  String get licenceStartsAt => 'Started';
+
+  @override
+  String get licenceExpiresAt => 'Expires';
+
+  @override
+  String get licencePerpetual => 'Perpetual — no expiry';
+
+  @override
+  String get licenceDaysRemaining => 'Days remaining';
+
+  @override
+  String get licenceSeats => 'User accounts';
+
+  @override
+  String get licenceSeatsUsedLabel => 'Used';
+
+  @override
+  String get licenceSeatsLimitLabel => 'Limit';
+
+  @override
+  String get licenceSeatsAvailableLabel => 'Available';
+
+  @override
+  String get licenceSeatsExplainer => 'A seat is consumed when a login account is created and is never returned by deleting the account.';
+
+  @override
+  String get licenceRequestCode => 'Activation request code';
+
+  @override
+  String get licenceRequestCodeHint => 'Send this code to the supplier. It carries only this machine\'s ID and the program version.';
+
+  @override
+  String get licenceCopy => 'Copy';
+
+  @override
+  String get licenceCopied => 'Copied';
+
+  @override
+  String get licenceEnterKey => 'Licence key';
+
+  @override
+  String get licenceKeyHint => 'Paste the key the supplier sent, starting with KYN1.';
+
+  @override
+  String get licenceApply => 'Apply key';
+
+  @override
+  String get licenceOperation => 'What the key does';
+
+  @override
+  String get licenceOperationActivation => 'New activation';
+
+  @override
+  String get licenceOperationRenewal => 'Renewal';
+
+  @override
+  String get licenceOperationSeats => 'Add user accounts';
+
+  @override
+  String get licenceOperationTransfer => 'Move to this computer';
+
+  @override
+  String get licenceApplied => 'The licence was updated.';
+
+  @override
+  String get licenceClockTitle => 'System date check';
+
+  @override
+  String get licenceClockWarning => 'The system date is earlier than the last recorded run. Set the correct date and time in Windows, then confirm.';
+
+  @override
+  String get licenceConfirmClock => 'Confirm date and time';
+
+  @override
+  String get licenceEvents => 'Licence history';
+
+  @override
+  String get licenceEventsEmpty => 'No licence events yet.';
+
+  @override
+  String get licencePublicKey => 'Verification key';
+
+  @override
+  String get licenceNotConfigured => 'This installation has no verification key, so it cannot check any licence key. Reinstall with the supplier\'s public key.';
+
+  @override
+  String get licenceBlockedTitle => 'Work is stopped by the licence';
+
+  @override
+  String get licenceBlockedBody => 'Your data is intact. Nothing was deleted. Open the licence screen and apply a renewal key to continue working.';
+
+  @override
+  String get licenceSuspendedBody => 'The program stopped because the system date is earlier than the last recorded run. Correct the date and time, then confirm on this screen. No data was lost.';
+
+  @override
+  String get licenceOpenLicence => 'Open the licence screen';
+
+  @override
+  String get licenceBackupStillAvailable => 'Backups and restores stay available while the licence is expired.';
+
+  @override
+  String get licenceOpenBackup => 'Backup and restore';
+
+  @override
+  String get licenceEnforcementEnforce => 'Enforced';
+
+  @override
+  String get licenceEnforcementWarn => 'Warning only';
+
+  @override
+  String get licenceEnforcementOff => 'Off';
+
+  @override
+  String get licenceSuperAdminOnly => 'Only a super administrator can change the licence.';
+
+  @override
+  String get licenceExpiringSoon => 'This licence expires soon. Renew it before it ends so no workday is interrupted.';
 }

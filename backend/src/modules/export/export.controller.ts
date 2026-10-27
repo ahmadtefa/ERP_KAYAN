@@ -23,6 +23,7 @@ import {
 } from './report-tables.service';
 import { DocumentsService } from './documents.service';
 import { PdfService } from './pdf.service';
+import { applyPriceVisibility, resolvePriceVisibility } from './price-visibility';
 import { Lang, toCsv, toPrintHtml, toXlsx } from './writers';
 
 /// Downloadable files and a printable page for every report.
@@ -148,7 +149,7 @@ export class ExportController {
     const spec = this.documents.spec(kind);
     this.allowedExport(user, spec.readPermission, spec.exportPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.documents.build(spec.kind, user.companyId, id, lang);
+    const table = applyPriceVisibility(await this.documents.build(spec.kind, user.companyId, id, lang), this.visibility(user, query));
     const header = await this.companyHeader(user.companyId, lang);
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: false,
@@ -170,7 +171,7 @@ export class ExportController {
     const spec = this.documents.spec(kind);
     this.allowed(user, spec.readPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.documents.build(spec.kind, user.companyId, id, lang);
+    const table = applyPriceVisibility(await this.documents.build(spec.kind, user.companyId, id, lang), this.visibility(user, query));
     const header = await this.companyHeader(user.companyId, lang);
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: query.auto === '1' || query.auto === 'true',
@@ -244,7 +245,7 @@ export class ExportController {
     this.allowed(user, spec.permission);
 
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.lists.build(list, user.companyId, query);
+    const table = applyPriceVisibility(await this.lists.build(list, user.companyId, query), this.visibility(user, query));
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
@@ -268,7 +269,7 @@ export class ExportController {
     this.allowed(user, spec.permission);
 
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.lists.build(list, user.companyId, query);
+    const table = applyPriceVisibility(await this.lists.build(list, user.companyId, query), this.visibility(user, query));
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
@@ -279,6 +280,16 @@ export class ExportController {
     response.type('text/html; charset=utf-8');
     response.setHeader('Cache-Control', 'no-store');
     response.send(html);
+  }
+
+  /// What this caller is allowed to see, whatever the URL asks for.
+  ///
+  /// The dialog on screen decides what a person wants; this decides what they
+  /// may have. A missing `inventory.cost.read` forces costs off, so adding
+  /// `showCost=true` to a link, or calling the endpoint by hand, cannot bring
+  /// back a figure the role was never granted.
+  private visibility(user: AuthUser, query: ExportQueryDto) {
+    return resolvePriceVisibility(user, query);
   }
 
   /// The permission a list needs is the one its own screen already requires.
@@ -353,7 +364,7 @@ export class ExportController {
     this.allowedExport(user, 'reports.read', 'reports.export');
     const slug = this.known(report);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.tables.build(slug, user.companyId, query, lang);
+    const table = applyPriceVisibility(await this.tables.build(slug, user.companyId, query, lang), this.visibility(user, query));
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
@@ -381,7 +392,7 @@ export class ExportController {
   ) {
     const slug = this.known(report);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.tables.build(slug, user.companyId, query, lang);
+    const table = applyPriceVisibility(await this.tables.build(slug, user.companyId, query, lang), this.visibility(user, query));
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {

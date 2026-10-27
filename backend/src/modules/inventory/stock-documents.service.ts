@@ -21,6 +21,13 @@ export interface StockDocumentLineInput {
   /** Adjustment: signed change. Count: ignored (countedQuantity is used). */
   quantity?: string | number;
   countedQuantity?: string | number;
+  /**
+   * The unit the person counted in, e.g. "carton" for a stock count entered as
+   * "3 cartons". The saved conversion factor of that unit turns the figure
+   * into base units, which is what stock and value are kept in. Omitted means
+   * the item's base unit.
+   */
+  unit?: string;
   unitCost?: string | number;
   notes?: string;
 }
@@ -210,21 +217,25 @@ export class StockDocumentsService {
     for (const [index, raw] of dto.lines.entries()) {
       const item = await this.prisma.item.findFirst({
         where: { id: raw.itemId, companyId, deletedAt: null },
-        select: { id: true, isStockTracked: true, code: true },
+        select: { id: true, isStockTracked: true, code: true, unit: true },
       });
       if (!item) throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
       if (!item.isStockTracked) {
         throw new BadRequestException(`Line ${index + 1}: item ${item.code} is not stock-tracked`);
       }
 
+      // Counted in cartons, recorded in pieces: the factor is the one saved
+      // with the item, never an assumption that a carton holds a dozen.
+      const factor = await this.unitFactor(companyId, item, raw.unit, index);
+
       const quantity =
         raw.quantity === undefined
           ? new Prisma.Decimal(0)
-          : this.decimal(raw.quantity, `Line ${index + 1} quantity`);
+          : this.decimal(raw.quantity, `Line ${index + 1} quantity`).mul(factor).toDecimalPlaces(MONEY_SCALE);
       const countedQuantity =
         raw.countedQuantity === undefined
           ? null
-          : this.decimal(raw.countedQuantity, `Line ${index + 1} counted quantity`);
+          : this.decimal(raw.countedQuantity, `Line ${index + 1} counted quantity`).mul(factor).toDecimalPlaces(MONEY_SCALE);
       const unitCost =
         raw.unitCost === undefined
           ? new Prisma.Decimal(0)
@@ -774,6 +785,31 @@ export class StockDocumentsService {
         },
       });
     }
+  }
+
+  /// The saved factor of the unit a line was entered in.
+  ///
+  /// An unknown unit is refused rather than treated as the base unit: a count
+  /// entered as "3 pallets" that silently became "3 pieces" would post a stock
+  /// difference nobody asked for.
+  private async unitFactor(
+    companyId: string,
+    item: { id: string; code: string; unit: string },
+    requested: string | undefined,
+    index: number,
+  ): Promise<Prisma.Decimal> {
+    const unit = String(requested ?? '').trim();
+    if (!unit || unit === item.unit) return new Prisma.Decimal(1);
+    const saved = await this.prisma.itemUnit.findFirst({
+      where: { itemId: item.id, unit, item: { companyId, deletedAt: null } },
+      select: { factor: true },
+    });
+    if (!saved) {
+      throw new BadRequestException(
+        `Line ${index + 1}: item ${item.code} has no unit called ${unit}`,
+      );
+    }
+    return saved.factor;
   }
 
   private decimal(value: unknown, field: string): Prisma.Decimal {
