@@ -853,6 +853,10 @@ class _Sheet extends StatelessWidget {
                   ),
                 ),
                 for (final section in document.sections) tableRow(section),
+                totalRow(
+                  document.arabic ? 'الإجمالي قبل الخصم' : 'Subtotal before discount',
+                  _money(totals.subTotal),
+                ),
                 if (quotationDiscount > 0)
                   totalRow(
                     document.arabic ? 'خصم العرض' : 'Quotation discount',
