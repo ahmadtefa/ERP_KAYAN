@@ -5,6 +5,7 @@ import '../../../../core/platform/browser_actions.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../providers/data_providers.dart';
+import 'price_visibility_dialog.dart';
 
 /// The ways out of a report: a spreadsheet, a plain file, a PDF, or paper.
 ///
@@ -52,7 +53,33 @@ class ReportExportActions extends ConsumerWidget {
     Future<void> download(Future<DownloadRequest> link) =>
         runDownload(context, link);
 
-    Future<void> showPage(Future<String> link) => runPrint(context, link);
+    Future<void> downloadPdf() async {
+      final visibility = await choosePriceVisibility(context, arabic: language == 'ar');
+      if (visibility == null || !context.mounted) return;
+      await download(links.pdf(
+        report: report,
+        language: language,
+        from: from,
+        to: to,
+        accountId: accountId,
+        showSalePrice: visibility['showSalePrice'],
+        showCost: visibility['showCost'],
+      ));
+    }
+
+    Future<void> showPage() async {
+      final visibility = await choosePriceVisibility(context, arabic: language == 'ar');
+      if (visibility == null || !context.mounted) return;
+      await runPrint(context, links.print(
+        report: report,
+        language: language,
+        from: from,
+        to: to,
+        accountId: accountId,
+        showSalePrice: visibility['showSalePrice'],
+        showCost: visibility['showCost'],
+      ));
+    }
 
     return Wrap(
       spacing: 8,
