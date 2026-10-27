@@ -91,7 +91,7 @@ function Publish-Failure([string]$Reason) {
   $redacted = [regex]::Replace($Reason, '(?i)postgres(?:ql)?://[^\s"'']+', '[DATABASE URL REDACTED]')
   $redacted = [regex]::Replace($redacted, '(?i)(password\s*[=:]\s*)[^\s;]+', '$1[REDACTED]')
   $annotation = ($redacted -replace '\r?\n', ' | ')
-  if ($annotation.Length -gt 4000) { $annotation = $annotation.Substring(0, 4000) }
+  if ($annotation.Length -gt 60000) { $annotation = $annotation.Substring(0, 60000) }
   # ::error:: turns this line into a check annotation, readable without the
   # full job log (which is only available to signed-in users).
   Write-Output "::error::Windows installer smoke test failed: $annotation"
@@ -566,7 +566,24 @@ $repairRecorded = @(
 )
 if ($repairRecorded.Count -eq 0) {
   $checked = ($runtimeLog + ' and ' + $repairResultFile)
-  Fail ("The bundled repair tool did not record KAYAN-REPAIR-OK. Checked $checked. The repair tool's exit code was 0, so it believed the repair succeeded: see the repairtool.log and repair-result.txt sections below for what it wrote.")
+  # The repair's own account of itself comes first: GitHub cuts the message
+  # at 4000 characters, and the general log dump would push it out of sight.
+  $compact = @(
+    "The bundled repair tool did not record KAYAN-REPAIR-OK.",
+    "Checked: $checked",
+    ("repair-result.txt exists: " + (Test-Path -LiteralPath $repairResultFile)),
+    "--- repairtool.log (tail) ---"
+  )
+  $repairToolLogPath = Join-Path $env:ProgramData 'KAYAN-ERP\logs\repairtool.log'
+  if (Test-Path -LiteralPath $repairToolLogPath) {
+    $compact += @(Get-Content -LiteralPath $repairToolLogPath -Tail 20 -ErrorAction SilentlyContinue)
+  } else {
+    $compact += "(not written: $repairToolLogPath)"
+  }
+  $compact += "--- files in the logs directory ---"
+  $compact += @(Get-ChildItem -LiteralPath (Join-Path $env:ProgramData 'KAYAN-ERP\logs') -ErrorAction SilentlyContinue |
+    ForEach-Object { "{0} {1} bytes {2:u}" -f $_.Name, $_.Length, $_.LastWriteTime })
+  Fail (($compact -join [Environment]::NewLine))
 }
 Write-Host ("PASS: the repair recorded KAYAN-REPAIR-OK in " + ($repairRecorded -join ', ') + ".")
 $env:PGPASSWORD = $databasePassword
