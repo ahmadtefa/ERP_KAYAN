@@ -173,7 +173,9 @@ function designCss(design: Record<string, unknown> | null | undefined): string {
   const targets: Record<string, string> = {
     title: '.title-band h2', company: '.brand h1', customer: '.panels .panel',
     sectionTitle: '.section-head h3', tableHeader: '.items thead th', tableCell: '.items tbody td',
-    totalsLabel: '.totals td:first-child', totalsValue: '.totals td.num', finalTotal: '.totals tr.grand td',
+    totalsLabel: '.summary tbody tr.discount td:first-child, .summary tbody tr.tax td:first-child, .totals td:first-child',
+    totalsValue: '.summary tbody tr.discount td.num, .summary tbody tr.tax td.num, .totals td.num',
+    finalTotal: '.summary tr.grand td, .totals tr.grand td',
     header: '.masthead, .custom-header', footer: '.page-footer',
   };
   for (const [key, selector] of Object.entries(targets)) {
