@@ -55,5 +55,9 @@ String? companyLogoUrl(String apiBaseUrl, Map<String, dynamic> company) {
 
   final id = company['id']?.toString().trim() ?? '';
   if (id.isEmpty || company['hasLogo'] != true) return null;
-  return resolveCompanyLogoUrl(apiBaseUrl, '/companies/logo/$id');
+  // Bust browser caches when the company logo changes, even when the API
+  // payload only provides the public logo endpoint instead of logoUrl.
+  final version = company['updatedAt']?.toString().trim() ?? '';
+  final suffix = version.isEmpty ? '' : '?v=$version';
+  return resolveCompanyLogoUrl(apiBaseUrl, '/companies/logo/$id$suffix');
 }
