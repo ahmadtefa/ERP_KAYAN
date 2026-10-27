@@ -252,7 +252,7 @@ async function main() {
       const window = await startWindow(emptyHome, port);
       cleanup.push(window.child);
       try {
-        assert(window.url, `the empty-register window did not start:\\n${window.output()}`);
+        assert(window.url, `the empty-register window did not start:\n${window.output()}`);
         const token = window.url.split('#')[1];
         const headers = { 'x-kayan-token': token, 'content-type': 'application/json' };
         const page = await fetch(`http://127.0.0.1:${port}/`);
@@ -295,7 +295,7 @@ async function main() {
         });
         assert(issued.status === 200, `issue after create status ${issued.status}`);
         const issuedBody = await issued.json();
-        assert(/^KYN1\\./.test(issuedBody.key || ''), 'no key issued after creating the licence');
+        assert(/^KYN1\./.test(issuedBody.key || ''), 'no key issued after creating the licence');
 
         const product = await import(pathToFileURL(BACKEND_KEY).href);
         const publicKey = product.loadPublicKey(readFileSync(join(emptyHome, 'public-key.pem'), 'utf8'));
