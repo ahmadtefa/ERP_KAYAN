@@ -1,0 +1,103 @@
+# TEMPORARY diagnostic workflow.
+#
+# The Windows Installer job fails at its "Licence key for this build" step in
+# under a second, before anything in the script runs, and the raw job log is not
+# reachable from outside the runner. This workflow isolates the suspects one
+# per step, each marked continue-on-error, so the per-step results alone say
+# which ingredient makes the step fail. It is deleted once the cause is known.
+name: Licence step diagnosis
+
+on:
+  push:
+    branches: ['arena/55b30d04-erp-kayan']
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: A plain powershell step
+        continue-on-error: true
+        shell: powershell
+        run: |
+          Write-Output "::notice::diag A plain powershell step ran"
+
+      - name: B step env with an undefined secret
+        continue-on-error: true
+        shell: powershell
+        env:
+          KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
+        run: |
+          Write-Output ("::notice::diag B ran; secret is empty: " + [string]([string]::IsNullOrEmpty($env:KAYAN_LICENCE_PRIVATE_KEY)))
+
+      - name: C notice text like the licence step
+        continue-on-error: true
+        shell: powershell
+        run: |
+          Write-Output ("::notice::Licence step started: powershell " + $PSVersionTable.PSVersion.ToString() + ", temp " + $env:RUNNER_TEMP)
+
+      - name: D node runs the generator
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $licenceDir = Join-Path $env:RUNNER_TEMP 'kayan-diag-licence'
+          Remove-Item -LiteralPath $licenceDir -Recurse -Force -ErrorAction SilentlyContinue
+          $generator = Join-Path (Get-Location) 'tools\license-generator\kayan-license.mjs'
+          & node $generator init --home $licenceDir
+          $code = $LASTEXITCODE
+          $key = Join-Path $licenceDir 'public-key.pem'
+          Write-Output ("::notice::diag D generator exit " + $code + "; key exists: " + (Test-Path -LiteralPath $key) + "; sha " + (Get-FileHash -LiteralPath $key -Algorithm SHA256).Hash)
+
+      - name: E writes step outputs
+        continue-on-error: true
+        id: writes
+        shell: powershell
+        run: |
+          "build=test-signed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "home=C:\temp\licence" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Output ("::notice::diag E outputs written; build=" + '${{ steps.writes.outputs.build }}')
+
+      - name: F the whole licence script, no env
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          try {
+            Write-Output ("::notice::diag F started")
+            $licenceDir = Join-Path $env:RUNNER_TEMP 'kayan-diag-f'
+            Remove-Item -LiteralPath $licenceDir -Recurse -Force -ErrorAction SilentlyContinue
+            $generator = Join-Path (Get-Location) 'tools\license-generator\kayan-license.mjs'
+            & node $generator init --home $licenceDir
+            $nodeExit = $LASTEXITCODE
+            $publicKey = Join-Path $licenceDir 'public-key.pem'
+            if ($nodeExit -ne 0) { throw "generator exit $nodeExit" }
+            if (-not (Test-Path -LiteralPath $publicKey)) { throw "no public key at $publicKey" }
+            Write-Output ("::notice::diag F completed with " + $publicKey)
+          } catch {
+            Write-Output ("::error title=diag F::" + $_.Exception.GetType().Name + ': ' + $_.Exception.Message)
+          }
+
+      - name: G the whole licence script, with env
+        continue-on-error: true
+        shell: powershell
+        env:
+          KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          try {
+            Write-Output ("::notice::diag G started")
+            $licenceDir = Join-Path $env:RUNNER_TEMP 'kayan-diag-g'
+            Remove-Item -LiteralPath $licenceDir -Recurse -Force -ErrorAction SilentlyContinue
+            $generator = Join-Path (Get-Location) 'tools\license-generator\kayan-license.mjs'
+            & node $generator init --home $licenceDir
+            $nodeExit = $LASTEXITCODE
+            $publicKey = Join-Path $licenceDir 'public-key.pem'
+            if ($nodeExit -ne 0) { throw "generator exit $nodeExit" }
+            if (-not (Test-Path -LiteralPath $publicKey)) { throw "no public key at $publicKey" }
+            Write-Output ("::notice::diag G completed with " + $publicKey)
+          } catch {
+            Write-Output ("::error title=diag G::" + $_.Exception.GetType().Name + ': ' + $_.Exception.Message)
+          }
