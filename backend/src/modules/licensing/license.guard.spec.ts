@@ -77,11 +77,21 @@ describe('LicenseGuard while the licence is blocked', () => {
     '/backup/full',
     '/health',
     '/setup/status',
+    '/api/v1/health',
+    '/api/v1/setup/status',
+    '/api/v1/backup/full',
+    '/api/v1/license/status',
   ])('keeps %s reachable', async (path) => {
     const { guard: g, service } = guard({});
     await expect(g.canActivate(contextFor(path))).resolves.toBe(true);
     // It does not even ask, so a slow database cannot block the way out.
     expect(service.isBlocked).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a prefixed business route as an escape route', async () => {
+    const { guard: g } = guard({});
+    const body = await codeOf(g.canActivate(contextFor('/api/v1/authorizations')));
+    expect(body?.code).toBe('LICENSE_EXPIRED');
   });
 
   it('does not treat a longer path with the same first letters as allowed', async () => {
