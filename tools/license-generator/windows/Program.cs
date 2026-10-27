@@ -20,11 +20,18 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            MessageBox.Show(
-                "تعذر تشغيل مولّد مفاتيح كيان.\nKAYAN Key Generator could not start.\n\n" + ex.Message,
-                "KAYAN Key Generator",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
+            if (!string.IsNullOrWhiteSpace(smokeMarker))
+            {
+                try { File.WriteAllText(smokeMarker, "NATIVE_WINDOW_FAILED\n" + ex); } catch { }
+            }
+            else
+            {
+                MessageBox.Show(
+                    "تعذر تشغيل مولّد مفاتيح كيان.\nKAYAN Key Generator could not start.\n\n" + ex.Message,
+                    "KAYAN Key Generator",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
             Environment.ExitCode = 1;
         }
     }
@@ -107,6 +114,7 @@ internal sealed class GeneratorWindow : Form
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_smokeMarker))!);
                     File.WriteAllText(_smokeMarker, "NATIVE_WINDOW_READY\n" + _url, Encoding.UTF8);
+                    BeginInvoke(new Action(Close));
                 }
             };
             _web.CoreWebView2.Navigate(_url!);
