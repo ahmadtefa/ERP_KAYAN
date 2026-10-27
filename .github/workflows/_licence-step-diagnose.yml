@@ -101,3 +101,69 @@ jobs:
           } catch {
             Write-Output ("::error title=diag G::" + $_.Exception.GetType().Name + ': ' + $_.Exception.Message)
           }
+
+      # H takes the licence step's run block out of the real workflow, byte for
+      # byte, and asks PowerShell's own parser whether it is valid. A parse error
+      # is what would explain a step that dies in under a second with no output.
+      - name: H parse the real licence step body
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $workflow = '.github/workflows/windows-installer.yml'
+          $lines = Get-Content -LiteralPath $workflow
+          $start = 0
+          for ($n = 0; $n -lt $lines.Count; $n++) {
+            if ($lines[$n] -like '*name: Licence key for this build*') { $start = $n; break }
+          }
+          if ($start -eq 0) { throw "could not find the licence step in $workflow" }
+          $i = $start
+          while ($i -lt $lines.Count -and $lines[$i] -notmatch 'run:\s*\|') { $i++ }
+          if ($i -ge $lines.Count) { throw 'could not find the run block' }
+          $runIndent = ([regex]::Match($lines[$i], '^(\s*)')).Groups[1].Value.Length
+          $body = New-Object System.Collections.Generic.List[string]
+          for ($j = $i + 1; $j -lt $lines.Count; $j++) {
+            $line = $lines[$j]
+            $indent = ([regex]::Match($line, '^(\s*)')).Groups[1].Value.Length
+            if ($line.Trim().Length -gt 0 -and $indent -le ($runIndent - 2)) { break }
+            if ($line.Length -ge $runIndent) { $body.Add($line.Substring($runIndent)) } else { $body.Add('') }
+          }
+          $text = [string]::Join("`n", $body)
+          Write-Output ("::notice::diag H extracted " + $body.Count + " lines, " + $text.Length + " characters")
+          $scriptPath = Join-Path $env:RUNNER_TEMP 'licence-step-body.ps1'
+          [IO.File]::WriteAllText($scriptPath, $text, (New-Object System.Text.UTF8Encoding($false)))
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -eq 0) {
+            Write-Output '::notice::diag H parse: no syntax errors'
+          } else {
+            foreach ($e in $errors) {
+              Write-Output ("::error title=diag H parse::" + $e.Message + " (line " + $e.Extent.StartLineNumber + ", column " + $e.Extent.StartColumnNumber + ") " + $e.Extent.Text)
+            }
+          }
+          Write-Output ("::notice::diag H token count " + $tokens.Count)
+
+      # I runs that extracted body exactly as written, so a runtime failure shows
+      # up as a failed step plus its own annotation.
+      - name: I run the extracted licence step body
+        continue-on-error: true
+        shell: powershell
+        env:
+          KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
+        run: |
+          Write-Output ("::notice::diag I starting")
+          $scriptPath = Join-Path $env:RUNNER_TEMP 'licence-step-body.ps1'
+          if (-not (Test-Path -LiteralPath $scriptPath)) { Write-Output '::error title=diag I::the body file was not written by step H'; exit 1 }
+          & $scriptPath
+          Write-Output ("::notice::diag I finished with LASTEXITCODE " + $LASTEXITCODE)
+
+      # J invokes the body the way the runner does for `shell: powershell`.
+      - name: J run the body through powershell -Command dot-source
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $scriptPath = Join-Path $env:RUNNER_TEMP 'licence-step-body.ps1'
+          if (-not (Test-Path -LiteralPath $scriptPath)) { Write-Output '::error title=diag J::the body file was not written by step H'; exit 1 }
+          powershell -NoLogo -NoProfile -Command ". '$scriptPath'; Write-Output ('::notice::diag J exit ' + `$LASTEXITCODE)"
+          Write-Output ("::notice::diag J wrapper exit " + $LASTEXITCODE)
