@@ -120,17 +120,7 @@ class ReportExportActions extends ConsumerWidget {
         ),
         if (pdfReady)
           FilledButton.tonalIcon(
-            onPressed: ready
-                ? () => download(
-                      links.pdf(
-                        report: report,
-                        language: language,
-                        from: from,
-                        to: to,
-                        accountId: accountId,
-                      ),
-                    )
-                : null,
+            onPressed: ready ? downloadPdf : null,
             icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
             label: Text(l10n.exportPdf),
           ),
@@ -139,17 +129,7 @@ class ReportExportActions extends ConsumerWidget {
           // one, so the tooltip says which dialogue option saves the file.
           message: pdfReady ? l10n.printPdfHint : l10n.printHintWhenNoPdf,
           child: OutlinedButton.icon(
-            onPressed: ready
-                ? () => showPage(
-                      links.print(
-                        report: report,
-                        language: language,
-                        from: from,
-                        to: to,
-                        accountId: accountId,
-                      ),
-                    )
-                : null,
+            onPressed: ready ? showPage : null,
             icon: const Icon(Icons.print_outlined, size: 18),
             label: Text(l10n.print),
           ),
