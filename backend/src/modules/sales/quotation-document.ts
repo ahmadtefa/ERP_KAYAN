@@ -526,6 +526,10 @@ export function renderQuotationDocument(
       </tr>`,
     )
     .join('');
+  const summarySubtotalRow = `<tr class="subtotal"><td colspan="3">${L(
+    'Subtotal before discount',
+    'الإجمالي قبل الخصم',
+  )}</td><td class="num">${money(content.totals.subTotal)}</td></tr>`;
   const summaryDiscountRow =
     quotationDiscount > 0
       ? `<tr class="discount"><td colspan="3">${L(
@@ -875,6 +879,7 @@ ${
       </thead>
       <tbody>
         ${summaryRows}
+        ${summarySubtotalRow}
         ${summaryDiscountRow}
         ${summaryTaxRow}
         <tr class="grand">
