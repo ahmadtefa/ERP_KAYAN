@@ -1,7 +1,20 @@
 [CmdletBinding()]
 param(
   [string]$Output = 'build\windows-installer',
-  [switch]$SkipInstaller
+  [switch]$SkipInstaller,
+  # Builds the product without licences enforced. Only for development: such a
+  # build refuses every customer key, and it must never be handed to a
+  # customer. Without this switch a build that cannot find the operator's
+  # public key fails instead of shipping quietly unprotected - that is how a
+  # released Setup came to run without asking for an activation key.
+  [switch]$EvaluationBuild,
+  # Where the licence public key is when it is not beside this script. A
+  # release passes the operator's key (or drops it beside this script); the CI
+  # job passes a throwaway key it generated for that run, so the Setup it
+  # installs really does enforce licences and activation can be tested end to
+  # end. Only the public key is ever read: nothing in this build can issue a
+  # licence.
+  [string]$LicencePublicKeyPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -202,6 +215,39 @@ Copy-Item (Join-Path $PSScriptRoot 'database-control.ps1') $app
 Copy-Item (Join-Path $PSScriptRoot 'UnelevatedProcess.cs') $app
 Copy-Item (Join-Path $PSScriptRoot 'README.txt') $app
 Copy-Item (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') $app
+# Offline licensing: a build prepared for customers carries the operator's
+# PUBLIC key only. The private key never leaves the supplier's key generator.
+#
+# A build with no key cannot verify any licence, so shipping one would mean
+# shipping a copy that runs without an activation key. That is a build error,
+# not a warning: the only way to produce such a build is to ask for it with
+# -EvaluationBuild, and then the manifest and the installer's own log say so.
+$licenceCandidates = @()
+if ($LicencePublicKeyPath) {
+  $explicitKey = if ([IO.Path]::IsPathRooted($LicencePublicKeyPath)) { [IO.Path]::GetFullPath($LicencePublicKeyPath) } else { [IO.Path]::GetFullPath((Join-Path $root $LicencePublicKeyPath)) }
+  if (-not (Test-Path -LiteralPath $explicitKey)) {
+    throw ("The licence public key this build was given does not exist: " + $explicitKey + ". Nothing was built.")
+  }
+  $licenceCandidates += $explicitKey
+  Write-Host "Licensing: using the public key passed to the build ($explicitKey)"
+}
+$licenceCandidates += @(
+  (Join-Path $PSScriptRoot 'public-key.pem'),
+  (Join-Path $PSScriptRoot 'licensing\public-key.pem')
+)
+$licencePublicKey = $licenceCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if ($licencePublicKey) {
+  Copy-Item -LiteralPath $licencePublicKey -Destination $app -Force
+  $licenceMode = 'enforce'
+  $licenceKeySha256 = (Get-FileHash -LiteralPath $licencePublicKey -Algorithm SHA256).Hash
+  Write-Host "Licensing: enforcement ON; public key staged from $licencePublicKey (SHA256 $licenceKeySha256)"
+} elseif ($EvaluationBuild) {
+  $licenceMode = 'warn'
+  $licenceKeySha256 = ''
+  Write-Host '::warning title=Evaluation build::No public-key.pem was found, so this is an EVALUATION build: licences are NOT enforced and no customer key can be activated. Place the operator''s public-key.pem beside build-installer.ps1 to produce a product build.'
+} else {
+  throw ('A product build needs the operator''s licence public key, and none was found. Expected ' + (Join-Path $PSScriptRoot 'public-key.pem') + ' (or licensing\public-key.pem). Copy it from KAYAN-Key-Generator: public-key.pem, never private-key.pem. For a development or CI build that must not enforce licences, pass -EvaluationBuild.')
+}
 Copy-Item (Join-Path $PSScriptRoot 'installer.iss') (Join-Path $stage 'installer.iss')
 # The icon Inno Setup embeds into Setup.exe (SetupIconFile in installer.iss).
 # generate_app_icons.py above has just refreshed it from the brand image.
@@ -221,13 +267,31 @@ $secretEnvironmentFiles = Get-ChildItem -LiteralPath $app -Force -File -Recurse 
 if ($secretEnvironmentFiles) { throw 'Environment files are forbidden in the installer package.' }
 
 Write-Host '[7/8] Write artifact manifest with exact pinned versions'
-$manifest = [ordered]@{ product='KAYAN ERP'; productVersion=$appVersion; architecture='x64'; nodeVersion=$nodeVersion; postgresqlVersion=($postgresVersion -replace '-1$',''); flutterVersion=((flutter --version --machine | ConvertFrom-Json).frameworkVersion); sourceCommit=(git -C $root rev-parse HEAD); windowsInstallerTested=$false }
+$manifest = [ordered]@{ product='KAYAN ERP'; productVersion=$appVersion; architecture='x64'; nodeVersion=$nodeVersion; postgresqlVersion=($postgresVersion -replace '-1$',''); flutterVersion=((flutter --version --machine | ConvertFrom-Json).frameworkVersion); sourceCommit=(git -C $root rev-parse HEAD); windowsInstallerTested=$false; licenseEnforcement=$licenceMode; licensePublicKeySha256=$licenceKeySha256 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $app 'runtime-manifest.json') -Encoding UTF8
 
 if (-not $SkipInstaller) {
   Write-Host '[8/8] Compile standalone Inno Setup installer'
-  & $iscc.Source "/DSourceDir=$app" "/DOutputDir=$outputPath" "/DAppVersion=$appVersion" (Join-Path $stage 'installer.iss')
-  if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed ($LASTEXITCODE)." }
+  if (-not (Test-Path -LiteralPath $outputPath)) { [void][IO.Directory]::CreateDirectory($outputPath) }
+  # ISCC has no /LOG switch (it rejects any option it does not know, which is
+  # how the previous attempt ended as a bare "failed (2)"). Its diagnosis goes
+  # to stdout/stderr, so the compiler's own output is captured to the log here
+  # and its last lines are repeated in the error. 2>&1 also keeps PowerShell
+  # from turning a compiler message into a terminating NativeCommandError
+  # before the exit code can be read.
+  $isccLog = Join-Path $outputPath 'iscc.log'
+  $isccArguments = @("/DSourceDir=$app", "/DOutputDir=$outputPath", "/DAppVersion=$appVersion", (Join-Path $stage 'installer.iss'))
+  $isccOutput = @(& $iscc.Source @isccArguments 2>&1 | ForEach-Object { "$_" })
+  $isccExit = $LASTEXITCODE
+  [IO.File]::WriteAllText($isccLog, ($isccOutput -join [Environment]::NewLine))
+  $isccOutput | ForEach-Object { Write-Host $_ }
+  if ($isccExit -ne 0) {
+    $details = (($isccOutput | Select-Object -Last 30) -join ' | ')
+    if (-not $details) { $details = 'ISCC printed nothing; see the build log.' }
+    if ($details.Length -gt 3000) { $details = $details.Substring($details.Length - 3000) }
+    Write-Host "::error title=Inno Setup::$(($details -replace '%','%25') -replace '\r?\n','%0A')"
+    throw "Inno Setup failed ($isccExit). $details"
+  }
   $versionedSetup = Join-Path $outputPath "KAYAN-ERP-Setup-$appVersion-x64.exe"
   $canonicalSetup = Join-Path $outputPath "KAYAN-ERP-Setup.exe"
   if (Test-Path $versionedSetup) {

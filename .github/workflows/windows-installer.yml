@@ -163,11 +163,116 @@ jobs:
       - name: Test Flutter
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
 
+      # A build that enforces licences needs a public key, and this repository
+      # does not contain the operator's. An evaluation build cannot prove that
+      # activation is mandatory, so when no operator key is present this job
+      # generates a throwaway signing key for itself and builds a real
+      # enforcement build with it: the Setup installed below refuses to work
+      # without a key, exactly as the product does. That key exists only in
+      # this run's temporary folder, so the artifact cannot activate any
+      # customer key - which is why it is never published as a release.
+      # PowerShell parses a whole script before running any of it, so one syntax
+      # error anywhere in the step below kills it before its own error handler
+      # exists: the step then fails in under a second, saying nothing that
+      # survives outside the runner log. This guard parses that step's text with
+      # PowerShell's own parser and fails with the exact message instead.
+      - name: Check the licence step parses
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $workflow = '.github/workflows/windows-installer.yml'
+          $lines = Get-Content -LiteralPath $workflow
+          $start = -1
+          for ($n = 0; $n -lt $lines.Count; $n++) {
+            if ($lines[$n] -eq '      - name: Licence key for this build') { $start = $n; break }
+          }
+          if ($start -lt 0) { throw "No licence step in $workflow" }
+          $i = $start
+          while ($i -lt $lines.Count -and $lines[$i] -notmatch 'run:\s*\|') { $i++ }
+          if ($i -ge $lines.Count) { throw "The licence step in $workflow has no run block" }
+          $runIndent = ([regex]::Match($lines[$i], '^(\s*)')).Groups[1].Value.Length
+          $body = New-Object System.Collections.Generic.List[string]
+          for ($j = $i + 1; $j -lt $lines.Count; $j++) {
+            $line = $lines[$j]
+            $indent = ([regex]::Match($line, '^(\s*)')).Groups[1].Value.Length
+            if ($line.Trim().Length -gt 0 -and $indent -le ($runIndent - 2)) { break }
+            if ($line.Length -ge $runIndent) { $body.Add($line.Substring($runIndent)) } else { $body.Add('') }
+          }
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseInput([string]::Join("`n", $body), [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            foreach ($e in $errors) {
+              Write-Output ("::error title=Licence step syntax::" + $e.Message + " (line " + $e.Extent.StartLineNumber + ")")
+            }
+            throw ("The licence step in " + $workflow + " has " + $errors.Count + " syntax error(s), so PowerShell would refuse to run it.")
+          }
+          Write-Host ("Licence step parses: " + $body.Count + " lines, " + $tokens.Count + " tokens.")
+
+      - name: Licence key for this build
+        id: licence
+        shell: powershell
+        env:
+          # The private half of the operator's key, when this repository holds
+          # the public half. It is only ever used to issue the temporary test
+          # licences the smoke test needs; it is written to the runner's
+          # temporary folder, never printed, and never enters the artifact.
+          KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Every failure here is reported as an annotation, because the raw
+          # step log is not always reachable from outside the runner.
+          try {
+            Write-Output ("::notice::Licence step started: powershell " + $PSVersionTable.PSVersion.ToString() + ", temp " + $env:RUNNER_TEMP + ", cwd " + (Get-Location).Path)
+            $operatorKey = ''
+            foreach ($candidate in @('.\distribution\windows\public-key.pem', '.\distribution\windows\licensing\public-key.pem')) {
+              if (Test-Path -LiteralPath $candidate) { $operatorKey = (Resolve-Path -LiteralPath $candidate).Path; break }
+            }
+            if ($operatorKey) {
+              Write-Host ("The repository carries the operator's licence key at " + $operatorKey + ": this is a product build.")
+              if (-not $env:KAYAN_LICENCE_PRIVATE_KEY) {
+                throw 'This repository carries the operator''s public key, but no KAYAN_LICENCE_PRIVATE_KEY secret is configured for this run. The installed Setup would enforce licences this job cannot issue, so its company features could not be tested - and a Setup nobody tested is not published. Add the private key as a repository secret, or remove the public key to build a test-signed Setup.'
+              }
+              $licenceDir = Join-Path $env:RUNNER_TEMP 'kayan-operator-licence'
+              New-Item -ItemType Directory -Force -Path $licenceDir | Out-Null
+              [IO.File]::WriteAllText((Join-Path $licenceDir 'private-key.pem'), $env:KAYAN_LICENCE_PRIVATE_KEY)
+              Copy-Item -LiteralPath $operatorKey -Destination (Join-Path $licenceDir 'public-key.pem') -Force
+              "build=product" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+              "home=$licenceDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+              exit 0
+            }
+
+            $licenceDir = Join-Path $env:RUNNER_TEMP 'kayan-ci-licence'
+            Remove-Item -LiteralPath $licenceDir -Recurse -Force -ErrorAction SilentlyContinue
+            $generator = Join-Path (Get-Location) 'tools\license-generator\kayan-license.mjs'
+            if (-not (Test-Path -LiteralPath $generator)) { throw "The licence generator is missing: $generator" }
+            & node $generator init --home $licenceDir
+            $nodeExit = $LASTEXITCODE
+            $publicKey = Join-Path $licenceDir 'public-key.pem'
+            if ($nodeExit -ne 0) { throw "The licence generator could not create a key pair (exit $nodeExit)." }
+            if (-not (Test-Path -LiteralPath $publicKey)) { throw "The licence generator did not write a public key at $publicKey" }
+            $fingerprint = (Get-FileHash -LiteralPath $publicKey -Algorithm SHA256).Hash
+            Write-Host ("Throwaway signing key for this run only: SHA256 " + $fingerprint)
+            Write-Host "::warning title=Test-signed installer::No operator public key in the repository, so this run signs the build with a throwaway key generated now. The Setup it installs DOES enforce licences - that is what makes the activation test real - but it cannot activate any customer key and is never published as a release. Add the operator's public-key.pem beside build-installer.ps1 to build a product installer."
+            "build=test-signed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "home=$licenceDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } catch {
+            Write-Output ("::error title=Licence key for this build::" + $_.Exception.GetType().Name + ': ' + $_.Exception.Message)
+            exit 1
+          }
       - name: Build Windows installer
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          & .\distribution\windows\build-installer.ps1
+          if ('${{ steps.licence.outputs.build }}' -eq 'product') {
+            Write-Host 'Building a product installer from the operator key in the repository.'
+            & .\distribution\windows\build-installer.ps1
+          } else {
+            $key = Join-Path '${{ steps.licence.outputs.home }}' 'public-key.pem'
+            if (-not (Test-Path -LiteralPath $key)) { throw "The throwaway licence key for this run is missing: $key" }
+            Write-Host "Building an enforcement build signed with this run's throwaway key: $key"
+            & .\distribution\windows\build-installer.ps1 -LicencePublicKeyPath $key
+          }
           if ($LASTEXITCODE -ne 0) { throw "Windows installer build failed." }
 
       - name: Verify installer artifact
@@ -181,9 +286,41 @@ jobs:
           $canonicalHash = (Get-FileHash $setupCanonical -Algorithm SHA256).Hash
           Write-Host "::notice title=Installer SHA256::KAYAN-ERP-Setup.exe SHA256=$canonicalHash"
 
+      # -RequireLicenceEnforcement is what makes this a test of the product
+      # rather than of a key somebody dropped next to it: the run fails if the
+      # installed build does not enforce licences. -LicenceHome hands the test
+      # the same key pair the build was signed with, so it can issue the
+      # activation keys a supplier would issue.
       - name: Smoke-test the actual installed Windows application
         shell: powershell
-        run: .\scripts\smoke-test-installed-windows.ps1 -SetupPath .\build\windows-installer\KAYAN-ERP-Setup.exe
+        run: |
+          # The step's output is captured, replayed, and - if the script dies -
+          # summarised in an error annotation. Without that, a script that dies
+          # before its own error handler exists (a syntax error, a parameter
+          # that will not bind) leaves only "Process completed with exit code 1"
+          # and the raw job log is not readable by somebody not signed in.
+          $ErrorActionPreference = 'Continue'
+          $smokeLog = Join-Path $env:RUNNER_TEMP 'kayan-smoke.log'
+          # A hashtable, so the names really bind: splatting an ARRAY passes its
+          # elements positionally, which silently made the first one - the
+          # string '-SetupPath' - the value of -SetupPath, and the script then
+          # died in Resolve-Path before its own error handler existed. That was
+          # the whole reason the smoke test never ran.
+          $arguments = @{ SetupPath = '.\build\windows-installer\KAYAN-ERP-Setup.exe'; RequireLicenceEnforcement = $true }
+          if ('${{ steps.licence.outputs.home }}') { $arguments['LicenceHome'] = '${{ steps.licence.outputs.home }}' }
+          & .\scripts\smoke-test-installed-windows.ps1 @arguments *> $smokeLog
+          $smokeExit = $LASTEXITCODE
+          if (Test-Path -LiteralPath $smokeLog) { Get-Content -LiteralPath $smokeLog | Write-Output }
+          if ($smokeExit -ne 0) {
+            $tail = ''
+            if (Test-Path -LiteralPath $smokeLog) {
+              $tail = ((Get-Content -LiteralPath $smokeLog -Tail 20) -join ' | ')
+              $tail = $tail.Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' | ')
+              if ($tail.Length -gt 3500) { $tail = $tail.Substring($tail.Length - 3500) }
+            }
+            Write-Output ("::error title=Smoke test failed::exit " + $smokeExit + ". Last lines of its output: " + $tail)
+            exit $smokeExit
+          }
 
       # The publish step below replaces the files of an existing release. That
       # is right while a release is being assembled, and wrong the moment one
@@ -191,14 +328,14 @@ jobs:
       # would overwrite the published Setup.exe of windows-v0.1.1. This guard
       # runs first and stops the job if that tag already has files.
       - name: Refuse to overwrite a published release
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        if: github.ref == 'refs/heads/main' && steps.licence.outputs.build == 'product' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         shell: powershell
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/check-release-tag.mjs "windows-v${{ steps.app-version.outputs.version }}"
 
       - name: Publish direct Setup.exe download
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        if: github.ref == 'refs/heads/main' && steps.licence.outputs.build == 'product' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: ncipollo/release-action@v1
         with:
           tag: windows-v${{ steps.app-version.outputs.version }}
@@ -219,7 +356,7 @@ jobs:
       # Everywhere else a pull-request build only uploads the diagnostic
       # artifact further down; the official release above stays main-only.
       - name: Publish branch prerelease with direct Setup.exe download
-        if: (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'arena/13bf1607-erp-kayan')
+        if: steps.licence.outputs.build == 'product' && ((github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'arena/13bf1607-erp-kayan'))
         uses: ncipollo/release-action@v1
         with:
           tag: windows-v${{ steps.app-version.outputs.version }}-pre-${{ github.run_id }}

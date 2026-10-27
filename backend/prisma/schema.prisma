@@ -2257,3 +2257,97 @@ model Budget {
   @@index([accountId])
   @@map("budgets")
 }
+
+// ------------------------------------------------------- offline licensing
+//
+// The licence belongs to the installation, not to a company: one machine runs
+// one KAYAN database, and the company rows inside it are the customer's
+// business data. Nothing here is derived from the company name, the tax
+// number or the books - only from the machine id and the signed keys the
+// operator issues with the offline key generator.
+//
+// These tables are deliberately not part of the company JSON backup: a
+// restored backup must not be able to roll the seat counter back. The
+// protected state file beside the database is the watermark, and the restore
+// path re-syncs it after the rows come back (see LicensingService.reconcile).
+
+model LicenseInstallation {
+  id           String    @id @default(uuid()) @db.Uuid
+  /// The identifier the issuing tool wrote into every key it made.
+  licenseId    String    @unique
+  machineId    String
+  /// Free text the operator typed into the issuing tool. Never the company's
+  /// trade name, tax number or anything read from the books.
+  customerRef  String?
+  issuedAt     DateTime
+  startsAt     DateTime
+  /// null means perpetual: no renewal date and no expiry.
+  expiresAt    DateTime?
+  seatLimit    Int
+  /// ACTIVE, or SUSPENDED when a confirmed clock tamper stops the program.
+  status       String    @default("ACTIVE")
+  lastKeyId    String?
+  lastSeenAt   DateTime?
+  clockState   String    @default("OK")
+  clockNote    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("license_installations")
+}
+
+/// Every key this installation has accepted, once.
+///
+/// `keyId` is unique, which is what makes re-entering the same renewal (or the
+/// same seat increase) a no-op instead of a second grant: the insert fails and
+/// the service answers "already applied".
+model LicenseKeyRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  keyId       String   @unique
+  licenseId   String
+  type        String
+  payloadJson String   @db.Text
+  machineId   String?
+  appliedAt   DateTime @default(now())
+  appliedBy   String?  @db.Uuid
+  ipAddress   String?
+  note        String?
+
+  @@index([licenseId])
+  @@map("license_keys")
+}
+
+/// One row per user account ever created through this installation.
+///
+/// The row survives the user: deleting or deactivating an account does not
+/// give the seat back, which is the whole point of counting here rather than
+/// counting `users`. Existing accounts are inserted by the migration.
+model LicenseSeatUsage {
+  id             String   @id @default(uuid()) @db.Uuid
+  /// Null for rows the migration wrote before a licence existed.
+  licenseId      String?
+  userId         String?  @db.Uuid
+  username       String
+  /// SETUP_ADMIN, USER_CREATE or MIGRATION_EXISTING.
+  reason         String
+  /// Prevents a retried request from consuming a second seat.
+  idempotencyKey String?  @unique
+  createdAt      DateTime @default(now())
+
+  @@index([licenseId])
+  @@index([userId])
+  @@map("license_seat_usage")
+}
+
+/// The licence's own history: issued, renewed, seats, transferred, clock
+/// warnings. Append-only from the application's point of view.
+model LicenseEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  licenseId   String?
+  type        String
+  detail      String?  @db.Text
+  occurredAt  DateTime @default(now())
+
+  @@index([licenseId, occurredAt])
+  @@map("license_events")
+}

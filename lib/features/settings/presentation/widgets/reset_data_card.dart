@@ -363,6 +363,8 @@ class _Counts extends StatelessWidget {
       'items' => l10n.resetCountItems,
       'salesInvoices' => l10n.resetCountSalesInvoices,
       'purchaseInvoices' => l10n.resetCountPurchaseInvoices,
+      'quotations' => l10n.resetCountQuotations,
+      'cashVouchers' => l10n.resetCountCashVouchers,
       'stockMovements' => l10n.resetCountStockMovements,
       'fiscalPeriods' => l10n.resetCountFiscalPeriods,
       'branches' => l10n.resetCountBranches,

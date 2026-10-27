@@ -254,7 +254,7 @@ async function main() {
         '  تعذر الاتصال بقاعدة البيانات بحساب المدير (postgres) أو بحساب التطبيق (erp_app).\n' +
         `  الهدف: ${target.host}:${target.port}/${target.database} (المستخدم: ${target.user})\n` +
         '  خطوات الحل:\n' +
-        '  1. تأكد من تشغيل خدمة قاعدة بيانات كايان (KAYAN_PostgreSQL) على المنفذ ' + target.port + '.\n' +
+        '  1. تأكد من تشغيل خدمة قاعدة بيانات كايان (KayanERPPostgreSQL) على المنفذ ' + target.port + '.\n' +
         '  2. إذا كان لديك خادم مسبق، تأكد من صحة بيانات ADMIN_DATABASE_URL أو DATABASE_URL في:\n' +
         '     %APPDATA%\\KAYAN-ERP\\kayan.env\n' +
         '  3. أعد تشغيل البرنامج بعد التحقق.\n'

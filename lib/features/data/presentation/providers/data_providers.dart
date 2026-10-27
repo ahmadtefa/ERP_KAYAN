@@ -78,6 +78,10 @@ class ReportLinkBuilder {
     String? to,
     String? accountId,
     String? branchId,
+    /// A partner statement carries who it is about; every other report
+    /// ignores the two.
+    String? partyId,
+    String? kind,
   }) async {
     final query = <String, String>{
       'format': format,
@@ -86,6 +90,8 @@ class ReportLinkBuilder {
       'to': ?to,
       'accountId': ?accountId,
       'branchId': ?branchId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(
@@ -100,12 +106,16 @@ class ReportLinkBuilder {
     String? from,
     String? to,
     String? accountId,
+    String? partyId,
+    String? kind,
   }) async {
     final query = <String, String>{
       'lang': language,
       'from': ?from,
       'to': ?to,
       'accountId': ?accountId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(url: '$_base/exports/$report/pdf?${_encode(query)}');
@@ -121,6 +131,8 @@ class ReportLinkBuilder {
     String? from,
     String? to,
     String? accountId,
+    String? partyId,
+    String? kind,
   }) async {
     final query = <String, String>{
       'lang': language,
@@ -128,6 +140,8 @@ class ReportLinkBuilder {
       'from': ?from,
       'to': ?to,
       'accountId': ?accountId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return '$_base/exports/$report/print?${_encode(query)}';

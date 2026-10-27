@@ -9,3 +9,6 @@ analyzer:
     - windows/**
     - macos/**
     - linux/**
+    # A separate package with its own SDK dependencies and its own analysis
+    # options; it is analysed by .github/workflows/key-generator-android.yml.
+    - tools/license-generator/android-app/**

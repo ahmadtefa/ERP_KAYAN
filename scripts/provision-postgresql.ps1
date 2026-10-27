@@ -49,7 +49,8 @@ if ($PgBinPath -and (Test-Path (Join-Path $PgBinPath 'psql.exe'))) {
     $psql = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $psql) {
         # Last resort: PATH
-        $psql = (Get-Command psql -ErrorAction SilentlyContinue)?.Source
+        $psqlCommand = Get-Command psql -ErrorAction SilentlyContinue
+        if ($psqlCommand) { $psql = $psqlCommand.Source }
     }
 }
 

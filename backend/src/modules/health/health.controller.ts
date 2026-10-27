@@ -1,4 +1,4 @@
-import { Controller, Get, Logger, Req } from '@nestjs/common';
+import { Controller, Get, Logger, Optional, Req } from '@nestjs/common';
 import { Request } from 'express';
 import { networkInterfaces } from 'node:os';
 import { Public } from '../../common/decorators/public.decorator';
@@ -6,10 +6,16 @@ import { advertisedHost, tlsTerminatedByProxy } from '../../common/security/expo
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { LicensingService } from '../licensing/licensing.service';
 
 @Controller('health')
 export class HealthController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // Optional so the controller can still be built in a unit test that only
+    // cares about the database half of the answer.
+    @Optional() private readonly licensing?: LicensingService,
+  ) {}
 
   /** Liveness plus a real database round-trip, so a broken DB is visible. */
   @Public()
@@ -29,16 +35,53 @@ export class HealthController {
     } catch {
       database = 'down';
     }
+    // Asked separately, and only once the round-trip above has proved the
+    // database answers: a query that cannot be read must never be reported as
+    // an outage of a database that is working. `current_database()` returns
+    // PostgreSQL's `name` type, which Prisma cannot deserialise in a raw query
+    // (it failed in CI with "Failed to deserialize column of type 'name'"),
+    // so it is cast to text. When the name cannot be read the answer says so
+    // by leaving it null, and the desktop shell refuses to treat that as proof
+    // of being connected to the company database it expects.
+    const databaseName = database === 'up' ? await this.readDatabaseName() : null;
     // Answered without a token, so it says only what a caller must know to
     // tell "the server is up" from "the server is up but the database is
     // not", plus whether the installation still needs its first account.
+    // `databaseName` is what lets the desktop shell prove it is talking to the
+    // database its settings name - the difference between a fresh company and
+    // the one that was on the computer before. It is not a secret: the name is
+    // fixed by the installer and the same on every installation.
     // The build mode, uptime and versions are behind /health/details.
+    // Whether this copy enforces licences, and whether it holds a key. The
+    // desktop shell needs both before anybody has signed in; neither says
+    // anything about the customer's licence, so both may travel with the
+    // public health answer.
+    const license = this.licensing?.licenseSummary() ?? null;
     return {
       status: database === 'up' ? 'ok' : 'degraded',
       database,
+      databaseName,
       needsSetup,
+      license,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  /** The database this process is really connected to, or null if unreadable. */
+  private async readDatabaseName(): Promise<string | null> {
+    try {
+      const rows = await this.prisma.$queryRaw<Array<{ name: string }>>`
+        SELECT current_database()::text AS name
+      `;
+      return rows.length > 0 && rows[0]?.name ? rows[0].name : null;
+    } catch (error) {
+      HealthController.logger.warn(
+        `The database answered, but its name could not be read: ${
+          (error as Error).message
+        }`,
+      );
+      return null;
+    }
   }
 
   /**

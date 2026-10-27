@@ -12,13 +12,37 @@ function fakeRequest(overrides: Partial<Record<string, unknown>> = {}): Request 
   } as unknown as Request;
 }
 
+/// The SQL a `$queryRaw` tagged-template call was given. Written out rather
+/// than stubbed blindly so a test can prove which statement the controller
+/// really sends: the database-name query is the one that has to be cast.
+function sqlOfCall(call: unknown[]): string {
+  const strings = call[0] as unknown as TemplateStringsArray;
+  return Array.isArray(strings) ? strings.join('?') : String(strings);
+}
+
+const DATABASE_NAME_ERROR = new Error(
+  "Raw query failed. Code: `N/A`. Message: `Failed to deserialize column of type 'name'`",
+);
+
 describe('HealthController', () => {
   let controller: HealthController;
   let mockPrisma: any;
+  /// Set by a test to make the database-name query fail the way PostgreSQL
+  /// and Prisma can, while `SELECT 1` keeps answering.
+  let databaseNameError: Error | null;
 
   beforeEach(() => {
+    databaseNameError = null;
     mockPrisma = {
-      $queryRaw: jest.fn().mockResolvedValue([{ 1: 1 }]),
+      $queryRaw: jest.fn((strings: TemplateStringsArray) => {
+        const sql = sqlOfCall([strings]);
+        if (/current_database/i.test(sql)) {
+          return databaseNameError
+            ? Promise.reject(databaseNameError)
+            : Promise.resolve([{ name: 'erp_kayan' }]);
+        }
+        return Promise.resolve([{ '?column?': 1 }]);
+      }),
       company: {
         count: jest.fn().mockResolvedValue(1),
       },
@@ -31,6 +55,38 @@ describe('HealthController', () => {
     expect(res.status).toBe('ok');
     expect(res.database).toBe('up');
     expect(res.needsSetup).toBe(false);
+    // The desktop shell proves it reached the right database with this.
+    expect(res.databaseName).toBe('erp_kayan');
+  });
+
+  it('asks for the database name as text, the one shape Prisma can read', async () => {
+    // `current_database()` returns PostgreSQL's `name` type, which Prisma
+    // cannot deserialise in a raw query. Without the cast, /health reports a
+    // working database as down and no installation can ever prove which
+    // database it opened.
+    await controller.check();
+    const statements = mockPrisma.$queryRaw.mock.calls.map(sqlOfCall);
+    const nameQuery = statements.find((sql: string) => /current_database/i.test(sql));
+    expect(nameQuery).toBeDefined();
+    expect(nameQuery).toMatch(/current_database\(\)\s*::text/i);
+  });
+
+  it('keeps the database up when only the name query cannot be read', async () => {
+    databaseNameError = DATABASE_NAME_ERROR;
+    const res = await controller.check();
+    expect(res.status).toBe('ok');
+    expect(res.database).toBe('up');
+    // Not a name from nowhere: the answer says the name is unknown, and the
+    // shell decides what an unknown name means.
+    expect(res.databaseName).toBeNull();
+  });
+
+  it('reports no database name when the database cannot be asked', async () => {
+    mockPrisma.$queryRaw.mockRejectedValueOnce(new Error('connect ECONNREFUSED'));
+    const res = await controller.check();
+    expect(res.status).toBe('degraded');
+    expect(res.database).toBe('down');
+    expect(res.databaseName).toBeNull();
   });
 
   it('reports network interface info', async () => {

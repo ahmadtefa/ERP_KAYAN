@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/providers/auth_providers.dart';
+import '../../features/licensing/presentation/widgets/licence_gate.dart';
 import '../../features/search/presentation/search_dialog.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
@@ -141,7 +142,12 @@ class _ErpShellState extends ConsumerState<ErpShell> {
                     isWide: isWide,
                     isExtended: isExtended,
                   ),
-                  Expanded(child: widget.child),
+                  Expanded(
+                    child: LicenceGate(
+                      currentPath: widget.currentPath,
+                      child: widget.child,
+                    ),
+                  ),
                 ],
               ),
             ),
