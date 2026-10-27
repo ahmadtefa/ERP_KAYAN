@@ -170,7 +170,7 @@ async function main() {
     await check('the packaged Windows EXE opens its own native window without launching the default browser', async () => {
       if (process.platform !== 'win32') return 'not applicable on this host; Windows workflow runs this check';
       const marker = join(home, 'native-window-smoke.txt');
-      const child = spawn(exe, ['--smoke-marker', marker], { windowsHide: true, stdio: 'ignore' });
+      const child = spawn(exe, ['--smoke-marker', marker, '--home', home], { windowsHide: true, stdio: 'ignore' });
       try {
         const deadline = Date.now() + 30_000;
         while (Date.now() < deadline && !existsSync(marker)) {
