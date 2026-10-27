@@ -121,6 +121,26 @@ export class InventoryReportsService {
       );
     }
 
+    const barcode = String(dto.barcode ?? '').trim() || null;
+    if (barcode) {
+      const [itemBarcode, unitBarcode] = await Promise.all([
+        this.prisma.item.findFirst({
+          where: { companyId, barcode, deletedAt: null },
+          select: { id: true, code: true },
+        }),
+        this.prisma.itemUnit.findFirst({
+          where: { barcode, item: { companyId, deletedAt: null } },
+          include: { item: { select: { code: true } } },
+        }),
+      ]);
+      if (itemBarcode) {
+        throw new ConflictException(`Barcode ${barcode} is already assigned to item ${itemBarcode.code}`);
+      }
+      if (unitBarcode) {
+        throw new ConflictException(`Barcode ${barcode} is already assigned to unit ${unitBarcode.unit} of item ${unitBarcode.item.code}`);
+      }
+    }
+
     const existing = await this.prisma.itemUnit.findFirst({ where: { itemId, unit } });
     if (existing) throw new ConflictException(`Item ${item.code} already has a unit called ${unit}`);
 
@@ -129,7 +149,7 @@ export class InventoryReportsService {
         itemId,
         unit,
         factor,
-        barcode: (dto.barcode as string) ?? null,
+        barcode,
         salePrice: dto.salePrice === undefined ? null : new Prisma.Decimal(String(dto.salePrice)),
         purchasePrice:
           dto.purchasePrice === undefined ? null : new Prisma.Decimal(String(dto.purchasePrice)),
