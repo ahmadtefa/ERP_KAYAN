@@ -60,16 +60,7 @@ class DocumentExportActions extends ConsumerWidget {
         ),
         if (pdfReady)
           OutlinedButton.icon(
-            onPressed: ready
-                ? () => runDownload(
-                      context,
-                      links.documentPdf(
-                        kind: kind,
-                        id: id,
-                        language: language,
-                      ),
-                    )
-                : null,
+            onPressed: ready ? downloadPdf : null,
             icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
             label: Text(l10n.exportPdf),
           ),
