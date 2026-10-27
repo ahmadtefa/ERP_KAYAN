@@ -23,12 +23,8 @@ export class HealthController {
   async check() {
     let database = 'up';
     let needsSetup = false;
-    let databaseName: string | null = null;
     try {
-      const rows = await this.prisma.$queryRaw<Array<{ name: string }>>`
-        SELECT current_database() AS name
-      `;
-      databaseName = rows.length > 0 && rows[0]?.name ? rows[0].name : null;
+      await this.prisma.$queryRaw`SELECT 1`;
       const companyCount = await this.prisma.company.count({
         where: { deletedAt: null },
       });
@@ -38,8 +34,16 @@ export class HealthController {
       needsSetup = companyCount === 0 || userCount === 0;
     } catch {
       database = 'down';
-      databaseName = null;
     }
+    // Asked separately, and only once the round-trip above has proved the
+    // database answers: a query that cannot be read must never be reported as
+    // an outage of a database that is working. `current_database()` returns
+    // PostgreSQL's `name` type, which Prisma cannot deserialise in a raw query
+    // (it failed in CI with "Failed to deserialize column of type 'name'"),
+    // so it is cast to text. When the name cannot be read the answer says so
+    // by leaving it null, and the desktop shell refuses to treat that as proof
+    // of being connected to the company database it expects.
+    const databaseName = database === 'up' ? await this.readDatabaseName() : null;
     // Answered without a token, so it says only what a caller must know to
     // tell "the server is up" from "the server is up but the database is
     // not", plus whether the installation still needs its first account.
@@ -61,6 +65,23 @@ export class HealthController {
       license,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  /** The database this process is really connected to, or null if unreadable. */
+  private async readDatabaseName(): Promise<string | null> {
+    try {
+      const rows = await this.prisma.$queryRaw<Array<{ name: string }>>`
+        SELECT current_database()::text AS name
+      `;
+      return rows.length > 0 && rows[0]?.name ? rows[0].name : null;
+    } catch (error) {
+      HealthController.logger.warn(
+        `The database answered, but its name could not be read: ${
+          (error as Error).message
+        }`,
+      );
+      return null;
+    }
   }
 
   /**

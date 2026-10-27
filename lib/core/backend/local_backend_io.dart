@@ -360,7 +360,7 @@ class LocalBackend {
       final health = await _health(port);
       final identityProblem = _verifyServerIdentity(health, settings);
       if (identityProblem != null) {
-        log?.writeln('[shell] refusing to open the program: $identityProblem');
+        log.writeln('[shell] refusing to open the program: $identityProblem');
         await _stop(process, log);
         return LocalBackendStatus.failed(
           identityProblem,
@@ -368,7 +368,7 @@ class LocalBackend {
           databaseProblem: true,
         );
       }
-      log?.writeln(
+      log.writeln(
         '[shell] the server is reading database '
         '${health?['databaseName'] ?? 'not reported'} '
         '(settings ${settings.sourceFile?.path ?? 'none'}, generation '

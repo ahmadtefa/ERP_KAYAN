@@ -141,13 +141,25 @@ jobs:
           npm run start:prod > /tmp/kayan-api.log 2>&1 &
           API_PID=$!
           trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          # Wait for a *working* database, not merely for an answer. The
+          # health route answers 200 with `"database":"down"` while the
+          # connection is still being established, so a loop that stops at the
+          # first 200 would read a starting server as a broken one. It is also
+          # what made a raw-query failure look like a database outage.
+          health_ok=false
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json; then
-              break
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json 2>/dev/null; then
+              if node -e 'const h=JSON.parse(require("fs").readFileSync("/tmp/kayan-health.json","utf8")); process.exit(h.status==="ok" && h.database==="up" ? 0 : 1)'; then
+                health_ok=true
+                break
+              fi
+              echo "health attempt ${attempt}: $(cat /tmp/kayan-health.json)"
             fi
             sleep 2
           done
-          if [ ! -s /tmp/kayan-health.json ]; then
+          if [ "$health_ok" != "true" ]; then
+            echo "::error::The API never reported a working database within 60 seconds."
+            cat /tmp/kayan-health.json 2>/dev/null || true
             cat /tmp/kayan-api.log
             exit 1
           fi
