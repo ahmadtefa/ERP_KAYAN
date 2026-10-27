@@ -32,6 +32,15 @@ function Get-RepairEvidence {
   $toolLog = Join-Path $env:ProgramData 'KAYAN-ERP\logs\repairtool.log'
   $lines += ("repair-result.txt: " + (Test-Path -LiteralPath $resultFile))
   if (Test-Path -LiteralPath $resultFile) {
+    # The failure marker can precede the backend's redirected startup output.
+    # Include it explicitly so a failed repair reports its actual reason instead
+    # of showing only the last few API log lines in the CI annotation.
+    $markers = @(Select-String -LiteralPath $resultFile -Pattern 'KAYAN-REPAIR-(FAILED|OK|LICENCE-ENFORCED|VERIFIED|SETTINGS-KEPT)' -ErrorAction SilentlyContinue |
+      Select-Object -Last 8 | ForEach-Object { $_.Line })
+    if ($markers.Count -gt 0) {
+      $lines += '--- repair markers ---'
+      $lines += $markers
+    }
     $lines += @(Get-Content -LiteralPath $resultFile -Tail 6 -ErrorAction SilentlyContinue)
   }
   $lines += "--- repairtool.log (tail 14) ---"
