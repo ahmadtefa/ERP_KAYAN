@@ -12,9 +12,10 @@ internal static class Program
     {
         ApplicationConfiguration.Initialize();
         var smokeMarker = ReadArgument(args, "--smoke-marker");
+        var home = ReadArgument(args, "--home");
         try
         {
-            using var window = new GeneratorWindow(smokeMarker);
+            using var window = new GeneratorWindow(smokeMarker, home);
             Application.Run(window);
         }
         catch (Exception ex)
@@ -41,13 +42,15 @@ internal sealed class GeneratorWindow : Form
 {
     private readonly WebView2 _web = new() { Dock = DockStyle.Fill };
     private readonly string? _smokeMarker;
+    private readonly string? _home;
     private Process? _server;
     private string? _url;
     private bool _closing;
 
-    public GeneratorWindow(string? smokeMarker)
+    public GeneratorWindow(string? smokeMarker, string? home)
     {
         _smokeMarker = smokeMarker;
+        _home = home;
         Text = "مولّد مفاتيح ترخيص كيان — KAYAN Key Generator";
         Width = 1180;
         Height = 850;
@@ -141,6 +144,11 @@ internal sealed class GeneratorWindow : Form
         start.ArgumentList.Add("--no-browser");
         start.ArgumentList.Add("--port");
         start.ArgumentList.Add("0");
+        if (!string.IsNullOrWhiteSpace(_home))
+        {
+            start.ArgumentList.Add("--home");
+            start.ArgumentList.Add(_home);
+        }
         _server = new Process { StartInfo = start, EnableRaisingEvents = true };
         _server.OutputDataReceived += (_, e) => CaptureUrl(e.Data);
         _server.ErrorDataReceived += (_, e) => CaptureUrl(e.Data);
