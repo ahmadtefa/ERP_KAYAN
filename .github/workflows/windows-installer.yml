@@ -24,6 +24,36 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # TEMPORARY diagnostics for the licence step. Removed once the cause is
+      # known. They run first, so their result arrives in seconds.
+      - name: Diag A trivial step
+        shell: powershell
+        run: |
+          Write-Output "::notice::diag A ran"
+
+      - name: Diag B step with an id and an output
+        id: diagb
+        shell: powershell
+        run: |
+          "value=b" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Output "::notice::diag B ran"
+
+      - name: Diag C step with the secret env
+        shell: powershell
+        env:
+          KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
+        run: |
+          Write-Output ("::notice::diag C ran; secret empty: " + [string]([string]::IsNullOrEmpty($env:KAYAN_LICENCE_PRIVATE_KEY)))
+
+      - name: Diag D step with id, secret env and output
+        id: diagd
+        shell: powershell
+        env:
+          KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
+        run: |
+          "value=d" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Output "::notice::diag D ran"
+
       - name: Read application version
         id: app-version
         shell: powershell
