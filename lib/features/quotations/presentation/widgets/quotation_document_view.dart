@@ -700,49 +700,81 @@ class _Sheet extends StatelessWidget {
     final design = document.design;
     final headerStyle = TextStyle(
       color: _Doc.royal,
-      fontSize: 8.5 * scale,
+      fontSize: 8.2 * scale,
       fontWeight: FontWeight.w700,
     );
     final bodyStyle = TextStyle(
       color: _Doc.ink,
-      fontSize: 8.8 * scale,
+      fontSize: 8.2 * scale,
       fontFeatures: const [FontFeature.tabularFigures()],
     );
 
-    Widget headerCell(String label, {bool numeric = false}) => Expanded(
-          flex: numeric ? 3 : 5,
+    Widget cell(
+      String label, {
+      int flex = 2,
+      bool numeric = false,
+      bool header = false,
+      TextStyle? style,
+    }) =>
+        Expanded(
+          flex: flex,
           child: Padding(
             padding: EdgeInsets.symmetric(
               vertical: 6 * scale,
-              horizontal: 5 * scale,
+              horizontal: 4 * scale,
             ),
             child: Text(
               label,
               textAlign: numeric ? TextAlign.end : TextAlign.start,
-              style: headerStyle,
+              style: style ?? (header ? headerStyle : bodyStyle),
             ),
           ),
         );
 
-    Widget summaryRow(
+    Widget tableRow(QuotationDocumentSection section) {
+      final discount = num.tryParse(section.discountAmount) ?? 0;
+      return Container(
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: _Doc.line, width: 0.6)),
+        ),
+        child: Row(
+          children: [
+            cell(section.title, flex: 4),
+            cell(_money(section.subTotal), numeric: true),
+            cell(
+              '${discount > 0 ? '− ' : ''}${_money(section.discountAmount)}',
+              numeric: true,
+              style: TextStyle(
+                color: discount > 0 ? _Doc.muted : _Doc.ink,
+                fontSize: 8.2 * scale,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+            cell(_money(section.netTotal), numeric: true),
+          ],
+        ),
+      );
+    }
+
+    Widget totalRow(
       String label,
       String amount, {
       bool grand = false,
       bool tax = false,
       bool discount = false,
     }) {
-      final normalLabelStyle = _styled(
+      final labelStyle = _styled(
         TextStyle(
           color: discount ? _Doc.muted : _Doc.ink,
-          fontSize: 8.8 * scale,
-          fontWeight: discount ? FontWeight.w500 : FontWeight.w600,
+          fontSize: 8.5 * scale,
+          fontWeight: FontWeight.w600,
         ),
         (discount || tax) ? design?.totalsLabel : null,
       );
-      final normalAmountStyle = _styled(
+      final amountStyle = _styled(
         TextStyle(
           color: tax ? _Doc.accent : (discount ? _Doc.muted : _Doc.ink),
-          fontSize: 9.3 * scale,
+          fontSize: 8.8 * scale,
           fontWeight: FontWeight.w600,
           fontFeatures: const [FontFeature.tabularFigures()],
         ),
@@ -751,33 +783,30 @@ class _Sheet extends StatelessWidget {
       final finalStyle = _styled(
         TextStyle(
           color: Colors.white,
-          fontSize: grand ? 11 * scale : 9.3 * scale,
+          fontSize: 10 * scale,
           fontWeight: FontWeight.w700,
           fontFeatures: const [FontFeature.tabularFigures()],
         ),
         design?.finalTotal,
       );
       return Container(
-        padding: EdgeInsets.symmetric(
-          vertical: grand ? 9 * scale : 6 * scale,
-          horizontal: 9 * scale,
-        ),
-        decoration: grand
-            ? const BoxDecoration(color: _Doc.royal)
-            : BoxDecoration(
-                color: tax ? _Doc.wash : null,
-                border: const Border(
+        decoration: BoxDecoration(
+          color: grand ? _Doc.royal : (tax ? _Doc.wash : null),
+          border: grand
+              ? null
+              : const Border(
                   bottom: BorderSide(color: _Doc.line, width: 0.6),
                 ),
-              ),
+        ),
+        padding: EdgeInsets.symmetric(
+          vertical: grand ? 8 * scale : 5 * scale,
+          horizontal: 8 * scale,
+        ),
         child: Row(
           children: [
             Expanded(
-              flex: 5,
-              child: Text(
-                label,
-                style: grand ? finalStyle : normalLabelStyle,
-              ),
+              flex: 8,
+              child: Text(label, style: grand ? finalStyle : labelStyle),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -785,7 +814,7 @@ class _Sheet extends StatelessWidget {
               child: Text(
                 amount,
                 textAlign: TextAlign.end,
-                style: grand ? finalStyle : normalAmountStyle,
+                style: grand ? finalStyle : amountStyle,
               ),
             ),
           ],
@@ -816,32 +845,30 @@ class _Sheet extends StatelessWidget {
                   color: _Doc.wash,
                   child: Row(
                     children: [
-                      headerCell(document.arabic ? 'الجدول' : 'Table'),
-                      headerCell(
-                        document.arabic ? 'إجمالي الجدول' : 'Table total',
-                        numeric: true,
-                      ),
+                      cell(document.arabic ? 'الجدول' : 'Table', flex: 4, header: true),
+                      cell(document.arabic ? 'قبل الخصم' : 'Before discount', numeric: true, header: true),
+                      cell(document.arabic ? 'خصم الجدول' : 'Table discount', numeric: true, header: true),
+                      cell(document.arabic ? 'الصافي' : 'Net', numeric: true, header: true),
                     ],
                   ),
                 ),
-                for (final section in document.sections)
-                  summaryRow(section.title, _money(section.netTotal)),
+                for (final section in document.sections) tableRow(section),
                 if (quotationDiscount > 0)
-                  summaryRow(
+                  totalRow(
                     document.arabic ? 'خصم العرض' : 'Quotation discount',
                     '− ${_money(totals.quotationDiscount)}',
                     discount: true,
                   ),
                 if (totals.hasTax)
-                  summaryRow(
+                  totalRow(
                     document.arabic
                         ? 'الضريبة المضافة${totals.taxRate.isNotEmpty ? ' (${totals.taxRate}%)' : ''}'
                         : 'Tax (VAT)${totals.taxRate.isNotEmpty ? ' (${totals.taxRate}%)' : ''}',
                     '+ ${_money(totals.taxAmount)}',
                     tax: true,
                   ),
-                summaryRow(
-                  document.arabic ? 'المجموع الكلي' : 'Grand total',
+                totalRow(
+                  document.arabic ? 'الإجمالي النهائي' : 'Final total',
                   _money(totals.totalAmount),
                   grand: true,
                 ),
