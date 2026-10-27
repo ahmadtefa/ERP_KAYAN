@@ -167,3 +167,27 @@ jobs:
           if (-not (Test-Path -LiteralPath $scriptPath)) { Write-Output '::error title=diag J::the body file was not written by step H'; exit 1 }
           powershell -NoLogo -NoProfile -Command ". '$scriptPath'; Write-Output ('::notice::diag J exit ' + `$LASTEXITCODE)"
           Write-Output ("::notice::diag J wrapper exit " + $LASTEXITCODE)
+
+      # K asks PowerShell's parser about every script the installer ships, so a
+      # syntax error anywhere is reported as an annotation instead of killing a
+      # step in under a second with nothing in the annotation list.
+      - name: K parse every PowerShell script in the repository
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(Get-ChildItem -Path 'scripts','distribution\windows' -Filter '*.ps1' -File -Recurse -ErrorAction SilentlyContinue)
+          $files += @(Get-ChildItem -Path 'tools' -Filter '*.ps1' -File -Recurse -ErrorAction SilentlyContinue)
+          $bad = 0
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $bad++
+              foreach ($e in $errors) {
+                Write-Output ("::error title=PowerShell syntax::" + $file.Name + " line " + $e.Extent.StartLineNumber + ": " + $e.Message)
+              }
+            }
+          }
+          if ($bad -eq 0) { Write-Output ("::notice::all " + $files.Count + " PowerShell scripts parse") }

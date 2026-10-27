@@ -294,10 +294,28 @@ jobs:
       - name: Smoke-test the actual installed Windows application
         shell: powershell
         run: |
+          # The step's output is captured, replayed, and - if the script dies -
+          # summarised in an error annotation. Without that, a script that dies
+          # before its own error handler exists (a syntax error, a parameter
+          # that will not bind) leaves only "Process completed with exit code 1"
+          # and the raw job log is not readable by somebody not signed in.
+          $ErrorActionPreference = 'Continue'
+          $smokeLog = Join-Path $env:RUNNER_TEMP 'kayan-smoke.log'
           $arguments = @('-SetupPath', '.\build\windows-installer\KAYAN-ERP-Setup.exe', '-RequireLicenceEnforcement')
           if ('${{ steps.licence.outputs.home }}') { $arguments += @('-LicenceHome', '${{ steps.licence.outputs.home }}') }
-          & .\scripts\smoke-test-installed-windows.ps1 @arguments
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\scripts\smoke-test-installed-windows.ps1 @arguments *> $smokeLog
+          $smokeExit = $LASTEXITCODE
+          if (Test-Path -LiteralPath $smokeLog) { Get-Content -LiteralPath $smokeLog | Write-Output }
+          if ($smokeExit -ne 0) {
+            $tail = ''
+            if (Test-Path -LiteralPath $smokeLog) {
+              $tail = ((Get-Content -LiteralPath $smokeLog -Tail 20) -join ' | ')
+              $tail = $tail.Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' | ')
+              if ($tail.Length -gt 3500) { $tail = $tail.Substring($tail.Length - 3500) }
+            }
+            Write-Output ("::error title=Smoke test failed::exit " + $smokeExit + ". Last lines of its output: " + $tail)
+            exit $smokeExit
+          }
 
       # The publish step below replaces the files of an existing release. That
       # is right while a release is being assembled, and wrong the moment one
