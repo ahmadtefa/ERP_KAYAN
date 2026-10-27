@@ -88,6 +88,35 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
 
   <section class="card" id="tab-issue">
     <h2>إصدار مفتاح / Issue a key</h2>
+    <div class="card" id="create-licence-card" style="background:#f8faff">
+      <h2>تسجيل ترخيص جديد — Create a licence</h2>
+      <div class="note" id="licence-hint">سجّل ترخيصًا أولًا قبل إصدار أي مفتاح.</div>
+      <div class="row">
+        <div>
+          <label for="licence-ref">مرجع أو ملاحظة إدارية — reference (optional)</label>
+          <input id="licence-ref" maxlength="160" placeholder="مثال: عقد 2026-001">
+        </div>
+        <div>
+          <label for="licence-seats">حد المستخدمين — seat limit</label>
+          <input id="licence-seats" type="number" min="1" step="1" value="5" dir="ltr" required>
+        </div>
+        <div>
+          <label for="licence-term">مدة الترخيص — term</label>
+          <select id="licence-term">
+            <option value="1m">شهر — 1 month</option>
+            <option value="6m">6 أشهر — 6 months</option>
+            <option value="1y" selected>سنة — 1 year</option>
+            <option value="2y">سنتان — 2 years</option>
+            <option value="3y">3 سنوات — 3 years</option>
+            <option value="P">دائم — perpetual</option>
+          </select>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="secondary" id="create-licence">تسجيل الترخيص — create licence</button>
+      </div>
+      <div class="msg" id="create-licence-msg" style="display:none"></div>
+    </div>
     <div class="row">
       <div>
         <label>نوع المفتاح — operation</label>
@@ -241,6 +270,21 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
     return bits.join(' — ');
   }
 
+  var creatingLicence = false;
+
+  function updateIssueAvailability() {
+    var hasKey = Boolean(state.hasKey);
+    var hasLicence = state.licences.length > 0;
+    $('create-licence').disabled = !hasKey || creatingLicence;
+    $('preview').disabled = !hasKey || !hasLicence;
+    $('issue').disabled = !hasKey || !hasLicence;
+    $('licence-hint').textContent = !hasKey
+      ? 'أنشئ مفتاح التوقيع أولًا من البطاقة أعلى الصفحة، أو افتح مجلد المفاتيح الصحيح. — Create/open the signing key first.'
+      : !hasLicence
+        ? 'السجل فارغ: سجّل ترخيصًا هنا أولًا؛ لن يتم إرسال طلب إصدار فارغ. — Register a licence here before issuing.'
+        : 'يمكنك تسجيل تراخيص إضافية في أي وقت. — You can register additional licences at any time.';
+  }
+
   function fillLicences() {
     var select = $('licence');
     var current = select.value;
@@ -250,6 +294,7 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
       option.value = '';
       option.textContent = 'لا يوجد ترخيص مسجّل — create one first';
       select.appendChild(option);
+      updateIssueAvailability();
       return;
     }
     state.licences.forEach(function (licence) {
@@ -260,6 +305,7 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
     });
     if (current) select.value = current;
     onLicenceChange();
+    updateIssueAvailability();
   }
 
   function selectedLicence() {
@@ -331,8 +377,7 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
 
   function renderRegister() {
     if (!state.licences.length) {
-      $('licences').innerHTML = '<div class="note">السجل فارغ. أنشئ ترخيصًا من السطر البرمجي: ' +
-        '<code>licence create --ref "customer" --seats 5 --term 1y</code></div>';
+      $('licences').innerHTML = '<div class="note">السجل فارغ. استخدم نموذج «تسجيل ترخيص جديد» في تبويب إصدار المفتاح؛ لن تحتاج إلى سطر الأوامر. — Register a licence in the issue tab; no command line needed.</div>';
       return;
     }
     var html = '';
@@ -395,8 +440,48 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
     return body;
   }
 
+  $('create-licence').addEventListener('click', function () {
+    if (!state.hasKey) {
+      show($('create-licence-msg'), 'أنشئ مفتاح التوقيع أولًا. — Create the signing key first.', 'bad');
+      return;
+    }
+    if (creatingLicence) return;
+    var seats = Number($('licence-seats').value);
+    if (!Number.isSafeInteger(seats) || seats < 1) {
+      show($('create-licence-msg'), 'حد المستخدمين يجب أن يكون عددًا صحيحًا لا يقل عن 1. — Seat limit must be a whole number of at least 1.', 'bad');
+      return;
+    }
+    creatingLicence = true;
+    updateIssueAvailability();
+    api('/api/licence-create', {
+      ref: $('licence-ref').value.trim(),
+      seats: seats,
+      term: $('licence-term').value
+    }).then(function (payload) {
+      return refresh().then(function () {
+        if (payload.licence && payload.licence.licenseId) {
+          $('licence').value = payload.licence.licenseId;
+          onLicenceChange();
+        }
+        show($('create-licence-msg'),
+          'تم تسجيل الترخيص بنجاح: ' + (payload.licence && payload.licence.licenseId || '') +
+          ' — Licence registered. You can now issue a key.', 'ok');
+      });
+    }).catch(function (error) {
+      show($('create-licence-msg'), error.message, 'bad');
+    }).then(function () {
+      creatingLicence = false;
+      updateIssueAvailability();
+    });
+  });
+
   $('preview').addEventListener('click', function () {
     hide($('result'));
+    if (!selectedLicence()) {
+      show($('issuemsg'), 'لا يوجد ترخيص صالح محدد. سجّل ترخيصًا أولًا. — Select or create a licence first.', 'bad');
+      updateIssueAvailability();
+      return;
+    }
     api('/api/issue', issueBody(true)).then(function (payload) {
       show($('issuemsg'), 'معاينة فقط، لم يُصدر مفتاح — preview only, nothing signed.\\n\\n' +
         JSON.stringify(payload.preview, null, 2), 'info');
@@ -404,6 +489,11 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
   });
 
   $('issue').addEventListener('click', function () {
+    if (!selectedLicence()) {
+      show($('issuemsg'), 'لا يوجد ترخيص صالح محدد. سجّل ترخيصًا أولًا. — Select or create a licence first.', 'bad');
+      updateIssueAvailability();
+      return;
+    }
     api('/api/issue', issueBody(false)).then(function (payload) {
       $('keytext').value = payload.key;
       $('summary').textContent = payload.summary;
