@@ -24,6 +24,7 @@ on:
       - 'tools/license-generator/license-gui.mjs'
       - 'tools/license-generator/sea/**'
       - 'backend/src/modules/licensing/**'
+      - 'distribution/windows/public-key.pem'
       - '.github/workflows/key-generator-android.yml'
   push:
     branches: ['arena/**']
@@ -33,6 +34,7 @@ on:
       - 'tools/license-generator/license-gui.mjs'
       - 'tools/license-generator/sea/**'
       - 'backend/src/modules/licensing/**'
+      - 'distribution/windows/public-key.pem'
       - '.github/workflows/key-generator-android.yml'
   workflow_dispatch:
     inputs:
