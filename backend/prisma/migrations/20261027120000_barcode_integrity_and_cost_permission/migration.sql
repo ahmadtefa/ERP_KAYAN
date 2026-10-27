@@ -19,16 +19,16 @@ CREATE OR REPLACE FUNCTION kayan_barcode_conflict(
 LANGUAGE sql STABLE AS $$
   SELECT 'item', i.code, NULL::text
     FROM items i
-   WHERE i.company_id = p_company_id
-     AND i.deleted_at IS NULL
+   WHERE i."companyId" = p_company_id
+     AND i."deletedAt" IS NULL
      AND i.barcode = p_barcode
      AND (p_item_id IS NULL OR i.id <> p_item_id)
   UNION ALL
   SELECT 'unit', i.code, u.unit
     FROM item_units u
-    JOIN items i ON i.id = u.item_id
-   WHERE i.company_id = p_company_id
-     AND i.deleted_at IS NULL
+    JOIN items i ON i.id = u."itemId"
+   WHERE i."companyId" = p_company_id
+     AND i."deletedAt" IS NULL
      AND u.barcode = p_barcode
      AND (p_unit_id IS NULL OR u.id <> p_unit_id)
   LIMIT 1;
@@ -39,10 +39,10 @@ LANGUAGE plpgsql AS $$
 DECLARE
   conflict record;
 BEGIN
-  IF NEW.barcode IS NULL OR btrim(NEW.barcode) = '' OR NEW.deleted_at IS NOT NULL THEN
+  IF NEW.barcode IS NULL OR btrim(NEW.barcode) = '' OR NEW."deletedAt" IS NOT NULL THEN
     RETURN NEW;
   END IF;
-  SELECT * INTO conflict FROM kayan_barcode_conflict(NEW.company_id, NEW.barcode, NEW.id, NULL);
+  SELECT * INTO conflict FROM kayan_barcode_conflict(NEW."companyId", NEW.barcode, NEW.id, NULL);
   IF FOUND THEN
     RAISE EXCEPTION 'barcode % is already assigned to item %', NEW.barcode, conflict.item_code
       USING ERRCODE = 'unique_violation';
@@ -61,7 +61,7 @@ BEGIN
   IF NEW.barcode IS NULL OR btrim(NEW.barcode) = '' THEN
     RETURN NEW;
   END IF;
-  SELECT i.company_id, i.code INTO owning_company, owning_code FROM items i WHERE i.id = NEW.item_id;
+  SELECT i."companyId", i.code INTO owning_company, owning_code FROM items i WHERE i.id = NEW."itemId";
   IF owning_company IS NULL THEN
     RETURN NEW;
   END IF;
@@ -80,17 +80,17 @@ $$;
 
 DROP TRIGGER IF EXISTS items_barcode_unique ON items;
 CREATE TRIGGER items_barcode_unique
-  BEFORE INSERT OR UPDATE OF barcode ON items
+  BEFORE INSERT OR UPDATE ON items
   FOR EACH ROW EXECUTE FUNCTION kayan_check_item_barcode();
 
 DROP TRIGGER IF EXISTS item_units_barcode_unique ON item_units;
 CREATE TRIGGER item_units_barcode_unique
-  BEFORE INSERT OR UPDATE OF barcode ON item_units
+  BEFORE INSERT OR UPDATE ON item_units
   FOR EACH ROW EXECUTE FUNCTION kayan_check_unit_barcode();
 
 -- A scanner looks a code up by exact value, so the lookup is indexed.
 CREATE INDEX IF NOT EXISTS items_company_barcode_idx
-  ON items (company_id, barcode)
+  ON items ("companyId", barcode)
   WHERE barcode IS NOT NULL;
 CREATE INDEX IF NOT EXISTS item_units_barcode_idx
   ON item_units (barcode)
