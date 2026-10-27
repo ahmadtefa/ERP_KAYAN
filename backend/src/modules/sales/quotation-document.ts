@@ -738,6 +738,7 @@ ${NASKH_FONT_FACE}
   .summary tbody td { padding: 1.4mm 2mm; border-bottom: 0.25mm solid ${LINE}; }
   .summary thead th.num { text-align: ${numAlign}; }
   .summary tbody tr.discount td { color: ${MUTED}; }
+  .summary tbody td.discount-value { color: ${MUTED}; }
   .summary tbody tr.tax td { background: ${WASH}; color: ${ACCENT}; font-weight: 800; }
   .summary tbody tr.grand td { background: ${PRIMARY}; color: #fff; font-weight: 800; font-size: 11pt; border-bottom: none; }
   .summary tbody tr.grand td:first-child { color: #fff; }
@@ -867,7 +868,9 @@ ${
       <thead>
         <tr>
           <th>${L('Table', 'الجدول')}</th>
-          <th class="num">${L('Table total', 'إجمالي الجدول')}</th>
+          <th class="num">${L('Before discount', 'قبل الخصم')}</th>
+          <th class="num">${L('Table discount', 'خصم الجدول')}</th>
+          <th class="num">${L('Net', 'الصافي')}</th>
         </tr>
       </thead>
       <tbody>
@@ -875,7 +878,7 @@ ${
         ${summaryDiscountRow}
         ${summaryTaxRow}
         <tr class="grand">
-          <td>${L('Grand total', 'المجموع الكلي')}</td>
+          <td colspan="3">${L('Final total', 'الإجمالي النهائي')}</td>
           <td class="num">${money(content.totals.totalAmount)}</td>
         </tr>
       </tbody>
