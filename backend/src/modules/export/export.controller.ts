@@ -23,6 +23,7 @@ import {
 } from './report-tables.service';
 import { DocumentsService } from './documents.service';
 import { PdfService } from './pdf.service';
+import { applyPriceVisibility } from './price-visibility';
 import { Lang, toCsv, toPrintHtml, toXlsx } from './writers';
 
 /// Downloadable files and a printable page for every report.
@@ -138,17 +139,7 @@ export class ExportController {
 
   @Get('documents/:kind/:id/pdf')
   @AllowQueryToken()
-  async documentPdf(
-    @CurrentUser() user: AuthUser,
-    @Param('kind') kind: string,
-    @Param('id') id: string,
-    @Query() query: ExportQueryDto,
-    @Res() response: Response,
-  ): Promise<void> {
-    const spec = this.documents.spec(kind);
-    this.allowedExport(user, spec.readPermission, spec.exportPermission);
-    const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.documents.build(spec.kind, user.companyId, id, lang);
+  const table = applyPriceVisibility(await this.documents.build(spec.kind, user.companyId, id, lang), query);
     const header = await this.companyHeader(user.companyId, lang);
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: false,
@@ -160,17 +151,7 @@ export class ExportController {
 
   @Get('documents/:kind/:id/print')
   @AllowQueryToken()
-  async documentPrint(
-    @CurrentUser() user: AuthUser,
-    @Param('kind') kind: string,
-    @Param('id') id: string,
-    @Query() query: ExportQueryDto,
-    @Res() response: Response,
-  ): Promise<void> {
-    const spec = this.documents.spec(kind);
-    this.allowed(user, spec.readPermission);
-    const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.documents.build(spec.kind, user.companyId, id, lang);
+  const table = applyPriceVisibility(await this.documents.build(spec.kind, user.companyId, id, lang), query);
     const header = await this.companyHeader(user.companyId, lang);
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: query.auto === '1' || query.auto === 'true',
@@ -234,17 +215,7 @@ export class ExportController {
   /// A list as a PDF, downloaded straight away.
   @Get('lists/:list/pdf')
   @AllowQueryToken()
-  async listPdf(
-    @CurrentUser() user: AuthUser,
-    @Param('list') list: string,
-    @Query() query: ExportQueryDto & Record<string, string>,
-    @Res() response: Response,
-  ): Promise<void> {
-    const spec = this.lists.known(list);
-    this.allowed(user, spec.permission);
-
-    const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.lists.build(list, user.companyId, query);
+  const table = applyPriceVisibility(await this.lists.build(list, user.companyId, query), query);
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
@@ -258,17 +229,7 @@ export class ExportController {
   /// A list as a page to print.
   @Get('lists/:list/print')
   @AllowQueryToken()
-  async listPrint(
-    @CurrentUser() user: AuthUser,
-    @Param('list') list: string,
-    @Query() query: ExportQueryDto & Record<string, string>,
-    @Res() response: Response,
-  ): Promise<void> {
-    const spec = this.lists.known(list);
-    this.allowed(user, spec.permission);
-
-    const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.lists.build(list, user.companyId, query);
+  const table = applyPriceVisibility(await this.lists.build(list, user.companyId, query), query);
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
@@ -344,16 +305,7 @@ export class ExportController {
   /// and saved as a PDF. One click, no dialogue.
   @Get(':report/pdf')
   @AllowQueryToken()
-  async pdfFile(
-    @CurrentUser() user: AuthUser,
-    @Param('report') report: string,
-    @Query() query: ExportQueryDto,
-    @Res() response: Response,
-  ): Promise<void> {
-    this.allowedExport(user, 'reports.read', 'reports.export');
-    const slug = this.known(report);
-    const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.tables.build(slug, user.companyId, query, lang);
+  const table = applyPriceVisibility(await this.tables.build(slug, user.companyId, query, lang), query);
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
@@ -373,15 +325,7 @@ export class ExportController {
   @Get(':report/print')
   @AllowQueryToken()
   @RequirePermissions('reports.read')
-  async print(
-    @CurrentUser() user: AuthUser,
-    @Param('report') report: string,
-    @Query() query: ExportQueryDto,
-    @Res() response: Response,
-  ) {
-    const slug = this.known(report);
-    const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.tables.build(slug, user.companyId, query, lang);
+  const table = applyPriceVisibility(await this.tables.build(slug, user.companyId, query, lang), query);
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
