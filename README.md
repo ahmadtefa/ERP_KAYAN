@@ -14,16 +14,17 @@ iOS, Windows, macOS, Linux and Web** from a single codebase.
 | `docs/STITCH.md` | How a design made in Google Stitch reaches the program (Arabic) |
 | `design/incoming/` | Drop exports from Stitch here |
 | `docs/DESKTOP_WINDOWS.md` | The Windows copy that starts its own server (Arabic) |
-| `scripts/build-desktop-windows.ps1` | Builds that copy: one folder that runs by itself |
-| `scripts/installer-windows.iss` | Turns that folder into one Setup .exe a customer runs (Inno Setup) |
-| `scripts/verify-package.ps1` | Asks whether a built copy is really shippable - no database needed |
-| `.github/workflows/windows-package.yml` | Builds it on a real Windows machine and publishes the result |
+| `distribution/windows/` | Current Windows desktop packaging scripts and Inno Setup installer definition |
+| `.github/workflows/windows-installer.yml` | Builds and uploads the Windows x64 installer artifact from GitHub Actions |
 | `tools/backend_shape_check.dart` | Proves the desktop and the web backend layer still agree |
 
-The built Windows copy is published as a release, so nobody has to build it to
-run it: <https://github.com/mohamedkamel78/ERP_KAYAN/releases>. The installer is
-`KAYAN-ERP-Setup-1.0.0.exe`; the machine it lands on needs PostgreSQL and
-nothing else. `docs/DESKTOP_WINDOWS.md` says what happens when it is opened.
+The Windows installer workflow currently uploads a downloadable GitHub Actions
+artifact; it does **not** automatically publish a GitHub Release. To retrieve the
+latest successful build, open the repository's Actions tab, select **Windows
+Installer**, open a successful run, and download `KAYAN-ERP-Windows-x64-Installer`.
+Artifacts are retained for 14 days. Before using the installer with real company
+data, follow `docs/DESKTOP_WINDOWS.md` and complete the acceptance checks in
+`docs/RELEASE_CHECKLIST.md`.
 
 ## Status
 
@@ -119,7 +120,7 @@ time:
 ```bash
 flutter run \
   --dart-define=APP_ENV=development \
-  --dart-define=API_BASE_URL=http://localhost:8080/api/v1
+  --dart-define=API_BASE_URL=http://localhost:3000/api/v1
 ```
 
 `APP_ENV` accepts `development`, `staging`, `production` or `onPremise`.
