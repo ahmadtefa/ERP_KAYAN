@@ -49,6 +49,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         FieldSpec('nameEn', 'Name (English)', required: true),
         FieldSpec('nameAr', 'الاسم (عربي)', required: true),
         FieldSpec('unit', l10n.unit),
+        FieldSpec('barcode', 'Barcode'),
         FieldSpec('salePrice', l10n.salePrice, kind: FieldKind.decimal),
         FieldSpec(
           'taxRate',
@@ -99,6 +100,104 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       if (mounted) showMessage(context, e.message, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _manageUnits(Json row) async {
+    final itemId = text(row, 'id');
+    final itemName = text(row, 'nameEn');
+    final client = ref.read(apiClientProvider);
+
+    Future<List<Map<String, dynamic>>> loadUnits() async {
+      final response = await client.raw.get<Map<String, dynamic>>(
+        '/inventory/items/$itemId/units',
+      );
+      final values = response.data?['items'] as List<dynamic>? ?? const [];
+      return values
+          .whereType<Map>()
+          .map((value) => Map<String, dynamic>.from(value))
+          .toList(growable: false);
+    }
+
+    while (mounted) {
+      List<Map<String, dynamic>> units;
+      try {
+        units = await loadUnits();
+      } on Failure catch (e) {
+        if (mounted) showMessage(context, e.message, error: true);
+        return;
+      }
+      if (!mounted) return;
+
+      final action = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('Units & barcodes — $itemName'),
+          content: SizedBox(
+            width: 520,
+            child: units.isEmpty
+                ? const Text('No additional units or barcodes have been added.')
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: units.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final unit = units[index];
+                      return ListTile(
+                        dense: true,
+                        title: Text('${unit['unit'] ?? ''}'),
+                        subtitle: Text(
+                          'Factor: ${unit['factor'] ?? ''}  •  Barcode: ${unit['barcode'] ?? '—'}',
+                        ),
+                        trailing: Text(
+                          unit['isBase'] == true
+                              ? 'Base unit'
+                              : '× ${unit['factor'] ?? ''}',
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(MaterialLocalizations.of(dialogContext).closeButtonLabel),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(dialogContext).pop('add'),
+              icon: const Icon(Icons.add),
+              label: const Text('Add unit / barcode'),
+            ),
+          ],
+        ),
+      );
+      if (action != 'add' || !mounted) return;
+
+      final values = await showFormSheet(
+        context,
+        title: 'Add unit / barcode',
+        fields: [
+          FieldSpec('unit', 'Unit name', required: true),
+          FieldSpec(
+            'factor',
+            'Base units per unit',
+            kind: FieldKind.decimal,
+            required: true,
+            helper: 'Example: 1 carton = 20 base units → factor 20.',
+          ),
+          FieldSpec('barcode', 'Barcode'),
+          FieldSpec('salePrice', 'Sale price', kind: FieldKind.decimal),
+          FieldSpec('purchasePrice', 'Purchase price', kind: FieldKind.decimal),
+        ],
+      );
+      if (values == null || !mounted) return;
+
+      try {
+        await client.post('/inventory/items/$itemId/units', body: values);
+        if (mounted) showMessage(context, 'Unit / barcode added.');
+      } on Failure catch (e) {
+        if (mounted) showMessage(context, e.message, error: true);
+      }
     }
   }
 
@@ -204,6 +303,11 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               tooltip: l10n.edit,
               icon: const Icon(Icons.edit_outlined, size: 20),
               onPressed: _busy ? null : () => _save(existing: row),
+            ),
+            IconButton(
+              tooltip: 'Units & barcodes',
+              icon: const Icon(Icons.qr_code_2_outlined, size: 20),
+              onPressed: _busy ? null : () => _manageUnits(row),
             ),
             IconButton(
               tooltip: flag(row, 'isActive', fallback: true)
