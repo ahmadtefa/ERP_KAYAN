@@ -514,26 +514,27 @@ export function renderQuotationDocument(
   const taxAmount = Number(content.totals.taxAmount ?? 0);
   const showTax = taxAmount > 0;
 
-  // The closing summary lists each table's net total once. Table-level
-  // discounts are already included in that net; only the offer-level discount
-  // is shown again here, followed by VAT (when enabled) and the stored total.
+  // Keep the gross, table-level discount and net visible per table.
+  // The offer-level discount is separate; totals are displayed, never recalculated.
   const summaryRows = content.tables
     .map(
       (table) => `<tr>
         <td>${escapeHtml(table.title)}</td>
+        <td class="num">${money(table.subTotal)}</td>
+        <td class="num discount-value">${Number(table.discountAmount) > 0 ? '− ' : ''}${money(table.discountAmount)}</td>
         <td class="num strong">${money(table.netTotal)}</td>
       </tr>`,
     )
     .join('');
   const summaryDiscountRow =
     quotationDiscount > 0
-      ? `<tr class="discount"><td>${L(
+      ? `<tr class="discount"><td colspan="3">${L(
           'Quotation discount',
           'خصم العرض',
         )}</td><td class="num">− ${money(quotationDiscount.toFixed(2))}</td></tr>`
       : '';
   const summaryTaxRow = showTax
-    ? `<tr class="tax"><td>${L('Tax (VAT)', 'الضريبة المضافة')}${
+    ? `<tr class="tax"><td colspan="3">${L('Tax (VAT)', 'الضريبة المضافة')}${
         taxRate > 0 ? ` (${taxRate.toFixed(2)}%)` : ''
       }</td><td class="num">+ ${money(taxAmount.toFixed(2))}</td></tr>`
     : '';
