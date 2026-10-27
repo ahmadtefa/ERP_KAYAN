@@ -1,12 +1,8 @@
 /**
- * The operator's window on the generator: a small local web page served by the
- * same process, opened in the default browser.
- *
- * Why a browser and not a native toolkit: the tool must run on a Windows
- * machine with nothing installed. A local page needs no GUI framework, no
- * runtime besides the one the tool already is, and no network: the server
- * answers on 127.0.0.1 only, with a token that changes on every start, so
- * another local program cannot drive it.
+ * The operator UI is a local web page served by this process. Source/CLI use
+ * can open it in the default browser; the packaged Windows launcher embeds it
+ * in a native WebView2 window. The server answers on 127.0.0.1 only, with a
+ * token that changes on every start, so another local origin cannot drive it.
  *
  * This module holds no licensing logic. Every action is handed to `api`, which
  * `kayan-license.mjs` builds out of the same functions the command line uses,
