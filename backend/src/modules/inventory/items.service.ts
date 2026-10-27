@@ -40,6 +40,7 @@ export class ItemsService {
         { nameEn: { contains: q, mode: 'insensitive' } },
         { nameAr: { contains: q } },
         { barcode: { contains: q } },
+        { units: { some: { barcode: { contains: q } } } },
       ];
     }
 
@@ -80,6 +81,22 @@ export class ItemsService {
     });
     if (existing && !existing.deletedAt) {
       throw new ConflictException(`Item code ${code} is already used`);
+    }
+
+    const barcode = String(dto.barcode ?? '').trim() || null;
+    if (barcode) {
+      const [itemBarcode, unitBarcode] = await Promise.all([
+        this.prisma.item.findFirst({
+          where: { companyId, barcode, deletedAt: null },
+          select: { id: true, code: true },
+        }),
+        this.prisma.itemUnit.findFirst({
+          where: { barcode, item: { companyId, deletedAt: null } },
+          include: { item: { select: { code: true } } },
+        }),
+      ]);
+      if (itemBarcode) throw new ConflictException(`Barcode ${barcode} is already assigned to item ${itemBarcode.code}`);
+      if (unitBarcode) throw new ConflictException(`Barcode ${barcode} is already assigned to unit ${unitBarcode.unit} of item ${unitBarcode.item.code}`);
     }
 
     const isStockTracked = (dto.isStockTracked as boolean) ?? true;
@@ -137,7 +154,7 @@ export class ItemsService {
           nameEn: dto.nameEn as string,
           nameAr: dto.nameAr as string,
           unit: (dto.unit as string) ?? 'unit',
-          barcode: (dto.barcode as string) ?? null,
+          barcode,
           salePrice: this.money(dto.salePrice, 'salePrice'),
           purchasePrice: this.money(dto.purchasePrice, 'purchasePrice'),
           reorderLevel: this.money(dto.reorderLevel, 'reorderLevel'),
@@ -260,6 +277,25 @@ export class ItemsService {
       where: { id, companyId, deletedAt: null },
     });
     if (!before) throw new NotFoundException('Item not found');
+
+    if (dto.barcode !== undefined) {
+      const barcode = String(dto.barcode ?? '').trim() || null;
+      if (barcode) {
+        const [itemBarcode, unitBarcode] = await Promise.all([
+          this.prisma.item.findFirst({
+            where: { companyId, barcode, id: { not: id }, deletedAt: null },
+            select: { code: true },
+          }),
+          this.prisma.itemUnit.findFirst({
+            where: { barcode, item: { companyId, id: { not: id }, deletedAt: null } },
+            include: { item: { select: { code: true } } },
+          }),
+        ]);
+        if (itemBarcode) throw new ConflictException(`Barcode ${barcode} is already assigned to item ${itemBarcode.code}`);
+        if (unitBarcode) throw new ConflictException(`Barcode ${barcode} is already assigned to unit ${unitBarcode.unit} of item ${unitBarcode.item.code}`);
+      }
+      dto.barcode = barcode;
+    }
 
     const data: Prisma.ItemUpdateInput = { updatedBy: userId };
     for (const key of ['nameEn', 'nameAr', 'unit', 'barcode', 'notes', 'isActive', 'isStockTracked'] as const) {
