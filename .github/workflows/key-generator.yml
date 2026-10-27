@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   package:
-    name: Build and test KAYAN-Key-Generator.exe
+    name: Build and test native KAYAN-Key-Generator.exe
     runs-on: windows-latest
     timeout-minutes: 45
     env:
@@ -103,9 +103,11 @@ jobs:
           }
           $exe = Join-Path $folder 'KAYAN-Key-Generator.exe'
           if (-not (Test-Path -LiteralPath $exe)) { throw 'the executable is missing' }
-          $version = & $exe version
-          Write-Host "version line: $version"
-          if ($version -notmatch '^kayan-license \d') { throw 'the executable did not report its version' }
+          $server = Join-Path $folder 'KAYAN-Key-Generator-Server.exe'
+          if (-not (Test-Path -LiteralPath $server)) { throw 'the bundled local service is missing' }
+          $version = & $server version
+          Write-Host "server version line: $version"
+          if ($version -notmatch '^kayan-license \d') { throw 'the bundled local service did not report its version' }
           $info = Get-Content -Raw (Join-Path $folder 'BUILD-INFO.txt')
           "::notice title=Key generator package::$(($info -split "`n") -join ' | ')"
 
@@ -116,6 +118,7 @@ jobs:
           name: KAYAN-Key-Generator-Windows-x64
           path: |
             dist/key-generator/KAYAN-Key-Generator.exe
+            dist/key-generator/KAYAN-Key-Generator-Server.exe
             dist/key-generator/BUILD-INFO.txt
             dist/key-generator/SMOKE-TEST.txt
           if-no-files-found: error
