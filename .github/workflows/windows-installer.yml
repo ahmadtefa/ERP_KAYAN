@@ -171,6 +171,14 @@ jobs:
       # without a key, exactly as the product does. That key exists only in
       # this run's temporary folder, so the artifact cannot activate any
       # customer key - which is why it is never published as a release.
+      # A build that enforces licences needs a public key, and this repository
+      # does not contain the operator's. An evaluation build cannot prove that
+      # activation is mandatory, so when no operator key is present this job
+      # generates a throwaway signing key for itself and builds a real
+      # enforcement build with it: the Setup installed below refuses to work
+      # without a key, exactly as the product does. That key exists only in
+      # this run's temporary folder, so the artifact cannot activate any
+      # customer key - which is why it is never published as a release.
       - name: Licence key for this build
         id: licence
         shell: powershell
@@ -182,31 +190,46 @@ jobs:
           KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $operatorKey = @('.\distribution\windows\public-key.pem', '.\distribution\windows\licensing\public-key.pem') |
-            Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-          if ($operatorKey) {
-            Write-Host "The repository carries the operator's licence key at $operatorKey: this is a product build."
-            if (-not $env:KAYAN_LICENCE_PRIVATE_KEY) {
-              throw 'This repository carries the operator''s public key, but no KAYAN_LICENCE_PRIVATE_KEY secret is configured for this run. The installed Setup would enforce licences that this job cannot issue, so its company features could not be tested - and a Setup nobody tested is not published. Add the private key as a repository secret, or remove the public key to build a test-signed Setup.'
+          # Every failure here is reported as an annotation, because the raw
+          # step log is not always reachable from outside the runner.
+          try {
+            Write-Host ("licence: powershell " + $PSVersionTable.PSVersion.ToString() + ", runner temp " + $env:RUNNER_TEMP)
+            $operatorKey = ''
+            foreach ($candidate in @('.\distribution\windows\public-key.pem', '.\distribution\windows\licensing\public-key.pem')) {
+              if (Test-Path -LiteralPath $candidate) { $operatorKey = (Resolve-Path -LiteralPath $candidate).Path; break }
             }
-            $home = Join-Path $env:RUNNER_TEMP 'kayan-operator-licence'
-            New-Item -ItemType Directory -Force -Path $home | Out-Null
-            [IO.File]::WriteAllText((Join-Path $home 'private-key.pem'), $env:KAYAN_LICENCE_PRIVATE_KEY)
-            Copy-Item -LiteralPath $operatorKey -Destination (Join-Path $home 'public-key.pem') -Force
-            "build=product" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            "home=$home" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            exit 0
-          }
-          $home = Join-Path $env:RUNNER_TEMP 'kayan-ci-licence'
-          Remove-Item -LiteralPath $home -Recurse -Force -ErrorAction SilentlyContinue
-          node .\tools\license-generator\kayan-license.mjs init --home $home
-          if ($LASTEXITCODE -ne 0) { throw 'Could not create the throwaway licence key for this run.' }
-          $fingerprint = (Get-FileHash -LiteralPath (Join-Path $home 'public-key.pem') -Algorithm SHA256).Hash
-          Write-Host ("Throwaway signing key for this run only: SHA256 " + $fingerprint)
-          Write-Host "::warning title=Test-signed installer::No operator public key in the repository, so this run signs the build with a throwaway key generated now. The Setup it installs DOES enforce licences - that is what makes the activation test real - but it cannot activate any customer key and is never published as a release. Add the operator's public-key.pem beside build-installer.ps1 to build a product installer."
-          "build=test-signed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "home=$home" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            if ($operatorKey) {
+              Write-Host "The repository carries the operator's licence key at $operatorKey: this is a product build."
+              if (-not $env:KAYAN_LICENCE_PRIVATE_KEY) {
+                throw 'This repository carries the operator''s public key, but no KAYAN_LICENCE_PRIVATE_KEY secret is configured for this run. The installed Setup would enforce licences this job cannot issue, so its company features could not be tested - and a Setup nobody tested is not published. Add the private key as a repository secret, or remove the public key to build a test-signed Setup.'
+              }
+              $home = Join-Path $env:RUNNER_TEMP 'kayan-operator-licence'
+              New-Item -ItemType Directory -Force -Path $home | Out-Null
+              [IO.File]::WriteAllText((Join-Path $home 'private-key.pem'), $env:KAYAN_LICENCE_PRIVATE_KEY)
+              Copy-Item -LiteralPath $operatorKey -Destination (Join-Path $home 'public-key.pem') -Force
+              "build=product" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+              "home=$home" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+              exit 0
+            }
 
+            $home = Join-Path $env:RUNNER_TEMP 'kayan-ci-licence'
+            Remove-Item -LiteralPath $home -Recurse -Force -ErrorAction SilentlyContinue
+            $generator = Join-Path (Get-Location) 'tools\license-generator\kayan-license.mjs'
+            if (-not (Test-Path -LiteralPath $generator)) { throw "The licence generator is missing: $generator" }
+            & node $generator init --home $home
+            $nodeExit = $LASTEXITCODE
+            $publicKey = Join-Path $home 'public-key.pem'
+            if ($nodeExit -ne 0) { throw "The licence generator could not create a key pair (exit $nodeExit)." }
+            if (-not (Test-Path -LiteralPath $publicKey)) { throw "The licence generator did not write a public key at $publicKey" }
+            $fingerprint = (Get-FileHash -LiteralPath $publicKey -Algorithm SHA256).Hash
+            Write-Host ("Throwaway signing key for this run only: SHA256 " + $fingerprint)
+            Write-Host "::warning title=Test-signed installer::No operator public key in the repository, so this run signs the build with a throwaway key generated now. The Setup it installs DOES enforce licences - that is what makes the activation test real - but it cannot activate any customer key and is never published as a release. Add the operator's public-key.pem beside build-installer.ps1 to build a product installer."
+            "build=test-signed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "home=$home" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } catch {
+            Write-Host ("::error title=Licence key for this build::" + $_.Exception.GetType().Name + ': ' + $_.Exception.Message)
+            exit 1
+          }
       - name: Build Windows installer
         shell: powershell
         run: |
