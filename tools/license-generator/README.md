@@ -12,8 +12,14 @@ KAYAN-Key-Generator.exe            (double-click; opens the local window)
 node kayan-license.mjs             (same, from a source checkout)
 ```
 
-`gui` opens it explicitly, `gui --no-browser` serves it without opening a
-browser, and every command below still works unchanged.
+`KAYAN-Key-Generator.exe` is a native Windows Forms window hosting the local UI
+inside WebView2; it does not open the default browser or show a CMD window. The
+bundled `KAYAN-Key-Generator-Server.exe` runs the local API hidden beside it.
+Keep both executables together. Windows needs the Microsoft Edge WebView2 Runtime
+(which is present on most current Windows 10/11 installations). The native-window
+smoke test runs in the Windows CI workflow. The CLI and `gui --no-browser` remain
+available for development and diagnostics, and every licensing command below
+still works unchanged.
 
 ## سطر الأوامر / The command line
 
