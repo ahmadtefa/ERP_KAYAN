@@ -184,8 +184,9 @@ writeFileSync(
   `KAYAN Key Generator — build information
 built at      : ${new Date().toISOString()}
 target        : ${target}
-entry point   : ${name}
-node runtime  : ${nodeVersion} (bundled; no install needed)
+entry point   : ${name} (native Windows window on win32)
+local service  : ${runtimeName} (bundled Node runtime)
+node runtime   : ${nodeVersion} (bundled; no Node install needed)
 built from    : ${ROOT}
 tool version  : ${JSON.parse(readFileSync(join(TOOL, 'package.json'), 'utf8')).version}
 source        : tools/license-generator/kayan-license.mjs
@@ -200,6 +201,8 @@ if (platform !== 'win32') {
   execFileSync('chmod', ['+x', output]);
 }
 
-const size = Math.round(statSync(output).size / 1048576);
-log(`done: ${output} (${size} MB)`);
+const deliverable = join(outDir, name);
+const size = Math.round(statSync(deliverable).size / 1048576);
+log(`done: ${deliverable} (${size} MB)`);
+if (platform === 'win32') log(`local service: ${join(outDir, runtimeName)}`);
 log('no signing key is embedded; the operator supplies the key folder.');
