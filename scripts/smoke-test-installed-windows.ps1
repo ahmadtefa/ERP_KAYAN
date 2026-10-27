@@ -23,10 +23,32 @@ $backend = Join-Path $installRoot "backend"
 $node = Join-Path $backend "node\node.exe"
 $settings = Join-Path $env:ProgramData "KAYAN-ERP\kayan.env"
 
+
+# The repair tool's own account of itself, kept short enough that GitHub shows
+# it in the failure annotation instead of cutting it off after the long log dump.
+function Get-RepairEvidence {
+  $lines = @()
+  $resultFile = Join-Path $env:ProgramData 'KAYAN-ERP\logs\repair-result.txt'
+  $toolLog = Join-Path $env:ProgramData 'KAYAN-ERP\logs\repairtool.log'
+  $lines += ("repair-result.txt: " + (Test-Path -LiteralPath $resultFile))
+  if (Test-Path -LiteralPath $resultFile) {
+    $lines += @(Get-Content -LiteralPath $resultFile -Tail 6 -ErrorAction SilentlyContinue)
+  }
+  $lines += "--- repairtool.log (tail 14) ---"
+  if (Test-Path -LiteralPath $toolLog) {
+    $lines += @(Get-Content -LiteralPath $toolLog -Tail 14 -ErrorAction SilentlyContinue)
+  } else {
+    $lines += "(not written: $toolLog)"
+  }
+  return ($lines -join [Environment]::NewLine)
+}
+
 function Read-Details {
   # Ordered most relevant first: the runtime setup log is the root-cause log,
   # and GitHub annotations cut the message after 4000 characters.
   $sections = @()
+  $sections += "--- repair evidence ---"
+  $sections += Get-RepairEvidence
   $resultFile = Join-Path $env:ProgramData "KAYAN-ERP\logs\installer-result.txt"
   $runtimeLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\installer.log"
   if (Test-Path $resultFile) {
@@ -38,7 +60,7 @@ function Read-Details {
   }
   if (Test-Path $runtimeLog) {
     $sections += "--- $runtimeLog ---"
-    $sections += Get-Content $runtimeLog -Tail 40 -ErrorAction SilentlyContinue
+    $sections += Get-Content $runtimeLog -Tail 8 -ErrorAction SilentlyContinue
   }
   $pgLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\postgresql.log"
   if (Test-Path $pgLog) {
@@ -58,19 +80,8 @@ function Read-Details {
   # What the repair tool itself decided, and the markers it could write. A
   # repair that failed to record anything is diagnosed from what it left
   # behind, not guessed at.
-  $repairToolLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\repairtool.log"
-  if (Test-Path $repairToolLog) {
-    $sections += "--- $repairToolLog ---"
-    $sections += Get-Content $repairToolLog -Tail 25 -ErrorAction SilentlyContinue
-  }
-  $repairResultLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\repair-result.txt"
-  if (Test-Path $repairResultLog) {
-    $sections += "--- $repairResultLog ---"
-    $sections += Get-Content $repairResultLog -Tail 15 -ErrorAction SilentlyContinue
-  } else {
-    $sections += "--- $repairResultLog ---"
-    $sections += "(not found: the repair tool wrote no markers of its own)"
-  }
+
+
   $logsDirectory = Join-Path $env:ProgramData "KAYAN-ERP\logs"
   if (Test-Path $logsDirectory) {
     $sections += "--- listing of $logsDirectory ---"
@@ -541,7 +552,9 @@ Write-Host "PASS: RepairTool.exe detected the stopped PostgreSQL service before 
 
 $repair = Start-Process -FilePath $repairTool -ArgumentList @("--repair", "--quiet") -WorkingDirectory $installRoot -Wait -PassThru
 if ($repair.ExitCode -ne 0) {
-  Fail "The bundled RepairTool.exe failed with exit code $($repair.ExitCode). See $runtimeLog and $env:ProgramData\KAYAN-ERP\logs\repairtool.log"
+  Fail ("The bundled RepairTool.exe failed with exit code $($repair.ExitCode)." + [Environment]::NewLine +
+    (Get-RepairEvidence) + [Environment]::NewLine +
+    "See $runtimeLog and $env:ProgramData\KAYAN-ERP\logs\repairtool.log")
 }
 $diagnoseAfter = Start-Process -FilePath $repairTool -ArgumentList @("--diagnose") -WorkingDirectory $installRoot -Wait -PassThru
 if ($diagnoseAfter.ExitCode -ne 0) {
