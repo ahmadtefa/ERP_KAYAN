@@ -17,45 +17,52 @@ export class HealthController {
     @Optional() private readonly licensing?: LicensingService,
   ) {}
 
-  /** Liveness plus a real database round-trip, so a broken DB is visible. */
+  /**
+   * Liveness plus a real database round-trip.
+   *
+   * The setup/count and database-name details are deliberately bounded. A
+   * health endpoint is itself used by the Windows repair runtime to prove that
+   * the server is alive. A slow metadata query must never make that probe hang
+   * for the entire repair timeout while the HTTP server is already listening.
+   * A timeout is therefore treated as "database details unknown" rather than
+   * inventing a first-run database or reporting a working database as dead.
+   */
   @Public()
   @Get()
   async check() {
     let database = 'up';
     let needsSetup = false;
     try {
-      await this.prisma.$queryRaw`SELECT 1`;
-      const companyCount = await this.prisma.company.count({
-        where: { deletedAt: null },
-      });
-      const userCount = this.prisma.user
-        ? await this.prisma.user.count({ where: { deletedAt: null } })
-        : 1;
-      needsSetup = companyCount === 0 || userCount === 0;
+      await this.withTimeout(
+        this.prisma.$queryRaw`SELECT 1`,
+        HealthController.DATABASE_PROBE_TIMEOUT_MS,
+        'database liveness query',
+      );
+      try {
+        const counts = await this.withTimeout(
+          Promise.all([
+            this.prisma.company.count({ where: { deletedAt: null } }),
+            this.prisma.user
+              ? this.prisma.user.count({ where: { deletedAt: null } })
+              : Promise.resolve(1),
+          ]),
+          HealthController.DATABASE_DETAILS_TIMEOUT_MS,
+          'database setup-state query',
+        );
+        needsSetup = counts[0] === 0 || counts[1] === 0;
+      } catch (error) {
+        HealthController.logger.warn(
+          `Database is reachable but setup-state details were not ready: ${(error as Error).message}`,
+        );
+        // Fail closed for first-run setup: an unknown state must never make an
+        // existing database look empty and trigger another administrator setup.
+        needsSetup = false;
+      }
     } catch {
       database = 'down';
     }
-    // Asked separately, and only once the round-trip above has proved the
-    // database answers: a query that cannot be read must never be reported as
-    // an outage of a database that is working. `current_database()` returns
-    // PostgreSQL's `name` type, which Prisma cannot deserialise in a raw query
-    // (it failed in CI with "Failed to deserialize column of type 'name'"),
-    // so it is cast to text. When the name cannot be read the answer says so
-    // by leaving it null, and the desktop shell refuses to treat that as proof
-    // of being connected to the company database it expects.
+
     const databaseName = database === 'up' ? await this.readDatabaseName() : null;
-    // Answered without a token, so it says only what a caller must know to
-    // tell "the server is up" from "the server is up but the database is
-    // not", plus whether the installation still needs its first account.
-    // `databaseName` is what lets the desktop shell prove it is talking to the
-    // database its settings name - the difference between a fresh company and
-    // the one that was on the computer before. It is not a secret: the name is
-    // fixed by the installer and the same on every installation.
-    // The build mode, uptime and versions are behind /health/details.
-    // Whether this copy enforces licences, and whether it holds a key. The
-    // desktop shell needs both before anybody has signed in; neither says
-    // anything about the customer's licence, so both may travel with the
-    // public health answer.
     const license = this.licensing?.licenseSummary() ?? null;
     return {
       status: database === 'up' ? 'ok' : 'degraded',
@@ -70,19 +77,45 @@ export class HealthController {
   /** The database this process is really connected to, or null if unreadable. */
   private async readDatabaseName(): Promise<string | null> {
     try {
-      const rows = await this.prisma.$queryRaw<Array<{ name: string }>>`
-        SELECT current_database()::text AS name
-      `;
+      const rows = await this.withTimeout(
+        this.prisma.$queryRaw<Array<{ name: string }>>`
+          SELECT current_database()::text AS name
+        `,
+        HealthController.DATABASE_DETAILS_TIMEOUT_MS,
+        'database-name query',
+      );
       return rows.length > 0 && rows[0]?.name ? rows[0].name : null;
     } catch (error) {
       HealthController.logger.warn(
-        `The database answered, but its name could not be read: ${
-          (error as Error).message
-        }`,
+        `The database answered, but its name could not be read: ${(error as Error).message}`,
       );
       return null;
     }
   }
+
+  private async withTimeout<T>(
+    operation: Promise<T>,
+    timeoutMs: number,
+    label: string,
+  ): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        operation,
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+            timeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private static readonly DATABASE_PROBE_TIMEOUT_MS = 5000;
+  private static readonly DATABASE_DETAILS_TIMEOUT_MS = 5000;
 
   /**
    * The same answer plus the facts a support call needs. It is not public:
@@ -137,7 +170,11 @@ export class HealthController {
 
     let database = 'up';
     try {
-      await this.prisma.$queryRaw`SELECT 1`;
+      await this.withTimeout(
+        this.prisma.$queryRaw`SELECT 1`,
+        HealthController.DATABASE_PROBE_TIMEOUT_MS,
+        'network database liveness query',
+      );
     } catch {
       database = 'down';
     }
@@ -161,21 +198,13 @@ export class HealthController {
     return {
       port,
       host,
-      // The host a person could type, not the wildcard the socket bound to.
       reachedAtHost: arrivedAt,
       bindAllInterfaces,
-      // Whether the session can be stored by the browser and whether the
-      // sign-in form travels encrypted. A page on plain http:// is not a
-      // secure context, and WebCrypto - which the token store needs - is
-      // refused there.
       secureContext: secure,
       sessionStorage:
         secure || isLoopbackHost(arrivedAt) ? 'durable' : 'memory-only',
       isLanAccessible: bindAllInterfaces && lanAddresses.length > 0,
       addresses: lanAddresses,
-      /// Every non-loopback interface, even when the server is local-only, so
-      /// the screen can say which address *would* be used once it is enabled
-      /// instead of presenting a guess as a working link.
       interfaces: addresses,
       primaryUrl: primary,
       localUrl: `${scheme}://localhost:${port}`,
@@ -185,12 +214,6 @@ export class HealthController {
     };
   }
 
-  /// Where this machine appears on the internet, asked for on purpose.
-  ///
-  /// It is a separate endpoint rather than part of the page load: a program
-  /// that opens a silent HTTP call to a third party every time somebody looks
-  /// at the settings screen is doing something the operator did not ask for.
-  /// The call is short-lived and its failure is an answer, not an error page.
   @Get('public-ip')
   @RequirePermissions('reports.read')
   async publicIp(@CurrentUser() user: AuthUser) {
@@ -223,8 +246,6 @@ export class HealthController {
         ok: true,
         checkedAt,
         publicIp: ip,
-        // An address alone does not mean this server can be reached from
-        // outside: a router or the carrier may be between the two.
         message:
           'The address was detected. It does not by itself prove that incoming connections reach this computer.',
       };
@@ -241,9 +262,6 @@ export class HealthController {
   private static readonly logger = new Logger('Health');
 }
 
-/// The private IPv4 ranges RFC 1918 sets aside, plus the link-local range used
-/// by automatic addressing. A public address here would be unusual and is not
-/// labelled as local.
 function isPrivateIpv4(address: string): boolean {
   const parts = address.split('.').map((part) => Number(part));
   if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) return false;
@@ -254,8 +272,6 @@ function isPrivateIpv4(address: string): boolean {
   return false;
 }
 
-/// A loopback address is a secure context even over plain http, which is why
-/// sign-in works on the server's own machine and not from another desk.
 function isLoopbackHost(host: string): boolean {
   const name = host.split(':')[0].toLowerCase();
   return name === 'localhost' || name === '127.0.0.1' || name === '[::1]' || name === '::1';
