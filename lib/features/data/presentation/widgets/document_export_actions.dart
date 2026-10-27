@@ -5,6 +5,7 @@ import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../providers/data_providers.dart';
 import 'price_visibility_dialog.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 
 /// Print and download one saved document (invoice, voucher, order, entry).
 class DocumentExportActions extends ConsumerWidget {
@@ -27,7 +28,11 @@ class DocumentExportActions extends ConsumerWidget {
     final ready = id.isNotEmpty;
 
     Future<void> printDocument() async {
-      final visibility = await choosePriceVisibility(context, arabic: language == 'ar');
+      final visibility = await choosePriceVisibility(
+        context,
+        arabic: language == 'ar',
+        canSeeCost: ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false,
+      );
       if (visibility == null || !context.mounted) return;
       await runPrint(context, links.documentPrint(
         kind: kind,
@@ -39,7 +44,11 @@ class DocumentExportActions extends ConsumerWidget {
     }
 
     Future<void> downloadPdf() async {
-      final visibility = await choosePriceVisibility(context, arabic: language == 'ar');
+      final visibility = await choosePriceVisibility(
+        context,
+        arabic: language == 'ar',
+        canSeeCost: ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false,
+      );
       if (visibility == null || !context.mounted) return;
       await runDownload(context, links.documentPdf(
         kind: kind,

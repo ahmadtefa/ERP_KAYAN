@@ -30,11 +30,56 @@ function Protect-Secret([string]$Text) {
   return $protected
 }
 
+# Where a repair records what it did, in two places.
+#
+# installer.log is the log a customer and the smoke test already read, but the
+# program's own server is often started with its output redirected into that
+# same file, and a redirected handle does not share write access: an append
+# from here then fails with a sharing violation. That is a real Windows
+# behaviour, and swallowing it made a successful repair look like one that had
+# recorded nothing.
+#
+# So every marker goes to installer.log (best effort) *and* to a file only this
+# script writes. The repair is only reported successful if at least one of them
+# really received the text - a marker nobody can read is not evidence.
+$script:markerSink = Join-Path (Split-Path -Parent $bootstrapLog) 'repair-result.txt'
+
+function Add-MarkerLine([string]$Path, [string]$Line) {
+  for ($attempt = 0; $attempt -lt 5; $attempt++) {
+    try {
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+      $stream = [System.IO.File]::Open(
+        $Path,
+        [System.IO.FileMode]::Append,
+        [System.IO.FileAccess]::Write,
+        [System.IO.FileShare]::ReadWrite
+      )
+      try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Line + [Environment]::NewLine)
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush()
+      } finally {
+        $stream.Dispose()
+      }
+      return $true
+    } catch {
+      Start-Sleep -Milliseconds 200
+    }
+  }
+  return $false
+}
+
 function Write-RepairMarker([string]$Message) {
-  try {
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $bootstrapLog) | Out-Null
-    Add-Content -LiteralPath $bootstrapLog -Value ("{0:u} {1}" -f (Get-Date),(Protect-Secret $Message)) -Encoding UTF8
-  } catch { }
+  $line = ("{0:u} {1}" -f (Get-Date),(Protect-Secret $Message))
+  $written = @(
+    (Add-MarkerLine $script:markerSink $line),
+    (Add-MarkerLine $bootstrapLog $line)
+  )
+  if ($written -contains $false -and ($written -notcontains $true)) {
+    # Nothing could be recorded. Say so instead of continuing: the rest of the
+    # repair cannot be shown to have happened if its own record is missing.
+    throw ("The repair could not write its log to " + $script:markerSink + " or " + $bootstrapLog + ". Check that the KAYAN-ERP folder under ProgramData is writable by an administrator.")
+  }
 }
 
 # The settings this installation had before the repair. A file that cannot be

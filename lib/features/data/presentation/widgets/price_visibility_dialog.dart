@@ -2,12 +2,18 @@ import 'package:flutter/material.dart';
 
 /// The same choice is used by list, report and saved-document PDF/print
 /// actions. This changes only the rendered copy, never the stored document.
+///
+/// [canSeeCost] mirrors the `inventory.cost.read` permission. A person who may
+/// not read a cost is not offered it here either: the server would refuse to
+/// include it anyway, and showing a checkbox that quietly changes nothing is
+/// worse than saying why it is not there.
 Future<Map<String, bool>?> choosePriceVisibility(
   BuildContext context, {
   required bool arabic,
+  bool canSeeCost = true,
 }) async {
   var showSalePrice = true;
-  var showCost = true;
+  var showCost = canSeeCost;
 
   return showDialog<Map<String, bool>>(
     context: context,
@@ -27,7 +33,16 @@ Future<Map<String, bool>?> choosePriceVisibility(
               contentPadding: EdgeInsets.zero,
               value: showCost,
               title: Text(arabic ? 'إظهار التكلفة' : 'Show costs'),
-              onChanged: (value) => setDialogState(() => showCost = value ?? false),
+              subtitle: canSeeCost
+                  ? null
+                  : Text(
+                      arabic
+                          ? 'ليس لديك صلاحية عرض التكلفة.'
+                          : 'Your role may not view costs.',
+                    ),
+              onChanged: canSeeCost
+                  ? (value) => setDialogState(() => showCost = value ?? false)
+                  : null,
             ),
             const SizedBox(height: 8),
             Text(
@@ -46,7 +61,7 @@ Future<Map<String, bool>?> choosePriceVisibility(
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop({
               'showSalePrice': showSalePrice,
-              'showCost': showCost,
+              'showCost': showCost && canSeeCost,
             }),
             child: Text(arabic ? 'متابعة' : 'Continue'),
           ),

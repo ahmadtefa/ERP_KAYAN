@@ -55,6 +55,28 @@ function Read-Details {
     $sections += "--- $backendLog ---"
     $sections += Get-Content $backendLog -Tail 15 -ErrorAction SilentlyContinue
   }
+  # What the repair tool itself decided, and the markers it could write. A
+  # repair that failed to record anything is diagnosed from what it left
+  # behind, not guessed at.
+  $repairToolLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\repairtool.log"
+  if (Test-Path $repairToolLog) {
+    $sections += "--- $repairToolLog ---"
+    $sections += Get-Content $repairToolLog -Tail 25 -ErrorAction SilentlyContinue
+  }
+  $repairResultLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\repair-result.txt"
+  if (Test-Path $repairResultLog) {
+    $sections += "--- $repairResultLog ---"
+    $sections += Get-Content $repairResultLog -Tail 15 -ErrorAction SilentlyContinue
+  } else {
+    $sections += "--- $repairResultLog ---"
+    $sections += "(not found: the repair tool wrote no markers of its own)"
+  }
+  $logsDirectory = Join-Path $env:ProgramData "KAYAN-ERP\logs"
+  if (Test-Path $logsDirectory) {
+    $sections += "--- listing of $logsDirectory ---"
+    $sections += @(Get-ChildItem -LiteralPath $logsDirectory -ErrorAction SilentlyContinue |
+      ForEach-Object { "{0} {1} bytes {2:u}" -f $_.Name, $_.Length, $_.LastWriteTime })
+  }
   if (Test-Path $installLog) {
     $sections += "--- setup log tail ---"
     $sections += Get-Content $installLog -Tail 20 -ErrorAction SilentlyContinue
@@ -530,9 +552,23 @@ $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if (-not $service -or $service.Status -ne "Running") {
   Fail "The bundled repair tool did not restart the PostgreSQL service."
 }
-if (-not (Select-String -LiteralPath $runtimeLog -Pattern 'KAYAN-REPAIR-OK' -Quiet)) {
-  Fail "The bundled repair tool did not record KAYAN-REPAIR-OK in installer.log."
+# The repair records its result twice, because installer.log is also used as
+# the redirect target of the program's own server - a handle that does not
+# share write access, so an append to it from another process can fail while
+# the server is up. The tool therefore keeps a second, private marker file and
+# exits non-zero if it could not write either. Success must be findable in at
+# least one of them; a marker nobody can read is not evidence.
+$repairResultFile = Join-Path $env:ProgramData 'KAYAN-ERP\logs\repair-result.txt'
+$repairRecorded = @(
+  @($runtimeLog, $repairResultFile) | Where-Object {
+    (Test-Path -LiteralPath $_) -and (Select-String -LiteralPath $_ -Pattern 'KAYAN-REPAIR-OK' -Quiet)
+  }
+)
+if ($repairRecorded.Count -eq 0) {
+  $checked = ($runtimeLog + ' and ' + $repairResultFile)
+  Fail ("The bundled repair tool did not record KAYAN-REPAIR-OK. Checked $checked. The repair tool's exit code was 0, so it believed the repair succeeded: see the repairtool.log and repair-result.txt sections below for what it wrote.")
 }
+Write-Host ("PASS: the repair recorded KAYAN-REPAIR-OK in " + ($repairRecorded -join ', ') + ".")
 $env:PGPASSWORD = $databasePassword
 $repairProbe = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT value FROM kayan_installer_upgrade_probe WHERE id=1" 2>&1)
 $repairProbeExit = $LASTEXITCODE

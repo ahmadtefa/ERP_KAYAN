@@ -103,10 +103,20 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     }
   }
 
+  /// Units, packs and cartons for one item, each with its own code.
+  ///
+  /// The item's base unit is what stock is counted in; every other unit is a
+  /// saved conversion factor. A barcode can belong to the item or to one unit,
+  /// and a scan of a carton must mean a carton - which is why the unit's own
+  /// factor is shown next to it instead of being assumed.
   Future<void> _manageUnits(Json row) async {
     final itemId = text(row, 'id');
     final itemName = text(row, 'nameEn');
     final client = ref.read(apiClientProvider);
+    final canManageBarcodes =
+        ref.read(currentUserProvider)?.can('inventory.barcodes.manage') ?? false;
+    final canSeeCost =
+        ref.read(currentUserProvider)?.can('inventory.cost.read') ?? false;
 
     Future<List<Map<String, dynamic>>> loadUnits() async {
       final response = await client.raw.get<Map<String, dynamic>>(
@@ -117,6 +127,10 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           .whereType<Map>()
           .map((value) => Map<String, dynamic>.from(value))
           .toList(growable: false);
+    }
+
+    Future<void> reload() async {
+      ref.read(itemsListProvider.notifier).reload();
     }
 
     while (mounted) {
@@ -134,7 +148,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         builder: (dialogContext) => AlertDialog(
           title: Text('Units & barcodes — $itemName'),
           content: SizedBox(
-            width: 520,
+            width: 560,
             child: units.isEmpty
                 ? const Text('No additional units or barcodes have been added.')
                 : ListView.separated(
@@ -143,16 +157,43 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                     separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final unit = units[index];
+                      final isBase = unit['isBase'] == true;
+                      final unitId = '${unit['id'] ?? ''}';
                       return ListTile(
                         dense: true,
                         title: Text('${unit['unit'] ?? ''}'),
                         subtitle: Text(
                           'Factor: ${unit['factor'] ?? ''}  •  Barcode: ${unit['barcode'] ?? '—'}',
                         ),
-                        trailing: Text(
-                          unit['isBase'] == true
-                              ? 'Base unit'
-                              : '× ${unit['factor'] ?? ''}',
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              isBase ? 'Base unit' : '× ${unit['factor'] ?? ''}',
+                            ),
+                            if (canManageBarcodes)
+                              IconButton(
+                                tooltip: 'Generate / replace barcode',
+                                icon: const Icon(Icons.qr_code_2, size: 20),
+                                onPressed: () =>
+                                    Navigator.of(dialogContext).pop('code:$unitId'),
+                              ),
+                            IconButton(
+                              tooltip: 'Edit unit',
+                              icon: const Icon(Icons.edit_outlined, size: 20),
+                              onPressed: () =>
+                                  Navigator.of(dialogContext).pop('edit:$unitId'),
+                            ),
+                            IconButton(
+                              tooltip: isBase
+                                  ? 'The base unit cannot be removed'
+                                  : 'Remove unit',
+                              icon: const Icon(Icons.delete_outline, size: 20),
+                              onPressed: isBase
+                                  ? null
+                                  : () => Navigator.of(dialogContext).pop('delete:$unitId'),
+                            ),
+                          ],
                         ),
                       );
                     },
@@ -171,32 +212,119 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           ],
         ),
       );
-      if (action != 'add' || !mounted) return;
+      if (action == null || !mounted) return;
 
-      final values = await showFormSheet(
-        context,
-        title: 'Add unit / barcode',
-        fields: [
-          FieldSpec('unit', 'Unit name', required: true),
-          FieldSpec(
-            'factor',
-            'Base units per unit',
-            kind: FieldKind.decimal,
-            required: true,
-            helper: 'Example: 1 carton = 20 base units → factor 20.',
-          ),
-          FieldSpec('barcode', 'Barcode'),
-          FieldSpec('salePrice', 'Sale price', kind: FieldKind.decimal),
-          FieldSpec('purchasePrice', 'Purchase price', kind: FieldKind.decimal),
-        ],
+      if (action == 'add') {
+        final values = await showFormSheet(
+          context,
+          title: 'Add unit / barcode',
+          fields: [
+            FieldSpec('unit', 'Unit name', required: true),
+            FieldSpec(
+              'factor',
+              'Base units per unit',
+              kind: FieldKind.decimal,
+              required: true,
+              helper: 'Example: 1 carton = 20 base units → factor 20.',
+            ),
+            if (canManageBarcodes) const FieldSpec('barcode', 'Barcode'),
+            const FieldSpec('salePrice', 'Sale price', kind: FieldKind.decimal),
+            if (canSeeCost)
+              const FieldSpec('purchasePrice', 'Purchase price', kind: FieldKind.decimal),
+          ],
+        );
+        if (values == null || !mounted) return;
+        try {
+          await client.post('/inventory/items/$itemId/units', body: values);
+          await reload();
+          if (mounted) showMessage(context, 'Unit / barcode added.');
+        } on Failure catch (e) {
+          if (mounted) showMessage(context, e.message, error: true);
+        }
+        continue;
+      }
+
+      final parts = action.split(':');
+      final verb = parts.first;
+      final unitId = parts.length > 1 ? parts.sublist(1).join(':') : '';
+      final unit = units.firstWhere(
+        (value) => '${value['id'] ?? ''}' == unitId,
+        orElse: () => const <String, dynamic>{},
       );
-      if (values == null || !mounted) return;
+      final isBase = unit['isBase'] == true;
 
-      try {
-        await client.post('/inventory/items/$itemId/units', body: values);
-        if (mounted) showMessage(context, 'Unit / barcode added.');
-      } on Failure catch (e) {
-        if (mounted) showMessage(context, e.message, error: true);
+      if (verb == 'code') {
+        try {
+          await client.post('/inventory/items/$itemId/units/$unitId/barcode', body: const {});
+          await reload();
+          if (mounted) showMessage(context, 'Barcode generated.');
+        } on Failure catch (e) {
+          if (mounted) showMessage(context, e.message, error: true);
+        }
+        continue;
+      }
+
+      if (verb == 'delete') {
+        final ok = await confirmAction(
+          context,
+          title: 'Remove unit',
+          message: 'Remove ${unit['unit'] ?? ''} from this item? '
+              'Stock already recorded stays as it is; it is counted in the base unit.',
+          confirmLabel: 'Remove',
+          destructive: true,
+        );
+        if (!ok || !mounted) return;
+        try {
+          await client.delete('/inventory/items/$itemId/units/$unitId');
+          await reload();
+          if (mounted) showMessage(context, 'Unit removed.');
+        } on Failure catch (e) {
+          if (mounted) showMessage(context, e.message, error: true);
+        }
+        continue;
+      }
+
+      if (verb == 'edit') {
+        final values = await showFormSheet(
+          context,
+          title: 'Edit unit',
+          initial: {
+            'unit': unit['unit'],
+            'factor': unit['factor'],
+            if (canManageBarcodes) 'barcode': unit['barcode'],
+            'salePrice': unit['salePrice'],
+            if (canSeeCost) 'purchasePrice': unit['purchasePrice'],
+          },
+          fields: [
+            FieldSpec(
+              'unit',
+              'Unit name',
+              required: true,
+              helper: isBase ? 'The base unit cannot be renamed.' : null,
+            ),
+            FieldSpec(
+              'factor',
+              'Base units per unit',
+              kind: FieldKind.decimal,
+              required: true,
+              helper: isBase
+                  ? 'The base unit always converts 1:1.'
+                  : 'The saved factor is used when this unit is scanned or counted.',
+            ),
+            if (canManageBarcodes) const FieldSpec('barcode', 'Barcode'),
+            const FieldSpec('salePrice', 'Sale price', kind: FieldKind.decimal),
+            if (canSeeCost)
+              const FieldSpec('purchasePrice', 'Purchase price', kind: FieldKind.decimal),
+          ],
+        );
+        if (values == null || !mounted) return;
+        try {
+          await client.patch('/inventory/items/$itemId/units/$unitId', body: values);
+          await reload();
+          if (mounted) showMessage(context, 'Unit updated.');
+        } on Failure catch (e) {
+          if (mounted) showMessage(context, e.message, error: true);
+        }
       }
     }
   }

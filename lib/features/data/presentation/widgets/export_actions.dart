@@ -6,6 +6,7 @@ import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../providers/data_providers.dart';
 import 'price_visibility_dialog.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 
 /// The ways out of a report: a spreadsheet, a plain file, a PDF, or paper.
 ///
@@ -54,7 +55,11 @@ class ReportExportActions extends ConsumerWidget {
         runDownload(context, link);
 
     Future<void> downloadPdf() async {
-      final visibility = await choosePriceVisibility(context, arabic: language == 'ar');
+      final visibility = await choosePriceVisibility(
+        context,
+        arabic: language == 'ar',
+        canSeeCost: ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false,
+      );
       if (visibility == null || !context.mounted) return;
       await download(links.pdf(
         report: report,
@@ -68,7 +73,11 @@ class ReportExportActions extends ConsumerWidget {
     }
 
     Future<void> showPage() async {
-      final visibility = await choosePriceVisibility(context, arabic: language == 'ar');
+      final visibility = await choosePriceVisibility(
+        context,
+        arabic: language == 'ar',
+        canSeeCost: ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false,
+      );
       if (visibility == null || !context.mounted) return;
       await runPrint(context, links.print(
         report: report,

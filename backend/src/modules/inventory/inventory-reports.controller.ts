@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  ForbiddenException,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { InventoryReportsService } from './inventory-reports.service';
@@ -36,6 +46,54 @@ export class InventoryReportsController {
     @Body() body: Record<string, unknown>,
   ) {
     return this.service.addUnit(user.companyId, user.userId, itemId, body);
+  }
+
+  @Patch('items/:itemId/units/:unitId')
+  @RequirePermissions('inventory.items.update')
+  updateUnit(
+    @CurrentUser() user: AuthUser,
+    @Param('itemId') itemId: string,
+    @Param('unitId') unitId: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    if (body?.barcode !== undefined && !this.mayManageBarcodes(user)) {
+      throw new ForbiddenException(
+        'ليس لديك صلاحية تعديل أكواد الباركود. / Missing permission: inventory.barcodes.manage',
+      );
+    }
+    return this.service.updateUnit(user.companyId, user.userId, itemId, unitId, body);
+  }
+
+  @Delete('items/:itemId/units/:unitId')
+  @RequirePermissions('inventory.items.update')
+  removeUnit(
+    @CurrentUser() user: AuthUser,
+    @Param('itemId') itemId: string,
+    @Param('unitId') unitId: string,
+  ) {
+    return this.service.removeUnit(user.companyId, user.userId, itemId, unitId);
+  }
+
+  /// Gives a unit its own code, generated when none is supplied.
+  @Post('items/:itemId/units/:unitId/barcode')
+  @RequirePermissions('inventory.barcodes.manage')
+  assignUnitBarcode(
+    @CurrentUser() user: AuthUser,
+    @Param('itemId') itemId: string,
+    @Param('unitId') unitId: string,
+    @Body() body: { barcode?: string | null },
+  ) {
+    return this.service.assignUnitBarcode(
+      user.companyId,
+      user.userId,
+      itemId,
+      unitId,
+      body?.barcode,
+    );
+  }
+
+  private mayManageBarcodes(user: AuthUser): boolean {
+    return user.isSuperAdmin || user.permissions.includes('inventory.barcodes.manage');
   }
 
   @Get('reports/valuation')

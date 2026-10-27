@@ -6,6 +6,7 @@ import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../providers/data_providers.dart';
 import 'price_visibility_dialog.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 
 /// The way out of a list: the same four choices a report has.
 ///
@@ -60,6 +61,7 @@ class ListExportActions extends ConsumerWidget {
       final visibility = await choosePriceVisibility(
         context,
         arabic: language == 'ar',
+        canSeeCost: ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false,
       );
       if (visibility == null || !context.mounted) return;
       await runDownload(
@@ -78,6 +80,7 @@ class ListExportActions extends ConsumerWidget {
       final visibility = await choosePriceVisibility(
         context,
         arabic: language == 'ar',
+        canSeeCost: ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false,
       );
       if (visibility == null || !context.mounted) return;
       await runPrint(

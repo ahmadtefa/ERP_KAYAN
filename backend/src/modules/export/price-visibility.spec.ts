@@ -1,4 +1,5 @@
-import { applyPriceVisibility } from './price-visibility';
+import { applyPriceVisibility, resolvePriceVisibility } from './price-visibility';
+import { toPrintHtml } from './writers';
 import { ReportTable } from './report-table';
 
 const table: ReportTable = {
@@ -58,5 +59,109 @@ describe('applyPriceVisibility', () => {
     expect(result.columns.map((column) => column.key)).toEqual(['itemCode', 'quantity']);
     expect(result.rows[0]).toEqual({ itemCode: 'A1', quantity: '2' });
     expect(result.totals).toHaveLength(0);
+  });
+});
+
+describe('applyPriceVisibility on the finished output', () => {
+  // The screen is not the last word: the printed page and the PDF are built
+  // from this table, so the hidden figure must be absent from the HTML itself,
+  // not merely from a widget the user is looking at.
+  const invoice: ReportTable = {
+    slug: 'sales-invoice',
+    titleEn: 'Sales invoice',
+    titleAr: 'فاتورة بيع',
+    meta: [],
+    columns: [
+      { key: 'itemCode', labelEn: 'Item', labelAr: 'الصنف' },
+      { key: 'quantity', labelEn: 'Quantity', labelAr: 'الكمية', numeric: true },
+      { key: 'unitPrice', labelEn: 'Unit price', labelAr: 'سعر الوحدة', numeric: true },
+      { key: 'purchasePrice', labelEn: 'Cost', labelAr: 'التكلفة', numeric: true },
+      { key: 'lineTotal', labelEn: 'Line total', labelAr: 'إجمالي السطر', numeric: true },
+    ],
+    rows: [
+      { itemCode: 'A1', quantity: '2', unitPrice: '150.00', purchasePrice: '90.00', lineTotal: '300.00' },
+    ],
+    totals: [
+      { labelEn: 'Cost', labelAr: 'التكلفة', value: '180.00' },
+      { labelEn: 'Total', labelAr: 'الإجمالي', value: '300.00' },
+    ],
+    notes: [],
+  };
+
+  it('leaves no hidden cost in the rendered print page', () => {
+    const shown = toPrintHtml(invoice, 'en', 'KAYAN', { generatedAt: new Date('2026-10-27T00:00:00Z') });
+    expect(shown).toContain('90.00');
+    expect(shown).toContain('180.00');
+
+    const hiddenCost = applyPriceVisibility(invoice, { showCost: false });
+    const page = toPrintHtml(hiddenCost, 'en', 'KAYAN', { generatedAt: new Date('2026-10-27T00:00:00Z') });
+    expect(page).not.toContain('90.00');
+    expect(page).not.toContain('180.00');
+    // The selling side is a different figure and is still there.
+    expect(page).toContain('150.00');
+  });
+
+  it('leaves no hidden sale price in the rendered print page', () => {
+    const hiddenSale = applyPriceVisibility(invoice, { showSalePrice: false });
+    const page = toPrintHtml(hiddenSale, 'en', 'KAYAN', { generatedAt: new Date('2026-10-27T00:00:00Z') });
+    expect(page).not.toContain('150.00');
+    expect(page).not.toContain('300.00');
+    expect(page).toContain('90.00');
+  });
+
+  it('hides both independently: cost off, sale price on', () => {
+    const page = toPrintHtml(
+      applyPriceVisibility(invoice, { showSalePrice: true, showCost: false }),
+      'ar',
+      'كيان',
+      { generatedAt: new Date('2026-10-27T00:00:00Z') },
+    );
+    expect(page).not.toContain('90.00');
+    expect(page).toContain('150.00');
+    // Quantities never disappear: the copy must still add up to the same goods.
+    expect(page).toContain('2');
+  });
+});
+
+describe('resolvePriceVisibility', () => {
+  const allowed = { isSuperAdmin: false, permissions: ['inventory.items.read', 'inventory.cost.read'] };
+  const clerk = { isSuperAdmin: false, permissions: ['inventory.items.read'] };
+
+  it('honours the request of a caller who may read costs', () => {
+    expect(resolvePriceVisibility(allowed, { showSalePrice: 'true', showCost: 'false' })).toEqual({
+      showSalePrice: 'true',
+      showCost: 'false',
+    });
+  });
+
+  it('forces costs off for a caller without the cost permission, whatever the link says', () => {
+    expect(resolvePriceVisibility(clerk, { showSalePrice: 'true', showCost: 'true' })).toEqual({
+      showSalePrice: 'true',
+      showCost: false,
+    });
+  });
+
+  it('never lets a stranger turn costs back on, even when the query omits them', () => {
+    const options = resolvePriceVisibility(clerk, {});
+    const priced: ReportTable = {
+      slug: 'inventory-valuation',
+      titleEn: 'Valuation',
+      titleAr: 'تقييم المخزون',
+      meta: [],
+      columns: [
+        { key: 'itemCode', labelEn: 'Item', labelAr: 'الصنف' },
+        { key: 'averageCost', labelEn: 'Average cost', labelAr: 'متوسط التكلفة', numeric: true },
+      ],
+      rows: [{ itemCode: 'A1', averageCost: '90.00' }],
+      totals: [],
+      notes: [],
+    };
+    expect(JSON.stringify(applyPriceVisibility(priced, options))).not.toContain('90.00');
+  });
+
+  it('gives a super admin what they asked for', () => {
+    expect(
+      resolvePriceVisibility({ isSuperAdmin: true, permissions: [] }, { showCost: 'true' }),
+    ).toEqual({ showSalePrice: undefined, showCost: 'true' });
   });
 });
