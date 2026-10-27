@@ -498,7 +498,12 @@ footer{max-width:1100px;margin:0 auto 30px;padding:0 16px;color:var(--muted);fon
       $('keytext').value = payload.key;
       $('summary').textContent = payload.summary;
       $('result').classList.remove('hidden');
-      show($('issuemsg'), 'تم إصدار المفتاح. انسخه كاملًا وأرسله للعميل. — Key issued; send it whole.', 'ok');
+      $('result').style.display = 'block';
+      // Keep the signed key visible even if a browser/layout issue hides the result panel.
+      show($('issuemsg'),
+        'تم إصدار المفتاح. انسخه كاملًا وأرسله للعميل. — Key issued; send it whole.\\n\\n' + payload.key,
+        'ok');
+      $('result').scrollIntoView({ block: 'center' });
       refresh();
     }).catch(function (error) {
       hide($('result'));
