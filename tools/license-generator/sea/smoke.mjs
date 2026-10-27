@@ -46,6 +46,8 @@ const exe = resolve(arg('exe', join(HERE, '..', 'dist', process.platform === 'wi
   ? 'KAYAN-Key-Generator.exe'
   : 'kayan-key-generator')));
 
+const serverExe = process.platform === 'win32' ? join(dirname(exe), 'KAYAN-Key-Generator-Server.exe') : exe;
+
 let failures = 0;
 let passes = 0;
 
@@ -96,7 +98,7 @@ function assert(condition, message) {
 
 function run(args, options = {}) {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(exe, args, { windowsHide: true, ...options });
+    const child = spawn(serverExe, args, { windowsHide: true, ...options });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => {
@@ -122,7 +124,7 @@ function freePort() {
 }
 
 async function startWindow(home, port) {
-  const child = spawn(exe, ['gui', '--no-browser', '--port', String(port), '--home', home], {
+  const child = spawn(serverExe, ['gui', '--no-browser', '--port', String(port), '--home', home], {
     windowsHide: true,
   });
   let output = '';
@@ -154,6 +156,10 @@ async function main() {
     console.error(`The executable does not exist: ${exe}`);
     process.exit(2);
   }
+  if (!existsSync(serverExe)) {
+    console.error(`The bundled local service does not exist: ${serverExe}`);
+    process.exit(2);
+  }
 
   const home = mkdtempSync(join(tmpdir(), 'kayan-keygen-smoke-'));
   const cleanup = [home];
@@ -161,6 +167,26 @@ async function main() {
   let licenceId = null;
 
   try {
+    await check('the packaged Windows EXE opens its own native window without launching the default browser', async () => {
+      if (process.platform !== 'win32') return 'not applicable on this host; Windows workflow runs this check';
+      const marker = join(home, 'native-window-smoke.txt');
+      const child = spawn(exe, ['--smoke-marker', marker], { windowsHide: true, stdio: 'ignore' });
+      try {
+        const deadline = Date.now() + 30_000;
+        while (Date.now() < deadline && !existsSync(marker)) {
+          if (child.exitCode !== null) throw new Error(`native window exited early with code ${child.exitCode}`);
+          await new Promise((done) => setTimeout(done, 200));
+        }
+        assert(existsSync(marker), 'the native window did not finish loading within 30 seconds');
+        const evidence = readFileSync(marker, 'utf8');
+        assert(evidence.includes('NATIVE_WINDOW_READY'), `unexpected window marker: ${evidence}`);
+        assert(child.exitCode === null, 'the native app closed before the smoke test inspected it');
+        return 'WinForms window and embedded WebView2 loaded the local operator UI; wrapper does not invoke an external browser';
+      } finally {
+        try { child.kill(); } catch { /* already exited */ }
+      }
+    });
+
     await check('the executable starts and reports its version', async () => {
       const { code, stdout } = await run(['version']);
       assert(code === 0, `exit code ${code}`);
