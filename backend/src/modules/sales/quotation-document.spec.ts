@@ -180,14 +180,13 @@ describe('quotation document template', () => {
       html.indexOf('<section class="summary">'),
       html.indexOf('</section>', html.indexOf('<section class="summary">')),
     );
-    // Two table rows, the header, one offer-level discount row and the grand total.
+    // Header, two table rows, offer-level discount and final total.
     expect(summary.match(/<tr[\s>]/g)).toHaveLength(5);
     expect(summary).toContain('Hardware');
     expect(summary).toContain('Software');
-    expect(summary).toContain('إجمالي الجدول');
+    expect(summary).toContain('قبل الخصم');
+    expect(summary).toContain('− 50.00 EGP');
     expect(summary).toContain('− 30.00 EGP');
-    // Table discounts are already reflected in each table's net.
-    expect(summary).not.toContain('− 50.00 EGP');
   });
 
   it('keeps the arithmetic of the stored totals and shows every discount once', () => {
