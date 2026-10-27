@@ -301,8 +301,13 @@ jobs:
           # and the raw job log is not readable by somebody not signed in.
           $ErrorActionPreference = 'Continue'
           $smokeLog = Join-Path $env:RUNNER_TEMP 'kayan-smoke.log'
-          $arguments = @('-SetupPath', '.\build\windows-installer\KAYAN-ERP-Setup.exe', '-RequireLicenceEnforcement')
-          if ('${{ steps.licence.outputs.home }}') { $arguments += @('-LicenceHome', '${{ steps.licence.outputs.home }}') }
+          # A hashtable, so the names really bind: splatting an ARRAY passes its
+          # elements positionally, which silently made the first one - the
+          # string '-SetupPath' - the value of -SetupPath, and the script then
+          # died in Resolve-Path before its own error handler existed. That was
+          # the whole reason the smoke test never ran.
+          $arguments = @{ SetupPath = '.\build\windows-installer\KAYAN-ERP-Setup.exe'; RequireLicenceEnforcement = $true }
+          if ('${{ steps.licence.outputs.home }}') { $arguments['LicenceHome'] = '${{ steps.licence.outputs.home }}' }
           & .\scripts\smoke-test-installed-windows.ps1 @arguments *> $smokeLog
           $smokeExit = $LASTEXITCODE
           if (Test-Path -LiteralPath $smokeLog) { Get-Content -LiteralPath $smokeLog | Write-Output }

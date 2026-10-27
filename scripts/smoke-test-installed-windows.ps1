@@ -13,7 +13,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$setup = (Resolve-Path $SetupPath).Path
+# $setup is resolved below, after Fail() exists: a bad path here used to end the
+# script with nothing but an exit code, before any handler could report it.
+$setup = $null
 $installLog = Join-Path $env:TEMP "kayan-setup-smoke.log"
 $serviceName = "KayanERPPostgreSQL"
 $installRoot = Join-Path $env:ProgramFiles "KAYAN ERP"
@@ -91,6 +93,14 @@ function Fail([string]$Reason) {
 trap {
   Fail ("Unhandled error in the smoke test: " + $_.Exception.Message + [Environment]::NewLine + ($_ | Out-String))
 }
+
+# The Setup to test. Checked here, where a failure is a reported annotation
+# rather than a silent exit before the handler was defined.
+if (-not (Test-Path -LiteralPath $SetupPath)) {
+  Fail ("The Setup this test should install was not found: " + $SetupPath + " (working directory " + (Get-Location).Path + ")")
+}
+$setup = (Resolve-Path -LiteralPath $SetupPath).Path
+Write-Host ("PASS: found the Setup to install: " + $setup)
 
 function Invoke-RuntimeScript([string]$Mode) {
   $out = Join-Path $env:TEMP ("kayan-runtime-" + $Mode + "-" + [Guid]::NewGuid().ToString('N') + ".log")
