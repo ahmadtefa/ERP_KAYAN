@@ -180,10 +180,16 @@ async function main() {
         assert(existsSync(marker), 'the native window did not finish loading within 30 seconds');
         const evidence = readFileSync(marker, 'utf8');
         assert(evidence.includes('NATIVE_WINDOW_READY'), `unexpected window marker: ${evidence}`);
-        assert(child.exitCode === null, 'the native app closed before the smoke test inspected it');
-        return 'WinForms window and embedded WebView2 loaded the local operator UI; wrapper does not invoke an external browser';
+        const exitDeadline = Date.now() + 5_000;
+        while (Date.now() < exitDeadline && child.exitCode === null) {
+          await new Promise((done) => setTimeout(done, 100));
+        }
+        assert(child.exitCode === 0, `the native window did not close cleanly after smoke (${child.exitCode})`);
+        return 'WinForms window and embedded WebView2 loaded the local operator UI; smoke window closed cleanly and wrapper does not invoke an external browser';
       } finally {
-        try { child.kill(); } catch { /* already exited */ }
+        if (child.exitCode === null) {
+          try { child.kill(); } catch { /* already exited */ }
+        }
       }
     });
 
