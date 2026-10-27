@@ -746,7 +746,7 @@ class _Sheet extends StatelessWidget {
           fontWeight: FontWeight.w600,
           fontFeatures: const [FontFeature.tabularFigures()],
         ),
-        design?.totalsValue,
+        (discount || tax) ? design?.totalsValue : null,
       );
       final finalStyle = _styled(
         TextStyle(
