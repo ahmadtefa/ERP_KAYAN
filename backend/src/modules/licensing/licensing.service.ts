@@ -247,11 +247,14 @@ export class LicensingService implements OnModuleInit {
     try {
       this.store = this.trustStore ?? new LicenseStore(this.directory);
     } catch (error) {
-      if (error instanceof LicenseStateError && error.code === 'TAMPERED') {
-        // A state file that fails its integrity check is a signal, not a
-        // reason to brick the installation: move it aside, keep the database
-        // counters, and record the fact. It is reported as a clock warning so
-        // the screen says something is wrong.
+      if (
+        error instanceof LicenseStateError &&
+        (error.code === 'TAMPERED' || error.code === 'UNREADABLE')
+      ) {
+        // A state file that fails its integrity check or cannot be parsed is a
+        // signal, not a reason to brick the installation: move it aside, keep
+        // the database counters, and record the fact. It is reported as a
+        // clock warning so the screen says something is wrong.
         this.storeQuarantined = true;
         const quarantine = `${join(
           this.directory,
