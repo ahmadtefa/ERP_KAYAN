@@ -48,6 +48,22 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+      # The service container is PostgreSQL 16, and a dump carries the version
+      # of the pg_dump that wrote it: a newer client writes SET statements the
+      # 16 server rejects ("unrecognized configuration parameter
+      # transaction_timeout"), which turns a rehearsal into a false alarm.
+      # Install the matching client explicitly instead of trusting whichever
+      # version the runner image happens to preinstall.
+      - name: Install PostgreSQL 16 client tools to match the server
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-16
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/16/bin/pg_dump --version
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -63,25 +79,87 @@ jobs:
       - name: Type-check
         run: npx tsc --noEmit
       - name: Run unit tests
-        run: python ../scripts/ci-diagnose.py npm test -- --runInBand
+        # `| tee` reports tee's exit status, not the test run's, so without
+        # `-o pipefail` a failing suite would leave this step green and the
+        # whole job would pass. The log is kept because the summary step below
+        # reads it.
+        run: python ../scripts/ci-diagnose.py bash -o pipefail -c 'npm test -- --runInBand 2>&1 | tee /tmp/kayan-jest.log'
+      - name: Record unit-test totals
+        if: always()
+        run: |
+          summary=$(grep -hE "^(Test Suites|Tests):" /tmp/kayan-jest.log 2>/dev/null | tr '\n' ' | ')
+          echo "::notice title=Unit tests::${summary:-summary not captured}"
       - name: Build API
         run: npm run build
       - name: Apply migrations to ephemeral PostgreSQL
         run: npx prisma migrate deploy
+
+      # Licensing is the one subsystem whose real behaviour cannot be shown
+      # with a mocked database: the migration has to survive an installation
+      # that already has accounts, seats have to be refused at the limit, two
+      # simultaneous creations must produce exactly one account, and an old
+      # backup must not hand seats back. The script creates throwaway
+      # databases on the same server and drives the compiled service.
+      - name: Prove licensing on real PostgreSQL (populated upgrade, seats, concurrency, restore)
+        env:
+          KAYAN_TEST_ADMIN_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
+        run: python ../scripts/ci-diagnose.py node scripts/verify-licensing-postgres.mjs
+      - name: Prove the required-accounts chart upgrade (old, complete and renumbered companies; run twice)
+        run: python ../scripts/ci-diagnose.py node scripts/check-chart-upgrade.mjs
+
+      # An upgrade of an installation that already has data, for the part of it
+      # that is easiest to get wrong: cost centers arriving as a real accounting
+      # dimension. The check builds a database at the schema that came before
+      # them, fills it with legacy rows, and applies the rest.
+      - name: Prove the cost-center upgrade on a pre-upgrade database
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGUSER: ci
+          PGPASSWORD: ci
+        run: python ../scripts/ci-diagnose.py node scripts/verify-cost-center-upgrade.mjs
+
+      # The release guard decides whether a Windows build may overwrite a
+      # published download; a wrong answer there is not recoverable.
+      - name: Prove the release guard refuses a published release
+        run: node --test ../scripts/check-release-tag.test.mjs
+
+      # The PDF verifier is what the Windows smoke test trusts on the installed
+      # machine, where nobody can look at the sheet. Its readers and its
+      # joining rule are pinned on real files so a mistake there cannot pass as
+      # a designed, joined, correctly numbered offer.
+      - name: Prove the quotation PDF verifier reads a real sheet
+        run: node --test scripts/verify-quotation-pdf.test.mjs scripts/verify-quotation-pdf.file.test.mjs
+
+      - name: Pin the database-state classifier (empty/incomplete/ready/unknown)
+        run: python ../scripts/ci-diagnose.py node scripts/check-database-state.mjs
       - name: Seed an isolated test company and administrator
         run: npx ts-node prisma/seed.ts
       - name: Start API and smoke-test database plus login
         run: |
+          exec > >(tee /tmp/kayan-smoke.log) 2>&1
           npm run start:prod > /tmp/kayan-api.log 2>&1 &
           API_PID=$!
           trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          # Wait for a *working* database, not merely for an answer. The
+          # health route answers 200 with `"database":"down"` while the
+          # connection is still being established, so a loop that stops at the
+          # first 200 would read a starting server as a broken one. It is also
+          # what made a raw-query failure look like a database outage.
+          health_ok=false
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json; then
-              break
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json 2>/dev/null; then
+              if node -e 'const h=JSON.parse(require("fs").readFileSync("/tmp/kayan-health.json","utf8")); process.exit(h.status==="ok" && h.database==="up" ? 0 : 1)'; then
+                health_ok=true
+                break
+              fi
+              echo "health attempt ${attempt}: $(cat /tmp/kayan-health.json)"
             fi
             sleep 2
           done
-          if [ ! -s /tmp/kayan-health.json ]; then
+          if [ "$health_ok" != "true" ]; then
+            echo "::error::The API never reported a working database within 60 seconds."
+            cat /tmp/kayan-health.json 2>/dev/null || true
             cat /tmp/kayan-api.log
             exit 1
           fi
@@ -117,10 +195,70 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
-      - name: Install PostgreSQL client tools for the isolated demo restore
+
+          echo "Running the end-to-end API check: real full backup (create, PGDMP download, upload, rehearsed restore), import-template download and import, exports and print..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 KAYAN_E2E_ALLOW_RESET=1 python ../scripts/ci-diagnose.py node scripts/api-check.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after api-check failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+          echo "Running the full accounting lifecycle scenario (hand-computed 2024: assets, depreciation, trading, reconciliations, close)..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-accounting-reconciliation.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after lifecycle scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+          echo "Running customer collections and supplier payments end to end: invoices, allocations, reversals, refusals, permissions, balances and the journal behind each one..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-collections-payments.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after collections and payments scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+          echo "Verifying a fresh full backup restores into an ISOLATED database with identical data..."
+          export PGPASSWORD=ci
+          LOGIN_JSON=$(curl -fsS -X POST http://127.0.0.1:3000/api/v1/auth/login -H 'Content-Type: application/json' -d '{"username":"ci-admin","password":"CI-only-Admin-Password-12345"}')
+          TOKEN=$(node -e 'console.log(JSON.parse(process.argv[1]).accessToken)' "$LOGIN_JSON")
+          curl -fsS -X POST http://127.0.0.1:3000/api/v1/backup/full -H "Authorization: Bearer $TOKEN" > /tmp/kayan-full.json
+          DUMP=$(ls -t backups/*.dump | head -n 1)
+          if [ -z "$DUMP" ] || [ ! -s "$DUMP" ]; then echo "No dump file was produced."; ls -la backups || true; exit 1; fi
+          echo "Restoring $DUMP into erp_kayan_restore_check..."
+          psql -h 127.0.0.1 -U ci -d postgres -v ON_ERROR_STOP=1 -q -c 'DROP DATABASE IF EXISTS erp_kayan_restore_check' -c 'CREATE DATABASE erp_kayan_restore_check'
+          if ! pg_restore -h 127.0.0.1 -U ci -d erp_kayan_restore_check --no-owner "$DUMP" > /tmp/pg_restore.log 2>&1; then
+            cat /tmp/pg_restore.log
+            exit 1
+          fi
+          FAIL=0
+          CHECKED=0
+          for T in $(psql -h 127.0.0.1 -U ci -d erp_kayan -At -c "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1"); do
+            case "$T" in *audit*|*session*|*token*|*log*) continue;; esac
+            A=$(psql -h 127.0.0.1 -U ci -d erp_kayan -At -c "SELECT count(*) FROM \"$T\"")
+            B=$(psql -h 127.0.0.1 -U ci -d erp_kayan_restore_check -At -c "SELECT count(*) FROM \"$T\"")
+            CHECKED=$((CHECKED+1))
+            if [ "$A" != "$B" ]; then echo "ROW COUNT MISMATCH $T: source=$A restored=$B"; FAIL=1; fi
+          done
+          if [ "$FAIL" != "0" ]; then exit 1; fi
+          echo "Isolated restore verified: $CHECKED non-volatile tables have identical row counts in source and restored databases."
+
+          # Last, because it deliberately recreates the shape old restored data
+          # can have: a receipt that reaches its partner only through the
+          # invoices it settled. That data is inconsistent by construction, so
+          # it must not be in place while the ageing/reconciliation checks run.
+          echo "Running the partner statement end to end: allocation-only vouchers, the card, exports, print and the ledger behind every figure..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-statement-export.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after statement scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
+      - name: Verify the PostgreSQL client tools used by the backup checks
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y postgresql-client
+          pg_dump --version
+          pg_restore --version
+          psql --version
       - name: Build and restore the complete demo JSON on clean disposable databases
         env:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_demo?schema=public
@@ -130,6 +268,19 @@ jobs:
           OUT_DIR: /tmp/kayan-demo-backup-build
         run: python ../scripts/ci-diagnose.py node scripts/build-demo-backup.mjs
         working-directory: backend
+      - name: Report backend smoke-test diagnostics
+        if: failure()
+        run: |
+          python ../scripts/ci-diagnose.py bash -c '
+            echo "== /tmp/kayan-health.json =="; head -c 2000 /tmp/kayan-health.json 2>/dev/null
+            echo; echo "== /tmp/kayan-login.json =="; head -c 2000 /tmp/kayan-login.json 2>/dev/null
+            echo; echo "== /tmp/kayan-api.log (tail) =="; tail -c 8000 /tmp/kayan-api.log 2>/dev/null
+            exit 1'
+      - name: Record scenario totals
+        if: always()
+        run: |
+          summary=$(grep -h "checks passed" /tmp/kayan-smoke.log 2>/dev/null | tr '\n' ' | ')
+          echo "::notice title=Scenario checks::${summary:-summary not captured}"
       - name: Audit production dependencies
         run: npm audit --omit=dev
 
@@ -197,6 +348,13 @@ jobs:
               if (!columns.includes('design') || !columns.includes('columns')) {
                 throw new Error('The runtime database is missing quotation design/layout columns after migration and seed.');
               }
+              const tableResult = await client.query(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'quotation_tables' AND column_name = 'columns'"
+              );
+              if (tableResult.rows.length !== 1) {
+                throw new Error('The runtime database is missing the per-table quotation columns column after migration.');
+              }
+              console.log('Per-table quotation columns verified: quotation_tables.columns');
             } finally {
               await client.end();
             }
@@ -233,7 +391,7 @@ jobs:
           curl -fsS http://127.0.0.1:3000/api/v1/health > /dev/null
           echo "Web client served at / and at a client-side route; API still routed."
 
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-regressions.mjs http://127.0.0.1:3000/api/v1; then
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/scenario-regressions.mjs http://127.0.0.1:3000/api/v1 | tee /tmp/kayan-regressions-scenario.log'; then
             echo "::group::API logs after regression scenario failure"
             cat /tmp/kayan-regressions-api.log
             echo "::endgroup::"
@@ -241,12 +399,21 @@ jobs:
           fi
 
           echo "Running the quotation and discount scenario..."
-          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-discounts-quotations.mjs http://127.0.0.1:3000/api/v1; then
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/scenario-discounts-quotations.mjs http://127.0.0.1:3000/api/v1 | tee /tmp/kayan-quotations-scenario.log'; then
             echo "::group::API logs after quotation scenario failure"
             cat /tmp/kayan-regressions-api.log
             echo "::endgroup::"
             exit 1
           fi
+      # Same reason as the backend job: the per-scenario totals are the
+      # evidence a run can be read without the log host.
+      - name: Record scenario totals
+        if: always()
+        run: |
+          # The two scenarios word their summary differently ("checks passed"
+          # and "passed"), so both shapes are looked for.
+          summary=$(grep -hE "checks passed|[0-9]+/[0-9]+ passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log 2>/dev/null | tr '\n' ' | ')
+          echo "::notice title=Regression scenario checks::${summary:-summary not captured}"
 
   flutter:
     name: Flutter Web (analyze, test, build)
@@ -271,8 +438,27 @@ jobs:
         run: flutter pub get
       - name: Analyze
         run: python scripts/ci-diagnose.py flutter analyze
+      # Renders real screens (shell + dashboard, customers, sales) to PNG so
+      # a design change can be inspected visually from the run's artifacts.
+      # These are screenshot generators: baselines are regenerated here, so
+      # the normal test run below compares against this run's own render.
+      - name: Render design screenshots
+        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
+      - name: Upload design screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: design-screenshots
+          path: test/screenshots/goldens/*.png
+          if-no-files-found: warn
+          retention-days: 30
       - name: Run tests
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
+      # A failing test's own message sits in the middle of a long log, and the
+      # log host is not always reachable. Re-running the one file leaves that
+      # message inside the annotated tail.
+      - name: Diagnose the voucher details widget test
+        if: failure()
+        run: python scripts/ci-diagnose.py flutter test test/widget/voucher_details_view_test.dart --reporter expanded
       - name: Build web
         run: flutter build web --release
       - name: Upload web build
@@ -313,6 +499,11 @@ jobs:
         run: flutter pub get
       - name: Analyze
         run: python scripts/ci-diagnose.py flutter analyze
+      # Same screenshot generation as the web job: baselines are produced in
+      # this job's own workspace so the test run below has something to
+      # compare against (the PNGs themselves are uploaded by the web job).
+      - name: Render design screenshots
+        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
       - name: Run tests
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
       - name: Build Linux desktop

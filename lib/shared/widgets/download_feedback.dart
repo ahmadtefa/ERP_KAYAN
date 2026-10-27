@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../core/error/failure.dart';
 import '../../core/platform/browser_actions.dart';
 import '../extensions/l10n_extension.dart';
+import 'app_error_dialog.dart';
 
 /// Fetches a file and says what happened.
 ///
@@ -28,7 +29,12 @@ Future<void> runDownload(
     _say(context, context.l10n.downloadStarted, isError: false);
   } catch (error) {
     if (!context.mounted) return;
-    _say(context, _message(error), isError: true);
+    _say(
+      context,
+      _message(error),
+      isError: true,
+      statusCode: error is DioException ? error.response?.statusCode : null,
+    );
   } finally {
     onDone?.call();
   }
@@ -36,9 +42,10 @@ Future<void> runDownload(
 
 /// Opens a print page in a new tab, and says so.
 ///
-/// A popup blocker can refuse the tab. There is no way to detect that from
-/// here - `window.open` simply answers null - so the message names what to
-/// do about it rather than pretending the page is on its way.
+/// It says so only after the page has actually been handed to a browser. On a
+/// desktop with no browser installed, or where policy forbids starting one,
+/// [openInNewTab] fails and the reason is shown here instead of a success
+/// note for something that never happened.
 Future<void> runPrint(
   BuildContext context,
   Future<String> link, {
@@ -48,12 +55,17 @@ Future<void> runPrint(
   onStart?.call();
   try {
     final url = await link;
+    await openInNewTab(url);
     if (!context.mounted) return;
-    openInNewTab(url);
     _say(context, context.l10n.printOpened, isError: false);
   } catch (error) {
     if (!context.mounted) return;
-    _say(context, _message(error), isError: true);
+    _say(
+      context,
+      _message(error),
+      isError: true,
+      statusCode: error is DioException ? error.response?.statusCode : null,
+    );
   } finally {
     onDone?.call();
   }
@@ -75,7 +87,19 @@ String _message(Object error) {
   return error.toString();
 }
 
-void _say(BuildContext context, String message, {required bool isError}) {
+void _say(
+  BuildContext context,
+  String message, {
+  required bool isError,
+  int? statusCode,
+}) {
+  // A failed download is an error: it is not a note to glance at on the way
+  // to something else, and its reason (no permission, server unreachable)
+  // has to be read. Successes stay as a light note at the bottom.
+  if (isError) {
+    showAppError(context, message, statusCode: statusCode);
+    return;
+  }
   final scheme = Theme.of(context).colorScheme;
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(

@@ -1,7 +1,9 @@
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../app/router/app_router.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/discount_math.dart';
 import '../../../../core/json/json_utils.dart';
@@ -11,7 +13,9 @@ import '../../../../shared/widgets/data_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/document_export_actions.dart';
+import '../../../fixed_assets/presentation/fixed_assets_screen.dart';
 import '../invoice_status.dart';
 import '../providers/invoice_providers.dart';
 
@@ -67,6 +71,55 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
     return ref
         .read(apiClientProvider)
         .getObject('${widget.kind.basePath}/$id');
+  }
+
+  /// Hands this posted purchase line to the asset register's create
+  /// form, prefilled with what the line still has left to capitalise.
+  /// Nothing is created here: the form saves a draft, and the existing
+  /// activation path (posted invoice only, funded from inventory, one
+  /// transaction) remains the only way the money moves.
+  Future<void> _createAssetFromLine(Json invoice, Json line) async {
+    final ar = Localizations.localeOf(context).languageCode == 'ar';
+    Json? offered;
+    try {
+      final body = await ref
+          .read(apiClientProvider)
+          .getObject('/fixed-assets/purchase-lines');
+      for (final candidate in listOf(body['items'])) {
+        if (text(candidate, 'lineId') == text(line, 'id')) offered = candidate;
+      }
+    } on Failure catch (e) {
+      if (mounted) showMessage(context, e.message, error: true);
+      return;
+    }
+    if (!mounted) return;
+    if (offered == null) {
+      showMessage(
+        context,
+        ar
+            ? 'هذا البند رُسمِل بالكامل أو لم يعد متاحًا للرسملة'
+            : 'This line is fully capitalised or no longer available',
+        error: true,
+      );
+      return;
+    }
+    final date = text(invoice, 'invoiceDate');
+    ref.read(assetPrefillProvider.notifier).deposit({
+      'purchaseInvoiceLineId': text(line, 'id'),
+      'purchaseQuantity': asString(offered['remainingQuantity']),
+      'cost': asString(offered['remainingCost']),
+      'purchaseDate': date,
+      'inServiceDate': date,
+      'nameEn':
+          text(line, 'itemNameEn', fallback: text(line, 'description')),
+      'nameAr':
+          text(line, 'itemNameAr', fallback: text(line, 'description')),
+      'description':
+          '${ar ? 'من فاتورة الشراء' : 'From purchase invoice'} '
+          '${text(invoice, 'invoiceNumber')}',
+    });
+    Navigator.of(context).pop();
+    context.go(AppRoutes.fixedAssets);
   }
 
   @override
@@ -260,6 +313,31 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
                         value: (r) => formatAmount(asString(r['costTotal'])),
                       ),
                   ],
+                  // A posted purchase line can become a fixed asset: the
+                  // register opens its create form prefilled from the
+                  // line. Drafts never offer this — a draft has posted
+                  // nothing into inventory to reclassify.
+                  actions:
+                      (!isSales &&
+                          text(invoice, 'status').toLowerCase() == 'posted')
+                      ? (row) => [
+                          IconButton(
+                            tooltip:
+                                Localizations.localeOf(
+                                      context,
+                                    ).languageCode ==
+                                    'ar'
+                                ? 'إنشاء أصل ثابت من هذا البند'
+                                : 'Create fixed asset from this line',
+                            icon: const Icon(
+                              Icons.precision_manufacturing_outlined,
+                              size: 20,
+                            ),
+                            onPressed: () =>
+                                _createAssetFromLine(invoice, row),
+                          ),
+                        ]
+                      : null,
                 ),
               ],
             ),

@@ -10,6 +10,7 @@ import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/page_header.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/company_providers.dart';
 
 /// Company profile, logo and units — the records every report and document
@@ -147,9 +148,10 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
     final l10n = context.l10n;
     if (error == null) {
       ref.invalidate(companyProfileProvider);
+      showMessage(context, l10n.profileSaved);
+    } else {
+      showMessage(context, error, error: true);
     }
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(error ?? l10n.profileSaved)));
   }
 
   @override
@@ -268,8 +270,7 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$error')));
+      showMessage(context, '$error', error: true);
       return;
     }
     if (picked == null || !mounted) return;
@@ -284,8 +285,10 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
       );
     } on CompanyLogoImageException catch (problem) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(problem.tooLarge ? l10n.logoTooLarge : l10n.logoInvalid)),
+      showMessage(
+        context,
+        problem.tooLarge ? l10n.logoTooLarge : l10n.logoInvalid,
+        error: true,
       );
       return;
     }
@@ -297,19 +300,19 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
         .uploadLogo(normalized);
     if (!mounted) return;
     setState(() => _busy = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          error == null
-              ? l10n.logoUpdated
-              : _localizedLogoError(
-                  error,
-                  tooLarge: l10n.logoTooLarge,
-                  invalid: l10n.logoInvalid,
-                ),
+    if (error == null) {
+      showMessage(context, l10n.logoUpdated);
+    } else {
+      showMessage(
+        context,
+        _localizedLogoError(
+          error,
+          tooLarge: l10n.logoTooLarge,
+          invalid: l10n.logoInvalid,
         ),
-      ),
-    );
+        error: true,
+      );
+    }
   }
 
   String _localizedLogoError(
@@ -338,9 +341,11 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
         await ref.read(companyProfileProvider.notifier).removeLogo();
     if (!mounted) return;
     setState(() => _busy = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error ?? l10n.logoRemoved)),
-    );
+    if (error == null) {
+      showMessage(context, l10n.logoRemoved);
+    } else {
+      showMessage(context, error, error: true);
+    }
   }
 
   @override
@@ -595,9 +600,11 @@ Future<void> _editBranch(
       ? await controller.create({'code': codeController.text.trim(), ...body})
       : await controller.updateBranch('${existing['id']}', body);
 
-  if (context.mounted) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(error ?? l10n.branchSaved)));
+  if (!context.mounted) return;
+  if (error == null) {
+    showMessage(context, l10n.branchSaved);
+  } else {
+    showMessage(context, error, error: true);
   }
 }
 
@@ -631,6 +638,6 @@ Future<void> _deleteBranch(
       .read(branchesProvider.notifier)
       .remove('${branch['id']}');
   if (context.mounted && error != null) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    showMessage(context, error, error: true);
   }
 }

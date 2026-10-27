@@ -17,6 +17,9 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['accounting.journal.read', 'View journal entries', 'عرض القيود اليومية', 'accounting'],
   ['accounting.journal.create', 'Create journal entries', 'إنشاء قيود يومية', 'accounting'],
   ['accounting.journal.post', 'Post and reverse entries', 'ترحيل وعكس القيود', 'accounting'],
+  ['accounting.fixedassets.read', 'View fixed assets', 'عرض الأصول الثابتة', 'accounting'],
+  ['accounting.fixedassets.manage', 'Manage fixed assets', 'إدارة الأصول الثابتة', 'accounting'],
+  ['accounting.fixedassets.depreciate', 'Run depreciation', 'تشغيل الإهلاك', 'accounting'],
   ['admin.users.manage', 'Manage users', 'إدارة المستخدمين', 'admin'],
   ['admin.roles.manage', 'Manage roles', 'إدارة الأدوار', 'admin'],
   ['admin.audit.read', 'View audit trail', 'عرض سجل التدقيق', 'admin'],
@@ -84,6 +87,10 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['accounting.costcenters.manage', 'Manage cost centers', 'إدارة مراكز التكلفة', 'accounting'],
   ['accounting.budgets.read', 'View budgets', 'عرض الموازنات', 'accounting'],
   ['accounting.budgets.manage', 'Manage budgets', 'إدارة الموازنات', 'accounting'],
+  // Seeing the opening figures is a smaller privilege than changing them:
+  // the read endpoints carry their own permission, and the migration that
+  // introduced it backfilled every role that already read via journal.read.
+  ['accounting.openingbalances.read', 'View opening balances', 'عرض الأرصدة الافتتاحية', 'accounting'],
   [
     'accounting.openingbalances.manage',
     'Open the books: opening balances',

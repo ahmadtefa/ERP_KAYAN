@@ -52,12 +52,6 @@ class LanAccessCard extends ConsumerWidget {
     final networkAsync = ref.watch(networkInfoProvider);
     final data = networkAsync.value ?? const <String, dynamic>{};
     final lanReady = data['isLanAccessible'] == true;
-    // 'durable' when the browser this page runs in can store the session;
-    // 'memory-only' on a plain http address that is not loopback.
-    final durableSession = data['sessionStorage'] == 'durable';
-    final sessionLabel = durableSession
-        ? l10n.sessionStorageDurable
-        : l10n.sessionStorageMemoryOnly;
     final port = data['port'] ?? 3000;
     final localUrl = '${data['localUrl'] ?? 'http://localhost:$port'}';
     final addresses = (data['addresses'] as List<dynamic>? ?? const [])
@@ -132,20 +126,7 @@ class LanAccessCard extends ConsumerWidget {
                       '${data['host'] ?? '—'}:${data['port'] ?? 3000}',
                     ),
                   ),
-                  // Whether the browser this page runs in can keep the
-                  // session. A LAN address over plain http cannot, and that -
-                  // not authentication - is why a reload signs people out.
-                  Chip(
-                    avatar: Icon(
-                      durableSession
-                          ? Icons.lock_outline
-                          : Icons.lock_open_outlined,
-                      size: 16,
-                    ),
-                    label: Text(
-                      '${l10n.sessionStorageLabel}: $sessionLabel',
-                    ),
-                  ),
+
                 ],
               ),
               const SizedBox(height: 12),
@@ -187,26 +168,6 @@ class LanAccessCard extends ConsumerWidget {
                 l10n.lanFirewallHint,
                 style: theme.textTheme.bodySmall,
               ),
-              if (!durableSession) ...[
-                const SizedBox(height: 6),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.info_outline,
-                      size: 16,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        l10n.sessionStorageMemoryHint,
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
               const Divider(height: 24),
               Row(
                 children: [

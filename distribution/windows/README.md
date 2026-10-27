@@ -30,6 +30,82 @@ The installer itself (not the build) requires elevation because it registers a P
 3. On first app start, the existing backend preparation path applies checked-in Prisma migrations and asks the first user to choose the initial administrator credentials. It does not seed a default user or reset an existing database.
 4. The Flutter client starts the bundled Nest API with the bundled Node runtime, waits for `/api/v1/health`, and renders the interface. The API is bound to loopback and serves the included web build from the same origin as well.
 
+### The company page: a new company never reuses the old database
+
+Setup asks one question: a new company, or the one already on this computer.
+
+- **A new company** creates a database of its own (`erp_kayan_<timestamp>`) with
+  the current schema and nothing in it. If this computer already holds a
+  company, Setup first takes a `pg_dump` backup of it, verifies that
+  `pg_restore --list` can read the file back, and leaves the old database
+  exactly as it is. It never empties, renames or reuses it, so the previous
+  company can always be recovered.
+- **An existing company** verifies that the database on disk really is this
+  installation's own (owner, role, tables), backs it up, and upgrades it in
+  place.
+
+Every write of `kayan.env` carries `KAYAN_SETTINGS_GENERATION`, which only
+grows. Two copies exist (the protected one in `%ProgramData%` and the per-user
+one), and the program reads the newer one, so a profile that could not be
+updated can never point the program at the previous company. The last thing
+Setup does is prove the program can reach the database its settings name
+(`KAYAN-RUNTIME-VERIFIED`); it reports success only after that.
+
+### Licence enforcement and evaluation builds
+
+A product Setup carries the operator's `public-key.pem` and switches licence
+enforcement on. `build-installer.ps1` **refuses** to build a customer installer
+without a key; `-EvaluationBuild` builds one explicitly for development, and
+that fact is written into `runtime-manifest.json` (`licenseEnforcement`). An
+installed copy whose protected licence folder holds a key or the
+`enforcement.required` marker always enforces, whatever the user's environment
+says. To produce a real release, place the operator's `public-key.pem` beside
+`build-installer.ps1` and run it without `-EvaluationBuild`, or pass
+`-LicencePublicKeyPath` with the path to it.
+
+The Windows CI job has no operator key. It therefore generates a **throwaway
+signing key for that run** and builds an enforcement build with it
+(`-LicencePublicKeyPath`), because an evaluation build cannot prove that
+activation is mandatory. Such a Setup enforces licences exactly like a product
+build, but it can never activate a customer key, so it is never published as a
+release - only uploaded as a run artifact. The smoke test is given the same
+key pair (`-LicenceHome`) and `-RequireLicenceEnforcement`, and then proves on
+the installed program: no licence refuses business use, a bogus key is refused,
+a key for another computer is refused, a valid key works, it survives a
+restart, deleting or corrupting the licence state file changes nothing,
+`LICENSE_ENFORCEMENT`/`LICENSE_MACHINE_ID`/`LICENSE_STATE_DIR`/
+`LICENSE_PUBLIC_KEY` cannot change an installed copy when set by whoever starts
+it, a business route called straight at the API is refused with
+`LICENSE_REQUIRED`, and `/health` and `/license` still answer while blocked.
+
+When the operator's public key *is* in the repository the job builds a real
+product Setup instead, and then needs the private half as the repository
+secret `KAYAN_LICENCE_PRIVATE_KEY`: it is written to the runner's temporary
+folder and used only to issue the temporary licences the smoke test applies.
+Without that secret the job fails before building, because a Setup that
+enforces licences the job cannot issue would install into a program whose
+company features could never be exercised - and a Setup nobody tested is not
+published.
+
+### Company databases and their names
+
+`install-runtime.ps1` accepts a company database only when the connection points
+at the bundled cluster (`erp_app` on `127.0.0.1:5432`) **and** the database is
+one this product created: `erp_kayan`, or the databases "a new company" and the
+safe reset create, `erp_kayan_<yyyyMMddHHmmss>`. Every step that names a
+database - the ownership check, the KAYAN-table check, the company count, the
+create-if-missing statement and the backup - takes the name from `DATABASE_URL`.
+Before this, those four places were written with the literal `erp_kayan`, so the
+first install after a reset whose settings named `erp_kayan_<stamp>` failed at
+"verifying the company database" with a PostgreSQL-looking error, and the
+program went on opening the previous company.
+
+Repair (`repair-runtime.ps1`) keeps the settings it found: it refuses to finish
+if the settings generation would go backwards or if the database name would
+change, and - when the protected licence folder says this installation must
+enforce - it fails unless the repaired server reports `enforcement: enforce`
+with its verification key readable.
+
 ### Two Windows rules the runtime setup has to respect
 
 **PostgreSQL refuses administrative permissions.** The server aborts with
@@ -70,5 +146,7 @@ The first install needs enough disk for the bundled installer plus a PostgreSQL 
 ## Verification boundary
 
 The build pipeline validates artifact hashes, staged entry points, required dependencies, absence of development `.env`, and emits a runtime manifest. The **Windows Installer** workflow goes further: on a real `windows-latest` machine it compiles the `.exe`, installs it silently, and then verifies the installed product with `scripts/smoke-test-installed-windows.ps1` - installer exit code, the `KayanERPPostgreSQL` service exists and runs as a non-administrator account, `pg_isready` on `127.0.0.1:5432`, the cluster really was initialized in `%ProgramData%\KAYAN-ERP\PostgreSQL\data`, the production database preparation, a disposable CI administrator, and a second upgrade/reinstall that must preserve a disposable company-data row. It then launches the installed `erp_kayan.exe`, verifies `/api/v1/health` reports `status=ok` and `database=up`, and logs in against the installed database. A build that only compiles is never treated as proof.
+
+The same run also proves the reported defects are gone: choosing "a new company" over a computer that already holds one produces a new empty database while the previous company and its backup stay intact, the installed program is proven to be connected to that new database, and - with a throwaway CI signing key installed into the package - an unlicensed installation refuses every business request, a key for another machine is refused, a valid key activates it, the licence survives a restart, and deleting it blocks again.
 
 The automated second install exercises the upgrade/reinstall path and proves a disposable database row survives. It does not replace a carefully supervised update of a real customer's installation, which should still be tested before a wide rollout. Uninstall retention (service removed, database kept) is not yet automated and should also be confirmed before broad distribution.

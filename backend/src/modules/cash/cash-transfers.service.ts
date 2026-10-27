@@ -242,6 +242,12 @@ export class CashTransfersService {
   }
 
   private async requireAccount(companyId: string, id: string, side: string) {
+    // An absent id would be read by Prisma as "the first account", turning a
+    // malformed transfer into a movement of money between two boxes the user
+    // never chose.
+    if (typeof id !== 'string' || id.trim().length === 0) {
+      throw new BadRequestException(`The ${side} cash account is required`);
+    }
     const cashAccount = await this.prisma.cashAccount.findFirst({
       where: { id, companyId, deletedAt: null },
       select: { id: true, accountId: true, currency: true, isActive: true, code: true },

@@ -41,7 +41,18 @@ const PERMISSION: Record<ImportKind, string> = {
   'opening-balances': 'accounting.openingbalances.manage',
 };
 
+/// Downloading a blank template writes nothing, so for opening balances it is
+/// a read: a viewer who may see the opening figures may also see which columns
+/// the importer expects. Uploading stays with `manage` above, because that is
+/// what actually posts figures. Every other kind keeps one permission for both
+/// halves of the workflow.
+const TEMPLATE_PERMISSION: Record<ImportKind, string> = {
+  ...PERMISSION,
+  'opening-balances': 'accounting.openingbalances.read',
+};
+
 export const IMPORT_PERMISSIONS = PERMISSION;
+export const IMPORT_TEMPLATE_PERMISSIONS = TEMPLATE_PERMISSION;
 
 @Controller('import')
 export class ImportController {
@@ -56,7 +67,8 @@ export class ImportController {
     @Res() response: Response,
   ): Promise<void> {
     const slug = this.kind(kind);
-    this.allowed(user, slug);
+    // Either the read grant or the manage grant may fetch the blank sheet.
+    this.allowed(user, [TEMPLATE_PERMISSION[slug], PERMISSION[slug]]);
 
     const body = await this.service.template(slug);
     response.setHeader(
@@ -87,7 +99,7 @@ export class ImportController {
     @Query() query: { dryRun?: string; mode?: string },
   ) {
     const slug = this.kind(kind);
-    this.allowed(user, slug);
+    this.allowed(user, [PERMISSION[slug]]);
     // Upsert can modify existing master records; create-only users must not
     // bypass the update permission by uploading a spreadsheet.
     if (!user.isSuperAdmin && query.mode === 'upsert') {
@@ -98,7 +110,11 @@ export class ImportController {
       };
       const needed = updatePermission[slug];
       if (needed && !user.permissions.includes(needed)) {
-        throw new ForbiddenException(`Missing permission: ${needed}`);
+        throw new ForbiddenException(
+          `ليس لديك صلاحية تعديل السجلات الموجودة بالاستيراد (${needed}). ` +
+            'اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات. ' +
+            `/ Missing permission: ${needed}. Ask an administrator to grant it to your role.`,
+        );
       }
     }
 
@@ -123,11 +139,13 @@ export class ImportController {
     return value as ImportKind;
   }
 
-  private allowed(user: AuthUser, kind: ImportKind): void {
+  private allowed(user: AuthUser, needed: readonly string[]): void {
     if (user.isSuperAdmin) return;
-    const needed = PERMISSION[kind];
-    if (!user.permissions.includes(needed)) {
-      throw new ForbiddenException(`Missing permission: ${needed}`);
-    }
+    if (needed.some((code) => user.permissions.includes(code))) return;
+    throw new ForbiddenException(
+      `ليس لديك صلاحية استخدام هذا الاستيراد (${needed.join(' or ')}). ` +
+        'اطلب من مدير النظام منح هذه الصلاحية لدورك من شاشة الأدوار والصلاحيات، ثم أعد المحاولة. ' +
+        `/ Missing permission: ${needed.join(' or ')}. Ask an administrator to grant it to your role, then try again.`,
+    );
   }
 }

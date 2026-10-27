@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
@@ -16,7 +17,9 @@ import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../../../data/presentation/widgets/document_export_actions.dart';
+import '../../voucher_allocation.dart';
 import '../providers/cash_providers.dart';
+import '../widgets/voucher_details_view.dart';
 
 /// Cash boxes, bank accounts, receipts, payments and transfers.
 ///
@@ -43,11 +46,14 @@ class _CashScreenState extends ConsumerState<CashScreen>
     super.dispose();
   }
 
+  /// Re-reads everything a saved receipt, payment or transfer changes.
+  ///
+  /// The cash lists are the obvious half. The partner's card and statement,
+  /// the party lists, the invoices the money settled and the dashboard are
+  /// the other half, and they are the half that used to stay stale until the
+  /// program was restarted.
   void _reloadAll() {
-    ref.invalidate(cashAccountsProvider);
-    ref.invalidate(cashBalancesProvider);
-    ref.invalidate(cashVouchersProvider);
-    ref.invalidate(cashTransfersProvider);
+    invalidateMoneyViews(ref);
   }
 
   /// Everything thrown is shown as the server worded it, never as a stack.
@@ -287,22 +293,11 @@ class _CashScreenState extends ConsumerState<CashScreen>
             partyId: partyId,
           )).future,
         );
-        var left = double.tryParse(text(values, 'amount', fallback: '0')) ?? 0;
-        for (final invoice in open) {
-          if (left <= 0) break;
-          final due = double.tryParse(amount(invoice, 'balance')) ?? 0;
-          if (due <= 0) continue;
-          final applied = due < left ? due : left;
-          allocations = [
-            ...allocations,
-            {
-              if (isReceipt) 'salesInvoiceId': text(invoice, 'id')
-              else 'purchaseInvoiceId': text(invoice, 'id'),
-              'amount': applied.toStringAsFixed(4),
-            },
-          ];
-          left -= applied;
-        }
+        allocations = planAllocations(
+          openInvoices: open,
+          amount: text(values, 'amount'),
+          isReceipt: isReceipt,
+        );
       } on Failure catch (error) {
         allocationLookupFailed = true;
         if (mounted) showMessage(context, error.message, error: true);
@@ -457,6 +452,14 @@ class _CashScreenState extends ConsumerState<CashScreen>
       ),
     );
   }
+
+  /// The chain behind one row: what the voucher settled and which entry it
+  /// wrote. Opened from the list, read from the server, never recomputed here.
+  void _showVoucher(Json voucher) => showVoucherDetail(
+        context,
+        id: text(voucher, 'id'),
+        title: text(voucher, 'voucherNumber'),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -657,16 +660,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 ColumnSpec(
                   l10n.party,
                   flex: 2,
-                  value: (r) {
-                    final customer = isArabic
-                        ? text(r, 'customerNameAr', fallback: text(r, 'customerNameEn'))
-                        : text(r, 'customerNameEn', fallback: text(r, 'customerNameAr'));
-                    return customer.isNotEmpty
-                        ? customer
-                        : (isArabic
-                              ? text(r, 'supplierNameAr', fallback: text(r, 'supplierNameEn'))
-                              : text(r, 'supplierNameEn', fallback: text(r, 'supplierNameAr')));
-                  },
+                  value: (r) => partnerName(r, arabic: isArabic),
                 ),
                 ColumnSpec(
                   l10n.amount,
@@ -681,6 +675,13 @@ class _CashScreenState extends ConsumerState<CashScreen>
                 ),
               ],
               actions: (row) => [
+                IconButton(
+                  tooltip: isArabic
+                      ? 'تفاصيل السند والفواتير والقيد'
+                      : 'Voucher, invoices and entry',
+                  icon: const Icon(Icons.receipt_long_outlined, size: 20),
+                  onPressed: () => _showVoucher(row),
+                ),
                 IconButton(
                   tooltip: isArabic ? 'طباعة وتنزيل المستند' : 'Print and download document',
                   icon: const Icon(Icons.print_outlined, size: 20),
@@ -858,6 +859,65 @@ class _AccountStatement extends ConsumerWidget {
                 ),
               ],
             ),
+    );
+  }
+}
+
+/// The chain behind one voucher: what it settled and which entry it wrote.
+///
+/// Opened from the cash list and from a partner's statement of account; the
+/// dialog is the same one in both places, read from the server either way.
+/// `onOpen` is how the caller answers "show me the screen behind this": the
+/// list simply goes there, while a statement closes itself first.
+void showVoucherDetail(
+  BuildContext context, {
+  required String id,
+  required String title,
+  void Function(String path)? onOpen,
+}) {
+  showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(title),
+      content: SizedBox(
+        width: 820,
+        height: 520,
+        child: _VoucherDetails(
+          id: id,
+          onOpen: (path) {
+            Navigator.of(dialogContext).pop();
+            if (onOpen != null) {
+              onOpen(path);
+            } else {
+              context.go(path);
+            }
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: Text(context.l10n.close),
+        ),
+      ],
+    ),
+  );
+}
+
+/// Loads one voucher and hands it to the view that draws it.
+class _VoucherDetails extends ConsumerWidget {
+  const _VoucherDetails({required this.id, required this.onOpen});
+
+  final String id;
+  final void Function(String path) onOpen;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final detail = ref.watch(cashVoucherProvider(id));
+    return detail.when(
+      loading: () => const LoadingView(),
+      error: (error, _) => ErrorView(message: error.toString()),
+      data: (voucher) => VoucherDetailsView(voucher: voucher, onOpen: onOpen),
     );
   }
 }

@@ -284,6 +284,12 @@ abstract class AppLocalizations {
   /// **'The server accepted the sign-in but did not send the account details. This usually means the program and the server are different versions, or the company setup was not finished. The technical detail is in the program log.'**
   String get signInIncomplete;
 
+  /// No description provided for @sessionNotPersisted.
+  ///
+  /// In en, this message translates to:
+  /// **'This session is kept in memory only: the browser will not store it on a plain http:// address. Reloading signs you out. Serve the program over HTTPS to keep the session.'**
+  String get sessionNotPersisted;
+
   /// No description provided for @sessionStorageLabel.
   ///
   /// In en, this message translates to:
@@ -349,12 +355,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Preview: invoice 1,250.00 EGP · 12.5% discount'**
   String get fontSizePreview;
-
-  /// No description provided for @sessionNotPersisted.
-  ///
-  /// In en, this message translates to:
-  /// **'This session is kept in memory only: the browser will not store it on a plain http:// address. Reloading signs you out. Serve the program over HTTPS to keep the session.'**
-  String get sessionNotPersisted;
 
   /// No description provided for @language.
   ///
@@ -2276,6 +2276,18 @@ abstract class AppLocalizations {
   /// **'Download the list'**
   String get downloadList;
 
+  /// No description provided for @downloadStatement.
+  ///
+  /// In en, this message translates to:
+  /// **'Download the statement'**
+  String get downloadStatement;
+
+  /// No description provided for @exportStatementHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Download this statement as it stands: Excel, CSV, PDF, or a page to print.'**
+  String get exportStatementHint;
+
   /// No description provided for @exportListHint.
   ///
   /// In en, this message translates to:
@@ -2576,6 +2588,12 @@ abstract class AppLocalizations {
   /// **'Create full backup'**
   String get createFullBackup;
 
+  /// No description provided for @backupSavedIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved in: {directory}'**
+  String backupSavedIn(Object directory);
+
   /// No description provided for @backupInProgress.
   ///
   /// In en, this message translates to:
@@ -2865,6 +2883,18 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   /// In en, this message translates to:
   /// **'Sales invoices'**
   String get resetCountSalesInvoices;
+
+  /// No description provided for @resetCountQuotations.
+  ///
+  /// In en, this message translates to:
+  /// **'Quotations'**
+  String get resetCountQuotations;
+
+  /// No description provided for @resetCountCashVouchers.
+  ///
+  /// In en, this message translates to:
+  /// **'Receipts and payments'**
+  String get resetCountCashVouchers;
 
   /// No description provided for @resetCountPurchaseInvoices.
   ///
@@ -4030,6 +4060,46 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   String get columnNumeric;
 
   /// In en, this message translates to:
+  /// **'This table\'s columns'**
+  String get tableColumns;
+
+  /// In en, this message translates to:
+  /// **'Built-in columns'**
+  String get builtinColumns;
+
+  /// In en, this message translates to:
+  /// **'Column type'**
+  String get columnType;
+
+  /// In en, this message translates to:
+  /// **'Text'**
+  String get columnTypeText;
+
+  /// In en, this message translates to:
+  /// **'Number'**
+  String get columnTypeNumber;
+
+  /// In en, this message translates to:
+  /// **'Quantity'**
+  String get columnTypeQuantity;
+
+  /// In en, this message translates to:
+  /// **'Price'**
+  String get columnTypePrice;
+
+  /// In en, this message translates to:
+  /// **'Percent'**
+  String get columnTypePercent;
+
+  /// In en, this message translates to:
+  /// **'Give the column a name in Arabic or English.'**
+  String get columnNameRequired;
+
+  /// In en, this message translates to:
+  /// **'Table preview'**
+  String get tablePreview;
+
+  /// In en, this message translates to:
   /// **'Custom column…'**
   String get addCustomColumn;
 
@@ -4082,4 +4152,545 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
   /// In en, this message translates to:
   /// **'Unassigned'**
   String get unassignedWarehouse;
+
+
+  /// No description provided for @errorDialogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Something went wrong'**
+  String get errorDialogTitle;
+
+  /// No description provided for @warningDialogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Notice'**
+  String get warningDialogTitle;
+
+  /// No description provided for @okAction.
+  ///
+  /// In en, this message translates to:
+  /// **'OK'**
+  String get okAction;
+
+  /// No description provided for @errorGenericBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The operation could not be completed because of an unexpected error. Nothing was saved. Try again, and if it keeps happening tell your system administrator.'**
+  String get errorGenericBody;
+
+  /// No description provided for @errorInvalidInputBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The submitted data is not valid, so nothing was changed. Check the fields and try again.'**
+  String get errorInvalidInputBody;
+
+  /// No description provided for @errorNotFoundBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The record could not be found. It may have been deleted or moved, or you may not be allowed to see it. Reload the page and try again.'**
+  String get errorNotFoundBody;
+
+  /// No description provided for @errorPermissionBody.
+  ///
+  /// In en, this message translates to:
+  /// **'You do not have permission to do this. Ask your system administrator if you need it.'**
+  String get errorPermissionBody;
+
+  /// No description provided for @errorConflictBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Someone else changed this record while you were working on it, so your change was not saved. Reload the page to see the latest version, then try again.'**
+  String get errorConflictBody;
+
+  /// No description provided for @errorServerBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The server failed while carrying out the operation and nothing was saved. Try again shortly, and if it keeps happening tell your system administrator.'**
+  String get errorServerBody;
+
+  /// No description provided for @backupSavedIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved in: {directory}'**
+  String backupSavedIn(Object directory);
+
+  /// No description provided for @accumulatedAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Accumulated depreciation account'**
+  String get accumulatedAccount;
+
+  /// No description provided for @accumulatedDepreciation.
+  ///
+  /// In en, this message translates to:
+  /// **'Accumulated depreciation'**
+  String get accumulatedDepreciation;
+
+  /// No description provided for @activateAsset.
+  ///
+  /// In en, this message translates to:
+  /// **'Activate (post acquisition)'**
+  String get activateAsset;
+
+  /// No description provided for @assetAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Asset account'**
+  String get assetAccount;
+
+  /// No description provided for @assetCategory.
+  ///
+  /// In en, this message translates to:
+  /// **'Category'**
+  String get assetCategory;
+
+  /// No description provided for @assetCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Asset code'**
+  String get assetCode;
+
+  /// No description provided for @assetCost.
+  ///
+  /// In en, this message translates to:
+  /// **'Cost'**
+  String get assetCost;
+
+  /// No description provided for @assetDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Asset details'**
+  String get assetDetails;
+
+  /// No description provided for @assetLocation.
+  ///
+  /// In en, this message translates to:
+  /// **'Location'**
+  String get assetLocation;
+
+  /// No description provided for @bookValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Book value'**
+  String get bookValue;
+
+  /// No description provided for @confirmActivateAsset.
+  ///
+  /// In en, this message translates to:
+  /// **'Activation posts the acquisition entry (Dr asset / Cr funding). Continue?'**
+  String get confirmActivateAsset;
+
+  /// No description provided for @confirmDisposeAsset.
+  ///
+  /// In en, this message translates to:
+  /// **'Disposal removes the asset from the books and posts its result. Continue?'**
+  String get confirmDisposeAsset;
+
+  /// No description provided for @depreciationExpenseAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Depreciation expense account'**
+  String get depreciationExpenseAccount;
+
+  /// No description provided for @depreciationPeriod.
+  ///
+  /// In en, this message translates to:
+  /// **'Month (YYYY-MM)'**
+  String get depreciationPeriod;
+
+  /// No description provided for @depreciationSchedule.
+  ///
+  /// In en, this message translates to:
+  /// **'Depreciation schedule'**
+  String get depreciationSchedule;
+
+  /// No description provided for @disposalDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Disposal date'**
+  String get disposalDate;
+
+  /// No description provided for @disposalProceeds.
+  ///
+  /// In en, this message translates to:
+  /// **'Proceeds'**
+  String get disposalProceeds;
+
+  /// No description provided for @disposeAsset.
+  ///
+  /// In en, this message translates to:
+  /// **'Dispose of asset'**
+  String get disposeAsset;
+
+  /// No description provided for @editAsset.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit asset'**
+  String get editAsset;
+
+  /// No description provided for @fixedAssets.
+  ///
+  /// In en, this message translates to:
+  /// **'Fixed assets'**
+  String get fixedAssets;
+
+  /// No description provided for @fundingAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Funding account'**
+  String get fundingAccount;
+
+  /// No description provided for @gainLossAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Gain/loss account'**
+  String get gainLossAccount;
+
+  /// No description provided for @inServiceDate.
+  ///
+  /// In en, this message translates to:
+  /// **'In-service date'**
+  String get inServiceDate;
+
+  /// No description provided for @newAsset.
+  ///
+  /// In en, this message translates to:
+  /// **'New asset'**
+  String get newAsset;
+
+  /// No description provided for @noAssets.
+  ///
+  /// In en, this message translates to:
+  /// **'No fixed assets yet.'**
+  String get noAssets;
+
+  /// No description provided for @proceedsAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Proceeds account'**
+  String get proceedsAccount;
+
+  /// No description provided for @purchaseDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase date'**
+  String get purchaseDate;
+
+  /// No description provided for @runDepreciation.
+  ///
+  /// In en, this message translates to:
+  /// **'Run depreciation'**
+  String get runDepreciation;
+
+  /// No description provided for @salvageValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Salvage value'**
+  String get salvageValue;
+
+  /// No description provided for @usefulLifeMonths.
+  ///
+  /// In en, this message translates to:
+  /// **'Useful life (months)'**
+  String get usefulLifeMonths;
+
+  /// No description provided for @licence.
+  ///
+  /// In en, this message translates to:
+  /// **'Licence'**
+  String get licence;
+
+  /// No description provided for @licenceSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Licence status, activation and renewal'**
+  String get licenceSubtitle;
+
+  /// No description provided for @licenceSettingsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Activation, renewal and user-account limit'**
+  String get licenceSettingsSubtitle;
+
+  /// No description provided for @licenceStateActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get licenceStateActive;
+
+  /// No description provided for @licenceStateExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'Expired'**
+  String get licenceStateExpired;
+
+  /// No description provided for @licenceStateSuspended.
+  ///
+  /// In en, this message translates to:
+  /// **'Suspended'**
+  String get licenceStateSuspended;
+
+  /// No description provided for @licenceStateUnlicensed.
+  ///
+  /// In en, this message translates to:
+  /// **'Not licensed'**
+  String get licenceStateUnlicensed;
+
+  /// No description provided for @licenceMachineId.
+  ///
+  /// In en, this message translates to:
+  /// **'Machine ID'**
+  String get licenceMachineId;
+
+  /// No description provided for @licenceLicenceId.
+  ///
+  /// In en, this message translates to:
+  /// **'Licence ID'**
+  String get licenceLicenceId;
+
+  /// No description provided for @licenceIssuedAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Issued'**
+  String get licenceIssuedAt;
+
+  /// No description provided for @licenceStartsAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Started'**
+  String get licenceStartsAt;
+
+  /// No description provided for @licenceExpiresAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Expires'**
+  String get licenceExpiresAt;
+
+  /// No description provided for @licencePerpetual.
+  ///
+  /// In en, this message translates to:
+  /// **'Perpetual — no expiry'**
+  String get licencePerpetual;
+
+  /// No description provided for @licenceDaysRemaining.
+  ///
+  /// In en, this message translates to:
+  /// **'Days remaining'**
+  String get licenceDaysRemaining;
+
+  /// No description provided for @licenceSeats.
+  ///
+  /// In en, this message translates to:
+  /// **'User accounts'**
+  String get licenceSeats;
+
+  /// No description provided for @licenceSeatsUsedLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Used'**
+  String get licenceSeatsUsedLabel;
+
+  /// No description provided for @licenceSeatsLimitLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Limit'**
+  String get licenceSeatsLimitLabel;
+
+  /// No description provided for @licenceSeatsAvailableLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Available'**
+  String get licenceSeatsAvailableLabel;
+
+  /// No description provided for @licenceSeatsExplainer.
+  ///
+  /// In en, this message translates to:
+  /// **'A seat is consumed when a login account is created and is never returned by deleting the account.'**
+  String get licenceSeatsExplainer;
+
+  /// No description provided for @licenceRequestCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Activation request code'**
+  String get licenceRequestCode;
+
+  /// No description provided for @licenceRequestCodeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Send this code to the supplier. It carries only this machine's ID and the program version.'**
+  String get licenceRequestCodeHint;
+
+  /// No description provided for @licenceCopy.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy'**
+  String get licenceCopy;
+
+  /// No description provided for @licenceCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Copied'**
+  String get licenceCopied;
+
+  /// No description provided for @licenceEnterKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Licence key'**
+  String get licenceEnterKey;
+
+  /// No description provided for @licenceKeyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste the key the supplier sent, starting with KYN1.'**
+  String get licenceKeyHint;
+
+  /// No description provided for @licenceApply.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply key'**
+  String get licenceApply;
+
+  /// No description provided for @licenceOperation.
+  ///
+  /// In en, this message translates to:
+  /// **'What the key does'**
+  String get licenceOperation;
+
+  /// No description provided for @licenceOperationActivation.
+  ///
+  /// In en, this message translates to:
+  /// **'New activation'**
+  String get licenceOperationActivation;
+
+  /// No description provided for @licenceOperationRenewal.
+  ///
+  /// In en, this message translates to:
+  /// **'Renewal'**
+  String get licenceOperationRenewal;
+
+  /// No description provided for @licenceOperationSeats.
+  ///
+  /// In en, this message translates to:
+  /// **'Add user accounts'**
+  String get licenceOperationSeats;
+
+  /// No description provided for @licenceOperationTransfer.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to this computer'**
+  String get licenceOperationTransfer;
+
+  /// No description provided for @licenceApplied.
+  ///
+  /// In en, this message translates to:
+  /// **'The licence was updated.'**
+  String get licenceApplied;
+
+  /// No description provided for @licenceClockTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'System date check'**
+  String get licenceClockTitle;
+
+  /// No description provided for @licenceClockWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'The system date is earlier than the last recorded run. Set the correct date and time in Windows, then confirm.'**
+  String get licenceClockWarning;
+
+  /// No description provided for @licenceConfirmClock.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm date and time'**
+  String get licenceConfirmClock;
+
+  /// No description provided for @licenceEvents.
+  ///
+  /// In en, this message translates to:
+  /// **'Licence history'**
+  String get licenceEvents;
+
+  /// No description provided for @licenceEventsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No licence events yet.'**
+  String get licenceEventsEmpty;
+
+  /// No description provided for @licencePublicKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Verification key'**
+  String get licencePublicKey;
+
+  /// No description provided for @licenceNotConfigured.
+  ///
+  /// In en, this message translates to:
+  /// **'This installation has no verification key, so it cannot check any licence key. Reinstall with the supplier's public key.'**
+  String get licenceNotConfigured;
+
+  /// No description provided for @licenceBlockedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Work is stopped by the licence'**
+  String get licenceBlockedTitle;
+
+  /// No description provided for @licenceBlockedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Your data is intact. Nothing was deleted. Open the licence screen and apply a renewal key to continue working.'**
+  String get licenceBlockedBody;
+
+  /// No description provided for @licenceSuspendedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The program stopped because the system date is earlier than the last recorded run. Correct the date and time, then confirm on this screen. No data was lost.'**
+  String get licenceSuspendedBody;
+
+  /// No description provided for @licenceOpenLicence.
+  ///
+  /// In en, this message translates to:
+  /// **'Open the licence screen'**
+  String get licenceOpenLicence;
+
+  /// No description provided for @licenceBackupStillAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Backups and restores stay available while the licence is expired.'**
+  String get licenceBackupStillAvailable;
+
+  /// No description provided for @licenceOpenBackup.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup and restore'**
+  String get licenceOpenBackup;
+
+  /// No description provided for @licenceEnforcementEnforce.
+  ///
+  /// In en, this message translates to:
+  /// **'Enforced'**
+  String get licenceEnforcementEnforce;
+
+  /// No description provided for @licenceEnforcementWarn.
+  ///
+  /// In en, this message translates to:
+  /// **'Warning only'**
+  String get licenceEnforcementWarn;
+
+  /// No description provided for @licenceEnforcementOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get licenceEnforcementOff;
+
+  /// No description provided for @licenceSuperAdminOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Only a super administrator can change the licence.'**
+  String get licenceSuperAdminOnly;
+
+  /// No description provided for @licenceExpiringSoon.
+  ///
+  /// In en, this message translates to:
+  /// **'This licence expires soon. Renew it before it ends so no workday is interrupted.'**
+  String get licenceExpiringSoon;
 }

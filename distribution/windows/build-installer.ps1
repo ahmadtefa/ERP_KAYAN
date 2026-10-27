@@ -1,7 +1,20 @@
 [CmdletBinding()]
 param(
   [string]$Output = 'build\windows-installer',
-  [switch]$SkipInstaller
+  [switch]$SkipInstaller,
+  # Builds the product without licences enforced. Only for development: such a
+  # build refuses every customer key, and it must never be handed to a
+  # customer. Without this switch a build that cannot find the operator's
+  # public key fails instead of shipping quietly unprotected - that is how a
+  # released Setup came to run without asking for an activation key.
+  [switch]$EvaluationBuild,
+  # Where the licence public key is when it is not beside this script. A
+  # release passes the operator's key (or drops it beside this script); the CI
+  # job passes a throwaway key it generated for that run, so the Setup it
+  # installs really does enforce licences and activation can be tested end to
+  # end. Only the public key is ever read: nothing in this build can issue a
+  # licence.
+  [string]$LicencePublicKeyPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -153,7 +166,9 @@ Run-Native 'npm.cmd' @('run','prisma:generate') $backend
 Run-Native 'npm.cmd' @('run','build') $backend
 
 Write-Host '[2/8] Stage production backend files (development .env is excluded)'
-foreach ($relative in @('dist','prisma','scripts','package.json','package-lock.json','nest-cli.json','tsconfig.json')) {
+# The licence of the Arabic typeface travels with the program: the font is
+# embedded in the bundle, and its licence has to ship beside it.
+foreach ($relative in @('dist','prisma','scripts','package.json','package-lock.json','nest-cli.json','tsconfig.json','OFL-NotoNaskhArabic.txt')) {
   Copy-Item -LiteralPath (Join-Path $backend $relative) -Destination (Join-Path $app 'backend') -Recurse -Force
 }
 Run-Native 'npm.cmd' @('ci','--omit=dev','--no-audit','--no-fund') (Join-Path $app 'backend')
@@ -193,13 +208,50 @@ Get-ChildItem $nodeFolder.FullName -Filter 'LICENSE*' -File -ErrorAction Silentl
 Write-Host '[5/8] Add database lifecycle and first-run setup scripts'
 Copy-Item (Join-Path $PSScriptRoot 'install-runtime.ps1') $app
 Copy-Item (Join-Path $PSScriptRoot 'repair-runtime.ps1') $app
+Copy-Item (Join-Path $PSScriptRoot 'reset-kayan.ps1') $app
 Copy-Item (Join-Path $PSScriptRoot 'repair-kayan.bat') $app
 Copy-Item (Join-Path $PSScriptRoot 'remove-runtime.ps1') $app
 Copy-Item (Join-Path $PSScriptRoot 'database-control.ps1') $app
 Copy-Item (Join-Path $PSScriptRoot 'UnelevatedProcess.cs') $app
 Copy-Item (Join-Path $PSScriptRoot 'README.txt') $app
 Copy-Item (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') $app
+# Offline licensing: a build prepared for customers carries the operator's
+# PUBLIC key only. The private key never leaves the supplier's key generator.
+#
+# A build with no key cannot verify any licence, so shipping one would mean
+# shipping a copy that runs without an activation key. That is a build error,
+# not a warning: the only way to produce such a build is to ask for it with
+# -EvaluationBuild, and then the manifest and the installer's own log say so.
+$licenceCandidates = @()
+if ($LicencePublicKeyPath) {
+  $explicitKey = if ([IO.Path]::IsPathRooted($LicencePublicKeyPath)) { [IO.Path]::GetFullPath($LicencePublicKeyPath) } else { [IO.Path]::GetFullPath((Join-Path $root $LicencePublicKeyPath)) }
+  if (-not (Test-Path -LiteralPath $explicitKey)) {
+    throw ("The licence public key this build was given does not exist: " + $explicitKey + ". Nothing was built.")
+  }
+  $licenceCandidates += $explicitKey
+  Write-Host "Licensing: using the public key passed to the build ($explicitKey)"
+}
+$licenceCandidates += @(
+  (Join-Path $PSScriptRoot 'public-key.pem'),
+  (Join-Path $PSScriptRoot 'licensing\public-key.pem')
+)
+$licencePublicKey = $licenceCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if ($licencePublicKey) {
+  Copy-Item -LiteralPath $licencePublicKey -Destination $app -Force
+  $licenceMode = 'enforce'
+  $licenceKeySha256 = (Get-FileHash -LiteralPath $licencePublicKey -Algorithm SHA256).Hash
+  Write-Host "Licensing: enforcement ON; public key staged from $licencePublicKey (SHA256 $licenceKeySha256)"
+} elseif ($EvaluationBuild) {
+  $licenceMode = 'warn'
+  $licenceKeySha256 = ''
+  Write-Host '::warning title=Evaluation build::No public-key.pem was found, so this is an EVALUATION build: licences are NOT enforced and no customer key can be activated. Place the operator''s public-key.pem beside build-installer.ps1 to produce a product build.'
+} else {
+  throw ('A product build needs the operator''s licence public key, and none was found. Expected ' + (Join-Path $PSScriptRoot 'public-key.pem') + ' (or licensing\public-key.pem). Copy it from KAYAN-Key-Generator: public-key.pem, never private-key.pem. For a development or CI build that must not enforce licences, pass -EvaluationBuild.')
+}
 Copy-Item (Join-Path $PSScriptRoot 'installer.iss') (Join-Path $stage 'installer.iss')
+# The icon Inno Setup embeds into Setup.exe (SetupIconFile in installer.iss).
+# generate_app_icons.py above has just refreshed it from the brand image.
+Copy-Item (Join-Path $root 'windows\runner\resources\app_icon.ico') (Join-Path $stage 'setup.ico')
 
 # Compile the real RepairTool.exe that ships in the Start menu and is exercised
 # by scripts\smoke-test-installed-windows.ps1.
@@ -209,19 +261,37 @@ $repairToolExe = Join-Path $app 'RepairTool.exe'
 if (-not (Test-Path -LiteralPath $repairToolExe)) { throw 'RepairTool.exe was not produced by the C# compiler.' }
 
 Write-Host '[6/8] Verify staged runtime essentials and absence of development .env'
-$required = @('erp_kayan.exe','backend\dist\src\main.js','backend\dist\prisma\seed.js','backend\scripts\prepare-database.mjs','backend\demo-data\kayan-company-backup-demo.json','backend\node\node.exe','backend\postgres\bin\pg_ctl.exe','backend\postgres\bin\pg_isready.exe','backend\postgres\bin\initdb.exe','backend\postgres\bin\psql.exe','build\web\index.html','install-runtime.ps1','repair-runtime.ps1','repair-kayan.bat','remove-runtime.ps1','database-control.ps1','UnelevatedProcess.cs','RepairTool.exe','prerequisites\vc_redist.x64.exe')
+$required = @('erp_kayan.exe','backend\dist\src\main.js','backend\dist\prisma\seed.js','backend\scripts\prepare-database.mjs','backend\scripts\database-state.mjs','backend\demo-data\kayan-company-backup-demo.json','backend\node\node.exe','backend\postgres\bin\pg_ctl.exe','backend\postgres\bin\pg_isready.exe','backend\postgres\bin\initdb.exe','backend\postgres\bin\psql.exe','backend\postgres\bin\pg_dump.exe','backend\postgres\bin\pg_restore.exe','build\web\index.html','install-runtime.ps1','repair-runtime.ps1','reset-kayan.ps1','repair-kayan.bat','remove-runtime.ps1','database-control.ps1','UnelevatedProcess.cs','RepairTool.exe','prerequisites\vc_redist.x64.exe')
 foreach ($item in $required) { if (-not (Test-Path (Join-Path $app $item))) { throw "Staged package is missing $item" } }
 $secretEnvironmentFiles = Get-ChildItem -LiteralPath $app -Force -File -Recurse | Where-Object { $_.Name -eq '.env' -or $_.Name -like '.env.*' }
 if ($secretEnvironmentFiles) { throw 'Environment files are forbidden in the installer package.' }
 
 Write-Host '[7/8] Write artifact manifest with exact pinned versions'
-$manifest = [ordered]@{ product='KAYAN ERP'; productVersion=$appVersion; architecture='x64'; nodeVersion=$nodeVersion; postgresqlVersion=($postgresVersion -replace '-1$',''); flutterVersion=((flutter --version --machine | ConvertFrom-Json).frameworkVersion); sourceCommit=(git -C $root rev-parse HEAD); windowsInstallerTested=$false }
+$manifest = [ordered]@{ product='KAYAN ERP'; productVersion=$appVersion; architecture='x64'; nodeVersion=$nodeVersion; postgresqlVersion=($postgresVersion -replace '-1$',''); flutterVersion=((flutter --version --machine | ConvertFrom-Json).frameworkVersion); sourceCommit=(git -C $root rev-parse HEAD); windowsInstallerTested=$false; licenseEnforcement=$licenceMode; licensePublicKeySha256=$licenceKeySha256 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $app 'runtime-manifest.json') -Encoding UTF8
 
 if (-not $SkipInstaller) {
   Write-Host '[8/8] Compile standalone Inno Setup installer'
-  & $iscc.Source "/DSourceDir=$app" "/DOutputDir=$outputPath" "/DAppVersion=$appVersion" (Join-Path $stage 'installer.iss')
-  if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed ($LASTEXITCODE)." }
+  if (-not (Test-Path -LiteralPath $outputPath)) { [void][IO.Directory]::CreateDirectory($outputPath) }
+  # ISCC has no /LOG switch (it rejects any option it does not know, which is
+  # how the previous attempt ended as a bare "failed (2)"). Its diagnosis goes
+  # to stdout/stderr, so the compiler's own output is captured to the log here
+  # and its last lines are repeated in the error. 2>&1 also keeps PowerShell
+  # from turning a compiler message into a terminating NativeCommandError
+  # before the exit code can be read.
+  $isccLog = Join-Path $outputPath 'iscc.log'
+  $isccArguments = @("/DSourceDir=$app", "/DOutputDir=$outputPath", "/DAppVersion=$appVersion", (Join-Path $stage 'installer.iss'))
+  $isccOutput = @(& $iscc.Source @isccArguments 2>&1 | ForEach-Object { "$_" })
+  $isccExit = $LASTEXITCODE
+  [IO.File]::WriteAllText($isccLog, ($isccOutput -join [Environment]::NewLine))
+  $isccOutput | ForEach-Object { Write-Host $_ }
+  if ($isccExit -ne 0) {
+    $details = (($isccOutput | Select-Object -Last 30) -join ' | ')
+    if (-not $details) { $details = 'ISCC printed nothing; see the build log.' }
+    if ($details.Length -gt 3000) { $details = $details.Substring($details.Length - 3000) }
+    Write-Host "::error title=Inno Setup::$(($details -replace '%','%25') -replace '\r?\n','%0A')"
+    throw "Inno Setup failed ($isccExit). $details"
+  }
   $versionedSetup = Join-Path $outputPath "KAYAN-ERP-Setup-$appVersion-x64.exe"
   $canonicalSetup = Join-Path $outputPath "KAYAN-ERP-Setup.exe"
   if (Test-Path $versionedSetup) {

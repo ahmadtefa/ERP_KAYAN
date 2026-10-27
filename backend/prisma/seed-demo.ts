@@ -162,7 +162,10 @@ const ACCOUNTS: Array<{
   { code: '3', nameEn: 'Equity', nameAr: 'حقوق الملكية', type: AccountType.EQUITY, postable: false },
   { code: '3101', nameEn: 'Share capital', nameAr: 'رأس المال', type: AccountType.EQUITY, parent: '3', postable: true },
   { code: '3102', nameEn: 'Retained earnings', nameAr: 'الأرباح المحتجزة', type: AccountType.EQUITY, parent: '3', postable: true },
-  { code: '3103', nameEn: 'Owner drawings', nameAr: 'مسحوبات المالك', type: AccountType.EQUITY, parent: '3', postable: true },
+  // 3103 is the opening-balance equity account the account map posts
+  // opening balances to; it was labelled 'Owner drawings' here, which
+  // is a different economic thing wearing the required code.
+  { code: '3103', nameEn: 'Opening balance equity', nameAr: 'أرصدة افتتاحية', type: AccountType.EQUITY, parent: '3', postable: true },
 
   { code: '4', nameEn: 'Revenue', nameAr: 'الإيرادات', type: AccountType.REVENUE, postable: false },
   { code: '4101', nameEn: 'Sales revenue — wholesale', nameAr: 'إيرادات مبيعات الجملة', type: AccountType.REVENUE, parent: '4', postable: true },
@@ -172,6 +175,7 @@ const ACCOUNTS: Array<{
 
   { code: '5', nameEn: 'Expenses', nameAr: 'المصروفات', type: AccountType.EXPENSE, postable: false },
   { code: '5101', nameEn: 'Cost of goods sold', nameAr: 'تكلفة البضاعة المباعة', type: AccountType.EXPENSE, parent: '5', postable: true },
+  { code: '5107', nameEn: 'Inventory differences', nameAr: 'فروق المخزون', type: AccountType.EXPENSE, parent: '5', postable: true },
   { code: '52', nameEn: 'Operating expenses', nameAr: 'المصروفات التشغيلية', type: AccountType.EXPENSE, parent: '5', postable: false },
   { code: '5201', nameEn: 'Salaries and wages', nameAr: 'الرواتب والأجور', type: AccountType.EXPENSE, parent: '52', postable: true },
   { code: '5202', nameEn: 'Rent', nameAr: 'الإيجار', type: AccountType.EXPENSE, parent: '52', postable: true },

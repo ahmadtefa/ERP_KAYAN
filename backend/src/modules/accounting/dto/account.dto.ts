@@ -36,6 +36,11 @@ export class CreateAccountDto {
   @IsOptional() @IsBoolean() isPostable?: boolean;
 
   @IsOptional() @IsString() @MaxLength(3) currency?: string;
+
+  /// IAS 7 class for the cash-flow statement. Left unset, the account's
+  /// cash movements report as unclassified rather than guessed.
+  @IsOptional() @IsIn(['OPERATING', 'INVESTING', 'FINANCING'])
+  cashFlowClass?: 'OPERATING' | 'INVESTING' | 'FINANCING';
 }
 
 export class UpdateAccountDto {
@@ -51,6 +56,8 @@ export class UpdateAccountDto {
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsString() @MaxLength(3) currency?: string;
   @IsOptional() @IsString() @MaxLength(500) description?: string | null;
+  @IsOptional() @IsIn(['OPERATING', 'INVESTING', 'FINANCING'])
+  cashFlowClass?: 'OPERATING' | 'INVESTING' | 'FINANCING' | null;
 }
 
 export class ListAccountsQueryDto {

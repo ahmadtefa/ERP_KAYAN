@@ -24,6 +24,16 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       exception instanceof Prisma.PrismaClientKnownRequestError &&
       exception.code === 'P2002';
 
+    // The fiscal-period trigger is a database backstop: when a path that
+    // writes stock movements before its journal reaches it first, its
+    // raise (SQLSTATE 23514) would otherwise surface as an opaque 500 for
+    // what is really a readable business refusal — the period is closed.
+    const exceptionText =
+      exception instanceof Error ? exception.message : String(exception ?? '');
+    const isClosedPeriodTrigger =
+      exceptionText.includes('Fiscal period is closed for company') ||
+      exceptionText.includes('kayan_require_open_fiscal_period');
+
     const rawStatus =
       typeof exception === 'object' && exception !== null && 'status' in exception
         ? Number((exception as { status?: unknown }).status)
@@ -33,7 +43,9 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     const requestTooLarge = rawStatus === HttpStatus.PAYLOAD_TOO_LARGE;
     const status = isUniqueConstraint
       ? HttpStatus.CONFLICT
-      : requestTooLarge
+      : isClosedPeriodTrigger
+        ? HttpStatus.BAD_REQUEST
+        : requestTooLarge
         ? HttpStatus.PAYLOAD_TOO_LARGE
         : exception instanceof HttpException
           ? exception.getStatus()
@@ -46,6 +58,10 @@ export class ProblemDetailsFilter implements ExceptionFilter {
 
     if (isUniqueConstraint) {
       detail = 'A record with the same unique value already exists';
+    } else if (isClosedPeriodTrigger) {
+      detail =
+        'The fiscal period covering this date is closed, so nothing can be posted into it. ' +
+        'Use a date in an open period instead.';
     } else if (requestTooLarge) {
       // Keep the bounded-upload explanation above; do not expose parser text.
     } else if (exception instanceof HttpException) {
@@ -61,6 +77,15 @@ export class ProblemDetailsFilter implements ExceptionFilter {
               ? (b.message as string[]).join('; ')
               : String(b.message ?? detail);
         if (b.errors) extra = { errors: b.errors };
+        // A machine-readable reason travels with the sentence: the client uses
+        // it to open the right screen (an expired licence is not a permission
+        // problem), and it is safe to show - it names a category, not a secret.
+        if (typeof b.code === 'string' && /^[A-Z0-9_]{3,64}$/.test(b.code)) {
+          extra = { ...extra, code: b.code };
+        }
+        if (b.license && typeof b.license === 'object') {
+          extra = { ...extra, license: b.license };
+        }
       }
     } else {
       this.logger.error(

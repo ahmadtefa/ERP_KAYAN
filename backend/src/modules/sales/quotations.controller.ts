@@ -21,7 +21,10 @@ import {
   QuotationNoteDto,
   UpdateQuotationDto,
 } from './dto/quotation.dto';
-import { quotationDocumentFileName } from './quotation-document';
+import {
+  QUOTATION_PAGE_NUMBER,
+  quotationDocumentFileName,
+} from './quotation-document';
 import { QuotationsService } from './quotations.service';
 
 /// Quotation endpoints.
@@ -176,7 +179,16 @@ export class QuotationsController {
       lang,
       false,
     );
-    const file = await this.pdf.render(document.html);
+    // The whole page is a design: printed the ordinary way - the browser's
+    // command line printer - the background artwork is dropped and the paper
+    // shrinks to the printer's own default. Asking the browser through its
+    // DevTools pipe is what keeps the sheet A4 and keeps the design on it.
+    const file = await this.pdf.render(document.html, {
+      fullBleed: true,
+      pageNumberColor: document.pageNumberInk,
+      pageNumberY: QUOTATION_PAGE_NUMBER.y,
+      pageNumberSize: QUOTATION_PAGE_NUMBER.size,
+    });
     response.setHeader('Content-Type', 'application/pdf');
     response.setHeader(
       'Content-Disposition',

@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
+import '../../../dashboard/presentation/providers/dashboard_providers.dart';
+import '../../../invoicing/presentation/providers/invoice_providers.dart';
+import '../../../parties/presentation/providers/party_providers.dart';
 
 /// Cash boxes and bank accounts, and the money that moves through them.
 ///
@@ -43,6 +46,13 @@ final cashTransfersProvider =
       CashTransfersController.new,
     );
 
+/// One voucher with the invoices it settled and the journal entries it wrote.
+/// The list is a table; this is the chain behind one row of it: receipt ->
+/// invoice -> entry, which is the question an auditor actually asks.
+final cashVoucherProvider = FutureProvider.family<Json, String>((ref, id) async {
+  return ref.read(apiClientProvider).getObject('/cash/vouchers/$id');
+});
+
 /// What each box and bank holds, read from the ledger rather than from a
 /// stored total that could drift away from it.
 final cashBalancesProvider = FutureProvider<List<Json>>((ref) async {
@@ -75,3 +85,35 @@ final cashStatementProvider = FutureProvider.family<List<Json>, String>((
       .getObject('/cash/accounts/$cashAccountId/statement');
   return listOf(data['movements']);
 });
+
+/// Everything a saved receipt or payment changes, in one place.
+///
+/// A voucher is not a cash-screen fact only. The moment it is saved it moves
+/// the partner's balance, settles the invoices it names, and writes the
+/// journal entry the dashboard and the statements read. Invalidating only the
+/// cash lists left an open statement, the partner list and the invoice list
+/// showing the figures they had read before the money moved, until the program
+/// was restarted.
+void invalidateMoneyViews(WidgetRef ref) {
+  // The cash screen itself.
+  ref.invalidate(cashAccountsProvider);
+  ref.invalidate(cashBalancesProvider);
+  ref.invalidate(cashVouchersProvider);
+  ref.invalidate(cashTransfersProvider);
+  ref.invalidate(cashVoucherProvider);
+  ref.invalidate(cashStatementProvider);
+  // The invoices the money settled, and the picker that lists what is open.
+  ref.invalidate(openInvoicesProvider);
+  ref.invalidate(salesInvoicesProvider);
+  ref.invalidate(purchaseInvoicesProvider);
+  // The partner: list, card and statement.
+  ref.invalidate(customersListProvider);
+  ref.invalidate(suppliersListProvider);
+  ref.invalidate(customersProvider);
+  ref.invalidate(suppliersProvider);
+  ref.invalidate(partySummaryProvider);
+  ref.invalidate(partyStatementProvider);
+  // The figures on the dashboard come from the same journal.
+  ref.invalidate(dashboardSummaryProvider);
+  ref.invalidate(dashboardMonthlyProvider);
+}

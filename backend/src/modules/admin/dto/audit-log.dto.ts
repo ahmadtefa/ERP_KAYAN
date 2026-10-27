@@ -13,6 +13,8 @@ import {
 export class ListAuditLogsDto {
   @IsOptional() @IsString() @MaxLength(60) action?: string;
   @IsOptional() @IsString() @MaxLength(60) entity?: string;
+  /// Every change made to one specific document or asset.
+  @IsOptional() @IsUUID('4') entityId?: string;
   @IsOptional() @IsUUID('4') userId?: string;
   @IsOptional() @IsDateString() from?: string;
   @IsOptional() @IsDateString() to?: string;

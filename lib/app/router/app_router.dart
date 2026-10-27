@@ -6,6 +6,7 @@ import '../../features/accounting/presentation/screens/budgets_screen.dart';
 import '../../features/accounting/presentation/screens/chart_of_accounts_screen.dart';
 import '../../features/accounting/presentation/screens/cost_centers_screen.dart';
 import '../../features/accounting/presentation/screens/fiscal_periods_screen.dart';
+import '../../features/fixed_assets/presentation/fixed_assets_screen.dart';
 import '../../features/admin/presentation/screens/admin_screen.dart';
 import '../../features/accounting/presentation/screens/journal_entries_screen.dart';
 import '../../features/accounting/presentation/screens/opening_balances_screen.dart';
@@ -18,6 +19,7 @@ import '../../features/data/presentation/screens/import_screen.dart';
 import '../../features/inventory/presentation/screens/items_screen.dart';
 import '../../features/inventory/presentation/screens/stock_screen.dart';
 import '../../features/invoicing/presentation/providers/invoice_providers.dart';
+import '../../features/licensing/presentation/screens/licence_screen.dart';
 import '../../features/invoicing/presentation/screens/invoice_list_screen.dart';
 import '../../features/invoicing/presentation/screens/return_editor_screen.dart';
 import '../../features/invoicing/presentation/screens/returns_screen.dart';
@@ -50,6 +52,7 @@ class AppRoutes {
   static const budgets = '/accounting/budgets';
   static const journalEntries = '/accounting/journal-entries';
   static const fiscalPeriods = '/accounting/fiscal-periods';
+  static const fixedAssets = '/accounting/fixed-assets';
   static const openingBalances = '/accounting/opening-balances';
   static const cash = '/cash';
   static const customers = '/parties/customers';
@@ -70,6 +73,7 @@ class AppRoutes {
   static const administration = '/administration';
   static const companySettings = '/settings/company';
   static const settings = '/settings';
+  static const licence = '/settings/licence';
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -153,6 +157,7 @@ const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.cash, child: CashScreen()),
   (path: AppRoutes.journalEntries, child: JournalEntriesScreen()),
   (path: AppRoutes.fiscalPeriods, child: FiscalPeriodsScreen()),
+  (path: AppRoutes.fixedAssets, child: FixedAssetsScreen()),
   (path: AppRoutes.openingBalances, child: OpeningBalancesScreen()),
   (
     path: AppRoutes.customers,
@@ -190,4 +195,5 @@ const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.administration, child: AdminScreen()),
   (path: AppRoutes.companySettings, child: CompanySettingsScreen()),
   (path: AppRoutes.settings, child: SettingsScreen()),
+  (path: AppRoutes.licence, child: LicenceScreen()),
 ];

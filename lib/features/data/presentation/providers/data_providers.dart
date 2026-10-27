@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/error/app_error_text.dart';
 import '../../../../core/platform/download_request.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -77,6 +78,10 @@ class ReportLinkBuilder {
     String? to,
     String? accountId,
     String? branchId,
+    /// A partner statement carries who it is about; every other report
+    /// ignores the two.
+    String? partyId,
+    String? kind,
   }) async {
     final query = <String, String>{
       'format': format,
@@ -85,6 +90,8 @@ class ReportLinkBuilder {
       'to': ?to,
       'accountId': ?accountId,
       'branchId': ?branchId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(
@@ -99,12 +106,20 @@ class ReportLinkBuilder {
     String? from,
     String? to,
     String? accountId,
+    String? partyId,
+    String? kind,
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       'from': ?from,
       'to': ?to,
       'accountId': ?accountId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(url: '$_base/exports/$report/pdf?${_encode(query)}');
@@ -120,13 +135,21 @@ class ReportLinkBuilder {
     String? from,
     String? to,
     String? accountId,
+    String? partyId,
+    String? kind,
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       'from': ?from,
       'to': ?to,
       'accountId': ?accountId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return '$_base/exports/$report/print?${_encode(query)}';
@@ -161,9 +184,13 @@ class ReportLinkBuilder {
     required String list,
     required String language,
     Map<String, String> filters = const {},
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       ...filters,
       'ticket': await _downloadTicket(),
     };
@@ -178,9 +205,13 @@ class ReportLinkBuilder {
     required String language,
     bool auto = true,
     Map<String, String> filters = const {},
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       ...filters,
       'ticket': await _downloadTicket(),
@@ -208,9 +239,13 @@ class ReportLinkBuilder {
     required String kind,
     required String id,
     required String language,
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(
@@ -223,9 +258,13 @@ class ReportLinkBuilder {
     required String id,
     required String language,
     bool auto = true,
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       'ticket': await _downloadTicket(),
     };
@@ -550,7 +589,14 @@ class FullBackupService {
   }
 
   Future<Map<String, dynamic>> create() async {
-    final response = await _dio.post<Map<String, dynamic>>(_path);
+    // A full pg_dump plus its read-back validation legitimately takes
+    // longer than the client's ordinary 30-second receive timeout; with
+    // the default, the request was aborted on the client while the server
+    // was still working, which looked like a backup that hangs forever.
+    final response = await _dio.post<Map<String, dynamic>>(
+      _path,
+      options: Options(receiveTimeout: const Duration(minutes: 15)),
+    );
     return Map<String, dynamic>.from(response.data ?? const {});
   }
 
@@ -576,7 +622,13 @@ class FullBackupService {
       '$_path/restore',
       data: form,
       queryParameters: {'confirm': confirm},
-      options: Options(contentType: 'multipart/form-data'),
+      // Uploading an archive and restoring it (rehearsal + safety copy +
+      // restore + checks) is the longest operation in the program.
+      options: Options(
+        contentType: 'multipart/form-data',
+        sendTimeout: const Duration(minutes: 30),
+        receiveTimeout: const Duration(minutes: 30),
+      ),
     );
     return Map<String, dynamic>.from(response.data ?? const {});
   }
@@ -593,12 +645,10 @@ final fullBackupServiceProvider = Provider<FullBackupService>(
 /// as it is; anything else falls back to the exception's own text rather than
 /// pretending nothing went wrong.
 String describeApiError(Object error) {
+  final status = error is DioException ? error.response?.statusCode : null;
   if (error is DioException) {
-    final data = error.response?.data;
-    if (data is Map) {
-      final detail = data['detail'] ?? data['title'];
-      if (detail is String && detail.trim().isNotEmpty) return detail;
-    }
+    final detail = _detailOf(error.response?.data);
+    if (detail != null) return _safeMessage(detail, status);
     switch (error.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.receiveTimeout:
@@ -610,7 +660,42 @@ String describeApiError(Object error) {
         break;
     }
   }
-  return error.toString();
+  return _safeMessage(error.toString(), status);
+}
+
+String? _detailOf(Object? data) {
+  if (data is Map) {
+    for (final key in const ['detail', 'message', 'error']) {
+      final value = data[key];
+      if (value is String && value.trim().isNotEmpty) return value;
+    }
+  }
+  return null;
+}
+
+/// The same resolver the central error dialog uses, so this administrative
+/// screen cannot print a DTO field name or a stack frame either. It answers
+/// in English because these panels are read by administrators next to the
+/// server log.
+String _safeMessage(String raw, int? status) {
+  final resolved = AppErrorMessageResolver(
+    isArabic: false,
+  ).resolve(raw, statusCode: status);
+  final business = resolved.businessMessage;
+  if (business != null && business.trim().isNotEmpty) return business;
+  return switch (resolved.reason) {
+    AppErrorReason.network =>
+      'The server could not be reached. Check that it is running.',
+    AppErrorReason.permission =>
+      'You do not have permission to do this.',
+    AppErrorReason.notFound => 'The record could not be found.',
+    AppErrorReason.conflict =>
+      'This record changed while you were working on it. Reload and try again.',
+    AppErrorReason.invalidInput => 'The submitted data is not valid.',
+    AppErrorReason.sessionExpired => 'The session has expired. Sign in again.',
+    AppErrorReason.server => 'The server failed while handling the request.',
+    AppErrorReason.unknown => 'The operation could not be completed.',
+  };
 }
 
 /// What this installation can produce.

@@ -75,6 +75,21 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
     );
   }
 
+  /// Activates or deactivates an account, then reloads so the tree shows
+  /// the server's answer rather than an optimistic guess.
+  Future<String?> setActive(String id, {required bool isActive}) async {
+    final result = await ref
+        .read(chartOfAccountsRepositoryProvider)
+        .setAccountActive(id, isActive: isActive);
+    return result.when(
+      success: (_) {
+        ref.invalidateSelf();
+        return null;
+      },
+      failure: (failure) => failure.message,
+    );
+  }
+
   Future<String?> remove(String id) async {
     final result = await ref
         .read(chartOfAccountsRepositoryProvider)

@@ -61,8 +61,16 @@ class ResizableTable extends StatefulWidget {
 }
 
 class _ResizableTableState extends State<ResizableTable> {
-  late List<double> _widths =
-      widget.columns.map((column) => column.width).toList(growable: false);
+  /// A money column narrower than this cannot show a full amount
+  /// (1,234,567.89 in tabular figures plus cell padding), so numeric
+  /// columns never shrink below it whatever the declared minimum —
+  /// including widths restored from storage.
+  static double _minFor(ResizableColumn column) =>
+      column.numeric ? math.max(column.minWidth, 112) : column.minWidth;
+
+  late List<double> _widths = widget.columns
+      .map((column) => math.max(column.width, _minFor(column)))
+      .toList(growable: false);
   TableDensity _density = TableDensity.normal;
 
   String get _key => 'resizable-table.${widget.storageKey ?? 'default'}';
@@ -92,7 +100,10 @@ class _ResizableTableState extends State<ResizableTable> {
         _density = density;
         if (widths.length == widget.columns.length &&
             widths.every((value) => value != null && value > 0)) {
-          _widths = widths.cast<double>();
+          _widths = [
+            for (var i = 0; i < widths.length; i += 1)
+              math.max(widths[i]!, _minFor(widget.columns[i])),
+          ];
         }
       });
     } catch (_) {
@@ -290,7 +301,7 @@ class _ResizableTableState extends State<ResizableTable> {
               onHorizontalDragUpdate: (details) {
                 setState(() {
                   _widths[index] = math.max(
-                    column.minWidth,
+                    _minFor(column),
                     _widths[index] + details.delta.dx,
                   );
                 });
@@ -340,7 +351,13 @@ class _ResizableTableState extends State<ResizableTable> {
                       waitDuration: const Duration(milliseconds: 500),
                       child: Text(
                         widget.columns[index].value(row) ?? '—',
-                        maxLines: _density == TableDensity.compact ? 1 : 2,
+                        // Numbers never wrap mid-figure; with the
+                        // numeric minimum width they fit whole, and the
+                        // tooltip remains for anything truly huge.
+                        maxLines: widget.columns[index].numeric
+                            ? 1
+                            : (_density == TableDensity.compact ? 1 : 2),
+                        softWrap: !widget.columns[index].numeric,
                         overflow: TextOverflow.ellipsis,
                         textAlign: widget.columns[index].numeric
                             ? TextAlign.end
