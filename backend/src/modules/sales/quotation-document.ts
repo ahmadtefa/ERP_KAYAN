@@ -734,6 +734,10 @@ ${NASKH_FONT_FACE}
   .summary thead th { background: ${TABLE_HEADER_BG}; color: ${TABLE_HEADER_TEXT}; text-align: start; padding: 1.6mm 2mm; border-bottom: 0.4mm solid ${SECONDARY}; }
   .summary tbody td { padding: 1.4mm 2mm; border-bottom: 0.25mm solid ${LINE}; }
   .summary thead th.num { text-align: ${numAlign}; }
+  .summary tbody tr.discount td { color: ${MUTED}; }
+  .summary tbody tr.tax td { background: ${WASH}; color: ${ACCENT}; font-weight: 800; }
+  .summary tbody tr.grand td { background: ${PRIMARY}; color: #fff; font-weight: 800; font-size: 11pt; border-bottom: none; }
+  .summary tbody tr.grand td:first-child { color: #fff; }
   .totals { display: flex; justify-content: ${rtl ? 'flex-start' : 'flex-end'}; margin-top: 2mm; }
   .totals table { width: 82mm; border: 0.3mm solid ${LINE}; }
   .totals td { padding: 1.3mm 2.5mm; border-bottom: 0.25mm solid ${LINE}; }
@@ -855,27 +859,24 @@ ${
   ${tables}
 
   <section class="summary">
-    <h3>${L('Section summary', 'ملخص الأقسام')}</h3>
+    <h3>${L('Tables summary', 'ملخص الجداول')}</h3>
     <table>
       <thead>
         <tr>
-          <th>${L('Section', 'القسم')}</th>
-          <th class="num">${L('Before discount', 'قبل الخصم')}</th>
-          <th class="num">${L('Discount', 'الخصم')}</th>
-          <th class="num">${L('Net', 'الصافي')}</th>
+          <th>${L('Table', 'الجدول')}</th>
+          <th class="num">${L('Table total', 'إجمالي الجدول')}</th>
         </tr>
       </thead>
-      <tbody>${summaryRows}</tbody>
-    </table>
-    <div class="totals">
-      <table>
-        ${totalsRows}
+      <tbody>
+        ${summaryRows}
+        ${summaryDiscountRow}
+        ${summaryTaxRow}
         <tr class="grand">
-          <td>${L('Final total', 'الإجمالي النهائي')}</td>
+          <td>${L('Grand total', 'المجموع الكلي')}</td>
           <td class="num">${money(content.totals.totalAmount)}</td>
         </tr>
-      </table>
-    </div>
+      </tbody>
+    </table>
   </section>
 
   ${terms}
