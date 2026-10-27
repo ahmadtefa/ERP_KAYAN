@@ -737,7 +737,7 @@ class _Sheet extends StatelessWidget {
           fontSize: 8.8 * scale,
           fontWeight: discount ? FontWeight.w500 : FontWeight.w600,
         ),
-        design?.totalsLabel,
+        (discount || tax) ? design?.totalsLabel : null,
       );
       final normalAmountStyle = _styled(
         TextStyle(
