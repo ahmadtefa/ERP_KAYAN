@@ -192,26 +192,31 @@ jobs:
           }
           if ($bad -eq 0) { Write-Output ("::notice::all " + $files.Count + " PowerShell scripts parse") }
 
-      # L runs the smoke test's own preamble against a placeholder Setup.exe, to
-      # see in a minute what the real job takes forty to show: whether the
-      # script starts at all, and whether its Fail() annotation appears.
-      - name: L dry-run the smoke test preamble
+      # L isolates why the smoke test writes nothing at all: named arguments vs
+      # an array splat, redirection vs a child process.
+      - name: L how the smoke test behaves when started
         continue-on-error: true
         shell: powershell
         run: |
           $ErrorActionPreference = 'Continue'
           New-Item -ItemType Directory -Force -Path 'build\windows-installer' | Out-Null
           Set-Content -LiteralPath 'build\windows-installer\KAYAN-ERP-Setup.exe' -Value 'placeholder' -Encoding ASCII
-          $log = Join-Path $env:RUNNER_TEMP 'smoke-dry-run.log'
+          $script = '.\scripts\smoke-test-installed-windows.ps1'
+          $info = Get-Item -LiteralPath $script
+          Write-Output ("::notice::L file " + $info.Length + " bytes; first line: " + ((Get-Content -LiteralPath $script -TotalCount 2) -join ' / '))
+
+          $log1 = Join-Path $env:RUNNER_TEMP 'smoke-named.log'
+          & $script -SetupPath '.\build\windows-installer\KAYAN-ERP-Setup.exe' -RequireLicenceEnforcement *> $log1
+          $l1 = (Get-Item -LiteralPath $log1).Length
+          Write-Output ("::notice::L named arguments wrote " + $l1 + " bytes; exit " + $LASTEXITCODE + "; first: " + (((Get-Content -LiteralPath $log1 -TotalCount 3) -join ' | ')))
+
+          $log2 = Join-Path $env:RUNNER_TEMP 'smoke-splat.log'
           $arguments = @('-SetupPath', '.\build\windows-installer\KAYAN-ERP-Setup.exe', '-RequireLicenceEnforcement')
-          & .\scripts\smoke-test-installed-windows.ps1 @arguments *> $log
-          $code = $LASTEXITCODE
-          Write-Output ("::notice::dry run exited " + $code)
-          if (Test-Path -LiteralPath $log) {
-            $text = Get-Content -LiteralPath $log -Raw
-            $tail = $text.Replace("`r", ' ').Replace("`n", ' | ')
-            if ($tail.Length -gt 3000) { $tail = $tail.Substring($tail.Length - 3000) }
-            Write-Output ("::notice::dry run tail: " + $tail)
-          } else {
-            Write-Output '::error title=dry run::the smoke script produced no log at all'
-          }
+          & $script @arguments *> $log2
+          $l2 = (Get-Item -LiteralPath $log2).Length
+          Write-Output ("::notice::L array splat wrote " + $l2 + " bytes; exit " + $LASTEXITCODE + "; first: " + (((Get-Content -LiteralPath $log2 -TotalCount 3) -join ' | ')))
+
+          $out3 = Join-Path $env:RUNNER_TEMP 'smoke-child.out.log'
+          $err3 = Join-Path $env:RUNNER_TEMP 'smoke-child.err.log'
+          $child = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$script,'-SetupPath','.\build\windows-installer\KAYAN-ERP-Setup.exe','-RequireLicenceEnforcement') -PassThru -NoNewWindow -RedirectStandardOutput $out3 -RedirectStandardError $err3 -Wait
+          Write-Output ("::notice::L child exit " + $child.ExitCode + "; stdout " + (Get-Item -LiteralPath $out3).Length + " bytes; stderr " + (Get-Item -LiteralPath $err3).Length + " bytes; stderr first: " + (((Get-Content -LiteralPath $err3 -TotalCount 5) -join ' | ')) + "; stdout first: " + (((Get-Content -LiteralPath $out3 -TotalCount 3) -join ' | ')))
