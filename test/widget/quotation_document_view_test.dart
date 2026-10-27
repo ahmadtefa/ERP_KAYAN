@@ -234,11 +234,10 @@ void main() {
     expect(find.text('Hardware'), findsNWidgets(2));
     expect(find.text('Software'), findsNWidgets(2));
     expect(find.text('إجمالي القسم'), findsNWidgets(2));
-    expect(find.text('إجمالي الجدول'), findsOneWidget);
+    expect(find.text('قبل الخصم'), findsOneWidget);
+    expect(find.text('خصم الجدول'), findsOneWidget);
     expect(find.text('خصم العرض'), findsOneWidget);
-    // Table discounts are already reflected in each table's net total.
-    expect(find.text('خصومات الجداول'), findsNothing);
-    expect(find.text('المجموع الكلي'), findsOneWidget);
+    expect(find.text('الإجمالي النهائي'), findsOneWidget);
     expect(find.text('1,420.00 EGP'), findsOneWidget);
     expect(find.text('مُرسل'), findsOneWidget);
 
