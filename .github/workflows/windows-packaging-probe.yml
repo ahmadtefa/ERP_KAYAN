@@ -1,14 +1,8 @@
 name: Product packaging probe (no upload or installation)
 
+# No automatic product build: the size and payload investigation is open.
 on:
-  push:
-    branches: ['arena/2d794f08-erp-kayan']
-    paths:
-      - '.github/workflows/windows-packaging-probe.yml'
-      - 'distribution/windows/build-installer.ps1'
-      - 'distribution/windows/public-key.pem'
-      - 'scripts/inspect-windows-pe.mjs'
-      - 'scripts/inspect-windows-pe.test.mjs'
+  workflow_dispatch:
 
 permissions:
   contents: read

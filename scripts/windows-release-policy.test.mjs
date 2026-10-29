@@ -28,7 +28,8 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   assert.match(build, /foreach \(\$runtimeDir in @\('bin', 'lib', 'share'\)\)/);
   assert.doesNotMatch(build, /Copy-Item \(Join-Path \$pgBin\.FullName '\*'\)/);
   assert.doesNotMatch(build, /\$demoBackupSource|backend\\\\demo-data\\\\kayan-company-backup-demo\.json/);
-  assert.match(build, /@\('prepare-database\.mjs', 'database-state\.mjs'\)/);
+  assert.match(build, /@\('prepare-database\.mjs', 'database-state\.mjs', 'migrate-deploy\.mjs'\)/);
+  assert.match(build, /backend\\node_modules\\prisma\\build\\index\.js/);
   assert.match(build, /seed-demo/);
   assert.match(inno, /#if KayanBuildKind != "product"[\s\S]*?Result := False;/);
   const smoke = workflow.match(/- name: Smoke-test the actual installed Windows application([\s\S]*?)(?=\n      - name:|\n  [a-z-]+:|$)/);

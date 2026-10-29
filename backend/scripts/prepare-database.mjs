@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
+import { deployMigrations, prismaCliAvailable } from './migrate-deploy.mjs';
 
 import {
   classifyDatabaseState,
@@ -107,25 +108,6 @@ async function ensureDatabase(admin, target) {
     `CREATE DATABASE ${quote(target.database)} OWNER ${quote(target.user)}`,
   );
   return 'created';
-}
-
-/// Applies the migrations with the same CLI the developer uses, so there is
-/// only one definition of "the database is up to date" in the project.
-function migrate() {
-  const cli = join(backendDir, 'node_modules', 'prisma', 'build', 'index.js');
-  if (!existsSync(cli)) {
-    console.log('  migrations: prisma CLI not found, skipping');
-    return Promise.resolve(0);
-  }
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [cli, 'migrate', 'deploy'], {
-      cwd: backendDir,
-      env: process.env,
-      stdio: ['ignore', 'inherit', 'inherit'],
-    });
-    child.on('exit', (code) => resolve(code ?? 1));
-    child.on('error', () => resolve(1));
-  });
 }
 
 /// What state the database is in - see database-state.mjs for the four
@@ -215,6 +197,11 @@ async function canAuthenticate(url) {
 }
 
 async function main() {
+  // Fail before touching roles or databases if the packaged migrator is absent.
+  if (!prismaCliAvailable(backendDir)) {
+    console.error('  migrations: bundled Prisma CLI is missing; preparation stopped');
+    process.exit(1);
+  }
   if (!appUrl) {
     console.error('  database: DATABASE_URL is not set');
     process.exit(2);
@@ -272,7 +259,7 @@ async function main() {
     process.exit(1);
   }
 
-  const code = await migrate();
+  const code = await deployMigrations(backendDir);
   if (code !== 0) {
     console.error('  migrations: failed');
     process.exit(code);

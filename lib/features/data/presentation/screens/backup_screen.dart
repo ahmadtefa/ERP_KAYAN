@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/config/app_config.dart';
 import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/data_providers.dart';
 import '../widgets/full_backup_section.dart';
@@ -34,6 +36,11 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final summary = ref.watch(backupSummaryProvider);
+    final environment = ref.watch(appConfigProvider).environment;
+    // Installed product builds intentionally do not include the sample
+    // company archive. Keep real backup/restore available in all modes.
+    final showDemo = environment == AppEnvironment.development ||
+        environment == AppEnvironment.staging;
 
     return ModuleScaffold(
       title: l10n.backupTitle,
@@ -58,8 +65,10 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
           const SizedBox(height: 16),
           _TakingCopy(summary: summary, onDownload: _download),
           const SizedBox(height: 16),
-          _DemoBackupSection(onDownload: _downloadDemo),
-          const SizedBox(height: 16),
+          if (showDemo) ...[
+            _DemoBackupSection(onDownload: _downloadDemo),
+            const SizedBox(height: 16),
+          ],
           _Restoring(
             file: _file,
             preview: _preview,

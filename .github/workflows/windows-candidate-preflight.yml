@@ -5,6 +5,20 @@ name: Windows candidate preflight (no publication)
 on:
   push:
     branches: ['arena/2d794f08-erp-kayan']
+    # This narrow audit has its own isolated tests and must not build another
+    # installer or repeat full application tests while the size review is open.
+    paths-ignore:
+      - '.github/workflows/windows-candidate-preflight.yml'
+      - '.github/workflows/windows-packaging-probe.yml'
+      - '.github/workflows/installer-focused-tests.yml'
+      - 'backend/scripts/prepare-database.mjs'
+      - 'backend/scripts/migrate-deploy.mjs'
+      - 'backend/scripts/migrate-deploy.test.mjs'
+      - 'distribution/windows/build-installer.ps1'
+      - 'scripts/windows-release-policy.test.mjs'
+      - 'lib/features/data/presentation/screens/backup_screen.dart'
+      - 'test/features/data/backup_demo_visibility_test.dart'
+      - 'docs/release/WINDOWS-OFFLINE-DEPENDENCY-AUDIT-2026-10-29.md'
   workflow_dispatch:
 
 permissions:
