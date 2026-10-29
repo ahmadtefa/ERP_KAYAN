@@ -9,7 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, renameSync, unlinkSync } from 'node:fs';
 import { arch, hostname, networkInterfaces, platform } from 'node:os';
 import { join } from 'node:path';
 
@@ -256,19 +256,34 @@ export class LicensingService implements OnModuleInit {
         // the database counters, and record the fact. It is reported as a
         // clock warning so the screen says something is wrong.
         this.storeQuarantined = true;
-        const quarantine = `${join(
+        const statePath = join(this.directory, 'license-state.json');
+        const quarantine = join(
           this.directory,
-          `license-state.quarantined-${Date.now()}.json`,
-        )}`;
+          `license-state.quarantined-${Date.now()}-${randomBytes(6).toString('hex')}.json`,
+        );
+
         try {
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const fs = require('node:fs') as typeof import('node:fs');
-          fs.renameSync(join(this.directory, 'license-state.json'), quarantine);
-        } catch {
-          // Nothing to move, or no permission: the fresh store still works.
+          renameSync(statePath, quarantine);
+        } catch (renameError) {
+          // Windows can refuse a rename while another process briefly holds the
+          // file. Do not swallow that failure and then re-open the same corrupt
+          // file: preserve a copy first, then remove the bad source before the
+          // fresh store is constructed.
+          try {
+            copyFileSync(statePath, quarantine);
+            unlinkSync(statePath);
+          } catch (fallbackError) {
+            this.logger.error(
+              `Could not isolate corrupt licence state. Rename failed: ${describeError(renameError)}; copy/remove fallback failed: ${describeError(fallbackError)}.`,
+            );
+            throw new ServiceUnavailableException(
+              `The licence state is corrupt and could not be isolated (${statePath}). Check the file and folder permissions, then restart KAYAN ERP.`,
+            );
+          }
         }
+
         this.logger.error(
-          `The licence state failed its integrity check and was set aside (${error.message}). Starting a new one; the database counters still apply.`,
+          `The licence state failed its integrity check (${error.message}) and was preserved as ${quarantine}. Starting a new state file; the database remains the source for the installed licence.`,
         );
         this.store = new LicenseStore(this.directory);
       } else {
