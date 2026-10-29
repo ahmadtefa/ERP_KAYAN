@@ -15,6 +15,8 @@ const REQUIRED_SUFFIXES = [
   'backend/dist/prisma/seed.js',
   'backend/node/node.exe',
   'backend/postgres/bin/initdb.exe',
+  'backend/postgres/bin/postgres.exe',
+  'backend/postgres/bin/libpq.dll',
   'backend/postgres/bin/pg_ctl.exe',
   'backend/postgres/bin/pg_isready.exe',
   'backend/postgres/bin/psql.exe',
@@ -22,6 +24,13 @@ const REQUIRED_SUFFIXES = [
   'backend/postgres/bin/pg_restore.exe',
   'backend/node_modules/prisma/build/index.js',
   'backend/node_modules/@prisma/client/package.json',
+  'backend/node_modules/@prisma/adapter-pg/package.json',
+  'backend/node_modules/@prisma/engines/package.json',
+  'backend/node_modules/@prisma/engines/schema-engine-windows.exe',
+  'backend/node_modules/pg/package.json',
+  'backend/node_modules/argon2/package.json',
+  'backend/node_modules/sharp/package.json',
+  'backend/node_modules/@img/sharp-win32-x64/package.json',
   'backend/node_modules/.prisma/client/index.js',
   'backend/prisma/schema.prisma',
   'backend/prisma/migrations/migration_lock.toml',
@@ -45,6 +54,10 @@ const REQUIRED_SUFFIXES = [
 const FORBIDDEN_NODE_PACKAGE_PATHS = [
   /(^|\/)backend\/node\/node_modules\/(?:npm|corepack)(?:\/|$)/i,
   /(^|\/)backend\/node\/(?:npm|npx|corepack)(?:\.cmd)?$/i,
+];
+const REQUIRED_NATIVE_BINDINGS = [
+  { description: 'Argon2 Windows native binding', pattern: /(^|\/)backend\/node_modules\/argon2\/.*\.node$/i },
+  { description: 'Sharp Windows x64 native binding', pattern: /(^|\/)backend\/node_modules\/@img\/sharp-win32-x64\/.*\.node$/i },
 ];
 
 const PRIVATE_MARKERS = [
@@ -137,6 +150,11 @@ export async function verifyExtractedPayload({ artifactPath, root, expectedSourc
   }
   if (!relativePaths.some((path) => /(^|\/)backend\/postgres\/share\/.+/i.test(path))) {
     throw new Error('The extracted payload contains no PostgreSQL shared runtime data.');
+  }
+  for (const binding of REQUIRED_NATIVE_BINDINGS) {
+    if (!relativePaths.some((path) => binding.pattern.test(path))) {
+      throw new Error(`Missing native Windows runtime binding: ${binding.description}.`);
+    }
   }
 
   const manifests = files.filter((file) => normalizePath(relative(payloadRoot, file)) === 'runtime-manifest.json'
