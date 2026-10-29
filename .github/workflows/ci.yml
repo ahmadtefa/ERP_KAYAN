@@ -83,7 +83,13 @@ jobs:
         # `-o pipefail` a failing suite would leave this step green and the
         # whole job would pass. The log is kept because the summary step below
         # reads it.
-        run: python ../scripts/ci-diagnose.py bash -o pipefail -c 'npm test -- --runInBand 2>&1 | tee /tmp/kayan-jest.log'
+        # This older CLI integration suite creates a private signing key on disk.
+        # It is retained in source but is not run under the no-private-key-on-disk
+        # constraint. The source-level in-memory generator check is a separate job;
+        # neither that check nor this partial suite proves the packaged generator.
+        run: |
+          echo '::warning title=Generator tests not run::The file-backed generator suite is excluded; the packaged Windows generator is not verified by this job.'
+          python ../scripts/ci-diagnose.py bash -o pipefail -c 'npm test -- --runInBand --testPathIgnorePatterns=license-generator.spec.ts 2>&1 | tee /tmp/kayan-jest.log'
       - name: Record unit-test totals
         if: always()
         run: |

@@ -121,7 +121,10 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $log = Join-Path $env:RUNNER_TEMP 'backend-tests.log'
           $err = Join-Path $env:RUNNER_TEMP 'backend-tests.err.log'
-          $proc = Start-Process -FilePath 'npm.cmd' -ArgumentList 'test','--','--runInBand' `
+          # The legacy generator suite writes a signing key to disk; retain it
+          # but do not execute it under the no-private-key-on-disk constraint.
+          Write-Output '::warning title=Generator tests not run::File-backed generator tests are excluded; packaged generator verification remains outstanding.'
+          $proc = Start-Process -FilePath 'npm.cmd' -ArgumentList 'test','--','--runInBand','--testPathIgnorePatterns=license-generator.spec.ts' `
             -NoNewWindow -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError $err
 
           $esc = [char]27
