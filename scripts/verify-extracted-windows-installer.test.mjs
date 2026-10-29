@@ -81,7 +81,7 @@ test('accepts a complete product payload with the pinned production public key',
     assert.equal(result.result, 'payload-inspection-passed-not-install-tested');
     assert.equal(result.licensing.privateKeyMarkersFound, false);
     assert.ok(result.payload.fileCount >= required.length);
-    assert.equal(result.installer.sha256, createHash('sha256').update(await readFile(f.artifact)).digest('hex'));
+    assert.equal(result.installer.sha256, createHash('sha256').update(await readFile(f.artifactPath)).digest('hex'));
   } finally {
     await rm(f.base, { recursive: true, force: true });
   }
