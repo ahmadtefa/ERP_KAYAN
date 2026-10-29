@@ -804,7 +804,7 @@ class LocalBackend {
         if (identical(_preparationInFlight, operation)) {
           _preparationInFlight = null;
         }
-      }, onError: (Object _, StackTrace __) {
+      }, onError: (Object _, StackTrace _) {
         if (identical(_preparationInFlight, operation)) {
           _preparationInFlight = null;
         }
@@ -943,7 +943,7 @@ class LocalBackend {
           }
           unawaited(pending.then<void>(
             (_) => removeLogo(),
-            onError: (Object _, StackTrace __) => removeLogo(),
+            onError: (Object _, StackTrace _) => removeLogo(),
           ));
         }
       }
