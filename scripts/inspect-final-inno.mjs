@@ -1,13 +1,15 @@
-// Fail-closed, limited inspection of the final Inno executable. Requires a
-// trusted 7z version capable of listing and streaming Inno payloads. No files
-// are extracted to disk, and no key material is printed. This is not proof that
-// all secrets (e.g. nested/encrypted/unknown formats) are absent.
+// Fail-closed inspection of the final Inno executable. The caller must build
+// and fixture-test the pinned innoextract source and provide its SHA-256.
+// Extracted files are private temporary data and are deleted after scanning.
+// The marker scan is limited; it is not proof that every secret is absent.
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { spawn, spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validatePem } from './license-build-policy.mjs';
+import { verifyExtractedPayload } from './verify-extracted-windows-installer.mjs';
 
 export function inspectListing(text) {
   const separator = text.indexOf('----------');
@@ -41,70 +43,57 @@ export function inspectChunk(chunk, previous = '') {
   return { found: markers.some(pattern => pattern.test(text)), tail: text.slice(-128) };
 }
 
-async function stream(args, collect = false) {
-  const proc = spawn('7z', args, { stdio: ['ignore', 'pipe', 'ignore'] });
-  let error = null, found = false, tail = '', size = 0;
-  const parts = [];
-  proc.on('error', e => { error = e; });
-  const done = new Promise(resolveExit => proc.once('close', resolveExit));
-  try {
-    for await (const chunk of proc.stdout) {
-      const result = inspectChunk(chunk, tail);
-      found ||= result.found;
-      tail = result.tail;
-      if (collect) {
-        size += chunk.length;
-        if (size <= 4096) parts.push(chunk);
-      }
-    }
-  } catch (e) { error = e; }
-  const code = await done;
-  if (error || code !== 0) throw new Error('Could not stream the complete Inno payload.');
-  if (found) throw new Error('A supported private-key marker was found in the final installer.');
-  if (collect && size > 4096) throw new Error('The embedded public key is too large.');
-  return Buffer.concat(parts);
-}
-
 async function hash(path) {
   const digest = createHash('sha256');
   for await (const chunk of createReadStream(path)) digest.update(chunk);
   return digest.digest('hex');
 }
 
+function parseArgs(args) {
+  const options = {};
+  for (let i = 0; i < args.length; i += 2) {
+    const flag = args[i], value = args[i + 1];
+    if (!['--artifact', '--extractor', '--extractor-sha256', '--source-commit', '--report', '--mode'].includes(flag) ||
+        !value || value.startsWith('--') || Object.hasOwn(options, flag)) {
+      throw new Error('Expected --artifact, --extractor, --extractor-sha256, --source-commit and optional --report/--mode.');
+    }
+    options[flag] = value;
+  }
+  if (!options['--artifact'] || !options['--extractor'] || !/^[a-f0-9]{64}$/i.test(options['--extractor-sha256'] ?? '') ||
+      !/^[a-f0-9]{40}$/i.test(options['--source-commit'] ?? '') || !['product', 'test-signed'].includes(options['--mode'] ?? 'product')) {
+    throw new Error('A pinned extractor hash, exact source commit and valid mode are required.');
+  }
+  return options;
+}
+
 async function main(args) {
-  // The default remains product: diagnostic mode must be explicit and is
-  // never release evidence. Both modes use the same fail-closed payload scan.
-  if ((args.length !== 2 && args.length !== 4) || args[0] !== '--artifact' ||
-      (args.length === 4 && (args[2] !== '--mode' || args[3] !== 'test-signed'))) {
-    throw new Error('Usage: --artifact <installer.exe> [--mode test-signed]');
+  const opts = parseArgs(args);
+  const artifact = resolve(opts['--artifact']);
+  const extractor = resolve(opts['--extractor']);
+  if (await hash(extractor) !== opts['--extractor-sha256'].toLowerCase()) throw new Error('Extractor binary SHA-256 mismatch.');
+  const before = await hash(artifact);
+  const temp = await mkdtemp(join(tmpdir(), 'kayan-inno-inspect-'));
+  try {
+    // Do not exclude temporary entries: the comparison key and any other
+    // bundled files must receive the same policy and private-material scan.
+    // Unknown Inno versions, failed checksums and extractor errors fail closed.
+    const result = spawnSync(extractor, ['--extract', '--test', '--no-extract-unknown', '--collisions', 'error', '--output-dir', temp, '--', artifact], {
+      stdio: 'ignore', timeout: 900000, windowsHide: true,
+    });
+    if (result.error || result.status !== 0) throw new Error('Trusted Inno extractor failed or refused the installer.');
+    const report = await verifyExtractedPayload({
+      artifactPath: artifact, root: temp, expectedSourceCommit: opts['--source-commit'], mode: opts['--mode'] ?? 'product',
+    });
+    if (await hash(artifact) !== before) throw new Error('Installer changed during inspection.');
+    if (opts['--report']) await writeFile(opts['--report'], JSON.stringify(report, null, 2) + '\n', { flag: 'wx' });
+    console.log(`Final Inno payload inspected (${opts['--mode'] ?? 'product'}): ${before}. The private-material scan is limited.`);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
   }
-  const path = args[1];
-  const mode = args.length === 4 ? 'test-signed' : 'product';
-  const before = await hash(path);
-  const list = spawnSync('7z', ['l', '-slt', '--', path], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 120000 });
-  if (list.error) throw new Error(list.error.code === 'ENOENT'
-    ? '7z is not available on PATH; the final Inno payload was not inspected.'
-    : 'Could not start 7z to list the final Inno payload.');
-  if (list.status !== 0) {
-    // 7z diagnostics identify tool/format failures, not payload contents.
-    // Avoid printing the listing itself or any embedded file bytes.
-    const diagnostic = (list.stderr || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 1000);
-    throw new Error(`7z could not list the final Inno payload (exit ${list.status ?? 'unknown'})${diagnostic ? `: ${diagnostic}` : '.'}`);
-  }
-  const keyPaths = inspectListing(list.stdout);
-  for (const keyPath of keyPaths) {
-    const publicPem = await stream(['x', '-so', '-spd', '--', path, keyPath], true);
-    validatePem(publicPem.toString('utf8'), mode);
-  }
-  await stream(['x', '-so', '--', path]);
-  if (await hash(path) !== before) throw new Error('Installer changed during inspection.');
-  console.log(`Final Inno inspected (${mode}): ${before}. Secret marker scan is limited, not proof of absence.`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2)).catch(e => {
-    // Preserve a concise, non-sensitive reason in Actions annotations even
-    // when the runner log archive is unreachable. Never emit payload bytes.
     const reason = String(e.message).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
     if (process.env.GITHUB_ACTIONS === 'true') console.log(`::error title=Inno inspection refused::${reason}`);
     console.error(`Inno inspection refused: ${e.message}`);

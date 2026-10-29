@@ -36,3 +36,20 @@ test('publication entrypoint rejects direct invocation without CI identity', () 
   const result = spawnSync(process.execPath, ['scripts/publish-verified-windows.mjs'], { encoding: 'utf8', env });
   assert.notEqual(result.status, 0);
 });
+
+test('CLI refuses missing or mismatched extractor identity and failed extraction', async () => {
+  const { createHash } = await import('node:crypto');
+  const { readFile } = await import('node:fs/promises');
+  const identity = createHash('sha256').update(await readFile(process.execPath)).digest('hex');
+  const source = '0123456789abcdef0123456789abcdef01234567';
+  const args = ['scripts/inspect-final-inno.mjs', '--artifact', 'scripts/inspect-final-inno.test.mjs', '--extractor', process.execPath, '--source-commit', source];
+  for (const [extra, expected] of [
+    [[], /pinned extractor hash/],
+    [['--extractor-sha256', '0'.repeat(64)], /Extractor binary SHA-256 mismatch/],
+    [['--extractor-sha256', identity], /extractor failed or refused/],
+  ]) {
+    const result = spawnSync(process.execPath, [...args, ...extra], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, expected);
+  }
+});

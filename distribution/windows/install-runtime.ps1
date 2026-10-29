@@ -62,24 +62,39 @@ param(
   [ValidateSet('New','Existing','Auto')][string]$CompanyMode = 'Auto'
 )
 $ErrorActionPreference = 'Stop'
-# Fail before writing logs, touching services, or changing any licence state.
-# Non-product packages are not isolated from customer paths and must never run.
-$manifestPath = Join-Path $PSScriptRoot 'runtime-manifest.json'
-if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'Runtime manifest is missing; refusing setup before any changes.' }
-try { $runtimeManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json } catch { throw 'Runtime manifest is unreadable; refusing setup before any changes.' }
-if ($runtimeManifest.licenseBuildKind -ne 'product') { throw 'Test, evaluation, and unclassified runtimes cannot run setup against customer paths.' }
-$incomingKey = Join-Path $PSScriptRoot 'public-key.pem'
-$installedLicenceDir = Join-Path $ProgramDataRoot 'license'
-$installedKey = Join-Path $installedLicenceDir 'public-key.pem'
-$installedMarker = Join-Path (Join-Path $ProgramDataRoot 'license') 'enforcement.required'
-$installedState = Join-Path (Join-Path $ProgramDataRoot 'license') 'license-state.json'
-if (-not (Test-Path -LiteralPath $incomingKey -PathType Leaf)) { throw 'Product public key is missing; refusing setup before any changes.' }
-if (Test-Path -LiteralPath $installedKey -PathType Leaf) {
-  if ((Get-FileHash -LiteralPath $incomingKey -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $installedKey -Algorithm SHA256).Hash) {
-    throw 'The existing licence key differs; refusing setup until a tested transition is approved.'
+# Refuse unsafe packages before touching services or licence state. When a
+# pre-existing protected diagnostic directory is available, record only the
+# failed preflight stage; stale success from a prior run must not hide failure.
+$preflightStage = 'manifest-validation'
+try {
+  $manifestPath = Join-Path $PSScriptRoot 'runtime-manifest.json'
+  if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'Runtime manifest is missing.' }
+  $runtimeManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+  $preflightStage = 'product-build-kind'
+  if ($runtimeManifest.licenseBuildKind -ne 'product') { throw 'Runtime is not a product build.' }
+  $incomingKey = Join-Path $PSScriptRoot 'public-key.pem'
+  $installedLicenceDir = Join-Path $ProgramDataRoot 'license'
+  $installedKey = Join-Path $installedLicenceDir 'public-key.pem'
+  $installedMarker = Join-Path $installedLicenceDir 'enforcement.required'
+  $installedState = Join-Path $installedLicenceDir 'license-state.json'
+  $preflightStage = 'incoming-public-key'
+  if (-not (Test-Path -LiteralPath $incomingKey -PathType Leaf)) { throw 'Product public key is missing.' }
+  $preflightStage = 'installed-public-key'
+  if (Test-Path -LiteralPath $installedKey -PathType Leaf) {
+    if ((Get-FileHash -LiteralPath $incomingKey -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $installedKey -Algorithm SHA256).Hash) {
+      throw 'The existing licence key differs; refusing setup until a tested transition is approved.'
+    }
+  } elseif ((Test-Path -LiteralPath $installedLicenceDir) -or (Test-Path -LiteralPath $installedMarker) -or (Test-Path -LiteralPath $installedState)) {
+    throw 'Existing licence state has no protected public key; refusing setup.'
   }
-} elseif ((Test-Path -LiteralPath $installedLicenceDir) -or (Test-Path -LiteralPath $installedMarker) -or (Test-Path -LiteralPath $installedState)) {
-  throw 'Existing licence state has no protected public key; refusing setup.'
+} catch {
+  try {
+    $diagnostics = Join-Path $ProgramDataRoot 'logs'
+    if (Test-Path -LiteralPath $diagnostics -PathType Container) {
+      [IO.File]::WriteAllText((Join-Path $diagnostics 'installer-result.txt'), "Failing step: product preflight $preflightStage", (New-Object Text.UTF8Encoding($false)))
+    }
+  } catch { }
+  throw "Product runtime preflight failed at $preflightStage; no licence state was changed."
 }
 $bootstrapLog = Join-Path (Join-Path $env:ProgramData 'KAYAN-ERP') 'logs\installer.log'
 $resultLog = Join-Path (Join-Path $env:ProgramData 'KAYAN-ERP') 'logs\installer-result.txt'

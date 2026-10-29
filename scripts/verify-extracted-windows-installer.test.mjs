@@ -183,3 +183,62 @@ test('refuses a payload manifest from a different commit', async () => {
     await rm(f.base, { recursive: true, force: true });
   }
 });
+
+test('checks every pre-install public-key copy without ignoring temporary payload files', async () => {
+  const f = await fixture();
+  try {
+    const extra = join(f.root, 'tmp', 'public-key.pem');
+    await mkdir(join(f.root, 'tmp'));
+    await writeFile(extra, await readFile(join(f.root, 'public-key.pem')));
+    assert.equal((await verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit })).result, 'payload-inspection-passed-not-install-tested');
+    await writeFile(extra, 'different public key');
+    await assert.rejects(verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit }), /copies do not match/);
+  } finally {
+    await rm(f.base, { recursive: true, force: true });
+  }
+});
+
+test('an explicit test-signed mode cannot be mistaken for a product payload', async () => {
+  const f = await fixture();
+  try {
+    await assert.rejects(verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit, mode: 'test-signed' }), /does not match/);
+    await assert.rejects(verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit, mode: 'unknown' }), /Unknown installer inspection mode/);
+    const key = generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' });
+    const manifest = JSON.parse(await readFile(join(f.root, 'runtime-manifest.json'), 'utf8'));
+    manifest.licenseBuildKind = 'test-signed';
+    manifest.licensePublicKeySha256 = createHash('sha256').update(key).digest('hex');
+    await writeFile(join(f.root, 'public-key.pem'), key);
+    await writeFile(join(f.root, 'runtime-manifest.json'), JSON.stringify(manifest));
+    assert.equal((await verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit, mode: 'test-signed' })).licensing.buildKind, 'test-signed');
+    await assert.rejects(verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit }), /does not match/);
+  } finally {
+    await rm(f.base, { recursive: true, force: true });
+  }
+});
+
+test('temporary entries are subject to forbidden filename and key-material checks', async () => {
+  const f = await fixture();
+  try {
+    const temp = join(f.root, 'tmp');
+    await mkdir(temp);
+    const banned = join(temp, '.env');
+    await writeFile(banned, 'synthetic fixture');
+    await assert.rejects(verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit }), /forbidden private-key or environment filename/);
+    await rm(banned);
+    // A marker-shaped dummy, not an actual private key.
+    await writeFile(join(temp, 'opaque.bin'), '-----BEGIN PRIVATE KEY-----\n' + 'A'.repeat(64));
+    await assert.rejects(verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit }), /private-key material/);
+  } finally {
+    await rm(f.base, { recursive: true, force: true });
+  }
+});
+
+test('refuses case-insensitive collisions for Windows', { skip: process.platform === 'win32' }, async () => {
+  const f = await fixture();
+  try {
+    await writeFile(join(f.root, 'ERP_KAYAN.exe'), 'fixture');
+    await assert.rejects(verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit }), /case-insensitive path collisions/);
+  } finally {
+    await rm(f.base, { recursive: true, force: true });
+  }
+});

@@ -267,7 +267,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22.22.3'
-      - run: node --test scripts/verify-extracted-windows-installer.test.mjs scripts/windows-release-policy.test.mjs
+      - run: node --test scripts/verify-extracted-windows-installer.test.mjs scripts/inspect-final-inno.test.mjs scripts/windows-release-policy.test.mjs
       - name: Install extractor build dependencies
         run: |
           sudo apt-get update
@@ -294,6 +294,7 @@ jobs:
           echo "d77d2c447dd46edaeab6b4ea5d7102000b0b8cd66970f18cea2b1eb20f21aa52  $fixture_zip" | sha256sum -c -
           unzip -q "$fixture_zip" -d "$RUNNER_TEMP"
           python3 "$src/tests/check-fixtures.py" --extractor "$extractor" --fixtures "$RUNNER_TEMP/format-fixtures" --output "$RUNNER_TEMP/fixture-results"
+          echo "KAYAN_INNOEXTRACT_SHA256=$(sha256sum "$extractor" | cut -d' ' -f1)" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           name: raw-internal-${{ github.sha }}
@@ -302,15 +303,12 @@ jobs:
         shell: bash
         run: |
           node -e "const fs=require('fs'),c=require('crypto'),e=JSON.parse(fs.readFileSync('candidate/build-evidence.json','utf8').replace(/^\\uFEFF/,'')),b=fs.readFileSync('candidate/KAYAN-ERP-Setup.exe'); if(e.sourceCommit!==process.env.GITHUB_SHA || e.sha256!==c.createHash('sha256').update(b).digest('hex') || e.size!==b.length) throw Error('Build evidence does not match EXE or source');"
-      - name: Checksum-test and extract Inno payload
+      - name: Inspect the final Inno including temporary payload files
         shell: bash
         run: |
-          set -euo pipefail
-          "$KAYAN_INNOEXTRACT" --list --silent --exclude-temp --no-extract-unknown -- candidate/KAYAN-ERP-Setup.exe > candidate/inno-payload-list.txt
-          test -s candidate/inno-payload-list.txt
-          "$KAYAN_INNOEXTRACT" --extract --test --exclude-temp --no-extract-unknown --output-dir extracted-payload -- candidate/KAYAN-ERP-Setup.exe
-      - name: Verify payload policy and production public key
-        run: node scripts/verify-extracted-windows-installer.mjs --artifact candidate/KAYAN-ERP-Setup.exe --root extracted-payload --source-commit "${{ github.sha }}" --report candidate/payload-verification.json
+          node scripts/inspect-final-inno.mjs --artifact candidate/KAYAN-ERP-Setup.exe \
+            --extractor "$KAYAN_INNOEXTRACT" --extractor-sha256 "$KAYAN_INNOEXTRACT_SHA256" \
+            --source-commit "$GITHUB_SHA" --report candidate/payload-verification.json
       - uses: actions/upload-artifact@v4
         with:
           name: payload-inspected-internal-${{ github.sha }}

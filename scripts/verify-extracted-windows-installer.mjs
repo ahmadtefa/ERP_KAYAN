@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { basename, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validatePem } from './license-build-policy.mjs';
 
@@ -124,7 +124,8 @@ async function scanForPrivateMaterial(file) {
   return scanPrivateMaterialStream(createReadStream(file));
 }
 
-export async function verifyExtractedPayload({ artifactPath, root, expectedSourceCommit }) {
+export async function verifyExtractedPayload({ artifactPath, root, expectedSourceCommit, mode = 'product' }) {
+  if (!['product', 'test-signed'].includes(mode)) throw new Error('Unknown installer inspection mode.');
   const artifact = resolve(artifactPath);
   const payloadRoot = resolve(root);
   if (!expectedSourceCommit || !/^[0-9a-f]{40}$/i.test(expectedSourceCommit)) {
@@ -137,6 +138,14 @@ export async function verifyExtractedPayload({ artifactPath, root, expectedSourc
   const files = await listFiles(payloadRoot);
   if (files.length === 0) throw new Error('The extractor produced an empty payload.');
   const relativePaths = files.map((file) => normalizePath(relative(payloadRoot, file)));
+  if (new Set(relativePaths).size !== relativePaths.length) {
+    throw new Error('The extracted payload contains case-insensitive path collisions.');
+  }
+  for (const path of relativePaths) {
+    if (path.split('/').some((part) => !part || part === '.' || part === '..' || /[:<>"|?*]|[. ]$/.test(part))) {
+      throw new Error('The extracted payload contains an unsafe Windows path.');
+    }
+  }
   for (const forbidden of relativePaths) {
     if (/(^|\/)(?:private[-_]?key(?:\..*)?|\.env(?:\..*)?|[^/]+\.(?:p12|pfx|jks|keystore))$/i.test(forbidden)) {
       throw new Error('A forbidden private-key or environment filename is present in the extracted payload.');
@@ -184,19 +193,31 @@ export async function verifyExtractedPayload({ artifactPath, root, expectedSourc
   if (manifest.product !== 'KAYAN ERP' || manifest.architecture !== 'x64') {
     throw new Error('The extracted runtime manifest does not identify the expected x64 KAYAN ERP product.');
   }
-  if (manifest.licenseBuildKind !== 'product' || manifest.licenseEnforcement !== 'enforce') {
-    throw new Error('The extracted installer is not a licence-enforced product build.');
+  if (manifest.licenseBuildKind !== mode || manifest.licenseEnforcement !== 'enforce') {
+    throw new Error('The extracted installer does not match the requested licence-enforced build mode.');
   }
 
+  // Inno may contain a temporary pre-install comparison copy as well as the
+  // installed key. Scan both, and require identical bytes; only the key next
+  // to the single runtime manifest is the installed key.
   const publicKeys = files.filter((file) => basename(file).toLowerCase() === 'public-key.pem');
-  if (publicKeys.length !== 1) throw new Error('The extracted payload has a missing or ambiguous installed public key.');
-  const publicKeyBytes = await readFile(publicKeys[0]);
+  const installedKey = join(dirname(manifests[0]), 'public-key.pem');
+  if (!publicKeys.includes(installedKey) || publicKeys.length > 2) {
+    throw new Error('The extracted payload has a missing or ambiguous installed public key.');
+  }
+  for (const path of publicKeys) {
+    if ((await stat(path)).size > 4096) throw new Error('An embedded public key is too large.');
+  }
+  const publicKeyBytes = await readFile(installedKey);
+  for (const path of publicKeys) {
+    if (!(await readFile(path)).equals(publicKeyBytes)) throw new Error('Embedded public-key copies do not match.');
+  }
   const publicKeyHash = sha256(publicKeyBytes);
   if (typeof manifest.licensePublicKeySha256 !== 'string'
       || manifest.licensePublicKeySha256.toLowerCase() !== publicKeyHash) {
     throw new Error('The runtime manifest public-key hash does not match the extracted key bytes.');
   }
-  const fingerprint = validatePem(publicKeyBytes.toString('utf8'), 'product');
+  const fingerprint = validatePem(publicKeyBytes.toString('utf8'), mode);
 
   for (const file of files) {
     const marker = await scanForPrivateMaterial(file);
