@@ -68,7 +68,7 @@ describe('HealthController', () => {
     const statements = mockPrisma.$queryRaw.mock.calls.map(sqlOfCall);
     const nameQuery = statements.find((sql: string) => /current_database/i.test(sql));
     expect(nameQuery).toBeDefined();
-    expect(nameQuery).toMatch(/current_database\(\)\s*::text/i);
+    expect(nameQuery).toMatch(/CAST\(current_database\(\) AS VARCHAR\(63\)\)/i);
   });
 
   it('keeps the database up when only the name query cannot be read', async () => {
