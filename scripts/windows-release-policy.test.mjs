@@ -60,6 +60,10 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   assert.ok(runtimeSmoke);
   assert.match(runtimeSmoke[1], /needs: \[build, inspect-final\]/);
   assert.match(runtimeSmoke[1], /needs\.build\.outputs\.build_mode == 'product'/);
+  const runtimeSetup = readFileSync(new URL('../distribution/windows/install-runtime.ps1', import.meta.url), 'utf8');
+  assert.match(runtimeSetup, /function Get-FileSha256Hex/);
+  assert.match(runtimeSetup, /SHA256\]::Create\(\)/);
+  assert.doesNotMatch(runtimeSetup, /\(Get-FileHash\s+-LiteralPath/);
   const smokeScript = readFileSync(new URL('./smoke-test-installed-windows.ps1', import.meta.url), 'utf8');
   assert.ok(smokeScript.indexOf('& $pgDump --no-password -h 127.0.0.1') > 0);
   assert.ok(smokeScript.indexOf('& $pgRestore --list $preUpgradeBackup') < smokeScript.indexOf('$upgrade = Start-Process'));
