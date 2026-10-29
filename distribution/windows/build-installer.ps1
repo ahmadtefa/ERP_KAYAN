@@ -259,6 +259,39 @@ Write-Host '[4/8] Bundle official Node.js x64 and PostgreSQL 17 x64'
 Expand-Archive -LiteralPath $nodeZip -DestinationPath (Join-Path $stage 'extract-node') -Force
 $nodeFolder = Get-ChildItem (Join-Path $stage 'extract-node') -Directory | Select-Object -First 1
 Copy-Item (Join-Path $nodeFolder.FullName '*') (Join-Path $app 'backend\node') -Recurse -Force
+# The installed application runs node.exe directly; npm/Corepack are build-time
+# package managers, not runtime dependencies. Their bundled npm documentation
+# also includes private-key examples, so do not ship the package-manager trees
+# or command shims in the production installer.
+$bundledNodeExtras = @(
+  'node_modules\npm',
+  'node_modules\corepack',
+  'npm.cmd',
+  'npx.cmd',
+  'corepack.cmd',
+  'npm',
+  'npx',
+  'corepack'
+)
+foreach ($relativeExtra in $bundledNodeExtras) {
+  $extraPath = Join-Path $app "backend\node\$relativeExtra"
+  if (Test-Path -LiteralPath $extraPath) {
+    Remove-Item -LiteralPath $extraPath -Recurse -Force
+  }
+}
+$nodeModulesPath = Join-Path $app 'backend\node\node_modules'
+if (Test-Path -LiteralPath $nodeModulesPath -PathType Container) {
+  $remainingNodeModules = @(Get-ChildItem -LiteralPath $nodeModulesPath -Force)
+  if ($remainingNodeModules.Count -eq 0) { Remove-Item -LiteralPath $nodeModulesPath -Force }
+}
+foreach ($relativeExtra in $bundledNodeExtras) {
+  if (Test-Path -LiteralPath (Join-Path $app "backend\node\$relativeExtra")) {
+    throw "Build-only Node package-manager content remains in the production runtime: $relativeExtra."
+  }
+}
+if (-not (Test-Path -LiteralPath (Join-Path $app 'backend\node\node.exe'))) {
+  throw 'The bundled Node.js executable is missing after package-manager pruning.'
+}
 Expand-Archive -LiteralPath $pgZip -DestinationPath (Join-Path $stage 'extract-postgres') -Force
 $pgBin = Get-ChildItem (Join-Path $stage 'extract-postgres') -Directory -Recurse | Where-Object { Test-Path (Join-Path $_.FullName 'bin\initdb.exe') } | Select-Object -First 1
 if (-not $pgBin) { throw 'The verified PostgreSQL archive did not contain bin\initdb.exe.' }
