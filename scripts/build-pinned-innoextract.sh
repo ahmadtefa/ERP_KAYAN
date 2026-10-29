@@ -22,7 +22,7 @@ extractor_sha256="$(sha256sum "$extractor" | cut -d' ' -f1)"
 fixture_zip="$RUNNER_TEMP/innoextract-format-fixtures.zip"
 curl -fsSL https://github.com/mplabsorg/innoextract/releases/download/format-fixtures-v1/innoextract-format-fixtures.zip -o "$fixture_zip"
 echo "d77d2c447dd46edaeab6b4ea5d7102000b0b8cd66970f18cea2b1eb20f21aa52  $fixture_zip" | sha256sum -c -
-fixtures="$RUNNER_TEMP/innoextract-format-fixtures"
+fixtures="$RUNNER_TEMP/format-fixtures"
 rm -rf "$fixtures"
 unzip -q "$fixture_zip" -d "$RUNNER_TEMP"
 python3 "$src/tests/check-fixtures.py" --extractor "$extractor" --fixtures "$fixtures" --output "$RUNNER_TEMP/innoextract-fixture-results"
