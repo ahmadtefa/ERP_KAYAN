@@ -107,7 +107,22 @@ test('refuses private-key material in any extracted payload file', async () => {
     await writeFile(join(f.root, 'backend/dist/secret.txt'), '-----BEGIN PRIVATE KEY-----');
     await assert.rejects(
       verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit }),
-      /private-key marker/,
+      /private-key marker.*backend\\/dist\\/secret\\.txt/,
+    );
+  } finally {
+    await rm(f.base, { recursive: true, force: true });
+  }
+});
+
+test('refuses build-only npm/Corepack files in the bundled Node runtime', async () => {
+  const f = await fixture();
+  try {
+    const path = join(f.root, 'backend/node/node_modules/npm/docs/content/using-npm/config.md');
+    await mkdir(join(path, '..'), { recursive: true });
+    await writeFile(path, 'npm documentation only; no runtime dependency');
+    await assert.rejects(
+      verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit }),
+      /Build-only npm\/Corepack files.*backend\/node\/node_modules\/npm/,
     );
   } finally {
     await rm(f.base, { recursive: true, force: true });
