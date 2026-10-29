@@ -98,6 +98,10 @@ jobs:
       - name: Build API
         run: npm run build
       - name: Apply migrations to ephemeral PostgreSQL
+        env:
+          # Exercise Prisma's supported native schema engine for migration
+          # compatibility. The shipped client still uses the JS query compiler.
+          KAYAN_PRISMA_CLASSIC_MIGRATIONS: '1'
         run: npx prisma migrate deploy
 
       # Licensing is the one subsystem whose real behaviour cannot be shown
@@ -335,6 +339,8 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
       - name: Apply migrations to a freshly created database
+        env:
+          KAYAN_PRISMA_CLASSIC_MIGRATIONS: '1'
         run: npx prisma migrate deploy
       - name: Seed an isolated company and administrator
         run: npx ts-node prisma/seed.ts
