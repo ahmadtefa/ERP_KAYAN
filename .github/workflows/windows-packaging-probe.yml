@@ -4,6 +4,18 @@ name: Product installer candidate verification (not a release)
 on:
   push:
     branches: ['fix/windows-installer-inspection-20261029']
+    paths:
+      - 'distribution/windows/**'
+      - 'backend/**'
+      - 'lib/**'
+      - 'windows/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'scripts/verify-extracted-windows-installer.mjs'
+      - 'scripts/verify-extracted-windows-installer.test.mjs'
+      - 'scripts/inspect-windows-pe.mjs'
+      - 'scripts/windows-release-policy.mjs'
+      - 'scripts/license-build-policy.mjs'
   workflow_dispatch:
 
 permissions:
