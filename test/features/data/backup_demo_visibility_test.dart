@@ -1,6 +1,5 @@
 import 'package:dio/dio.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
-import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/data/presentation/providers/data_providers.dart';
 import 'package:erp_kayan/features/data/presentation/screens/backup_screen.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
