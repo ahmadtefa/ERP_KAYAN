@@ -4,7 +4,7 @@ name: Windows candidate preflight (no publication)
 # installation/upgrade/licence-recovery test and cannot authorize a release.
 on:
   push:
-    branches: ['arena/2d794f08-erp-kayan']
+    branches: ['arena/2d794f08-erp-kayan', 'fix/inno-inspector-callsites-20261030']
   workflow_dispatch:
 
 permissions:
@@ -32,8 +32,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $dir = Join-Path $env:RUNNER_TEMP ('kayan-inno-probe-' + [guid]::NewGuid().ToString('N'))
-          [void](New-Item -ItemType Directory -Path $dir)
+          $dir = Join-Path $PWD 'build\inno-probe'
+          Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+          [void](New-Item -ItemType Directory -Force -Path $dir)
           $key = Join-Path $dir 'public-key.pem'
           & node -e "const c=require('node:crypto'),f=require('node:fs'); f.writeFileSync(process.argv[1],c.generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'pem'}),{flag:'wx'});" $key
           if ($LASTEXITCODE -ne 0) { throw 'Probe public key generation failed.' }
@@ -56,8 +57,50 @@ jobs:
           if (-not (Test-Path -LiteralPath $iscc)) { throw 'Inno compiler missing from runner.' }
           & $iscc $iss
           if ($LASTEXITCODE -ne 0) { throw 'Synthetic Inno probe build failed.' }
-          & node scripts/inspect-final-inno.mjs --artifact (Join-Path $dir 'probe.exe') --mode test-signed
-          if ($LASTEXITCODE -ne 0) { throw 'Synthetic Inno inspection failed.' }
+          if (-not (Test-Path -LiteralPath (Join-Path $dir 'probe.exe'))) { throw 'Synthetic Inno probe EXE was not created.' }
+      - name: Upload synthetic Inno probe for pinned extraction
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-inno-probe-raw-${{ github.sha }}
+          path: build/inno-probe/probe.exe
+          if-no-files-found: error
+          retention-days: 1
+  inspect-inno-probe:
+    name: Verify Windows-generated Inno probe with pinned extractor
+    needs: inno-probe
+    if: ${{ needs.inno-probe.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+      - name: Install extractor build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential cmake libboost-all-dev liblzma-dev zlib1g-dev libbz2-dev unzip
+      - name: Build and verify pinned Inno extractor
+        run: bash scripts/build-pinned-innoextract.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-inno-probe-raw-${{ github.sha }}
+          path: candidate
+      - name: Extract and checksum-test the Windows-generated probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/kayan-inno-probe-extracted"
+          mkdir -p "$output"
+          "$KAYAN_INNOEXTRACT" --extract --test --collisions error --output-dir "$output" -- candidate/probe.exe
+          key="$(find "$output" -type f -name public-key.pem -print -quit)"
+          test -n "$key"
+          test -s "$key"
+          echo "Windows-generated Inno probe extracted and checksum-tested by the pinned extractor."
+
   preflight:
     if: ${{ github.event_name != 'push' || github.event.before != '162685d56b07a5ddbdcbfc04ee387b58e99bfc28' || github.event.head_commit.message != 'Prepare production packaging probe' }}
     name: Validate the exact Windows candidate
@@ -201,19 +244,55 @@ jobs:
           $file = Get-Item -LiteralPath 'build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe'
           $sha = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
           Write-Output "::notice title=Diagnostic EXE::$($file.Name) bytes=$($file.Length) SHA256=$sha source=$env:GITHUB_SHA; not installable or releasable"
-      - name: Inspect diagnostic Inno payload before upload
-        id: diagnostic_inspect
+      - name: Upload raw non-installable diagnostic installer for isolated inspection
         if: ${{ always() && steps.diagnostic_build.outcome == 'success' }}
-        run: node scripts/inspect-final-inno.mjs --artifact build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe --mode test-signed
-      - name: Upload non-installable diagnostic installer
-        if: ${{ always() && steps.diagnostic_inspect.outcome == 'success' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@v4
         with:
-          name: windows-test-only-diagnostic-${{ github.sha }}
+          name: windows-test-only-raw-${{ github.sha }}
           path: build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
       - name: Report a failed screenshot baseline run
         if: ${{ always() && steps.screenshots.outcome == 'failure' }}
         shell: pwsh
         run: throw 'The screenshot baseline generator failed; see the test run. This is not release evidence.'
+  inspect-diagnostic:
+    name: Inspect diagnostic payload on isolated Linux runner
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+      - name: Install extractor build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential cmake libboost-all-dev liblzma-dev zlib1g-dev libbz2-dev unzip
+      - name: Build and verify pinned Inno extractor
+        run: bash scripts/build-pinned-innoextract.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-test-only-raw-${{ github.sha }}
+          path: candidate
+      - name: Inspect exact diagnostic payload with pinned extractor
+        run: |
+          node scripts/inspect-final-inno.mjs --artifact candidate/KAYAN-ERP-TEST-ONLY-Setup.exe \
+            --mode test-signed --extractor "$KAYAN_INNOEXTRACT" \
+            --extractor-sha256 "$KAYAN_INNOEXTRACT_SHA256" \
+            --source-commit "$GITHUB_SHA" --report candidate/payload-verification.json
+      - name: Upload inspected non-installable diagnostic artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-only-diagnostic-${{ github.sha }}
+          path: |
+            candidate/KAYAN-ERP-TEST-ONLY-Setup.exe
+            candidate/payload-verification.json
+          if-no-files-found: error
+          retention-days: 7
+
