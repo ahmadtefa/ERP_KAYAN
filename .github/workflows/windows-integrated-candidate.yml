@@ -120,10 +120,21 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw 'Source SHA mismatch' }
-          if (@(git status --porcelain=v1 --untracked-files=all).Count) { throw 'Source checkout is not clean' }
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) {
+            Write-Output '::error title=Source identity::Source SHA mismatch'
+            throw 'Source SHA mismatch'
+          }
+          $changes = @(git status --porcelain=v1 --untracked-files=all)
+          if ($changes.Count) {
+            $detail = (($changes | Select-Object -First 30) -join ' | ').Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            Write-Output "::error title=Dirty source after Flutter preflight::$detail"
+            throw 'Source checkout is not clean'
+          }
           choco install innosetup --no-progress -y
-          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup install failed' }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::error title=Inno package install::Chocolatey returned $LASTEXITCODE"
+            throw 'Inno Setup install failed'
+          }
           $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path -LiteralPath $compiler)) { $compiler = "$env:ProgramFiles\Inno Setup 6\ISCC.exe" }
           if (-not (Test-Path -LiteralPath $compiler)) { throw 'Inno compiler missing' }
