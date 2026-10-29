@@ -1,6 +1,10 @@
 # Runs the real Windows installer on the CI runner and verifies the installed local runtime.
 [CmdletBinding()]
-param([string]$SetupPath = "build\windows-installer\KAYAN-ERP-Setup.exe")
+param(
+  [string]$SetupPath = "build\windows-installer\KAYAN-ERP-Setup.exe",
+  [switch]$RuntimeOnly,
+  [string]$ExpectedSourceCommit = ""
+)
 
 $ErrorActionPreference = "Stop"
 $setup = (Resolve-Path $SetupPath).Path
@@ -9,6 +13,7 @@ $serviceName = "KayanERPPostgreSQL"
 $installRoot = Join-Path $env:ProgramFiles "KAYAN ERP"
 $backend = Join-Path $installRoot "backend"
 $node = Join-Path $backend "node\node.exe"
+$clientPath = Join-Path $installRoot "erp_kayan.exe"
 $settings = Join-Path $env:ProgramData "KAYAN-ERP\kayan.env"
 
 function Read-Details {
@@ -69,6 +74,45 @@ function Publish-Failure([string]$Reason) {
     } catch { }
   }
   Write-Output $redacted
+}
+
+function Stop-KayanSmokeClient([object]$Process, [int]$Port) {
+  if ($Process -and -not $Process.HasExited) {
+    $null = $Process.CloseMainWindow()
+    try { Wait-Process -Id $Process.Id -Timeout 10 -ErrorAction SilentlyContinue } catch { }
+    if (-not $Process.HasExited) { Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue }
+  }
+  $installRootPattern = [string]$installRoot
+  $backendProcesses = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue | Where-Object {
+    $_.CommandLine -and $_.CommandLine -match '(?i)dist[\\/]+src[\\/]+main\.js' -and $_.CommandLine.Contains($installRootPattern)
+  })
+  foreach ($backendProcess in $backendProcesses) {
+    Stop-Process -Id $backendProcess.ProcessId -Force -ErrorAction SilentlyContinue
+  }
+  if ($Port -gt 0) {
+    for ($wait = 0; $wait -lt 20; $wait++) {
+      $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+      if ($listeners.Count -eq 0) { break }
+      Start-Sleep -Seconds 1
+    }
+  }
+}
+
+function Start-KayanSmokeClient {
+  $process = Start-Process -FilePath $clientPath -WorkingDirectory $installRoot -PassThru
+  foreach ($attempt in 1..90) {
+    if ($process.HasExited) { Fail "The installed KAYAN client exited during a runtime-only restart (exit code $($process.ExitCode))." }
+    foreach ($portCandidate in @(3000, 3001, 3002, 3003, 3010, 3020)) {
+      try {
+        $candidateHealth = Invoke-RestMethod -Uri "http://127.0.0.1:$portCandidate/api/v1/health" -TimeoutSec 2
+        if ($candidateHealth.status) {
+          return @{ Process = $process; Port = $portCandidate; Health = $candidateHealth }
+        }
+      } catch { }
+    }
+    Start-Sleep -Seconds 1
+  }
+  Fail "The installed KAYAN client did not recover a healthy local API within 90 seconds after a licensing-state change."
 }
 
 function Fail([string]$Reason) {
@@ -197,11 +241,12 @@ $manifestPath = Join-Path $installRoot "runtime-manifest.json"
 if (-not (Test-Path $manifestPath)) { Fail "The installed package has no runtime-manifest.json, so the build it came from cannot be identified." }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 Write-Host ("PASS: installed manifest: product {0}, version {1}, commit {2}, Node {3}, PostgreSQL {4}." -f $manifest.product, $manifest.productVersion, $manifest.sourceCommit, $manifest.nodeVersion, $manifest.postgresqlVersion)
-$commitUnderTest = (& git -C $PSScriptRoot rev-parse HEAD 2>$null | Select-Object -First 1)
+$commitUnderTest = $ExpectedSourceCommit
+if (-not $commitUnderTest) { $commitUnderTest = (& git -C $PSScriptRoot rev-parse HEAD 2>$null | Select-Object -First 1) }
 if ($commitUnderTest -and $manifest.sourceCommit -ne $commitUnderTest) {
-  Fail "The installed payload was built from $($manifest.sourceCommit), not from the commit under test ($commitUnderTest)."
+  Fail "The installed payload was built from $($manifest.sourceCommit), not from the expected commit ($commitUnderTest)."
 }
-if ($commitUnderTest) { Write-Host "PASS: the installed payload is the commit under test ($commitUnderTest)." }
+if ($commitUnderTest) { Write-Host "PASS: the installed payload matches the expected source commit ($commitUnderTest)." }
 
 if (-not (Test-Path $settings)) { Fail "The installer did not create $settings" }
 
@@ -413,6 +458,128 @@ try {
   # development server. Only synthetic CI records are created/restored here.
   $base = "http://127.0.0.1:$apiPort/api/v1"
   $headers = @{ Authorization = "Bearer $($login.accessToken)" }
+  if ($RuntimeOnly) {
+    Write-Host "Runtime-only mode: validating offline startup, local PostgreSQL backup/restore, licensing-state recovery and public-key recovery. Licensed business routes are intentionally not exercised without a signing key."
+    $initialLicense = Invoke-RestMethod -Uri "$base/license/status" -TimeoutSec 15
+    if ($initialLicense.state -ne 'UNLICENSED' -or $initialLicense.configured -ne $true -or $initialLicense.blocked -ne $true) {
+      Fail ("Unexpected initial product license state: " + ($initialLicense | ConvertTo-Json -Compress))
+    }
+    Write-Host "PASS: product mode enforces licensing while allowing local health, login and backup routes."
+
+    # Verify the bundled pg_dump/pg_restore path against the installed runtime,
+    # using only the synthetic SQL sentinel created before upgrade/repair.
+    $full = Invoke-RestMethod -Method Post -Uri "$base/backup/full" -Headers $headers -TimeoutSec 180
+    if (-not $full.file.name -or $full.file.sizeBytes -le 0) { Fail 'Installed runtime did not produce a real PostgreSQL backup archive.' }
+    $verified = Invoke-RestMethod -Method Post -Uri "$base/backup/full/$($full.file.name)/verify" -Headers $headers -TimeoutSec 180
+    if ($verified.entries -le 0) { Fail 'Bundled pg_restore did not verify any archive objects.' }
+    $dumpPath = Join-Path $env:TEMP 'kayan-installed-runtime-full-backup.dump'
+    Invoke-WebRequest -UseBasicParsing -Uri "$base/backup/full/$($full.file.name)/download" -Headers $headers -OutFile $dumpPath -TimeoutSec 60
+    $dumpBytes = [IO.File]::ReadAllBytes($dumpPath)
+    if ($dumpBytes.Length -le 5 -or [Text.Encoding]::ASCII.GetString($dumpBytes, 0, 5) -ne 'PGDMP') { Fail 'Installed full backup download is not a real PostgreSQL custom archive.' }
+    $env:PGPASSWORD = $databasePassword
+    & $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -v ON_ERROR_STOP=1 -c "UPDATE kayan_installer_upgrade_probe SET value='changed' WHERE id=1" *> $null
+    $mutationExit = $LASTEXITCODE
+    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    if ($mutationExit -ne 0) { Fail 'Could not mutate the SQL sentinel before full PostgreSQL restore.' }
+    $restoreBody = @{ confirm = $true; fileName = $full.file.name } | ConvertTo-Json -Compress
+    $fullRestored = Invoke-RestMethod -Method Post -Uri "$base/backup/full/restore" -Headers $headers -ContentType 'application/json' -Body $restoreBody -TimeoutSec 300
+    if (-not $fullRestored.restored -or -not $fullRestored.checked -or -not $fullRestored.safetyBackup) { Fail 'Installed full restore did not complete with checked data and a safety backup.' }
+    $login = Invoke-RestMethod -Method Post -Uri "$base/auth/login" -ContentType 'application/json' -Body $loginPayload -TimeoutSec 30
+    if (-not $login.accessToken) { Fail 'Login failed after installed PostgreSQL restore.' }
+    $headers = @{ Authorization = "Bearer $($login.accessToken)" }
+    $env:PGPASSWORD = $databasePassword
+    $sentinelResult = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT value FROM kayan_installer_upgrade_probe WHERE id=1" 2>&1)
+    $sentinelExit = $LASTEXITCODE
+    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    if ($sentinelExit -ne 0 -or (($sentinelResult -join '').Trim() -ne 'preserved')) {
+      Fail ("PostgreSQL full restore did not recover the original SQL sentinel: " + ($sentinelResult -join ' '))
+    }
+    Write-Output '::notice::Installed Windows runtime backup/restore passed: valid PGDMP archive, checked restore, safety backup, re-login and original SQL sentinel verified.'
+
+    $licenseDirectory = Join-Path $env:ProgramData "KAYAN-ERP\license"
+    $statePath = Join-Path $licenseDirectory "license-state.json"
+    $publicKeyPath = Join-Path $licenseDirectory "public-key.pem"
+    $publicKeyBackupPath = Join-Path $env:TEMP "kayan-public-key-smoke-backup.pem"
+    if (-not (Test-Path $statePath)) { Fail "The installed license state file is missing: $statePath" }
+    if (-not (Test-Path $publicKeyPath)) { Fail "The installed public key is missing: $publicKeyPath" }
+    if (Test-Path $publicKeyBackupPath) { Remove-Item $publicKeyBackupPath -Force }
+    $originalStateBytes = [IO.File]::ReadAllBytes($statePath)
+    $originalStateHash = (Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash
+    $originalPublicKeyHash = (Get-FileHash -LiteralPath $publicKeyPath -Algorithm SHA256).Hash
+    try {
+      Stop-KayanSmokeClient -Process $client -Port $apiPort
+      $client = $null
+      [IO.File]::WriteAllText($statePath, 'not-json', [Text.Encoding]::ASCII)
+      $restart = Start-KayanSmokeClient
+      $client = $restart.Process
+      $apiPort = $restart.Port
+      $base = "http://127.0.0.1:$apiPort/api/v1"
+      $healthAfterCorruption = Invoke-RestMethod -Uri "$base/health" -TimeoutSec 10
+      if (-not $healthAfterCorruption.status) { Fail 'Local health did not recover after the license state file was corrupted.' }
+      $damagedResponse = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/license/status" -TimeoutSec 15
+      $damagedBody = $damagedResponse.Content | ConvertFrom-Json
+      if ([int]$damagedResponse.StatusCode -ne 503 -or $damagedBody.code -ne 'LICENSE_STATE_DAMAGED') {
+        Fail ("Corrupt license state did not fail closed with LICENSE_STATE_DAMAGED (HTTP $([int]$damagedResponse.StatusCode)): " + $damagedResponse.Content)
+      }
+      if ([IO.File]::ReadAllText($statePath) -ne 'not-json') { Fail 'The application silently overwrote the corrupted license state instead of preserving it for diagnosis.' }
+      Write-Host 'PASS: the app process and local health API recovered; corrupt license state fails closed without being silently rewritten.'
+
+      Stop-KayanSmokeClient -Process $client -Port $apiPort
+      $client = $null
+      [IO.File]::WriteAllBytes($statePath, $originalStateBytes)
+      $restart = Start-KayanSmokeClient
+      $client = $restart.Process
+      $apiPort = $restart.Port
+      $base = "http://127.0.0.1:$apiPort/api/v1"
+      $restoredLicense = Invoke-RestMethod -Uri "$base/license/status" -TimeoutSec 15
+      if ($restoredLicense.state -ne 'UNLICENSED' -or $restoredLicense.configured -ne $true -or $restoredLicense.blocked -ne $true) {
+        Fail ("Restoring the original license state did not recover the expected unlicensed state: " + ($restoredLicense | ConvertTo-Json -Compress))
+      }
+      Write-Host 'PASS: restoring the original license-state bytes restores normal license-status reporting.'
+
+      Stop-KayanSmokeClient -Process $client -Port $apiPort
+      $client = $null
+      Move-Item -LiteralPath $publicKeyPath -Destination $publicKeyBackupPath
+      $restart = Start-KayanSmokeClient
+      $client = $restart.Process
+      $apiPort = $restart.Port
+      $base = "http://127.0.0.1:$apiPort/api/v1"
+      $missingKeyStatus = Invoke-RestMethod -Uri "$base/license/status" -TimeoutSec 15
+      if ($missingKeyStatus.configured -ne $false -or $missingKeyStatus.blocked -ne $true) {
+        Fail ("A missing installed public key was not detected as an unconfigured, blocked license state: " + ($missingKeyStatus | ConvertTo-Json -Compress))
+      }
+      Write-Host 'PASS: a missing public key is detected without preventing the local runtime from starting.'
+
+      Stop-KayanSmokeClient -Process $client -Port $apiPort
+      $client = $null
+      Move-Item -LiteralPath $publicKeyBackupPath -Destination $publicKeyPath
+      $restart = Start-KayanSmokeClient
+      $client = $restart.Process
+      $apiPort = $restart.Port
+      $base = "http://127.0.0.1:$apiPort/api/v1"
+      $restoredKeyStatus = Invoke-RestMethod -Uri "$base/license/status" -TimeoutSec 15
+      if ($restoredKeyStatus.configured -ne $true -or $restoredKeyStatus.blocked -ne $true -or $restoredKeyStatus.state -ne 'UNLICENSED') {
+        Fail ("Restoring the installed public key did not recover normal product license enforcement: " + ($restoredKeyStatus | ConvertTo-Json -Compress))
+      }
+      if ((Get-FileHash -LiteralPath $publicKeyPath -Algorithm SHA256).Hash -ne $originalPublicKeyHash) {
+        Fail 'The restored public key bytes differ from the original installed key.'
+      }
+      Write-Host 'PASS: restoring the original public key restores normal product-mode license enforcement.'
+    } finally {
+      Stop-KayanSmokeClient -Process $client -Port $apiPort
+      $client = $null
+      if (Test-Path $publicKeyBackupPath) {
+        if (Test-Path $publicKeyPath) { Remove-Item -LiteralPath $publicKeyPath -Force -ErrorAction SilentlyContinue }
+        Move-Item -LiteralPath $publicKeyBackupPath -Destination $publicKeyPath -Force
+      }
+      if (Test-Path $statePath) {
+        if ((Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash -ne $originalStateHash) {
+          [IO.File]::WriteAllBytes($statePath, $originalStateBytes)
+        }
+      }
+    }
+    Write-Output '::notice::Runtime-only Windows installer smoke passed: product install, local PostgreSQL, Prisma setup, API startup/login, offline full backup/restore, corrupt license-state recovery and public-key missing/restore behavior.'
+  } else {
   $originalName = 'Installed backup sentinel'
   $customerBody = @{ code = 'WIN-BACKUP-PROBE'; nameEn = $originalName; nameAr = 'Windows backup probe' } | ConvertTo-Json -Compress
   $customer = Invoke-RestMethod -Method Post -Uri "$base/parties/customers" -Headers $headers -ContentType 'application/json' -Body $customerBody -TimeoutSec 30
@@ -572,6 +739,7 @@ try {
   Write-Output "::notice title=Installed PDF::pages=$($verified.pages) bytes=$($verified.bytes) sha256=$pdfHash arabicLetters=$($verified.arabic.mapped) joinedShapes=$($verified.arabic.joinedLetters) fonts=$($verified.arabic.fonts -join ';')"
   Write-Output "::notice::Installed Windows quotation PDF passed: %PDF- file of $($pdfBytes.Length) bytes over $($verified.pages) pages, design, drawn Arabic face, joined letters and page numbers verified on every page by the installed runtime."
   Write-Output "::notice::Windows installer smoke test passed: service, database preparation, client startup on port $apiPort, login, company JSON and full PostgreSQL backup/restore, and a $($verified.pages)-page designed Arabic quotation PDF all verified."
+  }
 } finally {
   if ($client -and -not $client.HasExited) {
     $null = $client.CloseMainWindow()
