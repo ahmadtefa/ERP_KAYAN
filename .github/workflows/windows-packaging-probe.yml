@@ -1,0 +1,70 @@
+name: Product packaging probe (no upload or installation)
+
+on:
+  push:
+    branches: ['arena/2d794f08-erp-kayan']
+    paths:
+      - '.github/workflows/windows-packaging-probe.yml'
+      - 'distribution/windows/build-installer.ps1'
+      - 'distribution/windows/public-key.pem'
+      - 'scripts/inspect-windows-pe.mjs'
+      - 'scripts/inspect-windows-pe.test.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Confirm exact source SHA
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw 'Source SHA mismatch.' }
+          if (@(git status --porcelain=v1 --untracked-files=all).Count -ne 0) { throw 'Checkout is not clean.' }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.22.3'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - name: Test PE parser and pinned public-key policy
+        run: node --test scripts/inspect-windows-pe.test.mjs scripts/windows-release-policy.test.mjs
+      - name: Install official Inno Setup compiler
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $iscc -PathType Leaf)) { $iscc = "$env:ProgramFiles\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path -LiteralPath $iscc -PathType Leaf)) { throw 'Inno compiler missing.' }
+          $item = Get-Item -LiteralPath $iscc
+          $version = $item.VersionInfo.FileVersion
+          Write-Output "::notice title=Inno compiler version::$version"
+      - name: Build product-mode candidate without signing secrets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\distribution\windows\build-installer.ps1 -DisposableSource
+          if ($LASTEXITCODE -ne 0) { throw 'Product-mode build failed.' }
+          $file = Get-Item -LiteralPath 'build/windows-installer/KAYAN-ERP-Setup.exe'
+          if ($file.Length -le 0) { throw 'Product-mode output is empty.' }
+          $sha = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+          Write-Output "::notice title=Unverified product-mode EXE::$($file.Name) bytes=$($file.Length) SHA256=$sha source=$env:GITHUB_SHA; NOT approved for upload or install"
+      - name: Check PE structure independently
+        run: node scripts/inspect-windows-pe.mjs build/windows-installer/KAYAN-ERP-Setup.exe
+      # A PE check is not Inno validation or a scan of compressed content.
+      # No artifact upload is present: this workflow must fail closed until a
+      # trusted compatible extractor and a complete final-payload policy exist.
+      - name: Block unverified product artifact
+        shell: pwsh
+        run: |
+          Write-Output '::error title=Packaging verification incomplete::Inno structure and final compressed payload remain unverified; no artifact can be uploaded or installed.'
+          throw 'Product candidate is not verified.'

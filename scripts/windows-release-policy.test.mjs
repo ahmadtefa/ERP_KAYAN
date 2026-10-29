@@ -16,12 +16,20 @@ test('product and diagnostic modes require the right public-key fingerprint', ()
   assert.equal(validatePem(pem(other), 'test-signed', approved), fingerprint(other.publicKey));
 });
 
+test('checked-in verification material matches the pinned product policy', () => {
+  const publicKey = readFileSync(new URL('../distribution/windows/public-key.pem', import.meta.url), 'utf8');
+  assert.equal(validatePem(publicKey, 'product'), 'F932-38B0-CDC0-A81D-345F-160C-F8DC-DBB7');
+});
+
 test('diagnostic Inno setup stays non-installable and production paths stay disabled', () => {
   const inno = readFileSync(new URL('../distribution/windows/installer.iss', import.meta.url), 'utf8');
   const workflow = readFileSync(new URL('../.github/workflows/windows-installer.yml', import.meta.url), 'utf8');
   const build = readFileSync(new URL('../distribution/windows/build-installer.ps1', import.meta.url), 'utf8');
   assert.match(build, /foreach \(\$runtimeDir in @\('bin', 'lib', 'share'\)\)/);
   assert.doesNotMatch(build, /Copy-Item \(Join-Path \$pgBin\.FullName '\*'\)/);
+  assert.doesNotMatch(build, /\$demoBackupSource|backend\\\\demo-data\\\\kayan-company-backup-demo\.json/);
+  assert.match(build, /@\('prepare-database\.mjs', 'database-state\.mjs'\)/);
+  assert.match(build, /seed-demo/);
   assert.match(inno, /#if KayanBuildKind != "product"[\s\S]*?Result := False;/);
   const smoke = workflow.match(/- name: Smoke-test the actual installed Windows application([\s\S]*?)(?=\n      - name:|\n  [a-z-]+:|$)/);
   assert.ok(smoke && /if:\s*\$\{\{ false \}\}/.test(smoke[1]));

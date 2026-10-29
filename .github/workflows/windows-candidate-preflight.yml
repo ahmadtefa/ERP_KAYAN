@@ -12,6 +12,9 @@ permissions:
 
 jobs:
   inno-probe:
+    # The dedicated packaging-probe workflow handles this one packaging-only
+    # commit; no unchanged application suites are repeated for that commit.
+    if: ${{ github.event_name != 'push' || github.event.before != '162685d56b07a5ddbdcbfc04ee387b58e99bfc28' || github.event.head_commit.message != 'Prepare production packaging probe' }}
     name: Probe Inno inspection on Windows
     runs-on: windows-latest
     timeout-minutes: 15
@@ -56,6 +59,7 @@ jobs:
           & node scripts/inspect-final-inno.mjs --artifact (Join-Path $dir 'probe.exe') --mode test-signed
           if ($LASTEXITCODE -ne 0) { throw 'Synthetic Inno inspection failed.' }
   preflight:
+    if: ${{ github.event_name != 'push' || github.event.before != '162685d56b07a5ddbdcbfc04ee387b58e99bfc28' || github.event.head_commit.message != 'Prepare production packaging probe' }}
     name: Validate the exact Windows candidate
     runs-on: windows-latest
     timeout-minutes: 90

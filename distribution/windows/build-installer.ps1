@@ -200,13 +200,11 @@ if (Test-Path -LiteralPath $app) { throw 'Staging app directory already exists; 
 New-Item -ItemType Directory -Force -Path (Join-Path $app 'backend'), (Join-Path $app 'backend\node'), (Join-Path $app 'backend\postgres'), (Join-Path $app 'build\web') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $app 'licenses') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $app 'prerequisites') | Out-Null
-$demoBackupSource = Join-Path $root 'demo-data\kayan-company-backup-demo.json'
-if (-not (Test-Path -LiteralPath $demoBackupSource)) {
-  throw 'The generated demo company JSON backup is missing from demo-data.'
-}
-$demoBackupDirectory = Join-Path $app 'backend\demo-data'
-New-Item -ItemType Directory -Force -Path $demoBackupDirectory | Out-Null
-Copy-Item -LiteralPath $demoBackupSource -Destination (Join-Path $demoBackupDirectory 'kayan-company-backup-demo.json') -Force
+# The downloadable sample backup is not runtime configuration or a system
+# seed. This explicit demo JSON copy is omitted for every build mode; the
+# final payload still requires independent sensitive-content inspection.
+# The optional demo-download endpoint returns its existing 404 when absent;
+# normal backup/restore and first-run initialization do not depend on it.
 Copy-Item $vcRuntime (Join-Path $app 'prerequisites\vc_redist.x64.exe') -Force
 
 Write-Host '[1/8] Build backend and Prisma client'
@@ -217,8 +215,29 @@ Run-Native 'npm.cmd' @('run','build') $backend
 Write-Host '[2/8] Stage production backend files (development .env is excluded)'
 # The licence of the Arabic typeface travels with the program: the font is
 # embedded in the bundle, and its licence has to ship beside it.
-foreach ($relative in @('dist','prisma','scripts','package.json','package-lock.json','nest-cli.json','tsconfig.json','OFL-NotoNaskhArabic.txt')) {
-  Copy-Item -LiteralPath (Join-Path $backend $relative) -Destination (Join-Path $app 'backend') -Recurse -Force
+# Copy runtime trees into fresh staging, omitting compiled test suites, test
+# directories and the development demo seeder; never remove source files.
+foreach ($relative in @('dist','prisma')) {
+  $sourceRoot = Join-Path $backend $relative
+  if (-not (Test-Path -LiteralPath $sourceRoot -PathType Container)) { throw "Missing runtime tree $relative." }
+  foreach ($file in Get-ChildItem -LiteralPath $sourceRoot -File -Recurse) {
+    $subPath = $file.FullName.Substring($sourceRoot.Length).TrimStart('\','/')
+    if ($subPath -match '(^|[\\/])(__tests__|tests?|fixtures|demo-data)([\\/]|$)' -or
+        $file.Name -match '(?i)(\.spec\.|\.test\.|^seed-demo\.)') { continue }
+    $destination = Join-Path (Join-Path $app "backend\$relative") $subPath
+    [void](New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force)
+    Copy-Item -LiteralPath $file.FullName -Destination $destination
+  }
+}
+foreach ($relative in @('package.json','package-lock.json','nest-cli.json','tsconfig.json','OFL-NotoNaskhArabic.txt')) {
+  Copy-Item -LiteralPath (Join-Path $backend $relative) -Destination (Join-Path $app 'backend')
+}
+# Do not ship scenario runners or the demo data generator. These two modules
+# are the runtime database preparer and its direct dependency.
+$runtimeScripts = Join-Path $app 'backend\scripts'
+[void](New-Item -ItemType Directory -Path $runtimeScripts)
+foreach ($script in @('prepare-database.mjs', 'database-state.mjs')) {
+  Copy-Item -LiteralPath (Join-Path $backend "scripts\$script") -Destination $runtimeScripts
 }
 Run-Native 'npm.cmd' @('ci','--omit=dev','--no-audit','--no-fund') (Join-Path $app 'backend')
 # prepare-database.mjs intentionally shells out to the Prisma CLI to apply the same checked-in migrations.
@@ -309,7 +328,7 @@ $repairToolExe = Join-Path $app 'RepairTool.exe'
 if (-not (Test-Path -LiteralPath $repairToolExe)) { throw 'RepairTool.exe was not produced by the C# compiler.' }
 
 Write-Host '[6/8] Verify staged runtime essentials and absence of development .env'
-$required = @('erp_kayan.exe','backend\dist\src\main.js','backend\dist\prisma\seed.js','backend\scripts\prepare-database.mjs','backend\scripts\database-state.mjs','backend\demo-data\kayan-company-backup-demo.json','backend\node\node.exe','backend\postgres\bin\pg_ctl.exe','backend\postgres\bin\pg_isready.exe','backend\postgres\bin\initdb.exe','backend\postgres\bin\psql.exe','backend\postgres\bin\pg_dump.exe','backend\postgres\bin\pg_restore.exe','build\web\index.html','install-runtime.ps1','repair-runtime.ps1','reset-kayan.ps1','repair-kayan.bat','remove-runtime.ps1','database-control.ps1','UnelevatedProcess.cs','RepairTool.exe','prerequisites\vc_redist.x64.exe')
+$required = @('erp_kayan.exe','backend\dist\src\main.js','backend\dist\prisma\seed.js','backend\scripts\prepare-database.mjs','backend\scripts\database-state.mjs','backend\node\node.exe','backend\postgres\bin\pg_ctl.exe','backend\postgres\bin\pg_isready.exe','backend\postgres\bin\initdb.exe','backend\postgres\bin\psql.exe','backend\postgres\bin\pg_dump.exe','backend\postgres\bin\pg_restore.exe','build\web\index.html','install-runtime.ps1','repair-runtime.ps1','reset-kayan.ps1','repair-kayan.bat','remove-runtime.ps1','database-control.ps1','UnelevatedProcess.cs','RepairTool.exe','prerequisites\vc_redist.x64.exe')
 foreach ($item in $required) { if (-not (Test-Path (Join-Path $app $item))) { throw "Staged package is missing $item" } }
 $secretEnvironmentFiles = Get-ChildItem -LiteralPath $app -Force -File -Recurse | Where-Object { $_.Name -eq '.env' -or $_.Name -like '.env.*' }
 if ($secretEnvironmentFiles) { throw 'Environment files are forbidden in the installer package.' }
