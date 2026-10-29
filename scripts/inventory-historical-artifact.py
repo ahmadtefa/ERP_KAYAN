@@ -43,6 +43,9 @@ def download():
 
 def report(line):
     print(line, flush=True)
+    # Annotations remain accessible when GitHub log archives cannot be reached.
+    escaped = line.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+    print(f'::notice title=Historical inventory::{escaped[:3500]}', flush=True)
     with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as out:
         out.write(line + '\n')
 
@@ -106,5 +109,9 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as exc:
-        print(f'Historical inventory incomplete: {type(exc).__name__}: {exc}', file=sys.stderr)
+        # Do not emit arbitrary URL exceptions: signed download URLs are
+        # credentials. Only known, explicitly constructed reasons are safe.
+        reason = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+        reason = reason.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+        print(f'::error title=Historical inventory incomplete::{reason}', flush=True)
         sys.exit(1)
