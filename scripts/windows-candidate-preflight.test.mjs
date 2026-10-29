@@ -36,7 +36,9 @@ test('preflight cannot publish, receives no secrets and uploads only the labelle
 });
 
 test('lint debt remains visible without gating the build; private-key-writing tests are excluded', () => {
-  assert.match(workflow, /run:\s*npm run lint/);
+  assert.match(workflow, /npm\.cmd run lint/);
+  assert.match(workflow, /flutter analyze --no-pub --machine/);
+  assert.match(workflow, /::error title=Flutter analyzer diagnostics/);
   assert.match(workflow, /continue-on-error:\s*true/);
   assert.match(workflow, /steps\.lint\.outcome == 'failure'/);
   assert.match(workflow, /::warning title=Known lint debt/);

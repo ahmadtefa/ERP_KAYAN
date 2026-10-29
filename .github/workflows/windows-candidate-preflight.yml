@@ -66,7 +66,13 @@ jobs:
         id: lint
         continue-on-error: true
         working-directory: backend
-        run: npm run lint
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          & npm.cmd run lint *> (Join-Path $env:RUNNER_TEMP 'kayan-lint.log')
+          $result = $LASTEXITCODE
+          Get-Content (Join-Path $env:RUNNER_TEMP 'kayan-lint.log') -Tail 3 | ForEach-Object { Write-Output "lint summary: $_" }
+          if ($result -ne 0) { throw 'Backend lint has known findings; see the classification report.' }
       - name: Backend tests excluding key generator
         id: tests
         working-directory: backend
@@ -81,7 +87,27 @@ jobs:
         run: flutter pub get --enforce-lockfile
       - name: Analyze Flutter
         id: flutter_analyze
-        run: flutter analyze
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $log = Join-Path $env:RUNNER_TEMP 'kayan-flutter-analyze.log'
+          & flutter analyze --no-pub --machine *> $log
+          $result = $LASTEXITCODE
+          $diagnostics = @(Get-Content -LiteralPath $log | Where-Object { $_ -match '^(ERROR|WARNING|INFO)\|' })
+          if ($diagnostics.Count -gt 0) {
+            # Annotations are available even where log archives are blocked.
+            # Encode workflow-command metacharacters; do not truncate the first
+            # diagnostic or claim success when a later diagnostic fails.
+            $text = (($diagnostics | Select-Object -First 30) -join ' | ').Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            if ($text.Length -gt 60000) { $text = $text.Substring(0, 60000) }
+            Write-Output "::error title=Flutter analyzer diagnostics::$text"
+          }
+          if ($result -ne 0 -and $diagnostics.Count -eq 0) {
+            $tail = ((Get-Content -LiteralPath $log -Tail 20) -join ' | ').Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            if ($tail.Length -gt 12000) { $tail = $tail.Substring(0, 12000) }
+            Write-Output "::error title=Flutter analyzer output::$tail"
+          }
+          if ($result -ne 0) { throw "Flutter analyze failed with exit code $result; diagnostics=$($diagnostics.Count)." }
       - name: Test Flutter
         id: flutter_test
         run: flutter test --reporter expanded
