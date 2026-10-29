@@ -19,6 +19,15 @@ for (const line of lines) {
       /EXCEPTION|Error|Exception|Unable to|golden/i.test(event.message ?? '')) {
     printed.set(event.testID, String(event.message).slice(0, 5000));
   }
+  // These three widget tests use only the checked-in synthetic invoice data.
+  // Retain assertion counts and test file locations, not arbitrary log output.
+  if (event.type === 'print' && /^(an invoice line carries the chosen cost center to the API|without cost centers the line form stays as it was|purchase editor sends multiple named landed-cost charges and their total)$/.test(tests.get(event.testID) ?? '')) {
+    const details = String(event.message ?? '').split(/\r?\n/).map(line =>
+      line.match(/^\s*(?:Expected:|Actual:)\s*(?:<\d+>|exactly \d+ matching candidates|no matching candidates)/)?.[0]?.trim() ??
+      line.match(/test\/widget\/invoice_(?:cost_center|editor_landed_cost)_test\.dart:\d+:\d+/)?.[0] ?? ''
+    ).filter(Boolean).join(' ');
+    if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
+  }
   if (event.type === 'error') {
     errors.push(`${tests.get(event.testID) ?? `test ${event.testID ?? 'unknown'}`}: ${event.error ?? 'unknown error'} ${event.stackTrace ?? ''} ${printed.get(event.testID) ?? ''}`);
   }
