@@ -39,7 +39,9 @@ jobs:
         with:
           node-version: '22.22.3'
       - run: node --test tools/license-generator/memory-flow.test.mjs
-      - run: echo 'Source-only test with a synthetic key; the packaged Windows generator was not tested.'
+      - name: Test the isolated machine fingerprint v2 algorithm
+        run: node --experimental-transform-types --test scripts/machine-fingerprint-v2.test.mjs
+      - run: echo 'Source-only tests; the packaged Windows generator and hardware fingerprint collection were not tested.'
 
   prisma-postgres:
     name: Standard Prisma and isolated PostgreSQL upgrade
