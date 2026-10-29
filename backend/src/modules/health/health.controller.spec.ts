@@ -59,7 +59,7 @@ describe('HealthController', () => {
     expect(res.databaseName).toBe('erp_kayan');
   });
 
-  it('asks for the database name as varchar, avoiding PostgreSQL's internal name type', async () => {
+  it("asks for the database name as varchar, avoiding PostgreSQL's internal name type", async () => {
     // `current_database()` returns PostgreSQL's `name` type, which Prisma
     // cannot deserialise in a raw query. Without the cast, /health reports a
     // working database as down and no installation can ever prove which
