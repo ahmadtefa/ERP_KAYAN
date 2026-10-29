@@ -58,7 +58,7 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   assert.match(runtimeSmoke[1], /needs: \[build, inspect-final\]/);
   assert.match(runtimeSmoke[1], /needs\.build\.outputs\.build_mode == 'product'/);
   const smokeScript = readFileSync(new URL('./smoke-test-installed-windows.ps1', import.meta.url), 'utf8');
-  assert.ok(smokeScript.indexOf('& $pgDump -h 127.0.0.1') > 0);
+  assert.ok(smokeScript.indexOf('& $pgDump --no-password -h 127.0.0.1') > 0);
   assert.ok(smokeScript.indexOf('& $pgRestore --list $preUpgradeBackup') < smokeScript.indexOf('$upgrade = Start-Process'));
   assert.match(smokeScript, /not signed-licence reconstruction or activation/);
 });

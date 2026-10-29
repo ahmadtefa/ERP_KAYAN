@@ -240,6 +240,7 @@ if (-not $lockedAsExpected) {
 }
 Write-Host "PASS: created pre-existing 0-ACE kayan.env to exercise broken-DACL recovery."
 
+Write-Output '::notice title=Windows smoke phase::Starting initial setup on disposable runner.'
 $install = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", ("/LOG=" + $installLog)) -Wait -PassThru
 if ($install.ExitCode -ne 0) {
   Fail ("KAYAN-ERP-Setup.exe failed with exit code $($install.ExitCode).")
@@ -420,6 +421,8 @@ $seed = Start-Process -FilePath $node -ArgumentList @("scripts\prepare-database.
 if ($seed.ExitCode -ne 0) { Fail "CI administrator setup failed with exit code $($seed.ExitCode)." }
 Remove-Item Env:KAYAN_ADMIN_USERNAME,Env:KAYAN_ADMIN_PASSWORD -ErrorAction SilentlyContinue
 
+Write-Output '::notice title=Windows smoke phase::Initial setup and client startup completed; preparing pre-upgrade data.'
+
 # Put a disposable record in the freshly installed company database, run the
 # installer again as an upgrade/reinstall, and prove that the record remains.
 # This is synthetic CI data only; no customer database is ever reset.
@@ -443,19 +446,23 @@ $pgDump = Join-Path $installRoot "backend\postgres\bin\pg_dump.exe"
 $pgRestore = Join-Path $installRoot "backend\postgres\bin\pg_restore.exe"
 if ((Test-Path -LiteralPath $preUpgradeBackup) -or -not (Test-Path -LiteralPath $pgDump) -or -not (Test-Path -LiteralPath $pgRestore)) { Fail 'Cannot safely prepare the pre-upgrade backup.' }
 $env:PGPASSWORD = $databasePassword
+$env:PGCONNECT_TIMEOUT = '20'
+Write-Output '::notice title=Windows smoke phase::Starting disposable pre-upgrade database backup.'
 try {
-  & $pgDump -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -Fc -f $preUpgradeBackup *> $null
+  & $pgDump --no-password -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -Fc -f $preUpgradeBackup *> $null
   if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $preUpgradeBackup -PathType Leaf)) { Fail 'Disposable pre-upgrade PostgreSQL backup failed.' }
   & $pgRestore --list $preUpgradeBackup *> $null
   if ($LASTEXITCODE -ne 0) { Fail 'Disposable pre-upgrade PostgreSQL backup could not be verified.' }
   $preUpgradeBackupHash = (Get-FileHash -LiteralPath $preUpgradeBackup -Algorithm SHA256).Hash
   Write-Host "PASS: checked disposable pre-upgrade PostgreSQL backup SHA256=$preUpgradeBackupHash."
 } finally {
-  Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+  Remove-Item Env:PGPASSWORD,Env:PGCONNECT_TIMEOUT -ErrorAction SilentlyContinue
 }
 
+Write-Output '::notice title=Windows smoke phase::Pre-upgrade backup verified; starting upgrade.'
 $upgradeLog = Join-Path $env:TEMP "kayan-setup-upgrade-smoke.log"
 $upgrade = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", ("/LOG=" + $upgradeLog)) -Wait -PassThru
+Write-Output '::notice title=Windows smoke phase::Upgrade process exited; checking service and data.'
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if ($upgrade.ExitCode -ne 0 -or -not $service -or $service.Status -ne "Running") {
   # The first-install log cannot explain a failure on the second Setup run.
@@ -504,6 +511,7 @@ if ($diagnoseBefore.ExitCode -eq 0) {
 }
 Write-Host "PASS: RepairTool.exe detected the stopped PostgreSQL service before repair (diagnose exit code $($diagnoseBefore.ExitCode))."
 
+Write-Output '::notice title=Windows smoke phase::Starting repair after upgrade verification.'
 $repair = Start-Process -FilePath $repairTool -ArgumentList @("--repair", "--quiet") -WorkingDirectory $installRoot -Wait -PassThru
 if ($repair.ExitCode -ne 0) {
   Fail "The bundled RepairTool.exe failed with exit code $($repair.ExitCode). See $runtimeLog and $env:ProgramData\KAYAN-ERP\logs\repairtool.log"
