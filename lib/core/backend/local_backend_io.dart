@@ -118,6 +118,13 @@ class KayanDatabaseConfig {
     return name.isEmpty ? null : name;
   }
 
+  /// Recovery cannot promote a diagnostic server when either database name
+  /// is missing: lack of an observed mismatch is not proof of identity.
+  static bool hasMatchingDatabaseIdentity(String? url, Object? reported) {
+    final expected = databaseNameFromUrl(url);
+    return expected != null && reported is String && reported == expected;
+  }
+
   static String buildDatabaseUrl({
     required String username,
     required String password,
@@ -276,6 +283,17 @@ class LocalBackend {
             return LocalBackendStatus.failed(settingsProblem, logPath: layout.logPath);
           }
           final settings = await RuntimeSettings.load(layout, port);
+          if (!KayanDatabaseConfig.hasMatchingDatabaseIdentity(
+            settings.databaseUrl,
+            health['databaseName'],
+          )) {
+            return LocalBackendStatus.failed(
+              'تعذّر التحقق من قاعدة بيانات الخادم بعد استعادة الترخيص. / '
+              'Could not verify the server database after licence recovery.',
+              logPath: layout.logPath,
+              databaseProblem: true,
+            );
+          }
           final identityProblem = _verifyServerIdentity(health, settings);
           if (identityProblem != null) {
             return LocalBackendStatus.failed(identityProblem, logPath: layout.logPath);
@@ -1021,6 +1039,11 @@ class LocalBackend {
 
   /// Stops the server this copy started. Called when the window closes.
   static Future<void> shutdown() async {
+    // An exit requested during startup must not lose the child that is about
+    // to be created. Also let an in-flight database preparation finish rather
+    // than terminating it in the middle of a migration.
+    final starting = _starting;
+    if (starting != null) await starting;
     final running = _instance;
     _instance = null;
     final process = running?._process;

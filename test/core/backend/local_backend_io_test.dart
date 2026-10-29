@@ -37,6 +37,14 @@ void main() {
   });
 
   group('KayanDatabaseConfig', () {
+    test('recovery requires both matching database identities', () {
+      const url = 'postgresql://erp_app:password@127.0.0.1:5432/erp_kayan';
+      expect(KayanDatabaseConfig.hasMatchingDatabaseIdentity(url, 'erp_kayan'), isTrue);
+      expect(KayanDatabaseConfig.hasMatchingDatabaseIdentity(url, 'other'), isFalse);
+      expect(KayanDatabaseConfig.hasMatchingDatabaseIdentity(url, null), isFalse);
+      expect(KayanDatabaseConfig.hasMatchingDatabaseIdentity(null, 'erp_kayan'), isFalse);
+      expect(KayanDatabaseConfig.hasMatchingDatabaseIdentity('postgresql://localhost/', ''), isFalse);
+    });
     test('matches the PostgreSQL port the Windows installer provisions', () {
       // The shipped Setup puts the bundled cluster on 5432. It used to be 5433
       // here - the port of the older development cluster - so a copy without a
