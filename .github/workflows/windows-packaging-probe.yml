@@ -84,7 +84,7 @@ jobs:
   inspect:
     name: Extract and verify the actual Inno payload
     needs: probe
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
