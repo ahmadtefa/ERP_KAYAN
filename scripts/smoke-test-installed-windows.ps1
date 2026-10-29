@@ -127,7 +127,7 @@ function Stop-KayanSmokeClient([object]$Process, [int]$Port) {
   }
   $installRootPattern = [string]$installRoot
   $backendProcesses = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue | Where-Object {
-    $_.CommandLine -and $_.CommandLine -match '(?i)dist[\\/]+src[\\/]+main\.js' -and $_.CommandLine.Contains($installRootPattern)
+    $_.CommandLine -and $_.CommandLine -match '(?i)dist[\\/]+src[\\/]+main\.js' -and $_.CommandLine.IndexOf($installRootPattern, [StringComparison]::OrdinalIgnoreCase) -ge 0
   })
   foreach ($backendProcess in $backendProcesses) {
     Stop-Process -Id $backendProcess.ProcessId -Force -ErrorAction SilentlyContinue
@@ -621,10 +621,8 @@ try {
         if (Test-Path $publicKeyPath) { Remove-Item -LiteralPath $publicKeyPath -Force -ErrorAction SilentlyContinue }
         Move-Item -LiteralPath $publicKeyBackupPath -Destination $publicKeyPath -Force
       }
-      if (Test-Path $statePath) {
-        if ((Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash -ne $originalStateHash) {
-          [IO.File]::WriteAllBytes($statePath, $originalStateBytes)
-        }
+      if (-not (Test-Path $statePath) -or (Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash -ne $originalStateHash) {
+        [IO.File]::WriteAllBytes($statePath, $originalStateBytes)
       }
     }
     Write-Output '::notice::Runtime-only Windows installer smoke passed: product install, local PostgreSQL, Prisma setup, API startup/login, offline full backup/restore, corrupt license-state recovery and public-key missing/restore behavior.'
