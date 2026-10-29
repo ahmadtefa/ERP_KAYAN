@@ -86,10 +86,13 @@ async function scanForPrivateMaterial(file) {
   let tail = '';
   for await (const chunk of createReadStream(file)) {
     const text = tail + chunk.toString('latin1');
-    if (PRIVATE_MARKERS.some((pattern) => pattern.test(text))) return true;
+    const markerIndex = PRIVATE_MARKERS.findIndex((pattern) => pattern.test(text));
+    if (markerIndex >= 0) {
+      return markerIndex === 0 ? 'PEM private-key header' : 'Ed25519 PKCS#8 private-key prefix';
+    }
     tail = text.slice(-128);
   }
-  return false;
+  return null;
 }
 
 export async function verifyExtractedPayload({ artifactPath, root, expectedSourceCommit }) {
@@ -156,8 +159,10 @@ export async function verifyExtractedPayload({ artifactPath, root, expectedSourc
   const fingerprint = validatePem(publicKeyBytes.toString('utf8'), 'product');
 
   for (const file of files) {
-    if (await scanForPrivateMaterial(file)) {
-      throw new Error('A supported private-key marker was found in an extracted payload file.');
+    const marker = await scanForPrivateMaterial(file);
+    if (marker) {
+      const relativeFile = normalizePath(relative(payloadRoot, file));
+      throw new Error(`A supported private-key marker (${marker}) was found in extracted payload file: ${relativeFile}.`);
     }
   }
 
