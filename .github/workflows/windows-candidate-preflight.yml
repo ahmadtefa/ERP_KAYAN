@@ -11,6 +11,50 @@ permissions:
   contents: read
 
 jobs:
+  inno-probe:
+    name: Probe Inno inspection on Windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.22.3'
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build and inspect a synthetic Inno payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP ('kayan-inno-probe-' + [guid]::NewGuid().ToString('N'))
+          [void](New-Item -ItemType Directory -Path $dir)
+          $key = Join-Path $dir 'public-key.pem'
+          & node -e "const c=require('node:crypto'),f=require('node:fs'); f.writeFileSync(process.argv[1],c.generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'pem'}),{flag:'wx'});" $key
+          if ($LASTEXITCODE -ne 0) { throw 'Probe public key generation failed.' }
+          $script = @"
+          [Setup]
+          AppName=Kayan Inno Inspection Probe
+          AppVersion=1.0
+          DefaultDirName={autopf}\KayanInnoProbe
+          OutputDir=$dir
+          OutputBaseFilename=probe
+          Compression=lzma2
+          SolidCompression=yes
+          [Files]
+          Source: "$key"; DestDir: "{app}"
+          "@
+          $iss = Join-Path $dir 'probe.iss'
+          [IO.File]::WriteAllText($iss, $script)
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $iscc)) { $iscc = "$env:ProgramFiles\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path -LiteralPath $iscc)) { throw 'Inno compiler missing from runner.' }
+          & $iscc $iss
+          if ($LASTEXITCODE -ne 0) { throw 'Synthetic Inno probe build failed.' }
+          & node scripts/inspect-final-inno.mjs --artifact (Join-Path $dir 'probe.exe') --mode test-signed
+          if ($LASTEXITCODE -ne 0) { throw 'Synthetic Inno inspection failed.' }
   preflight:
     name: Validate the exact Windows candidate
     runs-on: windows-latest

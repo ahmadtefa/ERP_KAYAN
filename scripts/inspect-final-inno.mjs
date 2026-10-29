@@ -85,7 +85,12 @@ async function main(args) {
   if (list.error) throw new Error(list.error.code === 'ENOENT'
     ? '7z is not available on PATH; the final Inno payload was not inspected.'
     : 'Could not start 7z to list the final Inno payload.');
-  if (list.status !== 0) throw new Error(`7z could not list the final Inno payload (exit ${list.status ?? 'unknown'}).`);
+  if (list.status !== 0) {
+    // 7z diagnostics identify tool/format failures, not payload contents.
+    // Avoid printing the listing itself or any embedded file bytes.
+    const diagnostic = (list.stderr || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 1000);
+    throw new Error(`7z could not list the final Inno payload (exit ${list.status ?? 'unknown'})${diagnostic ? `: ${diagnostic}` : '.'}`);
+  }
   const keyPaths = inspectListing(list.stdout);
   for (const keyPath of keyPaths) {
     const publicPem = await stream(['x', '-so', '-spd', '--', path, keyPath], true);

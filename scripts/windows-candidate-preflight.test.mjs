@@ -28,6 +28,8 @@ test('preflight cannot publish, receives no secrets and uploads only the labelle
   assert.doesNotMatch(workflow, /softprops\/action-gh-release|gh release create|secrets\./);
   assert.doesNotMatch(workflow, /contents:\s*write/);
   assert.match(workflow, /actions\/upload-artifact@[0-9a-f]{40}/);
+  assert.match(workflow, /name: Probe Inno inspection on Windows/);
+  assert.match(workflow, /inspect-final-inno\.mjs --artifact \(Join-Path \$dir 'probe\.exe'\) --mode test-signed/);
   assert.match(workflow, /path:\s*build\/windows-installer\/KAYAN-ERP-TEST-ONLY-Setup\.exe/);
   assert.match(workflow, /-DisposableSource -TestSignedBuild/);
   const inspect = workflow.indexOf('node scripts/inspect-final-inno.mjs --artifact build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe --mode test-signed');
