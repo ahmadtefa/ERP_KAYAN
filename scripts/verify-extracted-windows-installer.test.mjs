@@ -71,7 +71,7 @@ async function fixture() {
     licensePublicKeySha256: createHash('sha256').update(key).digest('hex'),
   };
   await writeFile(join(root, 'runtime-manifest.json'), JSON.stringify(manifest));
-  return { base, root, artifact };
+  return { base, root, artifactPath: artifact };
 }
 
 test('accepts a complete product payload with the pinned production public key', async () => {
