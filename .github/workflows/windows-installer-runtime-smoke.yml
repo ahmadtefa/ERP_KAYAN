@@ -23,6 +23,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.22.3'
+      - name: Test extracted-payload verifier policy
+        run: node --test scripts/verify-extracted-windows-installer.test.mjs
       - name: Install isolated extractor build dependencies
         run: |
           sudo apt-get update
