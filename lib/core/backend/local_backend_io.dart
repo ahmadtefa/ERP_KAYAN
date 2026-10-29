@@ -174,8 +174,7 @@ bool keepServerForLicenceDiagnostics(Map<String, dynamic>? health) {
 }
 
 class LocalBackend {
-  LocalBackend._(this._process, this.port, this._log, {bool diagnosticOnly = false})
-    : _diagnosticOnly = diagnosticOnly;
+  LocalBackend._(this._process, this.port, this._log, [this._diagnosticOnly = false]);
 
   final Process? _process;
   final int port;
@@ -446,7 +445,7 @@ class LocalBackend {
           // error remain available while the operator restores trusted state.
           // The business guard still fails closed. A retry must pass all
           // identity checks before this child can ever be treated as ready.
-          _instance = LocalBackend._(process, port, log, diagnosticOnly: true);
+          _instance = LocalBackend._(process, port, log, true);
         } else {
           await _stop(process, log);
         }
