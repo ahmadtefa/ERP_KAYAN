@@ -12,7 +12,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, 'arena/key-generator-register-ui-fix', 'arena/2d794f08-erp-kayan']
+    branches: [main, 'arena/key-generator-register-ui-fix', 'arena/2d794f08-erp-kayan', 'fix/windows-runtime-key-hash']
 
 # Building or inspecting a candidate never needs permission to publish releases.
 # Any future publishing job must request write permission separately, after its

@@ -62,6 +62,23 @@ param(
   [ValidateSet('New','Existing','Auto')][string]$CompanyMode = 'Auto'
 )
 $ErrorActionPreference = 'Stop'
+
+# Hash files through .NET directly rather than relying on Get-FileHash being
+# discoverable through PowerShell module autoloading in a clean/elevated setup
+# process. This is used before touching the existing database or licence state.
+function Get-FileSha256Hex([string]$Path) {
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    throw "Required file for SHA-256 verification is missing."
+  }
+  $stream = [System.IO.File]::OpenRead($Path)
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    return [System.BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '')
+  } finally {
+    $sha256.Dispose()
+    $stream.Dispose()
+  }
+}
 # Refuse unsafe packages before touching services or licence state. When a
 # pre-existing protected diagnostic directory is available, record only the
 # failed preflight stage; stale success from a prior run must not hide failure.
@@ -82,9 +99,9 @@ try {
   $preflightStage = 'installed-key-presence'
   if (Test-Path -LiteralPath $installedKey -PathType Leaf) {
     $preflightStage = 'incoming-key-hash'
-    $incomingKeyHash = (Get-FileHash -LiteralPath $incomingKey -Algorithm SHA256).Hash
+    $incomingKeyHash = (Get-FileSha256Hex -Path $incomingKey)
     $preflightStage = 'installed-key-hash'
-    $installedKeyHash = (Get-FileHash -LiteralPath $installedKey -Algorithm SHA256).Hash
+    $installedKeyHash = (Get-FileSha256Hex -Path $installedKey)
     $preflightStage = 'public-key-comparison'
     if (-not $incomingKeyHash -or -not $installedKeyHash -or $incomingKeyHash -ne $installedKeyHash) {
       throw 'The existing licence key differs; refusing setup until a tested transition is approved.'
@@ -768,7 +785,7 @@ function Add-LicenceSettings([hashtable]$Values) {
   if ($source) {
     # Recheck immediately before the write, and never replace an existing key.
     if (Test-Path -LiteralPath $target -PathType Leaf) {
-      if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash) {
+      if ((Get-FileSha256Hex -Path $source) -ne (Get-FileSha256Hex -Path $target)) {
         throw 'The installed licence key changed during setup; refusing replacement.'
       }
     } elseif ((Test-Path -LiteralPath $enforcementMarker) -or (Test-Path -LiteralPath (Join-Path $licenceDirectory 'license-state.json'))) {
