@@ -47,7 +47,7 @@ jobs:
           echo "KAYAN_INNOEXTRACT=$extractor" >> "$GITHUB_ENV"
           fixture_zip="$RUNNER_TEMP/innoextract-format-fixtures.zip"
           curl -fsSL "https://github.com/mplabsorg/innoextract/releases/download/format-fixtures-v1/innoextract-format-fixtures.zip" -o "$fixture_zip"
-          echo "70ccffba6c4aaf18f918cde0f11e2c005b9d1f596ea7c8cfe8c7c8f6a8b7c49a  $fixture_zip" | sha256sum -c -
+          echo "d77d2c447dd46edaeab6b4ea5d7102000b0b8cd66970f18cea2b1eb20f21aa52  $fixture_zip" | sha256sum -c -
           unzip -q "$fixture_zip" -d "$RUNNER_TEMP"
           python3 "$source_dir/tests/check-fixtures.py" --extractor "$extractor" --fixtures "$RUNNER_TEMP/format-fixtures" --output "$RUNNER_TEMP/format-fixture-results"
       - name: Download the internal candidate from the exact build run
