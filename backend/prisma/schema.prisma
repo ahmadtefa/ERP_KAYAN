@@ -1055,6 +1055,11 @@ model StockDocumentLine {
   notes           String?
   lineNumber      Int
 
+  // ── Multi-unit snapshot (null on legacy rows). `quantity` stays in base units ──
+  unitName     String?  @db.VarChar(40)
+  unitFactor   Decimal? @db.Decimal(19, 6)
+  unitQuantity Decimal? @db.Decimal(19, 4)
+
   document StockDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
   item     Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
@@ -1550,6 +1555,20 @@ model SalesInvoiceLine {
   /// historical invoices keep meaning exactly what they meant before.
   costCenterId String? @db.Uuid
 
+  // ── Multi-unit of measure snapshot ──────────────────────────────────────
+  // All three are null on rows written before multi-unit existed. A null row
+  // behaves exactly as before: `quantity` is the entered quantity in the
+  // item's base unit and `unitPrice` is the price of that base unit. On a new
+  // row they record what the user actually chose, frozen at document time so a
+  // later change to the item's unit factor or price never rewrites history.
+  // `quantity` always stays the internal, base-unit quantity used by stock.
+  /// The unit label the user picked, e.g. "carton". Null = base unit (legacy).
+  unitName String? @db.VarChar(40)
+  /// Base units contained in one chosen unit, copied from ItemUnit at entry.
+  unitFactor Decimal? @db.Decimal(19, 6)
+  /// What the user typed, measured in `unitName` (e.g. 1 carton).
+  unitQuantity Decimal? @db.Decimal(19, 4)
+
   invoice SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item    Item?        @relation(fields: [itemId], references: [id], onDelete: Restrict)
   costCenter CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
@@ -1667,6 +1686,14 @@ model PurchaseInvoiceLine {
   /// The analytical dimension of the line: which department or project the
   /// cost was incurred for. Optional, and never guessed for old rows.
   costCenterId String? @db.Uuid
+
+  // ── Multi-unit of measure snapshot (null on legacy rows; see SalesInvoiceLine) ──
+  /// The unit label the user picked, e.g. "carton". Null = base unit (legacy).
+  unitName String? @db.VarChar(40)
+  /// Base units contained in one chosen unit, copied from ItemUnit at entry.
+  unitFactor Decimal? @db.Decimal(19, 6)
+  /// What the user typed, measured in `unitName` (e.g. 5 cartons).
+  unitQuantity Decimal? @db.Decimal(19, 4)
 
   invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item    Item?           @relation(fields: [itemId], references: [id], onDelete: Restrict)
@@ -1965,11 +1992,18 @@ model ItemUnit {
   salePrice     Decimal? @db.Decimal(19, 4)
   purchasePrice Decimal? @db.Decimal(19, 4)
 
+  /// A unit used on a saved document is never hard-deleted: it is deactivated
+  /// instead, so old documents still name a unit that exists. New documents
+  /// reject an inactive unit.
+  isActive Boolean @default(true)
+
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
   @@unique([itemId, unit])
+  @@index([itemId, isActive])
   @@map("item_units")
 }
 
@@ -2083,6 +2117,11 @@ model PurchaseOrderLine {
 
   notes String?
 
+  // ── Multi-unit snapshot (null on legacy rows); `quantity` stays in base units ──
+  unitName     String?  @db.VarChar(40)
+  unitFactor   Decimal? @db.Decimal(19, 6)
+  unitQuantity Decimal? @db.Decimal(19, 4)
+
   order PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   item  Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
@@ -2145,6 +2184,11 @@ model SalesOrderLine {
   lineTotal       Decimal @default(0) @db.Decimal(19, 4)
 
   notes String?
+
+  // ── Multi-unit snapshot (null on legacy rows); `quantity` stays in base units ──
+  unitName     String?  @db.VarChar(40)
+  unitFactor   Decimal? @db.Decimal(19, 6)
+  unitQuantity Decimal? @db.Decimal(19, 4)
 
   order SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   item  Item       @relation(fields: [itemId], references: [id], onDelete: Restrict)
@@ -2256,4 +2300,98 @@ model Budget {
   @@index([companyId, costCenterId])
   @@index([accountId])
   @@map("budgets")
+}
+
+// ------------------------------------------------------- offline licensing
+//
+// The licence belongs to the installation, not to a company: one machine runs
+// one KAYAN database, and the company rows inside it are the customer's
+// business data. Nothing here is derived from the company name, the tax
+// number or the books - only from the machine id and the signed keys the
+// operator issues with the offline key generator.
+//
+// These tables are deliberately not part of the company JSON backup: a
+// restored backup must not be able to roll the seat counter back. The
+// protected state file beside the database is the watermark, and the restore
+// path re-syncs it after the rows come back (see LicensingService.reconcile).
+
+model LicenseInstallation {
+  id           String    @id @default(uuid()) @db.Uuid
+  /// The identifier the issuing tool wrote into every key it made.
+  licenseId    String    @unique
+  machineId    String
+  /// Free text the operator typed into the issuing tool. Never the company's
+  /// trade name, tax number or anything read from the books.
+  customerRef  String?
+  issuedAt     DateTime
+  startsAt     DateTime
+  /// null means perpetual: no renewal date and no expiry.
+  expiresAt    DateTime?
+  seatLimit    Int
+  /// ACTIVE, or SUSPENDED when a confirmed clock tamper stops the program.
+  status       String    @default("ACTIVE")
+  lastKeyId    String?
+  lastSeenAt   DateTime?
+  clockState   String    @default("OK")
+  clockNote    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("license_installations")
+}
+
+/// Every key this installation has accepted, once.
+///
+/// `keyId` is unique, which is what makes re-entering the same renewal (or the
+/// same seat increase) a no-op instead of a second grant: the insert fails and
+/// the service answers "already applied".
+model LicenseKeyRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  keyId       String   @unique
+  licenseId   String
+  type        String
+  payloadJson String   @db.Text
+  machineId   String?
+  appliedAt   DateTime @default(now())
+  appliedBy   String?  @db.Uuid
+  ipAddress   String?
+  note        String?
+
+  @@index([licenseId])
+  @@map("license_keys")
+}
+
+/// One row per user account ever created through this installation.
+///
+/// The row survives the user: deleting or deactivating an account does not
+/// give the seat back, which is the whole point of counting here rather than
+/// counting `users`. Existing accounts are inserted by the migration.
+model LicenseSeatUsage {
+  id             String   @id @default(uuid()) @db.Uuid
+  /// Null for rows the migration wrote before a licence existed.
+  licenseId      String?
+  userId         String?  @db.Uuid
+  username       String
+  /// SETUP_ADMIN, USER_CREATE or MIGRATION_EXISTING.
+  reason         String
+  /// Prevents a retried request from consuming a second seat.
+  idempotencyKey String?  @unique
+  createdAt      DateTime @default(now())
+
+  @@index([licenseId])
+  @@index([userId])
+  @@map("license_seat_usage")
+}
+
+/// The licence's own history: issued, renewed, seats, transferred, clock
+/// warnings. Append-only from the application's point of view.
+model LicenseEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  licenseId   String?
+  type        String
+  detail      String?  @db.Text
+  occurredAt  DateTime @default(now())
+
+  @@index([licenseId, occurredAt])
+  @@map("license_events")
 }

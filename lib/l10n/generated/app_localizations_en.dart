@@ -1136,6 +1136,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get downloadList => 'Download the list';
 
   @override
+  String get downloadStatement => 'Download the statement';
+
+  @override
+  String get exportStatementHint =>
+      'Download this statement as it stands: Excel, CSV, PDF, or a page to print.';
+
+  @override
   String get exportListHint =>
       'Download this list as it stands: Excel, CSV, PDF, or a page to print.';
 
@@ -1422,6 +1429,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get resetCountSalesInvoices => 'Sales invoices';
+
+  @override
+  String get resetCountQuotations => 'Quotations';
+
+  @override
+  String get resetCountCashVouchers => 'Receipts and payments';
 
   @override
   String get resetCountPurchaseInvoices => 'Purchase invoices';
@@ -1796,34 +1809,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get resultLabel => 'Result';
-  @override
-  String get @@locale => 'en';
-
-  @override
-  String get deleteAccountConfirm => 'The account “{account}” will be deleted, as long as it has no movements or sub-accounts. Continue?';
-
-  @override
-  String get deleteBranchConfirm => 'The unit “{unit}” will be deleted. Units with movements cannot be deleted.';
-
-  @override
-  String get deleteBackupConfirm => 'The file “{file}” will be permanently removed from the server.';
-
-  @override
-  String get resetForCompany => 'This will reset “{company}”.';
-
-  @override
-  String get resetConfirmBody => 'The only way back is to restore the backup that is about to be taken. Type your password and the word {word} to go ahead.';
-
-  @override
-  String get resetWordLabel => 'Type {word}';
-
-  @override
-  String get resetWrongWord => 'Type {word} exactly as it is written to confirm.';
-
-  @override
-  String get resetDone => 'The company’s data was cleared. “{file}” holds the old data.';
-
-  @override
   String get rowDensity => 'Row density';
 
   @override
@@ -2362,11 +2347,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get errorServerBody => 'The server failed while carrying out the operation and nothing was saved. Try again shortly, and if it keeps happening tell your system administrator.';
 
   @override
-  String backupSavedIn(Object directory) {
-    return 'Saved in: \$directory';
-  }
-
-  @override
   String get accumulatedAccount => 'Accumulated depreciation account';
 
   @override
@@ -2455,4 +2435,289 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get usefulLifeMonths => 'Useful life (months)';
+
+  @override
+  String get licence => 'Licence';
+
+  @override
+  String get licenceSubtitle => 'Licence status, activation and renewal';
+
+  @override
+  String get licenceSettingsSubtitle => 'Activation, renewal and user-account limit';
+
+  @override
+  String get licenceStateActive => 'Active';
+
+  @override
+  String get licenceStateExpired => 'Expired';
+
+  @override
+  String get licenceStateSuspended => 'Suspended';
+
+  @override
+  String get licenceStateUnlicensed => 'Not licensed';
+
+  @override
+  String get licenceMachineId => 'Machine ID';
+
+  @override
+  String get licenceLicenceId => 'Licence ID';
+
+  @override
+  String get licenceIssuedAt => 'Issued';
+
+  @override
+  String get licenceStartsAt => 'Started';
+
+  @override
+  String get licenceExpiresAt => 'Expires';
+
+  @override
+  String get licencePerpetual => 'Perpetual — no expiry';
+
+  @override
+  String get licenceDaysRemaining => 'Days remaining';
+
+  @override
+  String get licenceSeats => 'User accounts';
+
+  @override
+  String get licenceSeatsUsedLabel => 'Used';
+
+  @override
+  String get licenceSeatsLimitLabel => 'Limit';
+
+  @override
+  String get licenceSeatsAvailableLabel => 'Available';
+
+  @override
+  String get licenceSeatsExplainer => 'A seat is consumed when a login account is created and is never returned by deleting the account.';
+
+  @override
+  String get licenceRequestCode => 'Activation request code';
+
+  @override
+  String get licenceRequestCodeHint => 'Send this code to the supplier. It carries only this machine\'s ID and the program version.';
+
+  @override
+  String get licenceCopy => 'Copy';
+
+  @override
+  String get licenceCopied => 'Copied';
+
+  @override
+  String get licenceEnterKey => 'Licence key';
+
+  @override
+  String get licenceKeyHint => 'Paste the key the supplier sent, starting with KYN1.';
+
+  @override
+  String get licenceApply => 'Apply key';
+
+  @override
+  String get licenceOperation => 'What the key does';
+
+  @override
+  String get licenceOperationActivation => 'New activation';
+
+  @override
+  String get licenceOperationRenewal => 'Renewal';
+
+  @override
+  String get licenceOperationSeats => 'Add user accounts';
+
+  @override
+  String get licenceOperationTransfer => 'Move to this computer';
+
+  @override
+  String get licenceApplied => 'The licence was updated.';
+
+  @override
+  String get licenceClockTitle => 'System date check';
+
+  @override
+  String get licenceClockWarning => 'The system date is earlier than the last recorded run. Set the correct date and time in Windows, then confirm.';
+
+  @override
+  String get licenceConfirmClock => 'Confirm date and time';
+
+  @override
+  String get licenceEvents => 'Licence history';
+
+  @override
+  String get licenceEventsEmpty => 'No licence events yet.';
+
+  @override
+  String get licencePublicKey => 'Verification key';
+
+  @override
+  String get licenceNotConfigured => 'This installation has no verification key, so it cannot check any licence key. Reinstall with the supplier\'s public key.';
+
+  @override
+  String get licenceBlockedTitle => 'Work is stopped by the licence';
+
+  @override
+  String get licenceBlockedBody => 'Your data is intact. Nothing was deleted. Open the licence screen and apply a renewal key to continue working.';
+
+  @override
+  String get licenceSuspendedBody => 'The program stopped because the system date is earlier than the last recorded run. Correct the date and time, then confirm on this screen. No data was lost.';
+
+  @override
+  String get licenceOpenLicence => 'Open the licence screen';
+
+  @override
+  String get licenceBackupStillAvailable => 'Backups and restores stay available while the licence is expired.';
+
+  @override
+  String get licenceOpenBackup => 'Backup and restore';
+
+  @override
+  String get licenceEnforcementEnforce => 'Enforced';
+
+  @override
+  String get licenceEnforcementWarn => 'Warning only';
+
+  @override
+  String get licenceEnforcementOff => 'Off';
+
+  @override
+  String get licenceSuperAdminOnly => 'Only a super administrator can change the licence.';
+
+  @override
+  String get licenceExpiringSoon => 'This licence expires soon. Renew it before it ends so no workday is interrupted.';
+
+  @override
+  String unitsBarcodesTitle(Object itemName) => 'Units & barcodes — $itemName';
+
+  @override
+  String get unitsBarcodesEmpty => 'No additional units or barcodes have been added.';
+
+  @override
+  String unitsBarcodesInactiveUnit(Object unitName) => '$unitName (inactive)';
+
+  @override
+  String unitsBarcodesFactorBarcode(Object factor, Object barcode) => 'Factor: $factor  •  Barcode: $barcode';
+
+  @override
+  String get unitsBarcodesHidden => 'hidden from new documents';
+
+  @override
+  String get unitsBarcodesBaseUnit => 'Base unit';
+
+  @override
+  String get unitsBarcodesGenerateTooltip => 'Generate / replace barcode';
+
+  @override
+  String get unitsBarcodesEditTooltip => 'Edit unit';
+
+  @override
+  String get unitsBarcodesReactivateTooltip => 'Reactivate unit';
+
+  @override
+  String get unitsBarcodesBaseCannotRemove => 'The base unit cannot be removed';
+
+  @override
+  String get unitsBarcodesRemoveTooltip => 'Remove unit';
+
+  @override
+  String get unitsBarcodesPrintLabels => 'Print labels';
+
+  @override
+  String get unitsBarcodesAdd => 'Add unit / barcode';
+
+  @override
+  String get unitsBarcodesFieldUnit => 'Unit name';
+
+  @override
+  String get unitsBarcodesFieldFactor => 'Base units per unit';
+
+  @override
+  String get unitsBarcodesFactorHelper => 'Example: 1 carton = 20 base units → factor 20.';
+
+  @override
+  String get unitsBarcodesFieldBarcode => 'Barcode';
+
+  @override
+  String get unitsBarcodesFieldSalePrice => 'Sale price';
+
+  @override
+  String get unitsBarcodesFieldPurchasePrice => 'Purchase price';
+
+  @override
+  String get unitsBarcodesAdded => 'Unit / barcode added.';
+
+  @override
+  String get unitsBarcodesBarcodeGenerated => 'Barcode generated.';
+
+  @override
+  String get unitsBarcodesReactivated => 'Unit reactivated.';
+
+  @override
+  String get unitsBarcodesRemoveTitle => 'Remove unit';
+
+  @override
+  String unitsBarcodesRemoveConfirm(Object unit) => 'Remove $unit from this item? If it was used on a saved document, it will be deactivated instead of deleted, and hidden from new documents.';
+
+  @override
+  String get unitsBarcodesDeactivated => 'Unit used on documents: deactivated, not deleted.';
+
+  @override
+  String get unitsBarcodesRemoved => 'Unit removed.';
+
+  @override
+  String get unitsBarcodesEditTitle => 'Edit unit';
+
+  @override
+  String get unitsBarcodesBaseCannotRenameHelper => 'The base unit cannot be renamed.';
+
+  @override
+  String get unitsBarcodesBaseFactorHelper => 'The base unit always converts 1:1.';
+
+  @override
+  String get unitsBarcodesFactorEditHelper => 'The saved factor is used when this unit is scanned or counted.';
+
+  @override
+  String get unitsBarcodesUpdated => 'Unit updated.';
+
+  @override
+  String get unitsBarcodesTooltip => 'Units & barcodes';
+
+  @override
+  String barcodeLabelsTitle(Object itemName) => 'Print barcode labels — $itemName';
+
+  @override
+  String barcodeLabelsInactiveUnit(Object unitName) => '$unitName (inactive)';
+
+  @override
+  String barcodeLabelsBarcode(Object barcode) => 'Barcode: $barcode';
+
+  @override
+  String get barcodeLabelsNoBarcode => 'No barcode assigned — assign one before printing';
+
+  @override
+  String get barcodeLabelsCopies => 'Copies';
+
+  @override
+  String get barcodeLabelsPaper => 'Paper';
+
+  @override
+  String get barcodeLabelsPaperA4 => 'A4 sheet (3 labels per row)';
+
+  @override
+  String get barcodeLabelsPaperThermal80 => 'Thermal roll 80 mm';
+
+  @override
+  String get barcodeLabelsPaperThermal58 => 'Thermal roll 58 mm';
+
+  @override
+  String get barcodeLabelsShowPrice => 'Show sale price';
+
+  @override
+  String get barcodeLabelsPdf => 'PDF';
+
+  @override
+  String get barcodeLabelsPrint => 'Print';
+
+  @override
+  String barcodeLabelsPrintCount(Object count) => 'Print ($count)';
 }

@@ -1,0 +1,117 @@
+name: Windows candidate preflight (no publication)
+
+# Runs only a committed tree at this session's branch. This is NOT an
+# installation/upgrade/licence-recovery test and cannot authorize a release.
+on:
+  push:
+    branches: ['arena/2d794f08-erp-kayan']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Validate the exact Windows candidate
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Confirm exact checkout
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_SHA) { throw 'Checkout did not match the event commit.' }
+          if (@(git status --porcelain=v1 --untracked-files=all).Count -ne 0) { throw 'Candidate checkout is not clean.' }
+          Write-Host "Candidate commit: $actual"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          # Flutter 3.47.6 embeds Dart 3.13.5, matching pubspec.lock.
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - name: Record tool versions
+        run: |
+          node --version
+          npm --version
+          flutter --version
+      - name: Install locked backend dependencies
+        id: install
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+      - name: Validate Prisma schema
+        id: schema
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://synthetic@127.0.0.1:5432/kayan_unused?schema=public
+        run: npx prisma validate
+      - name: Generate current Prisma Client
+        id: prisma
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://synthetic@127.0.0.1:5432/kayan_unused?schema=public
+        run: npx prisma generate
+      - name: Backend lint
+        id: lint
+        continue-on-error: true
+        working-directory: backend
+        run: npm run lint
+      - name: Backend tests excluding key generator
+        id: tests
+        working-directory: backend
+        # The generator suite writes a synthetic private key to disk. It is
+        # deliberately excluded; this run must not claim a complete suite.
+        run: npm test -- --runInBand --testPathIgnorePatterns=license-generator.spec.ts
+      - name: Compile backend with current Prisma Client
+        id: backend_build
+        working-directory: backend
+        run: npm run build
+      - name: Get locked Flutter dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Analyze Flutter
+        id: flutter_analyze
+        run: flutter analyze
+      - name: Test Flutter
+        id: flutter_test
+        run: flutter test --reporter expanded
+      - name: Report known lint debt
+        if: ${{ always() && steps.lint.outcome == 'failure' }}
+        shell: pwsh
+        run: Write-Output '::warning title=Known lint debt::Backend lint failed under the newer rules. See docs/release/LINT-CLASSIFICATION-2026-10-29.md; this is not a clean lint result.'
+      # No secrets, releases, installer execution or signing are configured.
+      # A diagnostic build may not be installed: test/evaluation setups remain
+      # deliberately blocked until service, path and database isolation exists.
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build non-installable diagnostic installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $key = Join-Path $env:RUNNER_TEMP 'kayan-diagnostic-public.pem'
+          & node -e "const c=require('node:crypto'),f=require('node:fs'); const p=c.generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'pem'}); f.writeFileSync(process.argv[1],p,{flag:'wx'});" $key
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create diagnostic public key.' }
+          & .\distribution\windows\build-installer.ps1 -DisposableSource -TestSignedBuild -LicencePublicKeyPath $key
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic installer build failed.' }
+          $file = Get-Item -LiteralPath 'build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe'
+          $sha = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+          Write-Output "::notice title=Diagnostic EXE::$($file.Name) bytes=$($file.Length) SHA256=$sha source=$env:GITHUB_SHA; not installable or releasable"
+      - name: Inspect diagnostic Inno payload before upload
+        run: node scripts/inspect-final-inno.mjs --artifact build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe --mode test-signed
+      - name: Upload non-installable diagnostic installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-test-only-diagnostic-${{ github.sha }}
+          path: build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe
+          if-no-files-found: error
+          retention-days: 7

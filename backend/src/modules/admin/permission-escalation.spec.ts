@@ -2,6 +2,10 @@ import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { RolesService } from './roles.service';
 
+// The seat reservation is the only licensing call these specs reach;
+// its own behaviour is covered by licensing.service.spec.ts.
+const licensingStub = { reserveSeat: jest.fn().mockResolvedValue({ reserved: true }), reconcile: jest.fn().mockResolvedValue(undefined) } as any;
+
 describe('permission escalation protections', () => {
   const companyId = 'company-id';
   const actorId = 'actor-id';
@@ -19,7 +23,7 @@ describe('permission escalation protections', () => {
         ]),
       },
     };
-    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any, licensingStub);
 
     await expect(
       service.create(
@@ -49,7 +53,7 @@ describe('permission escalation protections', () => {
         }),
       },
     };
-    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any, licensingStub);
 
     await expect(
       service.changePassword(companyId, actorId, 'super-admin-id', 'new-test-password', false),
@@ -153,7 +157,7 @@ describe('permission escalation protections', () => {
       user: { findFirst: jest.fn().mockResolvedValue(userRecord) },
       $transaction: jest.fn(async (callback: (tx: any) => Promise<unknown>) => callback(tx)),
     };
-    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any, licensingStub);
 
     await service.update(companyId, actorId, 'target-user', { isActive: false }, [], false);
 
@@ -174,7 +178,7 @@ describe('permission escalation protections', () => {
     const prisma = {
       user: { findFirst: jest.fn().mockResolvedValue(superAdmin) },
     };
-    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any, licensingStub);
 
     await expect(
       service.update(companyId, actorId, superAdmin.id, { fullNameEn: 'Changed' }, [], false),
@@ -224,7 +228,7 @@ describe('direct permission grants', () => {
       permission: { findMany: jest.fn().mockResolvedValue(permissionRows) },
       $transaction: jest.fn(async (callback: (tx: any) => Promise<unknown>) => callback(tx)),
     };
-    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any, licensingStub);
     return { service, prisma, tx };
   }
 
@@ -283,7 +287,7 @@ describe('direct permission grants', () => {
     const prisma = {
       user: { findFirst: jest.fn().mockResolvedValue(withGrants) },
     };
-    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any, licensingStub);
 
     const response = await service.findOne(companyId, 'target-user');
     expect((response as any).extraPermissions).toEqual(['cash.vouchers.post']);

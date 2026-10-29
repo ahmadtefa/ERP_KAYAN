@@ -1,14 +1,39 @@
 [CmdletBinding()]
 param(
   [string]$Output = 'build\windows-installer',
-  [switch]$SkipInstaller
+  # Required acknowledgement: this script runs npm ci, Prisma and Flutter,
+  # which modify generated files. Use only a reviewed disposable source copy.
+  [switch]$DisposableSource,
+  [switch]$SkipInstaller,
+  # Builds the product without licences enforced. Only for development: such a
+  # build refuses every customer key, and it must never be handed to a
+  # customer. Without this switch a build that cannot find the operator's
+  # public key fails instead of shipping quietly unprotected - that is how a
+  # released Setup came to run without asking for an activation key.
+  [switch]$EvaluationBuild,
+  # An explicitly labelled diagnostic installer using a throwaway public key.
+  # It must never be published or given to a customer as a product installer.
+  [switch]$TestSignedBuild,
+  # Where the licence public key is when it is not beside this script. A
+  # release passes the operator's key (or drops it beside this script); the CI
+  # job passes a throwaway key it generated for that run, so the Setup it
+  # installs really does enforce licences and activation can be tested end to
+  # end. Only the public key is ever read: nothing in this build can issue a
+  # licence.
+  [string]$LicencePublicKeyPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+if (-not $DisposableSource) {
+  throw 'Build refused: use -DisposableSource only in a reviewed, disposable copy of the actual working tree. npm ci and Flutter modify generated files.'
+}
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $backend = Join-Path $root 'backend'
-$stage = Join-Path $root 'build\windows-installer-stage'
+# Each invocation gets its own staging directory; an earlier run is never
+# removed or reused. Build only from an isolated copy of the working tree:
+# npm ci, Prisma and Flutter can still overwrite generated files in that copy.
+$stage = Join-Path (Join-Path $root 'build\windows-installer-stage') ([guid]::NewGuid().ToString('N'))
 $outputPath = if ([IO.Path]::IsPathRooted($Output)) { [IO.Path]::GetFullPath($Output) } else { [IO.Path]::GetFullPath((Join-Path $root $Output)) }
 $version = (Get-Content (Join-Path $root 'pubspec.yaml') | Where-Object { $_ -match '^version:' } | Select-Object -First 1) -replace '^version:\s*', ''
 $appVersion = ($version -split '\+')[0]
@@ -22,14 +47,47 @@ $vcRuntimeUrl = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
 $nodeSha256 = '158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541'
 $postgresSha256 = '2aacc055d9bac49763ac0164759c13866bc0235123d7ffdbb6a6aaa20dc25d9a'
 
+# Fail before staging, downloads, or compilation. Production is the default;
+# test and evaluation are explicit and receive different installer names.
+if ($EvaluationBuild -and $TestSignedBuild) { throw 'EvaluationBuild and TestSignedBuild are mutually exclusive.' }
+if ($EvaluationBuild -and $LicencePublicKeyPath) { throw 'An evaluation build must not be given a licence public key.' }
+$buildKind = if ($EvaluationBuild) { 'evaluation' } elseif ($TestSignedBuild) { 'test-signed' } else { 'product' }
+$setupBase = switch ($buildKind) {
+  'test-signed' { 'KAYAN-ERP-TEST-ONLY-Setup' }
+  'evaluation' { 'KAYAN-ERP-EVALUATION-ONLY-Setup' }
+  default { 'KAYAN-ERP-Setup' }
+}
+$licencePublicKey = $null
+if (-not $EvaluationBuild) {
+  $licenceCandidates = @()
+  if ($LicencePublicKeyPath) {
+    $explicitKey = if ([IO.Path]::IsPathRooted($LicencePublicKeyPath)) { [IO.Path]::GetFullPath($LicencePublicKeyPath) } else { [IO.Path]::GetFullPath((Join-Path $root $LicencePublicKeyPath)) }
+    # Never fall back to a different file if the caller chose an explicit path.
+    if (-not (Test-Path -LiteralPath $explicitKey -PathType Leaf)) { throw 'The explicitly requested licence public key file is missing.' }
+    $licenceCandidates += $explicitKey
+  } else {
+    $licenceCandidates += @((Join-Path $PSScriptRoot 'public-key.pem'), (Join-Path $PSScriptRoot 'licensing\public-key.pem'))
+  }
+  $licencePublicKey = $licenceCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+}
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Node.js is required to validate the licence build policy.' }
+$policy = Join-Path $root 'scripts\license-build-policy.mjs'
+if ($licencePublicKey) { & node $policy --mode $buildKind --public-key $licencePublicKey } else { & node $policy --mode $buildKind }
+if ($LASTEXITCODE -ne 0) { throw 'Licence build policy validation failed. No installer was built.' }
+# Never overwrite an earlier installer or compiler log. A new directory is
+# required, not merely an empty shared one that another process could use.
+if (Test-Path -LiteralPath $outputPath) { throw 'Installer output path already exists; choose a new directory.' }
+if (Test-Path -LiteralPath $stage) { throw 'The unique staging directory already exists; refusing to reuse it.' }
+[void](New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop)
+
 # The build log is the only thing that can explain a failed build, and the
 # job log of a CI run is not always readable. It is written next to the
 # installer and repeated as a GitHub annotation when something goes wrong.
-$buildLog = Join-Path $root 'build\windows-installer-build.log'
+$buildLog = Join-Path $stage 'windows-installer-build.log'
 $transcriptRunning = $false
 try {
-  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $buildLog) | Out-Null
-  Start-Transcript -Path $buildLog -Force | Out-Null
+  New-Item -ItemType Directory -Path (Split-Path -Parent $buildLog) | Out-Null
+  Start-Transcript -Path $buildLog | Out-Null
   $transcriptRunning = $true
 } catch {
   Write-Host "Could not start the build transcript: $($_.Exception.Message)"
@@ -55,18 +113,21 @@ function Require-Command([string]$Name) {
 function Invoke-DownloadWithRetry([string]$Url, [string]$Destination, [int]$Attempts = 3) {
   for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
     try {
-      if (Test-Path -LiteralPath $Destination) {
-        Remove-Item -LiteralPath $Destination -Force
+      $attemptPath = "$Destination.attempt-$attempt"
+      if ((Test-Path -LiteralPath $Destination) -or (Test-Path -LiteralPath $attemptPath)) {
+        throw 'A download target already exists; refusing to overwrite it.'
       }
       Write-Host "Downloading $([IO.Path]::GetFileName($Destination)) (attempt $attempt/$Attempts)..."
-      Invoke-WebRequest -Uri $Url -OutFile $Destination -TimeoutSec 300
-      if (-not (Test-Path -LiteralPath $Destination) -or (Get-Item -LiteralPath $Destination).Length -le 0) {
-        throw "Download produced an empty file: $Destination"
+      Invoke-WebRequest -Uri $Url -OutFile $attemptPath -TimeoutSec 300
+      if (-not (Test-Path -LiteralPath $attemptPath) -or (Get-Item -LiteralPath $attemptPath).Length -le 0) {
+        throw "Download produced an empty file: $attemptPath"
       }
+      Move-Item -LiteralPath $attemptPath -Destination $Destination
       return
     } catch {
       $message = $_.Exception.Message
-      Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+      # Preserve any partial download for inspection in this run's private
+      # staging directory; each retry uses a different filename.
       if ($attempt -ge $Attempts) {
         throw "Download failed after $Attempts attempts for $Url. Last error: $message"
       }
@@ -81,8 +142,7 @@ function Get-VerifiedArchive([string]$Url, [string]$Destination, [string]$Sha256
     $existingHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
     $validExistingFile = $existingHash -eq $Sha256
     if (-not $validExistingFile) {
-      Write-Host "Discarding incomplete or checksum-mismatched archive: $([IO.Path]::GetFileName($Destination))"
-      Remove-Item -LiteralPath $Destination -Force
+      throw "Checksum-mismatched archive was left untouched: $([IO.Path]::GetFileName($Destination))"
     }
   }
   if (-not $validExistingFile) {
@@ -104,9 +164,11 @@ Require-Command 'flutter'
 Require-Command 'node'
 Require-Command 'npm'
 Require-Command 'git'
-Require-Command 'python'
-Run-Native 'python' @('-c','from PIL import Image') $root
-Run-Native 'python' @('scripts/generate_app_icons.py') $root
+# Use the icon assets from the supplied working-tree snapshot as-is. The icon
+# generator overwrites tracked Windows/web assets and also writes Android files.
+foreach ($icon in @('windows\runner\resources\app_icon.ico', 'web\favicon.png', 'web\icons\Icon-192.png', 'web\icons\Icon-512.png', 'web\icons\Icon-maskable-192.png', 'web\icons\Icon-maskable-512.png')) {
+  if (-not (Test-Path -LiteralPath (Join-Path $root $icon) -PathType Leaf)) { throw "Required existing icon asset is missing: $icon" }
+}
 $flutter = Get-Command flutter
 if ($flutter.Source -notmatch '\.bat$|\.cmd$') { $flutterCommand = 'flutter' } else { $flutterCommand = $flutter.Source }
 $iscc = Get-Command 'ISCC.exe' -ErrorAction SilentlyContinue
@@ -134,7 +196,7 @@ if ($vcSignature.Status -ne 'Valid' -or $vcSignature.SignerCertificate.Subject -
 }
 
 $app = Join-Path $stage 'KAYAN-ERP'
-if (Test-Path $app) { Remove-Item -LiteralPath $app -Recurse -Force }
+if (Test-Path -LiteralPath $app) { throw 'Staging app directory already exists; refusing to replace it.' }
 New-Item -ItemType Directory -Force -Path (Join-Path $app 'backend'), (Join-Path $app 'backend\node'), (Join-Path $app 'backend\postgres'), (Join-Path $app 'build\web') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $app 'licenses') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $app 'prerequisites') | Out-Null
@@ -202,6 +264,28 @@ Copy-Item (Join-Path $PSScriptRoot 'database-control.ps1') $app
 Copy-Item (Join-Path $PSScriptRoot 'UnelevatedProcess.cs') $app
 Copy-Item (Join-Path $PSScriptRoot 'README.txt') $app
 Copy-Item (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') $app
+# Offline licensing: a build prepared for customers carries the operator's
+# PUBLIC key only. The private key never leaves the supplier's key generator.
+#
+# A build with no key cannot verify any licence, so shipping one would mean
+# shipping a copy that runs without an activation key. That is a build error,
+# not a warning: the only way to produce such a build is to ask for it with
+# -EvaluationBuild, and then the manifest and the installer's own log say so.
+if ($licencePublicKey) {
+  # Canonical destination even when the supplied file has a different name.
+  $stagedPublicKey = Join-Path $app 'public-key.pem'
+  Copy-Item -LiteralPath $licencePublicKey -Destination $stagedPublicKey -Force
+  # Validate the actual staged bytes too, not only the source selected earlier.
+  & node $policy --mode $buildKind --public-key $stagedPublicKey
+  if ($LASTEXITCODE -ne 0) { throw 'Staged licence public key failed policy validation.' }
+  $licenceMode = 'enforce'
+  $licenceKeySha256 = (Get-FileHash -LiteralPath $stagedPublicKey -Algorithm SHA256).Hash
+  Write-Host "Licensing: enforcement ON ($buildKind); staged public key SHA256 $licenceKeySha256"
+} else {
+  $licenceMode = 'warn'
+  $licenceKeySha256 = ''
+  Write-Host '::warning title=Evaluation build::This EVALUATION-ONLY build does not enforce licences and must not be given to customers.'
+}
 Copy-Item (Join-Path $PSScriptRoot 'installer.iss') (Join-Path $stage 'installer.iss')
 # The icon Inno Setup embeds into Setup.exe (SetupIconFile in installer.iss).
 # generate_app_icons.py above has just refreshed it from the brand image.
@@ -221,22 +305,45 @@ $secretEnvironmentFiles = Get-ChildItem -LiteralPath $app -Force -File -Recurse 
 if ($secretEnvironmentFiles) { throw 'Environment files are forbidden in the installer package.' }
 
 Write-Host '[7/8] Write artifact manifest with exact pinned versions'
-$manifest = [ordered]@{ product='KAYAN ERP'; productVersion=$appVersion; architecture='x64'; nodeVersion=$nodeVersion; postgresqlVersion=($postgresVersion -replace '-1$',''); flutterVersion=((flutter --version --machine | ConvertFrom-Json).frameworkVersion); sourceCommit=(git -C $root rev-parse HEAD); windowsInstallerTested=$false }
+$sourceCommit = & git -C $root rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw 'Unable to read source HEAD.' }
+$sourceStatus = @(& git -C $root status --porcelain=v1 --untracked-files=all)
+if ($LASTEXITCODE -ne 0) { throw 'Unable to read source working-tree status.' }
+# HEAD alone never identifies a dirty tree; ignored inputs are not covered by
+# Git status either. A separately reviewed source inventory is still required.
+$manifest = [ordered]@{ product='KAYAN ERP'; productVersion=$appVersion; architecture='x64'; nodeVersion=$nodeVersion; postgresqlVersion=($postgresVersion -replace '-1$',''); flutterVersion=((flutter --version --machine | ConvertFrom-Json).frameworkVersion); sourceCommit=$sourceCommit; sourceTreeDirty=($sourceStatus.Count -gt 0); sourceTreeIgnoresNotAudited=$true; windowsInstallerTested=$false; licenseBuildKind=$buildKind; licenseEnforcement=$licenceMode; licensePublicKeySha256=$licenceKeySha256 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $app 'runtime-manifest.json') -Encoding UTF8
 
 if (-not $SkipInstaller) {
   Write-Host '[8/8] Compile standalone Inno Setup installer'
-  & $iscc.Source "/DSourceDir=$app" "/DOutputDir=$outputPath" "/DAppVersion=$appVersion" (Join-Path $stage 'installer.iss')
-  if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed ($LASTEXITCODE)." }
-  $versionedSetup = Join-Path $outputPath "KAYAN-ERP-Setup-$appVersion-x64.exe"
-  $canonicalSetup = Join-Path $outputPath "KAYAN-ERP-Setup.exe"
-  if (Test-Path $versionedSetup) {
-    Copy-Item -LiteralPath $versionedSetup -Destination $canonicalSetup -Force
+  if (-not (Test-Path -LiteralPath $outputPath)) { [void][IO.Directory]::CreateDirectory($outputPath) }
+  # ISCC has no /LOG switch (it rejects any option it does not know, which is
+  # how the previous attempt ended as a bare "failed (2)"). Its diagnosis goes
+  # to stdout/stderr, so the compiler's own output is captured to the log here
+  # and its last lines are repeated in the error. 2>&1 also keeps PowerShell
+  # from turning a compiler message into a terminating NativeCommandError
+  # before the exit code can be read.
+  $isccLog = Join-Path $outputPath 'iscc.log'
+  $isccArguments = @("/DSourceDir=$app", "/DOutputDir=$outputPath", "/DAppVersion=$appVersion", "/DKayanBuildKind=$buildKind", (Join-Path $stage 'installer.iss'))
+  $isccOutput = @(& $iscc.Source @isccArguments 2>&1 | ForEach-Object { "$_" })
+  $isccExit = $LASTEXITCODE
+  [IO.File]::WriteAllText($isccLog, ($isccOutput -join [Environment]::NewLine))
+  $isccOutput | ForEach-Object { Write-Host $_ }
+  if ($isccExit -ne 0) {
+    $details = (($isccOutput | Select-Object -Last 30) -join ' | ')
+    if (-not $details) { $details = 'ISCC printed nothing; see the build log.' }
+    if ($details.Length -gt 3000) { $details = $details.Substring($details.Length - 3000) }
+    Write-Host "::error title=Inno Setup::$(($details -replace '%','%25') -replace '\r?\n','%0A')"
+    throw "Inno Setup failed ($isccExit). $details"
   }
+  $versionedSetup = Join-Path $outputPath "$setupBase-$appVersion-x64.exe"
+  $canonicalSetup = Join-Path $outputPath "$setupBase.exe"
+  if (-not (Test-Path -LiteralPath $versionedSetup -PathType Leaf)) { throw 'Inno Setup did not produce the expected mode-specific installer.' }
+  Copy-Item -LiteralPath $versionedSetup -Destination $canonicalSetup -Force
 }
 Write-Host "Build staging: $app"
 if (-not $SkipInstaller) {
-  Write-Host "Installer: $(Join-Path $outputPath "KAYAN-ERP-Setup-$appVersion-x64.exe")"
-  Write-Host "Canonical Installer: $(Join-Path $outputPath "KAYAN-ERP-Setup.exe")"
+  Write-Host "Installer: $(Join-Path $outputPath "$setupBase-$appVersion-x64.exe")"
+  Write-Host "Canonical Installer: $(Join-Path $outputPath "$setupBase.exe")"
 }
 Write-Host 'A native Windows install/service test is still required; build host does not prove runtime behavior.'

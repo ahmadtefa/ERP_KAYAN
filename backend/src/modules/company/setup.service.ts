@@ -7,6 +7,7 @@ import { AccountType, BranchKind, Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
 
 import { AuditService } from '../../common/audit/audit.service';
+import { LicensingService } from '../licensing/licensing.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { normalizeLogo } from './company.service';
 import { PERMISSIONS } from '../../../prisma/permissions';
@@ -30,6 +31,7 @@ export class SetupService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly licensing: LicensingService,
   ) {}
 
   async status() {
@@ -237,6 +239,18 @@ export class SetupService {
                 isSuperAdmin: true,
               },
             });
+
+      // The first-run administrator is a real account like any other, so it
+      // consumes a seat. An account revived by setup (already exists) is not
+      // created again and therefore reserves nothing.
+      if (already.length === 0) {
+        await this.licensing.reserveSeat(tx, {
+          userId: admin.id,
+          username: admin.username,
+          reason: 'SETUP_ADMIN',
+          idempotencyKey: `setup:${company.id}:${admin.username}`,
+        });
+      }
 
       // Only one administrator belongs at the beginning of a company. The
       // extra accounts are switched off and retired rather than deleted: an

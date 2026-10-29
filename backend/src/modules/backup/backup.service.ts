@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { basename, join } from 'node:path';
@@ -13,6 +14,7 @@ import {
   AuditPurgeService,
 } from '../../common/audit/audit-purge.service';
 import { AuditService } from '../../common/audit/audit.service';
+import { LicensingService } from '../licensing/licensing.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { reconcileRestoredAccess } from './restore-access';
 import {
@@ -254,12 +256,17 @@ const OMITTED: Record<string, string> = {
 
 @Injectable()
 export class BackupService {
+  private readonly logger = new Logger('BackupService');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     /// The one place that is allowed to remove audit rows, and only inside the
     /// caller's transaction, with a reason, and never silently.
     private readonly purge: AuditPurgeService,
+    /// The licence is installation-level state that a company file cannot
+    /// carry; the restore asks it to re-assert its watermarks afterwards.
+    private readonly licensing: LicensingService,
   ) {}
 
   /// ───────────────────────────────────────────────────────── taking one
@@ -618,6 +625,16 @@ export class BackupService {
     if (file.companyProfile && previousLogoPath) {
       await unlink(join(uploadsDir(), basename(previousLogoPath))).catch(() => {});
     }
+
+    // The company file never contains licence rows, and the seat ledger is
+    // outside it, so a restore cannot hand seats back. Reconcile anyway: it
+    // records the restore in the licence history and proves the counters did
+    // not move.
+    await this.licensing.reconcile().catch((error: Error) => {
+      this.logger.warn(
+        `The licence could not be reconciled after the restore: ${error.message}`,
+      );
+    });
 
     return {
       companyId: requesterCompanyId,
