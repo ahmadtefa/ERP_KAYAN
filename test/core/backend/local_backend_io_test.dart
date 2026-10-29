@@ -4,6 +4,38 @@ import 'package:erp_kayan/core/backend/local_backend_io.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  group('damaged-licence diagnostics', () {
+    test('keeps only an enforced and healthy database server for diagnostics', () {
+      final health = <String, dynamic>{
+        'status': 'ok',
+        'database': 'up',
+        'license': {
+          'enforcement': 'enforce',
+          'configured': false,
+          'stateError': 'LICENSE_STATE_DAMAGED',
+        },
+      };
+      expect(keepServerForLicenceDiagnostics(health), isTrue);
+      expect(keepServerForLicenceDiagnostics(null), isFalse);
+      expect(keepServerForLicenceDiagnostics({...health, 'database': 'down'}), isFalse);
+      expect(keepServerForLicenceDiagnostics({...health, 'status': 'degraded'}), isFalse);
+      expect(
+        keepServerForLicenceDiagnostics({
+          ...health,
+          'license': {'enforcement': 'warn', 'stateError': 'LICENSE_STATE_DAMAGED'},
+        }),
+        isFalse,
+      );
+      expect(
+        keepServerForLicenceDiagnostics({
+          ...health,
+          'license': {'enforcement': 'enforce', 'configured': true},
+        }),
+        isFalse,
+      );
+    });
+  });
+
   group('KayanDatabaseConfig', () {
     test('matches the PostgreSQL port the Windows installer provisions', () {
       // The shipped Setup puts the bundled cluster on 5432. It used to be 5433

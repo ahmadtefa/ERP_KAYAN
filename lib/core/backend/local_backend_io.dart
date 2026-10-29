@@ -162,14 +162,28 @@ class KayanDatabaseConfig {
 File? _logoFile;
 
 /// A running server, or the reason there is not one.
+/// Whether an owned local server may remain alive solely for diagnostics.
+/// Business operations remain guarded; the shell must not treat this as ready.
+bool keepServerForLicenceDiagnostics(Map<String, dynamic>? health) {
+  final licence = health?['license'];
+  return health?['status'] == 'ok' &&
+      health?['database'] == 'up' &&
+      licence is Map &&
+      licence['enforcement'] == 'enforce' &&
+      licence['stateError'] == 'LICENSE_STATE_DAMAGED';
+}
+
 class LocalBackend {
-  LocalBackend._(this._process, this.port, this._log);
+  LocalBackend._(this._process, this.port, this._log, {bool diagnosticOnly = false})
+    : _diagnosticOnly = diagnosticOnly;
 
   final Process? _process;
   final int port;
   final IOSink? _log;
+  bool _diagnosticOnly;
 
   static LocalBackend? _instance;
+  static Future<LocalBackendStatus>? _starting;
   static Process? _stoppingProcess;
   // A timed-out migration may still be running. Do not launch a second one
   // in this process or terminate it mid-migration.
@@ -200,11 +214,17 @@ class LocalBackend {
   /// on a screen, not a crash.
   static Future<LocalBackendStatus> ensureRunning({
     required String appDisplayName,
-  }) async {
+  }) {
+    return _starting ??= _startOnce(appDisplayName);
+  }
+
+  static Future<LocalBackendStatus> _startOnce(String appDisplayName) async {
     try {
       return await _ensureRunning(appDisplayName);
     } on Object catch (error) {
       return LocalBackendStatus.failed('$error');
+    } finally {
+      _starting = null;
     }
   }
 
@@ -243,18 +263,33 @@ class LocalBackend {
             logPath: BackendLayout.discover().logPath,
           );
         }
+        // A diagnostic-only child has never passed the full database and
+        // licence identity checks. After recovery, validate it before either
+        // opening the app or offering first-run setup against its database.
+        final running = _instance;
+        if (running != null && running.port == port && running._diagnosticOnly) {
+          final layout = BackendLayout.discover();
+          if (layout.problem != null) {
+            return LocalBackendStatus.failed(layout.problem, logPath: layout.logPath);
+          }
+          final settingsProblem = missingInstalledSettings(layout);
+          if (settingsProblem != null) {
+            return LocalBackendStatus.failed(settingsProblem, logPath: layout.logPath);
+          }
+          final settings = await RuntimeSettings.load(layout, port);
+          final identityProblem = _verifyServerIdentity(health, settings);
+          if (identityProblem != null) {
+            return LocalBackendStatus.failed(identityProblem, logPath: layout.logPath);
+          }
+          running._diagnosticOnly = false;
+        }
         // A reachable API can still be attached to a completely empty
-        // database. Check its health payload before treating it as ready;
-        // otherwise an already-running API skips the first-administrator
-        // screen and leaves the user stranded at the login form.
+        // database. Check its health payload before treating it as ready.
         if (health['needsSetup'] == true) {
           return const LocalBackendStatus.needsFirstAdministrator();
         }
 
-        // The address we already started on. Keep the handle to the child:
-        // replacing it here would lose the only reference to the server and
-        // leave it running after the window closes.
-        final running = _instance;
+        // Retain the handle to the child so shutdown can stop it.
         if (running != null && running.port == port) {
           return LocalBackendStatus.ready(running.baseUrl);
         }
@@ -406,7 +441,15 @@ class LocalBackend {
       final identityProblem = _verifyServerIdentity(health, settings);
       if (identityProblem != null) {
         log.writeln('[shell] refusing to open the program: $identityProblem');
-        await _stop(process, log);
+        if (keepServerForLicenceDiagnostics(health)) {
+          // Keep one owned server alive so health and the explicit damaged-state
+          // error remain available while the operator restores trusted state.
+          // The business guard still fails closed. A retry must pass all
+          // identity checks before this child can ever be treated as ready.
+          _instance = LocalBackend._(process, port, log, diagnosticOnly: true);
+        } else {
+          await _stop(process, log);
+        }
         return LocalBackendStatus.failed(
           identityProblem,
           logPath: layout.logPath,
