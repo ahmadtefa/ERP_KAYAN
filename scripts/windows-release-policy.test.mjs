@@ -35,7 +35,22 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   const smoke = workflow.match(/- name: Smoke-test the actual installed Windows application([\s\S]*?)(?=\n      - name:|\n  [a-z-]+:|$)/);
   assert.ok(smoke && /if:\s*\$\{\{ false \}\}/.test(smoke[1]));
   assert.doesNotMatch(workflow, /secrets\.LICENSE_PRIVATE_KEY/);
-  const inspect = workflow.indexOf('node scripts/inspect-final-inno.mjs --artifact build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe --mode test-signed');
-  const upload = workflow.indexOf('- name: Upload TEST ONLY installer');
-  assert.ok(inspect >= 0 && inspect < upload);
+  // The raw same-run transport is not a release candidate. Both build modes
+  // must pass the pinned extractor on Linux before the inspected artifact or
+  // product-only runtime smoke; the old test-only upload remains disabled.
+  const testUpload = workflow.match(/- name: Upload TEST ONLY installer \(diagnostic artifact\)([\s\S]*?)(?=\n      - name:|\n  [a-z-]+:|$)/);
+  assert.ok(testUpload && /if:\s*\$\{\{ false \}\}/.test(testUpload[1]));
+  const inspect = workflow.match(/\n  inspect-final:([\s\S]*?)(?=\n  [a-z-]+:|$)/);
+  assert.ok(inspect);
+  assert.match(inspect[1], /needs: build/);
+  assert.match(inspect[1], /34f65747e4a57d5de2582bb1ad3d540f440a3983/);
+  assert.match(inspect[1], /check-fixtures\.py/);
+  assert.match(inspect[1], /node scripts\/inspect-final-inno\.mjs --artifact "candidate\/\$BASE\.exe" --mode "\$MODE"/);
+  assert.match(inspect[1], /--extractor-sha256 "\$KAYAN_INNOEXTRACT_SHA256"/);
+  assert.match(inspect[1], /--source-commit "\$GITHUB_SHA"/);
+  assert.ok(inspect[1].indexOf('node scripts/inspect-final-inno.mjs --artifact') < inspect[1].indexOf('windows-installer-inspected-internal-'));
+  const runtimeSmoke = workflow.match(/\n  smoke-final:([\s\S]*?)(?=\n  [a-z-]+:|$)/);
+  assert.ok(runtimeSmoke);
+  assert.match(runtimeSmoke[1], /needs: \[build, inspect-final\]/);
+  assert.match(runtimeSmoke[1], /needs\.build\.outputs\.build_mode == 'product'/);
 });
