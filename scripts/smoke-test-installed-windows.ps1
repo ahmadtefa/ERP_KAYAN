@@ -440,7 +440,16 @@ $upgradeLog = Join-Path $env:TEMP "kayan-setup-upgrade-smoke.log"
 $upgrade = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", ("/LOG=" + $upgradeLog)) -Wait -PassThru
 if ($upgrade.ExitCode -ne 0) { Fail "The KAYAN upgrade/reinstall exited with code $($upgrade.ExitCode)." }
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-if (-not $service -or $service.Status -ne "Running") { Fail "The PostgreSQL service did not restart after the upgrade/reinstall." }
+if (-not $service -or $service.Status -ne "Running") {
+  # The first-install log cannot explain a failure on the second Setup run.
+  # Restrict diagnostics to Setup lifecycle lines, never environment/config.
+  $upgradeEvidence = @()
+  if (Test-Path -LiteralPath $upgradeLog) {
+    $upgradeEvidence = @(Get-Content -LiteralPath $upgradeLog -Tail 60 | Where-Object { $_ -match '(?i)error|restart|reboot|postinstall|preparing|installation process|exit code|closing|shutdown|log closed' } | Select-Object -Last 12)
+  }
+  $serviceStatus = if ($service) { $service.Status.ToString() } else { 'missing' }
+  Fail ("The PostgreSQL service did not restart after the upgrade/reinstall (state=$serviceStatus, Setup exit=$($upgrade.ExitCode)). Upgrade Setup log: " + ($upgradeEvidence -join ' | '))
+}
 & $pgReady -h 127.0.0.1 -p 5432 -U postgres *> $null
 if ($LASTEXITCODE -ne 0) { Fail "PostgreSQL did not accept connections after the upgrade/reinstall." }
 $env:PGPASSWORD = $databasePassword
