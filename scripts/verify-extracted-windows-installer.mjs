@@ -52,6 +52,12 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+async function sha256File(path) {
+  const digest = createHash('sha256');
+  for await (const chunk of createReadStream(path)) digest.update(chunk);
+  return digest.digest('hex');
+}
+
 function normalizePath(value) {
   return value.replaceAll('\\', '/').replace(/^\.\/+/, '').toLowerCase();
 }
@@ -94,7 +100,7 @@ export async function verifyExtractedPayload({ artifactPath, root, expectedSourc
   }
   const artifactInfo = await stat(artifact);
   if (!artifactInfo.isFile() || artifactInfo.size <= 0) throw new Error('The candidate installer is missing or empty.');
-  const artifactHashBefore = sha256(await readFile(artifact));
+  const artifactHashBefore = await sha256File(artifact);
 
   const files = await listFiles(payloadRoot);
   if (files.length === 0) throw new Error('The extractor produced an empty payload.');
@@ -155,7 +161,7 @@ export async function verifyExtractedPayload({ artifactPath, root, expectedSourc
     }
   }
 
-  const artifactHashAfter = sha256(await readFile(artifact));
+  const artifactHashAfter = await sha256File(artifact);
   if (artifactHashAfter !== artifactHashBefore) throw new Error('The candidate installer changed during inspection.');
 
   const totalPayloadBytes = (await Promise.all(files.map(async (file) => (await stat(file)).size)))
