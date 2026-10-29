@@ -2,6 +2,8 @@ name: Product packaging probe (no upload or installation)
 
 # No automatic product build: the size and payload investigation is open.
 on:
+  push:
+    branches: ['fix/windows-installer-inspection-20261029']
   workflow_dispatch:
 
 permissions:
@@ -31,6 +33,8 @@ jobs:
           cache: true
       - name: Test PE parser and pinned public-key policy
         run: node --test scripts/inspect-windows-pe.test.mjs scripts/windows-release-policy.test.mjs
+      - name: Test extracted-payload verification policy
+        run: node --test scripts/verify-extracted-windows-installer.test.mjs
       - name: Install official Inno Setup compiler
         shell: pwsh
         run: |
@@ -54,11 +58,74 @@ jobs:
           Write-Output "::notice title=Unverified product-mode EXE::$($file.Name) bytes=$($file.Length) SHA256=$sha source=$env:GITHUB_SHA; NOT approved for upload or install"
       - name: Check PE structure independently
         run: node scripts/inspect-windows-pe.mjs build/windows-installer/KAYAN-ERP-Setup.exe
-      # A PE check is not Inno validation or a scan of compressed content.
-      # No artifact upload is present: this workflow must fail closed until a
-      # trusted compatible extractor and a complete final-payload policy exist.
-      - name: Block unverified product artifact
-        shell: pwsh
+      # This is an internal hand-off to the independent Linux extraction job,
+      # not a customer download. It is retained for one day and is never
+      # published as a release or described as install-tested.
+      - name: Pass candidate to independent payload inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: kayan-windows-inno-payload-${{ github.sha }}
+          path: build/windows-installer/KAYAN-ERP-Setup.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  inspect:
+    name: Extract and verify the actual Inno payload
+    needs: probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+      - name: Install isolated extractor build dependencies
         run: |
-          Write-Output '::error title=Packaging verification incomplete::Inno structure and final compressed payload remain unverified; no artifact can be uploaded or installed.'
-          throw 'Product candidate is not verified.'
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential cmake libboost-all-dev liblzma-dev zlib1g-dev libbz2-dev
+      - name: Build and test the pinned Inno Setup 6.7-compatible extractor
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir="$RUNNER_TEMP/innoextract-src"
+          git clone https://github.com/mplabsorg/innoextract.git "$source_dir"
+          git -C "$source_dir" checkout --detach 34f65747e4a57d5de2582bb1ad3d540f440a3983
+          actual="$(git -C "$source_dir" rev-parse HEAD)"
+          test "$actual" = "34f65747e4a57d5de2582bb1ad3d540f440a3983"
+          cmake -S "$source_dir" -B "$source_dir/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
+          cmake --build "$source_dir/build" --parallel 2
+          ctest --test-dir "$source_dir/build" --output-on-failure
+          extractor="$(find "$source_dir/build" -type f -name innoextract -perm -111 -print -quit)"
+          test -n "$extractor"
+          "$extractor" --version
+          echo "KAYAN_INNOEXTRACT=$extractor" >> "$GITHUB_ENV"
+      - name: Download the internal candidate from this exact run
+        uses: actions/download-artifact@v4
+        with:
+          name: kayan-windows-inno-payload-${{ github.sha }}
+          path: candidate
+      - name: List and checksum-test the final Inno payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s candidate/KAYAN-ERP-Setup.exe
+          "$KAYAN_INNOEXTRACT" --list --silent --exclude-temp --no-extract-unknown -- candidate/KAYAN-ERP-Setup.exe > candidate/inno-payload-list.txt
+          test -s candidate/inno-payload-list.txt
+          "$KAYAN_INNOEXTRACT" --extract --test --exclude-temp --no-extract-unknown --output-dir extracted-payload -- candidate/KAYAN-ERP-Setup.exe
+      - name: Verify runtime manifest, required dependencies and secrets
+        run: node scripts/verify-extracted-windows-installer.mjs --artifact candidate/KAYAN-ERP-Setup.exe --root extracted-payload --source-commit "${{ github.sha }}" --report candidate/payload-verification.json
+      - name: Upload payload-verified candidate (not install-tested)
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAYAN-ERP-Windows-x64-PAYLOAD-VERIFIED-NOT-RELEASE
+          path: |
+            candidate/KAYAN-ERP-Setup.exe
+            candidate/payload-verification.json
+          if-no-files-found: error
+          retention-days: 7
