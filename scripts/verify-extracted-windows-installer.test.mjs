@@ -17,6 +17,8 @@ const required = [
   'backend/dist/prisma/seed.js',
   'backend/node/node.exe',
   'backend/postgres/bin/initdb.exe',
+  'backend/postgres/bin/postgres.exe',
+  'backend/postgres/bin/libpq.dll',
   'backend/postgres/bin/pg_ctl.exe',
   'backend/postgres/bin/pg_isready.exe',
   'backend/postgres/bin/psql.exe',
@@ -24,6 +26,15 @@ const required = [
   'backend/postgres/bin/pg_restore.exe',
   'backend/node_modules/prisma/build/index.js',
   'backend/node_modules/@prisma/client/package.json',
+  'backend/node_modules/@prisma/adapter-pg/package.json',
+  'backend/node_modules/@prisma/engines/package.json',
+  'backend/node_modules/@prisma/engines/schema-engine-windows.exe',
+  'backend/node_modules/pg/package.json',
+  'backend/node_modules/argon2/package.json',
+  'backend/node_modules/argon2/argon2.node',
+  'backend/node_modules/sharp/package.json',
+  'backend/node_modules/@img/sharp-win32-x64/package.json',
+  'backend/node_modules/@img/sharp-win32-x64/sharp-win32-x64.node',
   'backend/node_modules/.prisma/client/index.js',
   'backend/prisma/schema.prisma',
   'backend/prisma/migrations/migration_lock.toml',
@@ -31,7 +42,6 @@ const required = [
   'backend/scripts/prepare-database.mjs',
   'backend/scripts/database-state.mjs',
   'backend/scripts/migrate-deploy.mjs',
-  'backend/postgres/lib/libpq.dll',
   'backend/postgres/share/extension/plpgsql.control',
   'prerequisites/vc_redist.x64.exe',
   'runtime-manifest.json',
@@ -82,6 +92,20 @@ test('accepts a complete product payload with the pinned production public key',
     assert.equal(result.licensing.privateKeyMarkersFound, false);
     assert.ok(result.payload.fileCount >= required.length);
     assert.equal(result.installer.sha256, createHash('sha256').update(await readFile(f.artifactPath)).digest('hex'));
+  } finally {
+    await rm(f.base, { recursive: true, force: true });
+  }
+});
+
+test('refuses a missing native Windows runtime binding', async () => {
+  const f = await fixture();
+  try {
+    const { rm: removeFile } = await import('node:fs/promises');
+    await removeFile(join(f.root, 'backend/node_modules/argon2/argon2.node'));
+    await assert.rejects(
+      verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit }),
+      /Missing native Windows runtime binding: Argon2 Windows native binding/,
+    );
   } finally {
     await rm(f.base, { recursive: true, force: true });
   }
