@@ -1,11 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
-import {
-  COLUMN_LABELS,
-  columnLabel,
-  normalizeColumns,
-} from '../sales/quotation-columns';
+import { columnLabel, normalizeColumns } from '../sales/quotation-columns';
 import { ReportTable, TableColumn } from './report-table';
 
 export const DOCUMENT_KINDS = [
@@ -133,8 +129,10 @@ export class DocumentsService {
         lineNumber: String(l.lineNumber),
         itemCode: l.item?.code ?? '',
         description: l.description || (lang === 'ar' ? l.item?.nameAr || l.item?.nameEn : l.item?.nameEn) || '',
-        unit: l.item?.unit ?? '',
-        quantity: l.quantity.toFixed(MONEY),
+        // Show the unit the user chose and the quantity they typed, not the
+        // internal base-unit conversion. Legacy rows fall back to item unit.
+        unit: l.unitName ?? l.item?.unit ?? '',
+        quantity: (l.unitQuantity ?? l.quantity).toFixed(MONEY),
         unitPrice: l.unitPrice.toFixed(MONEY),
         taxAmount: l.taxAmount.toFixed(MONEY),
         lineTotal: l.lineTotal.toFixed(MONEY),
@@ -182,8 +180,9 @@ export class DocumentsService {
         lineNumber: String(l.lineNumber),
         itemCode: l.item?.code ?? '',
         description: l.description || (lang === 'ar' ? l.item?.nameAr || l.item?.nameEn : l.item?.nameEn) || '',
-        unit: l.item?.unit ?? '',
-        quantity: l.quantity.toFixed(MONEY),
+        // Chosen unit and entered quantity; legacy rows fall back to base unit.
+        unit: l.unitName ?? l.item?.unit ?? '',
+        quantity: (l.unitQuantity ?? l.quantity).toFixed(MONEY),
         unitPrice: l.unitPrice.toFixed(MONEY),
         taxAmount: l.taxAmount.toFixed(MONEY),
         lineTotal: l.lineTotal.toFixed(MONEY),
@@ -226,8 +225,8 @@ export class DocumentsService {
         lineNumber: String(l.lineNumber),
         itemCode: l.item?.code ?? '',
         description: l.description || l.item?.nameEn || '',
-        unit: l.item?.unit ?? '',
-        quantity: l.quantity.toFixed(MONEY),
+        unit: l.unitName ?? l.item?.unit ?? '',
+        quantity: (l.unitQuantity ?? l.quantity).toFixed(MONEY),
         unitPrice: l.unitPrice.toFixed(MONEY),
         taxAmount: '0.0000',
         lineTotal: l.lineTotal.toFixed(MONEY),
@@ -266,8 +265,8 @@ export class DocumentsService {
         lineNumber: String(l.lineNumber),
         itemCode: l.item?.code ?? '',
         description: l.description || l.item?.nameEn || '',
-        unit: l.item?.unit ?? '',
-        quantity: l.quantity.toFixed(MONEY),
+        unit: l.unitName ?? l.item?.unit ?? '',
+        quantity: (l.unitQuantity ?? l.quantity).toFixed(MONEY),
         unitPrice: l.unitPrice.toFixed(MONEY),
         taxAmount: '0.0000',
         lineTotal: l.lineTotal.toFixed(MONEY),
@@ -309,7 +308,10 @@ export class DocumentsService {
         key: column.key,
         labelEn: columnLabel(column, 'en'),
         labelAr: columnLabel(column, 'ar'),
-        numeric: COLUMN_LABELS[column.key].numeric,
+        // Built-in money columns carry their flag in the layout; a
+        // user-defined column is never looked up in the built-in catalogue,
+        // where its key does not exist.
+        numeric: column.numeric === true,
         width: Math.max(8, column.width * 6),
       })),
     ];
@@ -321,7 +323,7 @@ export class DocumentsService {
           line.description ||
           (lang === 'ar' ? line.item?.nameAr || line.item?.nameEn : line.item?.nameEn) ||
           '';
-        rows.push({
+        const row: Record<string, unknown> = {
           table: table.title,
           itemCode: line.item?.code ?? '',
           description,
@@ -330,7 +332,21 @@ export class DocumentsService {
           quantity: line.quantity.toFixed(MONEY),
           unitPrice: line.unitPrice.toFixed(MONEY),
           lineTotal: line.lineTotal.toFixed(MONEY),
-        });
+        };
+        // The value under each user-defined column is stored per line; a line
+        // that left it blank must still produce a cell, not shift the row.
+        const custom = (line.customValues as Record<string, unknown> | null) ?? {};
+        for (const column of layout) {
+          if (column.key in row) continue;
+          const value = custom[column.key];
+          row[column.key] =
+            typeof value === 'string'
+              ? value
+              : value === undefined || value === null
+                ? ''
+                : String(value);
+        }
+        rows.push(row);
       }
     }
 

@@ -20,7 +20,42 @@ export interface QuotationColumn {
   /// Whether the column holds a monetary quantity. Built-in money keys are
   /// numeric; user-defined columns default to text.
   numeric?: boolean;
+  /// How a user-defined column's values are entered and printed: plain
+  /// text, a number, a quantity, a price, or a percentage. Built-in keys
+  /// ignore it (their meaning is fixed); absent on layouts stored before
+  /// kinds existed, where [numeric] alone decides.
+  kind?: QuotationColumnKind;
 }
+
+export type QuotationColumnKind =
+  | 'text'
+  | 'number'
+  | 'quantity'
+  | 'price'
+  | 'percent';
+
+export const COLUMN_KINDS: QuotationColumnKind[] = [
+  'text',
+  'number',
+  'quantity',
+  'price',
+  'percent',
+];
+
+/// Whether a column's cells are numbers, wherever that fact is recorded:
+/// the built-in catalogue, the stored kind, or the legacy numeric flag.
+export function columnIsNumeric(column: QuotationColumn): boolean {
+  const builtIn = COLUMN_LABELS[column.key];
+  if (builtIn) return builtIn.numeric;
+  if (column.kind) return column.kind !== 'text';
+  return column.numeric ?? false;
+}
+
+/// The longest a column key may be. A printed column is a heading, not a
+/// sentence, and the key also travels in the spreadsheet and the saved layout;
+/// keeping it short stops a paste from producing a document with no room for
+/// the numbers.
+export const COLUMN_KEY_MAX_LENGTH = 120;
 
 /// Built-in column keys offered by the picker. Users are not limited to
 /// these: any free-text key can be added.
@@ -79,6 +114,11 @@ export function normalizeColumns(raw: unknown): QuotationColumn[] {
     seen.add(key);
     const width = Number(row.width);
     const builtIn = COLUMN_LABELS[key];
+    const kind =
+      typeof row.kind === 'string' &&
+      (COLUMN_KINDS as string[]).includes(row.kind)
+        ? (row.kind as QuotationColumnKind)
+        : undefined;
     columns.push({
       key,
       labelEn:
@@ -91,7 +131,12 @@ export function normalizeColumns(raw: unknown): QuotationColumn[] {
           : builtIn ? builtIn.ar : null,
       visible: row.visible !== false,
       width: Number.isFinite(width) ? Math.min(6, Math.max(1, Math.round(width))) : 2,
-      numeric: builtIn ? builtIn.numeric : Boolean(row.numeric),
+      numeric: builtIn
+        ? builtIn.numeric
+        : kind
+          ? kind !== 'text'
+          : Boolean(row.numeric),
+      ...(kind ? { kind } : {}),
     });
   }
   return columns.length ? columns : standardColumns();

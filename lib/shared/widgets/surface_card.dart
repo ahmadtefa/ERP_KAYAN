@@ -133,6 +133,11 @@ class SurfaceCard extends StatelessWidget {
         color: scheme.surface,
         borderRadius: AppRadii.card,
         border: Border.all(color: border),
+        // Fluent depth on the light canvas; on dark surfaces the hairline
+        // alone carries the separation (shadows would be invisible).
+        boxShadow: scheme.brightness == Brightness.light
+            ? AppShadows.raised
+            : AppShadows.none,
       ),
       clipBehavior: Clip.antiAlias,
       child: content,

@@ -1,5 +1,6 @@
 import 'package:erp_kayan/app/router/app_router.dart';
 import 'package:erp_kayan/app/shell/erp_shell.dart';
+import 'package:erp_kayan/app/theme/design_tokens.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
@@ -168,7 +169,8 @@ void main() {
 
       // These permissions match the GET endpoints. The user intentionally
       // does not hold the separate returns.read or opening-balances.manage
-      // permission codes; neither should hide a screen whose API GET is allowed.
+      // codes; a view-only grant must still reveal the screen whose API GET is
+      // allowed, and manage must not be required just to look.
       for (final label in [
         'الخزائن والبنوك',
         'الأرصدة الافتتاحية',
@@ -234,7 +236,99 @@ void main() {
       expect(find.widgetWithText(ListTile, 'لوحة التحكم'), findsOneWidget);
     },
   );
+  testWidgets(
+    'each section lights up in its own colour when it is the active one',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final router = GoRouter(
+        initialLocation: AppRoutes.salesInvoices,
+        routes: [
+          for (final route in [
+            AppRoutes.dashboard,
+            AppRoutes.customers,
+            AppRoutes.salesInvoices,
+            AppRoutes.settings,
+          ])
+            GoRoute(
+              path: route,
+              builder: (context, state) => ErpShell(
+                currentPath: state.matchedLocation,
+                child: const SizedBox.expand(),
+              ),
+            ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            tokenStoreProvider.overrideWithValue(FakeTokenStore()),
+            authRepositoryProvider.overrideWithValue(FakeAuthRepository()),
+          ],
+          child: MaterialApp.router(
+            locale: const Locale('ar'),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      Color? titleColorOf(String label) {
+        final tile = tester.widget<ListTile>(
+          find.widgetWithText(ListTile, label, skipOffstage: false),
+        );
+        return (tile.title! as Text).style?.color;
+      }
+
+      // Sales is active: its sidebar label carries the sales green in the
+      // step mixed for the navy sidebar, and the (light) top bar names
+      // the section in the base step of the same hue.
+      expect(titleColorOf('فواتير البيع'), SectionAccents.sales.darkBase);
+      expect(
+        find.byWidgetPredicate(
+          (w) =>
+              w is Text &&
+              w.data == 'المبيعات' &&
+              w.style?.color == SectionAccents.sales.base,
+        ),
+        findsOneWidget,
+      );
+      // Customers is not active yet, so its rose stays out of its label.
+      expect(
+        titleColorOf('العملاء'),
+        isNot(SectionAccents.parties.base),
+      );
+
+      // Move to customers & suppliers: the rose section identity takes
+      // over the label and the top bar, and sales goes back to neutral.
+      router.go(AppRoutes.customers);
+      await tester.pumpAndSettle();
+      expect(titleColorOf('العملاء'), SectionAccents.parties.darkBase);
+      expect(
+        find.byWidgetPredicate(
+          (w) =>
+              w is Text &&
+              w.data == 'العملاء والموردون' &&
+              w.style?.color == SectionAccents.parties.base,
+        ),
+        findsOneWidget,
+      );
+      expect(
+        titleColorOf('فواتير البيع'),
+        isNot(SectionAccents.sales.base),
+      );
+    },
+  );
 }
+
 
 class _PermissionTestAuthController extends AuthController {
   @override
@@ -247,6 +341,7 @@ class _PermissionTestAuthController extends AuthController {
         permissions: [
           'cash.accounts.read',
           'accounting.journal.read',
+          'accounting.openingbalances.read',
           'sales.invoices.read',
           'purchases.invoices.read',
           'sales.quotations.read',

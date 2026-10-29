@@ -27,12 +27,17 @@ import path from 'node:path';
 import pg from 'pg';
 
 const HOST = process.env.PGHOST ?? '127.0.0.1';
-const PORT = Number(process.env.PGPORT ?? 55432);
+const PORT = Number(process.env.PGPORT ?? 5432);
 const USER = process.env.PGUSER ?? 'kayan';
-const DB = process.env.UPGRADE_DB ?? 'kayan_upgrade';
-const ADMIN_URL = `postgresql://${USER}@${HOST}:${PORT}/postgres`;
-const URL = `postgresql://${USER}@${HOST}:${PORT}/${DB}`;
-const MIGRATIONS = '/home/user/ERP_KAYAN/backend/prisma/migrations';
+const PASSWORD = process.env.PGPASSWORD ?? '';
+const DB = process.env.UPGRADE_DB ?? 'kayan_cost_center_upgrade';
+const credentials = PASSWORD ? `${USER}:${encodeURIComponent(PASSWORD)}@` : `${USER}@`;
+const ADMIN_URL = `postgresql://${credentials}${HOST}:${PORT}/postgres`;
+const URL = `postgresql://${credentials}${HOST}:${PORT}/${DB}`;
+// The migrations and the seed travel with the script, so the same check runs
+// on a developer's machine, in CI, and on a machine with no internet.
+const BACKEND = path.resolve(import.meta.dirname, '..');
+const MIGRATIONS = path.join(BACKEND, 'prisma', 'migrations');
 const TARGET = '20261019120000_cost_centers_hierarchy_allocations';
 
 const results = [];
@@ -119,12 +124,45 @@ try {
 
   // Seed with the current code, then roll the catalogue back to what an old
   // installation actually had: no `read`, no type, no hierarchy columns.
-  const { execFileSync } = await import('node:child_process');
-  execFileSync('node', ['dist/prisma/seed.js'], {
-    cwd: '/home/user/ERP_KAYAN/backend',
-    env: { ...process.env, DATABASE_URL: `${URL}?schema=public` },
-    stdio: 'ignore',
-  });
+  // The fixture is written as SQL rather than by running prisma/seed.ts: the
+  // seed uses the current Prisma client, which writes columns that this
+  // database does not have yet - it is deliberately a database from before the
+  // upgrade. What the check needs is only the shape of real data: a company,
+  // its branch, the chart account a journal line posts to, the two system
+  // roles, and one custom role that can read reports.
+  const companyId = '00000000-0000-4000-8000-0000000c0001';
+  const branchId = '00000000-0000-4000-8000-0000000b0001';
+  const accountId = '00000000-0000-4000-8000-0000000a0001';
+  await client.query('BEGIN');
+  await client.query(
+    `INSERT INTO companies (id, code, "nameEn", "nameAr", "taxId", currency, timezone, "isActive", "createdAt", "updatedAt")
+     VALUES ($1, 'KAYAN', 'KAYAN', 'كيان', 'TAX-1', 'EGP', 'Africa/Cairo', true, now(), now())`,
+    [companyId],
+  );
+  await client.query(
+    `INSERT INTO branches (id, "companyId", code, "nameEn", "nameAr", "isActive", "createdAt", "updatedAt")
+     VALUES ($1, $2, 'HQ', 'Head office', 'المقر', true, now(), now())`,
+    [branchId, companyId],
+  );
+  await client.query(
+    `INSERT INTO accounts (id, "companyId", code, "nameEn", "nameAr", type, "isPostable", "isActive", "createdAt", "updatedAt")
+     VALUES ($1, $2, '4101', 'Sales', 'مبيعات', 'REVENUE', true, true, now(), now())`,
+    [accountId, companyId],
+  );
+  await client.query(
+    `INSERT INTO roles (id, "companyId", code, "nameEn", "nameAr", "isSystem", "createdAt", "updatedAt")
+     VALUES
+       ('00000000-0000-4000-8000-0000000d0001', $1, 'ADMIN', 'Administrator', 'مدير', true, now(), now()),
+       ('00000000-0000-4000-8000-0000000d0002', $1, 'ACCOUNTANT', 'Accountant', 'محاسب', true, now(), now())
+     ON CONFLICT DO NOTHING`,
+    [companyId],
+  );
+  await client.query(
+    `INSERT INTO role_permissions ("roleId", "permissionId")
+     SELECT r.id, p.id FROM roles r CROSS JOIN permissions p
+      WHERE r.code IN ('ADMIN', 'ACCOUNTANT') ON CONFLICT DO NOTHING`,
+  );
+  await client.query('COMMIT');
 
   const company = (await client.query('SELECT id FROM companies LIMIT 1')).rows[0].id;
   const adminRole = (await client.query("SELECT id FROM roles WHERE code = 'ADMIN' LIMIT 1")).rows[0].id;
@@ -163,9 +201,20 @@ try {
      VALUES ('00000000-0000-4000-8000-0000000000a1', $1, 'LEGACY_AUDITOR', 'Legacy auditor', 'مراجع قديم', false, now(), now())`,
     [company],
   );
+  // `reports.read` is the code the cost-center migration keys its "everyone who
+  // can already read reports can read cost centers" rule on. The catalogue in
+  // this repository no longer carries it (reports are guarded by
+  // reports.export / reports.print), but older installations do, so the check
+  // recreates it to exercise that rule rather than skipping it.
+  await client.query(
+    `INSERT INTO permissions (id, code, "nameEn", "nameAr", module)
+     VALUES ('00000000-0000-4000-8000-0000000000b1', 'reports.read', 'View reports', 'عرض التقارير', 'reports')
+     ON CONFLICT (code) DO NOTHING`,
+  );
   await client.query(
     `INSERT INTO role_permissions ("roleId", "permissionId")
-     SELECT '00000000-0000-4000-8000-0000000000a1', id FROM permissions WHERE code = 'reports.read'`,
+     SELECT '00000000-0000-4000-8000-0000000000a1', id FROM permissions WHERE code = 'reports.read'
+     ON CONFLICT DO NOTHING`,
   );
   await client.query('COMMIT');
 

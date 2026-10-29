@@ -137,6 +137,85 @@ void main() {
     TestWidgetsFlutterBinding.ensureInitialized();
   });
 
+  test('each section of the preview uses its own columns and values', () {
+    final document = QuotationDocument.fromJson(
+      {
+        'quotationNumber': 'QT-77',
+        'quotationDate': '2026-10-01',
+        'currency': 'EGP',
+        'status': 'draft',
+        'customer': {'nameEn': 'Buyer', 'nameAr': 'مشتري'},
+        'columns': [
+          {'key': 'description', 'visible': true, 'width': 4},
+          {'key': 'lineTotal', 'visible': true, 'width': 2},
+        ],
+        'tables': [
+          {
+            'title': 'الأجهزة',
+            'subTotal': '100.0000',
+            'discountAmount': '0.0000',
+            'discountPercent': '0.0000',
+            'netTotal': '100.0000',
+            'columns': [
+              {'key': 'description', 'visible': true, 'width': 4},
+              {
+                'key': 'custom-warranty',
+                'labelAr': 'مدة الضمان',
+                'visible': true,
+                'width': 2,
+                'kind': 'text',
+              },
+              {'key': 'lineTotal', 'visible': true, 'width': 2},
+            ],
+            'lines': [
+              {
+                'description': 'ثلاجة',
+                'quantity': '1.0000',
+                'unitPrice': '100.0000',
+                'lineTotal': '100.0000',
+                'customValues': {'custom-warranty': 'سنتان'},
+              },
+            ],
+          },
+          {
+            'title': 'التركيب',
+            'subTotal': '0.0000',
+            'discountAmount': '0.0000',
+            'discountPercent': '0.0000',
+            'netTotal': '0.0000',
+            'lines': [
+              {
+                'description': 'زيارة',
+                'quantity': '1.0000',
+                'unitPrice': '0.0000',
+                'lineTotal': '0.0000',
+              },
+            ],
+          },
+        ],
+        'subTotal': '100.0000',
+        'discountTotal': '0.0000',
+        'totalAmount': '100.0000',
+      },
+      company: const {'nameEn': 'KAYAN', 'nameAr': 'كيان'},
+      language: 'ar',
+    );
+
+    expect(document.sections, hasLength(2));
+    // First section: its own three columns, the Arabic one in the middle,
+    // and the saved value in the cell.
+    expect(
+      document.sections[0].columns.map((c) => c.label).toList(),
+      ['الوصف', 'مدة الضمان', 'الإجمالي'],
+    );
+    expect(document.sections[0].rows.single.cells, contains('سنتان'));
+    // Second section inherits the quotation-level two columns.
+    expect(
+      document.sections[1].columns.map((c) => c.label).toList(),
+      ['الوصف', 'الإجمالي'],
+    );
+  });
+
   testWidgets('lays the offer out from the letterhead to the footer', (
     tester,
   ) async {
@@ -155,8 +234,10 @@ void main() {
     expect(find.text('Hardware'), findsNWidgets(2));
     expect(find.text('Software'), findsNWidgets(2));
     expect(find.text('إجمالي القسم'), findsNWidgets(2));
+    expect(find.text('قبل الخصم'), findsOneWidget);
+    expect(find.text('خصم الجدول'), findsOneWidget);
     expect(find.text('خصم العرض'), findsOneWidget);
-    expect(find.text('خصومات الجداول'), findsOneWidget);
+    expect(find.text('الإجمالي النهائي'), findsOneWidget);
     expect(find.text('1,420.00 EGP'), findsOneWidget);
     expect(find.text('مُرسل'), findsOneWidget);
 

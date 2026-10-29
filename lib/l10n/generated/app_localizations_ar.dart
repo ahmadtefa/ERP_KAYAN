@@ -106,6 +106,12 @@ class AppLocalizationsAr extends AppLocalizations {
   String get settings => 'الإعدادات';
 
   @override
+  String get signInIncomplete => 'قبِل الخادم تسجيل الدخول لكنه لم يُرسل بيانات الحساب. يعني ذلك عادةً أن البرنامج والخادم بإصدارين مختلفين، أو أن تهيئة الشركة لم تكتمل. التفاصيل التقنية في سجل البرنامج.';
+
+  @override
+  String get sessionNotPersisted => 'الجلسة محفوظة في الذاكرة فقط: المتصفح لا يخزّنها على عنوان http:// غير آمن. إعادة تحميل الصفحة تسجّل الخروج. شغّل البرنامج عبر HTTPS لحفظ الجلسة.';
+
+  @override
   String get sessionStorageLabel => 'حفظ الجلسة';
 
   @override
@@ -116,9 +122,6 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get sessionStorageMemoryHint => 'هذه الصفحة ليست عبر HTTPS، لذا يحفظ المتصفح الجلسة حتى إعادة التحميل فقط. شغّل البرنامج عبر HTTPS لبقاء المستخدمين مسجّلين.';
-
-  @override
-  String get signInIncomplete => 'قبِل الخادم تسجيل الدخول لكنه لم يُرسل بيانات الحساب. يعني ذلك عادةً أن البرنامج والخادم بإصدارين مختلفين، أو أن تهيئة الشركة لم تكتمل. التفاصيل التقنية في سجل البرنامج.';
 
   @override
   String get fontSize => 'حجم الخط';
@@ -137,9 +140,6 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get fontSizePreview => 'معاينة: فاتورة 1,250.00 ج.م · خصم 12.5%';
-
-  @override
-  String get sessionNotPersisted => 'الجلسة محفوظة في الذاكرة فقط: المتصفح لا يخزّنها على عنوان http:// غير آمن. إعادة تحميل الصفحة تسجّل الخروج. شغّل البرنامج عبر HTTPS لحفظ الجلسة.';
 
   @override
   String get language => 'اللغة';
@@ -1128,6 +1128,13 @@ class AppLocalizationsAr extends AppLocalizations {
   String get downloadList => 'تنزيل الملف';
 
   @override
+  String get downloadStatement => 'تنزيل كشف الحساب';
+
+  @override
+  String get exportStatementHint =>
+      'نزّل كشف الحساب كما هو معروض: إكسل، أو CSV، أو PDF، أو صفحة للطباعة.';
+
+  @override
   String get exportListHint =>
       'نزّل القائمة زي ما هي على الشاشة: إكسل أو CSV أو PDF أو ورقة للطباعة.';
 
@@ -1274,7 +1281,12 @@ class AppLocalizationsAr extends AppLocalizations {
       'نسخة كاملة لكل قاعدة البيانات (جميع الشركات والمستخدمين) بصيغة PostgreSQL. تعمل على الخادم نفسه الذي تستضيف القاعدة.';
 
   @override
-  String get createFullBackup => 'إنشاء نسخة كاملة';
+  String get createFullBackup => 'إنشاء نسخة احتياطية الآن';
+
+  @override
+  String backupSavedIn(Object directory) {
+    return 'مكان الحفظ: $directory';
+  }
 
   @override
   String get backupInProgress => 'جارٍ إنشاء النسخة…';
@@ -1355,20 +1367,20 @@ class AppLocalizationsAr extends AppLocalizations {
   String get printBlocked => 'حجب المتصفح التبويب الجديد. اسمح بالفتح في تبويب جديد لهذا العنوان ثم اضغط طباعة مرة أخرى.';
 
   @override
-  String get resetData => 'إعادة ضبط بيانات البرنامج';
+  String get resetData => 'إعادة تهيئة البرنامج';
 
   @override
   String get resetDataHint => 'يحذف بيانات هذه الشركة ويعيد البرنامج إلى أول تشغيل. تؤخذ نسخة احتياطية ويتم التأكد منها قبل حذف أي شيء، وتتوقف العملية إن تعذّر ذلك.';
 
   @override
-  String get resetButton => 'إعادة ضبط بيانات البرنامج';
+  String get resetButton => 'إعادة تهيئة البرنامج';
 
   @override
   String get resetOnlyAdmins => 'لا يمكن تنفيذ هذا إلا بصلاحية مدير البرنامج.';
 
   @override
   String resetForCompany(Object company) {
-    return 'ستتم إعادة ضبط بيانات «$company».';
+    return 'ستتم إعادة تهيئة بيانات «$company».';
   }
 
   @override
@@ -1409,6 +1421,12 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get resetCountSalesInvoices => 'فواتير البيع';
+
+  @override
+  String get resetCountQuotations => 'عروض الأسعار';
+
+  @override
+  String get resetCountCashVouchers => 'سندات القبض والدفع';
 
   @override
   String get resetCountPurchaseInvoices => 'فواتير الشراء';
@@ -1781,34 +1799,6 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get resultLabel => 'النتيجة';
-  @override
-  String get @@locale => 'ar';
-
-  @override
-  String get deleteAccountConfirm => 'سيتم حذف الحساب «{account}» نهائياً إن لم يكن له حركات أو حسابات فرعية. متابعة؟';
-
-  @override
-  String get deleteBranchConfirm => 'سيتم حذف الوحدة «{unit}». الوحدات ذات الحركات لا يمكن حذفها.';
-
-  @override
-  String get deleteBackupConfirm => 'سيتم حذف الملف «{file}» من الخادم نهائياً.';
-
-  @override
-  String get resetForCompany => 'ستتم إعادة ضبط بيانات «{company}».';
-
-  @override
-  String get resetConfirmBody => 'العودة تكون فقط باستعادة النسخة التي ستؤخذ الآن. اكتب كلمة المرور وكلمة {word} للمتابعة.';
-
-  @override
-  String get resetWordLabel => 'اكتب {word}';
-
-  @override
-  String get resetWrongWord => 'اكتب {word} تماماً كما هي للتأكيد.';
-
-  @override
-  String get resetDone => 'تم حذف بيانات الشركة. تحتوي «{file}» على البيانات القديمة.';
-
-  @override
   String get rowDensity => 'كثافة الصفوف';
 
   @override
@@ -2249,6 +2239,36 @@ class AppLocalizationsAr extends AppLocalizations {
   String get columnNumeric => 'رقمي';
 
   @override
+  String get tableColumns => 'أعمدة هذا الجدول';
+
+  @override
+  String get builtinColumns => 'أعمدة جاهزة';
+
+  @override
+  String get columnType => 'نوع العمود';
+
+  @override
+  String get columnTypeText => 'نص';
+
+  @override
+  String get columnTypeNumber => 'رقم';
+
+  @override
+  String get columnTypeQuantity => 'كمية';
+
+  @override
+  String get columnTypePrice => 'سعر';
+
+  @override
+  String get columnTypePercent => 'نسبة مئوية';
+
+  @override
+  String get columnNameRequired => 'أعطِ العمود اسمًا بالعربية أو بالإنجليزية.';
+
+  @override
+  String get tablePreview => 'معاينة الجدول';
+
+  @override
   String get addCustomColumn => 'عمود مخصص…';
 
   @override
@@ -2288,4 +2308,406 @@ class AppLocalizationsAr extends AppLocalizations {
   @override
   String get unassignedWarehouse => 'غير مُخصّص';
 
+
+  @override
+  String get errorDialogTitle => 'حدث خطأ';
+
+  @override
+  String get warningDialogTitle => 'تنبيه';
+
+  @override
+  String get okAction => 'حسنًا';
+
+  @override
+  String get errorGenericBody => 'لم تكتمل العملية بسبب خطأ غير متوقع. لم يُحفظ أي تغيير. حاول مرة أخرى، وإذا تكرر الخطأ فأبلغ مسؤول النظام.';
+
+  @override
+  String get errorInvalidInputBody => 'البيانات المرسلة غير صالحة، لذلك لم تُنفّذ العملية. راجع الحقول المدخلة وحاول مرة أخرى.';
+
+  @override
+  String get errorNotFoundBody => 'لم يتم العثور على السجل المطلوب. ربما حُذف أو نُقل، أو لا تملك صلاحية الوصول إليه. أعد تحميل الصفحة وحاول مرة أخرى.';
+
+  @override
+  String get errorPermissionBody => 'ليس لديك صلاحية لتنفيذ هذا الإجراء. راجع مسؤول النظام إذا كنت تحتاج إليها.';
+
+  @override
+  String get errorConflictBody => 'تم تعديل هذا السجل من مستخدم آخر أثناء عملك عليه، لذلك لم يُحفظ التغيير. أعد تحميل الصفحة لرؤية أحدث نسخة ثم كرّر المحاولة.';
+
+  @override
+  String get errorServerBody => 'حدث خطأ في الخادم أثناء تنفيذ العملية، ولم يُحفظ التغيير. حاول مرة أخرى بعد قليل، وإذا تكرر الخطأ فأبلغ مسؤول النظام.';
+
+  @override
+  String get accumulatedAccount => 'حساب مجمع الإهلاك';
+
+  @override
+  String get accumulatedDepreciation => 'مجمع الإهلاك';
+
+  @override
+  String get activateAsset => 'تفعيل (ترحيل الاقتناء)';
+
+  @override
+  String get assetAccount => 'حساب الأصل';
+
+  @override
+  String get assetCategory => 'التصنيف';
+
+  @override
+  String get assetCode => 'كود الأصل';
+
+  @override
+  String get assetCost => 'التكلفة';
+
+  @override
+  String get assetDetails => 'تفاصيل الأصل';
+
+  @override
+  String get assetLocation => 'الموقع';
+
+  @override
+  String get bookValue => 'القيمة الدفترية';
+
+  @override
+  String get confirmActivateAsset => 'التفعيل يُرحّل قيد الاقتناء (مدين الأصل / دائن التمويل). متابعة؟';
+
+  @override
+  String get confirmDisposeAsset => 'الاستبعاد يخرج الأصل من الدفاتر ويُرحّل نتيجته. متابعة؟';
+
+  @override
+  String get depreciationExpenseAccount => 'حساب مصروف الإهلاك';
+
+  @override
+  String get depreciationPeriod => 'الشهر (YYYY-MM)';
+
+  @override
+  String get depreciationSchedule => 'جدول الإهلاك';
+
+  @override
+  String get disposalDate => 'تاريخ الاستبعاد';
+
+  @override
+  String get disposalProceeds => 'قيمة البيع';
+
+  @override
+  String get disposeAsset => 'استبعاد الأصل';
+
+  @override
+  String get editAsset => 'تعديل الأصل';
+
+  @override
+  String get fixedAssets => 'الأصول الثابتة';
+
+  @override
+  String get fundingAccount => 'حساب التمويل';
+
+  @override
+  String get gainLossAccount => 'حساب الربح/الخسارة';
+
+  @override
+  String get inServiceDate => 'تاريخ بدء الاستخدام';
+
+  @override
+  String get newAsset => 'أصل جديد';
+
+  @override
+  String get noAssets => 'لا توجد أصول ثابتة بعد.';
+
+  @override
+  String get proceedsAccount => 'حساب التحصيل';
+
+  @override
+  String get purchaseDate => 'تاريخ الشراء';
+
+  @override
+  String get runDepreciation => 'تشغيل الإهلاك';
+
+  @override
+  String get salvageValue => 'القيمة المتبقية';
+
+  @override
+  String get usefulLifeMonths => 'العمر الإنتاجي (شهور)';
+
+  @override
+  String get licence => 'الترخيص';
+
+  @override
+  String get licenceSubtitle => 'حالة الترخيص والتفعيل والتجديد';
+
+  @override
+  String get licenceSettingsSubtitle => 'التفعيل والتجديد وحد المستخدمين';
+
+  @override
+  String get licenceStateActive => 'نشط';
+
+  @override
+  String get licenceStateExpired => 'منتهي';
+
+  @override
+  String get licenceStateSuspended => 'موقوف';
+
+  @override
+  String get licenceStateUnlicensed => 'غير مرخّص';
+
+  @override
+  String get licenceMachineId => 'معرّف الجهاز';
+
+  @override
+  String get licenceLicenceId => 'رقم الترخيص';
+
+  @override
+  String get licenceIssuedAt => 'تاريخ الإصدار';
+
+  @override
+  String get licenceStartsAt => 'تاريخ البداية';
+
+  @override
+  String get licenceExpiresAt => 'تاريخ الانتهاء';
+
+  @override
+  String get licencePerpetual => 'دائم — بلا انتهاء';
+
+  @override
+  String get licenceDaysRemaining => 'الأيام المتبقية';
+
+  @override
+  String get licenceSeats => 'حسابات المستخدمين';
+
+  @override
+  String get licenceSeatsUsedLabel => 'مستخدم';
+
+  @override
+  String get licenceSeatsLimitLabel => 'الحد';
+
+  @override
+  String get licenceSeatsAvailableLabel => 'متاح';
+
+  @override
+  String get licenceSeatsExplainer => 'يُستهلك المقعد عند إنشاء حساب دخول ولا يعود بحذف الحساب.';
+
+  @override
+  String get licenceRequestCode => 'كود طلب التفعيل';
+
+  @override
+  String get licenceRequestCodeHint => 'أرسل هذا الكود للمورّد. لا يحمل إلا معرّف هذا الجهاز وإصدار البرنامج.';
+
+  @override
+  String get licenceCopy => 'نسخ';
+
+  @override
+  String get licenceCopied => 'تم النسخ';
+
+  @override
+  String get licenceEnterKey => 'مفتاح الترخيص';
+
+  @override
+  String get licenceKeyHint => 'ألصق المفتاح الذي أرسله المورّد ويبدأ بـ KYN1.';
+
+  @override
+  String get licenceApply => 'تطبيق المفتاح';
+
+  @override
+  String get licenceOperation => 'ما يفعله المفتاح';
+
+  @override
+  String get licenceOperationActivation => 'تفعيل جديد';
+
+  @override
+  String get licenceOperationRenewal => 'تجديد';
+
+  @override
+  String get licenceOperationSeats => 'زيادة مستخدمين';
+
+  @override
+  String get licenceOperationTransfer => 'نقل إلى هذا الجهاز';
+
+  @override
+  String get licenceApplied => 'تم تحديث الترخيص.';
+
+  @override
+  String get licenceClockTitle => 'فحص تاريخ الجهاز';
+
+  @override
+  String get licenceClockWarning => 'تاريخ النظام أقدم من آخر تشغيل مسجّل. اضبط التاريخ والوقت الصحيحين في ويندوز ثم أكّد.';
+
+  @override
+  String get licenceConfirmClock => 'تأكيد التاريخ والوقت';
+
+  @override
+  String get licenceEvents => 'سجل الترخيص';
+
+  @override
+  String get licenceEventsEmpty => 'لا حوادث ترخيص بعد.';
+
+  @override
+  String get licencePublicKey => 'مفتاح التحقق';
+
+  @override
+  String get licenceNotConfigured => 'هذا التثبيت بلا مفتاح تحقق، فلا يستطيع فحص أي مفتاح ترخيص. أعد التثبيت ومعك المفتاح العام من المورّد.';
+
+  @override
+  String get licenceBlockedTitle => 'العمل موقوف بسبب الترخيص';
+
+  @override
+  String get licenceBlockedBody => 'بياناتك سليمة ولم يُحذف منها شيء. افتح شاشة الترخيص وطبّق مفتاح تجديد لمواصلة العمل.';
+
+  @override
+  String get licenceSuspendedBody => 'أوقف البرنامج العمل لأن تاريخ النظام أقدم من آخر تشغيل مسجّل. صحّح التاريخ والوقت ثم أكّد من هذه الشاشة. لم تُفقد أي بيانات.';
+
+  @override
+  String get licenceOpenLicence => 'فتح شاشة الترخيص';
+
+  @override
+  String get licenceBackupStillAvailable => 'النسخ الاحتياطي والاستعادة متاحان دائمًا حتى مع انتهاء الترخيص.';
+
+  @override
+  String get licenceOpenBackup => 'النسخ الاحتياطي والاستعادة';
+
+  @override
+  String get licenceEnforcementEnforce => 'مُطبَّق';
+
+  @override
+  String get licenceEnforcementWarn => 'تحذير فقط';
+
+  @override
+  String get licenceEnforcementOff => 'معطّل';
+
+  @override
+  String get licenceSuperAdminOnly => 'لا يغيّر الترخيص إلا المسؤول الأعلى.';
+
+  @override
+  String get licenceExpiringSoon => 'هذا الترخيص ينتهي قريبًا. جدّده قبل انتهائه حتى لا يتوقف يوم عمل.';
+
+  @override
+  String unitsBarcodesTitle(Object itemName) => 'الوحدات والباركود — $itemName';
+
+  @override
+  String get unitsBarcodesEmpty => 'لم تُضَف وحدات أو باركودات إضافية بعد.';
+
+  @override
+  String unitsBarcodesInactiveUnit(Object unitName) => '$unitName (غير نشطة)';
+
+  @override
+  String unitsBarcodesFactorBarcode(Object factor, Object barcode) => 'المعامل: $factor  •  الباركود: $barcode';
+
+  @override
+  String get unitsBarcodesHidden => 'مخفية عن المستندات الجديدة';
+
+  @override
+  String get unitsBarcodesBaseUnit => 'الوحدة الأساسية';
+
+  @override
+  String get unitsBarcodesGenerateTooltip => 'توليد / استبدال الباركود';
+
+  @override
+  String get unitsBarcodesEditTooltip => 'تعديل الوحدة';
+
+  @override
+  String get unitsBarcodesReactivateTooltip => 'إعادة تفعيل الوحدة';
+
+  @override
+  String get unitsBarcodesBaseCannotRemove => 'لا يمكن حذف الوحدة الأساسية';
+
+  @override
+  String get unitsBarcodesRemoveTooltip => 'حذف الوحدة';
+
+  @override
+  String get unitsBarcodesPrintLabels => 'طباعة الملصقات';
+
+  @override
+  String get unitsBarcodesAdd => 'إضافة وحدة / باركود';
+
+  @override
+  String get unitsBarcodesFieldUnit => 'اسم الوحدة';
+
+  @override
+  String get unitsBarcodesFieldFactor => 'عدد الوحدات الأساسية لكل وحدة';
+
+  @override
+  String get unitsBarcodesFactorHelper => 'مثال: كرتونة = 20 وحدة أساسية ← المعامل 20.';
+
+  @override
+  String get unitsBarcodesFieldBarcode => 'الباركود';
+
+  @override
+  String get unitsBarcodesFieldSalePrice => 'سعر البيع';
+
+  @override
+  String get unitsBarcodesFieldPurchasePrice => 'سعر الشراء';
+
+  @override
+  String get unitsBarcodesAdded => 'تمت إضافة الوحدة / الباركود.';
+
+  @override
+  String get unitsBarcodesBarcodeGenerated => 'تم توليد الباركود.';
+
+  @override
+  String get unitsBarcodesReactivated => 'تمت إعادة تفعيل الوحدة.';
+
+  @override
+  String get unitsBarcodesRemoveTitle => 'حذف الوحدة';
+
+  @override
+  String unitsBarcodesRemoveConfirm(Object unit) => 'حذف «$unit» من هذا الصنف؟ إذا كانت مستخدمة في مستند محفوظ فستُعطَّل بدل حذفها، وتُخفى عن المستندات الجديدة.';
+
+  @override
+  String get unitsBarcodesDeactivated => 'الوحدة مستخدمة في مستندات: عُطّلت بدل حذفها.';
+
+  @override
+  String get unitsBarcodesRemoved => 'تم حذف الوحدة.';
+
+  @override
+  String get unitsBarcodesEditTitle => 'تعديل الوحدة';
+
+  @override
+  String get unitsBarcodesBaseCannotRenameHelper => 'لا يمكن إعادة تسمية الوحدة الأساسية.';
+
+  @override
+  String get unitsBarcodesBaseFactorHelper => 'الوحدة الأساسية تحوّل دائمًا بنسبة 1:1.';
+
+  @override
+  String get unitsBarcodesFactorEditHelper => 'يُستخدم المعامل المحفوظ عند مسح هذه الوحدة أو جردها.';
+
+  @override
+  String get unitsBarcodesUpdated => 'تم تحديث الوحدة.';
+
+  @override
+  String get unitsBarcodesTooltip => 'الوحدات والباركود';
+
+  @override
+  String barcodeLabelsTitle(Object itemName) => 'طباعة ملصقات الباركود — $itemName';
+
+  @override
+  String barcodeLabelsInactiveUnit(Object unitName) => '$unitName (غير نشطة)';
+
+  @override
+  String barcodeLabelsBarcode(Object barcode) => 'الباركود: $barcode';
+
+  @override
+  String get barcodeLabelsNoBarcode => 'لا يوجد باركود معيّن — عيّن باركودًا قبل الطباعة.';
+
+  @override
+  String get barcodeLabelsCopies => 'عدد النسخ';
+
+  @override
+  String get barcodeLabelsPaper => 'الورق';
+
+  @override
+  String get barcodeLabelsPaperA4 => 'ورقة A4 (3 ملصقات في الصف)';
+
+  @override
+  String get barcodeLabelsPaperThermal80 => 'رول حراري 80 مم';
+
+  @override
+  String get barcodeLabelsPaperThermal58 => 'رول حراري 58 مم';
+
+  @override
+  String get barcodeLabelsShowPrice => 'إظهار سعر البيع';
+
+  @override
+  String get barcodeLabelsPdf => 'PDF';
+
+  @override
+  String get barcodeLabelsPrint => 'طباعة';
+
+  @override
+  String barcodeLabelsPrintCount(Object count) => 'طباعة ($count)';
 }

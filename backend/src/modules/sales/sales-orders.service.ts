@@ -8,6 +8,10 @@ import { OrderStatus, Prisma } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import {
+  defaultUnitPrice,
+  resolveUnitSelection,
+} from '../../common/units/unit-math';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { SalesInvoicesService } from './sales-invoices.service';
 import { PriceListsService } from '../sales/price-lists.service';
@@ -23,6 +27,9 @@ export interface OrderLineInput {
   discountPercent?: string | number;
   taxRate?: string | number;
   notes?: string;
+  /// Optional chosen unit; the quantity is expressed in it.
+  unitName?: string;
+  unitId?: string;
 }
 
 /**
@@ -130,9 +137,16 @@ export class SalesOrdersService {
         itemCode: line.item.code,
         itemNameEn: line.item.nameEn,
         itemNameAr: line.item.nameAr,
-        unit: line.item.unit,
+        unit: line.unitName ?? line.item.unit,
+        unitName: line.unitName ?? null,
+        unitFactor:
+          line.unitFactor === null || line.unitFactor === undefined
+            ? null
+            : line.unitFactor.toFixed(6),
+        unitQuantity: (line.unitQuantity ?? line.quantity).toFixed(MONEY_SCALE),
         description: line.description,
         quantity: line.quantity.toFixed(MONEY_SCALE),
+        baseQuantity: line.quantity.toFixed(MONEY_SCALE),
         invoicedQuantity: line.invoicedQuantity.toFixed(MONEY_SCALE),
         remainingQuantity: line.quantity.minus(line.invoicedQuantity).toFixed(MONEY_SCALE),
         unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
@@ -193,6 +207,9 @@ export class SalesOrdersService {
               taxRate: line.taxRate,
               lineTotal: line.lineTotal,
               notes: line.notes,
+              unitName: line.unitName,
+              unitFactor: line.unitFactor,
+              unitQuantity: line.unitQuantity,
             })),
           },
         },
@@ -320,7 +337,7 @@ export class SalesOrdersService {
       }
     }
 
-    const invoiceLines: Array<{ itemId: string; description: string; quantity: string; unitPrice: string; taxRate: string }> = [];
+    const invoiceLines: Array<{ itemId: string; description: string; quantity: string; unitPrice: string; taxRate: string; unitName?: string }> = [];
     const consumed: Array<{ lineId: string; quantity: Prisma.Decimal }> = [];
 
     for (const line of order.lines) {
@@ -333,12 +350,19 @@ export class SalesOrdersService {
             `${quantity.toFixed(MONEY_SCALE)} was asked for`,
         );
       }
+      // Hand the invoice the quantity in the chosen unit; it re-applies the
+      // factor to reach the same base quantity. Legacy lines pass through.
+      const hasUnit = line.unitFactor !== null && line.unitFactor !== undefined;
+      const invoiceQuantity = hasUnit
+        ? quantity.div(line.unitFactor as Prisma.Decimal).toDecimalPlaces(MONEY_SCALE)
+        : quantity;
       invoiceLines.push({
         itemId: line.itemId,
         description: line.description,
-        quantity: quantity.toFixed(MONEY_SCALE),
+        quantity: invoiceQuantity.toFixed(MONEY_SCALE),
         unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
         taxRate: line.taxRate.toFixed(MONEY_SCALE),
+        unitName: line.unitName ?? undefined,
       });
       consumed.push({ lineId: line.id, quantity });
     }
@@ -412,6 +436,9 @@ export class SalesOrdersService {
       taxRate: Prisma.Decimal;
       lineTotal: Prisma.Decimal;
       notes: string | null;
+      unitName: string | null;
+      unitFactor: Prisma.Decimal | null;
+      unitQuantity: Prisma.Decimal | null;
     }> = [];
     let subTotal = new Prisma.Decimal(0);
     let taxAmount = new Prisma.Decimal(0);
@@ -420,33 +447,46 @@ export class SalesOrdersService {
       const itemId = this.text(raw.itemId, `Line ${index + 1} itemId`);
       const item = await this.prisma.item.findFirst({
         where: { id: itemId, companyId, deletedAt: null },
-        select: { id: true, code: true, nameEn: true, unit: true, isActive: true, salePrice: true, taxRate: true },
+        select: { id: true, code: true, nameEn: true, unit: true, isActive: true, salePrice: true, taxRate: true, units: true },
       });
       if (!item) throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
       if (!item.isActive) throw new BadRequestException(`Line ${index + 1}: item ${item.code} is inactive`);
 
-      const quantity = this.positive(raw.quantity, `Line ${index + 1} quantity`);
+      const enteredQuantity = this.positive(raw.quantity, `Line ${index + 1} quantity`);
+      const resolved = resolveUnitSelection({
+        lineLabel: `Line ${index + 1}`,
+        requestedUnitId: raw.unitId,
+        requestedUnitName: raw.unitName,
+        enteredQuantity,
+        baseUnitName: item.unit,
+        units: (item as { units?: any[] }).units ?? [],
+      });
+      const quantity = resolved.baseQuantity;
       const discountPercent = this.percent(raw.discountPercent, `Line ${index + 1} discountPercent`);
 
       let unitPrice = raw.unitPrice === undefined || raw.unitPrice === null || raw.unitPrice === ''
         ? null
         : this.nonNegative(raw.unitPrice, `Line ${index + 1} unitPrice`);
       if (unitPrice === null) {
+        const chosenUnitName = resolved.snapshot.unitName ?? item.unit;
         const listed = await this.prices.resolvePrice(this.prisma, companyId, {
           partyId: customerId,
           partyKind: 'SUPPLIER',
           itemId: item.id,
-          unit: item.unit,
-          quantity,
+          unit: chosenUnitName,
+          quantity: enteredQuantity,
         });
-        unitPrice = listed?.price ?? item.salePrice;
+        unitPrice = listed
+          ? listed.price
+          : defaultUnitPrice('sale', resolved.row, item.salePrice);
       }
 
       const taxRate = raw.taxRate === undefined || raw.taxRate === null || raw.taxRate === ''
         ? item.taxRate ?? new Prisma.Decimal(settings.taxRate)
         : this.percent(raw.taxRate, `Line ${index + 1} taxRate`);
 
-      const net = quantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
+      // Money follows the entered quantity in the chosen unit.
+      const net = enteredQuantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
       const discount = net.mul(discountPercent).div(100).toDecimalPlaces(MONEY_SCALE);
       const taxable = net.minus(discount);
       const tax = taxable.mul(taxRate).div(100).toDecimalPlaces(MONEY_SCALE);
@@ -463,6 +503,9 @@ export class SalesOrdersService {
         taxRate,
         lineTotal,
         notes: raw.notes?.trim() || null,
+        unitName: resolved.snapshot.unitName,
+        unitFactor: resolved.snapshot.unitFactor,
+        unitQuantity: resolved.snapshot.unitQuantity,
       });
     }
 

@@ -1,6 +1,8 @@
+import { KAYAN_FONT_FAMILY, NASKH_FONT_FACE } from './quotation-fonts';
 import {
   COLUMN_LABELS,
   QuotationColumn,
+  columnIsNumeric,
   columnLabel,
   standardColumns,
 } from './quotation-columns';
@@ -65,6 +67,10 @@ export interface QuotationSnapshot {
   tables: Array<{
     title: string;
     sortOrder: number;
+    /// This section's own columns when it has them; absent on snapshots
+    /// frozen before per-table layouts, which keep printing the
+    /// quotation-level [columns] for every section.
+    columns?: QuotationColumn[];
     subTotal: string;
     discountPercent: string;
     discountAmount: string;
@@ -167,7 +173,9 @@ function designCss(design: Record<string, unknown> | null | undefined): string {
   const targets: Record<string, string> = {
     title: '.title-band h2', company: '.brand h1', customer: '.panels .panel',
     sectionTitle: '.section-head h3', tableHeader: '.items thead th', tableCell: '.items tbody td',
-    totalsLabel: '.totals td:first-child', totalsValue: '.totals td.num', finalTotal: '.totals tr.grand td',
+    totalsLabel: '.summary tbody tr.discount td:first-child, .summary tbody tr.tax td:first-child, .totals td:first-child',
+    totalsValue: '.summary tbody tr.discount td.num, .summary tbody tr.tax td.num, .totals td.num',
+    finalTotal: '.summary tr.grand td, .totals tr.grand td',
     header: '.masthead, .custom-header', footer: '.page-footer',
   };
   for (const [key, selector] of Object.entries(targets)) {
@@ -208,9 +216,10 @@ function quantity(value: string): string {
 function columnCell(
   column: QuotationColumn,
   line: QuotationSnapshotLine,
+  lang: 'en' | 'ar' = 'en',
 ): { text: string; numeric: boolean; strong: boolean } {
   const builtIn = COLUMN_LABELS[column.key];
-  const numeric = builtIn ? builtIn.numeric : column.numeric ?? false;
+  const numeric = builtIn ? builtIn.numeric : columnIsNumeric(column);
   switch (column.key) {
     case 'description':
       return { text: line.description, numeric: false, strong: false };
@@ -230,12 +239,26 @@ function columnCell(
       return { text: amount(line.unitPrice), numeric: true, strong: false };
     case 'lineTotal':
       return { text: amount(line.lineTotal), numeric: true, strong: true };
-    default:
-      return {
-        text: line.customValues?.[column.key] ?? '',
-        numeric,
-        strong: false,
-      };
+    default: {
+      const raw = line.customValues?.[column.key] ?? '';
+      // A numeric custom column prints like the built-in numbers around it
+      // (grouped, trimmed) instead of echoing whatever was typed; text
+      // that does not parse as a number is shown as written rather than
+      // dropped, because a wrong-looking value beats a missing one.
+      if (numeric && raw.trim() !== '' && Number.isFinite(Number(raw))) {
+        const formatted =
+          column.kind === 'price' ? amount(raw) : quantity(raw);
+        return {
+          text:
+            column.kind === 'percent'
+              ? `${formatted}${lang === 'ar' ? '٪' : '%'}`
+              : formatted,
+          numeric,
+          strong: false,
+        };
+      }
+      return { text: raw, numeric, strong: false };
+    }
   }
 }
 
@@ -250,6 +273,64 @@ export function quotationDocumentFileName(
     .replace(/[^A-Za-z0-9._-]+/g, '-')
     .replace(/^-+|-+$/g, '');
   return `quotation-${safe || fallback}.pdf`;
+}
+
+/// The two bands the page design owns, in millimetres.
+///
+/// The content table reserves exactly these heights with an empty `thead` and
+/// `tfoot` (see `.page-flow` in the stylesheet), so a long offer that spills
+/// onto a second page cannot print its last row underneath the legal footer:
+/// Chromium repeats the header and footer groups on every page it writes, and
+/// the fixed background layer paints behind them.
+export const QUOTATION_TOP_BAND_MM = 28;
+export const QUOTATION_BOTTOM_BAND_MM = 26;
+
+/// How far above the paper's bottom edge the footer's last line sits.
+///
+/// The footer is anchored to the band, not to the paper, so this is measured
+/// from the bottom of the design. Everything below it belongs to the stamped
+/// page number.
+export const QUOTATION_FOOTER_INSET_MM = 9.5;
+
+/// Where `PdfService` stamps "n / N", in PDF points from the bottom edge, and
+/// how large the digits are.
+///
+/// 10 pt puts the digits' top at roughly 17 pt while the footer's last line
+/// starts at {@link QUOTATION_FOOTER_INSET_MM} (27 pt): the two cannot touch,
+/// and both are inside the {@link QUOTATION_BOTTOM_BAND_MM} band.
+export const QUOTATION_PAGE_NUMBER = { y: 10, size: 9 };
+
+export interface PageNumberInk {
+  r: number;
+  g: number;
+  b: number;
+}
+
+/// The colour the stamped page number is drawn in.
+///
+/// The bottom band is brand navy unless the offer's own design overrode the
+/// footer background, so the digits are white by default and switch to the
+/// deep brand ink when the band a design asked for is light. Without this the
+/// number would be invisible on one of the two, and it is stamped after the
+/// browser has finished, so it cannot inherit the band's colour.
+export function quotationPageNumberInk(
+  design: Record<string, unknown> | null | undefined,
+): PageNumberInk {
+  const white: PageNumberInk = { r: 1, g: 1, b: 1 };
+  const dark: PageNumberInk = { r: 0.086, g: 0.161, b: 0.29 };
+  const footer = design?.footer;
+  const raw =
+    footer && typeof footer === 'object'
+      ? (footer as Record<string, unknown>).backgroundColor
+      : null;
+  const hex = safeColor(raw);
+  if (!hex) return white;
+  const value = hex.slice(1, 7);
+  const r = parseInt(value.slice(0, 2), 16) / 255;
+  const g = parseInt(value.slice(2, 4), 16) / 255;
+  const b = parseInt(value.slice(4, 6), 16) / 255;
+  const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+  return luminance > 0.6 ? dark : white;
 }
 
 /// The print page and the PDF, in one self-contained HTML document.
@@ -293,24 +374,28 @@ export function renderQuotationDocument(
     ? content.customer.nameAr || content.customer.nameEn
     : content.customer.nameEn || content.customer.nameAr;
 
+  // A phone number, an e-mail and a tax number are left-to-right runs even in
+  // an Arabic page: without `bdi` the bidi algorithm decides a trailing digit
+  // belongs to the other end of the line and prints "+20 2 1234 5678" as
+  // "5678 1234 2 20+".
   const customerRows = [
     content.customer.phone
-      ? `<div><span>${L('Phone', 'الهاتف')}</span><b>${escapeHtml(
+      ? `<div class="row"><span>${L('Phone', 'الهاتف')}</span><b><bdi>${escapeHtml(
           content.customer.phone,
-        )}</b></div>`
+        )}</bdi></b></div>`
       : '',
     content.customer.email
-      ? `<div><span>${L('Email', 'البريد الإلكتروني')}</span><b>${escapeHtml(
+      ? `<div class="row"><span>${L('Email', 'البريد الإلكتروني')}</span><b><bdi>${escapeHtml(
           content.customer.email,
-        )}</b></div>`
+        )}</bdi></b></div>`
       : '',
     content.customer.taxNumber
-      ? `<div><span>${L('Tax number', 'الرقم الضريبي')}</span><b>${escapeHtml(
+      ? `<div class="row"><span>${L('Tax number', 'الرقم الضريبي')}</span><b><bdi>${escapeHtml(
           content.customer.taxNumber,
-        )}</b></div>`
+        )}</bdi></b></div>`
       : '',
     content.customer.address
-      ? `<div><span>${L('Address', 'العنوان')}</span><b>${escapeHtml(
+      ? `<div class="row"><span>${L('Address', 'العنوان')}</span><b>${escapeHtml(
           content.customer.address,
         )}</b></div>`
       : '',
@@ -318,30 +403,39 @@ export function renderQuotationDocument(
     .filter(Boolean)
     .join('');
 
-  const columns = (
+  // The quotation-level layout: every section's fallback, and the only
+  // layout a snapshot frozen before per-table columns has.
+  const fallbackColumns = (
     content.columns?.length ? content.columns : standardColumns()
   ).filter((column) => column.visible);
-  const columnCount =
-    columns.reduce((sum, column) => sum + column.width, 0) || 1;
-  const span = columns.length + 1;
-  const headCells = columns
-    .map((column) => {
-      const builtIn = COLUMN_LABELS[column.key];
-      const numeric = builtIn ? builtIn.numeric : column.numeric ?? false;
-      const width = `${Math.round((column.width / columnCount) * 100)}%`;
-      return `<th${numeric ? ` class="num"` : ''} style="width:${width}">${escapeHtml(
-        columnLabel(column, lang),
-      )}</th>`;
-    })
-    .join('');
 
   const tables = content.tables
     .map((table, index) => {
+      // This section's own columns when it carries them. Widths, header
+      // cells and the footer span are per-section now, because sections
+      // of one offer no longer have to share one layout.
+      const columns =
+        table.columns?.length
+          ? table.columns.filter((column) => column.visible)
+          : fallbackColumns;
+      const columnCount =
+        columns.reduce((sum, column) => sum + column.width, 0) || 1;
+      const span = columns.length + 1;
+      const headCells = columns
+        .map((column) => {
+          const numeric = columnIsNumeric(column);
+          const width = `${Math.round((column.width / columnCount) * 100)}%`;
+          return `<th${numeric ? ` class="num"` : ''} style="width:${width}">${escapeHtml(
+            columnLabel(column, lang),
+          )}</th>`;
+        })
+        .join('');
+
       const rows = table.lines
         .map((line, lineIndex) => {
           const cells = columns
             .map((column) => {
-              const cell = columnCell(column, line);
+              const cell = columnCell(column, line, lang);
               const classes = [
                 cell.numeric ? 'num' : '',
                 cell.strong ? 'strong' : '',
@@ -420,39 +514,34 @@ export function renderQuotationDocument(
   const taxAmount = Number(content.totals.taxAmount ?? 0);
   const showTax = taxAmount > 0;
 
+  // Keep the gross, table-level discount and net visible per table.
+  // The offer-level discount is separate; totals are displayed, never recalculated.
   const summaryRows = content.tables
     .map(
       (table) => `<tr>
         <td>${escapeHtml(table.title)}</td>
         <td class="num">${money(table.subTotal)}</td>
-        <td class="num">${Number(table.discountAmount) > 0 ? `− ${money(table.discountAmount)}` : '—'}</td>
+        <td class="num discount-value">${Number(table.discountAmount) > 0 ? '− ' : ''}${money(table.discountAmount)}</td>
         <td class="num strong">${money(table.netTotal)}</td>
       </tr>`,
     )
     .join('');
-
-  const totalsRows = [
-    `<tr><td>${L('Subtotal before discount', 'الإجمالي قبل الخصم')}</td><td class="num">${money(
-      content.totals.subTotal,
-    )}</td></tr>`,
-    tableDiscountTotal > 0
-      ? `<tr><td>${L('Table discounts', 'خصومات الجداول')}</td><td class="num">− ${money(
-          tableDiscountTotal.toFixed(2),
-        )}</td></tr>`
-      : '',
+  const summarySubtotalRow = `<tr class="subtotal"><td colspan="3">${L(
+    'Subtotal before discount',
+    'الإجمالي قبل الخصم',
+  )}</td><td class="num">${money(content.totals.subTotal)}</td></tr>`;
+  const summaryDiscountRow =
     quotationDiscount > 0
-      ? `<tr><td>${L('Quotation discount', 'خصم العرض')}</td><td class="num">− ${money(
-          quotationDiscount.toFixed(2),
-        )}</td></tr>`
-      : '',
-    showTax
-      ? `<tr class="tax"><td>${L('Tax (VAT)', 'الضريبة المضافة')}${
-          taxRate > 0 ? ` (${taxRate.toFixed(2)}%)` : ''
-        }</td><td class="num">+ ${money(taxAmount.toFixed(2))}</td></tr>`
-      : '',
-  ]
-    .filter(Boolean)
-    .join('');
+      ? `<tr class="discount"><td colspan="3">${L(
+          'Quotation discount',
+          'خصم العرض',
+        )}</td><td class="num">− ${money(quotationDiscount.toFixed(2))}</td></tr>`
+      : '';
+  const summaryTaxRow = showTax
+    ? `<tr class="tax"><td colspan="3">${L('Tax (VAT)', 'الضريبة المضافة')}${
+        taxRate > 0 ? ` (${taxRate.toFixed(2)}%)` : ''
+      }</td><td class="num">+ ${money(taxAmount.toFixed(2))}</td></tr>`
+    : '';
 
   const terms = content.terms?.trim()
     ? `<section class="terms">
@@ -492,27 +581,37 @@ export function renderQuotationDocument(
 
   const contactLine = [
     companyAddress ? escapeHtml(companyAddress) : '',
-    content.company.phone ? escapeHtml(content.company.phone) : '',
-    content.company.email ? escapeHtml(content.company.email) : '',
+    content.company.phone ? `<bdi>${escapeHtml(content.company.phone)}</bdi>` : '',
+    content.company.email ? `<bdi>${escapeHtml(content.company.email)}</bdi>` : '',
   ]
     .filter(Boolean)
     .join(' · ');
 
   const legalLine = [
     content.showTaxId && content.company.taxId
-      ? `${L('Tax registration', 'الرقم الضريبي')}: ${escapeHtml(
+      ? `${L('Tax registration', 'الرقم الضريبي')}: <bdi>${escapeHtml(
           content.company.taxId,
-        )}`
+        )}</bdi>`
       : '',
     content.company.commercialRegistration
-      ? `${L('Commercial registration', 'السجل التجاري')}: ${escapeHtml(
+      ? `${L('Commercial registration', 'السجل التجاري')}: <bdi>${escapeHtml(
           content.company.commercialRegistration,
-        )}`
+        )}</bdi>`
       : '',
     L('This offer is not a tax invoice.', 'هذا العرض ليس فاتورة ضريبية.'),
   ]
     .filter(Boolean)
     .join(' · ');
+
+  // A wordmark for the watermark: the company's own name, trimmed to the two
+  // words that still read at 66pt behind the text.
+  const watermark = companyName
+    .replace(/^(شركة|مؤسسة|company)\s+/i, '')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .join(' ')
+    .slice(0, 28);
 
   return `<!doctype html>
 <html lang="${lang}" dir="${rtl ? 'rtl' : 'ltr'}">
@@ -520,58 +619,111 @@ export function renderQuotationDocument(
 <meta charset="utf-8">
 <title>${escapeHtml(content.quotationNumber)} — ${escapeHtml(companyName)}</title>
 <style>
-  @page { size: A4 portrait; margin: 12mm 12mm 16mm; }
+${NASKH_FONT_FACE}
+  /* The sheet is the whole page: the design owns the margins, so the fixed
+     background can reach the paper's edge. */
+  @page { size: A4 portrait; margin: 0; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
     direction: ${rtl ? 'rtl' : 'ltr'};
-    font-family: 'Tahoma', 'Segoe UI', 'Arial', sans-serif;
+    font-family: '${KAYAN_FONT_FAMILY}', 'Tahoma', 'Segoe UI', 'Arial', sans-serif;
     color: ${INK};
     font-size: 9.5pt;
     line-height: 1.45;
     background: #f3f4f6;
+    position: relative;
   }
-  .toolbar { display: flex; gap: 8px; justify-content: flex-end; padding: 10px 4px; background: #ffffff; }
+  .toolbar { position: relative; z-index: 3; display: flex; gap: 8px; justify-content: flex-end; padding: 10px 4px; background: #ffffff; }
   .toolbar button { font: inherit; padding: 7px 15px; border-radius: 4px; border: 1px solid ${LINE}; background: #fff; color: ${INK}; cursor: pointer; }
   .toolbar button.primary { background: ${PRIMARY}; border-color: ${PRIMARY}; color: #fff; }
-  .sheet {
-    width: 210mm;
-    min-height: 297mm;
-    margin: 0 auto;
-    padding: 0 0 6mm;
-    background: #fff;
-    color: ${INK};
+
+  /* ── the page design: one fixed layer, painted behind everything and
+        repeated by Chromium at the top of every printed page ─────────────── */
+  /* Fixed, and sized to the page box: Chromium paints this layer again at the
+     top of every printed page, behind everything else. Inset to zero rather than
+     a fixed 210x297mm keeps the design whole even if a printer (or the user's
+     own print dialog) insists on its own margins. */
+  .page-bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; }
+  .page-bg .band { position: absolute; left: 0; right: 0; }
+  .page-bg .band-top { top: 0; height: ${QUOTATION_TOP_BAND_MM}mm; background: ${PRIMARY_DEEP}; }
+  .page-bg .band-top .rule { position: absolute; left: 0; right: 0; bottom: 0; height: 1.1mm; background: ${SECONDARY}; }
+  .page-bg .band-bottom { bottom: 0; height: ${QUOTATION_BOTTOM_BAND_MM}mm; background: ${PRIMARY_DEEP}; }
+  .page-bg .band-bottom .rule { position: absolute; left: 0; right: 0; top: 0; height: 1.1mm; background: ${SECONDARY}; }
+
+  .page-bg .masthead {
+    position: absolute; top: 5.5mm; left: 12mm; right: 12mm;
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 8mm;
+    color: #ffffff; padding: 0; border: 0;
   }
-  .masthead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8mm; padding-bottom: 5mm; border-bottom: 0.6mm solid ${PRIMARY}; }
-  .brand { flex: 1; }
-  .brand h1 { margin: 0; color: ${PRIMARY_DEEP}; font-family: 'Tahoma', 'Segoe UI', Arial, sans-serif; font-size: 12.5pt; font-weight: 600; line-height: 1.35; }
-  .brand .secondary { margin-top: 1mm; color: ${MUTED}; font-family: 'Tahoma', 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; font-weight: 400; letter-spacing: 0.02em; text-transform: none; }
-  .mark { width: 30mm; min-height: 14mm; display: flex; justify-content: flex-end; align-items: flex-start; }
-  .mark img { max-width: 30mm; max-height: 14mm; width: auto; height: auto; object-fit: contain; }
-  .title-band { text-align: center; padding: 6mm 0 5mm; }
+  .page-bg .brand { flex: 1; min-width: 0; }
+  .page-bg .brand h1 { margin: 0; color: #ffffff; font-family: '${KAYAN_FONT_FAMILY}', 'Tahoma', 'Segoe UI', Arial, sans-serif; font-size: 13pt; font-weight: 700; line-height: 1.3; }
+  .page-bg .brand .secondary { margin-top: 0.6mm; color: #cfe0f6; font-family: '${KAYAN_FONT_FAMILY}', 'Tahoma', 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; font-weight: 400; letter-spacing: 0.02em; }
+  .page-bg .brand .contact { margin-top: 1.6mm; color: #d6e4f6; font-size: 7pt; line-height: 1.5; }
+  .page-bg .brand .custom-header { margin-top: 1mm; color: #d6e4f6; font-size: 7pt; }
+
+  .page-bg .mark { flex: none; width: 38mm; display: flex; justify-content: flex-end; align-items: flex-start; }
+  .page-bg .mark img { max-width: 38mm; max-height: 19mm; width: auto; height: auto; object-fit: contain; background: #ffffff; padding: 1.1mm; border-radius: 1.6mm; }
+
+  /* The frame and the watermark are the design's own furniture: they run the
+     full height of the content area, between the two bands. */
+  .page-bg .frame {
+    position: absolute; top: ${QUOTATION_TOP_BAND_MM}mm; bottom: ${QUOTATION_BOTTOM_BAND_MM}mm;
+    left: 7mm; right: 7mm;
+    border-left: 0.35mm solid ${LINE}; border-right: 0.35mm solid ${LINE};
+  }
+  .page-bg .watermark {
+    position: absolute; top: 118mm; left: 8mm; right: 8mm; text-align: center;
+    color: ${PRIMARY}; opacity: 0.04; font-size: 62pt; font-weight: 700;
+    letter-spacing: 0.06em; transform: rotate(-22deg); white-space: nowrap;
+  }
+
+  .page-bg .page-footer {
+    position: absolute; left: 14mm; right: 14mm; bottom: ${QUOTATION_FOOTER_INSET_MM}mm;
+    color: #d6e4f6; font-size: 7pt; line-height: 1.45; text-align: center;
+    margin: 0; padding: 0; border: 0;
+  }
+  .page-bg .page-footer .name { color: #ffffff; font-weight: 700; font-size: 7.8pt; }
+  .page-bg .page-footer .legal { margin-top: 0.5mm; color: #c8d9ef; }
+  .page-bg .page-footer .custom-footer { margin-top: 0.5mm; color: #d6e4f6; }
+
+  /* ── the variable content: a table whose empty header/footer groups reserve
+        the two bands on every page the offer runs onto ───────────────────── */
+  /* 186mm = A4 less the 12mm margin on each side. The width lives on the
+     table, not in the cell's padding: padding is applied to the first fragment
+     of a row only, so a row that runs onto a second page would otherwise
+     widen to the paper's edge there. */
+  table.page-flow { position: relative; z-index: 1; width: 186mm; margin: 0 auto; border-collapse: collapse; table-layout: fixed; }
+  /* The two bands, plus a little air: the header and footer groups repeat on
+     every page, so the gap they leave is repeated too. */
+  .page-flow > thead > tr > td { height: ${QUOTATION_TOP_BAND_MM + 4}mm; padding: 0; }
+  .page-flow > tfoot > tr > td { height: ${QUOTATION_BOTTOM_BAND_MM + 3}mm; padding: 0; }
+  .page-flow > tbody > tr > td { padding: 0; vertical-align: top; }
+
+  .title-band { text-align: center; padding: 1mm 0 3mm; }
   .title-band .rule { width: 18mm; height: 0.8mm; background: ${SECONDARY}; margin: 0 auto 3mm; }
-  .title-band h2 { margin: 0; color: ${PRIMARY_DEEP}; font-size: 23pt; font-weight: 800; letter-spacing: 0.01em; }
-  .title-band .english { margin-top: 1mm; color: ${MUTED}; font-size: 8.5pt; letter-spacing: 0.18em; text-transform: uppercase; }
-  .title-band .number { margin-top: 2mm; color: ${PRIMARY_DEEP}; font-size: 10pt; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .panels { display: flex; gap: 4mm; margin-bottom: 5mm; }
-  .panel { flex: 1; border: 0.3mm solid ${LINE}; border-radius: 1.5mm; padding: 3.5mm 4mm; background: ${SURFACE}; }
-  .panel .eyebrow { color: ${PRIMARY}; font-size: 7.5pt; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 1.5mm; }
-  .panel h3 { margin: 0 0 1mm; font-size: 10.5pt; }
-  .panel .code { color: ${MUTED}; font-size: 8pt; margin-bottom: 2mm; }
-  .panel .row { display: flex; justify-content: space-between; gap: 4mm; font-size: 8.5pt; padding: 0.6mm 0; }
+  .title-band h2 { margin: 0; color: ${PRIMARY_DEEP}; font-size: 21pt; font-weight: 700; line-height: 1.15; letter-spacing: 0.01em; }
+  .title-band .english { margin-top: 1mm; color: ${MUTED}; font-size: 8.5pt; line-height: 1.2; letter-spacing: 0.18em; text-transform: uppercase; }
+  .title-band .number { margin-top: 1.5mm; color: ${PRIMARY_DEEP}; font-size: 10pt; line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .panels { display: flex; gap: 4mm; margin-bottom: 4mm; }
+  .panel { flex: 1; border: 0.3mm solid ${LINE}; border-radius: 1.5mm; padding: 2.4mm 3mm; background: ${SURFACE}; }
+  .panel .eyebrow { color: ${PRIMARY}; font-size: 7.5pt; line-height: 1.2; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 1.2mm; }
+  .panel h3 { margin: 0 0 0.6mm; font-size: 10.5pt; line-height: 1.25; }
+  .panel .code { color: ${MUTED}; font-size: 8pt; line-height: 1.3; margin-bottom: 1.5mm; }
+  .panel .row { display: flex; justify-content: space-between; gap: 4mm; font-size: 8.2pt; line-height: 1.25; padding: 0.15mm 0; }
   .panel .row span { color: ${MUTED}; }
   .panel .row b { font-weight: 700; text-align: ${rtl ? 'left' : 'right'}; }
   .facts .number { color: ${PRIMARY_DEEP}; font-size: 12pt; font-weight: 800; font-variant-numeric: tabular-nums; }
   .status { display: inline-block; margin-top: 2mm; padding: 0.6mm 2.5mm; border-radius: 10mm; background: ${WASH}; color: ${PRIMARY}; font-size: 8pt; font-weight: 800; }
-  .subject { border-inline-start: 0.8mm solid ${PRIMARY}; background: ${WASH}; padding: 2.5mm 3.5mm; margin-bottom: 5mm; font-size: 9.5pt; }
+  .subject { border-inline-start: 0.8mm solid ${PRIMARY}; background: ${WASH}; padding: 2mm 3.5mm; margin-bottom: 4mm; font-size: 9.5pt; line-height: 1.35; }
   .subject span { color: ${MUTED}; font-size: 8pt; margin-inline-end: 2mm; }
-  .block { margin-bottom: 6mm; }
-  .section-head { display: flex; align-items: center; gap: 2.5mm; margin-bottom: 2mm; break-after: avoid; }
+  .block { margin-bottom: 3.5mm; }
+  .section-head { display: flex; align-items: center; gap: 2.5mm; margin-bottom: 1mm; break-after: avoid; }
   .section-index { display: inline-flex; align-items: center; justify-content: center; width: 6.5mm; height: 6.5mm; border-radius: 50%; background: ${PRIMARY}; color: #fff; font-size: 7.5pt; font-weight: 800; }
-  .section-head h3 { margin: 0; color: ${PRIMARY}; font-size: 11pt; font-weight: 800; }
+  .section-head h3 { margin: 0; color: ${PRIMARY}; font-size: 11pt; line-height: 1.2; font-weight: 800; }
   table { width: 100%; border-collapse: collapse; }
   .items { font-size: 8.5pt; border: 0.3mm solid ${LINE}; }
-  .items th, .items td { padding: 1.8mm 2mm; vertical-align: top; border-bottom: 0.25mm solid ${LINE}; }
+  .items th, .items td { padding: 1.5mm 2mm; vertical-align: top; border-bottom: 0.25mm solid ${LINE}; }
   .items thead th { background: ${TABLE_HEADER_BG}; color: ${TABLE_HEADER_TEXT}; font-size: 8pt; font-weight: 800; text-align: start; border-bottom: 0.4mm solid ${SECONDARY}; }
   .items thead th.num { text-align: ${numAlign}; }
   .items tbody tr:nth-child(even) { background: #fbfcff; }
@@ -583,41 +735,49 @@ export function renderQuotationDocument(
   .desc { word-break: break-word; }
   .num { text-align: ${numAlign}; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .strong { font-weight: 700; }
-  .summary { margin-top: 2mm; margin-bottom: 6mm; break-inside: avoid; }
-  .summary h3 { margin: 0 0 2.5mm; color: ${PRIMARY}; font-size: 11pt; font-weight: 800; }
+  .summary { margin-top: 0; margin-bottom: 4mm; break-inside: avoid; }
+  .summary h3 { margin: 0 0 2mm; color: ${PRIMARY}; font-size: 11pt; line-height: 1.2; font-weight: 800; }
   .summary table { font-size: 8.5pt; border: 0.3mm solid ${LINE}; }
-  .summary thead th { background: ${TABLE_HEADER_BG}; color: ${TABLE_HEADER_TEXT}; text-align: start; padding: 2mm; border-bottom: 0.4mm solid ${SECONDARY}; }
-  .summary tbody td { padding: 1.8mm 2mm; border-bottom: 0.25mm solid ${LINE}; }
+  .summary thead th { background: ${TABLE_HEADER_BG}; color: ${TABLE_HEADER_TEXT}; text-align: start; padding: 1.6mm 2mm; border-bottom: 0.4mm solid ${SECONDARY}; }
+  .summary tbody td { padding: 1.4mm 2mm; border-bottom: 0.25mm solid ${LINE}; }
   .summary thead th.num { text-align: ${numAlign}; }
-  .totals { display: flex; justify-content: ${rtl ? 'flex-start' : 'flex-end'}; margin-top: 4mm; }
+  .summary tbody tr.discount td { color: ${MUTED}; }
+  .summary tbody td.discount-value { color: ${MUTED}; }
+  .summary tbody tr.tax td { background: ${WASH}; color: ${ACCENT}; font-weight: 800; }
+  .summary tbody tr.grand td { background: ${PRIMARY}; color: #fff; font-weight: 800; font-size: 11pt; border-bottom: none; }
+  .summary tbody tr.grand td:first-child { color: #fff; }
+  .totals { display: flex; justify-content: ${rtl ? 'flex-start' : 'flex-end'}; margin-top: 2mm; }
   .totals table { width: 82mm; border: 0.3mm solid ${LINE}; }
-  .totals td { padding: 2mm 2.5mm; border-bottom: 0.25mm solid ${LINE}; }
+  .totals td { padding: 1.3mm 2.5mm; border-bottom: 0.25mm solid ${LINE}; }
   .totals td:first-child { color: ${MUTED}; }
   .totals tr.grand td { background: ${PRIMARY}; color: #fff; font-weight: 800; font-size: 11pt; border-bottom: none; }
   .totals tr.grand td:first-child { color: #fff; }
   .totals tr.tax td { background: ${WASH}; color: ${ACCENT}; font-weight: 800; }
-  .terms, .notes { margin-top: 4mm; break-inside: avoid; }
-  .terms h3, .notes h3 { margin: 0 0 1.5mm; color: ${PRIMARY}; font-size: 10pt; font-weight: 800; }
-  .terms div, .notes div { color: ${MUTED}; font-size: 8.5pt; line-height: 1.6; }
-  .signs { display: flex; gap: 12mm; margin-top: 10mm; break-inside: avoid; }
+  .terms, .notes { margin-top: 2.5mm; break-inside: avoid; }
+  .terms h3, .notes h3 { margin: 0 0 1mm; color: ${PRIMARY}; font-size: 10pt; line-height: 1.2; font-weight: 800; }
+  .terms div, .notes div { color: ${MUTED}; font-size: 8.3pt; line-height: 1.45; }
+  .signs { display: flex; gap: 12mm; margin-top: 4mm; break-inside: avoid; }
   .sign { flex: 1; font-size: 8.5pt; }
-  .sign .line { border-bottom: 0.3mm solid #95a0b0; height: 11mm; margin-bottom: 1.5mm; }
+  .sign .line { border-bottom: 0.3mm solid #95a0b0; height: 8mm; margin-bottom: 1.2mm; }
   .sign span { color: ${MUTED}; font-size: 7.5pt; display: block; }
   .sign b { display: block; font-size: 9.5pt; margin-top: 0.5mm; }
   .sign .small { color: ${MUTED}; font-size: 8pt; }
-  .page-footer { margin-top: 8mm; padding-top: 2.5mm; border-top: 0.3mm solid ${LINE}; color: ${MUTED}; font-size: 7.5pt; }
-  .page-footer .name { color: ${PRIMARY}; font-weight: 800; font-size: 8.5pt; }
-  .page-footer .legal { margin-top: 1mm; color: ${MUTED}; }
+
+  /* On screen the design sits at the top of the sheet instead of sticking to
+     the viewport; the print pipeline is the only place it repeats. */
+  @media screen {
+    body { width: 210mm; margin: 0 auto; background: #e9edf3; }
+    .page-bg { position: absolute; }
+  }
   @media print {
     body { background: #fff; }
     .toolbar { display: none; }
-    .sheet { width: auto; min-height: 0; margin: 0; }
     .items thead { display: table-header-group; }
     /* One subtotal per section, not one per printed fragment. */
     .items tfoot { display: table-row-group; }
     .items tr { break-inside: avoid; }
     .block { break-inside: auto; }
-    .summary, .terms, .notes, .signs, .page-footer { break-inside: avoid; }
+    .summary, .terms, .notes, .signs { break-inside: avoid; }
     .section-head { break-after: avoid; }
   }
 ${designCss(content.design)}
@@ -634,18 +794,40 @@ ${
          )}</button>
        </div>`
 }
-<div class="sheet">
-  <header class="masthead">
-    <div class="brand">
-      <h1>${escapeHtml(companyName)}</h1>
-      ${secondaryName ? `<div class="secondary">${escapeHtml(secondaryName)}</div>` : ''}
-      ${designCustomText(content.design, 'header') ? `<div class="custom-header">${escapeHtml(designCustomText(content.design, 'header'))}</div>` : ''}
-    </div>
-    <div class="mark">${logo
-      ? `<img src="${logo}" alt="${escapeHtml(companyName)}">`
-      : ''
-    }</div>
-  </header>
+<!-- The page design. Fixed, so Chromium repeats it on every printed page;
+     everything below is drawn on top of it. -->
+<div class="page-bg" aria-hidden="true">
+  <div class="band band-top">
+    <header class="masthead">
+      <div class="brand">
+        <h1>${escapeHtml(companyName)}</h1>
+        ${secondaryName ? `<div class="secondary">${escapeHtml(secondaryName)}</div>` : ''}
+        ${contactLine ? `<div class="contact">${contactLine}</div>` : ''}
+        ${designCustomText(content.design, 'header') ? `<div class="custom-header">${escapeHtml(designCustomText(content.design, 'header'))}</div>` : ''}
+      </div>
+      <div class="mark">${logo
+        ? `<img src="${logo}" alt="${escapeHtml(companyName)}">`
+        : ''
+      }</div>
+    </header>
+    <div class="rule"></div>
+  </div>
+  <div class="frame"></div>
+  <div class="watermark">${escapeHtml(watermark)}</div>
+  <div class="band band-bottom">
+    <div class="rule"></div>
+    <footer class="page-footer">
+      <div class="name">${escapeHtml(companyName)}</div>
+      ${designCustomText(content.design, 'footer') ? `<div class="custom-footer">${escapeHtml(designCustomText(content.design, 'footer'))}</div>` : ''}
+      <div class="legal">${legalLine}</div>
+    </footer>
+  </div>
+</div>
+
+<table class="page-flow">
+  <thead><tr><td></td></tr></thead>
+  <tfoot><tr><td></td></tr></tfoot>
+  <tbody><tr><td>
 
   <div class="title-band">
     <div class="rule"></div>
@@ -685,40 +867,35 @@ ${
   ${tables}
 
   <section class="summary">
-    <h3>${L('Section summary', 'ملخص الأقسام')}</h3>
+    <h3>${L('Tables summary', 'ملخص الجداول')}</h3>
     <table>
       <thead>
         <tr>
-          <th>${L('Section', 'القسم')}</th>
+          <th>${L('Table', 'الجدول')}</th>
           <th class="num">${L('Before discount', 'قبل الخصم')}</th>
-          <th class="num">${L('Discount', 'الخصم')}</th>
+          <th class="num">${L('Table discount', 'خصم الجدول')}</th>
           <th class="num">${L('Net', 'الصافي')}</th>
         </tr>
       </thead>
-      <tbody>${summaryRows}</tbody>
-    </table>
-    <div class="totals">
-      <table>
-        ${totalsRows}
+      <tbody>
+        ${summaryRows}
+        ${summarySubtotalRow}
+        ${summaryDiscountRow}
+        ${summaryTaxRow}
         <tr class="grand">
-          <td>${L('Final total', 'الإجمالي النهائي')}</td>
+          <td colspan="3">${L('Final total', 'الإجمالي النهائي')}</td>
           <td class="num">${money(content.totals.totalAmount)}</td>
         </tr>
-      </table>
-    </div>
+      </tbody>
+    </table>
   </section>
 
   ${terms}
   ${notes}
   ${signatureBlock}
 
-  <footer class="page-footer">
-    <div class="name">${escapeHtml(companyName)}</div>
-    ${contactLine ? `<div>${contactLine}</div>` : ''}
-    ${designCustomText(content.design, 'footer') ? `<div class="custom-footer">${escapeHtml(designCustomText(content.design, 'footer'))}</div>` : ''}
-    <div class="legal">${legalLine}</div>
-  </footer>
-</div>
+  </td></tr></tbody>
+</table>
 ${autoPrint ? '<script>window.addEventListener("load",()=>window.print())</script>' : ''}
 </body>
 </html>

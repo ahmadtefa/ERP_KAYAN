@@ -4,10 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/providers/auth_providers.dart';
+import '../../features/licensing/presentation/widgets/licence_gate.dart';
 import '../../features/search/presentation/search_dialog.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
-import '../../shared/widgets/session_storage_notice.dart';
 import '../router/app_router.dart';
 import '../theme/design_tokens.dart';
 
@@ -30,6 +30,7 @@ class _NavItem {
     this.label, {
     this.permissions,
     this.group = _NavGroup.administration,
+    this.accentOverride,
   });
 
   final String path;
@@ -37,6 +38,12 @@ class _NavItem {
   final String label;
   final List<String>? permissions;
   final _NavGroup group;
+
+  /// A section colour of its own when the entry is a daily destination in
+  /// its own right (banks & cashboxes, inside the accounting group).
+  final SectionAccent? accentOverride;
+
+  SectionAccent get accent => accentOverride ?? _accentForGroup(group);
 
   bool allows(bool Function(String) can) {
     final required = permissions;
@@ -49,6 +56,21 @@ class _NavItem {
 /// with no visible item disappear entirely, so a cashier never sees an empty
 /// "Accounting" heading.
 enum _NavGroup { overview, accounting, parties, inventory, sales, purchases, insights, administration }
+
+/// Each section owns one colour (see [SectionAccents]): the selected entry
+/// is recognisable by its text, icon tile, background and edge indicator
+/// all switching to it, and the top bar repeats it — so where you are is
+/// visible before you read a word.
+SectionAccent _accentForGroup(_NavGroup group) => switch (group) {
+  _NavGroup.overview => SectionAccents.overview,
+  _NavGroup.accounting => SectionAccents.accounting,
+  _NavGroup.parties => SectionAccents.parties,
+  _NavGroup.inventory => SectionAccents.inventory,
+  _NavGroup.sales => SectionAccents.sales,
+  _NavGroup.purchases => SectionAccents.purchases,
+  _NavGroup.insights => SectionAccents.insights,
+  _NavGroup.administration => SectionAccents.administration,
+};
 
 /// Adaptive chrome around every authenticated screen.
 ///
@@ -112,12 +134,20 @@ class _ErpShellState extends ConsumerState<ErpShell> {
               child: Column(
                 children: [
                   _TopBar(
-                    title: items[selectedIndex].label,
+                    item: items[selectedIndex],
+                    sectionLabel: _Sidebar._groupLabel(
+                      items[selectedIndex].group,
+                      Localizations.localeOf(context).languageCode == 'ar',
+                    ),
                     isWide: isWide,
                     isExtended: isExtended,
                   ),
-                  const SessionStorageNotice(),
-                  Expanded(child: widget.child),
+                  Expanded(
+                    child: LicenceGate(
+                      currentPath: widget.currentPath,
+                      child: widget.child,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -167,6 +197,9 @@ class _ErpShellState extends ConsumerState<ErpShell> {
           'cash.reports.read',
         ],
         group: _NavGroup.accounting,
+        // Banks & cashboxes are their own section in daily use, with their
+        // own teal, even though they sit under the accounting heading.
+        accentOverride: SectionAccents.cash,
       ),
       _NavItem(
         AppRoutes.journalEntries,
@@ -183,13 +216,20 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         group: _NavGroup.accounting,
       ),
       _NavItem(
+        AppRoutes.fixedAssets,
+        Icons.precision_manufacturing_outlined,
+        l10n.fixedAssets,
+        permissions: const ['accounting.fixedassets.read'],
+        group: _NavGroup.accounting,
+      ),
+      _NavItem(
         AppRoutes.openingBalances,
         Icons.tune_outlined,
         l10n.openingBalancesTitle,
-        // Readable with the journal permission; changing them needs manage.
+        // Seeing the figures needs the read grant; changing them needs manage.
         permissions: const [
+          'accounting.openingbalances.read',
           'accounting.openingbalances.manage',
-          'accounting.journal.read',
         ],
         group: _NavGroup.accounting,
       ),
@@ -384,20 +424,15 @@ class _Sidebar extends StatelessWidget {
 
     return Container(
       width: width,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [AppColors.navy, AppColors.navyDeep],
-        ),
-        border: BorderDirectional(
-          end: BorderSide(color: Color(0x14FFFFFF)),
-        ),
-      ),
+      // The program's frame: a navy column in both themes, deepening from
+      // its lit top to its base. The sections' own colours ride on it as
+      // lit tiles and edge marks — structure from the navy, identity from
+      // the accent — while the work surfaces beside it stay white.
+      decoration: const BoxDecoration(gradient: AppGradients.sidebar),
       child: Column(
         children: [
           _SidebarBrand(extended: extended),
-          Container(height: 1, color: const Color(0x1FFFFFFF)),
+          Container(height: 1, color: AppColors.sidebarHairline),
           Expanded(
             child: Scrollbar(
               controller: scrollController,
@@ -423,6 +458,7 @@ class _Sidebar extends StatelessWidget {
                         extended: extended,
                         first: group == _NavGroup.values.first,
                         label: _groupLabel(group, arabic),
+                        accent: _accentForGroup(group),
                       ),
                       for (final item in groups[group]!)
                         _NavEntry(
@@ -470,6 +506,10 @@ class _SidebarBrand extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(AppRadii.md),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
+        boxShadow: const [
+          BoxShadow(color: Color(0x40000000), blurRadius: 10, offset: Offset(0, 3)),
+        ],
       ),
       child: Image.asset('1.png', fit: BoxFit.contain),
     );
@@ -493,7 +533,7 @@ class _SidebarBrand extends StatelessWidget {
                 Text(
                   'KAYAN',
                   style: theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.white,
+                    color: AppColors.onSidebar,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 1.6,
                     fontSize: 15,
@@ -502,7 +542,7 @@ class _SidebarBrand extends StatelessWidget {
                 Text(
                   'ERP SUITE',
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: AppColors.onNavyMuted,
+                    color: AppColors.onSidebarMuted,
                     letterSpacing: 2.0,
                     fontSize: 9,
                     fontWeight: FontWeight.w600,
@@ -522,30 +562,53 @@ class _GroupLabel extends StatelessWidget {
     required this.extended,
     required this.first,
     required this.label,
+    required this.accent,
   });
 
   final bool extended;
   final bool first;
   final String label;
+  final SectionAccent accent;
 
   @override
   Widget build(BuildContext context) {
     if (!extended) {
       return Padding(
         padding: EdgeInsets.fromLTRB(10, first ? 4 : 12, 10, 6),
-        child: Container(height: 1, color: const Color(0x1FFFFFFF)),
+        child: Container(height: 1, color: AppColors.sidebarHairline),
       );
     }
     return Padding(
-      padding: EdgeInsets.fromLTRB(8, first ? 4 : 14, 8, 5),
-      child: Text(
-        label.toUpperCase(),
-        style: const TextStyle(
-          color: Color(0xFF7E93AD),
-          fontSize: 9.5,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 1.2,
-        ),
+      padding: EdgeInsets.fromLTRB(8, first ? 4 : 16, 8, 6),
+      child: Row(
+        children: [
+          // The section's colour dot: the same hue its entries light up
+          // with when selected, so the eye groups them before reading.
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              // The sidebar is a dark surface in both themes, so the dot
+              // takes the step mixed for dark surfaces.
+              color: accent.darkBase,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              label.toUpperCase(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppColors.onSidebarMuted,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.8,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -564,7 +627,39 @@ class _NavEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foreground = selected ? Colors.white : AppColors.onNavyMuted;
+    final accent = item.accent;
+    // The sidebar is navy in both themes, so every accent is read in its
+    // brighter, dark-surface step here.
+    final accentColor = accent.darkBase;
+
+    // Every entry wears its section colour in a small icon tile, selected
+    // or not; selecting it fills the tile, washes the row, colours the
+    // label, and draws the edge indicator — four signals, one hue.
+    Widget iconTile(double size, double iconSize) => Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: selected
+            ? accentColor
+            : Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        boxShadow: selected
+            ? [
+                BoxShadow(
+                  color: accentColor.withValues(alpha: 0.45),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ]
+            : null,
+      ),
+      child: Icon(
+        item.icon,
+        size: iconSize,
+        color: selected ? Colors.white : accentColor,
+      ),
+    );
 
     if (!extended) {
       return Padding(
@@ -572,15 +667,27 @@ class _NavEntry extends StatelessWidget {
         child: Tooltip(
           message: item.label,
           child: Material(
-            color: selected ? const Color(0x1FFFFFFF) : Colors.transparent,
+            color: selected
+                ? Colors.white.withValues(alpha: 0.10)
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(AppRadii.md),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(AppRadii.md),
-              onTap: () => context.go(item.path),
-              child: SizedBox(
-                height: 40,
-                child: Center(
-                  child: Icon(item.icon, size: 19, color: foreground),
+            clipBehavior: Clip.antiAlias,
+            child: Container(
+              decoration: BoxDecoration(
+                border: BorderDirectional(
+                  start: BorderSide(
+                    color: selected ? accentColor : Colors.transparent,
+                    width: 3,
+                  ),
+                ),
+              ),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                hoverColor: Colors.white.withValues(alpha: 0.06),
+                onTap: () => context.go(item.path),
+                child: SizedBox(
+                  height: 44,
+                  child: Center(child: iconTile(32, 18)),
                 ),
               ),
             ),
@@ -596,38 +703,43 @@ class _NavEntry extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 1),
       child: Material(
-        color: selected ? const Color(0x1FFFFFFF) : Colors.transparent,
+        color: selected
+            ? Colors.white.withValues(alpha: 0.10)
+            : Colors.transparent,
         borderRadius: BorderRadius.circular(AppRadii.md),
         clipBehavior: Clip.antiAlias,
         child: Container(
           decoration: BoxDecoration(
             border: BorderDirectional(
               start: BorderSide(
-                color: selected ? AppColors.accent : Colors.transparent,
-                width: 2.5,
+                color: selected ? accentColor : Colors.transparent,
+                width: 3,
               ),
             ),
           ),
           child: ListTile(
             dense: true,
-            visualDensity: const VisualDensity(vertical: -2, horizontal: -1),
+            visualDensity: const VisualDensity(vertical: -1, horizontal: -1),
             selected: selected,
             selectedTileColor: Colors.transparent,
-            hoverColor: const Color(0x0FFFFFFF),
+            hoverColor: Colors.white.withValues(alpha: 0.06),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(AppRadii.md),
             ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 9),
-            minLeadingWidth: 18,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 8,
+              vertical: 2,
+            ),
+            minLeadingWidth: 30,
             horizontalTitleGap: 10,
-            leading: Icon(item.icon, size: 18, color: foreground),
+            leading: iconTile(30, 17),
             title: Text(
               item.label,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: foreground,
-                fontSize: 12.5,
+                color: selected ? accentColor : AppColors.onSidebar,
+                fontSize: 13,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
               ),
             ),
@@ -651,7 +763,7 @@ class _SidebarFooter extends ConsumerWidget {
     final role = user.roles.isEmpty ? user.username : user.roles.first;
     return Container(
       decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Color(0x1FFFFFFF))),
+        border: Border(top: BorderSide(color: AppColors.sidebarHairline)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Row(
@@ -661,13 +773,13 @@ class _SidebarFooter extends ConsumerWidget {
             height: 30,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: const Color(0x24FFFFFF),
+              color: Colors.white.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(AppRadii.sm),
             ),
             child: Text(
               initials,
               style: const TextStyle(
-                color: Colors.white,
+                color: AppColors.onSidebar,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
               ),
@@ -684,7 +796,7 @@ class _SidebarFooter extends ConsumerWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.white,
+                    color: AppColors.onSidebar,
                     fontWeight: FontWeight.w600,
                     fontSize: 11.5,
                   ),
@@ -694,7 +806,7 @@ class _SidebarFooter extends ConsumerWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: AppColors.onNavyMuted,
+                    color: AppColors.onSidebarMuted,
                     fontSize: 10,
                   ),
                 ),
@@ -721,12 +833,14 @@ class _SidebarFooter extends ConsumerWidget {
 
 class _TopBar extends StatelessWidget {
   const _TopBar({
-    required this.title,
+    required this.item,
+    required this.sectionLabel,
     required this.isWide,
     required this.isExtended,
   });
 
-  final String title;
+  final _NavItem item;
+  final String sectionLabel;
   final bool isWide;
   final bool isExtended;
 
@@ -734,18 +848,20 @@ class _TopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final accentColor = item.accent.of(scheme.brightness);
     return Container(
       height: Theme.of(context).appBarTheme.toolbarHeight ??
           AppSizes.topBarHeight,
       decoration: BoxDecoration(
         color: scheme.surface,
-        border: Border(
-          bottom: BorderSide(
-            color: scheme.brightness == Brightness.light
-                ? AppColors.border
-                : AppColors.darkBorder,
+        border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0A000000),
+            blurRadius: 6,
+            offset: Offset(0, 1),
           ),
-        ),
+        ],
       ),
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
       child: Row(
@@ -760,18 +876,51 @@ class _TopBar extends StatelessWidget {
             ),
             const SizedBox(width: AppSpacing.sm),
           ],
+          // The current section, in its own colour: icon tile + section
+          // name over the page title, so the bar answers «أين أنا؟»
+          // before the title is read.
+          Container(
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: item.accent.softOf(scheme.brightness),
+              borderRadius: BorderRadius.circular(AppRadii.md),
+            ),
+            child: Icon(item.icon, size: 19, color: accentColor),
+          ),
+          const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Row(
               children: [
                 Flexible(
-                  child: Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: scheme.onSurface,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        sectionLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: accentColor,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                      Text(
+                        item.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: scheme.onSurface,
+                          fontWeight: FontWeight.w700,
+                          height: 1.15,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 if (isExtended) ...[
@@ -915,7 +1064,7 @@ class _ModuleDrawer extends StatelessWidget {
               padding: EdgeInsets.only(top: 6, bottom: 6),
               child: _SidebarBrand(extended: true),
             ),
-            Container(height: 1, color: const Color(0x1FFFFFFF)),
+            Container(height: 1, color: AppColors.sidebarHairline),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(10, 10, 10, 20),
@@ -926,6 +1075,7 @@ class _ModuleDrawer extends StatelessWidget {
                         extended: true,
                         first: group == _NavGroup.values.first,
                         label: _Sidebar._groupLabel(group, arabic),
+                        accent: _accentForGroup(group),
                       ),
                       for (final item in groups[group]!)
                         _NavEntry(

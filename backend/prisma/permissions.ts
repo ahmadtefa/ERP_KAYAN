@@ -17,6 +17,9 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['accounting.journal.read', 'View journal entries', 'عرض القيود اليومية', 'accounting'],
   ['accounting.journal.create', 'Create journal entries', 'إنشاء قيود يومية', 'accounting'],
   ['accounting.journal.post', 'Post and reverse entries', 'ترحيل وعكس القيود', 'accounting'],
+  ['accounting.fixedassets.read', 'View fixed assets', 'عرض الأصول الثابتة', 'accounting'],
+  ['accounting.fixedassets.manage', 'Manage fixed assets', 'إدارة الأصول الثابتة', 'accounting'],
+  ['accounting.fixedassets.depreciate', 'Run depreciation', 'تشغيل الإهلاك', 'accounting'],
   ['admin.users.manage', 'Manage users', 'إدارة المستخدمين', 'admin'],
   ['admin.roles.manage', 'Manage roles', 'إدارة الأدوار', 'admin'],
   ['admin.audit.read', 'View audit trail', 'عرض سجل التدقيق', 'admin'],
@@ -84,6 +87,10 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['accounting.costcenters.manage', 'Manage cost centers', 'إدارة مراكز التكلفة', 'accounting'],
   ['accounting.budgets.read', 'View budgets', 'عرض الموازنات', 'accounting'],
   ['accounting.budgets.manage', 'Manage budgets', 'إدارة الموازنات', 'accounting'],
+  // Seeing the opening figures is a smaller privilege than changing them:
+  // the read endpoints carry their own permission, and the migration that
+  // introduced it backfilled every role that already read via journal.read.
+  ['accounting.openingbalances.read', 'View opening balances', 'عرض الأرصدة الافتتاحية', 'accounting'],
   [
     'accounting.openingbalances.manage',
     'Open the books: opening balances',
@@ -101,6 +108,13 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['cash.reconcile', 'Reconcile bank statements', 'تسوية كشوف البنك', 'cash'],
 
   ['inventory.items.delete', 'Deactivate items', 'إيقاف الأصناف', 'inventory'],
+  // Reading a cost is its own privilege: a warehouse clerk may price a sale
+  // without ever seeing what the goods cost the company, and the print/PDF
+  // options can only hide what the API is willing to send.
+  ['inventory.cost.read', 'View cost and purchase prices', 'عرض التكلفة وأسعار الشراء', 'inventory'],
+  // A barcode is an identifier, so changing one is guarded separately from
+  // editing the item's descriptive fields. Generating a code is a write too.
+  ['inventory.barcodes.manage', 'Edit and generate barcodes', 'تعديل وتوليد أكواد الباركود', 'inventory'],
   ['inventory.stock.adjust', 'Adjust, transfer and count stock', 'تسويات وتحويلات وجرد المخزون', 'inventory'],
   ['sales.invoices.export', 'Export sales documents', 'تصدير مستندات البيع', 'sales'],
   ['purchases.invoices.export', 'Export purchase documents', 'تصدير مستندات الشراء', 'purchases'],

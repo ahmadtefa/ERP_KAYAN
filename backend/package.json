@@ -14,6 +14,7 @@
     "db:prepare": "node scripts/prepare-database.mjs",
     "seed": "ts-node prisma/seed.ts",
     "test": "jest",
+    "test:integration:pg": "node scripts/pglite-integration-guard.mjs",
     "lint": "eslint \"src/**/*.ts\"",
     "seed:permissions": "ts-node prisma/seed-permissions.ts",
     "seed:demo": "ts-node prisma/seed-demo.ts",
@@ -40,33 +41,25 @@
     "sharp": "0.35.5"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.2",
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.23.1",
+    "@typescript-eslint/eslint-plugin": "8.48.1",
+    "@typescript-eslint/parser": "8.48.1",
+    "eslint": "9.39.2",
     "jest": "^30.5.2",
     "ts-jest": "^29.4.14",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   },
-  "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
-    },
-    "testEnvironment": "node"
-  },
   "overrides": {
     "uuid": "^11.1.1",
     "deepmerge-ts": "^8.0.2",
-    "argparse": "2.0.1"
+    "argparse": "2.0.1",
+    "multer": "^2.5.0"
   }
 }

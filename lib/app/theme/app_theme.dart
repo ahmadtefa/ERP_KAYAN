@@ -99,6 +99,9 @@ abstract final class AppTheme {
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       ),
 
+      // The drawer carries the same navy frame as the sidebar: on a phone
+      // it *is* the sidebar, and the two must not disagree about what the
+      // program looks like.
       drawerTheme: DrawerThemeData(
         backgroundColor: AppColors.navy,
         surfaceTintColor: Colors.transparent,
@@ -150,7 +153,7 @@ abstract final class AppTheme {
         backgroundColor: surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        shadowColor: const Color(0x33142B4A),
+        shadowColor: const Color(0x330A1E3C),
         insetPadding: const EdgeInsets.all(AppSpacing.xxl),
         shape: RoundedRectangleBorder(
           borderRadius: AppRadii.dialog,
@@ -177,7 +180,7 @@ abstract final class AppTheme {
         color: surface,
         surfaceTintColor: Colors.transparent,
         elevation: 8,
-        shadowColor: const Color(0x1F142B4A),
+        shadowColor: const Color(0x1F0A1E3C),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.lg),
           side: BorderSide(color: border),
@@ -226,7 +229,9 @@ abstract final class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: AppRadii.control,
-          borderSide: BorderSide(color: scheme.primary, width: 1.5),
+          // Fluent's 2px brand underline-step, as a full border here: the
+          // focused field must be findable at a glance on a dense form.
+          borderSide: BorderSide(color: scheme.primary, width: 2),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: AppRadii.control,
@@ -277,8 +282,14 @@ abstract final class AppTheme {
             if (states.contains(WidgetState.disabled)) {
               return scheme.primary.withValues(alpha: 0.38);
             }
-            if (states.contains(WidgetState.hovered) ||
-                states.contains(WidgetState.pressed)) {
+            // Fluent gives hover and pressed their own steps of the brand
+            // ramp, so a press is visible before the click lands. The dark
+            // scheme's primary is already the light step, so there the
+            // white overlay below carries the state instead.
+            if (isLight && states.contains(WidgetState.pressed)) {
+              return AppColors.primaryPressed;
+            }
+            if (isLight && states.contains(WidgetState.hovered)) {
               return AppColors.primaryHover;
             }
             return scheme.primary;
@@ -314,6 +325,9 @@ abstract final class AppTheme {
           }),
           foregroundColor: WidgetStatePropertyAll(scheme.primary),
           backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.pressed)) {
+              return scheme.primary.withValues(alpha: 0.10);
+            }
             if (states.contains(WidgetState.hovered)) {
               return scheme.primary.withValues(alpha: 0.05);
             }
@@ -358,12 +372,25 @@ abstract final class AppTheme {
       ),
 
       dataTableTheme: DataTableThemeData(
-        headingRowColor: WidgetStatePropertyAll(surfaceAlt),
+        // Table heads sit in the paler step of the navy family, so a grid
+        // reads as one framed object instead of rows floating on the page.
+        headingRowColor: WidgetStatePropertyAll(
+          isLight ? const Color(0xFFEDF2FA) : AppColors.darkSurfaceAlt,
+        ),
+        dataRowColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return scheme.primaryContainer;
+          }
+          if (states.contains(WidgetState.hovered)) {
+            return scheme.surfaceContainerLow;
+          }
+          return null;
+        }),
         headingRowHeight: _room(AppSizes.tableHeaderHeight, textScale, 16),
         dataRowMinHeight: _room(AppSizes.tableRowHeight, textScale, 16),
         dataRowMaxHeight: _room(AppSizes.tableRowHeight + 6, textScale, 24),
         headingTextStyle: textTheme.labelSmall?.copyWith(
-          color: scheme.onSurfaceVariant,
+          color: isLight ? AppColors.navy : AppColors.darkText,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.5,
         ),
@@ -481,22 +508,22 @@ abstract final class AppTheme {
     surfaceContainerHighest: AppColors.surfaceSunken,
     outline: AppColors.borderStrong,
     outlineVariant: AppColors.border,
-    shadow: Color(0x1A142B4A),
-    scrim: Color(0x66142B4A),
+    shadow: Color(0x1A0A1E3C),
+    scrim: Color(0x660A1E3C),
     inverseSurface: AppColors.navy,
     onInverseSurface: Colors.white,
-    inversePrimary: Color(0xFF9DBDF0),
+    inversePrimary: Color(0xFFA9C6F5),
     surfaceTint: Colors.transparent,
   );
 
   static const _darkScheme = ColorScheme(
     brightness: Brightness.dark,
-    primary: Color(0xFF7FA9E8),
-    onPrimary: Color(0xFF0B1B2E),
-    primaryContainer: Color(0xFF1D3A60),
+    primary: Color(0xFF7FA9F5),
+    onPrimary: Color(0xFF081730),
+    primaryContainer: Color(0xFF16305C),
     onPrimaryContainer: Color(0xFFDCE8F8),
     secondary: Color(0xFF8FB6F7),
-    onSecondary: Color(0xFF0B1B2E),
+    onSecondary: Color(0xFF081730),
     secondaryContainer: Color(0xFF1B3252),
     onSecondaryContainer: Color(0xFFDCE8F8),
     tertiary: Color(0xFF6FC3A0),
@@ -508,12 +535,12 @@ abstract final class AppTheme {
     surface: AppColors.darkSurface,
     onSurface: AppColors.darkText,
     onSurfaceVariant: AppColors.darkTextMuted,
-    surfaceContainerLowest: Color(0xFF0A1524),
+    surfaceContainerLowest: Color(0xFF070F1E),
     surfaceContainerLow: AppColors.darkSurfaceAlt,
     surfaceContainer: AppColors.darkSurface,
-    surfaceContainerHigh: Color(0xFF1B2F49),
-    surfaceContainerHighest: Color(0xFF21374F),
-    outline: Color(0xFF3A5069),
+    surfaceContainerHigh: Color(0xFF1D3050),
+    surfaceContainerHighest: Color(0xFF243A5E),
+    outline: Color(0xFF41587C),
     outlineVariant: AppColors.darkBorder,
     shadow: Colors.black,
     scrim: Color(0xAA000000),

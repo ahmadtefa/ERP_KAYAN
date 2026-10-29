@@ -5,6 +5,7 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { canReadCost } from '../../common/auth/cost-visibility';
 import { BudgetsService } from '../accounting/budgets.service';
 import { AgingService } from './aging.service';
 import { FinancialStatementsService } from './financial-statements.service';
@@ -17,6 +18,8 @@ import {
   PeriodQueryDto,
 } from './dto/report-query.dto';
 import { OperationsReportsService } from './operations-reports.service';
+import { PartyReconciliationService } from './party-reconciliation.service';
+import { ReconciliationCenterService } from './reconciliation-center.service';
 import { ReportsService } from './reports.service';
 
 @Controller('reports')
@@ -27,7 +30,29 @@ export class ReportsController {
     private readonly aging: AgingService,
     private readonly operations: OperationsReportsService,
     private readonly budgets: BudgetsService,
+    private readonly reconciliation: PartyReconciliationService,
+    private readonly reconciliationCenter: ReconciliationCenterService,
   ) {}
+
+  @Get('reconciliation-center')
+  @RequirePermissions('reports.read')
+  reconciliationCenterReport(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
+    return this.reconciliationCenter.center(user.companyId, {
+      asOf: query.asOf ?? query.to,
+    });
+  }
+
+  @Get('receivables-reconciliation')
+  @RequirePermissions('reports.read')
+  receivablesReconciliation(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
+    return this.reconciliation.receivables(user.companyId, { asOf: query.asOf ?? query.to });
+  }
+
+  @Get('payables-reconciliation')
+  @RequirePermissions('reports.read')
+  payablesReconciliation(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
+    return this.reconciliation.payables(user.companyId, { asOf: query.asOf ?? query.to });
+  }
 
   @Get('trial-balance')
   @RequirePermissions('reports.read')
@@ -71,6 +96,12 @@ export class ReportsController {
   @RequirePermissions('reports.read')
   balanceSheet(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
     return this.statements.balanceSheet(user.companyId, query);
+  }
+
+  @Get('equity-changes')
+  @RequirePermissions('reports.read')
+  equityChanges(@CurrentUser() user: AuthUser, @Query() query: PeriodQueryDto) {
+    return this.statements.equityChanges(user.companyId, query);
   }
 
   @Get('cash-flow')
@@ -147,7 +178,7 @@ export class ReportsController {
   @Get('sales')
   @RequirePermissions('reports.read')
   salesReport(@CurrentUser() user: AuthUser, @Query() query: OperationsQueryDto) {
-    return this.operations.sales(user.companyId, query);
+    return this.operations.sales(user.companyId, query, canReadCost(user));
   }
 
   @Get('purchases')

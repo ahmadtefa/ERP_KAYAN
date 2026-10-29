@@ -52,7 +52,11 @@ export class OperationsReportsService {
   }
 
   /// Sales invoices (and returns) in the period, one row per document.
-  async sales(companyId: string, query: PartyOperationsQuery) {
+  async sales(
+    companyId: string,
+    query: PartyOperationsQuery,
+    mayReadCost = true,
+  ) {
     const { from, to } = this.period(query);
     const rows = await this.prisma.salesInvoice.findMany({
       where: {
@@ -113,8 +117,12 @@ export class OperationsReportsService {
         totalAmount: row.totalAmount.toFixed(MONEY_SCALE),
         paidAmount: row.paidAmount.toFixed(MONEY_SCALE),
         outstanding: row.totalAmount.minus(row.paidAmount).toFixed(MONEY_SCALE),
-        costOfGoods: row.costOfGoods.toFixed(MONEY_SCALE),
-        grossProfit: row.totalAmount.minus(row.costOfGoods).toFixed(MONEY_SCALE),
+        // Cost-derived figures are gated by inventory.cost.read; selling
+        // figures above remain available to any reports reader.
+        costOfGoods: mayReadCost ? row.costOfGoods.toFixed(MONEY_SCALE) : null,
+        grossProfit: mayReadCost
+          ? row.totalAmount.minus(row.costOfGoods).toFixed(MONEY_SCALE)
+          : null,
       })),
       totals: {
         documents: rows.length,
@@ -124,8 +132,10 @@ export class OperationsReportsService {
         total: totals.total.toFixed(MONEY_SCALE),
         paid: totals.paid.toFixed(MONEY_SCALE),
         outstanding: totals.total.minus(totals.paid).toFixed(MONEY_SCALE),
-        costOfGoods: totals.costOfGoods.toFixed(MONEY_SCALE),
-        grossProfit: totals.total.minus(totals.costOfGoods).toFixed(MONEY_SCALE),
+        costOfGoods: mayReadCost ? totals.costOfGoods.toFixed(MONEY_SCALE) : null,
+        grossProfit: mayReadCost
+          ? totals.total.minus(totals.costOfGoods).toFixed(MONEY_SCALE)
+          : null,
       },
     };
   }

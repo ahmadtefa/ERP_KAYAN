@@ -17,14 +17,12 @@ Future<void> showQuotationPreview(
   BuildContext context, {
   required Json quotation,
   required String language,
-  required bool canExport,
 }) {
   return Navigator.of(context, rootNavigator: true).push(
     MaterialPageRoute<void>(
       builder: (context) => QuotationPreviewScreen(
         quotation: quotation,
         language: language,
-        canExport: canExport,
       ),
     ),
   );
@@ -36,17 +34,21 @@ Future<void> showQuotationPreview(
 /// an issued offer, the live record for a draft. The print page and the PDF
 /// are still produced by the server, so the browser handles the Arabic shaping
 /// and the customer gets a real file, not a painted screen.
+///
+/// Print and Download PDF are always on this screen. Whether this person may
+/// export is the server's call - it checks `sales.quotations.export` on both
+/// routes - and hiding the buttons here only ever produced a preview with
+/// no way out and no explanation. A refusal now arrives as the server's own
+/// sentence instead of a missing button.
 class QuotationPreviewScreen extends ConsumerWidget {
   const QuotationPreviewScreen({
     super.key,
     required this.quotation,
     required this.language,
-    required this.canExport,
   });
 
   final Json quotation;
   final String language;
-  final bool canExport;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -74,7 +76,7 @@ class QuotationPreviewScreen extends ConsumerWidget {
         backgroundColor: AppColors.surface,
         title: Text(l10n.printPreview),
         actions: [
-          if (!compact && canExport && id.isNotEmpty) ...[
+          if (!compact && id.isNotEmpty) ...[
             TextButton.icon(
               onPressed: () => runPrint(
                 context,
@@ -105,7 +107,7 @@ class QuotationPreviewScreen extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (compact && canExport && id.isNotEmpty) ...[
+                if (compact && id.isNotEmpty) ...[
                   Row(
                     children: [
                       Expanded(

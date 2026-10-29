@@ -443,6 +443,132 @@ async function main() {
     `${openInvoices.data?.items?.length ?? 0} open invoices`,
   );
 
+  // ── settlements: an allocation must match the voucher it rides on ──────
+  // These run before the good receipt so the invoice is still fully due and a
+  // refusal cannot be explained by "it was already paid".
+  const secondCustomer = await must(
+    'create a second customer for the settlement checks',
+    '/parties/customers',
+    {
+      method: 'POST',
+      json: {
+        code: `E2E-C2-${stamp}`,
+        nameEn: `Scenario second customer ${stamp}`,
+        nameAr: `عميل ثانٍ للسيناريو ${stamp}`,
+        creditLimit: '10000',
+        paymentTermDays: 30,
+      },
+    },
+  );
+
+  const wrongPartyReceipt = await api('/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'RECEIPT',
+      voucherDate: today,
+      cashAccountId: bankAccount.id,
+      customerId: secondCustomer?.id,
+      amount: '10',
+      allocations: [{ salesInvoiceId: sale.id, amount: '10' }],
+    },
+  });
+  check(
+    "a receipt cannot settle another customer's invoice",
+    wrongPartyReceipt.status === 400,
+    `status ${wrongPartyReceipt.status}: ${String(wrongPartyReceipt.data?.detail).slice(0, 160)}`,
+  );
+
+  const purchaseByReceipt = await api('/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'RECEIPT',
+      voucherDate: today,
+      cashAccountId: bankAccount.id,
+      customerId: customer.id,
+      amount: '10',
+      allocations: [{ purchaseInvoiceId: purchase.id, amount: '10' }],
+    },
+  });
+  check(
+    'a receipt cannot settle a purchase invoice',
+    purchaseByReceipt.status === 400,
+    `status ${purchaseByReceipt.status}: ${String(purchaseByReceipt.data?.detail).slice(0, 160)}`,
+  );
+
+  const bothInvoiceKinds = await api('/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'RECEIPT',
+      voucherDate: today,
+      cashAccountId: bankAccount.id,
+      customerId: customer.id,
+      amount: '10',
+      allocations: [
+        { salesInvoiceId: sale.id, purchaseInvoiceId: purchase.id, amount: '10' },
+      ],
+    },
+  });
+  check(
+    'one allocation line cannot name both invoice kinds',
+    bothInvoiceKinds.status === 400,
+    `status ${bothInvoiceKinds.status}: ${String(bothInvoiceKinds.data?.detail).slice(0, 160)}`,
+  );
+
+  const repeatedRows = await api('/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'RECEIPT',
+      voucherDate: today,
+      cashAccountId: bankAccount.id,
+      customerId: customer.id,
+      amount: '690',
+      allocations: [
+        { salesInvoiceId: sale.id, amount: '400' },
+        { salesInvoiceId: sale.id, amount: '290' },
+      ],
+    },
+  });
+  check(
+    'two rows against one invoice are summed before the due check',
+    repeatedRows.status === 400 && /left to pay/i.test(String(repeatedRows.data?.detail)),
+    `status ${repeatedRows.status}: ${String(repeatedRows.data?.detail).slice(0, 160)}`,
+  );
+
+  const draftSale = await must('create a draft sales invoice for the settlement checks', '/sales/invoices', {
+    method: 'POST',
+    json: {
+      invoiceDate: today,
+      dueDate: today,
+      customerId: customer.id,
+      lines: [{ itemId: itemA.id, quantity: '1', unitPrice: '10' }],
+    },
+  });
+  // Creating a voucher against a draft invoice is allowed on purpose: the
+  // invoice may be posted before the money is handed over. Posting is where
+  // the status is enforced, and it is enforced there.
+  const draftVoucher = await api('/cash/vouchers', {
+    method: 'POST',
+    json: {
+      kind: 'RECEIPT',
+      voucherDate: today,
+      cashAccountId: bankAccount.id,
+      customerId: customer.id,
+      amount: '10',
+      allocations: [{ salesInvoiceId: draftSale?.id, amount: '10' }],
+    },
+  });
+  const draftVoucherPost =
+    draftVoucher.status === 201
+      ? await api(`/cash/vouchers/${draftVoucher.data?.id}/post`, { method: 'POST' })
+      : { status: 0, data: null };
+  check(
+    'a draft invoice cannot be settled: the voucher is kept, posting waits for the invoice',
+    draftVoucher.status === 201 &&
+      draftVoucherPost.status === 400 &&
+      /not posted/i.test(String(draftVoucherPost.data?.detail)),
+    `create ${draftVoucher.status}, post ${draftVoucherPost.status}: ${String(draftVoucherPost.data?.detail).slice(0, 160)}`,
+  );
+
   const receipt = await must('collect 684 from the customer into the bank', '/cash/vouchers', {
     method: 'POST',
     json: {
@@ -1238,7 +1364,7 @@ async function main() {
     check(
       'the backup can be restored, and the restore reports what it put back',
       restored.status < 300 && restored.data?.restored === true && restored.data?.rehearsed === true,
-      `restored ${restored.data?.source}, safety copy ${restored.data?.safetyBackup}, rehearsed ${restored.data?.rehearsed}`,
+      `status ${restored.status}: ${JSON.stringify(restored.data).slice(0, 400)}`,
     );
     const afterRestore = await api(`/parties/customers?q=${encodeURIComponent(`E2E-C-${stamp}`)}`);
     check(
@@ -1305,31 +1431,6 @@ async function main() {
   } else {
     skip('backup and restore', `pg_dump is not available here: ${capabilities.data?.reason ?? 'unknown reason'}`);
   }
-
-  // ─────────────────────── 18. the server defends itself against a flood
-  const flood = await Promise.all(
-    Array.from({ length: 30 }, () =>
-      api('/auth/login', {
-        method: 'POST',
-        json: { username: USERNAME, password: 'definitely-not-the-password' },
-        noAuth: true,
-        noRetry: true,
-      }),
-    ),
-  );
-  const limited = flood.some((row) => row.status === 429);
-  const rejected = flood.filter((row) => row.status === 401).length;
-  check(
-    'repeated failed logins are rejected and then rate-limited',
-    rejected >= 1 && limited,
-    `${rejected} rejected, rate limited: ${limited}`,
-  );
-  const detail = flood.find((row) => row.status === 429)?.data?.detail ?? '';
-  check(
-    'the refusal does not leak whether the password or the account was wrong',
-    !/password|user not found|no such/i.test(String(detail)) || /too many requests/i.test(String(detail)),
-    String(detail).slice(0, 90),
-  );
 
   // This operation is intentionally disabled unless CI (or an operator using
   // a dedicated disposable database) opts in explicitly. Never let a routine
@@ -1469,6 +1570,144 @@ async function main() {
     );
   } else {
     skip('live reset and first-run status', 'set ENABLE_DISPOSABLE_RESET=true only for an ephemeral test database');
+  }
+
+  // ─────────────────────── 19. the server defends itself against a flood
+  //
+  // Two different defences answer a burst of wrong passwords, and both are
+  // checked here:
+  //
+  //  * the per-address limiter, which refuses the whole address once its
+  //    sign-in window is full, and says how long to wait;
+  //  * the per-account lock, which refuses the right password for fifteen
+  //    minutes after five failures, so guessing cannot continue slowly.
+  //
+  // Last on purpose, and on a throwaway account. Early versions of this
+  // check fired the burst at the administrator: the account lock then kept
+  // the administrator out for a quarter of an hour, and every scenario that
+  // ran afterwards - the API check, the lifecycle, the statement export -
+  // failed to sign in with nothing wrong in what it tested.
+  //
+  // The window is measured from a known state. Ten misses are sent for a name
+  // that does not exist (no account is touched by those), which is enough to
+  // fill any window; the next one must be refused, and waiting out its own
+  // Retry-After leaves a fresh window.
+  const floodStamp = Date.now().toString(36);
+  const floodUsername = `scenario_flood_${floodStamp}`;
+  const floodPassword = 'Scenario-Flood-Password-12345';
+  // A token of its own: the live-reset section above recreates the company,
+  // and the session carried in from before it is not guaranteed to still be
+  // the administrator of the company that now exists.
+  const adminForFlood = await api('/auth/login', {
+    method: 'POST',
+    json: { username: USERNAME, password: PASSWORD },
+    noAuth: true,
+    noRetry: true,
+  });
+  const floodUser = await api('/admin/users', {
+    method: 'POST',
+    noAuth: true,
+    headers: { Authorization: `Bearer ${adminForFlood.data?.accessToken ?? ''}` },
+    json: {
+      username: floodUsername,
+      password: floodPassword,
+      fullNameEn: 'Scenario Flood',
+      fullNameAr: 'مستخدم اختبار الغمر',
+    },
+  });
+  check(
+    'a throwaway account exists for the flood check',
+    floodUser.status === 201 && Boolean(floodUser.data?.id),
+    floodUser.data?.detail ?? `HTTP ${floodUser.status}`,
+  );
+
+  // Fill this address's window with misses for a name that cannot exist.
+  const fill = await Promise.all(
+    Array.from({ length: 10 }, () =>
+      api('/auth/login', {
+        method: 'POST',
+        json: { username: `no_such_account_${floodStamp}`, password: 'not-the-password' },
+        noAuth: true,
+        noRetry: true,
+      }),
+    ),
+  );
+  const fillRefused = fill.filter((row) => row.status === 429).length;
+  const overflow = await api('/auth/login', {
+    method: 'POST',
+    json: { username: `no_such_account_${floodStamp}`, password: 'not-the-password' },
+    noAuth: true,
+    noRetry: true,
+  });
+  if (overflow.status === 429) {
+    const seconds = Number(overflow.headers?.get('retry-after') ?? 0) + 1;
+    console.log(`  (the sign-in window is full by design; waiting ${seconds}s for a fresh one)`);
+    await sleep(seconds * 1000);
+  } else {
+    console.log(`  (note: the window was not full after 10 misses - HTTP ${overflow.status})`);
+  }
+  console.log(`  (filled the window: ${fillRefused}/10 misses were already refused)`);
+
+  // The account lock: five wrong passwords, then the right one is refused too.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await api('/auth/login', {
+      method: 'POST',
+      json: { username: floodUsername, password: 'definitely-not-the-password' },
+      noAuth: true,
+      noRetry: true,
+    });
+  }
+  const lockedOut = await api('/auth/login', {
+    method: 'POST',
+    json: { username: floodUsername, password: floodPassword },
+    noAuth: true,
+    noRetry: true,
+  });
+  check(
+    'five wrong passwords lock the account against the right one',
+    lockedOut.status === 401 && /lock/i.test(String(lockedOut.data?.detail ?? '')),
+    `HTTP ${lockedOut.status}; ${String(lockedOut.data?.detail ?? '').slice(0, 70)}`,
+  );
+
+  const flood = await Promise.all(
+    Array.from({ length: 30 }, () =>
+      api('/auth/login', {
+        method: 'POST',
+        json: { username: floodUsername, password: 'definitely-not-the-password' },
+        noAuth: true,
+        noRetry: true,
+      }),
+    ),
+  );
+  const refusals = flood.filter((row) => row.status === 429);
+  const rejected = flood.filter((row) => row.status === 401).length;
+  const accepted = flood.filter((row) => row.status >= 200 && row.status < 300).length;
+  check(
+    'repeated failed logins are rejected and then rate-limited',
+    rejected >= 1 && refusals.length > 0 && accepted === 0,
+    `${rejected} rejected, ${refusals.length} rate limited, ${accepted} accepted`,
+  );
+  const firstRefusal = refusals[0];
+  const detail = firstRefusal?.data?.detail ?? '';
+  check(
+    'the refusal does not leak whether the password or the account was wrong',
+    !/password|user not found|no such/i.test(String(detail)) || /too many requests/i.test(String(detail)),
+    String(detail).slice(0, 90),
+  );
+  check(
+    'the refusal tells the client how long to wait',
+    Number(firstRefusal?.headers?.get('retry-after') ?? 0) > 0 && /second/i.test(String(detail)),
+    `Retry-After ${firstRefusal?.headers?.get('retry-after') ?? 'missing'}; ${String(detail).slice(0, 60)}`,
+  );
+
+  // Leave the limiter as it was found. The window belongs to the API process,
+  // not to this script, so a closed one would refuse the sign-in of whatever
+  // runs next (the API check, the lifecycle scenario, the statement export) -
+  // and those are not rate-limit tests.
+  const waitSeconds = Number(firstRefusal?.headers?.get('retry-after') ?? 0);
+  if (waitSeconds > 0) {
+    console.log(`  (waiting ${waitSeconds}s for this address's sign-in window to reopen)`);
+    await sleep((waitSeconds + 1) * 1000);
   }
 
   // ─────────────────────────────────────────────────────────── the summary

@@ -1,6 +1,10 @@
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { RolesService } from './roles.service';
+
+// The seat reservation is the only licensing call these specs reach;
+// its own behaviour is covered by licensing.service.spec.ts.
+const licensingStub = { reserveSeat: jest.fn().mockResolvedValue({ reserved: true }), reconcile: jest.fn().mockResolvedValue(undefined) } as any;
 
 describe('permission escalation protections', () => {
   const companyId = 'company-id';
@@ -19,7 +23,7 @@ describe('permission escalation protections', () => {
         ]),
       },
     };
-    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any, licensingStub);
 
     await expect(
       service.create(
@@ -49,7 +53,7 @@ describe('permission escalation protections', () => {
         }),
       },
     };
-    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any, licensingStub);
 
     await expect(
       service.changePassword(companyId, actorId, 'super-admin-id', 'new-test-password', false),
@@ -153,7 +157,7 @@ describe('permission escalation protections', () => {
       user: { findFirst: jest.fn().mockResolvedValue(userRecord) },
       $transaction: jest.fn(async (callback: (tx: any) => Promise<unknown>) => callback(tx)),
     };
-    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any, licensingStub);
 
     await service.update(companyId, actorId, 'target-user', { isActive: false }, [], false);
 
@@ -174,7 +178,7 @@ describe('permission escalation protections', () => {
     const prisma = {
       user: { findFirst: jest.fn().mockResolvedValue(superAdmin) },
     };
-    const service = new UsersService(prisma as any, { record: jest.fn() } as any);
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any, licensingStub);
 
     await expect(
       service.update(companyId, actorId, superAdmin.id, { fullNameEn: 'Changed' }, [], false),
@@ -184,4 +188,108 @@ describe('permission escalation protections', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+});
+
+describe('direct permission grants', () => {
+  const companyId = 'company-id';
+  const actorId = 'actor-id';
+  const target = {
+    id: 'target-user',
+    companyId,
+    username: 'target',
+    email: null,
+    fullNameEn: 'Target User',
+    fullNameAr: 'مستخدم',
+    isActive: true,
+    isSuperAdmin: false,
+    lastLoginAt: null,
+    lockedUntil: null,
+    createdAt: new Date(),
+    userRoles: [],
+    branches: [],
+    userPermissions: [],
+    deletedAt: null,
+  };
+
+  function buildService(permissionRows: Array<{ id: string; code: string }>) {
+    const tx = {
+      user: { update: jest.fn().mockResolvedValue(target) },
+      permission: {
+        findMany: jest.fn().mockResolvedValue(permissionRows),
+      },
+      userPermission: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        createMany: jest.fn().mockResolvedValue({ count: permissionRows.length }),
+      },
+      refreshToken: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    };
+    const prisma = {
+      user: { findFirst: jest.fn().mockResolvedValue(target) },
+      permission: { findMany: jest.fn().mockResolvedValue(permissionRows) },
+      $transaction: jest.fn(async (callback: (tx: any) => Promise<unknown>) => callback(tx)),
+    };
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any, licensingStub);
+    return { service, prisma, tx };
+  }
+
+  it('does not let a user manager directly grant a permission they lack', async () => {
+    const { service } = buildService([{ id: 'perm-post', code: 'cash.vouchers.post' }]);
+
+    await expect(
+      service.update(
+        companyId,
+        actorId,
+        'target-user',
+        { extraPermissions: ['cash.vouchers.post'] } as any,
+        ['admin.users.manage'],
+        false,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('lets a user manager directly grant a permission they hold', async () => {
+    const { service, tx } = buildService([{ id: 'perm-post', code: 'cash.vouchers.post' }]);
+
+    await service.update(
+      companyId,
+      actorId,
+      'target-user',
+      { extraPermissions: ['cash.vouchers.post'] } as any,
+      ['admin.users.manage', 'cash.vouchers.post'],
+      false,
+    );
+
+    expect(tx.userPermission.createMany).toHaveBeenCalledWith({
+      data: [{ userId: 'target-user', permissionId: 'perm-post' }],
+    });
+  });
+
+  it('rejects direct grants that name unknown permission codes', async () => {
+    const { service } = buildService([]);
+
+    await expect(
+      service.update(
+        companyId,
+        actorId,
+        'target-user',
+        { extraPermissions: ['no.such.permission'] } as any,
+        ['admin.users.manage'],
+        true,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('shows direct grants on the user response', async () => {
+    const withGrants = {
+      ...target,
+      userPermissions: [{ permission: { code: 'cash.vouchers.post' } }],
+    };
+    const prisma = {
+      user: { findFirst: jest.fn().mockResolvedValue(withGrants) },
+    };
+    const service = new UsersService(prisma as any, { record: jest.fn() } as any, licensingStub);
+
+    const response = await service.findOne(companyId, 'target-user');
+    expect((response as any).extraPermissions).toEqual(['cash.vouchers.post']);
+  });
 });

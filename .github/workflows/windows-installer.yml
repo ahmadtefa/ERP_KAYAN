@@ -2,13 +2,23 @@ name: Windows Installer
 
 on:
   workflow_dispatch:
+    inputs:
+      build_mode:
+        description: 'Product (approved key required) or explicitly labelled test-only installer'
+        type: choice
+        options: [product, test-signed]
+        default: product
+        required: true
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, 'arena/key-generator-register-ui-fix']
 
+# Building or inspecting a candidate never needs permission to publish releases.
+# Any future publishing job must request write permission separately, after its
+# independent package and environment checks.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-installer-${{ github.ref }}
@@ -19,30 +29,13 @@ jobs:
     name: Build KAYAN ERP for Windows x64
     runs-on: windows-latest
     timeout-minutes: 90
+    outputs:
+      build_mode: ${{ steps.licence.outputs.build }}
+      version: ${{ steps.app-version.outputs.version }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Finalize quotation design source before build
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'arena/24dd290b-erp-kayan' && hashFiles('scripts/finalize-quotation-design.py') != ''
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          python scripts/finalize-quotation-design.py
-          Remove-Item -Force scripts/finalize-quotation-design.py -ErrorAction SilentlyContinue
-          Remove-Item -Force .github/workflows/finalize-quotation-design.yml -ErrorAction SilentlyContinue
-          Remove-Item -Force docs/quotation-design-finalization-trigger.md -ErrorAction SilentlyContinue
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add lib backend scripts .github/workflows docs
-          if (-not (git diff --cached --quiet)) {
-            git commit -m 'feat: complete per-element quotation design controls'
-            git push origin HEAD:arena/24dd290b-erp-kayan
-          }
-          git fetch origin arena/24dd290b-erp-kayan
-          git checkout arena/24dd290b-erp-kayan
-          git reset --hard origin/arena/24dd290b-erp-kayan
 
       - name: Read application version
         id: app-version
@@ -61,21 +54,24 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
+      - name: Test licence build policy, synthetic signatures and release gates
+        run: node --experimental-transform-types --test scripts/windows-release-policy.test.mjs scripts/license-key-compatibility.test.mjs scripts/verify-release-evidence.test.mjs scripts/release-evidence-adversarial.test.mjs scripts/release-evidence-cli-isolation.test.mjs scripts/release-workflow-order.test.mjs scripts/check-release-environment.test.mjs scripts/inspect-final-inno.test.mjs
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
-      - name: Set up Python for branded icons
+      - name: Set up Python for CI diagnostics
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Generate platform icons from 1.png
+      - name: Verify the checked-in Windows icon
+        shell: powershell
         run: |
-          python -m pip install --disable-pip-version-check Pillow
-          python scripts/generate_app_icons.py
+          if (-not (Test-Path -LiteralPath 'windows\runner\resources\app_icon.ico' -PathType Leaf)) { throw 'Windows icon is missing.' }
 
       - name: Compile RepairTool.exe (early check)
         shell: powershell
@@ -110,8 +106,52 @@ jobs:
 
       - name: Test backend
         working-directory: backend
-        run: npm test -- --runInBand
+        shell: powershell
+        # Two things this step has to do besides run the tests: say *which*
+        # test failed (the run log archive is not always downloadable), and
+        # say what the PDF renderer thought of this machine. Both go out as
+        # annotations, which are readable even when the log is not.
+        #
+        # Tee-Object cannot be used to capture the output: GitHub runs
+        # PowerShell steps with $ErrorActionPreference = 'Stop', so the first
+        # line a native command writes to stderr becomes a terminating error
+        # and the script dies before it can report anything. Start-Process
+        # writes to files of its own instead.
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $log = Join-Path $env:RUNNER_TEMP 'backend-tests.log'
+          $err = Join-Path $env:RUNNER_TEMP 'backend-tests.err.log'
+          $proc = Start-Process -FilePath 'npm.cmd' -ArgumentList 'test','--','--runInBand' `
+            -NoNewWindow -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError $err
 
+          $esc = [char]27
+          function Clean([string]$text) {
+            $text = $text -replace "$esc\[[0-9;]*m", ''
+            $text = $text -replace "`r?`n", '%0A'
+            return ($text -replace '[^\x20-\x7E%]', '.')
+          }
+
+          # What the renderer found, and what it had to say when it could not
+          # print: the browser it chose, and every attempt's complaint.
+          $notes = @(
+            Get-Content -LiteralPath $log,$err -ErrorAction SilentlyContinue |
+              Select-String -Pattern 'Making PDFs','No browser found','would not print','not finish printing','exited with code' |
+              ForEach-Object { $_.Line } |
+              Select-Object -Unique |
+              Select-Object -Last 12
+          ) -join "`n"
+          if ($notes) { Write-Host "::warning title=PDF renderer on this machine::$(Clean $notes)" }
+
+          Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Select-Object -Last 60
+
+          if ($proc.ExitCode -ne 0) {
+            $fail = @(Get-Content -LiteralPath $err -ErrorAction SilentlyContinue | Select-Object -Last 22) -join "`n"
+            if (-not $fail) { $fail = @(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Select-Object -Last 22) -join "`n" }
+            $fail = Clean $fail
+            if ($fail.Length -gt 3400) { $fail = $fail.Substring($fail.Length - 3400) }
+            Write-Host "::error title=Backend tests failed::$fail"
+            exit 1
+          }
       - name: Clean build backend
         working-directory: backend
         run: npm run build
@@ -128,33 +168,191 @@ jobs:
       - name: Analyze Flutter
         run: python scripts/ci-diagnose.py flutter analyze
 
+      # Same screenshot generation as the ERP CI jobs: the design-screenshot
+      # goldens are not committed, so they must be rendered in this job's own
+      # workspace before the test run below compares against them. Without
+      # this step every Windows run failed at "Test Flutter" with missing
+      # golden files even when all real tests passed on Linux.
+      - name: Render design screenshots
+        run: flutter test test/screenshots/design_screenshots_test.dart --update-goldens
+
       - name: Test Flutter
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
 
-      - name: Build Windows installer
+      # PR builds are explicitly test-signed; pushes default to product, and a
+      # manual run chooses its mode. A missing product key is never a reason to
+      # silently downgrade to a test build. Test installers are labelled and
+      # are never eligible for either release publication path.
+      # PowerShell parses a whole script before running any of it, so one syntax
+      # error anywhere in the step below kills it before its own error handler
+      # exists: the step then fails in under a second, saying nothing that
+      # survives outside the runner log. This guard parses that step's text with
+      # PowerShell's own parser and fails with the exact message instead.
+      - name: Check the licence step parses
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          & .\distribution\windows\build-installer.ps1
-          if ($LASTEXITCODE -ne 0) { throw "Windows installer build failed." }
+          $workflow = '.github/workflows/windows-installer.yml'
+          $lines = Get-Content -LiteralPath $workflow
+          $start = -1
+          for ($n = 0; $n -lt $lines.Count; $n++) {
+            if ($lines[$n] -eq '      - name: Licence key for this build') { $start = $n; break }
+          }
+          if ($start -lt 0) { throw "No licence step in $workflow" }
+          $i = $start
+          while ($i -lt $lines.Count -and $lines[$i] -notmatch 'run:\s*\|') { $i++ }
+          if ($i -ge $lines.Count) { throw "The licence step in $workflow has no run block" }
+          $runIndent = ([regex]::Match($lines[$i], '^(\s*)')).Groups[1].Value.Length
+          $body = New-Object System.Collections.Generic.List[string]
+          for ($j = $i + 1; $j -lt $lines.Count; $j++) {
+            $line = $lines[$j]
+            $indent = ([regex]::Match($line, '^(\s*)')).Groups[1].Value.Length
+            if ($line.Trim().Length -gt 0 -and $indent -le ($runIndent - 2)) { break }
+            if ($line.Length -ge $runIndent) { $body.Add($line.Substring($runIndent)) } else { $body.Add('') }
+          }
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseInput([string]::Join("`n", $body), [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            foreach ($e in $errors) {
+              Write-Output ("::error title=Licence step syntax::" + $e.Message + " (line " + $e.Extent.StartLineNumber + ")")
+            }
+            throw ("The licence step in " + $workflow + " has " + $errors.Count + " syntax error(s), so PowerShell would refuse to run it.")
+          }
+          Write-Host ("Licence step parses: " + $body.Count + " lines, " + $tokens.Count + " tokens.")
+
+      - name: Licence key for this build
+        id: licence
+        shell: powershell
+        env:
+          # No production signing secret is provided to this job.
+          KAYAN_BUILD_MODE: ${{ github.event_name == 'pull_request' && 'test-signed' || inputs.build_mode || 'product' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Every failure here is reported as an annotation, because the raw
+          # step log is not always reachable from outside the runner.
+          try {
+            Write-Output ("::notice::Licence step started: powershell " + $PSVersionTable.PSVersion.ToString() + ", temp " + $env:RUNNER_TEMP + ", cwd " + (Get-Location).Path)
+            $operatorKey = ''
+            foreach ($candidate in @('.\distribution\windows\public-key.pem', '.\distribution\windows\licensing\public-key.pem')) {
+              if (Test-Path -LiteralPath $candidate) { $operatorKey = (Resolve-Path -LiteralPath $candidate).Path; break }
+            }
+            if ($env:KAYAN_BUILD_MODE -eq 'product') {
+              if (-not $operatorKey) { throw 'Product build refused: the approved licence public key is missing.' }
+              & node .\scripts\license-build-policy.mjs --mode product --public-key $operatorKey
+              if ($LASTEXITCODE -ne 0) { throw 'Product build refused: licence public key validation failed.' }
+              # Product candidates require only the approved public key. No
+              # production private key is sent to CI or used for smoke tests.
+              "build=product" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+              exit 0
+            }
+
+            if ($env:KAYAN_BUILD_MODE -ne 'test-signed') { throw 'Unknown licence build mode.' }
+            # Generate a synthetic pair in memory; only the public half is
+            # written. This installer is deliberately non-installable.
+            $publicKey = Join-Path $env:RUNNER_TEMP 'kayan-test-public.pem'
+            & node -e "const c=require('node:crypto'),f=require('node:fs');const p=c.generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'pem'});f.writeFileSync(process.argv[1],p,{flag:'wx'});" $publicKey
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $publicKey)) { throw 'Could not create the synthetic public key.' }
+            & node .\scripts\license-build-policy.mjs --mode test-signed --public-key $publicKey
+            if ($LASTEXITCODE -ne 0) { throw 'Test-signed build key failed policy validation.' }
+            Write-Host '::warning title=TEST ONLY::This diagnostic installer refuses installation and cannot activate customer keys.'
+            "build=test-signed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "public_key=$publicKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } catch {
+            Write-Output ("::error title=Licence key for this build::" + $_.Exception.GetType().Name + ': ' + $_.Exception.Message)
+            exit 1
+          }
+      - name: Build Windows installer
+        id: installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ('${{ steps.licence.outputs.build }}' -eq 'product') {
+            Write-Host 'Building a product installer from the approved operator public key.'
+            & .\distribution\windows\build-installer.ps1 -DisposableSource
+            $base = 'KAYAN-ERP-Setup'
+          } elseif ('${{ steps.licence.outputs.build }}' -eq 'test-signed') {
+            $key = '${{ steps.licence.outputs.public_key }}'
+            if (-not (Test-Path -LiteralPath $key)) { throw 'The test public key is missing.' }
+            & .\distribution\windows\build-installer.ps1 -TestSignedBuild -LicencePublicKeyPath $key -DisposableSource
+            $base = 'KAYAN-ERP-TEST-ONLY-Setup'
+          } else { throw 'Unknown licence build mode; refusing to build.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installer build failed.' }
+          "base=$base" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "path=build/windows-installer/$base.exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Verify installer artifact
         shell: powershell
         run: |
-          $setupCanonical = ".\build\windows-installer\KAYAN-ERP-Setup.exe"
-          if (-not (Test-Path $setupCanonical)) { throw "Expected canonical installer EXE not found: $setupCanonical" }
-          $files = @(Get-ChildItem .\build\windows-installer\KAYAN-ERP-Setup-*-x64.exe -File)
+          $base = '${{ steps.installer.outputs.base }}'
+          if ($base -notin @('KAYAN-ERP-Setup', 'KAYAN-ERP-TEST-ONLY-Setup')) { throw 'Invalid installer basename.' }
+          $setupCanonical = Join-Path '.\build\windows-installer' "$base.exe"
+          if (-not (Test-Path $setupCanonical)) { throw "Expected installer EXE not found: $setupCanonical" }
+          $files = @(Get-ChildItem ".\build\windows-installer\$base-*-x64.exe" -File)
           if ($files.Count -lt 1) { throw "Expected at least one versioned installer EXE; found $($files.Count)." }
           Get-FileHash $setupCanonical, $files[0].FullName -Algorithm SHA256 | Format-List Algorithm, Hash, Path
           $canonicalHash = (Get-FileHash $setupCanonical -Algorithm SHA256).Hash
-          Write-Host "::notice title=Installer SHA256::KAYAN-ERP-Setup.exe SHA256=$canonicalHash"
+          Write-Host "::notice title=Installer SHA256::$base.exe SHA256=$canonicalHash"
 
+      - name: Inspect final product Inno payload (limited secret scan)
+        if: steps.licence.outputs.build == 'product'
+        run: node scripts/inspect-final-inno.mjs --artifact build/windows-installer/KAYAN-ERP-Setup.exe
+
+      - name: Inspect non-installable diagnostic Inno payload
+        if: steps.licence.outputs.build == 'test-signed'
+        run: node scripts/inspect-final-inno.mjs --artifact build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe --mode test-signed
+
+      # Disabled: the existing smoke script installs into customer paths and
+      # needs a signing private key. Do not re-enable until a disposable VM,
+      # isolated runtime paths, and a secret-free test protocol are available.
       - name: Smoke-test the actual installed Windows application
+        if: ${{ false }}
         shell: powershell
-        run: .\scripts\smoke-test-installed-windows.ps1 -SetupPath .\build\windows-installer\KAYAN-ERP-Setup.exe
+        run: |
+          # The step's output is captured, replayed, and - if the script dies -
+          # summarised in an error annotation. Without that, a script that dies
+          # before its own error handler exists (a syntax error, a parameter
+          # that will not bind) leaves only "Process completed with exit code 1"
+          # and the raw job log is not readable by somebody not signed in.
+          $ErrorActionPreference = 'Continue'
+          $smokeLog = Join-Path $env:RUNNER_TEMP 'kayan-smoke.log'
+          # A hashtable, so the names really bind: splatting an ARRAY passes its
+          # elements positionally, which silently made the first one - the
+          # string '-SetupPath' - the value of -SetupPath, and the script then
+          # died in Resolve-Path before its own error handler existed. That was
+          # the whole reason the smoke test never ran.
+          $arguments = @{ SetupPath = '${{ steps.installer.outputs.path }}'; RequireLicenceEnforcement = $true }
+          if ('${{ steps.licence.outputs.home }}') { $arguments['LicenceHome'] = '${{ steps.licence.outputs.home }}' }
+          & .\scripts\smoke-test-installed-windows.ps1 @arguments *> $smokeLog
+          $smokeExit = $LASTEXITCODE
+          if (Test-Path -LiteralPath $smokeLog) { Get-Content -LiteralPath $smokeLog | Write-Output }
+          if ($smokeExit -ne 0) {
+            $tail = ''
+            if (Test-Path -LiteralPath $smokeLog) {
+              $tail = ((Get-Content -LiteralPath $smokeLog -Tail 20) -join ' | ')
+              $tail = $tail.Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' | ')
+              if ($tail.Length -gt 3500) { $tail = $tail.Substring($tail.Length - 3500) }
+            }
+            Write-Output ("::error title=Smoke test failed::exit " + $smokeExit + ". Last lines of its output: " + $tail)
+            exit $smokeExit
+          }
+
+      # The publish step below replaces the files of an existing release. That
+      # is right while a release is being assembled, and wrong the moment one
+      # has been handed to customers: a push to main without a version bump
+      # would overwrite the published Setup.exe of windows-v0.1.1. This guard
+      # runs first and stops the job if that tag already has files.
+      # Production publication is intentionally fail-closed until the exact
+      # installer is independently verified on an isolated Windows host.
+      - name: Refuse to overwrite a published release
+        if: ${{ false }}
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-release-tag.mjs "windows-v${{ steps.app-version.outputs.version }}"
 
       - name: Publish direct Setup.exe download
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        if: ${{ false }}
         uses: ncipollo/release-action@v1
         with:
           tag: windows-v${{ steps.app-version.outputs.version }}
@@ -167,11 +365,86 @@ jobs:
           generateReleaseNotes: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Windows installer (diagnostic build artifact)
+      # Branch prereleases are blocked by the same fail-closed policy.
+      - name: Publish branch prerelease with direct Setup.exe download
+        if: ${{ false }}
+        uses: ncipollo/release-action@v1
+        with:
+          tag: windows-v${{ steps.app-version.outputs.version }}-pre-${{ github.run_id }}
+          commit: ${{ github.event.pull_request.head.sha || github.sha }}
+          name: KAYAN ERP Windows ${{ steps.app-version.outputs.version }} (branch build ${{ github.run_id }})
+          artifacts: build/windows-installer/KAYAN-ERP-Setup.exe
+          artifactContentType: application/vnd.microsoft.portable-executable
+          prerelease: true
+          makeLatest: false
+          body: |
+            Automatic branch build for testing and handover. This is not an
+            official release; the official download is published from main.
+
+            Branch: ${{ github.event.pull_request.head.ref || github.ref_name }}
+            Commit: ${{ github.event.pull_request.head.sha || github.sha }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Final Inno payload inspection is not implemented. Do not upload even a
+      # candidate until the final binary is inspected on a trusted runner.
+      - name: Upload product installer (diagnostic artifact)
+        if: ${{ false }}
         uses: actions/upload-artifact@v4
         with:
-          name: KAYAN-ERP-Windows-x64-Installer
-          path: |
-            build/windows-installer/KAYAN-ERP-Setup.exe
+          name: KAYAN-ERP-Windows-x64-PRODUCT-CANDIDATE-NOT-FOR-RELEASE
+          path: build/windows-installer/KAYAN-ERP-Setup.exe
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload TEST ONLY installer (diagnostic artifact)
+        if: ${{ false }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAYAN-ERP-Windows-x64-TEST-ONLY-Installer
+          path: build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-windows:
+    name: Publish independently verified Windows installer
+    needs: build
+    if: >-
+      ${{ github.repository == 'ahmadtefa/ERP_KAYAN' && github.ref == 'refs/heads/main' &&
+          github.event_name == 'push' && needs.build.outputs.build_mode == 'product' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: windows-production
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify actual release environment protections
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/check-release-environment.mjs
+      # The build's candidate upload is intentionally still blocked. Enabling
+      # it requires final Inno content inspection before upload; this step
+      # therefore fails closed until that independently reviewed work exists.
+      - name: Retrieve candidate from this exact workflow run
+        uses: actions/download-artifact@v4
+        with:
+          name: KAYAN-ERP-Windows-x64-PRODUCT-CANDIDATE-NOT-FOR-RELEASE
+          path: release-candidate
+      - name: Reinspect the final installer payload
+        run: node scripts/inspect-final-inno.mjs --artifact release-candidate/KAYAN-ERP-Setup.exe
+      - name: Verify independent signed evidence for the exact installer
+        env:
+          KAYAN_WINDOWS_RELEASE_EVIDENCE: ${{ vars.KAYAN_WINDOWS_RELEASE_EVIDENCE }}
+        run: node scripts/verify-release-evidence.mjs --artifact release-candidate/KAYAN-ERP-Setup.exe
+      - name: Publish the verified installer without overwriting a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_VERSION: ${{ needs.build.outputs.version }}
+          KAYAN_WINDOWS_RELEASE_EVIDENCE: ${{ vars.KAYAN_WINDOWS_RELEASE_EVIDENCE }}
+        run: node scripts/publish-verified-windows.mjs

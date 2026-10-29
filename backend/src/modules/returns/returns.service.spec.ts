@@ -36,6 +36,9 @@ function dependencies(prisma: Record<string, any>, posting = { post: jest.fn(), 
   const warehouses = {
     resolve: jest.fn().mockResolvedValue(WAREHOUSE_ID),
     resolveForReversal: jest.fn().mockResolvedValue(WAREHOUSE_ID),
+    // Behaviour of the warehouse-level guard is covered in the dedicated
+    // warehouse-guard suites; here it stays a permissive no-op mock.
+    assertWarehouseAvailable: jest.fn().mockResolvedValue(undefined),
   };
   const service = new ReturnsService(
     prisma as never,
@@ -85,6 +88,63 @@ function transactionPrisma(tx: Record<string, any>, model: 'salesInvoice' | 'pur
 }
 
 describe('ReturnsService', () => {
+  it('refuses a return that does not name its source invoice instead of selecting one', async () => {
+    // Prisma reads a missing id as "no filter". A request that leaves the
+    // source out must be refused before any invoice is picked.
+    const prisma = { salesInvoice: { findFirst: jest.fn() }, purchaseInvoice: { findFirst: jest.fn() } };
+    const { service } = dependencies(prisma as never);
+
+    await expect(
+      service.createSalesReturn(COMPANY_ID, BRANCH_ID, USER_ID, {
+        returnDate: '2026-10-20',
+        lines: [{ originalLineId: SOURCE_LINE_ID, quantity: '1' }],
+      } as never),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    await expect(
+      service.createPurchaseReturn(COMPANY_ID, BRANCH_ID, USER_ID, {
+        returnDate: '2026-10-20',
+        lines: [{ originalLineId: SOURCE_LINE_ID, quantity: '1' }],
+      } as never),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.salesInvoice.findFirst).not.toHaveBeenCalled();
+    expect(prisma.purchaseInvoice.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('refuses a return line that does not name the original line', async () => {
+    const original = {
+      id: SOURCE_INVOICE_ID,
+      status: InvoiceStatus.POSTED,
+      documentType: InvoiceDocumentType.INVOICE,
+      branchId: BRANCH_ID,
+      invoiceDate: TODAY,
+      invoiceNumber: 'SI-0001',
+      lines: [
+        {
+          id: SOURCE_LINE_ID,
+          itemId: ITEM_ID,
+          description: 'Line',
+          quantity: D(1),
+          returnedQuantity: D(0),
+          unitPrice: D(10),
+          taxRate: D(0),
+          discountAmount: D(0),
+        },
+      ],
+    };
+    const prisma = { salesInvoice: { findFirst: jest.fn().mockResolvedValue(original) }, purchaseInvoice: { findFirst: jest.fn() } };
+    const { service } = dependencies(prisma as never);
+
+    await expect(
+      service.createSalesReturn(COMPANY_ID, BRANCH_ID, USER_ID, {
+        originalInvoiceId: SOURCE_INVOICE_ID,
+        returnDate: '2026-10-20',
+        lines: [{ quantity: '1' }],
+      } as never),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('refuses to post or reverse ordinary invoices through return endpoints', async () => {
     const ordinarySalesInvoice = {
       ...summaryFields({

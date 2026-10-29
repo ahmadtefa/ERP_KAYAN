@@ -7,6 +7,7 @@ import { AccountType, BranchKind, Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
 
 import { AuditService } from '../../common/audit/audit.service';
+import { LicensingService } from '../licensing/licensing.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { normalizeLogo } from './company.service';
 import { PERMISSIONS } from '../../../prisma/permissions';
@@ -30,6 +31,7 @@ export class SetupService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly licensing: LicensingService,
   ) {}
 
   async status() {
@@ -237,6 +239,18 @@ export class SetupService {
                 isSuperAdmin: true,
               },
             });
+
+      // The first-run administrator is a real account like any other, so it
+      // consumes a seat. An account revived by setup (already exists) is not
+      // created again and therefore reserves nothing.
+      if (already.length === 0) {
+        await this.licensing.reserveSeat(tx, {
+          userId: admin.id,
+          username: admin.username,
+          reason: 'SETUP_ADMIN',
+          idempotencyKey: `setup:${company.id}:${admin.username}`,
+        });
+      }
 
       // Only one administrator belongs at the beginning of a company. The
       // extra accounts are switched off and retired rather than deleted: an
@@ -456,6 +470,11 @@ const STARTER_ACCOUNTS: Array<{
   { code: '3', nameEn: 'Equity', nameAr: 'حقوق الملكية', type: AccountType.EQUITY, postable: false },
   { code: '3101', nameEn: 'Capital', nameAr: 'رأس المال', type: AccountType.EQUITY, parent: '3', postable: true },
   { code: '3102', nameEn: 'Retained earnings', nameAr: 'الأرباح المحتجزة', type: AccountType.EQUITY, parent: '3', postable: true },
+  // 3103 and 5107 are resolved by code from the account map (opening
+  // balances and inventory differences). They existed in the seed chart
+  // but not here, so a company created through setup — every real one —
+  // failed those postings with "required account does not exist".
+  { code: '3103', nameEn: 'Opening balance equity', nameAr: 'أرصدة افتتاحية', type: AccountType.EQUITY, parent: '3', postable: true },
   { code: '4', nameEn: 'Revenue', nameAr: 'الإيرادات', type: AccountType.REVENUE, postable: false },
   { code: '4101', nameEn: 'Sales revenue', nameAr: 'إيرادات المبيعات', type: AccountType.REVENUE, parent: '4', postable: true },
   { code: '4102', nameEn: 'Sales returns', nameAr: 'مردودات المبيعات', type: AccountType.REVENUE, parent: '4', postable: true },
@@ -467,4 +486,5 @@ const STARTER_ACCOUNTS: Array<{
   { code: '5104', nameEn: 'Utilities', nameAr: 'المرافق والخدمات', type: AccountType.EXPENSE, parent: '5', postable: true },
   { code: '5105', nameEn: 'Depreciation expense', nameAr: 'مصروف الإهلاك', type: AccountType.EXPENSE, parent: '5', postable: true },
   { code: '5106', nameEn: 'Professional fees', nameAr: 'أتعاب مهنية', type: AccountType.EXPENSE, parent: '5', postable: true },
+  { code: '5107', nameEn: 'Inventory differences', nameAr: 'فروق المخزون', type: AccountType.EXPENSE, parent: '5', postable: true },
 ];

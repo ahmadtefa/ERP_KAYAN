@@ -302,6 +302,28 @@ async function main(): Promise<void> {
     },
   });
 
+  // An account created here is an account like any other: it consumes one
+  // seat. The packaged installer creates the first administrator through this
+  // program rather than through the setup endpoint, so without this a
+  // five-seat licence would allow six accounts on every fresh installation.
+  // The row is skipped when the account already has one - the licensing
+  // migration backfills accounts that existed before it, and setup.service
+  // reserves the same seat when it revives this account itself.
+  const existingSeat = await prisma.licenseSeatUsage.findFirst({
+    where: { userId: admin.id },
+    select: { id: true },
+  });
+  if (!existingSeat) {
+    await prisma.licenseSeatUsage.create({
+      data: {
+        userId: admin.id,
+        username: admin.username,
+        reason: 'SETUP_ADMIN',
+        idempotencyKey: `setup:${company.id}:${admin.username}`,
+      },
+    });
+  }
+
   await prisma.userRole.upsert({
     where: {
       userId_roleId_companyId: {
@@ -319,6 +341,23 @@ async function main(): Promise<void> {
     update: {},
     create: { userId: admin.id, branchId: branch.id },
   });
+
+  // The upsert above only sets `isSuperAdmin` when it *creates* the account.
+  // An installation whose administrator row already exists without the flag
+  // (restored from an archive, say) would keep it missing forever — and with
+  // it, the program-reset and full-backup screens, which no screen can grant
+  // back. Seeding runs on install and repair, so this is where the invariant
+  // "the seeded company always has a super administrator" is restored: only
+  // when the company has none, and only onto the account this seed owns.
+  const superAdmins = await prisma.user.count({
+    where: { companyId: company.id, isSuperAdmin: true, isActive: true, deletedAt: null },
+  });
+  if (superAdmins === 0) {
+    await prisma.user.update({
+      where: { id: admin.id },
+      data: { isSuperAdmin: true, isActive: true, deletedAt: null },
+    });
+  }
 
   // Chart of accounts: parents first so foreign keys resolve.
   const sorted = [...ACCOUNTS].sort((a, b) => a.code.length - b.code.length);

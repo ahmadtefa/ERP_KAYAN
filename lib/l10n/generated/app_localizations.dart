@@ -61,6 +61,7 @@ import 'app_localizations_en.dart';
 /// you wish to add from the pop-up menu in the Value field. This list should
 /// be consistent with the languages listed in the AppLocalizations.supportedLocales
 /// property.
+
 abstract class AppLocalizations {
   AppLocalizations(String locale)
     : localeName = intl.Intl.canonicalizedLocale(locale.toString());
@@ -284,6 +285,12 @@ abstract class AppLocalizations {
   /// **'The server accepted the sign-in but did not send the account details. This usually means the program and the server are different versions, or the company setup was not finished. The technical detail is in the program log.'**
   String get signInIncomplete;
 
+  /// No description provided for @sessionNotPersisted.
+  ///
+  /// In en, this message translates to:
+  /// **'This session is kept in memory only: the browser will not store it on a plain http:// address. Reloading signs you out. Serve the program over HTTPS to keep the session.'**
+  String get sessionNotPersisted;
+
   /// No description provided for @sessionStorageLabel.
   ///
   /// In en, this message translates to:
@@ -349,12 +356,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Preview: invoice 1,250.00 EGP · 12.5% discount'**
   String get fontSizePreview;
-
-  /// No description provided for @sessionNotPersisted.
-  ///
-  /// In en, this message translates to:
-  /// **'This session is kept in memory only: the browser will not store it on a plain http:// address. Reloading signs you out. Serve the program over HTTPS to keep the session.'**
-  String get sessionNotPersisted;
 
   /// No description provided for @language.
   ///
@@ -2276,6 +2277,18 @@ abstract class AppLocalizations {
   /// **'Download the list'**
   String get downloadList;
 
+  /// No description provided for @downloadStatement.
+  ///
+  /// In en, this message translates to:
+  /// **'Download the statement'**
+  String get downloadStatement;
+
+  /// No description provided for @exportStatementHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Download this statement as it stands: Excel, CSV, PDF, or a page to print.'**
+  String get exportStatementHint;
+
   /// No description provided for @exportListHint.
   ///
   /// In en, this message translates to:
@@ -2576,6 +2589,12 @@ abstract class AppLocalizations {
   /// **'Create full backup'**
   String get createFullBackup;
 
+  /// No description provided for @backupSavedIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved in: {directory}'**
+  String backupSavedIn(Object directory);
+
   /// No description provided for @backupInProgress.
   ///
   /// In en, this message translates to:
@@ -2713,6 +2732,2176 @@ abstract class AppLocalizations {
 
   String get deactivateAccount;
 
+
+  /// No description provided for @fixedAssets.
+  ///
+  ///
+  String get fixedAssets;
+
+  /// No description provided for @newAsset.
+  ///
+  ///
+  String get newAsset;
+
+  /// No description provided for @editAsset.
+  ///
+  ///
+  String get editAsset;
+
+  /// No description provided for @assetCode.
+  ///
+  ///
+  String get assetCode;
+
+  /// No description provided for @purchaseDate.
+  ///
+  ///
+  String get purchaseDate;
+
+  /// No description provided for @inServiceDate.
+  ///
+  ///
+  String get inServiceDate;
+
+  /// No description provided for @assetCost.
+  ///
+  ///
+  String get assetCost;
+
+  /// No description provided for @salvageValue.
+  ///
+  ///
+  String get salvageValue;
+
+  /// No description provided for @usefulLifeMonths.
+  ///
+  ///
+  String get usefulLifeMonths;
+
+  /// No description provided for @assetAccount.
+  ///
+  ///
+  String get assetAccount;
+
+  /// No description provided for @accumulatedAccount.
+  ///
+  ///
+  String get accumulatedAccount;
+
+  /// No description provided for @depreciationExpenseAccount.
+  ///
+  ///
+  String get depreciationExpenseAccount;
+
+  /// No description provided for @fundingAccount.
+  ///
+  ///
+  String get fundingAccount;
+
+  /// No description provided for @activateAsset.
+  ///
+  ///
+  String get activateAsset;
+
+  /// No description provided for @disposeAsset.
+  ///
+  ///
+  String get disposeAsset;
+
+  /// No description provided for @disposalDate.
+  ///
+  ///
+  String get disposalDate;
+
+  /// No description provided for @disposalProceeds.
+  ///
+  ///
+  String get disposalProceeds;
+
+  /// No description provided for @proceedsAccount.
+  ///
+  ///
+  String get proceedsAccount;
+
+  /// No description provided for @gainLossAccount.
+  ///
+  ///
+  String get gainLossAccount;
+
+  /// No description provided for @runDepreciation.
+  ///
+  ///
+  String get runDepreciation;
+
+  /// No description provided for @depreciationPeriod.
+  ///
+  ///
+  String get depreciationPeriod;
+
+  /// No description provided for @accumulatedDepreciation.
+  ///
+  ///
+  String get accumulatedDepreciation;
+
+  /// No description provided for @bookValue.
+  ///
+  ///
+  String get bookValue;
+
+  /// No description provided for @assetCategory.
+  ///
+  ///
+  String get assetCategory;
+
+  /// No description provided for @assetLocation.
+  ///
+  ///
+  String get assetLocation;
+
+  /// No description provided for @noAssets.
+  ///
+  ///
+  String get noAssets;
+
+  /// No description provided for @assetDetails.
+  ///
+  ///
+  String get assetDetails;
+
+  /// No description provided for @depreciationSchedule.
+  ///
+  ///
+  String get depreciationSchedule;
+
+  /// No description provided for @confirmActivateAsset.
+  ///
+  ///
+  String get confirmActivateAsset;
+
+  /// No description provided for @confirmDisposeAsset.
+  ///
+  ///
+  String get confirmDisposeAsset;
+
+  /// No description provided for @downloadStarted.
+  ///
+  ///
+  String get downloadStarted;
+
+  /// No description provided for @downloadFailedTitle.
+  ///
+  ///
+  String get downloadFailedTitle;
+
+  /// No description provided for @printOpened.
+  ///
+  ///
+  String get printOpened;
+
+  /// No description provided for @printBlocked.
+  ///
+  ///
+  String get printBlocked;
+
+  /// No description provided for @resetData.
+  ///
+  ///
+  String get resetData;
+
+  /// No description provided for @resetDataHint.
+  ///
+  ///
+  String get resetDataHint;
+
+  /// No description provided for @resetButton.
+  ///
+  ///
+  String get resetButton;
+
+  /// No description provided for @resetOnlyAdmins.
+  ///
+  ///
+  String get resetOnlyAdmins;
+
+  /// No description provided for @resetForCompany.
+  ///
+  ///
+  String resetForCompany(Object company);
+
+  /// No description provided for @resetWhatIsDeleted.
+  ///
+  ///
+  String get resetWhatIsDeleted;
+
+  /// No description provided for @resetWhatIsKept.
+  ///
+  ///
+  String get resetWhatIsKept;
+
+  /// No description provided for @resetDeletedHint.
+  ///
+  ///
+  String get resetDeletedHint;
+
+  /// No description provided for @resetKeptAdmin.
+  ///
+  ///
+  String get resetKeptAdmin;
+
+  /// No description provided for @resetKeptPermissions.
+  ///
+  ///
+  String get resetKeptPermissions;
+
+  /// No description provided for @resetKeptRoles.
+  ///
+  ///
+  String get resetKeptRoles;
+
+  /// No description provided for @resetKeptConfig.
+  ///
+  ///
+  String get resetKeptConfig;
+
+  /// No description provided for @resetCountJournalEntries.
+  ///
+  ///
+  String get resetCountJournalEntries;
+
+  /// No description provided for @resetCountAccounts.
+  ///
+  ///
+  String get resetCountAccounts;
+
+  /// No description provided for @resetCountCustomers.
+  ///
+  ///
+  String get resetCountCustomers;
+
+  /// No description provided for @resetCountSuppliers.
+  ///
+  ///
+  String get resetCountSuppliers;
+
+  /// No description provided for @resetCountItems.
+  ///
+  ///
+  String get resetCountItems;
+
+  /// No description provided for @resetCountSalesInvoices.
+  ///
+  ///
+  String get resetCountSalesInvoices;
+
+  /// No description provided for @resetCountQuotations.
+  ///
+  ///
+  String get resetCountQuotations;
+
+  /// No description provided for @resetCountCashVouchers.
+  ///
+  ///
+  String get resetCountCashVouchers;
+
+  /// No description provided for @resetCountPurchaseInvoices.
+  ///
+  ///
+  String get resetCountPurchaseInvoices;
+
+  /// No description provided for @resetCountStockMovements.
+  ///
+  ///
+  String get resetCountStockMovements;
+
+  /// No description provided for @resetCountFiscalPeriods.
+  ///
+  ///
+  String get resetCountFiscalPeriods;
+
+  /// No description provided for @resetCountBranches.
+  ///
+  ///
+  String get resetCountBranches;
+
+  /// No description provided for @resetCountUsers.
+  ///
+  ///
+  String get resetCountUsers;
+
+  /// No description provided for @resetBackupFirst.
+  ///
+  ///
+  String get resetBackupFirst;
+
+  /// No description provided for @resetConfirmTitle.
+  ///
+  ///
+  String get resetConfirmTitle;
+
+  /// No description provided for @resetConfirmBody.
+  ///
+  ///
+  String resetConfirmBody(Object word);
+
+  /// No description provided for @resetPasswordLabel.
+  ///
+  ///
+  String get resetPasswordLabel;
+
+  /// No description provided for @resetPasswordHint.
+  ///
+  ///
+  String get resetPasswordHint;
+
+  /// No description provided for @resetWordLabel.
+  ///
+  ///
+  String resetWordLabel(Object word);
+
+  /// No description provided for @resetWrongWord.
+  ///
+  ///
+  String resetWrongWord(Object word);
+
+  /// No description provided for @resetDone.
+  ///
+  ///
+  String resetDone(Object file);
+
+  /// No description provided for @resetNeedsSetup.
+  ///
+  ///
+  String get resetNeedsSetup;
+
+  /// No description provided for @resetPreviewFailed.
+  ///
+  ///
+  String get resetPreviewFailed;
+
+  /// No description provided for @cashAndBanks.
+  ///
+  ///
+  String get cashAndBanks;
+
+  /// No description provided for @newCashAccount.
+  ///
+  ///
+  String get newCashAccount;
+
+  /// No description provided for @cashAccount.
+  ///
+  ///
+  String get cashAccount;
+
+  /// No description provided for @cashBox.
+  ///
+  ///
+  String get cashBox;
+
+  /// No description provided for @bank.
+  ///
+  ///
+  String get bank;
+
+  /// No description provided for @bankName.
+  ///
+  ///
+  String get bankName;
+
+  /// No description provided for @iban.
+  ///
+  ///
+  String get iban;
+
+  /// No description provided for @ledgerAccount.
+  ///
+  ///
+  String get ledgerAccount;
+
+  /// No description provided for @noCashAccounts.
+  ///
+  ///
+  String get noCashAccounts;
+
+  /// No description provided for @statement.
+  ///
+  ///
+  String get statement;
+
+  /// No description provided for @vouchers.
+  ///
+  ///
+  String get vouchers;
+
+  /// No description provided for @newVoucher.
+  ///
+  ///
+  String get newVoucher;
+
+  /// No description provided for @receipt.
+  ///
+  ///
+  String get receipt;
+
+  /// No description provided for @payment.
+  ///
+  ///
+  String get payment;
+
+  /// No description provided for @voucherType.
+  ///
+  ///
+  String get voucherType;
+
+  /// No description provided for @voucherNumber.
+  ///
+  ///
+  String get voucherNumber;
+
+  /// No description provided for @amount.
+  ///
+  ///
+  String get amount;
+
+  /// No description provided for @noVouchers.
+  ///
+  ///
+  String get noVouchers;
+
+  /// No description provided for @transfers.
+  ///
+  ///
+  String get transfers;
+
+  /// No description provided for @newTransfer.
+  ///
+  ///
+  String get newTransfer;
+
+  /// No description provided for @fromAccount.
+  ///
+  ///
+  String get fromAccount;
+
+  /// No description provided for @toAccount.
+  ///
+  ///
+  String get toAccount;
+
+  /// No description provided for @noTransfers.
+  ///
+  ///
+  String get noTransfers;
+
+  /// No description provided for @transferNeedsTwoAccounts.
+  ///
+  ///
+  String get transferNeedsTwoAccounts;
+
+  /// No description provided for @party.
+  ///
+  ///
+  String get party;
+
+  /// No description provided for @saved.
+  ///
+  ///
+  String get saved;
+
+  /// No description provided for @settleOldestFirst.
+  ///
+  ///
+  String get settleOldestFirst;
+
+  /// No description provided for @costCenters.
+  ///
+  ///
+  String get costCenters;
+
+  /// No description provided for @costCenter.
+  ///
+  ///
+  String get costCenter;
+
+  /// No description provided for @newCostCenter.
+  ///
+  ///
+  String get newCostCenter;
+
+  /// No description provided for @editCostCenter.
+  ///
+  ///
+  String get editCostCenter;
+
+  /// No description provided for @costCenterCode.
+  ///
+  ///
+  String get costCenterCode;
+
+  /// No description provided for @costCenterType.
+  ///
+  ///
+  String get costCenterType;
+
+  /// No description provided for @department.
+  ///
+  ///
+  String get department;
+
+  /// No description provided for @administrativeUnit.
+  ///
+  ///
+  String get administrativeUnit;
+
+  /// No description provided for @project.
+  ///
+  ///
+  String get project;
+
+  /// No description provided for @responsiblePerson.
+  ///
+  ///
+  String get responsiblePerson;
+
+  /// No description provided for @parentCostCenter.
+  ///
+  ///
+  String get parentCostCenter;
+
+  /// No description provided for @searchCostCenters.
+  ///
+  ///
+  String get searchCostCenters;
+
+  /// No description provided for @noCostCenters.
+  ///
+  ///
+  String get noCostCenters;
+
+  /// No description provided for @costCenterSaved.
+  ///
+  ///
+  String get costCenterSaved;
+
+  /// No description provided for @costCenterDeactivated.
+  ///
+  ///
+  String get costCenterDeactivated;
+
+  /// No description provided for @confirmDeactivateCostCenter.
+  ///
+  ///
+  String get confirmDeactivateCostCenter;
+
+  /// No description provided for @deleteCostCenter.
+  ///
+  ///
+  String get deleteCostCenter;
+
+  /// No description provided for @confirmDeleteCostCenter.
+  ///
+  ///
+  String get confirmDeleteCostCenter;
+
+  /// No description provided for @costCenterDeleted.
+  ///
+  ///
+  String get costCenterDeleted;
+
+  /// No description provided for @allParents.
+  ///
+  ///
+  String get allParents;
+
+  /// No description provided for @allStatuses.
+  ///
+  ///
+  String get allStatuses;
+
+  /// No description provided for @usage.
+  ///
+  ///
+  String get usage;
+
+  /// No description provided for @journalLinesUsing.
+  ///
+  ///
+  String get journalLinesUsing;
+
+  /// No description provided for @allocatedLinesUsing.
+  ///
+  ///
+  String get allocatedLinesUsing;
+
+  /// No description provided for @costCenterReport.
+  ///
+  ///
+  String get costCenterReport;
+
+  /// No description provided for @ownAmount.
+  ///
+  ///
+  String get ownAmount;
+
+  /// No description provided for @rolledUp.
+  ///
+  ///
+  String get rolledUp;
+
+  /// No description provided for @unallocated.
+  ///
+  ///
+  String get unallocated;
+
+  /// No description provided for @transactions.
+  ///
+  ///
+  String get transactions;
+
+  /// No description provided for @noTransactions.
+  ///
+  ///
+  String get noTransactions;
+
+  /// No description provided for @drillDown.
+  ///
+  ///
+  String get drillDown;
+
+  /// No description provided for @budgets.
+  ///
+  ///
+  String get budgets;
+
+  /// No description provided for @budget.
+  ///
+  ///
+  String get budget;
+
+  /// No description provided for @newBudget.
+  ///
+  ///
+  String get newBudget;
+
+  /// No description provided for @editBudget.
+  ///
+  ///
+  String get editBudget;
+
+  /// No description provided for @budgetAmount.
+  ///
+  ///
+  String get budgetAmount;
+
+  /// No description provided for @actualAmount.
+  ///
+  ///
+  String get actualAmount;
+
+  /// No description provided for @variance.
+  ///
+  ///
+  String get variance;
+
+  /// No description provided for @variancePercent.
+  ///
+  ///
+  String get variancePercent;
+
+  /// No description provided for @budgetPeriod.
+  ///
+  ///
+  String get budgetPeriod;
+
+  /// No description provided for @noBudgets.
+  ///
+  ///
+  String get noBudgets;
+
+  /// No description provided for @budgetSaved.
+  ///
+  ///
+  String get budgetSaved;
+
+  /// No description provided for @retireBudget.
+  ///
+  ///
+  String get retireBudget;
+
+  /// No description provided for @confirmRetireBudget.
+  ///
+  ///
+  String get confirmRetireBudget;
+
+  /// No description provided for @budgetReport.
+  ///
+  ///
+  String get budgetReport;
+
+  /// No description provided for @favorable.
+  ///
+  ///
+  String get favorable;
+
+  /// No description provided for @unfavorable.
+  ///
+  ///
+  String get unfavorable;
+
+  /// No description provided for @budgetRetired.
+  ///
+  ///
+  String get budgetRetired;
+
+  /// No description provided for @allocation.
+  ///
+  ///
+  String get allocation;
+
+  /// No description provided for @allocations.
+  ///
+  ///
+  String get allocations;
+
+  /// No description provided for @allocated.
+  ///
+  ///
+  String get allocated;
+
+  /// No description provided for @sourceAmount.
+  ///
+  ///
+  String get sourceAmount;
+
+  /// No description provided for @remainingToAllocate.
+  ///
+  ///
+  String get remainingToAllocate;
+
+  /// No description provided for @splitAcrossCenters.
+  ///
+  ///
+  String get splitAcrossCenters;
+
+  /// No description provided for @allocationMustReconcile.
+  ///
+  ///
+  String get allocationMustReconcile;
+
+  /// No description provided for @duplicateCostCenter.
+  ///
+  ///
+  String get duplicateCostCenter;
+
+  /// No description provided for @selectCostCenter.
+  ///
+  ///
+  String get selectCostCenter;
+
+  /// No description provided for @noAllocation.
+  ///
+  ///
+  String get noAllocation;
+
+  /// No description provided for @costCenterInactive.
+  ///
+  ///
+  String get costCenterInactive;
+
+  /// No description provided for @addAllocation.
+  ///
+  ///
+  String get addAllocation;
+
+  /// No description provided for @allocationTotal.
+  ///
+  ///
+  String get allocationTotal;
+
+  /// No description provided for @deleteRecord.
+  ///
+  ///
+  String get deleteRecord;
+
+  /// No description provided for @resultLabel.
+  ///
+  ///
+  String get resultLabel;
+
+  /// No description provided for @rowDensity.
+  ///
+  ///
+  String get rowDensity;
+
+  /// No description provided for @densityCompact.
+  ///
+  ///
+  String get densityCompact;
+
+  /// No description provided for @densityNormal.
+  ///
+  ///
+  String get densityNormal;
+
+  /// No description provided for @densitySpacious.
+  ///
+  ///
+  String get densitySpacious;
+
+  /// No description provided for @dragColumnHint.
+  ///
+  ///
+  String get dragColumnHint;
+
+  /// No description provided for @noRecords.
+  ///
+  ///
+  String get noRecords;
+
+  /// No description provided for @resizeDialog.
+  ///
+  ///
+  String get resizeDialog;
+
+  /// No description provided for @maximize.
+  ///
+  ///
+  String get maximize;
+
+  /// No description provided for @restore.
+  ///
+  ///
+  String get restore;
+
+  /// No description provided for @availableInBranch.
+  ///
+  ///
+  String get availableInBranch;
+
+  /// No description provided for @branchStockHint.
+  ///
+  ///
+  String get branchStockHint;
+
+  /// No description provided for @stockNotVisible.
+  ///
+  ///
+  String get stockNotVisible;
+
+  /// No description provided for @useItem.
+  ///
+  ///
+  String get useItem;
+
+  /// No description provided for @invoiceDiscount.
+  ///
+  ///
+  String get invoiceDiscount;
+
+  /// No description provided for @discountBeforeTaxHint.
+  ///
+  ///
+  String get discountBeforeTaxHint;
+
+  /// No description provided for @noDiscount.
+  ///
+  ///
+  String get noDiscount;
+
+  /// No description provided for @discountPercent.
+  ///
+  ///
+  String get discountPercent;
+
+  /// No description provided for @discountAmount.
+  ///
+  ///
+  String get discountAmount;
+
+  /// No description provided for @discountPercentValue.
+  ///
+  ///
+  String get discountPercentValue;
+
+  /// No description provided for @discountAmountValue.
+  ///
+  ///
+  String get discountAmountValue;
+
+  /// No description provided for @lineDiscount.
+  ///
+  ///
+  String get lineDiscount;
+
+  /// No description provided for @beforeDiscount.
+  ///
+  ///
+  String get beforeDiscount;
+
+  /// No description provided for @lineDiscounts.
+  ///
+  ///
+  String get lineDiscounts;
+
+  /// No description provided for @netLine.
+  ///
+  ///
+  String get netLine;
+
+  /// No description provided for @quotations.
+  ///
+  ///
+  String get quotations;
+
+  /// No description provided for @quotation.
+  ///
+  ///
+  String get quotation;
+
+  /// No description provided for @newQuotation.
+  ///
+  ///
+  String get newQuotation;
+
+  /// No description provided for @editQuotation.
+  ///
+  ///
+  String get editQuotation;
+
+  /// No description provided for @quotationNumber.
+  ///
+  ///
+  String get quotationNumber;
+
+  /// No description provided for @quotationDate.
+  ///
+  ///
+  String get quotationDate;
+
+  /// No description provided for @validUntil.
+  ///
+  ///
+  String get validUntil;
+
+  /// No description provided for @sent.
+  ///
+  ///
+  String get sent;
+
+  /// No description provided for @accepted.
+  ///
+  ///
+  String get accepted;
+
+  /// No description provided for @rejected.
+  ///
+  ///
+  String get rejected;
+
+  /// No description provided for @expired.
+  ///
+  ///
+  String get expired;
+
+  /// No description provided for @converted.
+  ///
+  ///
+  String get converted;
+
+  /// No description provided for @quotationTables.
+  ///
+  ///
+  String get quotationTables;
+
+  /// No description provided for @addTable.
+  ///
+  ///
+  String get addTable;
+
+  /// No description provided for @tableTitle.
+  ///
+  ///
+  String get tableTitle;
+
+  /// No description provided for @tableDiscount.
+  ///
+  ///
+  String get tableDiscount;
+
+  /// No description provided for @moveUp.
+  ///
+  ///
+  String get moveUp;
+
+  /// No description provided for @moveDown.
+  ///
+  ///
+  String get moveDown;
+
+  /// No description provided for @removeTable.
+  ///
+  ///
+  String get removeTable;
+
+  /// No description provided for @addQuotationLine.
+  ///
+  ///
+  String get addQuotationLine;
+
+  /// No description provided for @countryOfOrigin.
+  ///
+  ///
+  String get countryOfOrigin;
+
+  /// No description provided for @origin.
+  ///
+  ///
+  String get origin;
+
+  /// No description provided for @grossValue.
+  ///
+  ///
+  String get grossValue;
+
+  /// No description provided for @netValue.
+  ///
+  ///
+  String get netValue;
+
+  /// No description provided for @finalTotal.
+  ///
+  ///
+  String get finalTotal;
+
+  /// No description provided for @totalDiscounts.
+  ///
+  ///
+  String get totalDiscounts;
+
+  /// No description provided for @quotationDiscount.
+  ///
+  ///
+  String get quotationDiscount;
+
+  /// No description provided for @subtotalBeforeDiscount.
+  ///
+  ///
+  String get subtotalBeforeDiscount;
+
+  /// No description provided for @quotationSummary.
+  ///
+  ///
+  String get quotationSummary;
+
+  /// No description provided for @tableSubtotal.
+  ///
+  ///
+  String get tableSubtotal;
+
+  /// No description provided for @termsAndConditions.
+  ///
+  ///
+  String get termsAndConditions;
+
+  /// No description provided for @notesLabel.
+  ///
+  ///
+  String get notesLabel;
+
+  /// No description provided for @managerName.
+  ///
+  ///
+  String get managerName;
+
+  /// No description provided for @responsibleName.
+  ///
+  ///
+  String get responsibleName;
+
+  /// No description provided for @responsiblePhone.
+  ///
+  ///
+  String get responsiblePhone;
+
+  /// No description provided for @followUp.
+  ///
+  ///
+  String get followUp;
+
+  /// No description provided for @followUpNote.
+  ///
+  ///
+  String get followUpNote;
+
+  /// No description provided for @followUpRequired.
+  ///
+  ///
+  String get followUpRequired;
+
+  /// No description provided for @statusHistory.
+  ///
+  ///
+  String get statusHistory;
+
+  /// No description provided for @sendQuotation.
+  ///
+  ///
+  String get sendQuotation;
+
+  /// No description provided for @acceptQuotation.
+  ///
+  ///
+  String get acceptQuotation;
+
+  /// No description provided for @rejectQuotation.
+  ///
+  ///
+  String get rejectQuotation;
+
+  /// No description provided for @reviseQuotation.
+  ///
+  ///
+  String get reviseQuotation;
+
+  /// No description provided for @convertToInvoice.
+  ///
+  ///
+  String get convertToInvoice;
+
+  /// No description provided for @convert.
+  ///
+  ///
+  String get convert;
+
+  /// No description provided for @convertedInvoice.
+  ///
+  ///
+  String get convertedInvoice;
+
+  /// No description provided for @conversionConfirm.
+  ///
+  ///
+  String get conversionConfirm;
+
+  /// No description provided for @conversionTaxNote.
+  ///
+  ///
+  String get conversionTaxNote;
+
+  /// No description provided for @noQuotations.
+  ///
+  ///
+  String get noQuotations;
+
+  /// No description provided for @printPreview.
+  ///
+  ///
+  String get printPreview;
+
+  /// No description provided for @downloadPdf.
+  ///
+  ///
+  String get downloadPdf;
+
+  /// No description provided for @quotationSaved.
+  ///
+  ///
+  String get quotationSaved;
+
+  /// No description provided for @quotationSent.
+  ///
+  ///
+  String get quotationSent;
+
+  /// No description provided for @quotationAccepted.
+  ///
+  ///
+  String get quotationAccepted;
+
+  /// No description provided for @quotationRejected.
+  ///
+  ///
+  String get quotationRejected;
+
+  /// No description provided for @quotationRevised.
+  ///
+  ///
+  String get quotationRevised;
+
+  /// No description provided for @quotationConverted.
+  ///
+  ///
+  String get quotationConverted;
+
+  /// No description provided for @quotationDeleted.
+  ///
+  ///
+  String get quotationDeleted;
+
+  /// No description provided for @deleteQuotationConfirm.
+  ///
+  ///
+  String get deleteQuotationConfirm;
+
+  /// No description provided for @quotationNeedsTable.
+  ///
+  ///
+  String get quotationNeedsTable;
+
+  /// No description provided for @filterStatus.
+  ///
+  ///
+  String get filterStatus;
+
+  /// No description provided for @fromDate.
+  ///
+  ///
+  String get fromDate;
+
+  /// No description provided for @toDate.
+  ///
+  ///
+  String get toDate;
+
+  /// No description provided for @quotationDraftHint.
+  ///
+  ///
+  String get quotationDraftHint;
+
+  /// No description provided for @optional.
+  ///
+  ///
+  String get optional;
+
+  /// No description provided for @currency.
+  ///
+  ///
+  String get currency;
+
+  /// No description provided for @clear.
+  ///
+  ///
+  String get clear;
+
+  /// No description provided for @quotationFilterHint.
+  ///
+  ///
+  String get quotationFilterHint;
+
+  /// No description provided for @documentSettings.
+  ///
+  ///
+  String get documentSettings;
+
+  /// No description provided for @maximumDiscount.
+  ///
+  ///
+  String get maximumDiscount;
+
+  /// No description provided for @showTaxIdOnQuotations.
+  ///
+  ///
+  String get showTaxIdOnQuotations;
+
+  /// No description provided for @taxIdLegalNote.
+  ///
+  ///
+  String get taxIdLegalNote;
+
+  /// No description provided for @salesManagerName.
+  ///
+  ///
+  String get salesManagerName;
+
+  /// No description provided for @salesManagerPhone.
+  ///
+  ///
+  String get salesManagerPhone;
+
+  /// No description provided for @settingsSaved.
+  ///
+  ///
+  String get settingsSaved;
+
+  /// No description provided for @saveSettings.
+  ///
+  ///
+  String get saveSettings;
+
+  /// No description provided for @readOnlySettings.
+  ///
+  ///
+  String get readOnlySettings;
+
+  /// No description provided for @invalidSetting.
+  ///
+  ///
+  String get invalidSetting;
+
+  /// No description provided for @networkAccessTitle.
+  ///
+  ///
+  String get networkAccessTitle;
+
+  /// No description provided for @networkUnavailable.
+  ///
+  ///
+  String get networkUnavailable;
+
+  /// No description provided for @lanReachable.
+  ///
+  ///
+  String get lanReachable;
+
+  /// No description provided for @localOnly.
+  ///
+  ///
+  String get localOnly;
+
+  /// No description provided for @serverStatus.
+  ///
+  ///
+  String get serverStatus;
+
+  /// No description provided for @serverReady.
+  ///
+  ///
+  String get serverReady;
+
+  /// No description provided for @databaseDown.
+  ///
+  ///
+  String get databaseDown;
+
+  /// No description provided for @listeningOn.
+  ///
+  ///
+  String get listeningOn;
+
+  /// No description provided for @localAddress.
+  ///
+  ///
+  String get localAddress;
+
+  /// No description provided for @networkAddress.
+  ///
+  ///
+  String get networkAddress;
+
+  /// No description provided for @wouldBeAddress.
+  ///
+  ///
+  String get wouldBeAddress;
+
+  /// No description provided for @addressCopied.
+  ///
+  ///
+  String get addressCopied;
+
+  /// No description provided for @copyAddress.
+  ///
+  ///
+  String get copyAddress;
+
+  /// No description provided for @lanNotEnabledHint.
+  ///
+  ///
+  String get lanNotEnabledHint;
+
+  /// No description provided for @lanFirewallHint.
+  ///
+  ///
+  String get lanFirewallHint;
+
+  /// No description provided for @publicAddressTitle.
+  ///
+  ///
+  String get publicAddressTitle;
+
+  /// No description provided for @detectPublicAddress.
+  ///
+  ///
+  String get detectPublicAddress;
+
+  /// No description provided for @publicAddressHint.
+  ///
+  ///
+  String get publicAddressHint;
+
+  /// No description provided for @publicAddressChecking.
+  ///
+  ///
+  String get publicAddressChecking;
+
+  /// No description provided for @publicAddressUnavailable.
+  ///
+  ///
+  String get publicAddressUnavailable;
+
+  /// No description provided for @publicAddressNotProof.
+  ///
+  ///
+  String get publicAddressNotProof;
+
+  /// No description provided for @lastChecked.
+  ///
+  ///
+  String get lastChecked;
+
+  /// No description provided for @remove.
+  ///
+  ///
+  String get remove;
+
+  /// No description provided for @termsLibrary.
+  ///
+  ///
+  String get termsLibrary;
+
+  /// No description provided for @insertSavedTerms.
+  ///
+  ///
+  String get insertSavedTerms;
+
+  /// No description provided for @saveTermsToLibrary.
+  ///
+  ///
+  String get saveTermsToLibrary;
+
+  /// No description provided for @termsTitle.
+  ///
+  ///
+  String get termsTitle;
+
+  /// No description provided for @termsBody.
+  ///
+  ///
+  String get termsBody;
+
+  /// No description provided for @noSavedTerms.
+  ///
+  ///
+  String get noSavedTerms;
+
+  /// No description provided for @termsSaved.
+  ///
+  ///
+  String get termsSaved;
+
+  /// No description provided for @manageSavedTerms.
+  ///
+  ///
+  String get manageSavedTerms;
+
+  /// No description provided for @termsInserted.
+  ///
+  ///
+  String get termsInserted;
+
+  /// No description provided for @removeSavedTerm.
+  ///
+  ///
+  String get removeSavedTerm;
+
+  /// No description provided for @itemCode.
+  ///
+  ///
+  String get itemCode;
+
+  /// No description provided for @subject.
+  ///
+  ///
+  String get subject;
+
+  /// No description provided for @subjectHint.
+  ///
+  ///
+  String get subjectHint;
+
+  /// No description provided for @showTaxNumberOnOffer.
+  ///
+  ///
+  String get showTaxNumberOnOffer;
+
+  /// No description provided for @showTaxNumberOnOfferHint.
+  ///
+  ///
+  String get showTaxNumberOnOfferHint;
+
+  /// No description provided for @quotationColumns.
+  ///
+  ///
+  String get quotationColumns;
+
+  /// No description provided for @columnLayout.
+  ///
+  ///
+  String get columnLayout;
+
+  /// No description provided for @columnLayoutHint.
+  ///
+  ///
+  String get columnLayoutHint;
+
+  /// No description provided for @columnLabelEn.
+  ///
+  ///
+  String get columnLabelEn;
+
+  /// No description provided for @columnLabelAr.
+  ///
+  ///
+  String get columnLabelAr;
+
+  /// No description provided for @columnWidth.
+  ///
+  ///
+  String get columnWidth;
+
+  /// No description provided for @columnNumeric.
+  ///
+  ///
+  String get columnNumeric;
+
+  /// No description provided for @tableColumns.
+  ///
+  ///
+  String get tableColumns;
+
+  /// No description provided for @builtinColumns.
+  ///
+  ///
+  String get builtinColumns;
+
+  /// No description provided for @columnType.
+  ///
+  ///
+  String get columnType;
+
+  /// No description provided for @columnTypeText.
+  ///
+  ///
+  String get columnTypeText;
+
+  /// No description provided for @columnTypeNumber.
+  ///
+  ///
+  String get columnTypeNumber;
+
+  /// No description provided for @columnTypeQuantity.
+  ///
+  ///
+  String get columnTypeQuantity;
+
+  /// No description provided for @columnTypePrice.
+  ///
+  ///
+  String get columnTypePrice;
+
+  /// No description provided for @columnTypePercent.
+  ///
+  ///
+  String get columnTypePercent;
+
+  /// No description provided for @columnNameRequired.
+  ///
+  ///
+  String get columnNameRequired;
+
+  /// No description provided for @tablePreview.
+  ///
+  ///
+  String get tablePreview;
+
+  /// No description provided for @addCustomColumn.
+  ///
+  ///
+  String get addCustomColumn;
+
+  /// No description provided for @columnKey.
+  ///
+  ///
+  String get columnKey;
+
+  /// No description provided for @columnAlreadyExists.
+  ///
+  ///
+  String get columnAlreadyExists;
+
+  /// No description provided for @addColumn.
+  ///
+  ///
+  String get addColumn;
+
+  /// No description provided for @removeColumn.
+  ///
+  ///
+  String get removeColumn;
+
+  /// No description provided for @columnTemplate.
+  ///
+  ///
+  String get columnTemplate;
+
+  /// No description provided for @templateName.
+  ///
+  ///
+  String get templateName;
+
+  /// No description provided for @saveColumnTemplate.
+  ///
+  ///
+  String get saveColumnTemplate;
+
+  /// No description provided for @templateSaved.
+  ///
+  ///
+  String get templateSaved;
+
+  /// No description provided for @keepOneColumnVisible.
+  ///
+  ///
+  String get keepOneColumnVisible;
+
+  /// No description provided for @printedOnOffer.
+  ///
+  ///
+  String get printedOnOffer;
+
+  /// No description provided for @notPrintedOnOffer.
+  ///
+  ///
+  String get notPrintedOnOffer;
+
+  /// No description provided for @perWarehouse.
+  ///
+  ///
+  String get perWarehouse;
+
+  /// No description provided for @unassignedWarehouse.
+  ///
+  ///
+  String get unassignedWarehouse;
+
+  /// No description provided for @errorDialogTitle.
+  ///
+  ///
+  String get errorDialogTitle;
+
+  /// No description provided for @warningDialogTitle.
+  ///
+  ///
+  String get warningDialogTitle;
+
+  /// No description provided for @okAction.
+  ///
+  ///
+  String get okAction;
+
+  /// No description provided for @errorGenericBody.
+  ///
+  ///
+  String get errorGenericBody;
+
+  /// No description provided for @errorInvalidInputBody.
+  ///
+  ///
+  String get errorInvalidInputBody;
+
+  /// No description provided for @errorNotFoundBody.
+  ///
+  ///
+  String get errorNotFoundBody;
+
+  /// No description provided for @errorPermissionBody.
+  ///
+  ///
+  String get errorPermissionBody;
+
+  /// No description provided for @errorConflictBody.
+  ///
+  ///
+  String get errorConflictBody;
+
+  /// No description provided for @errorServerBody.
+  ///
+  ///
+  String get errorServerBody;
+
+  /// No description provided for @licence.
+  ///
+  ///
+  String get licence;
+
+  /// No description provided for @licenceSubtitle.
+  ///
+  ///
+  String get licenceSubtitle;
+
+  /// No description provided for @licenceSettingsSubtitle.
+  ///
+  ///
+  String get licenceSettingsSubtitle;
+
+  /// No description provided for @licenceStateActive.
+  ///
+  ///
+  String get licenceStateActive;
+
+  /// No description provided for @licenceStateExpired.
+  ///
+  ///
+  String get licenceStateExpired;
+
+  /// No description provided for @licenceStateSuspended.
+  ///
+  ///
+  String get licenceStateSuspended;
+
+  /// No description provided for @licenceStateUnlicensed.
+  ///
+  ///
+  String get licenceStateUnlicensed;
+
+  /// No description provided for @licenceMachineId.
+  ///
+  ///
+  String get licenceMachineId;
+
+  /// No description provided for @licenceLicenceId.
+  ///
+  ///
+  String get licenceLicenceId;
+
+  /// No description provided for @licenceIssuedAt.
+  ///
+  ///
+  String get licenceIssuedAt;
+
+  /// No description provided for @licenceStartsAt.
+  ///
+  ///
+  String get licenceStartsAt;
+
+  /// No description provided for @licenceExpiresAt.
+  ///
+  ///
+  String get licenceExpiresAt;
+
+  /// No description provided for @licencePerpetual.
+  ///
+  ///
+  String get licencePerpetual;
+
+  /// No description provided for @licenceDaysRemaining.
+  ///
+  ///
+  String get licenceDaysRemaining;
+
+  /// No description provided for @licenceSeats.
+  ///
+  ///
+  String get licenceSeats;
+
+  /// No description provided for @licenceSeatsUsedLabel.
+  ///
+  ///
+  String get licenceSeatsUsedLabel;
+
+  /// No description provided for @licenceSeatsLimitLabel.
+  ///
+  ///
+  String get licenceSeatsLimitLabel;
+
+  /// No description provided for @licenceSeatsAvailableLabel.
+  ///
+  ///
+  String get licenceSeatsAvailableLabel;
+
+  /// No description provided for @licenceSeatsExplainer.
+  ///
+  ///
+  String get licenceSeatsExplainer;
+
+  /// No description provided for @licenceRequestCode.
+  ///
+  ///
+  String get licenceRequestCode;
+
+  /// No description provided for @licenceRequestCodeHint.
+  ///
+  ///
+  String get licenceRequestCodeHint;
+
+  /// No description provided for @licenceCopy.
+  ///
+  ///
+  String get licenceCopy;
+
+  /// No description provided for @licenceCopied.
+  ///
+  ///
+  String get licenceCopied;
+
+  /// No description provided for @licenceEnterKey.
+  ///
+  ///
+  String get licenceEnterKey;
+
+  /// No description provided for @licenceKeyHint.
+  ///
+  ///
+  String get licenceKeyHint;
+
+  /// No description provided for @licenceApply.
+  ///
+  ///
+  String get licenceApply;
+
+  /// No description provided for @licenceOperation.
+  ///
+  ///
+  String get licenceOperation;
+
+  /// No description provided for @licenceOperationActivation.
+  ///
+  ///
+  String get licenceOperationActivation;
+
+  /// No description provided for @licenceOperationRenewal.
+  ///
+  ///
+  String get licenceOperationRenewal;
+
+  /// No description provided for @licenceOperationSeats.
+  ///
+  ///
+  String get licenceOperationSeats;
+
+  /// No description provided for @licenceOperationTransfer.
+  ///
+  ///
+  String get licenceOperationTransfer;
+
+  /// No description provided for @licenceApplied.
+  ///
+  ///
+  String get licenceApplied;
+
+  /// No description provided for @licenceClockTitle.
+  ///
+  ///
+  String get licenceClockTitle;
+
+  /// No description provided for @licenceClockWarning.
+  ///
+  ///
+  String get licenceClockWarning;
+
+  /// No description provided for @licenceConfirmClock.
+  ///
+  ///
+  String get licenceConfirmClock;
+
+  /// No description provided for @licenceEvents.
+  ///
+  ///
+  String get licenceEvents;
+
+  /// No description provided for @licenceEventsEmpty.
+  ///
+  ///
+  String get licenceEventsEmpty;
+
+  /// No description provided for @licencePublicKey.
+  ///
+  ///
+  String get licencePublicKey;
+
+  /// No description provided for @licenceNotConfigured.
+  ///
+  ///
+  String get licenceNotConfigured;
+
+  /// No description provided for @licenceBlockedTitle.
+  ///
+  ///
+  String get licenceBlockedTitle;
+
+  /// No description provided for @licenceBlockedBody.
+  ///
+  ///
+  String get licenceBlockedBody;
+
+  /// No description provided for @licenceSuspendedBody.
+  ///
+  ///
+  String get licenceSuspendedBody;
+
+  /// No description provided for @licenceOpenLicence.
+  ///
+  ///
+  String get licenceOpenLicence;
+
+  /// No description provided for @licenceBackupStillAvailable.
+  ///
+  ///
+  String get licenceBackupStillAvailable;
+
+  /// No description provided for @licenceOpenBackup.
+  ///
+  ///
+  String get licenceOpenBackup;
+
+  /// No description provided for @licenceEnforcementEnforce.
+  ///
+  ///
+  String get licenceEnforcementEnforce;
+
+  /// No description provided for @licenceEnforcementWarn.
+  ///
+  ///
+  String get licenceEnforcementWarn;
+
+  /// No description provided for @licenceEnforcementOff.
+  ///
+  ///
+  String get licenceEnforcementOff;
+
+  /// No description provided for @licenceSuperAdminOnly.
+  ///
+  ///
+  String get licenceSuperAdminOnly;
+
+  /// No description provided for @licenceExpiringSoon.
+  ///
+  ///
+  String get licenceExpiringSoon;
+
+  /// No description provided for @unitsBarcodesTitle.
+  ///
+  ///
+  String unitsBarcodesTitle(Object itemName);
+
+  /// No description provided for @unitsBarcodesEmpty.
+  ///
+  ///
+  String get unitsBarcodesEmpty;
+
+  /// No description provided for @unitsBarcodesInactiveUnit.
+  ///
+  ///
+  String unitsBarcodesInactiveUnit(Object unitName);
+
+  /// No description provided for @unitsBarcodesFactorBarcode.
+  ///
+  ///
+  String unitsBarcodesFactorBarcode(Object factor, Object barcode);
+
+  /// No description provided for @unitsBarcodesHidden.
+  ///
+  ///
+  String get unitsBarcodesHidden;
+
+  /// No description provided for @unitsBarcodesBaseUnit.
+  ///
+  ///
+  String get unitsBarcodesBaseUnit;
+
+  /// No description provided for @unitsBarcodesGenerateTooltip.
+  ///
+  ///
+  String get unitsBarcodesGenerateTooltip;
+
+  /// No description provided for @unitsBarcodesEditTooltip.
+  ///
+  ///
+  String get unitsBarcodesEditTooltip;
+
+  /// No description provided for @unitsBarcodesReactivateTooltip.
+  ///
+  ///
+  String get unitsBarcodesReactivateTooltip;
+
+  /// No description provided for @unitsBarcodesBaseCannotRemove.
+  ///
+  ///
+  String get unitsBarcodesBaseCannotRemove;
+
+  /// No description provided for @unitsBarcodesRemoveTooltip.
+  ///
+  ///
+  String get unitsBarcodesRemoveTooltip;
+
+  /// No description provided for @unitsBarcodesPrintLabels.
+  ///
+  ///
+  String get unitsBarcodesPrintLabels;
+
+  /// No description provided for @unitsBarcodesAdd.
+  ///
+  ///
+  String get unitsBarcodesAdd;
+
+  /// No description provided for @unitsBarcodesFieldUnit.
+  ///
+  ///
+  String get unitsBarcodesFieldUnit;
+
+  /// No description provided for @unitsBarcodesFieldFactor.
+  ///
+  ///
+  String get unitsBarcodesFieldFactor;
+
+  /// No description provided for @unitsBarcodesFactorHelper.
+  ///
+  ///
+  String get unitsBarcodesFactorHelper;
+
+  /// No description provided for @unitsBarcodesFieldBarcode.
+  ///
+  ///
+  String get unitsBarcodesFieldBarcode;
+
+  /// No description provided for @unitsBarcodesFieldSalePrice.
+  ///
+  ///
+  String get unitsBarcodesFieldSalePrice;
+
+  /// No description provided for @unitsBarcodesFieldPurchasePrice.
+  ///
+  ///
+  String get unitsBarcodesFieldPurchasePrice;
+
+  /// No description provided for @unitsBarcodesAdded.
+  ///
+  ///
+  String get unitsBarcodesAdded;
+
+  /// No description provided for @unitsBarcodesBarcodeGenerated.
+  ///
+  ///
+  String get unitsBarcodesBarcodeGenerated;
+
+  /// No description provided for @unitsBarcodesReactivated.
+  ///
+  ///
+  String get unitsBarcodesReactivated;
+
+  /// No description provided for @unitsBarcodesRemoveTitle.
+  ///
+  ///
+  String get unitsBarcodesRemoveTitle;
+
+  /// No description provided for @unitsBarcodesRemoveConfirm.
+  ///
+  ///
+  String unitsBarcodesRemoveConfirm(Object unit);
+
+  /// No description provided for @unitsBarcodesDeactivated.
+  ///
+  ///
+  String get unitsBarcodesDeactivated;
+
+  /// No description provided for @unitsBarcodesRemoved.
+  ///
+  ///
+  String get unitsBarcodesRemoved;
+
+  /// No description provided for @unitsBarcodesEditTitle.
+  ///
+  ///
+  String get unitsBarcodesEditTitle;
+
+  /// No description provided for @unitsBarcodesBaseCannotRenameHelper.
+  ///
+  ///
+  String get unitsBarcodesBaseCannotRenameHelper;
+
+  /// No description provided for @unitsBarcodesBaseFactorHelper.
+  ///
+  ///
+  String get unitsBarcodesBaseFactorHelper;
+
+  /// No description provided for @unitsBarcodesFactorEditHelper.
+  ///
+  ///
+  String get unitsBarcodesFactorEditHelper;
+
+  /// No description provided for @unitsBarcodesUpdated.
+  ///
+  ///
+  String get unitsBarcodesUpdated;
+
+  /// No description provided for @unitsBarcodesTooltip.
+  ///
+  ///
+  String get unitsBarcodesTooltip;
+
+  /// No description provided for @barcodeLabelsTitle.
+  ///
+  ///
+  String barcodeLabelsTitle(Object itemName);
+
+  /// No description provided for @barcodeLabelsInactiveUnit.
+  ///
+  ///
+  String barcodeLabelsInactiveUnit(Object unitName);
+
+  /// No description provided for @barcodeLabelsBarcode.
+  ///
+  ///
+  String barcodeLabelsBarcode(Object barcode);
+
+  /// No description provided for @barcodeLabelsNoBarcode.
+  ///
+  ///
+  String get barcodeLabelsNoBarcode;
+
+  /// No description provided for @barcodeLabelsCopies.
+  ///
+  ///
+  String get barcodeLabelsCopies;
+
+  /// No description provided for @barcodeLabelsPaper.
+  ///
+  ///
+  String get barcodeLabelsPaper;
+
+  /// No description provided for @barcodeLabelsPaperA4.
+  ///
+  ///
+  String get barcodeLabelsPaperA4;
+
+  /// No description provided for @barcodeLabelsPaperThermal80.
+  ///
+  ///
+  String get barcodeLabelsPaperThermal80;
+
+  /// No description provided for @barcodeLabelsPaperThermal58.
+  ///
+  ///
+  String get barcodeLabelsPaperThermal58;
+
+  /// No description provided for @barcodeLabelsShowPrice.
+  ///
+  ///
+  String get barcodeLabelsShowPrice;
+
+  /// No description provided for @barcodeLabelsPdf.
+  ///
+  ///
+  String get barcodeLabelsPdf;
+
+  /// No description provided for @barcodeLabelsPrint.
+  ///
+  ///
+  String get barcodeLabelsPrint;
+
+  /// No description provided for @barcodeLabelsPrintCount.
+  ///
+  ///
+  String barcodeLabelsPrintCount(Object count);
 }
 
 class _AppLocalizationsDelegate
@@ -2733,1240 +4922,6 @@ class _AppLocalizationsDelegate
 }
 
 AppLocalizations lookupAppLocalizations(Locale locale) {
-
-  /// No description provided for @downloadStarted.
-  ///
-  /// In en, this message translates to:
-  /// **'The file is downloading.'**
-  String get downloadStarted;
-
-  /// No description provided for @downloadFailedTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'The file could not be downloaded.'**
-  String get downloadFailedTitle;
-
-  /// No description provided for @printOpened.
-  ///
-  /// In en, this message translates to:
-  /// **'The print page is opening in a new tab.'**
-  String get printOpened;
-
-  /// No description provided for @printBlocked.
-  ///
-  /// In en, this message translates to:
-  /// **'The browser blocked the new tab. Allow pop-ups for this address, then press Print again.'**
-  String get printBlocked;
-
-  /// No description provided for @resetData.
-  ///
-  /// In en, this message translates to:
-  /// **'Reset the program\'s data'**
-  String get resetData;
-
-  /// No description provided for @resetDataHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Clears this company’s books and returns the program to its first run. A backup is taken and checked before anything is deleted, and the reset stops if that backup fails.'**
-  String get resetDataHint;
-
-  /// No description provided for @resetButton.
-  ///
-  /// In en, this message translates to:
-  /// **'Reset ERP Data'**
-  String get resetButton;
-
-  /// No description provided for @resetOnlyAdmins.
-  ///
-  /// In en, this message translates to:
-  /// **'Only an administrator of the program can do this.'**
-  String get resetOnlyAdmins;
-
-  /// No description provided for @resetForCompany.
-  ///
-  /// In en, this message translates to:
-  /// **'This will reset “{company}”.'**
-  String resetForCompany(Object company);
-
-  /// No description provided for @resetWhatIsDeleted.
-  ///
-  /// In en, this message translates to:
-  /// **'What will be deleted'**
-  String get resetWhatIsDeleted;
-
-  /// No description provided for @resetWhatIsKept.
-  ///
-  /// In en, this message translates to:
-  /// **'What is kept'**
-  String get resetWhatIsKept;
-
-  /// No description provided for @resetDeletedHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Every record the company holds: its books, its parties, its stock and its documents.'**
-  String get resetDeletedHint;
-
-  /// No description provided for @resetKeptAdmin.
-  ///
-  /// In en, this message translates to:
-  /// **'The administrator account you are signed in with'**
-  String get resetKeptAdmin;
-
-  /// No description provided for @resetKeptPermissions.
-  ///
-  /// In en, this message translates to:
-  /// **'The permission catalogue'**
-  String get resetKeptPermissions;
-
-  /// No description provided for @resetKeptRoles.
-  ///
-  /// In en, this message translates to:
-  /// **'The roles the program ships with'**
-  String get resetKeptRoles;
-
-  /// No description provided for @resetKeptConfig.
-  ///
-  /// In en, this message translates to:
-  /// **'The database connection and the program’s settings'**
-  String get resetKeptConfig;
-
-  /// No description provided for @resetCountJournalEntries.
-  ///
-  /// In en, this message translates to:
-  /// **'Journal entries'**
-  String get resetCountJournalEntries;
-
-  /// No description provided for @resetCountAccounts.
-  ///
-  /// In en, this message translates to:
-  /// **'Accounts'**
-  String get resetCountAccounts;
-
-  /// No description provided for @resetCountCustomers.
-  ///
-  /// In en, this message translates to:
-  /// **'Customers'**
-  String get resetCountCustomers;
-
-  /// No description provided for @resetCountSuppliers.
-  ///
-  /// In en, this message translates to:
-  /// **'Suppliers'**
-  String get resetCountSuppliers;
-
-  /// No description provided for @resetCountItems.
-  ///
-  /// In en, this message translates to:
-  /// **'Items'**
-  String get resetCountItems;
-
-  /// No description provided for @resetCountSalesInvoices.
-  ///
-  /// In en, this message translates to:
-  /// **'Sales invoices'**
-  String get resetCountSalesInvoices;
-
-  /// No description provided for @resetCountPurchaseInvoices.
-  ///
-  /// In en, this message translates to:
-  /// **'Purchase invoices'**
-  String get resetCountPurchaseInvoices;
-
-  /// No description provided for @resetCountStockMovements.
-  ///
-  /// In en, this message translates to:
-  /// **'Stock movements'**
-  String get resetCountStockMovements;
-
-  /// No description provided for @resetCountFiscalPeriods.
-  ///
-  /// In en, this message translates to:
-  /// **'Financial periods'**
-  String get resetCountFiscalPeriods;
-
-  /// No description provided for @resetCountBranches.
-  ///
-  /// In en, this message translates to:
-  /// **'Branches'**
-  String get resetCountBranches;
-
-  /// No description provided for @resetCountUsers.
-  ///
-  /// In en, this message translates to:
-  /// **'Other users'**
-  String get resetCountUsers;
-
-  /// No description provided for @resetBackupFirst.
-  ///
-  /// In en, this message translates to:
-  /// **'A full backup will be taken and checked before anything is deleted. If the backup cannot be taken, or cannot be read back, nothing is deleted at all.'**
-  String get resetBackupFirst;
-
-  /// No description provided for @resetConfirmTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'This cannot be undone'**
-  String get resetConfirmTitle;
-
-  /// No description provided for @resetConfirmBody.
-  ///
-  /// In en, this message translates to:
-  /// **'The only way back is to restore the backup that is about to be taken. Type your password and the word {word} to go ahead.'**
-  String resetConfirmBody(Object word);
-
-  /// No description provided for @resetPasswordLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Your password'**
-  String get resetPasswordLabel;
-
-  /// No description provided for @resetPasswordHint.
-  ///
-  /// In en, this message translates to:
-  /// **'The password of the account you are signed in with. The server checks it.'**
-  String get resetPasswordHint;
-
-  /// No description provided for @resetWordLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Type {word}'**
-  String resetWordLabel(Object word);
-
-  /// No description provided for @resetWrongWord.
-  ///
-  /// In en, this message translates to:
-  /// **'Type {word} exactly as it is written to confirm.'**
-  String resetWrongWord(Object word);
-
-  /// No description provided for @resetDone.
-  ///
-  /// In en, this message translates to:
-  /// **'The company’s data was cleared. “{file}” holds the old data.'**
-  String resetDone(Object file);
-
-  /// No description provided for @resetNeedsSetup.
-  ///
-  /// In en, this message translates to:
-  /// **'The program will ask to be set up again the next time it is opened.'**
-  String get resetNeedsSetup;
-
-  /// No description provided for @resetPreviewFailed.
-  ///
-  /// In en, this message translates to:
-  /// **'What a reset would remove could not be read.'**
-  String get resetPreviewFailed;
-
-  /// No description provided for @cashAndBanks.
-  ///
-  /// In ar, this message translates to:
-  /// **'الخزائن والبنوك'**
-  String get cashAndBanks;
-
-  /// No description provided for @newCashAccount.
-  ///
-  /// In ar, this message translates to:
-  /// **'خزنة أو حساب بنكي جديد'**
-  String get newCashAccount;
-
-  /// No description provided for @cashAccount.
-  ///
-  /// In ar, this message translates to:
-  /// **'الخزنة أو البنك'**
-  String get cashAccount;
-
-  /// No description provided for @cashBox.
-  ///
-  /// In ar, this message translates to:
-  /// **'خزنة'**
-  String get cashBox;
-
-  /// No description provided for @bank.
-  ///
-  /// In ar, this message translates to:
-  /// **'بنك'**
-  String get bank;
-
-  /// No description provided for @bankName.
-  ///
-  /// In ar, this message translates to:
-  /// **'اسم البنك'**
-  String get bankName;
-
-  /// No description provided for @iban.
-  ///
-  /// In ar, this message translates to:
-  /// **'رقم الحساب الدولي'**
-  String get iban;
-
-  /// No description provided for @ledgerAccount.
-  ///
-  /// In ar, this message translates to:
-  /// **'الحساب الدفتري'**
-  String get ledgerAccount;
-
-  /// No description provided for @noCashAccounts.
-  ///
-  /// In ar, this message translates to:
-  /// **'لا توجد خزائن أو بنوك بعد'**
-  String get noCashAccounts;
-
-  /// No description provided for @statement.
-  ///
-  /// In ar, this message translates to:
-  /// **'كشف حساب'**
-  String get statement;
-
-  /// No description provided for @vouchers.
-  ///
-  /// In ar, this message translates to:
-  /// **'سندات القبض والصرف'**
-  String get vouchers;
-
-  /// No description provided for @newVoucher.
-  ///
-  /// In ar, this message translates to:
-  /// **'سند قبض أو صرف جديد'**
-  String get newVoucher;
-
-  /// No description provided for @receipt.
-  ///
-  /// In ar, this message translates to:
-  /// **'سند قبض'**
-  String get receipt;
-
-  /// No description provided for @payment.
-  ///
-  /// In ar, this message translates to:
-  /// **'سند صرف'**
-  String get payment;
-
-  /// No description provided for @voucherType.
-  ///
-  /// In ar, this message translates to:
-  /// **'النوع'**
-  String get voucherType;
-
-  /// No description provided for @voucherNumber.
-  ///
-  /// In ar, this message translates to:
-  /// **'الرقم'**
-  String get voucherNumber;
-
-  /// No description provided for @amount.
-  ///
-  /// In ar, this message translates to:
-  /// **'المبلغ'**
-  String get amount;
-
-  /// No description provided for @noVouchers.
-  ///
-  /// In ar, this message translates to:
-  /// **'لا توجد سندات بعد'**
-  String get noVouchers;
-
-  /// No description provided for @transfers.
-  ///
-  /// In ar, this message translates to:
-  /// **'التحويلات'**
-  String get transfers;
-
-  /// No description provided for @newTransfer.
-  ///
-  /// In ar, this message translates to:
-  /// **'تحويل جديد'**
-  String get newTransfer;
-
-  /// No description provided for @fromAccount.
-  ///
-  /// In ar, this message translates to:
-  /// **'من'**
-  String get fromAccount;
-
-  /// No description provided for @toAccount.
-  ///
-  /// In ar, this message translates to:
-  /// **'إلى'**
-  String get toAccount;
-
-  /// No description provided for @noTransfers.
-  ///
-  /// In ar, this message translates to:
-  /// **'لا توجد تحويلات بعد'**
-  String get noTransfers;
-
-  /// No description provided for @transferNeedsTwoAccounts.
-  ///
-  /// In ar, this message translates to:
-  /// **'يحتاج التحويل إلى خزنتين أو حسابين بنكيين'**
-  String get transferNeedsTwoAccounts;
-
-  /// No description provided for @party.
-  ///
-  /// In ar, this message translates to:
-  /// **'الطرف'**
-  String get party;
-
-  /// No description provided for @saved.
-  ///
-  /// In ar, this message translates to:
-  /// **'تم الحفظ'**
-  String get saved;
-
-  /// No description provided for @settleOldestFirst.
-  ///
-  /// In ar, this message translates to:
-  /// **'تم تخصيص المبلغ على أقدم الفواتير المفتوحة'**
-  String get settleOldestFirst;
-
-  /// In en, this message translates to:
-  /// **'Cost centers'**
-  String get costCenters;
-
-  /// In en, this message translates to:
-  /// **'Cost center'**
-  String get costCenter;
-
-  /// In en, this message translates to:
-  /// **'New cost center'**
-  String get newCostCenter;
-
-  /// In en, this message translates to:
-  /// **'Edit cost center'**
-  String get editCostCenter;
-
-  /// In en, this message translates to:
-  /// **'Cost center code'**
-  String get costCenterCode;
-
-  /// In en, this message translates to:
-  /// **'Cost center type'**
-  String get costCenterType;
-
-  /// In en, this message translates to:
-  /// **'Department'**
-  String get department;
-
-  /// In en, this message translates to:
-  /// **'Administrative unit'**
-  String get administrativeUnit;
-
-  /// In en, this message translates to:
-  /// **'Project'**
-  String get project;
-
-  /// In en, this message translates to:
-  /// **'Responsible person'**
-  String get responsiblePerson;
-
-  /// In en, this message translates to:
-  /// **'Parent cost center'**
-  String get parentCostCenter;
-
-  /// In en, this message translates to:
-  /// **'Search cost centers'**
-  String get searchCostCenters;
-
-  /// In en, this message translates to:
-  /// **'No cost centers yet'**
-  String get noCostCenters;
-
-  /// In en, this message translates to:
-  /// **'Cost center saved'**
-  String get costCenterSaved;
-
-  /// In en, this message translates to:
-  /// **'Cost center deactivated'**
-  String get costCenterDeactivated;
-
-  /// In en, this message translates to:
-  /// **'Deactivating stops new postings. Existing transactions keep their centre. Continue?'**
-  String get confirmDeactivateCostCenter;
-
-  /// In en, this message translates to:
-  /// **'Delete cost center'**
-  String get deleteCostCenter;
-
-  /// In en, this message translates to:
-  /// **'Only an unused cost center can be deleted. If it has transactions, deactivate it instead. Continue?'**
-  String get confirmDeleteCostCenter;
-
-  /// In en, this message translates to:
-  /// **'Cost center deleted'**
-  String get costCenterDeleted;
-
-  /// In en, this message translates to:
-  /// **'All parents'**
-  String get allParents;
-
-  /// In en, this message translates to:
-  /// **'All statuses'**
-  String get allStatuses;
-
-  /// In en, this message translates to:
-  /// **'Usage'**
-  String get usage;
-
-  /// In en, this message translates to:
-  /// **'Journal lines'**
-  String get journalLinesUsing;
-
-  /// In en, this message translates to:
-  /// **'Allocated lines'**
-  String get allocatedLinesUsing;
-
-  /// In en, this message translates to:
-  /// **'Cost centers'**
-  String get costCenterReport;
-
-  /// In en, this message translates to:
-  /// **'Own'**
-  String get ownAmount;
-
-  /// In en, this message translates to:
-  /// **'Including children'**
-  String get rolledUp;
-
-  /// In en, this message translates to:
-  /// **'Unallocated'**
-  String get unallocated;
-
-  /// In en, this message translates to:
-  /// **'Transactions'**
-  String get transactions;
-
-  /// In en, this message translates to:
-  /// **'No transactions in this period'**
-  String get noTransactions;
-
-  /// In en, this message translates to:
-  /// **'Details'**
-  String get drillDown;
-
-  /// In en, this message translates to:
-  /// **'Budgets'**
-  String get budgets;
-
-  /// In en, this message translates to:
-  /// **'Budget'**
-  String get budget;
-
-  /// In en, this message translates to:
-  /// **'New budget'**
-  String get newBudget;
-
-  /// In en, this message translates to:
-  /// **'Edit budget'**
-  String get editBudget;
-
-  /// In en, this message translates to:
-  /// **'Budget amount'**
-  String get budgetAmount;
-
-  /// In en, this message translates to:
-  /// **'Actual'**
-  String get actualAmount;
-
-  /// In en, this message translates to:
-  /// **'Variance'**
-  String get variance;
-
-  /// In en, this message translates to:
-  /// **'Variance %'**
-  String get variancePercent;
-
-  /// In en, this message translates to:
-  /// **'Budget period'**
-  String get budgetPeriod;
-
-  /// In en, this message translates to:
-  /// **'No budgets yet'**
-  String get noBudgets;
-
-  /// In en, this message translates to:
-  /// **'Budget saved'**
-  String get budgetSaved;
-
-  /// In en, this message translates to:
-  /// **'Retire budget'**
-  String get retireBudget;
-
-  /// In en, this message translates to:
-  /// **'A retired budget keeps its history and leaves the active list. Continue?'**
-  String get confirmRetireBudget;
-
-  /// In en, this message translates to:
-  /// **'Budget vs actual'**
-  String get budgetReport;
-
-  /// In en, this message translates to:
-  /// **'Favorable'**
-  String get favorable;
-
-  /// In en, this message translates to:
-  /// **'Unfavorable'**
-  String get unfavorable;
-
-  /// In en, this message translates to:
-  /// **'Retired'**
-  String get budgetRetired;
-
-  /// In en, this message translates to:
-  /// **'Allocation'**
-  String get allocation;
-
-  /// In en, this message translates to:
-  /// **'Allocations'**
-  String get allocations;
-
-  /// In en, this message translates to:
-  /// **'Allocated'**
-  String get allocated;
-
-  /// In en, this message translates to:
-  /// **'Line amount'**
-  String get sourceAmount;
-
-  /// In en, this message translates to:
-  /// **'Remaining'**
-  String get remainingToAllocate;
-
-  /// In en, this message translates to:
-  /// **'Split across cost centers'**
-  String get splitAcrossCenters;
-
-  /// In en, this message translates to:
-  /// **'Allocations must add up to the line amount exactly.'**
-  String get allocationMustReconcile;
-
-  /// In en, this message translates to:
-  /// **'This cost center is already in the split.'**
-  String get duplicateCostCenter;
-
-  /// In en, this message translates to:
-  /// **'Select a cost center'**
-  String get selectCostCenter;
-
-  /// In en, this message translates to:
-  /// **'No cost center'**
-  String get noAllocation;
-
-  /// In en, this message translates to:
-  /// **'Inactive cost centers cannot receive new postings.'**
-  String get costCenterInactive;
-
-  /// In en, this message translates to:
-  /// **'Add cost center'**
-  String get addAllocation;
-
-  /// In en, this message translates to:
-  /// **'Allocated total'**
-  String get allocationTotal;
-
-  /// In en, this message translates to:
-  /// **'Delete'**
-  String get deleteRecord;
-
-  /// In en, this message translates to:
-  /// **'Result'**
-  String get resultLabel;
-
-  /// In en, this message translates to:
-  /// **'en'**
-  String get @@locale;
-
-  /// In en, this message translates to:
-  /// **'The account “{account}” will be deleted, as long as it has no movements or sub-accounts. Continue?'**
-  String get deleteAccountConfirm;
-
-  /// In en, this message translates to:
-  /// **'The unit “{unit}” will be deleted. Units with movements cannot be deleted.'**
-  String get deleteBranchConfirm;
-
-  /// In en, this message translates to:
-  /// **'The file “{file}” will be permanently removed from the server.'**
-  String get deleteBackupConfirm;
-
-  /// In en, this message translates to:
-  /// **'This will reset “{company}”.'**
-  String get resetForCompany;
-
-  /// In en, this message translates to:
-  /// **'The only way back is to restore the backup that is about to be taken. Type your password and the word {word} to go ahead.'**
-  String get resetConfirmBody;
-
-  /// In en, this message translates to:
-  /// **'Type {word}'**
-  String get resetWordLabel;
-
-  /// In en, this message translates to:
-  /// **'Type {word} exactly as it is written to confirm.'**
-  String get resetWrongWord;
-
-  /// In en, this message translates to:
-  /// **'The company’s data was cleared. “{file}” holds the old data.'**
-  String get resetDone;
-
-  /// In en, this message translates to:
-  /// **'Row density'**
-  String get rowDensity;
-
-  /// In en, this message translates to:
-  /// **'Compact'**
-  String get densityCompact;
-
-  /// In en, this message translates to:
-  /// **'Normal'**
-  String get densityNormal;
-
-  /// In en, this message translates to:
-  /// **'Spacious'**
-  String get densitySpacious;
-
-  /// In en, this message translates to:
-  /// **'Drag a column edge to widen it'**
-  String get dragColumnHint;
-
-  /// In en, this message translates to:
-  /// **'Nothing to show'**
-  String get noRecords;
-
-  /// In en, this message translates to:
-  /// **'Resize'**
-  String get resizeDialog;
-
-  /// In en, this message translates to:
-  /// **'Maximize'**
-  String get maximize;
-
-  /// In en, this message translates to:
-  /// **'Restore'**
-  String get restore;
-
-  /// In en, this message translates to:
-  /// **'Available in branch'**
-  String get availableInBranch;
-
-  /// In en, this message translates to:
-  /// **'The branch\'s actual on-hand balance, the same figure posting checks. Warehouse-level balances are not tracked.'**
-  String get branchStockHint;
-
-  /// In en, this message translates to:
-  /// **'Stock quantities need the inventory.stock.read permission, so they are not shown.'**
-  String get stockNotVisible;
-
-  /// In en, this message translates to:
-  /// **'Use'**
-  String get useItem;
-
-  /// In en, this message translates to:
-  /// **'Invoice discount'**
-  String get invoiceDiscount;
-
-  /// In en, this message translates to:
-  /// **'Applied before tax and allocated across the lines'**
-  String get discountBeforeTaxHint;
-
-  /// In en, this message translates to:
-  /// **'No discount'**
-  String get noDiscount;
-
-  /// In en, this message translates to:
-  /// **'Percentage'**
-  String get discountPercent;
-
-  /// In en, this message translates to:
-  /// **'Fixed amount'**
-  String get discountAmount;
-
-  /// In en, this message translates to:
-  /// **'Percent %'**
-  String get discountPercentValue;
-
-  /// In en, this message translates to:
-  /// **'Amount'**
-  String get discountAmountValue;
-
-  /// In en, this message translates to:
-  /// **'Line discount'**
-  String get lineDiscount;
-
-  /// In en, this message translates to:
-  /// **'Before discount'**
-  String get beforeDiscount;
-
-  /// In en, this message translates to:
-  /// **'Line discounts'**
-  String get lineDiscounts;
-
-  /// In en, this message translates to:
-  /// **'Net line'**
-  String get netLine;
-
-  /// In en, this message translates to:
-  /// **'Quotations'**
-  String get quotations;
-
-  /// In en, this message translates to:
-  /// **'Quotation'**
-  String get quotation;
-
-  /// In en, this message translates to:
-  /// **'New quotation'**
-  String get newQuotation;
-
-  /// In en, this message translates to:
-  /// **'Edit quotation'**
-  String get editQuotation;
-
-  /// In en, this message translates to:
-  /// **'Quotation number'**
-  String get quotationNumber;
-
-  /// In en, this message translates to:
-  /// **'Quotation date'**
-  String get quotationDate;
-
-  /// In en, this message translates to:
-  /// **'Valid until'**
-  String get validUntil;
-
-  /// In en, this message translates to:
-  /// **'Sent'**
-  String get sent;
-
-  /// In en, this message translates to:
-  /// **'Accepted'**
-  String get accepted;
-
-  /// In en, this message translates to:
-  /// **'Rejected'**
-  String get rejected;
-
-  /// In en, this message translates to:
-  /// **'Expired'**
-  String get expired;
-
-  /// In en, this message translates to:
-  /// **'Converted'**
-  String get converted;
-
-  /// In en, this message translates to:
-  /// **'Tables'**
-  String get quotationTables;
-
-  /// In en, this message translates to:
-  /// **'Add table'**
-  String get addTable;
-
-  /// In en, this message translates to:
-  /// **'Table title'**
-  String get tableTitle;
-
-  /// In en, this message translates to:
-  /// **'Table discount'**
-  String get tableDiscount;
-
-  /// In en, this message translates to:
-  /// **'Move up'**
-  String get moveUp;
-
-  /// In en, this message translates to:
-  /// **'Move down'**
-  String get moveDown;
-
-  /// In en, this message translates to:
-  /// **'Remove table'**
-  String get removeTable;
-
-  /// In en, this message translates to:
-  /// **'Add line'**
-  String get addQuotationLine;
-
-  /// In en, this message translates to:
-  /// **'Country of origin'**
-  String get countryOfOrigin;
-
-  /// In en, this message translates to:
-  /// **'Origin'**
-  String get origin;
-
-  /// In en, this message translates to:
-  /// **'Gross value'**
-  String get grossValue;
-
-  /// In en, this message translates to:
-  /// **'Net value'**
-  String get netValue;
-
-  /// In en, this message translates to:
-  /// **'Final total'**
-  String get finalTotal;
-
-  /// In en, this message translates to:
-  /// **'Total discounts'**
-  String get totalDiscounts;
-
-  /// In en, this message translates to:
-  /// **'Quotation discount'**
-  String get quotationDiscount;
-
-  /// In en, this message translates to:
-  /// **'Subtotal before discount'**
-  String get subtotalBeforeDiscount;
-
-  /// In en, this message translates to:
-  /// **'Summary'**
-  String get quotationSummary;
-
-  /// In en, this message translates to:
-  /// **'Table subtotal'**
-  String get tableSubtotal;
-
-  /// In en, this message translates to:
-  /// **'Terms and conditions'**
-  String get termsAndConditions;
-
-  /// In en, this message translates to:
-  /// **'Notes'**
-  String get notesLabel;
-
-  /// In en, this message translates to:
-  /// **'Company manager'**
-  String get managerName;
-
-  /// In en, this message translates to:
-  /// **'Responsible person'**
-  String get responsibleName;
-
-  /// In en, this message translates to:
-  /// **'Responsible telephone'**
-  String get responsiblePhone;
-
-  /// In en, this message translates to:
-  /// **'Follow up'**
-  String get followUp;
-
-  /// In en, this message translates to:
-  /// **'What was discussed'**
-  String get followUpNote;
-
-  /// In en, this message translates to:
-  /// **'Write what was discussed before saving the follow-up.'**
-  String get followUpRequired;
-
-  /// In en, this message translates to:
-  /// **'History'**
-  String get statusHistory;
-
-  /// In en, this message translates to:
-  /// **'Issue and mark sent'**
-  String get sendQuotation;
-
-  /// In en, this message translates to:
-  /// **'Accept'**
-  String get acceptQuotation;
-
-  /// In en, this message translates to:
-  /// **'Reject'**
-  String get rejectQuotation;
-
-  /// In en, this message translates to:
-  /// **'Start a revision'**
-  String get reviseQuotation;
-
-  /// In en, this message translates to:
-  /// **'Convert to invoice'**
-  String get convertToInvoice;
-
-  /// In en, this message translates to:
-  /// **'Convert'**
-  String get convert;
-
-  /// In en, this message translates to:
-  /// **'Converted invoice'**
-  String get convertedInvoice;
-
-  /// In en, this message translates to:
-  /// **'Create a draft sales invoice from this accepted quotation? Nothing is posted and no stock moves until the invoice is posted separately.'**
-  String get conversionConfirm;
-
-  /// In en, this message translates to:
-  /// **'The quotation total is before tax. The invoice applies the company tax rules, so its total may be higher.'**
-  String get conversionTaxNote;
-
-  /// In en, this message translates to:
-  /// **'No quotations yet'**
-  String get noQuotations;
-
-  /// In en, this message translates to:
-  /// **'Print preview'**
-  String get printPreview;
-
-  /// In en, this message translates to:
-  /// **'Download PDF'**
-  String get downloadPdf;
-
-  /// In en, this message translates to:
-  /// **'Quotation saved'**
-  String get quotationSaved;
-
-  /// In en, this message translates to:
-  /// **'Quotation issued and marked as sent'**
-  String get quotationSent;
-
-  /// In en, this message translates to:
-  /// **'Quotation accepted'**
-  String get quotationAccepted;
-
-  /// In en, this message translates to:
-  /// **'Quotation rejected'**
-  String get quotationRejected;
-
-  /// In en, this message translates to:
-  /// **'A new draft revision was created'**
-  String get quotationRevised;
-
-  /// In en, this message translates to:
-  /// **'Quotation converted to a draft invoice'**
-  String get quotationConverted;
-
-  /// In en, this message translates to:
-  /// **'Draft quotation removed'**
-  String get quotationDeleted;
-
-  /// In en, this message translates to:
-  /// **'Remove this draft quotation? Issued quotations are never deleted.'**
-  String get deleteQuotationConfirm;
-
-  /// In en, this message translates to:
-  /// **'Add at least one table with one line.'**
-  String get quotationNeedsTable;
-
-  /// In en, this message translates to:
-  /// **'Status'**
-  String get filterStatus;
-
-  /// In en, this message translates to:
-  /// **'From date'**
-  String get fromDate;
-
-  /// In en, this message translates to:
-  /// **'To date'**
-  String get toDate;
-
-  /// In en, this message translates to:
-  /// **'This is a draft: nothing is posted and stock is untouched. Issuing it freezes the content that the customer receives.'**
-  String get quotationDraftHint;
-
-  /// In en, this message translates to:
-  /// **'Optional'**
-  String get optional;
-
-  /// In en, this message translates to:
-  /// **'Currency'**
-  String get currency;
-
-  /// In en, this message translates to:
-  /// **'Clear'**
-  String get clear;
-
-  /// In en, this message translates to:
-  /// **'Filter by status, customer or date'**
-  String get quotationFilterHint;
-
-  /// In en, this message translates to:
-  /// **'Documents and quotations'**
-  String get documentSettings;
-
-  /// In en, this message translates to:
-  /// **'Maximum discount %'**
-  String get maximumDiscount;
-
-  /// In en, this message translates to:
-  /// **'Print the tax registration number on quotations'**
-  String get showTaxIdOnQuotations;
-
-  /// In en, this message translates to:
-  /// **'A display choice only. It never deletes the number, and it cannot override a legal requirement to show it.'**
-  String get taxIdLegalNote;
-
-  /// In en, this message translates to:
-  /// **'Sales manager'**
-  String get salesManagerName;
-
-  /// In en, this message translates to:
-  /// **'Sales manager telephone'**
-  String get salesManagerPhone;
-
-  /// In en, this message translates to:
-  /// **'Settings saved'**
-  String get settingsSaved;
-
-  /// In en, this message translates to:
-  /// **'Save settings'**
-  String get saveSettings;
-
-  /// In en, this message translates to:
-  /// **'Changing these needs the company administration permission.'**
-  String get readOnlySettings;
-
-  /// In en, this message translates to:
-  /// **'Enter a value between 0 and 100.'**
-  String get invalidSetting;
-
-  /// In en, this message translates to:
-  /// **'Network and remote access'**
-  String get networkAccessTitle;
-
-  /// In en, this message translates to:
-  /// **'The server did not answer its network report. Check that it is running.'**
-  String get networkUnavailable;
-
-  /// In en, this message translates to:
-  /// **'Available on the local network'**
-  String get lanReachable;
-
-  /// In en, this message translates to:
-  /// **'This computer only'**
-  String get localOnly;
-
-  /// In en, this message translates to:
-  /// **'Server'**
-  String get serverStatus;
-
-  /// In en, this message translates to:
-  /// **'ready, database up'**
-  String get serverReady;
-
-  /// In en, this message translates to:
-  /// **'database not reachable'**
-  String get databaseDown;
-
-  /// In en, this message translates to:
-  /// **'Listening on'**
-  String get listeningOn;
-
-  /// In en, this message translates to:
-  /// **'Local address'**
-  String get localAddress;
-
-  /// In en, this message translates to:
-  /// **'Network address'**
-  String get networkAddress;
-
-  /// In en, this message translates to:
-  /// **'Address if enabled'**
-  String get wouldBeAddress;
-
-  /// In en, this message translates to:
-  /// **'Address copied'**
-  String get addressCopied;
-
-  /// In en, this message translates to:
-  /// **'Copy address'**
-  String get copyAddress;
-
-  /// In en, this message translates to:
-  /// **'The server is bound to this computer only, so the addresses below do not answer from another device. To allow the other computers on the network, set HOST=0.0.0.0 in the installation settings file and restart the program.'**
-  String get lanNotEnabledHint;
-
-  /// In en, this message translates to:
-  /// **'Windows Firewall must also allow the program on private networks. The database port (5432) is never opened: other devices only reach the program, and still have to sign in.'**
-  String get lanFirewallHint;
-
-  /// In en, this message translates to:
-  /// **'Public (internet) address'**
-  String get publicAddressTitle;
-
-  /// In en, this message translates to:
-  /// **'Detect'**
-  String get detectPublicAddress;
-
-  /// In en, this message translates to:
-  /// **'Detected only when you press Detect. A public address alone does not make this server reachable from the internet: the router or the carrier may block incoming connections. For remote use, prefer a VPN or an HTTPS gateway; never expose the database.'**
-  String get publicAddressHint;
-
-  /// In en, this message translates to:
-  /// **'Checking…'**
-  String get publicAddressChecking;
-
-  /// In en, this message translates to:
-  /// **'The public address could not be detected.'**
-  String get publicAddressUnavailable;
-
-  /// In en, this message translates to:
-  /// **'an address alone does not prove that incoming connections reach this computer.'**
-  String get publicAddressNotProof;
-
-  /// In en, this message translates to:
-  /// **'Last checked'**
-  String get lastChecked;
-
-  /// In en, this message translates to:
-  /// **'Remove'**
-  String get remove;
-
-
-  /// No description provided for @termsLibrary.
-  ///
-  /// In en, this message translates to:
-  /// **'Saved terms'**
-  String get termsLibrary;
-
-  /// No description provided for @insertSavedTerms.
-  ///
-  /// In en, this message translates to:
-  /// **'Insert saved terms'**
-  String get insertSavedTerms;
-
-  /// No description provided for @saveTermsToLibrary.
-  ///
-  /// In en, this message translates to:
-  /// **'Save terms to library'**
-  String get saveTermsToLibrary;
-
-  /// No description provided for @termsTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Entry title'**
-  String get termsTitle;
-
-  /// No description provided for @termsBody.
-  ///
-  /// In en, this message translates to:
-  /// **'Terms text'**
-  String get termsBody;
-
-  /// No description provided for @noSavedTerms.
-  ///
-  /// In en, this message translates to:
-  /// **'No saved terms yet. Write the terms below and save them for reuse.'**
-  String get noSavedTerms;
-
-  /// No description provided for @termsSaved.
-  ///
-  /// In en, this message translates to:
-  /// **'Terms saved to the library'**
-  String get termsSaved;
-
-  /// No description provided for @manageSavedTerms.
-  ///
-  /// In en, this message translates to:
-  /// **'Manage saved terms'**
-  String get manageSavedTerms;
-
-  /// No description provided for @termsInserted.
-  ///
-  /// In en, this message translates to:
-  /// **'Saved terms inserted. You can edit this copy freely.'**
-  String get termsInserted;
-
-  /// No description provided for @removeSavedTerm.
-  ///
-  /// In en, this message translates to:
-  /// **'Remove this saved entry? Documents that already used it keep their own copy.'**
-  String get removeSavedTerm;
-
   // Lookup logic when only language code is specified.
   switch (locale.languageCode) {
     case 'ar':
@@ -3981,105 +4936,4 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
     'on GitHub with a reproducible sample app and the gen-l10n configuration '
     'that was used.',
   );
-  /// In en, this message translates to:
-  /// **'Item code'**
-  String get itemCode;
-
-  /// In en, this message translates to:
-  /// **'Subject'**
-  String get subject;
-
-  /// In en, this message translates to:
-  /// **'The headline of this offer, printed above the customer\'s name.'**
-  String get subjectHint;
-
-  /// In en, this message translates to:
-  /// **'Print the company tax number on this offer'**
-  String get showTaxNumberOnOffer;
-
-  /// In en, this message translates to:
-  /// **'The company setting is only the default; this offer keeps its own choice.'**
-  String get showTaxNumberOnOfferHint;
-
-  /// In en, this message translates to:
-  /// **'Line columns'**
-  String get quotationColumns;
-
-  /// In en, this message translates to:
-  /// **'Column layout'**
-  String get columnLayout;
-
-  /// In en, this message translates to:
-  /// **'Choose, rename, order and size the columns this offer prints.'**
-  String get columnLayoutHint;
-
-  /// In en, this message translates to:
-  /// **'English label'**
-  String get columnLabelEn;
-
-  /// In en, this message translates to:
-  /// **'Arabic label'**
-  String get columnLabelAr;
-
-  /// In en, this message translates to:
-  /// **'Width'**
-  String get columnWidth;
-
-  /// In en, this message translates to:
-  /// **'Numeric'**
-  String get columnNumeric;
-
-  /// In en, this message translates to:
-  /// **'Custom column…'**
-  String get addCustomColumn;
-
-  /// In en, this message translates to:
-  /// **'Column key'**
-  String get columnKey;
-
-  /// In en, this message translates to:
-  /// **'A column with this key already exists.'**
-  String get columnAlreadyExists;
-
-  /// In en, this message translates to:
-  /// **'Add column'**
-  String get addColumn;
-
-  /// In en, this message translates to:
-  /// **'Remove column'**
-  String get removeColumn;
-
-  /// In en, this message translates to:
-  /// **'Saved layout'**
-  String get columnTemplate;
-
-  /// In en, this message translates to:
-  /// **'New layout name'**
-  String get templateName;
-
-  /// In en, this message translates to:
-  /// **'Save as a layout'**
-  String get saveColumnTemplate;
-
-  /// In en, this message translates to:
-  /// **'Layout saved to the library'**
-  String get templateSaved;
-
-  /// In en, this message translates to:
-  /// **'Keep at least one column visible.'**
-  String get keepOneColumnVisible;
-  /// In en, this message translates to:
-  /// **'Printed'**
-  String get printedOnOffer;
-
-  /// In en, this message translates to:
-  /// **'Not printed'**
-  String get notPrintedOnOffer;
-  /// In en, this message translates to:
-  /// **'Warehouses'**
-  String get perWarehouse;
-
-  /// In en, this message translates to:
-  /// **'Unassigned'**
-  String get unassignedWarehouse;
 }

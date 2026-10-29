@@ -233,13 +233,33 @@ void main() {
   });
 
   group('resolveCompanyLogoUrl', () {
-    test('makes the relative mark address absolute', () {
+    test('keeps the API prefix so the address reaches the logo route', () {
       expect(
         resolveCompanyLogoUrl(
           'http://localhost:3000/api/v1',
           '/companies/logo/c1?v=17',
         ),
-        'http://localhost:3000/companies/logo/c1?v=17',
+        'http://localhost:3000/api/v1/companies/logo/c1?v=17',
+      );
+    });
+
+    test('does not prefix an address that already carries the prefix', () {
+      expect(
+        resolveCompanyLogoUrl(
+          'http://localhost:3000/api/v1',
+          '/api/v1/companies/logo/c1?v=17',
+        ),
+        'http://localhost:3000/api/v1/companies/logo/c1?v=17',
+      );
+    });
+
+    test('joins a path without a leading slash under the prefix', () {
+      expect(
+        resolveCompanyLogoUrl(
+          'http://localhost:3000/api/v1/',
+          'companies/logo/c1',
+        ),
+        'http://localhost:3000/api/v1/companies/logo/c1',
       );
     });
 
@@ -264,7 +284,7 @@ void main() {
           'id': 'company-1',
           'hasLogo': true,
         }),
-        'http://localhost:3000/companies/logo/company-1',
+        'http://localhost:3000/api/v1/companies/logo/company-1',
       );
       expect(
         companyLogoUrl('http://localhost:3000/api/v1', const {
@@ -272,6 +292,18 @@ void main() {
           'hasLogo': false,
         }),
         isNull,
+      );
+    });
+
+    test('versions a direct logo URL after the company profile changes', () {
+      expect(
+        companyLogoUrl('http://localhost:3000/api/v1', const {
+          'id': 'company-1',
+          'hasLogo': true,
+          'logoUrl': '/companies/logo/company-1?existing=1',
+          'updatedAt': '2026-10-27T10:00:00.000Z',
+        }),
+        'http://localhost:3000/api/v1/companies/logo/company-1?existing=1&v=2026-10-27T10%3A00%3A00.000Z',
       );
     });
 

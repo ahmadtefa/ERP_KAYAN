@@ -27,10 +27,10 @@ class MonthlyBarsChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final salesColor = scheme.primary;
-    final purchaseColor = theme.brightness == Brightness.light
-        ? const Color(0xFF8A6A2F)
-        : const Color(0xFFD8B678);
+    // The series carry their sections' colours — green sales, orange
+    // purchases — the same hues as the navigation and the KPI row above.
+    final salesColor = SectionAccents.sales.of(theme.brightness);
+    final purchaseColor = SectionAccents.purchases.of(theme.brightness);
     final resultColor = scheme.tertiary;
     final maxValue = months.fold<double>(0, (max, row) {
       final double sales = asNum(row['sales'])?.toDouble() ?? 0.0;
@@ -468,12 +468,17 @@ class QuickActionTile extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.badge,
+    this.accent,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
   final String? badge;
+
+  /// The destination section's colour; the tile's icon wears it, matching
+  /// the navigation entry it jumps to.
+  final SectionAccent? accent;
 
   @override
   Widget build(BuildContext context) {
@@ -487,8 +492,8 @@ class QuickActionTile extends StatelessWidget {
         onTap: onTap,
         child: Ink(
           padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.md,
+            horizontal: AppSpacing.sm,
+            vertical: 10,
           ),
           decoration: BoxDecoration(
             borderRadius: AppRadii.control,
@@ -501,9 +506,23 @@ class QuickActionTile extends StatelessWidget {
                 isLabelVisible: badge != null && badge != '0',
                 label: Text(badge ?? ''),
                 backgroundColor: AppColors.warning,
-                child: Icon(icon, color: scheme.primary, size: 24),
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: accent?.softOf(scheme.brightness) ??
+                        scheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(AppRadii.md),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: accent?.of(scheme.brightness) ?? scheme.primary,
+                    size: 20,
+                  ),
+                ),
               ),
-              const SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: 6),
               Text(
                 label,
                 textAlign: TextAlign.center,

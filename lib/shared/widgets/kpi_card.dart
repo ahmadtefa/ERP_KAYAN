@@ -15,6 +15,7 @@ class KpiCard extends StatelessWidget {
     this.caption,
     this.icon,
     this.tone = AppTone.info,
+    this.accent,
     this.trend,
     this.onTap,
     this.compact = false,
@@ -25,6 +26,12 @@ class KpiCard extends StatelessWidget {
   final String? caption;
   final IconData? icon;
   final AppTone tone;
+
+  /// The product section this figure belongs to (sales, cash, parties…).
+  /// When given, the icon tile wears the section colour — the same hue
+  /// the navigation lights up with — so a dashboard row reads as a map of
+  /// the product, not four copies of one card.
+  final SectionAccent? accent;
 
   /// A signed percentage such as `+12.4%`; only pass real data.
   final String? trend;
@@ -53,13 +60,14 @@ class KpiCard extends StatelessWidget {
                   height: compact ? 26 : 30,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: tone.background,
+                    color: accent?.softOf(scheme.brightness) ??
+                        tone.background,
                     borderRadius: BorderRadius.circular(AppRadii.md),
                   ),
                   child: Icon(
                     icon,
                     size: compact ? 14 : 16,
-                    color: tone.foreground,
+                    color: accent?.of(scheme.brightness) ?? tone.foreground,
                   ),
                 ),
               const Spacer(),
@@ -126,6 +134,9 @@ class KpiCard extends StatelessWidget {
         color: scheme.surface,
         borderRadius: AppRadii.card,
         border: Border.all(color: border),
+        boxShadow: scheme.brightness == Brightness.light
+            ? AppShadows.raised
+            : AppShadows.none,
       ),
       clipBehavior: Clip.antiAlias,
       child: body,

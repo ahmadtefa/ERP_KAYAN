@@ -9,7 +9,16 @@
 //   * verifies/installs the bundled Visual C++ runtime,
 //   * recovers broken DACLs on kayan.env and the PostgreSQL data directory,
 //   * re-registers and starts the KayanERPPostgreSQL service,
-//   * applies the checked-in Prisma migrations.
+//   * applies the checked-in Prisma migrations, and
+//   * proves the repair by briefly starting the real API and requiring a
+//     healthy answer from it before declaring success.
+//
+// The diagnostics below deliberately separate the five ways a desktop
+// installation can be unwell - server down, database down, settings wrong,
+// migrations pending, first-run setup not finished - because "the program
+// says it cannot reach the server" has a different fix for each. The
+// configured database port is read from kayan.env instead of being assumed,
+// and the API is probed on the shell's own candidate ports.
 //
 // It never deletes, resets or overwrites the database, never changes the
 // existing database credentials, and never prints secrets: all output is
@@ -23,6 +32,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -85,6 +95,18 @@ namespace Kayan
                 report.AppendLine("Repair attempted (exit code " + exitCode + ").");
                 if (output.Length > 0) { report.AppendLine(output.TrimEnd()); }
                 if (!quiet) { Console.WriteLine(report.ToString()); }
+                if (exitCode != 0)
+                {
+                    // The repair script says it did not finish. Diagnostics
+                    // happening to look clean afterwards is not a repair: it
+                    // can be clean because the script got as far as restarting
+                    // the service and then failed. Reporting 0 here made a
+                    // failed repair indistinguishable from a successful one.
+                    report.AppendLine("The repair did not complete; its own exit code was " + exitCode + ".");
+                    RepairLog.Write(root, report.ToString());
+                    if (!quiet) { Console.WriteLine(report.ToString()); }
+                    return exitCode == 0 ? 1 : exitCode;
+                }
             }
             else if (repair)
             {
@@ -95,6 +117,7 @@ namespace Kayan
             int problemsAfter = CountFailures(after);
             report.AppendLine("Confirmed problems remaining: " + problemsAfter);
             for (int i = 0; i < after.Count; i++) { report.AppendLine("  " + after[i].ToString()); }
+            report.AppendLine(Diagnostics.Diagnose(after));
 
             RepairLog.Write(root, report.ToString());
             if (!quiet) { Console.WriteLine(report.ToString()); }
@@ -166,6 +189,13 @@ namespace Kayan
             }
         }
 
+        // Check names the diagnosis summary looks up. Keep them stable:
+        // Diagnose() and the CI smoke test reason about these strings.
+        internal const string CheckSettings = "Runtime settings (kayan.env)";
+        internal const string CheckDatabasePort = "PostgreSQL accepts local connections";
+        internal const string CheckApi = "Local API (starts with the program)";
+        internal const string CheckLog = "Last server log";
+
         public static List<RepairCheck> Run(string root)
         {
             List<RepairCheck> checks = new List<RepairCheck>();
@@ -173,15 +203,26 @@ namespace Kayan
             string repairScript = Path.Combine(root, "repair-runtime.ps1");
             checks.Add(new RepairCheck("Repair script bundled", File.Exists(repairScript), repairScript));
 
+            string programExe = Path.Combine(root, "erp_kayan.exe");
+            checks.Add(new RepairCheck("Program executable", File.Exists(programExe), programExe));
+
+            // The settings file decides where the database is, so it is
+            // read (never displayed) before anything probes a port: the
+            // database port is the CONFIGURED one, not an assumed 5432.
             string machineSettings = MachineSettingsPath();
             string userSettings = UserSettingsPath();
             string settings = null;
             if (File.Exists(machineSettings)) { settings = machineSettings; }
             else if (File.Exists(userSettings)) { settings = userSettings; }
             checks.Add(new RepairCheck(
-                "Runtime settings (kayan.env)",
+                CheckSettings,
                 settings != null,
                 settings == null ? "not found; run the KAYAN ERP installer first" : settings));
+
+            Dictionary<string, string> values = ReadSettings(settings);
+            checks.Add(SettingsContentCheck(settings, values));
+            int databasePort = ConfiguredDatabasePort(values);
+            string databaseHost = ConfiguredDatabaseHost(values);
 
             string node = Path.Combine(Path.Combine(Path.Combine(root, "backend"), "node"), "node.exe");
             checks.Add(new RepairCheck("Bundled Node.js runtime", File.Exists(node), node));
@@ -190,6 +231,16 @@ namespace Kayan
             string mainJs = Path.Combine(backendDist, "main.js");
             checks.Add(new RepairCheck("Backend entry point", File.Exists(mainJs), mainJs));
 
+            // Without these two the first run cannot create the company or
+            // its first administrator, which looks exactly like "the
+            // program never gets past start-up".
+            string prepareScript = Path.Combine(Path.Combine(Path.Combine(root, "backend"), "scripts"), "prepare-database.mjs");
+            checks.Add(new RepairCheck("Database preparation script", File.Exists(prepareScript), prepareScript));
+            string seedScript = Path.Combine(Path.Combine(Path.Combine(Path.Combine(root, "backend"), "dist"), "prisma"), "seed.js");
+            checks.Add(new RepairCheck("First-run setup program", File.Exists(seedScript), seedScript));
+            string pgIsReady = Path.Combine(Path.Combine(Path.Combine(Path.Combine(root, "backend"), "postgres"), "bin"), "pg_isready.exe");
+            checks.Add(new RepairCheck("Bundled PostgreSQL tools", File.Exists(pgIsReady), pgIsReady));
+
             string dataDirectory = Path.Combine(Path.Combine(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "KAYAN-ERP"), "PostgreSQL"), "data");
             checks.Add(new RepairCheck(
                 "Database cluster present",
@@ -197,9 +248,99 @@ namespace Kayan
                 dataDirectory));
 
             checks.Add(ServiceCheck());
-            checks.Add(DatabaseCheck());
+            checks.Add(DatabaseCheck(databaseHost, databasePort));
+            checks.Add(ApiCheck());
+            checks.Add(LogCheck());
 
             return checks;
+        }
+
+        // kayan.env, parsed the same tolerant way the shell and the
+        // PowerShell tooling parse it. Values stay inside this process;
+        // only redacted shapes (user@host:port/database, yes/no) are
+        // ever reported.
+        internal static Dictionary<string, string> ReadSettings(string settingsPath)
+        {
+            Dictionary<string, string> values = new Dictionary<string, string>();
+            if (settingsPath == null) { return values; }
+            try
+            {
+                string[] lines = File.ReadAllLines(settingsPath);
+                Regex pattern = new Regex("^\\s*([A-Z_]+)=\"?(.*?)\"?\\s*$");
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    Match match = pattern.Match(lines[i].TrimStart('﻿'));
+                    if (match.Success)
+                    {
+                        values[match.Groups[1].Value] = match.Groups[2].Value.Trim('"');
+                    }
+                }
+            }
+            catch
+            {
+                // An unreadable settings file is exactly the kind of
+                // problem the checks below must report, not throw on.
+            }
+            return values;
+        }
+
+        private static RepairCheck SettingsContentCheck(string settingsPath, Dictionary<string, string> values)
+        {
+            const string name = "Settings point at a database";
+            if (settingsPath == null)
+            {
+                return new RepairCheck(name, false, "no settings file to read");
+            }
+            string databaseUrl;
+            if (!values.TryGetValue("DATABASE_URL", out databaseUrl) || string.IsNullOrEmpty(databaseUrl))
+            {
+                return new RepairCheck(name, false, "DATABASE_URL is missing from " + settingsPath);
+            }
+            Uri uri;
+            if (!Uri.TryCreate(databaseUrl, UriKind.Absolute, out uri) || string.IsNullOrEmpty(uri.Host))
+            {
+                return new RepairCheck(name, false, "DATABASE_URL is not a readable address");
+            }
+            string user = "user";
+            if (!string.IsNullOrEmpty(uri.UserInfo))
+            {
+                int colon = uri.UserInfo.IndexOf(':');
+                user = colon >= 0 ? uri.UserInfo.Substring(0, colon) : uri.UserInfo;
+            }
+            string database = uri.AbsolutePath.TrimStart('/');
+            string admin = values.ContainsKey("ADMIN_DATABASE_URL") && !string.IsNullOrEmpty(values["ADMIN_DATABASE_URL"])
+                ? "admin settings present" : "no admin settings (direct app login must work)";
+            return new RepairCheck(name, true, user + "@" + uri.Host + ":" + ConfiguredPort(uri) + "/" + database + "; " + admin);
+        }
+
+        private static int ConfiguredPort(Uri uri)
+        {
+            return uri.Port > 0 ? uri.Port : 5432;
+        }
+
+        private static int ConfiguredDatabasePort(Dictionary<string, string> values)
+        {
+            string databaseUrl;
+            Uri uri;
+            if (values.TryGetValue("DATABASE_URL", out databaseUrl)
+                && Uri.TryCreate(databaseUrl, UriKind.Absolute, out uri))
+            {
+                return ConfiguredPort(uri);
+            }
+            return 5432;
+        }
+
+        private static string ConfiguredDatabaseHost(Dictionary<string, string> values)
+        {
+            string databaseUrl;
+            Uri uri;
+            if (values.TryGetValue("DATABASE_URL", out databaseUrl)
+                && Uri.TryCreate(databaseUrl, UriKind.Absolute, out uri)
+                && !string.IsNullOrEmpty(uri.Host))
+            {
+                return uri.Host;
+            }
+            return "127.0.0.1";
         }
 
         private static RepairCheck ServiceCheck()
@@ -231,10 +372,189 @@ namespace Kayan
             }
         }
 
-        private static RepairCheck DatabaseCheck()
+        private static RepairCheck DatabaseCheck(string host, int port)
         {
-            bool reachable = CanConnect("127.0.0.1", 5432, 4000);
-            return new RepairCheck("PostgreSQL accepts local connections", reachable, reachable ? "127.0.0.1:5432" : "127.0.0.1:5432 is not accepting connections");
+            bool reachable = CanConnect(host, port, 4000);
+            return new RepairCheck(
+                CheckDatabasePort,
+                reachable,
+                reachable ? host + ":" + port : host + ":" + port + " (the configured port) is not accepting connections");
+        }
+
+        // The server only runs while the program is open, so "not
+        // running" is information, not a failure. What this probe adds:
+        // when it IS running, it says whether first-run setup still
+        // waits (needsSetup) - the state that stranded real users at a
+        // "cannot reach the server" message when the shell had not
+        // started any server yet - and whether something that is not
+        // KAYAN occupies one of the shell's ports.
+        private static RepairCheck ApiCheck()
+        {
+            int[] ports = new int[] { 3000, 3001, 3002, 3003, 3010, 3020 };
+            for (int i = 0; i < ports.Length; i++)
+            {
+                string body = TryGetHealth(ports[i]);
+                if (body == null) { continue; }
+                if (body.IndexOf("\"status\"", StringComparison.Ordinal) < 0)
+                {
+                    return new RepairCheck(
+                        CheckApi,
+                        false,
+                        "port " + ports[i] + " answers, but not like the KAYAN API - another program may be using it");
+                }
+                bool needsSetup = body.IndexOf("\"needsSetup\":true", StringComparison.Ordinal) >= 0
+                    || body.IndexOf("\"needsSetup\": true", StringComparison.Ordinal) >= 0;
+                return new RepairCheck(
+                    CheckApi,
+                    true,
+                    needsSetup
+                        ? "running on port " + ports[i] + "; FIRST-RUN SETUP NOT COMPLETED - open KAYAN ERP and create the company and first administrator"
+                        : "running and healthy on port " + ports[i]);
+            }
+            return new RepairCheck(
+                CheckApi,
+                true,
+                "not running right now; it starts automatically when KAYAN ERP opens");
+        }
+
+        private static string TryGetHealth(int port)
+        {
+            try
+            {
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + port + "/api/v1/health");
+                request.Timeout = 2000;
+                request.ReadWriteTimeout = 2000;
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                {
+                    if ((int)response.StatusCode != 200) { return null; }
+                    using (StreamReader reader = new StreamReader(response.GetResponseStream()))
+                    {
+                        return reader.ReadToEnd();
+                    }
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        // The desktop shell's log, scanned for the signatures that name
+        // the failure in words. Informational by design (it never makes
+        // the verdict worse); the newest recognised condition wins.
+        private static RepairCheck LogCheck()
+        {
+            string logPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                Path.Combine("KAYAN-ERP", Path.Combine("logs", "backend.log")));
+            try
+            {
+                if (!File.Exists(logPath))
+                {
+                    return new RepairCheck(CheckLog, true, "no server log yet (" + logPath + ")");
+                }
+                string[] lines = File.ReadAllLines(logPath);
+                int from = Math.Max(0, lines.Length - 120);
+                string diagnosis = null;
+                for (int i = from; i < lines.Length; i++)
+                {
+                    string line = lines[i];
+                    if (line.IndexOf("asking who the first administrator is", StringComparison.Ordinal) >= 0)
+                    {
+                        diagnosis = "the last run stopped at first-run setup: the database is ready and empty, waiting for the company and first administrator to be created in the program";
+                    }
+                    else if (line.IndexOf("P1000", StringComparison.Ordinal) >= 0
+                        || line.IndexOf("password authentication failed", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        diagnosis = "the database rejected the saved credentials (authentication) - check kayan.env, do not reinstall over the data";
+                    }
+                    else if (line.IndexOf("P1001", StringComparison.Ordinal) >= 0
+                        || line.IndexOf("ECONNREFUSED", StringComparison.Ordinal) >= 0)
+                    {
+                        diagnosis = "the server could not reach the database (connection refused) - PostgreSQL service or port problem";
+                    }
+                    else if (line.IndexOf("DATABASE_URL is not set", StringComparison.Ordinal) >= 0)
+                    {
+                        diagnosis = "the server was started without its settings (DATABASE_URL missing) - it must be started by the KAYAN ERP program, which loads kayan.env for it";
+                    }
+                    else if (line.IndexOf("migrations: failed", StringComparison.Ordinal) >= 0)
+                    {
+                        diagnosis = "database preparation failed during migrations - see the [prep] lines above this one in the log";
+                    }
+                    else if (line.IndexOf("the server exited with code", StringComparison.Ordinal) >= 0)
+                    {
+                        diagnosis = "the last server process exited early - see the [err] lines just above it in the log";
+                    }
+                }
+                return new RepairCheck(
+                    CheckLog,
+                    true,
+                    diagnosis ?? "no known failure signature in the last log lines");
+            }
+            catch (Exception ex)
+            {
+                return new RepairCheck(CheckLog, true, "could not read the server log: " + RepairRunner.Redact(ex.Message));
+            }
+        }
+
+        // One sentence a person can act on, naming WHICH of the five
+        // failure families this is. Computed from the same checks the
+        // report lists, in the order a support engineer would rule
+        // them out.
+        public static string Diagnose(List<RepairCheck> checks)
+        {
+            RepairCheck settings = Find(checks, CheckSettings);
+            if (settings != null && !settings.Ok)
+            {
+                return "Diagnosis: settings problem - kayan.env was not found, so nothing knows where the database is. Run the installer (or Repair) to recreate it; company data is not touched.";
+            }
+            RepairCheck content = Find(checks, "Settings point at a database");
+            if (content != null && !content.Ok)
+            {
+                return "Diagnosis: settings problem - " + content.Detail + ".";
+            }
+            RepairCheck service = Find(checks, "PostgreSQL service (" + ServiceName + ")");
+            if (service != null && !service.Ok)
+            {
+                return "Diagnosis: database service problem - " + service.Detail + ". Repair restarts it; company data is not touched.";
+            }
+            RepairCheck port = Find(checks, CheckDatabasePort);
+            if (port != null && !port.Ok)
+            {
+                return "Diagnosis: database not accepting connections on the configured port, although the service claims to run. Repair re-registers the service; if it persists, check for another PostgreSQL using that port.";
+            }
+            for (int i = 0; i < checks.Count; i++)
+            {
+                if (!checks[i].Ok)
+                {
+                    return "Diagnosis: the installation itself is incomplete (" + checks[i].Name + "). Reinstall KAYAN ERP over the top; settings and company data are kept.";
+                }
+            }
+            RepairCheck api = Find(checks, CheckApi);
+            if (api != null && api.Detail.IndexOf("FIRST-RUN SETUP NOT COMPLETED", StringComparison.Ordinal) >= 0)
+            {
+                return "Diagnosis: everything is installed and running; first-run setup has not been completed. Open KAYAN ERP and create the company and the first administrator.";
+            }
+            RepairCheck log = Find(checks, CheckLog);
+            if (log != null && log.Detail.IndexOf("first-run setup", StringComparison.Ordinal) >= 0)
+            {
+                return "Diagnosis: the installation is healthy; the last run was waiting at first-run setup. Open KAYAN ERP and create the company and the first administrator.";
+            }
+            if (log != null && log.Detail.IndexOf("no known failure signature", StringComparison.Ordinal) < 0
+                && log.Detail.IndexOf("no server log yet", StringComparison.Ordinal) < 0)
+            {
+                return "Diagnosis: from the last server log - " + log.Detail + ".";
+            }
+            return "Diagnosis: no problems detected. If the program still misbehaves, open it once, then run this tool again so the fresh log can be read.";
+        }
+
+        private static RepairCheck Find(List<RepairCheck> checks, string name)
+        {
+            for (int i = 0; i < checks.Count; i++)
+            {
+                if (string.Equals(checks[i].Name, name, StringComparison.Ordinal)) { return checks[i]; }
+            }
+            return null;
         }
 
         private static bool CanConnect(string host, int port, int timeoutMilliseconds)
@@ -460,7 +780,11 @@ namespace Kayan
             {
                 if (failures == 0)
                 {
-                    status.Text = "Detected problems: none. The local installation looks healthy.";
+                    // The one-sentence diagnosis, not a blanket "healthy":
+                    // an installation can pass every check and still be
+                    // waiting for its first-run setup, which is guidance
+                    // the person in front of the machine actually needs.
+                    status.Text = Diagnostics.Diagnose(results);
                     status.ForeColor = Color.FromArgb(0, 110, 50);
                 }
                 else
@@ -496,7 +820,7 @@ namespace Kayan
             }
 
             DialogResult answer = MessageBox.Show(this,
-                "This will stop the running KAYAN ERP program, verify the bundled runtime, repair file permissions, restart the local PostgreSQL service and apply any pending database migrations.\r\n\r\n"
+                "This will stop the running KAYAN ERP program, verify the bundled runtime, repair file permissions, restart the local PostgreSQL service, apply any pending database migrations, and finally start the real server briefly to prove it answers before calling the repair a success.\r\n\r\n"
                 + "It does not delete, reset or overwrite company data, and it does not change existing database credentials.\r\n\r\n"
                 + "Continue with the repair?",
                 "KAYAN ERP Repair", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
