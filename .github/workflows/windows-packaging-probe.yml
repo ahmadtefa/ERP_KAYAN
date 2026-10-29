@@ -11,8 +11,6 @@ on:
       - 'windows/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
-      - 'scripts/verify-extracted-windows-installer.mjs'
-      - 'scripts/verify-extracted-windows-installer.test.mjs'
       - 'scripts/inspect-windows-pe.mjs'
       - 'scripts/windows-release-policy.mjs'
       - 'scripts/license-build-policy.mjs'
