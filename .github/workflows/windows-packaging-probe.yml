@@ -1,4 +1,4 @@
-name: Product packaging probe (no upload or installation)
+name: Product installer candidate verification (not a release)
 
 # No automatic product build: the size and payload investigation is open.
 on:
@@ -26,15 +26,15 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22.22.3'
+      - name: Test PE parser and pinned public-key policy
+        run: node --test scripts/inspect-windows-pe.test.mjs scripts/windows-release-policy.test.mjs
+      - name: Test extracted-payload verification policy
+        run: node --test scripts/verify-extracted-windows-installer.test.mjs
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: '3.47.6'
           channel: stable
           cache: true
-      - name: Test PE parser and pinned public-key policy
-        run: node --test scripts/inspect-windows-pe.test.mjs scripts/windows-release-policy.test.mjs
-      - name: Test extracted-payload verification policy
-        run: node --test scripts/verify-extracted-windows-installer.test.mjs
       - name: Install official Inno Setup compiler
         shell: pwsh
         run: |
@@ -94,8 +94,9 @@ jobs:
         run: |
           set -euo pipefail
           source_dir="$RUNNER_TEMP/innoextract-src"
-          git clone https://github.com/mplabsorg/innoextract.git "$source_dir"
-          git -C "$source_dir" checkout --detach 34f65747e4a57d5de2582bb1ad3d540f440a3983
+          git clone --no-checkout https://github.com/mplabsorg/innoextract.git "$source_dir"
+          git -C "$source_dir" fetch --depth=1 origin refs/heads/support-inno-7.1
+          git -C "$source_dir" checkout --detach FETCH_HEAD
           actual="$(git -C "$source_dir" rev-parse HEAD)"
           test "$actual" = "34f65747e4a57d5de2582bb1ad3d540f440a3983"
           cmake -S "$source_dir" -B "$source_dir/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
