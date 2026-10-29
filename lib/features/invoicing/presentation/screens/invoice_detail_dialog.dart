@@ -268,9 +268,7 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
                       // Show what was entered in the chosen unit; a legacy row
                       // has no snapshot and falls back to the base quantity.
                       value: (r) => formatQuantity(
-                        asString(r['unitQuantity']).isEmpty
-                            ? asString(r['quantity'])
-                            : asString(r['unitQuantity']),
+                        asString(r['unitQuantity']) ?? asString(r['quantity']),
                       ),
                     ),
                     ColumnSpec(

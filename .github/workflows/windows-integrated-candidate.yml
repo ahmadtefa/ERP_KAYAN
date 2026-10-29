@@ -95,6 +95,27 @@ jobs:
           flutter-version: '3.47.6'
           channel: stable
           cache: true
+      - name: Check Flutter analysis and unit selection behavior
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          & flutter pub get --enforce-lockfile
+          if ($LASTEXITCODE -ne 0) { throw 'Flutter dependency resolution failed' }
+          $log = Join-Path $env:RUNNER_TEMP 'candidate-flutter-analysis.log'
+          & flutter analyze --no-pub --machine *> $log
+          $result = $LASTEXITCODE
+          if ($result -ne 0) {
+            $detail = ((Get-Content -LiteralPath $log -Tail 35) -join ' | ').Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            if ($detail.Length -gt 12000) { $detail = $detail.Substring(0, 12000) }
+            Write-Output "::error title=Flutter preflight analysis::$detail"
+            throw 'Flutter analysis failed'
+          }
+          $tests = Join-Path $env:RUNNER_TEMP 'candidate-unit-tests.jsonl'
+          & flutter test --no-pub --reporter json test/widget/invoice_unit_selection_test.dart *> $tests
+          if ($LASTEXITCODE -ne 0) {
+            & node scripts/report-flutter-test-failures.mjs $tests
+            throw 'Invoice unit selection tests failed'
+          }
       - name: Check source and install Inno Setup
         shell: pwsh
         run: |

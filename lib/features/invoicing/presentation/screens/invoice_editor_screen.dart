@@ -30,8 +30,8 @@ List<Json> lineUnitsOf(Json? item) {
           .toList();
   if (stored.isNotEmpty) {
     stored.sort((a, b) {
-      final fa = Decimal.tryParse(asString(a['factor'])) ?? Decimal.one;
-      final fb = Decimal.tryParse(asString(b['factor'])) ?? Decimal.one;
+      final fa = Decimal.tryParse(asString(a['factor']) ?? '') ?? Decimal.one;
+      final fb = Decimal.tryParse(asString(b['factor']) ?? '') ?? Decimal.one;
       return fa.compareTo(fb);
     });
     return stored;
@@ -56,11 +56,11 @@ String unitListPrice(Json item, String unitName, {required bool isSales}) {
   final key = isSales ? 'salePrice' : 'purchasePrice';
   for (final unit in lineUnitsOf(item)) {
     if (text(unit, 'unit') == unitName) {
-      final specific = asString(unit[key]);
+      final specific = text(unit, key);
       if (specific.isNotEmpty) return specific;
     }
   }
-  return asString(item[key]);
+  return text(item, key);
 }
 
 /// One editable invoice line.

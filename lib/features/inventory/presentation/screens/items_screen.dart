@@ -360,8 +360,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               await client.delete('/inventory/items/$itemId/units/$unitId');
           await reload();
           if (mounted) {
-            final deactivated =
-                (response is Map && response['deactivated'] == true);
+            final deactivated = response['deactivated'] == true;
             showMessage(
               context,
               deactivated
