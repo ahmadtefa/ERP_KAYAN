@@ -62,6 +62,19 @@ param(
   [ValidateSet('New','Existing','Auto')][string]$CompanyMode = 'Auto'
 )
 $ErrorActionPreference = 'Stop'
+
+# Avoid depending on Get-FileHash command discovery/module autoload in the
+# elevated installer process. .NET hashing is available on supported Windows.
+function Get-FileSha256Hex([string]$Path) {
+  $stream = [System.IO.File]::OpenRead($Path)
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '')
+  } finally {
+    $sha.Dispose()
+    $stream.Dispose()
+  }
+}
 # Refuse unsafe packages before touching services or licence state. When a
 # pre-existing protected diagnostic directory is available, record only the
 # failed preflight stage; stale success from a prior run must not hide failure.
@@ -82,9 +95,9 @@ try {
   $preflightStage = 'installed-key-presence'
   if (Test-Path -LiteralPath $installedKey -PathType Leaf) {
     $preflightStage = 'incoming-key-hash'
-    $incomingKeyHash = (Get-FileHash -LiteralPath $incomingKey -Algorithm SHA256).Hash
+    $incomingKeyHash = (Get-FileSha256Hex -Path $incomingKey)
     $preflightStage = 'installed-key-hash'
-    $installedKeyHash = (Get-FileHash -LiteralPath $installedKey -Algorithm SHA256).Hash
+    $installedKeyHash = (Get-FileSha256Hex -Path $installedKey)
     $preflightStage = 'public-key-comparison'
     if (-not $incomingKeyHash -or -not $installedKeyHash -or $incomingKeyHash -ne $installedKeyHash) {
       throw 'The existing licence key differs; refusing setup until a tested transition is approved.'
@@ -768,7 +781,7 @@ function Add-LicenceSettings([hashtable]$Values) {
   if ($source) {
     # Recheck immediately before the write, and never replace an existing key.
     if (Test-Path -LiteralPath $target -PathType Leaf) {
-      if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash) {
+      if ((Get-FileSha256Hex -Path $source) -ne (Get-FileSha256Hex -Path $target)) {
         throw 'The installed licence key changed during setup; refusing replacement.'
       }
     } elseif ((Test-Path -LiteralPath $enforcementMarker) -or (Test-Path -LiteralPath (Join-Path $licenceDirectory 'license-state.json'))) {
