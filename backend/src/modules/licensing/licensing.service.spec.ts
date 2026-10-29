@@ -1,6 +1,9 @@
 import { generateKeyPairSync } from 'node:crypto';
 
 import { signPayload } from './license-key';
+import { readdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { LicensingService } from './licensing.service';
 import {
   LICENSE,
   MACHINE,
@@ -762,6 +765,35 @@ describe('transfer', () => {
         'LICENSE_KEY_WRONG_TYPE',
       );
       expect((await h.service.status({ fresh: true })).seats.limit).toBe(5);
+    } finally {
+      h.dispose();
+    }
+  });
+});
+
+describe('corrupt licence state recovery', () => {
+  it('preserves a damaged state file and reconstructs active status from the database', async () => {
+    const h = harness();
+    try {
+      await activation(h);
+      const statePath = join(h.dir, 'license-state.json');
+      writeFileSync(statePath, 'deliberately corrupted licence state', 'utf8');
+
+      const recovered = new LicensingService(h.db as any, {} as any, {
+        directory: h.dir,
+        installedDirectory: null,
+        publicKeyText: PUBLIC_PEM,
+        enforcement: 'enforce',
+        clock: () => new Date('2026-05-01T09:00:00.000Z'),
+        appVersion: '0.1.0-test',
+        machineId: MACHINE,
+      });
+      const status = await recovered.status();
+
+      expect(status.state).toBe('ACTIVE');
+      expect(status.blocked).toBe(false);
+      expect(readdirSync(h.dir).some((name) => name.startsWith('license-state.quarantined-'))).toBe(true);
+      expect(readdirSync(h.dir)).toContain('license-state.json');
     } finally {
       h.dispose();
     }
