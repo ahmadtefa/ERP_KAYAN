@@ -79,19 +79,29 @@ try {
   $installedState = Join-Path $installedLicenceDir 'license-state.json'
   $preflightStage = 'incoming-public-key'
   if (-not (Test-Path -LiteralPath $incomingKey -PathType Leaf)) { throw 'Product public key is missing.' }
-  $preflightStage = 'installed-public-key'
+  $preflightStage = 'installed-key-presence'
   if (Test-Path -LiteralPath $installedKey -PathType Leaf) {
-    if ((Get-FileHash -LiteralPath $incomingKey -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $installedKey -Algorithm SHA256).Hash) {
+    $preflightStage = 'incoming-key-hash'
+    $incomingKeyHash = (Get-FileHash -LiteralPath $incomingKey -Algorithm SHA256).Hash
+    $preflightStage = 'installed-key-hash'
+    $installedKeyHash = (Get-FileHash -LiteralPath $installedKey -Algorithm SHA256).Hash
+    $preflightStage = 'public-key-comparison'
+    if (-not $incomingKeyHash -or -not $installedKeyHash -or $incomingKeyHash -ne $installedKeyHash) {
       throw 'The existing licence key differs; refusing setup until a tested transition is approved.'
     }
-  } elseif ((Test-Path -LiteralPath $installedLicenceDir) -or (Test-Path -LiteralPath $installedMarker) -or (Test-Path -LiteralPath $installedState)) {
-    throw 'Existing licence state has no protected public key; refusing setup.'
+  } else {
+    $preflightStage = 'existing-key-absent'
+    if ((Test-Path -LiteralPath $installedLicenceDir) -or (Test-Path -LiteralPath $installedMarker) -or (Test-Path -LiteralPath $installedState)) {
+      throw 'Existing licence state has no protected public key; refusing setup.'
+    }
   }
 } catch {
+  # Log only the exception class, never messages, file contents or secrets.
+  $failureType = $_.Exception.GetType().Name -replace '[^a-zA-Z0-9_]', ''
   try {
     $diagnostics = Join-Path $ProgramDataRoot 'logs'
     if (Test-Path -LiteralPath $diagnostics -PathType Container) {
-      [IO.File]::WriteAllText((Join-Path $diagnostics 'installer-result.txt'), "Failing step: product preflight $preflightStage", (New-Object Text.UTF8Encoding($false)))
+      [IO.File]::WriteAllText((Join-Path $diagnostics 'installer-result.txt'), "Failing step: product preflight $preflightStage ($failureType)", (New-Object Text.UTF8Encoding($false)))
     }
   } catch { }
   throw "Product runtime preflight failed at $preflightStage; no licence state was changed."

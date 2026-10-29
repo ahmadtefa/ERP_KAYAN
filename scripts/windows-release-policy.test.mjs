@@ -32,6 +32,10 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   assert.match(build, /backend\\node_modules\\prisma\\build\\index\.js/);
   assert.match(build, /seed-demo/);
   assert.match(inno, /#if KayanBuildKind != "product"[\s\S]*?Result := False;/);
+  assert.match(inno, /Length\(ExistingHash\) <> 64/);
+  assert.match(inno, /Length\(IncomingHash\) <> 64/);
+  assert.match(inno, /function GetCustomSetupExitCode: Integer/);
+  assert.match(inno, /RuntimeFailed := True;/);
   const smoke = workflow.match(/- name: Smoke-test the actual installed Windows application([\s\S]*?)(?=\n      - name:|\n  [a-z-]+:|$)/);
   assert.ok(smoke && /if:\s*\$\{\{ false \}\}/.test(smoke[1]));
   assert.doesNotMatch(workflow, /secrets\.LICENSE_PRIVATE_KEY/);
@@ -53,4 +57,8 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   assert.ok(runtimeSmoke);
   assert.match(runtimeSmoke[1], /needs: \[build, inspect-final\]/);
   assert.match(runtimeSmoke[1], /needs\.build\.outputs\.build_mode == 'product'/);
+  const smokeScript = readFileSync(new URL('./smoke-test-installed-windows.ps1', import.meta.url), 'utf8');
+  assert.ok(smokeScript.indexOf('& $pgDump -h 127.0.0.1') > 0);
+  assert.ok(smokeScript.indexOf('& $pgRestore --list $preUpgradeBackup') < smokeScript.indexOf('$upgrade = Start-Process'));
+  assert.match(smokeScript, /not signed-licence reconstruction or activation/);
 });

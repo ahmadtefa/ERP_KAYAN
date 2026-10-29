@@ -183,7 +183,8 @@ export async function verifyExtractedPayload({ artifactPath, root, expectedSourc
   if (manifests.length !== 1) throw new Error('The extracted payload has a missing or ambiguous runtime manifest.');
   let manifest;
   try {
-    manifest = JSON.parse(await readFile(manifests[0], 'utf8'));
+    // Windows PowerShell 5.1 writes UTF-8 with a BOM; pwsh 7 does not.
+    manifest = JSON.parse((await readFile(manifests[0], 'utf8')).replace(/^\uFEFF/, ''));
   } catch {
     throw new Error('The extracted runtime manifest is unreadable.');
   }

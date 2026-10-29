@@ -110,6 +110,14 @@ Type: dirifempty; Name: "{app}"
 [Code]
 var
   CompanyPage: TInputOptionWizardPage;
+  RuntimeFailed: Boolean;
+
+{ Preserve a failing exit status even if a post-install exception is reported
+  after Inno has already marked its file-copy phase successful. }
+function GetCustomSetupExitCode: Integer;
+begin
+  if RuntimeFailed then Result := 1 else Result := 0;
+end;
 
 { Test installers are deliberately non-installable: the runtime still uses
   customer paths and services, so a label or a clean-looking host is not
@@ -117,7 +125,7 @@ var
 function InitializeSetup(): Boolean;
 #if KayanBuildKind == "product"
 var
-  ExistingDir, ExistingKey, Marker, StateFile, IncomingKey: String;
+  ExistingDir, ExistingKey, Marker, StateFile, IncomingKey, ExistingHash, IncomingHash: String;
 #endif
 begin
 #if KayanBuildKind != "product"
@@ -132,8 +140,11 @@ begin
   if FileExists(ExistingKey) then begin
     ExtractTemporaryFile('public-key.pem');
     IncomingKey := ExpandConstant('{tmp}\public-key.pem');
-    if CompareText(GetSHA256OfFile(ExistingKey), GetSHA256OfFile(IncomingKey)) <> 0 then begin
-      MsgBox('The installed licence verification key differs from this installer. Upgrade stopped before changing application or licence files; a tested transition is required.', mbError, MB_OK);
+    ExistingHash := GetSHA256OfFile(ExistingKey);
+    IncomingHash := GetSHA256OfFile(IncomingKey);
+    { Empty hashes must never compare equal and authorize an upgrade. }
+    if (Length(ExistingHash) <> 64) or (Length(IncomingHash) <> 64) or (CompareText(ExistingHash, IncomingHash) <> 0) then begin
+      MsgBox('The installed licence verification key is unreadable or differs from this installer. Upgrade stopped before changing application or licence files; a tested transition is required.', mbError, MB_OK);
       exit;
     end;
   end else if DirExists(ExistingDir) or FileExists(Marker) or FileExists(StateFile) then begin
@@ -292,17 +303,21 @@ var
 begin
   if CurStep = ssPostInstall then begin
     Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\install-runtime.ps1') + '" -UserSettingsPath "' + ExpandConstant('{userappdata}\KAYAN-ERP\kayan.env') + '" -CompanyMode ' + SelectedCompanyMode;
-    if not RunPowerShell(Args, ResultCode) then
+    if not RunPowerShell(Args, ResultCode) then begin
+      RuntimeFailed := True;
       RaiseException('Could not start the local database setup, so KAYAN ERP was not prepared. The program files are installed; fix the cause and run "Repair KAYAN ERP" from the Start menu. Diagnostics: ' +
-        ExpandConstant('{commonappdata}\KAYAN-ERP\logs\installer.log'))
-    else if ResultCode <> 0 then
+        ExpandConstant('{commonappdata}\KAYAN-ERP\logs\installer.log'));
+    end else if ResultCode <> 0 then begin
+      RuntimeFailed := True;
       RaiseException('The local database step did not finish, so KAYAN ERP was not opened. ' +
         'No company data was deleted: a database already on this computer is still there, and a new company is only switched to after it has been checked. ' +
         ReadRuntimeResult + ' Full diagnostics: ' + ExpandConstant('{commonappdata}\KAYAN-ERP\logs\installer.log') +
-        ' - fix the cause, then run "Repair KAYAN ERP" from the Start menu.')
-    else if not RuntimeConfirmed then
+        ' - fix the cause, then run "Repair KAYAN ERP" from the Start menu.');
+    end else if not RuntimeConfirmed then begin
+      RuntimeFailed := True;
       RaiseException('The local database step reported no error but never reached its last check, so KAYAN ERP is not treated as installed. ' +
         ReadRuntimeResult + ' Full diagnostics: ' + ExpandConstant('{commonappdata}\KAYAN-ERP\logs\installer.log') +
-        ' - run "Repair KAYAN ERP" from the Start menu.')
+        ' - run "Repair KAYAN ERP" from the Start menu.');
+    end;
   end;
 end;

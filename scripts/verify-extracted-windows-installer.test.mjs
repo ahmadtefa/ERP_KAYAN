@@ -242,3 +242,14 @@ test('refuses case-insensitive collisions for Windows', { skip: process.platform
     await rm(f.base, { recursive: true, force: true });
   }
 });
+
+test('accepts the UTF-8 BOM emitted by Windows PowerShell 5.1 manifests', async () => {
+  const f = await fixture();
+  try {
+    const path = join(f.root, 'runtime-manifest.json');
+    await writeFile(path, '\uFEFF' + await readFile(path, 'utf8'));
+    assert.equal((await verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit })).result, 'payload-inspection-passed-not-install-tested');
+  } finally {
+    await rm(f.base, { recursive: true, force: true });
+  }
+});

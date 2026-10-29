@@ -436,11 +436,28 @@ $sentinelSql = "CREATE TABLE IF NOT EXISTS kayan_installer_upgrade_probe (id int
 if ($LASTEXITCODE -ne 0) { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue; Fail "Could not create the disposable company-data preservation probe." }
 Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
 
+# Preserve a real, checked custom-format PostgreSQL backup before any upgrade.
+# The source here is the disposable CI database, never a customer database.
+$preUpgradeBackup = Join-Path $env:TEMP ("kayan-pre-upgrade-{0}.dump" -f [guid]::NewGuid().ToString('N'))
+$pgDump = Join-Path $installRoot "backend\postgres\bin\pg_dump.exe"
+$pgRestore = Join-Path $installRoot "backend\postgres\bin\pg_restore.exe"
+if ((Test-Path -LiteralPath $preUpgradeBackup) -or -not (Test-Path -LiteralPath $pgDump) -or -not (Test-Path -LiteralPath $pgRestore)) { Fail 'Cannot safely prepare the pre-upgrade backup.' }
+$env:PGPASSWORD = $databasePassword
+try {
+  & $pgDump -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -Fc -f $preUpgradeBackup *> $null
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $preUpgradeBackup -PathType Leaf)) { Fail 'Disposable pre-upgrade PostgreSQL backup failed.' }
+  & $pgRestore --list $preUpgradeBackup *> $null
+  if ($LASTEXITCODE -ne 0) { Fail 'Disposable pre-upgrade PostgreSQL backup could not be verified.' }
+  $preUpgradeBackupHash = (Get-FileHash -LiteralPath $preUpgradeBackup -Algorithm SHA256).Hash
+  Write-Host "PASS: checked disposable pre-upgrade PostgreSQL backup SHA256=$preUpgradeBackupHash."
+} finally {
+  Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+}
+
 $upgradeLog = Join-Path $env:TEMP "kayan-setup-upgrade-smoke.log"
 $upgrade = Start-Process -FilePath $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", ("/LOG=" + $upgradeLog)) -Wait -PassThru
-if ($upgrade.ExitCode -ne 0) { Fail "The KAYAN upgrade/reinstall exited with code $($upgrade.ExitCode)." }
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-if (-not $service -or $service.Status -ne "Running") {
+if ($upgrade.ExitCode -ne 0 -or -not $service -or $service.Status -ne "Running") {
   # The first-install log cannot explain a failure on the second Setup run.
   # Restrict diagnostics to Setup lifecycle lines, never environment/config.
   $upgradeEvidence = @()
@@ -458,7 +475,7 @@ if (-not $service -or $service.Status -ne "Running") {
     }
   }
   $serviceStatus = if ($service) { $service.Status.ToString() } else { 'missing' }
-  Fail ("The PostgreSQL service did not restart after the upgrade/reinstall (state=$serviceStatus, Setup exit=$($upgrade.ExitCode)). Upgrade Setup log: " + ($upgradeEvidence -join ' | '))
+  Fail ("The upgrade/reinstall failed or PostgreSQL did not restart (state=$serviceStatus, Setup exit=$($upgrade.ExitCode)). Upgrade Setup log: " + ($upgradeEvidence -join ' | '))
 }
 & $pgReady -h 127.0.0.1 -p 5432 -U postgres *> $null
 if ($LASTEXITCODE -ne 0) { Fail "PostgreSQL did not accept connections after the upgrade/reinstall." }
@@ -551,7 +568,7 @@ try {
   $base = "http://127.0.0.1:$apiPort/api/v1"
   $headers = @{ Authorization = "Bearer $($login.accessToken)" }
   if ($RuntimeOnly) {
-    Write-Host "Runtime-only mode: validating offline startup, local PostgreSQL backup/restore, licensing-state recovery and public-key recovery. Licensed business routes are intentionally not exercised without a signing key."
+    Write-Host "Runtime-only mode: validating offline startup, local PostgreSQL backup/restore, fail-closed corrupt-state handling, restoration of saved state bytes and public-key recovery. This is not signed-licence reconstruction or activation."
     $initialLicense = Invoke-RestMethod -Uri "$base/license/status" -TimeoutSec 15
     if ($initialLicense.state -ne 'UNLICENSED' -or $initialLicense.configured -ne $true -or $initialLicense.blocked -ne $true) {
       Fail ("Unexpected initial product license state: " + ($initialLicense | ConvertTo-Json -Compress))
@@ -676,7 +693,7 @@ try {
         [IO.File]::WriteAllBytes($statePath, $originalStateBytes)
       }
     }
-    Write-Output '::notice::Runtime-only Windows installer smoke passed: product install, local PostgreSQL, Prisma setup, API startup/login, offline full backup/restore, corrupt license-state recovery and public-key missing/restore behavior.'
+    Write-Output '::notice::Runtime-only Windows installer smoke passed: product install, local PostgreSQL, Prisma setup, API startup/login, offline full backup/restore, corrupt-state refusal, trusted saved-state byte restoration and public-key missing/restore. Signed-licence reconstruction and activation were not tested.'
   } else {
   $originalName = 'Installed backup sentinel'
   $customerBody = @{ code = 'WIN-BACKUP-PROBE'; nameEn = $originalName; nameAr = 'Windows backup probe' } | ConvertTo-Json -Compress
