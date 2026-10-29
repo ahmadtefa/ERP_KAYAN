@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { verifyExtractedPayload } from './verify-extracted-windows-installer.mjs';
+import { scanPrivateMaterialStream, verifyExtractedPayload } from './verify-extracted-windows-installer.mjs';
 
 const sourceCommit = '0123456789abcdef0123456789abcdef01234567';
 const required = [
@@ -24,6 +25,7 @@ const required = [
   'backend/postgres/bin/psql.exe',
   'backend/postgres/bin/pg_dump.exe',
   'backend/postgres/bin/pg_restore.exe',
+  'backend/postgres/lib/plpgsql.dll',
   'backend/node_modules/prisma/build/index.js',
   'backend/node_modules/@prisma/client/package.json',
   'backend/node_modules/@prisma/adapter-pg/package.json',
@@ -125,17 +127,34 @@ test('refuses a missing PostgreSQL runtime executable', async () => {
   }
 });
 
-test('refuses private-key material in any extracted payload file', async () => {
+test('allows a documentation placeholder without key material', async () => {
   const f = await fixture();
   try {
-    await writeFile(join(f.root, 'backend/dist/secret.txt'), '-----BEGIN PRIVATE KEY-----');
-    await assert.rejects(
-      verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit }),
-      /private-key marker.*backend\\/dist\\/secret\\.txt/,
-    );
+    await writeFile(join(f.root, 'backend/dist/readme.txt'), 'Example: -----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----');
+    const result = await verifyExtractedPayload({ ...f, expectedSourceCommit: sourceCommit });
+    assert.equal(result.licensing.privateKeyMarkersFound, false);
   } finally {
     await rm(f.base, { recursive: true, force: true });
   }
+});
+
+test('refuses synthetic private-key material without writing it to disk', async () => {
+  const { privateKey } = generateKeyPairSync('ed25519');
+  const pem = privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const der = privateKey.export({ type: 'pkcs8', format: 'der' });
+  // Deliberately split across tiny chunks, including in the PEM delimiter.
+  const chunks = Array.from(pem, (char) => Buffer.from(char));
+  assert.ok(await scanPrivateMaterialStream(Readable.from(chunks)));
+  assert.ok(await scanPrivateMaterialStream(Readable.from([der.subarray(0, 8), der.subarray(8)])));
+  const encoded = der.toString('base64');
+  assert.ok(await scanPrivateMaterialStream(Readable.from([encoded.slice(0, 12), encoded.slice(12)])));
+});
+
+test('refuses wrapped and ambiguous private key data even across chunk boundaries', async () => {
+  const header = '-----BEGIN RSA PRIVATE KEY-----';
+  const wrapped = header + '\\n' + 'A'.repeat(16) + '\\n' + 'B'.repeat(16);
+  assert.ok(await scanPrivateMaterialStream(Readable.from([wrapped.slice(0, 15), wrapped.slice(15)])));
+  assert.ok(await scanPrivateMaterialStream(Readable.from([header, ' '.repeat(512)])));
 });
 
 test('refuses build-only npm/Corepack files in the bundled Node runtime', async () => {

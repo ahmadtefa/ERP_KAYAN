@@ -60,10 +60,14 @@ const REQUIRED_NATIVE_BINDINGS = [
   { description: 'Sharp Windows x64 native binding', pattern: /(^|\/)backend\/node_modules\/@img\/sharp-win32-x64\/.*\.node$/i },
 ];
 
-const PRIVATE_MARKERS = [
-  /-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/,
-  /MC4CAQAwBQYDK2VwBCIEI/,
-];
+// Documentation may quote PEM delimiters around an ellipsis, which is not key
+// material. A delimiter followed by a plausible base64 payload is refused even
+// if it is truncated or encrypted; do not attempt to print or decode it. Keep
+// separate detection for an unarmoured/base64 Ed25519 PKCS#8 key.
+const PRIVATE_PEM_MATERIAL = /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----(?:(?:\\r|\\n)|[\r\n\t ]){0,511}(?:[A-Za-z0-9+/](?:(?:\\r|\\n)|[\r\n\t ]){0,511}){32}/;
+const AMBIGUOUS_PRIVATE_PEM = /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----(?:(?:\\r|\\n)|[\r\n\t ]){512,}/;
+const ED25519_PKCS8_BASE64 = /MC4CAQAwBQYDK2VwBCIEI/;
+const ED25519_PKCS8_DER = Buffer.from('302e020100300506032b657004220420', 'hex').toString('latin1');
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -99,17 +103,25 @@ async function listFiles(root) {
   return files;
 }
 
-async function scanForPrivateMaterial(file) {
+export async function scanPrivateMaterialStream(stream) {
   let tail = '';
-  for await (const chunk of createReadStream(file)) {
-    const text = tail + chunk.toString('latin1');
-    const markerIndex = PRIVATE_MARKERS.findIndex((pattern) => pattern.test(text));
-    if (markerIndex >= 0) {
-      return markerIndex === 0 ? 'PEM private-key header' : 'Ed25519 PKCS#8 private-key prefix';
-    }
-    tail = text.slice(-128);
+  for await (const chunk of stream) {
+    const text = tail + Buffer.from(chunk).toString('latin1');
+    if (PRIVATE_PEM_MATERIAL.test(text)) return 'PEM private-key material';
+    // Excessive whitespace makes a header ambiguous. Refuse instead of
+    // allowing a long separator to evade the bounded streaming overlap.
+    if (AMBIGUOUS_PRIVATE_PEM.test(text)) return 'ambiguous PEM private-key header';
+    if (ED25519_PKCS8_BASE64.test(text)) return 'Ed25519 PKCS#8 private-key prefix';
+    if (text.includes(ED25519_PKCS8_DER)) return 'Ed25519 PKCS#8 DER private-key prefix';
+    // Maximum permitted separation plus 32 base64 symbols fits the overlap,
+    // even when each separator is an escaped two-character newline.
+    tail = text.slice(-34816);
   }
   return null;
+}
+
+async function scanForPrivateMaterial(file) {
+  return scanPrivateMaterialStream(createReadStream(file));
 }
 
 export async function verifyExtractedPayload({ artifactPath, root, expectedSourceCommit }) {
