@@ -7,6 +7,30 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# This script intentionally simulates interrupted setup, corrupts a synthetic
+# trust store, invokes reset, and changes firewall rules. Never run it on a
+# workstation or a self-hosted runner, and never overwrite a prior installation.
+if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
+  throw 'Installer smoke requires a fresh GitHub-hosted Windows VM.'
+}
+$existingData = Join-Path $env:ProgramData 'KAYAN-ERP'
+$existingInstall = Join-Path $env:ProgramFiles 'KAYAN ERP'
+if ((Test-Path -LiteralPath $existingData) -or (Test-Path -LiteralPath $existingInstall) -or
+    (Get-Service -Name 'KayanERPPostgreSQL' -ErrorAction SilentlyContinue)) {
+  throw 'Refusing destructive smoke test: existing KAYAN data, installation or service detected.'
+}
+foreach ($port in @(5432, 3000, 3001, 3002, 3003, 3010, 3020)) {
+  if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
+    throw "Refusing destructive smoke test: required port $port is already in use."
+  }
+}
+if (-not $RuntimeOnly) {
+  throw 'The historical licensed smoke required a signing-key directory and is not safe to run. RuntimeOnly is diagnostic and does not prove licensed business operation.'
+}
+if ($ExpectedSourceCommit -notmatch '^[0-9a-f]{40}$' -or $env:GITHUB_SHA -ne $ExpectedSourceCommit) {
+  throw 'The expected source SHA must match this workflow run.'
+}
 $setup = (Resolve-Path $SetupPath).Path
 $installLog = Join-Path $env:TEMP "kayan-setup-smoke.log"
 $serviceName = "KayanERPPostgreSQL"

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { canReadCost } from '../../common/auth/cost-visibility';
 import { StockDocumentsService } from './stock-documents.service';
 
 /// Adjustments, transfers and physical counts. Separate permissions for
@@ -26,7 +27,7 @@ export class StockDocumentsController {
   @Get(':id')
   @RequirePermissions('inventory.stock.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id);
+    return this.service.findOne(user.companyId, id, canReadCost(user));
   }
 
   @Post()

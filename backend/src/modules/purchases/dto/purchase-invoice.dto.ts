@@ -23,7 +23,13 @@ export class PurchaseInvoiceLineDto {
 
   @IsOptional() @IsString() @MaxLength(300) description?: string;
 
+  /// Quantity in the CHOSEN unit (e.g. 5 cartons). The server converts it into
+  /// the base-unit quantity that stock actually receives.
   @IsString() quantity!: string;
+
+  /// Chosen unit label or ItemUnit id. Omit for a legacy/base-unit line.
+  @IsOptional() @IsString() @MaxLength(40) unitName?: string;
+  @IsOptional() @IsUUID() unitId?: string;
 
   /// When omitted, the supplier's price list (or the item's own purchase
   /// price) decides.

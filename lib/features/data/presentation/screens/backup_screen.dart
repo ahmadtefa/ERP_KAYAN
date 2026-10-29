@@ -6,6 +6,7 @@ import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/data_providers.dart';
 import '../widgets/full_backup_section.dart';
@@ -189,6 +190,15 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
         _preview = null;
       });
       ref.invalidate(backupSummaryProvider);
+      // The restored rows are the ones the backup carried: its roles, its
+      // grants and, if the file had no super administrator, the promotion
+      // the restore performs. The signed-in session still holds the
+      // permissions it read before the restore, so every menu would be drawn
+      // from a company that no longer exists. Re-reading the session asks the
+      // server - which has just repaired the grants - who this person is now;
+      // if the restored company has no such account, the token is refused and
+      // the app goes back to the sign-in screen, which is the honest answer.
+      ref.invalidate(authControllerProvider);
     } catch (error) {
       setState(() {
         _failure = describeApiError(error);

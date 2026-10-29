@@ -93,6 +93,17 @@ jobs:
         run: npm run build
       - name: Apply migrations to ephemeral PostgreSQL
         run: npx prisma migrate deploy
+
+      # Licensing is the one subsystem whose real behaviour cannot be shown
+      # with a mocked database: the migration has to survive an installation
+      # that already has accounts, seats have to be refused at the limit, two
+      # simultaneous creations must produce exactly one account, and an old
+      # backup must not hand seats back. The script creates throwaway
+      # databases on the same server and drives the compiled service.
+      - name: Prove licensing on real PostgreSQL (populated upgrade, seats, concurrency, restore)
+        env:
+          KAYAN_TEST_ADMIN_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
+        run: python ../scripts/ci-diagnose.py node scripts/verify-licensing-postgres.mjs
       - name: Prove the required-accounts chart upgrade (old, complete and renumbered companies; run twice)
         run: python ../scripts/ci-diagnose.py node scripts/check-chart-upgrade.mjs
 
@@ -130,13 +141,25 @@ jobs:
           npm run start:prod > /tmp/kayan-api.log 2>&1 &
           API_PID=$!
           trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          # Wait for a *working* database, not merely for an answer. The
+          # health route answers 200 with `"database":"down"` while the
+          # connection is still being established, so a loop that stops at the
+          # first 200 would read a starting server as a broken one. It is also
+          # what made a raw-query failure look like a database outage.
+          health_ok=false
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json; then
-              break
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json 2>/dev/null; then
+              if node -e 'const h=JSON.parse(require("fs").readFileSync("/tmp/kayan-health.json","utf8")); process.exit(h.status==="ok" && h.database==="up" ? 0 : 1)'; then
+                health_ok=true
+                break
+              fi
+              echo "health attempt ${attempt}: $(cat /tmp/kayan-health.json)"
             fi
             sleep 2
           done
-          if [ ! -s /tmp/kayan-health.json ]; then
+          if [ "$health_ok" != "true" ]; then
+            echo "::error::The API never reported a working database within 60 seconds."
+            cat /tmp/kayan-health.json 2>/dev/null || true
             cat /tmp/kayan-api.log
             exit 1
           fi
@@ -218,6 +241,18 @@ jobs:
           done
           if [ "$FAIL" != "0" ]; then exit 1; fi
           echo "Isolated restore verified: $CHECKED non-volatile tables have identical row counts in source and restored databases."
+
+          # Last, because it deliberately recreates the shape old restored data
+          # can have: a receipt that reaches its partner only through the
+          # invoices it settled. That data is inconsistent by construction, so
+          # it must not be in place while the ageing/reconciliation checks run.
+          echo "Running the partner statement end to end: allocation-only vouchers, the card, exports, print and the ledger behind every figure..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-statement-export.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after statement scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
 
       - name: Verify the PostgreSQL client tools used by the backup checks
         run: |

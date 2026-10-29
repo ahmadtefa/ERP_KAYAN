@@ -10,6 +10,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { PostingService } from '../accounting/posting.service';
+import { isValidEan13, randomInternalBarcode, toBaseQuantity } from './barcode';
 
 const MONEY_SCALE = 4;
 const RATE_SCALE = 4;
@@ -27,6 +28,10 @@ export class ItemsService {
   async findAll(
     companyId: string,
     query: { q?: string; includeInactive?: boolean; page?: number; pageSize?: number },
+    /// False for a caller without `inventory.cost.read`: the cost column is
+    /// left out of the answer rather than blanked out on screen, so a
+    /// hand-written request cannot read what a list was not allowed to show.
+    mayReadCost = true,
   ) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
@@ -40,6 +45,7 @@ export class ItemsService {
         { nameEn: { contains: q, mode: 'insensitive' } },
         { nameAr: { contains: q } },
         { barcode: { contains: q } },
+        { units: { some: { barcode: { contains: q } } } },
       ];
     }
 
@@ -49,19 +55,205 @@ export class ItemsService {
         orderBy: { code: 'asc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
+        include: { units: { orderBy: [{ factor: 'asc' }, { createdAt: 'asc' }] } },
       }),
       this.prisma.item.count({ where }),
     ]);
 
-    return { items: items.map((i) => this.toResponse(i)), total, page, pageSize };
+    return { items: items.map((i) => this.toResponse(i, mayReadCost)), total, page, pageSize };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, mayReadCost = true) {
     const item = await this.prisma.item.findFirst({
       where: { id, companyId, deletedAt: null },
+      include: { units: { orderBy: [{ factor: 'asc' }, { createdAt: 'asc' }] } },
     });
     if (!item) throw new NotFoundException('Item not found');
-    return this.toResponse(item);
+    return this.toResponse(item, mayReadCost);
+  }
+
+  /// What a scanned code means.
+  ///
+  /// A barcode can belong to the item itself or to one of its units, and the
+  /// difference decides what the scanner means: scanning a carton code must
+  /// bring in one carton, not one piece. The answer therefore says which unit
+  /// matched, its factor, and how many base units one scan stands for, so the
+  /// screen never has to guess.
+  async findByBarcode(companyId: string, code: string, mayReadCost = true) {
+    const barcode = String(code ?? '').trim();
+    if (!barcode) throw new BadRequestException('barcode is required');
+
+    const item = await this.prisma.item.findFirst({
+      where: { companyId, barcode, deletedAt: null },
+      include: { units: { orderBy: { factor: 'asc' } } },
+    });
+    if (item) {
+      return {
+        matched: 'item' as const,
+        unit: item.unit,
+        factor: '1.000000',
+        quantityPerScan: '1.0000',
+        salePrice: item.salePrice.toFixed(MONEY_SCALE),
+        purchasePrice: mayReadCost ? item.purchasePrice.toFixed(MONEY_SCALE) : null,
+        item: this.toResponse(item, mayReadCost),
+        units: item.units.map((unit) =>
+          this.unitResponse(unit, item.unit, mayReadCost),
+        ),
+      };
+    }
+
+    const unit = await this.prisma.itemUnit.findFirst({
+      where: { barcode, item: { companyId, deletedAt: null } },
+      include: { item: { include: { units: { orderBy: { factor: 'asc' } } } } },
+    });
+    if (!unit) {
+      throw new NotFoundException(`No item or unit carries the barcode ${barcode}`);
+    }
+
+    const owner = unit.item;
+    return {
+      matched: 'unit' as const,
+      unit: unit.unit,
+      factor: unit.factor.toFixed(6),
+      // A scan of a unit barcode is one of that unit, expressed in the base
+      // unit the stock ledger keeps.
+      quantityPerScan: toBaseQuantity(1, unit.factor).toFixed(MONEY_SCALE),
+      salePrice:
+        unit.salePrice?.toFixed(MONEY_SCALE) ?? owner.salePrice.toFixed(MONEY_SCALE),
+      purchasePrice: mayReadCost
+        ? unit.purchasePrice?.toFixed(MONEY_SCALE) ?? owner.purchasePrice.toFixed(MONEY_SCALE)
+        : null,
+      item: this.toResponse(owner, mayReadCost),
+      units: owner.units.map((row) =>
+        this.unitResponse(row, owner.unit, mayReadCost),
+      ),
+    };
+  }
+
+  /// Gives an item a code that no other item or unit in this company uses.
+  ///
+  /// The generated code is an EAN-13 with the reserved internal prefix and a
+  /// real check digit, so it can be printed and read. Collisions are checked
+  /// against the database rather than assumed away, and a manual code is
+  /// accepted only when it is free as well.
+  async assignBarcode(
+    companyId: string,
+    userId: string,
+    itemId: string,
+    requested: string | null | undefined,
+    mayReadCost = true,
+  ) {
+    const item = await this.prisma.item.findFirst({
+      where: { id: itemId, companyId, deletedAt: null },
+      select: { id: true, code: true, barcode: true },
+    });
+    if (!item) throw new NotFoundException('Item not found');
+
+    let barcode = String(requested ?? '').trim();
+    if (barcode) {
+      if (barcode.length > 60) {
+        throw new BadRequestException('barcode cannot be longer than 60 characters');
+      }
+      await this.assertBarcodeFree(companyId, barcode, itemId);
+    } else {
+      for (let attempt = 0; attempt < 20 && !barcode; attempt += 1) {
+        const candidate = randomInternalBarcode();
+        if (!isValidEan13(candidate)) continue;
+        const taken = await this.barcodeTaken(companyId, candidate, itemId);
+        if (!taken) barcode = candidate;
+      }
+      if (!barcode) {
+        throw new ConflictException(
+          'Could not generate a free internal barcode; try again or enter one by hand',
+        );
+      }
+    }
+
+    const updated = await this.prisma.item.update({
+      where: { id: itemId },
+      data: { barcode, updatedBy: userId },
+    });
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'UPDATE',
+      entity: 'items',
+      entityId: itemId,
+      before: { barcode: item.barcode },
+      after: { barcode },
+    });
+    return this.toResponse(updated, mayReadCost);
+  }
+
+  private async barcodeTaken(companyId: string, barcode: string, ignoreItemId: string | null) {
+    const [item, unit] = await Promise.all([
+      this.prisma.item.findFirst({
+        where: {
+          companyId,
+          barcode,
+          deletedAt: null,
+          ...(ignoreItemId ? { id: { not: ignoreItemId } } : {}),
+        },
+        select: { id: true },
+      }),
+      this.prisma.itemUnit.findFirst({
+        where: {
+          barcode,
+          item: { companyId, deletedAt: null, ...(ignoreItemId ? { id: { not: ignoreItemId } } : {}) },
+        },
+        select: { id: true },
+      }),
+    ]);
+    return Boolean(item || unit);
+  }
+
+  private async assertBarcodeFree(companyId: string, barcode: string, ignoreItemId: string | null) {
+    const [item, unit] = await Promise.all([
+      this.prisma.item.findFirst({
+        where: {
+          companyId,
+          barcode,
+          deletedAt: null,
+          ...(ignoreItemId ? { id: { not: ignoreItemId } } : {}),
+        },
+        select: { code: true },
+      }),
+      this.prisma.itemUnit.findFirst({
+        where: {
+          barcode,
+          item: { companyId, deletedAt: null, ...(ignoreItemId ? { id: { not: ignoreItemId } } : {}) },
+        },
+        include: { item: { select: { code: true } } },
+      }),
+    ]);
+    if (item) {
+      throw new ConflictException(`Barcode ${barcode} is already assigned to item ${item.code}`);
+    }
+    if (unit) {
+      throw new ConflictException(
+        `Barcode ${barcode} is already assigned to unit ${unit.unit} of item ${unit.item.code}`,
+      );
+    }
+  }
+
+  private unitResponse(
+    unit: { id: string; unit: string; factor: Prisma.Decimal; barcode: string | null; salePrice: Prisma.Decimal | null; purchasePrice: Prisma.Decimal | null },
+    baseUnit: string,
+    mayReadCost = true,
+  ) {
+    return {
+      id: unit.id,
+      unit: unit.unit,
+      factor: unit.factor.toFixed(6),
+      barcode: unit.barcode,
+      salePrice: unit.salePrice?.toFixed(MONEY_SCALE) ?? null,
+      // A unit's own purchase price is a cost, exactly like the item-level
+      // one: absent from the response when the caller lacks cost.read.
+      purchasePrice: mayReadCost
+        ? unit.purchasePrice?.toFixed(MONEY_SCALE) ?? null
+        : null,
+      isBase: unit.unit === baseUnit,
+    };
   }
 
   async create(
@@ -69,6 +261,7 @@ export class ItemsService {
     userId: string,
     body: object,
     branchId: string | null = null,
+    mayReadCost = true,
   ) {
     const dto = body as Record<string, any>;
     const code = String(dto.code ?? '').trim();
@@ -80,6 +273,22 @@ export class ItemsService {
     });
     if (existing && !existing.deletedAt) {
       throw new ConflictException(`Item code ${code} is already used`);
+    }
+
+    const barcode = String(dto.barcode ?? '').trim() || null;
+    if (barcode) {
+      const [itemBarcode, unitBarcode] = await Promise.all([
+        this.prisma.item.findFirst({
+          where: { companyId, barcode, deletedAt: null },
+          select: { id: true, code: true },
+        }),
+        this.prisma.itemUnit.findFirst({
+          where: { barcode, item: { companyId, deletedAt: null } },
+          include: { item: { select: { code: true } } },
+        }),
+      ]);
+      if (itemBarcode) throw new ConflictException(`Barcode ${barcode} is already assigned to item ${itemBarcode.code}`);
+      if (unitBarcode) throw new ConflictException(`Barcode ${barcode} is already assigned to unit ${unitBarcode.unit} of item ${unitBarcode.item.code}`);
     }
 
     const isStockTracked = (dto.isStockTracked as boolean) ?? true;
@@ -137,7 +346,7 @@ export class ItemsService {
           nameEn: dto.nameEn as string,
           nameAr: dto.nameAr as string,
           unit: (dto.unit as string) ?? 'unit',
-          barcode: (dto.barcode as string) ?? null,
+          barcode,
           salePrice: this.money(dto.salePrice, 'salePrice'),
           purchasePrice: this.money(dto.purchasePrice, 'purchasePrice'),
           reorderLevel: this.money(dto.reorderLevel, 'reorderLevel'),
@@ -148,6 +357,18 @@ export class ItemsService {
           notes: (dto.notes as string) ?? null,
           createdBy: userId,
           updatedBy: userId,
+        },
+      });
+
+      // Every item has exactly one factor-1 row anchoring its base unit, so
+      // document resolution always has a base to convert against. Created
+      // inside the same transaction as the item itself.
+      await tx.itemUnit.create({
+        data: {
+          itemId: item.id,
+          unit: item.unit,
+          factor: new Prisma.Decimal(1),
+          isActive: true,
         },
       });
 
@@ -246,7 +467,7 @@ export class ItemsService {
       },
     });
 
-    return this.toResponse(created);
+    return this.toResponse(created, mayReadCost);
   }
 
   async update(
@@ -254,12 +475,32 @@ export class ItemsService {
     userId: string,
     id: string,
     body: object,
+    mayReadCost = true,
   ) {
     const dto = body as Record<string, any>;
     const before = await this.prisma.item.findFirst({
       where: { id, companyId, deletedAt: null },
     });
     if (!before) throw new NotFoundException('Item not found');
+
+    if (dto.barcode !== undefined) {
+      const barcode = String(dto.barcode ?? '').trim() || null;
+      if (barcode) {
+        const [itemBarcode, unitBarcode] = await Promise.all([
+          this.prisma.item.findFirst({
+            where: { companyId, barcode, id: { not: id }, deletedAt: null },
+            select: { code: true },
+          }),
+          this.prisma.itemUnit.findFirst({
+            where: { barcode, item: { companyId, id: { not: id }, deletedAt: null } },
+            include: { item: { select: { code: true } } },
+          }),
+        ]);
+        if (itemBarcode) throw new ConflictException(`Barcode ${barcode} is already assigned to item ${itemBarcode.code}`);
+        if (unitBarcode) throw new ConflictException(`Barcode ${barcode} is already assigned to unit ${unitBarcode.unit} of item ${unitBarcode.item.code}`);
+      }
+      dto.barcode = barcode;
+    }
 
     const data: Prisma.ItemUpdateInput = { updatedBy: userId };
     for (const key of ['nameEn', 'nameAr', 'unit', 'barcode', 'notes', 'isActive', 'isStockTracked'] as const) {
@@ -280,6 +521,22 @@ export class ItemsService {
 
     const updated = await this.prisma.item.update({ where: { id }, data });
 
+    // Keep the factor-1 base row's label aligned with the item base unit.
+    if (dto.unit !== undefined && String(dto.unit).trim() && dto.unit !== before.unit) {
+      const baseRow = await this.prisma.itemUnit.findFirst({
+        where: { itemId: id, factor: 1 },
+        select: { id: true, unit: true },
+      });
+      if (baseRow && baseRow.unit !== dto.unit) {
+        await this.prisma.itemUnit.update({
+          where: { id: baseRow.id },
+          data: { unit: String(dto.unit).trim() },
+        });
+      } else if (!baseRow) {
+        await this.ensureBaseUnit({ id, unit: String(dto.unit).trim() });
+      }
+    }
+
     await this.audit.record({
       companyId,
       userId,
@@ -290,17 +547,22 @@ export class ItemsService {
       after: { nameEn: updated.nameEn, salePrice: updated.salePrice.toFixed(MONEY_SCALE) },
     });
 
-    return this.toResponse(updated);
+    return this.toResponse(updated, mayReadCost);
   }
 
   /** An item that has moved through stock is never deleted, only deactivated. */
-  async deactivate(companyId: string, userId: string, id: string) {
+  async deactivate(
+    companyId: string,
+    userId: string,
+    id: string,
+    mayReadCost = true,
+  ) {
     const item = await this.prisma.item.findFirst({
       where: { id, companyId, deletedAt: null },
       include: { stockBalances: true },
     });
     if (!item) throw new NotFoundException('Item not found');
-    if (!item.isActive) return this.toResponse(item);
+    if (!item.isActive) return this.toResponse(item, mayReadCost);
 
     const onHand = item.stockBalances.reduce(
       (sum, b) => sum.plus(b.quantity),
@@ -328,7 +590,7 @@ export class ItemsService {
       after: { isActive: false },
     });
 
-    return this.toResponse(updated);
+    return this.toResponse(updated, mayReadCost);
   }
 
   /// Like `money`, but an absent/blank field means "not supplied" rather
@@ -388,7 +650,19 @@ export class ItemsService {
     countryOfOrigin?: string | null;
     notes: string | null;
     createdAt: Date;
-  }) {
+    units?: Array<{
+      id: string;
+      unit: string;
+      factor: Prisma.Decimal;
+      barcode: string | null;
+      salePrice: Prisma.Decimal | null;
+      purchasePrice: Prisma.Decimal | null;
+      isActive?: boolean;
+      createdAt?: Date | null;
+    }>;
+    // False for callers without `inventory.cost.read`: prices that reveal cost
+    // are redacted in the response (from the barcode/cost-permission work).
+  }, mayReadCost = true) {
     return {
       id: item.id,
       companyId: item.companyId,
@@ -398,7 +672,7 @@ export class ItemsService {
       unit: item.unit,
       barcode: item.barcode,
       salePrice: item.salePrice.toFixed(MONEY_SCALE),
-      purchasePrice: item.purchasePrice.toFixed(MONEY_SCALE),
+      purchasePrice: mayReadCost ? item.purchasePrice.toFixed(MONEY_SCALE) : null,
       reorderLevel: item.reorderLevel.toFixed(MONEY_SCALE),
       // Null here means "follow the company default", which is different
       // from the string "0" meaning exempt.
@@ -409,6 +683,69 @@ export class ItemsService {
       countryOfOrigin: item.countryOfOrigin ?? null,
       notes: item.notes,
       createdAt: item.createdAt.toISOString(),
+      // Present whenever the query included units (findOne/findAll).
+      units: Array.isArray(item.units)
+        ? item.units.map((unit) => this.unitToResponse(unit, mayReadCost))
+        : undefined,
+    };
+  }
+
+
+  /**
+   * Guarantees the factor-1 base row exists. Items created before multi-unit
+   * have no ItemUnit rows; this backfills the base unit the first time it is
+   * needed without touching any document data.
+   */
+  async ensureBaseUnit(item: { id: string; unit: string }) {
+    const existing = await this.prisma.itemUnit.findFirst({
+      where: { itemId: item.id, factor: 1 },
+      select: { id: true },
+    });
+    if (existing) return;
+    await this.prisma.itemUnit.create({
+      data: {
+        itemId: item.id,
+        unit: item.unit,
+        factor: new Prisma.Decimal(1),
+        isActive: true,
+      },
+    });
+  }
+
+  private unitToResponse(
+    unit: {
+      id: string;
+      itemId?: string;
+      unit: string;
+      factor: Prisma.Decimal;
+      barcode: string | null;
+      salePrice: Prisma.Decimal | null;
+      purchasePrice: Prisma.Decimal | null;
+      isActive?: boolean;
+      createdAt?: Date | null;
+    },
+    mayReadCost = true,
+  ) {
+    return {
+      id: unit.id,
+      itemId: unit.itemId,
+      unit: unit.unit,
+      factor: unit.factor.toFixed(6),
+      barcode: unit.barcode,
+      salePrice: unit.salePrice === null || unit.salePrice === undefined
+        ? null
+        : unit.salePrice.toFixed(MONEY_SCALE),
+      purchasePrice:
+        mayReadCost &&
+        unit.purchasePrice !== null &&
+        unit.purchasePrice !== undefined
+          ? unit.purchasePrice.toFixed(MONEY_SCALE)
+          : null,
+      // Pre-multi-unit rows carry no active flag; treat them as active rather
+      // than hiding a unit the catalogue always offered.
+      isActive: unit.isActive ?? true,
+      isBase: unit.factor.equals(1),
+      createdAt: unit.createdAt ? unit.createdAt.toISOString() : null,
     };
   }
 }
