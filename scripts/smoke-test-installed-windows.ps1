@@ -228,7 +228,7 @@ $preExistingLines = @(
 Set-Content -LiteralPath $settings -Value $preExistingLines -Encoding ASCII
 $emptyAcl = New-Object System.Security.AccessControl.FileSecurity
 $emptyAcl.SetAccessRuleProtection($true, $false)
-[System.IO.File]::SetAccessControl($settings, $emptyAcl)
+Set-Acl -LiteralPath $settings -AclObject $emptyAcl
 $lockedAsExpected = $false
 try {
   [void][System.IO.File]::ReadAllText($settings)
@@ -457,7 +457,7 @@ Write-Host "PASS: the upgrade/reinstall retained the existing company-data probe
 # detected, (b) attempt the repair, and (c) confirm afterwards that no problems
 # remain -- while company data and credentials are preserved.
 Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
-[System.IO.File]::SetAccessControl($settings, $emptyAcl)
+Set-Acl -LiteralPath $settings -AclObject $emptyAcl
 $repairTool = Join-Path $installRoot "RepairTool.exe"
 if (-not (Test-Path $repairTool)) { Fail "The installed package is missing RepairTool.exe." }
 $diagnoseBeforeLog = Join-Path $env:TEMP "kayan-repairtool-before.log"

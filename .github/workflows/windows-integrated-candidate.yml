@@ -223,7 +223,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'PE inspection failed' }
           $record = [ordered]@{sourceCommit=$env:GITHUB_SHA; sha256=$hash; size=$file.Length; innoVersion=$env:KAYAN_INNO_VERSION; innoCompilerSha256=$env:KAYAN_INNO_SHA256}
           $record | ConvertTo-Json | Set-Content -LiteralPath 'build/windows-installer/build-evidence.json' -Encoding utf8
-          Write-Host "Built candidate SHA256=$hash bytes=$($file.Length) source=$env:GITHUB_SHA; not yet verified or install-tested."
+          Write-Output "::notice title=Built candidate (not a release)::SHA256=$hash bytes=$($file.Length) source=$env:GITHUB_SHA; not yet verified or install-tested."
       - name: Pass candidate to independent inspection only
         uses: actions/upload-artifact@v4
         with:
@@ -334,6 +334,7 @@ jobs:
           $build = Get-Content 'candidate/build-evidence.json' -Raw | ConvertFrom-Json
           $hash = (Get-FileHash 'candidate/KAYAN-ERP-Setup.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($hash -ne $build.sha256) { throw 'Setup changed during smoke' }
+          Write-Output "::notice title=Install-tested candidate (not a release)::SHA256=$hash bytes=$($build.size) source=$env:GITHUB_SHA"
           [ordered]@{sourceCommit=$env:GITHUB_SHA; installerSha256=$hash; result='offline-runtime-smoke-passed-not-release'; notTested=@('Licensed business operation with production public key','Packaged Windows generator with synthetic signing key')} | ConvertTo-Json -Depth 4 | Set-Content 'candidate/installation-smoke.json' -Encoding utf8
       - name: Upload install-tested candidate with explicit limitations
         uses: actions/upload-artifact@v4
@@ -342,3 +343,29 @@ jobs:
           path: candidate/
           if-no-files-found: error
           retention-days: 7
+
+  verify-upload:
+    name: Verify the uploaded install-tested candidate
+    needs: smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: KAYAN-ERP-INSTALL-SMOKE-NOT-RELEASE-${{ github.sha }}
+          path: candidate
+      - name: Compare uploaded EXE to tested hash and source
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          const json = path => JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, ''));
+          const build = json('candidate/build-evidence.json');
+          const smoke = json('candidate/installation-smoke.json');
+          const bytes = readFileSync('candidate/KAYAN-ERP-Setup.exe');
+          const hash = createHash('sha256').update(bytes).digest('hex');
+          if (build.sourceCommit !== process.env.GITHUB_SHA || smoke.sourceCommit !== process.env.GITHUB_SHA ||
+              build.sha256 !== hash || smoke.installerSha256 !== hash || build.size !== bytes.length ||
+              smoke.result !== 'offline-runtime-smoke-passed-not-release') throw Error('Uploaded EXE does not match install-tested evidence');
+          console.log(`::notice title=Uploaded candidate verified (not a release)::SHA256=${hash} bytes=${bytes.length} source=${process.env.GITHUB_SHA}`);
+          NODE
