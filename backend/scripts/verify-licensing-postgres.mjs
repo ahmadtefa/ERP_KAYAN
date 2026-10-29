@@ -108,7 +108,11 @@ async function refusal(promise) {
     return { resolved: true, code: null };
   } catch (error) {
     const response = typeof error?.getResponse === 'function' ? error.getResponse() : null;
-    return { resolved: false, code: response?.code ?? error?.message ?? 'no-code' };
+    return {
+      resolved: false,
+      code: response?.code ?? error?.message ?? 'no-code',
+      status: typeof error?.getStatus === 'function' ? error.getStatus() : null,
+    };
   }
 }
 
@@ -1087,23 +1091,39 @@ async function clockAndRestore() {
       return 'the database remains the authority';
     });
 
-    await check('B4 a corrupted state file is quarantined, not trusted', async () => {
+    await check('B4 a corrupted state fails closed until trusted recovery', async () => {
       const path = join(instance.directory, 'license-state.json');
-      const body = JSON.parse(readFileSync(path, 'utf8'));
+      // This is a synthetic state from this same test installation. Keep the
+      // exact trusted bytes in memory; never create a blank replacement store.
+      const trusted = readFileSync(path);
+      const body = JSON.parse(trusted.toString('utf8'));
       body.state.maxSeatsUsed = 0;
-      writeFileSync(path, JSON.stringify(body));
+      const damaged = JSON.stringify(body);
+      writeFileSync(path, damaged);
       const restarted = await installation({
         database: DATABASES.runtime + '_clock',
         directory: instance.directory,
       });
       try {
+        const refusalResult = await refusal(restarted.service.status({ fresh: true }));
+        assertCode(refusalResult, 'LICENSE_STATE_DAMAGED');
+        assertEqual(refusalResult.status, 503, 'damaged state HTTP status');
+        assertEqual(readFileSync(path, 'utf8'), damaged, 'damaged state remains untouched');
+        assertEqual(await seatsIn(DATABASES.runtime + '_clock'), 3, 'seat ledger stays intact');
+        // Preserve evidence before restoring the trusted bytes; this is an
+        // isolated test directory, never an operator or customer state folder.
+        writeFileSync(`${path}.damaged`, damaged, { flag: 'wx' });
+        writeFileSync(path, trusted);
         const status = await restarted.service.status({ fresh: true });
-        assertEqual(status.state, 'ACTIVE', 'the licence is still readable from the database');
-        assert(status.seats.used >= 2, `used seats fell to ${status.seats.used}`);
+        assertEqual(status.state, 'ACTIVE', 'trusted state restores the licence');
+        assertEqual(status.machineId, MACHINE, 'the restored licence belongs to this machine');
+        assertEqual(status.seats.used, 3, 'restored seat usage');
+        assertEqual(status.seats.limit, 9, 'restored seat limit');
+        assertEqual(readFileSync(`${path}.damaged`, 'utf8'), damaged, 'damaged evidence preserved');
       } finally {
         await close(restarted);
       }
-      return 'edited file refused; the database counters still apply';
+      return 'damaged bytes preserved; 503 fail-closed; trusted state restored without losing seats';
     });
 
     await check('B5 a database newer than the state file raises the file, not the other way round', async () => {

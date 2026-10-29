@@ -106,9 +106,13 @@ jobs:
           $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path -LiteralPath $compiler)) { $compiler = "$env:ProgramFiles\Inno Setup 6\ISCC.exe" }
           if (-not (Test-Path -LiteralPath $compiler)) { throw 'Inno compiler missing' }
-          $versionOutput = (& $compiler '/?' 2>&1 | Out-String)
-          Write-Output ("::notice title=Inno compiler banner::" + ($versionOutput -replace '\r?\n', ' | '))
-          if ($versionOutput -notmatch '(?i)Inno Setup[^\r\n]*\b(6\.7\.[0-9]+)\b') { throw 'Cannot prove supported Inno Setup 6.7 compiler version' }
+          # ISCC /? reports only major version 6; its FileVersionInfo on the
+          # hosted image has also been 0.0.0.0. Record the installed Chocolatey
+          # package version and the compiler binary hash instead of inventing
+          # a version from either incomplete source.
+          $versionOutput = (& choco list --exact innosetup --limit-output 2>&1 | Out-String)
+          Write-Output ("::notice title=Inno package version::" + ($versionOutput -replace '\r?\n', ' | '))
+          if ($versionOutput -notmatch '(?im)^innosetup\|(6\.7\.[0-9]+)\s*$') { throw 'Cannot establish an Inno Setup 6.7 package version compatible with the pinned extractor' }
           $version = $Matches[1]
           $compilerSha = (Get-FileHash -LiteralPath $compiler -Algorithm SHA256).Hash.ToLowerInvariant()
           "KAYAN_INNO_VERSION=$version" >> $env:GITHUB_ENV
