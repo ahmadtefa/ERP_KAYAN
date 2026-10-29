@@ -24,6 +24,13 @@ test('private key marker split across stream chunks is refused', () => {
   assert.equal(inspectChunk(Buffer.from('KEY----- suffix'), first.tail).found, true);
 });
 
+test('a failed inspection is reported in Actions without reading payload content', () => {
+  const env = { ...process.env, GITHUB_ACTIONS: 'true' };
+  const result = spawnSync(process.execPath, ['scripts/inspect-final-inno.mjs', '--artifact', 'definitely-missing-test-installer.exe'], { encoding: 'utf8', env });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /::error title=Inno inspection refused::/);
+});
+
 test('publication entrypoint rejects direct invocation without CI identity', () => {
   const env = { ...process.env, GITHUB_REPOSITORY: '', GITHUB_REF: '', GITHUB_EVENT_NAME: '', GH_TOKEN: '' };
   const result = spawnSync(process.execPath, ['scripts/publish-verified-windows.mjs'], { encoding: 'utf8', env });

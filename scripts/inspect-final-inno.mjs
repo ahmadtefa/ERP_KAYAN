@@ -82,7 +82,10 @@ async function main(args) {
   const mode = args.length === 4 ? 'test-signed' : 'product';
   const before = await hash(path);
   const list = spawnSync('7z', ['l', '-slt', '--', path], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 120000 });
-  if (list.error || list.status !== 0) throw new Error('Could not list the final Inno payload using 7z.');
+  if (list.error) throw new Error(list.error.code === 'ENOENT'
+    ? '7z is not available on PATH; the final Inno payload was not inspected.'
+    : 'Could not start 7z to list the final Inno payload.');
+  if (list.status !== 0) throw new Error(`7z could not list the final Inno payload (exit ${list.status ?? 'unknown'}).`);
   const keyPaths = inspectListing(list.stdout);
   for (const keyPath of keyPaths) {
     const publicPem = await stream(['x', '-so', '-spd', '--', path, keyPath], true);
@@ -94,5 +97,12 @@ async function main(args) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2)).catch(e => { console.error(`Inno inspection refused: ${e.message}`); process.exitCode = 1; });
+  main(process.argv.slice(2)).catch(e => {
+    // Preserve a concise, non-sensitive reason in Actions annotations even
+    // when the runner log archive is unreachable. Never emit payload bytes.
+    const reason = String(e.message).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+    if (process.env.GITHUB_ACTIONS === 'true') console.log(`::error title=Inno inspection refused::${reason}`);
+    console.error(`Inno inspection refused: ${e.message}`);
+    process.exitCode = 1;
+  });
 }
