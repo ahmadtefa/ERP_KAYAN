@@ -60,4 +60,6 @@ test('Flutter test diagnostics associate failures with test names and escape wor
   assert.match(summary, /protected read/);
   assert.match(summary, /100%25%0Aactual 0/);
   assert.equal(summarize('plain failure'), 'plain failure');
+  assert.equal(summarize('postgresql://user:dummy@127.0.0.1/db'), 'postgresql://[redacted]@127.0.0.1/db');
+  assert.match(workflow, /test\/screenshots\/design_screenshots_test\.dart --update-goldens/);
 });

@@ -19,6 +19,9 @@ test('product and diagnostic modes require the right public-key fingerprint', ()
 test('diagnostic Inno setup stays non-installable and production paths stay disabled', () => {
   const inno = readFileSync(new URL('../distribution/windows/installer.iss', import.meta.url), 'utf8');
   const workflow = readFileSync(new URL('../.github/workflows/windows-installer.yml', import.meta.url), 'utf8');
+  const build = readFileSync(new URL('../distribution/windows/build-installer.ps1', import.meta.url), 'utf8');
+  assert.match(build, /foreach \(\$runtimeDir in @\('bin', 'lib', 'share'\)\)/);
+  assert.doesNotMatch(build, /Copy-Item \(Join-Path \$pgBin\.FullName '\*'\)/);
   assert.match(inno, /#if KayanBuildKind != "product"[\s\S]*?Result := False;/);
   const smoke = workflow.match(/- name: Smoke-test the actual installed Windows application([\s\S]*?)(?=\n      - name:|\n  [a-z-]+:|$)/);
   assert.ok(smoke && /if:\s*\$\{\{ false \}\}/.test(smoke[1]));

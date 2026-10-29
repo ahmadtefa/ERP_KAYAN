@@ -108,6 +108,13 @@ jobs:
             Write-Output "::error title=Flutter analyzer output::$tail"
           }
           if ($result -ne 0) { throw "Flutter analyze failed with exit code $result; diagnostics=$($diagnostics.Count)." }
+      # The inherited screenshot suite is a generator; its goldens are not
+      # checked in. Regenerate only inside the disposable runner, as the
+      # existing project CI does. These PNGs are not release evidence.
+      - name: Prepare screenshot test baselines on the runner
+        id: screenshots
+        continue-on-error: true
+        run: flutter test --no-pub test/screenshots/design_screenshots_test.dart --update-goldens
       - name: Test Flutter
         id: flutter_test
         shell: pwsh
@@ -158,3 +165,7 @@ jobs:
           path: build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe
           if-no-files-found: error
           retention-days: 7
+      - name: Report a failed screenshot baseline run
+        if: ${{ always() && steps.screenshots.outcome == 'failure' }}
+        shell: pwsh
+        run: throw 'The screenshot baseline generator failed; see the test run. This is not release evidence.'

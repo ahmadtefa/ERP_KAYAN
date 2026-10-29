@@ -243,7 +243,17 @@ Copy-Item (Join-Path $nodeFolder.FullName '*') (Join-Path $app 'backend\node') -
 Expand-Archive -LiteralPath $pgZip -DestinationPath (Join-Path $stage 'extract-postgres') -Force
 $pgBin = Get-ChildItem (Join-Path $stage 'extract-postgres') -Directory -Recurse | Where-Object { Test-Path (Join-Path $_.FullName 'bin\initdb.exe') } | Select-Object -First 1
 if (-not $pgBin) { throw 'The verified PostgreSQL archive did not contain bin\initdb.exe.' }
-Copy-Item (Join-Path $pgBin.FullName '*') (Join-Path $app 'backend\postgres') -Recurse -Force
+# The official archive also contains pgAdmin and unrelated tooling. Recursing
+# into its deeply nested Python packages coincided with Inno failing while
+# compressing a 264-character pgAdmin path on the Windows runner. The service needs
+# PostgreSQL's binaries, extension libraries and shared data, not pgAdmin. Copy
+# only those runtime trees into this fresh staging directory; never delete or
+# modify anything in the downloaded archive.
+foreach ($runtimeDir in @('bin', 'lib', 'share')) {
+  $source = Join-Path $pgBin.FullName $runtimeDir
+  if (-not (Test-Path -LiteralPath $source -PathType Container)) { throw "Verified PostgreSQL archive is missing runtime directory $runtimeDir." }
+  Copy-Item -LiteralPath $source -Destination (Join-Path $app 'backend\postgres') -Recurse -Force
+}
 $pgRoot = Split-Path -Parent $pgBin.FullName
 foreach ($licenseName in @('LICENSE','COPYRIGHT','README')) {
   Get-ChildItem $pgRoot -Filter $licenseName -File -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
