@@ -5,12 +5,6 @@ name: Windows candidate preflight (no publication)
 on:
   push:
     branches: ['arena/2d794f08-erp-kayan']
-    # History-only inventory does not change the installer or application and
-    # must not restart the prior full application test or diagnostic build.
-    paths-ignore:
-      - '.github/workflows/windows-candidate-preflight.yml'
-      - '.github/workflows/installer-historical-inventory.yml'
-      - 'scripts/inventory-historical-artifact.py'
   workflow_dispatch:
 
 permissions:
