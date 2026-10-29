@@ -39,7 +39,7 @@ jobs:
           }
           if (-not $sevenZip) { throw '7-Zip executable was not found after installation.' }
           Write-Output "7-Zip executable: $($sevenZip.Source)"
-          & $sevenZip.Source | Select-Object -First 2
+          & $sevenZip.Source i *> $null
           if ($LASTEXITCODE -ne 0) { throw '7-Zip did not execute successfully.' }
           $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
           if (-not (Test-Path -LiteralPath $iscc)) { $iscc = Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe' }
