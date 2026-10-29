@@ -4,10 +4,7 @@ on:
   push:
     branches: ['fix/windows-installer-inspection-20261029']
     paths:
-      - '.github/workflows/windows-installer-runtime-smoke.yml'
       - 'scripts/smoke-test-installed-windows.ps1'
-      - 'scripts/verify-extracted-windows-installer.mjs'
-      - 'scripts/verify-extracted-windows-installer.test.mjs'
   workflow_dispatch:
 
 permissions:
