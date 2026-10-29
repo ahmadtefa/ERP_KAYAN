@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { summarize } from './report-flutter-test-failures.mjs';
 
 // Static safety checks only: they do not prove GitHub actually ran this job.
 const workflow = readFileSync(new URL('../.github/workflows/windows-candidate-preflight.yml', import.meta.url), 'utf8');
@@ -33,6 +34,8 @@ test('preflight cannot publish, receives no secrets and uploads only the labelle
   const upload = workflow.indexOf('actions/upload-artifact@');
   assert.ok(inspect >= 0 && inspect < upload);
   assert.doesNotMatch(workflow, /smoke-test-installed-windows|Start-Process.*Setup/);
+  assert.match(workflow, /steps\.flutter_test\.outcome == 'failure'/);
+  assert.match(workflow, /throw "Flutter tests failed/);
 });
 
 test('lint debt remains visible without gating the build; private-key-writing tests are excluded', () => {
@@ -46,4 +49,15 @@ test('lint debt remains visible without gating the build; private-key-writing te
   assert.match(workflow, /--testPathIgnorePatterns=license-generator\.spec\.ts/);
   assert.match(workflow, /npx prisma generate/);
   assert.doesNotMatch(workflow, /PRISMA_SCHEMA_ENGINE_BINARY|PRISMA_QUERY_ENGINE_LIBRARY/);
+});
+
+test('Flutter test diagnostics associate failures with test names and escape workflow commands', () => {
+  const log = [
+    { type: 'testStart', test: { id: 4, name: 'protected read' } },
+    { type: 'error', testID: 4, error: 'expected 100%\nactual 0', stackTrace: 'at test.dart:5' },
+  ].map(JSON.stringify).join('\n');
+  const summary = summarize(log);
+  assert.match(summary, /protected read/);
+  assert.match(summary, /100%25%0Aactual 0/);
+  assert.equal(summarize('plain failure'), 'plain failure');
 });

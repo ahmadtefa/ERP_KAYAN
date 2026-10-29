@@ -110,7 +110,17 @@ jobs:
           if ($result -ne 0) { throw "Flutter analyze failed with exit code $result; diagnostics=$($diagnostics.Count)." }
       - name: Test Flutter
         id: flutter_test
-        run: flutter test --reporter expanded
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $log = Join-Path $env:RUNNER_TEMP 'kayan-flutter-tests.jsonl'
+          & flutter test --no-pub --reporter json *> $log
+          $result = $LASTEXITCODE
+          if ($result -ne 0) {
+            & node scripts/report-flutter-test-failures.mjs $log
+            throw "Flutter tests failed with exit code $result."
+          }
+          Write-Output 'Flutter tests passed.'
       - name: Report known lint debt
         if: ${{ always() && steps.lint.outcome == 'failure' }}
         shell: pwsh
@@ -119,8 +129,12 @@ jobs:
       # A diagnostic build may not be installed: test/evaluation setups remain
       # deliberately blocked until service, path and database isolation exists.
       - name: Install Inno Setup
+        id: inno
+        if: ${{ always() && steps.backend_build.outcome == 'success' && steps.flutter_analyze.outcome == 'success' && (steps.flutter_test.outcome == 'success' || steps.flutter_test.outcome == 'failure') }}
         run: choco install innosetup --no-progress -y
       - name: Build non-installable diagnostic installer
+        id: diagnostic_build
+        if: ${{ always() && steps.inno.outcome == 'success' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -133,8 +147,11 @@ jobs:
           $sha = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
           Write-Output "::notice title=Diagnostic EXE::$($file.Name) bytes=$($file.Length) SHA256=$sha source=$env:GITHUB_SHA; not installable or releasable"
       - name: Inspect diagnostic Inno payload before upload
+        id: diagnostic_inspect
+        if: ${{ always() && steps.diagnostic_build.outcome == 'success' }}
         run: node scripts/inspect-final-inno.mjs --artifact build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe --mode test-signed
       - name: Upload non-installable diagnostic installer
+        if: ${{ always() && steps.diagnostic_inspect.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-test-only-diagnostic-${{ github.sha }}
