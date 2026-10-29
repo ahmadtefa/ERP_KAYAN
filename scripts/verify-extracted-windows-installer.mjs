@@ -42,6 +42,10 @@ const REQUIRED_SUFFIXES = [
   'licenses/LICENSE',
   'licenses/PostgreSQL-LICENSE',
 ];
+const FORBIDDEN_NODE_PACKAGE_PATHS = [
+  /(^|\/)backend\/node\/node_modules\/(?:npm|corepack)(?:\/|$)/i,
+  /(^|\/)backend\/node\/(?:npm|npx|corepack)(?:\.cmd)?$/i,
+];
 
 const PRIVATE_MARKERS = [
   /-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/,
@@ -114,6 +118,12 @@ export async function verifyExtractedPayload({ artifactPath, root, expectedSourc
     }
     if (/(^|\/)demo-company\.json$/i.test(forbidden)) {
       throw new Error('The production installer unexpectedly contains the demo-company backup.');
+    }
+  }
+
+  for (const path of relativePaths) {
+    if (FORBIDDEN_NODE_PACKAGE_PATHS.some((pattern) => pattern.test(path))) {
+      throw new Error(`Build-only npm/Corepack files must not be bundled into the runtime: ${path}.`);
     }
   }
 
