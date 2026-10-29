@@ -2,35 +2,35 @@ import { defineConfig } from 'prisma/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 /**
- * The project runs on the engine-less client (`engineType = "client"` with the
- * query compiler and the pg driver adapter), so no native query-engine binary
- * is shipped. The matching choice for schema work is the JavaScript (WASM)
- * schema engine: it needs no download from binaries.prisma.sh, which keeps
- * `prisma validate`, `generate` and migrations working in locked-down/offline
- * CI and on customer machines.
+ * The application client is engine-less and uses the JavaScript query compiler
+ * with the pg driver adapter. Prisma 6.19's WASM schema engine currently fails
+ * to deserialize PostgreSQL's internal `name` catalog type during
+ * `migrate deploy`. For migration CI only, opt into the classic schema engine
+ * (the CLI's supported native engine); the shipped application remains on the
+ * engine-less runtime and offline Windows installs continue to use
+ * scripts/apply-migrations.mjs.
  *
- * Prisma 6.19.x reads `engine`/`adapter` from the TOP LEVEL of defineConfig
- * (the nested `schemaEngine: { engine: 'js' }` shape belongs to later Prisma
- * releases and is silently ignored here, which makes the CLI fall back to
- * downloading the native schema-engine binary). `experimental.adapter` is the
- * 6.19 gate that enables the driver-adapter-backed JS schema engine.
- *
- * The adapter is instantiated lazily: pure validation/generation never opens
- * a socket, so no DATABASE_URL is needed for those commands.
+ * Set KAYAN_PRISMA_CLASSIC_MIGRATIONS=1 only for CI's real migrate-deploy
+ * compatibility check. Do not set it for client generation or runtime.
  */
+const classicMigrations =
+  process.env.KAYAN_PRISMA_CLASSIC_MIGRATIONS === '1';
+
 export default defineConfig({
   schema: 'prisma/schema.prisma',
-  engine: 'js',
-  experimental: {
-    adapter: true,
-  },
-  adapter: async () => {
-    const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) {
-      throw new Error(
-        'DATABASE_URL is required for database-touching Prisma commands.',
-      );
-    }
-    return new PrismaPg({ connectionString });
-  },
+  engine: classicMigrations ? 'classic' : 'js',
+  ...(classicMigrations
+    ? {}
+    : {
+        experimental: { adapter: true },
+        adapter: async () => {
+          const connectionString = process.env.DATABASE_URL;
+          if (!connectionString) {
+            throw new Error(
+              'DATABASE_URL is required for database-touching Prisma commands.',
+            );
+          }
+          return new PrismaPg({ connectionString });
+        },
+      }),
 });
