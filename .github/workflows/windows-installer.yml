@@ -265,6 +265,11 @@ jobs:
             Write-Output ("::error title=Licence key for this build::" + $_.Exception.GetType().Name + ': ' + $_.Exception.Message)
             exit 1
           }
+      - name: Verify configured product key pair in memory
+        if: github.event_name != 'workflow_dispatch' || inputs.build_mode == 'product'
+        env:
+          KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
+        run: node scripts/verify-configured-key-pair.mjs
       - name: Build Windows installer
         id: installer
         shell: powershell
