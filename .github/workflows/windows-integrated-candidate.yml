@@ -167,6 +167,15 @@ jobs:
             Write-Output '::error title=Source identity::Source SHA mismatch'
             throw 'Source SHA mismatch'
           }
+          # Flutter may rewrite generated files with byte-for-byte identical
+          # content, leaving stale index stat data on the Windows runner.
+          # Refresh metadata only, and prove that the staged tree did not change.
+          $indexBefore = (git write-tree).Trim()
+          & git update-index --refresh
+          $refreshExit = $LASTEXITCODE
+          $indexAfter = (git write-tree).Trim()
+          if ($indexBefore -ne $indexAfter) { throw 'Index tree changed during stat refresh' }
+          Write-Output "::notice title=Git stat refresh::exit=$refreshExit indexTree=$indexAfter"
           $changes = @(git status --porcelain=v1 --untracked-files=all)
           if ($changes.Count) {
             $diffNames = @(git diff --name-only)
