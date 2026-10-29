@@ -14,7 +14,12 @@ $installRoot = Join-Path $env:ProgramFiles "KAYAN ERP"
 $backend = Join-Path $installRoot "backend"
 $node = Join-Path $backend "node\node.exe"
 $clientPath = Join-Path $installRoot "erp_kayan.exe"
+$postgresExe = Join-Path $installRoot "backend\postgres\bin\postgres.exe"
+$repairTool = Join-Path $installRoot "RepairTool.exe"
+$vcRedist = Join-Path $installRoot "prerequisites\vc_redist.x64.exe"
+$windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 $settings = Join-Path $env:ProgramData "KAYAN-ERP\kayan.env"
+$offlineRuleNames = New-Object 'System.Collections.Generic.List[string]'
 
 function Read-Details {
   # Ordered most relevant first: the runtime setup log is the root-cause log,
@@ -58,6 +63,44 @@ function Read-Details {
 # Publishes a failure where a person (and the CI annotations API) can see it:
 # the step summary page, and a GitHub error annotation. The installer log is
 # redacted the same way the runtime scripts redact it.
+function Add-KayanOfflineRule([string]$Program) {
+  if (-not (Test-Path -LiteralPath $Program)) { Fail "Cannot enforce offline mode because a required executable path is missing: $Program" }
+  $ruleName = "KAYAN-Offline-Smoke-" + [Guid]::NewGuid().ToString("N")
+  New-NetFirewallRule -DisplayName $ruleName -Direction Outbound -Action Block -Program $Program -RemoteAddress Internet -Profile Any -Enabled True -ErrorAction Stop | Out-Null
+  $script:offlineRuleNames.Add($ruleName)
+}
+
+function Remove-KayanOfflineRules {
+  foreach ($ruleName in @($script:offlineRuleNames)) {
+    Remove-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+  }
+  $script:offlineRuleNames.Clear()
+}
+
+function Enable-KayanOfflineSmokeRules([switch]$AfterInstall) {
+  $disabledProfiles = @(Get-NetFirewallProfile | Where-Object { $_.Enabled -ne $true })
+  if ($disabledProfiles.Count -gt 0) {
+    Fail ("Cannot prove offline installation: Windows Firewall is disabled for profile(s) " + (($disabledProfiles | ForEach-Object { $_.Name }) -join ', ') + ".")
+  }
+  if (-not $AfterInstall) {
+    Add-KayanOfflineRule -Program $setup
+    Add-KayanOfflineRule -Program $windowsPowerShell
+    Write-Host "PASS: outbound Internet is blocked for Setup.exe and Windows PowerShell before installation."
+    return
+  }
+
+  $browserCandidates = @(
+    (Join-Path ${env:ProgramFiles(x86)} "Microsoft\Edge\Application\msedge.exe"),
+    (Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe")
+  )
+  $browser = $browserCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+  if (-not $browser) { Fail "The clean Windows image has no OS-provided Microsoft Edge runtime; the quotation PDF service depends on an installed Edge/Chrome browser." }
+  foreach ($program in @($clientPath, $node, $postgresExe, $repairTool, $vcRedist, $browser)) {
+    Add-KayanOfflineRule -Program $program
+  }
+  Write-Host "PASS: outbound Internet is blocked for the installed KAYAN client, bundled Node.js, PostgreSQL, RepairTool, VC++ redistributable and Edge; loopback remains available."
+}
+
 function Publish-Failure([string]$Reason) {
   $redacted = [regex]::Replace($Reason, '(?i)postgres(?:ql)?://[^\s"'']+', '[DATABASE URL REDACTED]')
   $redacted = [regex]::Replace($redacted, '(?i)(password\s*[=:]\s*)[^\s;]+', '$1[REDACTED]')
@@ -95,6 +138,8 @@ function Stop-KayanSmokeClient([object]$Process, [int]$Port) {
       if ($listeners.Count -eq 0) { break }
       Start-Sleep -Seconds 1
     }
+    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    if ($listeners.Count -gt 0) { Fail "The previous installed backend still owns port $Port after restart cleanup." }
   }
 }
 
@@ -116,6 +161,7 @@ function Start-KayanSmokeClient {
 }
 
 function Fail([string]$Reason) {
+  Remove-KayanOfflineRules
   Publish-Failure ($Reason + [Environment]::NewLine + (Read-Details))
   exit 1
 }
@@ -125,6 +171,8 @@ function Fail([string]$Reason) {
 trap {
   Fail ("Unhandled error in the smoke test: " + $_.Exception.Message + [Environment]::NewLine + ($_ | Out-String))
 }
+
+if ($RuntimeOnly) { Enable-KayanOfflineSmokeRules }
 
 function New-SmokeHexSecret {
   $bytes = New-Object byte[] 32
@@ -247,6 +295,7 @@ if ($commitUnderTest -and $manifest.sourceCommit -ne $commitUnderTest) {
   Fail "The installed payload was built from $($manifest.sourceCommit), not from the expected commit ($commitUnderTest)."
 }
 if ($commitUnderTest) { Write-Host "PASS: the installed payload matches the expected source commit ($commitUnderTest)." }
+if ($RuntimeOnly) { Enable-KayanOfflineSmokeRules -AfterInstall }
 
 if (-not (Test-Path $settings)) { Fail "The installer did not create $settings" }
 
@@ -864,3 +913,4 @@ try {
   Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
 }
 Write-Output "::notice::Safe-reset exercise passed: cancel changed nothing; reset backed up (PGDMP, pg_restore-readable), switched to a fresh empty database, preserved the old database and its sentinel, kept previous settings, redacted logs, and the next launch waits at first-run setup."
+Remove-KayanOfflineRules
