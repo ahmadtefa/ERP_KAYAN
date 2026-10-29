@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const PRODUCTION_FINGERPRINT = 'F932-38B0-CDC0-A81D-345F-160C-F8DC-DBB7';
+export const PRODUCTION_FINGERPRINT = '9153-E15E-475B-A2E2-251A-7E40-D8EB-5855';
 export const BUILD_MODES = Object.freeze(['product', 'test-signed', 'evaluation']);
 
 export function fingerprint(publicKey) {

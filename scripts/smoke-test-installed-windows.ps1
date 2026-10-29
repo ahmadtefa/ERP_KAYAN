@@ -445,7 +445,17 @@ if (-not $service -or $service.Status -ne "Running") {
   # Restrict diagnostics to Setup lifecycle lines, never environment/config.
   $upgradeEvidence = @()
   if (Test-Path -LiteralPath $upgradeLog) {
-    $upgradeEvidence = @(Get-Content -LiteralPath $upgradeLog -Tail 60 | Where-Object { $_ -match '(?i)error|restart|reboot|postinstall|preparing|installation process|exit code|closing|shutdown|log closed' } | Select-Object -Last 12)
+    $upgradeLines = @(Get-Content -LiteralPath $upgradeLog -Tail 80)
+    $upgradeEvidence = @($upgradeLines | Where-Object { $_ -match '(?i)error|restart|reboot|postinstall|preparing|installation process|exit code|closing|shutdown|log closed' } | Select-Object -Last 12)
+    for ($i = 0; $i -lt $upgradeLines.Count; $i++) {
+      if ($upgradeLines[$i] -match 'Runtime error \(at ') {
+        # Include the next error-description lines; Publish-Failure redacts
+        # URLs and passwords before creating the annotation.
+        $last = [Math]::Min($i + 3, $upgradeLines.Count - 1)
+        $upgradeEvidence += @($upgradeLines[$i..$last])
+        break
+      }
+    }
   }
   $serviceStatus = if ($service) { $service.Status.ToString() } else { 'missing' }
   Fail ("The PostgreSQL service did not restart after the upgrade/reinstall (state=$serviceStatus, Setup exit=$($upgrade.ExitCode)). Upgrade Setup log: " + ($upgradeEvidence -join ' | '))

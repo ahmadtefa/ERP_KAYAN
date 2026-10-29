@@ -23,7 +23,7 @@ test('the project fingerprint is SHA-256 SPKI, 128 bits in groups', async () => 
   const expected = createHash('sha256').update(first.publicKey.export({ type: 'spki', format: 'der' }))
     .digest('hex').slice(0, 32).toUpperCase().match(/.{4}/g).join('-');
   assert.equal(syntheticReference, expected);
-  assert.equal(PRODUCTION_FINGERPRINT, 'F932-38B0-CDC0-A81D-345F-160C-F8DC-DBB7');
+  assert.equal(PRODUCTION_FINGERPRINT, '9153-E15E-475B-A2E2-251A-7E40-D8EB-5855');
 });
 
 test('product accepts only its reference public key (synthetic reference)', () => {

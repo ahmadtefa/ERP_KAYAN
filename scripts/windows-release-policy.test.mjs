@@ -18,7 +18,7 @@ test('product and diagnostic modes require the right public-key fingerprint', ()
 
 test('checked-in verification material matches the pinned product policy', () => {
   const publicKey = readFileSync(new URL('../distribution/windows/public-key.pem', import.meta.url), 'utf8');
-  assert.equal(validatePem(publicKey, 'product'), 'F932-38B0-CDC0-A81D-345F-160C-F8DC-DBB7');
+  assert.equal(validatePem(publicKey, 'product'), '9153-E15E-475B-A2E2-251A-7E40-D8EB-5855');
 });
 
 test('diagnostic Inno setup stays non-installable and production paths stay disabled', () => {

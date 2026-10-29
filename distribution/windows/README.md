@@ -56,7 +56,7 @@ Setup does is prove the program can reach the database its settings name
 A product Setup carries the operator's `public-key.pem` and switches licence
 enforcement on. `build-installer.ps1` refuses
 production when the public key is missing, invalid, or does not match the
-approved fingerprint `F932-38B0-CDC0-A81D-345F-160C-F8DC-DBB7`. The staged
+approved fingerprint `9153-E15E-475B-A2E2-251A-7E40-D8EB-5855`. The staged
 copy is checked again. Place the approved public key beside the build script,
 or pass `-LicencePublicKeyPath`. Never give the builder a private key.
 
