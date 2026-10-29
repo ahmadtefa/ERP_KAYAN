@@ -77,8 +77,43 @@ def main():
     if count != info.file_size or sha.hexdigest() != EXPECTED_EXE:
         raise RuntimeError('Historical executable size or SHA-256 mismatch')
     report(f'Historical EXE: {count} bytes; SHA-256 `{sha.hexdigest()}`; ZIP CRC also verified while reading.')
+    # Probe only the fixed public Inno format identifier, never arbitrary bytes.
+    # This is metadata evidence and does not validate the structure or content.
+    import mmap
+    with mmap.mmap(fd, 0, access=mmap.ACCESS_READ) as mapped:
+        patterns = set(match.group().decode('ascii') for match in re.finditer(rb'Inno Setup Setup Data \([0-9.]{1,20}\)(?: \(u\))?', mapped))
+    report('Raw Inno data identifiers: ' + (', '.join(sorted(patterns)) if patterns else 'not found in executable bytes'))
     os.lseek(fd, 0, os.SEEK_SET)
     exe = f'/proc/self/fd/{fd}'
+    # Compare the exact upstream PostgreSQL input archive named in both source
+    # commits. These are staging-input sizes, not sizes measured inside either
+    # final EXE. No files are extracted and all archive bytes remain in memory.
+    pg_url = 'https://get.enterprisedb.com/postgresql/postgresql-17.7-1-windows-x64-binaries.zip'
+    pg_expected = '2aacc055d9bac49763ac0164759c13866bc0235123d7ffdbb6a6aaa20dc25d9a'
+    with urllib.request.urlopen(urllib.request.Request(pg_url, headers={'User-Agent': 'kayan-historical-inventory'}), timeout=300) as response:
+        pg_raw = response.read()
+    if hashlib.sha256(pg_raw).hexdigest() != pg_expected:
+        raise RuntimeError('PostgreSQL source archive SHA-256 mismatch')
+    pg = zipfile.ZipFile(io.BytesIO(pg_raw))
+    matches = [item.filename for item in pg.infolist() if item.filename.replace('\\\\', '/').lower().endswith('/bin/initdb.exe')]
+    if len(matches) != 1:
+        raise RuntimeError('PostgreSQL source archive root is ambiguous')
+    root = matches[0].replace('\\\\', '/')[:-len('bin/initdb.exe')]
+    groups = {}
+    for item in pg.infolist():
+        name = item.filename.replace('\\\\', '/')
+        if not name.startswith(root) or item.is_dir():
+            continue
+        rel = name[len(root):]
+        top = rel.split('/', 1)[0] if '/' in rel else '(root files)'
+        sizes = groups.setdefault(top, [0, 0, 0])
+        sizes[0] += 1
+        sizes[1] += item.file_size
+        sizes[2] += item.compress_size
+    report(f'PostgreSQL input ZIP: {len(pg_raw)} bytes; SHA-256 verified; group sizes below are not final EXE sizes.')
+    for name, (files, size, compressed) in sorted(groups.items(), key=lambda x: -x[1][1]):
+        included = name in ('bin', 'lib', 'share')
+        report(f'PostgreSQL `{name}`: {files} files, {size} uncompressed bytes, {compressed} ZIP-compressed bytes; new runtime tree {"included" if included else "not copied as a tree"}.')
     version = subprocess.run(['innoextract', '--version'], capture_output=True, text=True, timeout=15)
     report(f"Inno extractor: `{version.stdout.splitlines()[0] if version.stdout else 'unknown'}` from runner OS packages.")
     listing = subprocess.run(['innoextract', '--list', '--list-sizes', exe], pass_fds=(fd,), capture_output=True, text=True, errors='replace', timeout=180)
