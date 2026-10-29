@@ -136,6 +136,10 @@ jobs:
           # never publish a whole workspace, environment file, or key directory.
           & node --input-type=module -e "import {scanPrivateMaterialStream as scan} from './scripts/verify-extracted-windows-installer.mjs'; import {createReadStream} from 'node:fs'; for (const p of process.argv.slice(1)) if (await scan(createReadStream(p))) throw Error('Refusing to export generated source with key marker');" @paths
           if ($LASTEXITCODE -ne 0) { throw 'Generated source policy failed' }
+          $beforeStatus = @(git status --porcelain=v1 --untracked-files=all)
+          Write-Output ("::notice title=Status before diff::" + (($beforeStatus | Select-Object -First 20) -join ' | '))
+          $changedPaths = @(git diff --name-only -- @paths)
+          Write-Output ("::notice title=Paths in diff::" + ($changedPaths -join ' | '))
           & git diff --binary --output="$env:RUNNER_TEMP/generated-source.patch" -- @paths
           if ($LASTEXITCODE -ne 0) { throw 'Could not record generated diff' }
           # Artifact storage may be inaccessible in restricted environments.
@@ -165,6 +169,16 @@ jobs:
           }
           $changes = @(git status --porcelain=v1 --untracked-files=all)
           if ($changes.Count) {
+            $diffNames = @(git diff --name-only)
+            Write-Output ("::notice title=Paths in final diff::" + ($diffNames -join ' | '))
+            foreach ($line in $changes) {
+              $path = $line.Substring(3)
+              if ($path -match '^(linux/flutter/generated_|macos/Flutter/GeneratedPluginRegistrant\.swift$|windows/flutter/generated_)') {
+                $headBlob = (git rev-parse "HEAD:$path").Trim()
+                $workBlob = (git hash-object -- "$path").Trim()
+                Write-Output "::notice title=Generated blob comparison::$path HEAD=$headBlob worktree=$workBlob"
+              }
+            }
             $detail = (($changes | Select-Object -First 30) -join ' | ').Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
             Write-Output "::error title=Dirty source after Flutter preflight::$detail"
             throw 'Source checkout is not clean'

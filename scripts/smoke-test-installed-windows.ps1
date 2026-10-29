@@ -595,7 +595,15 @@ try {
         Fail ("Corrupt license state did not fail closed with LICENSE_STATE_DAMAGED (HTTP $([int]$damagedResponse.StatusCode)): " + $damagedResponse.Content)
       }
       if ([IO.File]::ReadAllText($statePath) -ne 'not-json') { Fail 'The application silently overwrote the corrupted license state instead of preserving it for diagnosis.' }
-      Write-Host 'PASS: the app process and local health API recovered; corrupt license state fails closed without being silently rewritten.'
+      # Use the already authenticated synthetic administrator on a real
+      # business route: health and license/status alone do not prove fail-closed.
+      $businessResponse = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/parties/customers" -Headers $headers -TimeoutSec 15
+      $businessBody = $businessResponse.Content | ConvertFrom-Json
+      if ([int]$businessResponse.StatusCode -ne 503 -or $businessBody.code -ne 'LICENSE_STATE_DAMAGED') {
+        Fail ("Corrupted license state did not block the installed business route (HTTP $([int]$businessResponse.StatusCode)).")
+      }
+      if ([IO.File]::ReadAllText($statePath) -ne 'not-json') { Fail 'The blocked business request altered the corrupt license state.' }
+      Write-Host 'PASS: health recovered and an authenticated business route failed closed without rewriting corrupt license state.'
 
       Stop-KayanSmokeClient -Process $client -Port $apiPort
       $client = $null
