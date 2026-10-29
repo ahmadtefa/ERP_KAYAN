@@ -542,7 +542,7 @@ jobs:
 
   publish-windows:
     name: Publish independently verified Windows installer
-    needs: build
+    needs: [build, inspect-final, smoke-final]
     if: >-
       ${{ github.repository == 'ahmadtefa/ERP_KAYAN' && github.ref == 'refs/heads/main' &&
           github.event_name == 'push' && needs.build.outputs.build_mode == 'product' }}
@@ -563,16 +563,36 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/check-release-environment.mjs
-      # The build's candidate upload is intentionally still blocked. Enabling
-      # it requires final Inno content inspection before upload; this step
-      # therefore fails closed until that independently reviewed work exists.
-      - name: Retrieve candidate from this exact workflow run
+      # Consume only the artifact produced by inspect-final, which already
+      # built and fixture-tested the pinned extractor, checked its SHA-256,
+      # verified the exact source commit, and inspected the exact installer.
+      # smoke-final must also pass before this publishing job can start.
+      - name: Retrieve the exact inspected candidate from this workflow run
         uses: actions/download-artifact@v4
         with:
-          name: KAYAN-ERP-Windows-x64-PRODUCT-CANDIDATE-NOT-FOR-RELEASE
+          name: windows-installer-inspected-internal-${{ github.sha }}
           path: release-candidate
-      - name: Reinspect the final installer payload
-        run: node scripts/inspect-final-inno.mjs --artifact release-candidate/KAYAN-ERP-Setup.exe
+      - name: Revalidate inspected artifact identity and provenance
+        env:
+          EXPECTED_SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          node --input-type=module - <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { readFile } from 'node:fs/promises';
+          const expected = process.env.EXPECTED_SOURCE_COMMIT;
+          const bytes = await readFile('release-candidate/KAYAN-ERP-Setup.exe');
+          const actual = createHash('sha256').update(bytes).digest('hex');
+          const build = JSON.parse((await readFile('release-candidate/build-evidence.json', 'utf8')).replace(/^\\uFEFF/, ''));
+          const report = JSON.parse((await readFile('release-candidate/payload-verification.json', 'utf8')).replace(/^\\uFEFF/, ''));
+          if (!/^[0-9a-f]{40}$/i.test(expected ?? '') ||
+              build.sourceCommit !== expected || report.sourceCommit !== expected ||
+              build.mode !== 'product' || build.sha256 !== actual ||
+              report.installer?.sha256 !== actual || build.size !== bytes.length ||
+              report.result !== 'payload-inspection-passed-not-install-tested') {
+            throw new Error('The inspected installer, build evidence, payload report, or source commit do not match.');
+          }
+          console.log(`Verified inspected installer SHA-256: ${actual}; bytes: ${bytes.length}; source: ${expected}`);
+          NODE
       - name: Verify independent signed evidence for the exact installer
         env:
           KAYAN_WINDOWS_RELEASE_EVIDENCE: ${{ vars.KAYAN_WINDOWS_RELEASE_EVIDENCE }}
