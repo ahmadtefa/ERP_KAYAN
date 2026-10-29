@@ -116,6 +116,34 @@ jobs:
             & node scripts/report-flutter-test-failures.mjs $tests
             throw 'Invoice unit selection tests failed'
           }
+      - name: Record reviewed generated-source differences
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $paths = @(
+            'lib/l10n/generated/app_localizations.dart',
+            'lib/l10n/generated/app_localizations_ar.dart',
+            'lib/l10n/generated/app_localizations_en.dart',
+            'linux/flutter/generated_plugin_registrant.cc',
+            'linux/flutter/generated_plugin_registrant.h',
+            'linux/flutter/generated_plugins.cmake',
+            'macos/Flutter/GeneratedPluginRegistrant.swift',
+            'windows/flutter/generated_plugin_registrant.cc',
+            'windows/flutter/generated_plugin_registrant.h',
+            'windows/flutter/generated_plugins.cmake'
+          )
+          # Only known generated source files are eligible for this diagnostic;
+          # never publish a whole workspace, environment file, or key directory.
+          & node --input-type=module -e "import {scanPrivateMaterialStream as scan} from './scripts/verify-extracted-windows-installer.mjs'; import {createReadStream} from 'node:fs'; for (const p of process.argv.slice(1)) if (await scan(createReadStream(p))) throw Error('Refusing to export generated source with key marker');" @paths
+          if ($LASTEXITCODE -ne 0) { throw 'Generated source policy failed' }
+          & git diff --binary --output="$env:RUNNER_TEMP/generated-source.patch" -- @paths
+          if ($LASTEXITCODE -ne 0) { throw 'Could not record generated diff' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generated-source-diff-${{ github.sha }}
+          path: ${{ runner.temp }}/generated-source.patch
+          if-no-files-found: error
+          retention-days: 1
       - name: Check source and install Inno Setup
         shell: pwsh
         run: |
