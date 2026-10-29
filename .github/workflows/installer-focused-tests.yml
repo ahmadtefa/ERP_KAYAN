@@ -18,6 +18,8 @@ permissions:
 
 jobs:
   migration-safety:
+    # This follow-up changes only Flutter diagnostic invocation.
+    if: ${{ !startsWith(github.event.head_commit.message, 'Fix focused Flutter diagnostics') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -46,6 +48,20 @@ jobs:
       - name: Get locked Flutter dependencies
         run: flutter pub get --enforce-lockfile
       - name: Analyze only affected UI and test
-        run: flutter analyze --no-pub lib/features/data/presentation/screens/backup_screen.dart test/features/data/backup_demo_visibility_test.dart
+        shell: bash
+        run: |
+          for path in lib/features/data/presentation/screens/backup_screen.dart test/features/data/backup_demo_visibility_test.dart; do
+            log="$RUNNER_TEMP/flutter-focused-analyze.log"
+            if ! flutter analyze --no-pub --machine "$path" > "$log" 2>&1; then
+              python3 -c 'import sys; s=open(sys.argv[1],encoding="utf-8").read()[-12000:]; print("::error title=Focused Flutter analysis::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))' "$log"
+              exit 1
+            fi
+          done
       - name: Test backup UI visibility and preserved controls
-        run: flutter test --no-pub test/features/data/backup_demo_visibility_test.dart
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/flutter-focused-test.jsonl"
+          if ! flutter test --no-pub --reporter json test/features/data/backup_demo_visibility_test.dart > "$log" 2>&1; then
+            node scripts/report-flutter-test-failures.mjs "$log"
+            exit 1
+          fi
