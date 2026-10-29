@@ -1,0 +1,6 @@
+KAYAN ERP licensing public key
+Fingerprint (SHA-256, first 128 bits, uppercase groups): F932-38B0-CDC0-A81D-345F-160C-F8DC-DBB7
+Algorithm: Ed25519
+Public key file: distribution/windows/public-key.pem
+
+The matching private key must remain operator-only and must never be committed to this public repository or embedded in a customer ERP installer or publicly downloadable APK. Configure it as the GitHub Actions secret KAYAN_LICENCE_PRIVATE_KEY before building a product installer. Back up the private key securely; changing it requires rebuilding every product installation that verifies licences with this key.

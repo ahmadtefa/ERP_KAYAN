@@ -49,6 +49,7 @@ const arch = arg('arch', process.arch);
 const target = `${platform}-${arch}`;
 const outDir = resolve(arg('out', join(TOOL, 'dist')));
 const name = platform === 'win32' ? 'KAYAN-Key-Generator.exe' : 'kayan-key-generator';
+const runtimeName = platform === 'win32' ? 'KAYAN-Key-Generator-Server.exe' : name;
 
 function run(command, args, options = {}) {
   execFileSync(command, args, { stdio: 'inherit', cwd: HERE, ...options });
@@ -122,7 +123,7 @@ if (!existsSync(baseNode)) {
 }
 
 mkdirSync(outDir, { recursive: true });
-const output = join(outDir, name);
+const output = join(outDir, runtimeName);
 copyFileSync(baseNode, output);
 log(`base runtime ${baseNode} (${Math.round(statSync(baseNode).size / 1048576)} MB)`);
 
@@ -142,7 +143,34 @@ run(process.execPath, [
   FUSE,
 ]);
 
-// ── 5. keep the provenance beside the binary ───────────────────────────────
+// ── 5. build the native Windows operator window ─────────────────────────────
+if (platform === 'win32') {
+  const project = join(TOOL, 'windows', 'KayanKeyGenerator.csproj');
+  const publishDir = join(work, 'windows-publish');
+  rmSync(publishDir, { recursive: true, force: true });
+  log('publishing the native WinForms/WebView2 operator window (self-contained .NET)');
+  run('dotnet', [
+    'publish', project,
+    '--configuration', 'Release',
+    '--runtime', 'win-x64',
+    '--self-contained', 'true',
+    '-p:PublishSingleFile=true',
+    '-p:IncludeNativeLibrariesForSelfExtract=true',
+    '-p:DebugType=None',
+    '-p:DebugSymbols=false',
+    '--output', publishDir,
+  ], { cwd: ROOT });
+  for (const entry of (await import('node:fs')).readdirSync(publishDir, { withFileTypes: true })) {
+    if (entry.isFile()) {
+      copyFileSync(join(publishDir, entry.name), join(outDir, entry.name));
+    }
+  }
+  if (!existsSync(join(outDir, name))) {
+    throw new Error(`Native Windows window was not published: ${join(outDir, name)}`);
+  }
+}
+
+// ── 6. keep the provenance beside the binary ──────────────────────────────────
 const header = readFileSync(bundle, 'utf8');
 if (header.includes('BEGIN PRIVATE KEY')) {
   rmSync(output, { force: true });
@@ -156,8 +184,9 @@ writeFileSync(
   `KAYAN Key Generator — build information
 built at      : ${new Date().toISOString()}
 target        : ${target}
-entry point   : ${name}
-node runtime  : ${nodeVersion} (bundled; no install needed)
+entry point   : ${name} (native Windows window on win32)
+local service  : ${runtimeName} (bundled Node runtime)
+node runtime   : ${nodeVersion} (bundled; no Node install needed)
 built from    : ${ROOT}
 tool version  : ${JSON.parse(readFileSync(join(TOOL, 'package.json'), 'utf8')).version}
 source        : tools/license-generator/kayan-license.mjs
@@ -172,6 +201,8 @@ if (platform !== 'win32') {
   execFileSync('chmod', ['+x', output]);
 }
 
-const size = Math.round(statSync(output).size / 1048576);
-log(`done: ${output} (${size} MB)`);
+const deliverable = join(outDir, name);
+const size = Math.round(statSync(deliverable).size / 1048576);
+log(`done: ${deliverable} (${size} MB)`);
+if (platform === 'win32') log(`local service: ${join(outDir, runtimeName)}`);
 log('no signing key is embedded; the operator supplies the key folder.');

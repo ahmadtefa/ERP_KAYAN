@@ -46,6 +46,8 @@ const exe = resolve(arg('exe', join(HERE, '..', 'dist', process.platform === 'wi
   ? 'KAYAN-Key-Generator.exe'
   : 'kayan-key-generator')));
 
+const serverExe = process.platform === 'win32' ? join(dirname(exe), 'KAYAN-Key-Generator-Server.exe') : exe;
+
 let failures = 0;
 let passes = 0;
 
@@ -96,7 +98,7 @@ function assert(condition, message) {
 
 function run(args, options = {}) {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(exe, args, { windowsHide: true, ...options });
+    const child = spawn(serverExe, args, { windowsHide: true, ...options });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => {
@@ -122,7 +124,7 @@ function freePort() {
 }
 
 async function startWindow(home, port) {
-  const child = spawn(exe, ['gui', '--no-browser', '--port', String(port), '--home', home], {
+  const child = spawn(serverExe, ['gui', '--no-browser', '--port', String(port), '--home', home], {
     windowsHide: true,
   });
   let output = '';
@@ -154,6 +156,10 @@ async function main() {
     console.error(`The executable does not exist: ${exe}`);
     process.exit(2);
   }
+  if (!existsSync(serverExe)) {
+    console.error(`The bundled local service does not exist: ${serverExe}`);
+    process.exit(2);
+  }
 
   const home = mkdtempSync(join(tmpdir(), 'kayan-keygen-smoke-'));
   const cleanup = [home];
@@ -161,6 +167,32 @@ async function main() {
   let licenceId = null;
 
   try {
+    await check('the packaged Windows EXE opens its own native window without launching the default browser', async () => {
+      if (process.platform !== 'win32') return 'not applicable on this host; Windows workflow runs this check';
+      const marker = join(home, 'native-window-smoke.txt');
+      const child = spawn(exe, ['--smoke-marker', marker, '--home', home], { windowsHide: true, stdio: 'ignore' });
+      try {
+        const deadline = Date.now() + 30_000;
+        while (Date.now() < deadline && !existsSync(marker)) {
+          if (child.exitCode !== null) throw new Error(`native window exited early with code ${child.exitCode}`);
+          await new Promise((done) => setTimeout(done, 200));
+        }
+        assert(existsSync(marker), 'the native window did not finish loading within 30 seconds');
+        const evidence = readFileSync(marker, 'utf8');
+        assert(evidence.includes('NATIVE_WINDOW_READY'), `unexpected window marker: ${evidence}`);
+        const exitDeadline = Date.now() + 5_000;
+        while (Date.now() < exitDeadline && child.exitCode === null) {
+          await new Promise((done) => setTimeout(done, 100));
+        }
+        assert(child.exitCode === 0, `the native window did not close cleanly after smoke (${child.exitCode})`);
+        return 'WinForms window and embedded WebView2 loaded the local operator UI; smoke window closed cleanly and wrapper does not invoke an external browser';
+      } finally {
+        if (child.exitCode === null) {
+          try { child.kill(); } catch { /* already exited */ }
+        }
+      }
+    });
+
     await check('the executable starts and reports its version', async () => {
       const { code, stdout } = await run(['version']);
       assert(code === 0, `exit code ${code}`);
@@ -240,6 +272,74 @@ async function main() {
       }
       assert(refused, 'the product accepted a key whose signature was altered');
       return 'refused';
+    });
+
+    await check('an empty register can be created from the packaged operator window before issuing', async () => {
+      const emptyHome = mkdtempSync(join(tmpdir(), 'kayan-keygen-empty-register-'));
+      cleanup.push(emptyHome);
+      const init = await run(['init', '--home', emptyHome]);
+      assert(init.code === 0, `initialise empty-register test: ${init.stdout}`);
+
+      const port = await freePort();
+      const window = await startWindow(emptyHome, port);
+      cleanup.push(window.child);
+      try {
+        assert(window.url, `the empty-register window did not start:\n${window.output()}`);
+        const token = window.url.split('#')[1];
+        const headers = { 'x-kayan-token': token, 'content-type': 'application/json' };
+        const page = await fetch(`http://127.0.0.1:${port}/`);
+        const html = await page.text();
+        assert(html.includes('id="create-licence"'), 'the page has no create-licence control');
+        assert(html.includes('if (!selectedLicence())'), 'the UI has no guard against issuing without a selected licence');
+        assert(html.includes('لا يوجد ترخيص مسجّل') && html.includes('Register a licence here before issuing'),
+          'the empty-register instructions are missing');
+
+        const initial = await fetch(`http://127.0.0.1:${port}/api/state`, { headers });
+        assert(initial.status === 200, `empty state status ${initial.status}`);
+        const initialState = await initial.json();
+        assert(initialState.hasKey === true, 'the test signing key was not detected');
+        assert(Array.isArray(initialState.licences) && initialState.licences.length === 0,
+          'the fresh test register was not empty');
+
+        const refused = await fetch(`http://127.0.0.1:${port}/api/issue`, {
+          method: 'POST', headers,
+          body: JSON.stringify({ type: 'ACTIVATION', licenceId: '', machineId: 'KM-SMOKE-1111-2222-3333', term: '6m', seats: 3 }),
+        });
+        assert(refused.status === 400, `empty licence issue status ${refused.status}`);
+        const refusal = await refused.json();
+        assert(/There is no licence/.test(refusal.error || ''), `unexpected empty-register refusal: ${JSON.stringify(refusal)}`);
+
+        const created = await fetch(`http://127.0.0.1:${port}/api/licence-create`, {
+          method: 'POST', headers,
+          body: JSON.stringify({ ref: 'empty-register GUI smoke', seats: 3, term: '6m' }),
+        });
+        assert(created.status === 200, `licence create status ${created.status}`);
+        const createdBody = await created.json();
+        const createdId = createdBody.licence && createdBody.licence.licenseId;
+        assert(/^lic_[0-9a-f]{16}$/.test(createdId || ''), `invalid created licence: ${JSON.stringify(createdBody)}`);
+
+        const issued = await fetch(`http://127.0.0.1:${port}/api/issue`, {
+          method: 'POST', headers,
+          body: JSON.stringify({
+            type: 'ACTIVATION', licenceId: createdId,
+            machineId: 'KM-SMOKE-1111-2222-3333', term: '6m', seats: 3,
+          }),
+        });
+        assert(issued.status === 200, `issue after create status ${issued.status}`);
+        const issuedBody = await issued.json();
+        assert(/^KYN1\./.test(issuedBody.key || ''), 'no key issued after creating the licence');
+
+        const product = await import(pathToFileURL(BACKEND_KEY).href);
+        const publicKey = product.loadPublicKey(readFileSync(join(emptyHome, 'public-key.pem'), 'utf8'));
+        const parsed = product.verifyKey(issuedBody.key, publicKey);
+        assert(parsed.payload.licenseId === createdId, 'the signed key does not reference the newly created licence');
+        assert(parsed.payload.machineId === 'KM-SMOKE-1111-2222-3333', 'the signed key machine id differs');
+        return `empty register explained; blank issue refused; GUI API created ${createdId}; issued key verified by product`;
+      } finally {
+        window.child.kill();
+        await new Promise((done) => setTimeout(done, 300));
+        if (window.child.exitCode === null) window.child.kill('SIGKILL');
+      }
     });
 
     await check('the operator window serves its page and answers only with its token', async () => {

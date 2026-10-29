@@ -13,10 +13,12 @@
  *     node kayan-license.mjs licence create --ref "شركة النور" --seats 5 --term 1y
  *     node kayan-license.mjs issue activation --licence lic_xxx --machine KM-...
  *
- * Run it with no command to open the operator window (a local page in the
- * default browser); every action there calls the same functions as the
- * command line below, so the two front ends cannot disagree. `gui` opens it
- * explicitly and `--no-browser` serves it without opening anything.
+ * The Windows packaged launcher opens the operator UI in its own native
+ * WebView2 window and starts this file's packaged local service hidden. In a
+ * source checkout, running with no command or `gui` still opens the local page
+ * in the default browser; `gui --no-browser` serves it without a browser. Every
+ * UI action calls the same functions as the CLI, so the two front ends cannot
+ * disagree.
  *
  * The packaged `KAYAN-Key-Generator.exe` is this file bundled with a Node
  * runtime; it does not contain a signing key, and it never prints one.
