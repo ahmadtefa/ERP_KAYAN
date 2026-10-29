@@ -4,7 +4,7 @@ name: Windows candidate preflight (no publication)
 # installation/upgrade/licence-recovery test and cannot authorize a release.
 on:
   push:
-    branches: ['arena/2d794f08-erp-kayan']
+    branches: ['arena/2d794f08-erp-kayan', 'fix/windows-installer-inspection-20261029']
   workflow_dispatch:
 
 permissions:
@@ -26,8 +26,25 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22.22.3'
-      - name: Install Inno Setup
-        run: choco install innosetup --no-progress -y
+      - name: Install Inno Setup and 7-Zip explicitly
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install innosetup 7zip --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw 'Installing Inno Setup / 7-Zip failed.' }
+          $sevenZip = Get-Command 7z.exe -ErrorAction SilentlyContinue
+          if (-not $sevenZip) {
+            $candidate = Join-Path $env:ProgramFiles '7-Zip\7z.exe'
+            if (Test-Path -LiteralPath $candidate) { $sevenZip = @{ Source = $candidate } }
+          }
+          if (-not $sevenZip) { throw '7-Zip executable was not found after installation.' }
+          Write-Output "7-Zip executable: $($sevenZip.Source)"
+          & $sevenZip.Source | Select-Object -First 2
+          if ($LASTEXITCODE -ne 0) { throw '7-Zip did not execute successfully.' }
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path -LiteralPath $iscc)) { $iscc = Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe' }
+          if (-not (Test-Path -LiteralPath $iscc)) { throw 'Inno Setup compiler was not found after installation.' }
+          Write-Output "Inno Setup compiler: $((Get-Item -LiteralPath $iscc).VersionInfo.FileVersion)"
       - name: Build and inspect a synthetic Inno payload
         shell: pwsh
         run: |
