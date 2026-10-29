@@ -79,7 +79,7 @@ export class HealthController {
     try {
       const rows = await this.withTimeout(
         this.prisma.$queryRaw<Array<{ name: string }>>`
-          SELECT current_database()::text AS name
+          SELECT CAST(current_database() AS VARCHAR(63)) AS name
         `,
         HealthController.DATABASE_DETAILS_TIMEOUT_MS,
         'database-name query',
