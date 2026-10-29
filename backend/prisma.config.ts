@@ -20,7 +20,12 @@ export default defineConfig({
   schema: 'prisma/schema.prisma',
   engine: classicMigrations ? 'classic' : 'js',
   ...(classicMigrations
-    ? {}
+    ? {
+        // A config file disables implicit env loading, and the classic schema
+        // engine needs the datasource URL explicitly (the JS adapter path does
+        // not use it for schema-engine connections).
+        datasource: { url: process.env.DATABASE_URL ?? '' },
+      }
     : {
         experimental: { adapter: true },
         adapter: async () => {
