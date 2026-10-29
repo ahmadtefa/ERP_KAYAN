@@ -61,9 +61,8 @@ describe('HealthController', () => {
 
   it("serializes the database name as JSON to avoid PostgreSQL's internal name type", async () => {
     // `current_database()` returns PostgreSQL's `name` type, which Prisma
-    // cannot deserialise in a raw query. Without the cast, /health reports a
-    // working database as down and no installation can ever prove which
-    // database it opened.
+    // cannot be deserialised in a raw query. Serializing it as JSON gives
+    // Prisma a supported result type while preserving the exact database name.
     await controller.check();
     const statements = mockPrisma.$queryRaw.mock.calls.map(sqlOfCall);
     const nameQuery = statements.find((sql: string) => /current_database/i.test(sql));
