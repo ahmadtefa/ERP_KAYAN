@@ -28,7 +28,8 @@ jobs:
           node-version: '22.22.3'
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
-      - name: Build and inspect a synthetic Inno payload
+      - name: Build a synthetic Inno payload for independent inspection
+        id: probe_build
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -56,8 +57,16 @@ jobs:
           if (-not (Test-Path -LiteralPath $iscc)) { throw 'Inno compiler missing from runner.' }
           & $iscc $iss
           if ($LASTEXITCODE -ne 0) { throw 'Synthetic Inno probe build failed.' }
-          & node scripts/inspect-final-inno.mjs --artifact (Join-Path $dir 'probe.exe') --mode test-signed
-          if ($LASTEXITCODE -ne 0) { throw 'Synthetic Inno inspection failed.' }
+          "dir=$dir" >> $env:GITHUB_OUTPUT
+      - name: Transfer synthetic public-key-only probe for inspection
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: synthetic-inno-probe-raw-${{ github.sha }}
+          path: |
+            ${{ steps.probe_build.outputs.dir }}/probe.exe
+            ${{ steps.probe_build.outputs.dir }}/public-key.pem
+          if-no-files-found: error
+          retention-days: 1
   preflight:
     if: ${{ github.event_name != 'push' || github.event.before != '162685d56b07a5ddbdcbfc04ee387b58e99bfc28' || github.event.head_commit.message != 'Prepare production packaging probe' }}
     name: Validate the exact Windows candidate
@@ -201,19 +210,115 @@ jobs:
           $file = Get-Item -LiteralPath 'build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe'
           $sha = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
           Write-Output "::notice title=Diagnostic EXE::$($file.Name) bytes=$($file.Length) SHA256=$sha source=$env:GITHUB_SHA; not installable or releasable"
-      - name: Inspect diagnostic Inno payload before upload
-        id: diagnostic_inspect
+      # The raw executable is a one-day internal hand-off to the independent
+      # inspector, never an installable product or release candidate.
+      - name: Record diagnostic installer identity
         if: ${{ always() && steps.diagnostic_build.outcome == 'success' }}
-        run: node scripts/inspect-final-inno.mjs --artifact build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe --mode test-signed
-      - name: Upload non-installable diagnostic installer
-        if: ${{ always() && steps.diagnostic_inspect.outcome == 'success' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        shell: pwsh
+        run: |
+          $file = Get-Item -LiteralPath build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe
+          [ordered]@{sourceCommit=$env:GITHUB_SHA; sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); size=$file.Length} | ConvertTo-Json | Set-Content -LiteralPath build/windows-installer/diagnostic-evidence.json -Encoding utf8
+      - name: Transfer raw non-installable diagnostic only to inspection
+        if: ${{ always() && steps.diagnostic_build.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: windows-test-only-diagnostic-${{ github.sha }}
-          path: build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe
+          name: diagnostic-inno-raw-${{ github.sha }}
+          path: |
+            build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe
+            build/windows-installer/diagnostic-evidence.json
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
       - name: Report a failed screenshot baseline run
         if: ${{ always() && steps.screenshots.outcome == 'failure' }}
         shell: pwsh
         run: throw 'The screenshot baseline generator failed; see the test run. This is not release evidence.'
+
+  diagnostic-inspect:
+    name: Inspect synthetic and diagnostic Inno on Linux
+    needs: [inno-probe, preflight]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+      - run: node --test scripts/windows-candidate-preflight.test.mjs scripts/verify-synthetic-inno-probe.test.mjs scripts/inspect-final-inno.test.mjs scripts/verify-extracted-windows-installer.test.mjs
+      - name: Install extractor build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential cmake libboost-all-dev liblzma-dev zlib1g-dev libbz2-dev unzip
+      - name: Build and verify pinned Inno 6.7-compatible extractor and fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/innoextract-src"
+          git clone --no-checkout https://github.com/mplabsorg/innoextract.git "$src"
+          git -C "$src" fetch --depth=1 origin refs/heads/support-inno-7.1
+          git -C "$src" checkout --detach FETCH_HEAD
+          test "$(git -C "$src" rev-parse HEAD)" = 34f65747e4a57d5de2582bb1ad3d540f440a3983
+          cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
+          cmake --build "$src/build" --parallel 2
+          ctest --test-dir "$src/build" --output-on-failure
+          extractor="$(find "$src/build" -type f -name innoextract -perm -111 -print -quit)"
+          test -n "$extractor"
+          "$extractor" --version
+          sha256sum "$extractor"
+          echo "KAYAN_INNOEXTRACT=$extractor" >> "$GITHUB_ENV"
+          fixture_zip="$RUNNER_TEMP/fixtures.zip"
+          curl -fsSL https://github.com/mplabsorg/innoextract/releases/download/format-fixtures-v1/innoextract-format-fixtures.zip -o "$fixture_zip"
+          echo "d77d2c447dd46edaeab6b4ea5d7102000b0b8cd66970f18cea2b1eb20f21aa52  $fixture_zip" | sha256sum -c -
+          unzip -q "$fixture_zip" -d "$RUNNER_TEMP"
+          python3 "$src/tests/check-fixtures.py" --extractor "$extractor" --fixtures "$RUNNER_TEMP/format-fixtures" --output "$RUNNER_TEMP/fixture-results"
+          echo "KAYAN_INNOEXTRACT_SHA256=$(sha256sum "$extractor" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - name: Retrieve the same-run synthetic probe
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          name: synthetic-inno-probe-raw-${{ github.sha }}
+          path: probe
+      - name: Verify synthetic extractor behavior and refuse an incomplete installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -m 700 probe-extracted
+          "$KAYAN_INNOEXTRACT" --extract --test --no-extract-unknown --collisions error --output-dir probe-extracted -- probe/probe.exe
+          node scripts/verify-synthetic-inno-probe.mjs probe-extracted probe/public-key.pem
+          node --input-type=module <<'NODE'
+          import { spawnSync } from 'node:child_process';
+          const r = spawnSync(process.execPath, ['scripts/inspect-final-inno.mjs', '--artifact', 'probe/probe.exe', '--mode', 'test-signed', '--extractor', process.env.KAYAN_INNOEXTRACT, '--extractor-sha256', process.env.KAYAN_INNOEXTRACT_SHA256, '--source-commit', process.env.GITHUB_SHA], {encoding:'utf8'});
+          if (r.error || r.status === 0 || !r.stderr.includes('Required runtime payload entries are missing')) throw Error('Incomplete synthetic installer was not rejected as expected');
+          console.log('Synthetic archive extracted correctly and was rejected as an incomplete installer.');
+          NODE
+      - name: Retrieve the same-run diagnostic installer
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          name: diagnostic-inno-raw-${{ github.sha }}
+          path: diagnostic
+      - name: Check diagnostic installer identity
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          const e = JSON.parse(readFileSync('diagnostic/diagnostic-evidence.json', 'utf8').replace(/^\uFEFF/, ''));
+          const b = readFileSync('diagnostic/KAYAN-ERP-TEST-ONLY-Setup.exe');
+          if (e.sourceCommit !== process.env.GITHUB_SHA || e.size !== b.length || e.sha256 !== createHash('sha256').update(b).digest('hex')) throw Error('Diagnostic installer identity mismatch');
+          NODE
+      - name: Inspect diagnostic Inno payload before upload
+        shell: bash
+        run: |
+          node scripts/inspect-final-inno.mjs --artifact diagnostic/KAYAN-ERP-TEST-ONLY-Setup.exe --mode test-signed \
+            --extractor "$KAYAN_INNOEXTRACT" --extractor-sha256 "$KAYAN_INNOEXTRACT_SHA256" \
+            --source-commit "$GITHUB_SHA" --report diagnostic/payload-verification.json
+      - name: Upload inspected non-installable diagnostic only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-test-only-diagnostic-${{ github.sha }}
+          path: |
+            diagnostic/KAYAN-ERP-TEST-ONLY-Setup.exe
+            diagnostic/payload-verification.json
+          if-no-files-found: error
+          retention-days: 7
