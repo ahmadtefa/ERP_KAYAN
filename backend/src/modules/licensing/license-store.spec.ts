@@ -3,7 +3,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { LicenseStateError, LicenseStore, emptyState } from './license-store';
+import {
+  LicenseStateError,
+  LicenseStore,
+  emptyState,
+  mergeTrustStates,
+} from './license-store';
 
 /**
  * The state file is the one part of the licence that is not in PostgreSQL, so
@@ -144,5 +149,97 @@ describe('emptyState', () => {
       clockState: 'OK',
       enforcement: null,
     });
+  });
+
+  it('survives a power cut between the mirror write and the primary write', () => {
+    const store = new LicenseStore(dir);
+    store.update((state) => {
+      state.maxSeatsUsed = 3;
+      state.appliedKeys = ['key_first'];
+    });
+    // The state as it was written by the update above (sequence n).
+    const primaryBefore = readFileSync(join(dir, 'license-state.json'));
+    store.update((state) => {
+      state.maxSeatsUsed = 4;
+      state.appliedKeys.push('key_second');
+    });
+    // Simulate the machine losing power after the mirror was renamed into
+    // place but before the primary was: the primary is one step behind, and
+    // both copies are still authentic.
+    writeFileSync(join(dir, 'license-state.json'), primaryBefore);
+
+    const reopened = new LicenseStore(dir);
+    // The newer copy wins, so the interrupted update is not lost.
+    expect(reopened.current.maxSeatsUsed).toBe(4);
+    expect(reopened.current.appliedKeys).toEqual(['key_first', 'key_second']);
+    // ...and the stale copy is brought forward instead of being left behind.
+    expect(readFileSync(join(dir, 'license-state.json'))).toEqual(
+      readFileSync(join(dir, 'license-state.backup.json')),
+    );
+  });
+
+  it('ignores a temporary file left behind by a killed write', () => {
+    const store = new LicenseStore(dir);
+    store.update((state) => {
+      state.maxSeatLimit = 5;
+    });
+    writeFileSync(
+      join(dir, `license-state.json.${process.pid}.1234abcd.tmp`),
+      '{"state":',
+    );
+    expect(new LicenseStore(dir).current.maxSeatLimit).toBe(5);
+  });
+
+  it('merges two authenticated copies that raced to the same sequence', () => {
+    // Both copies are honest: the union must not lose what either one knew.
+    const base = emptyState('install-1');
+    const first = { ...base, sequence: 4, maxSeatsUsed: 2, appliedKeys: ['key_a'] };
+    const second = {
+      ...base,
+      sequence: 4,
+      maxSeatLimit: 9,
+      appliedKeys: ['key_b'],
+      lastSeenAt: '2026-05-01T10:00:00.000Z',
+    };
+    const merged = mergeTrustStates(first, second);
+    expect(merged.sequence).toBe(5);
+    expect(merged.maxSeatsUsed).toBe(2);
+    expect(merged.maxSeatLimit).toBe(9);
+    expect(merged.appliedKeys).toEqual(['key_a', 'key_b']);
+    expect(merged.lastSeenAt).toBe('2026-05-01T10:00:00.000Z');
+  });
+
+  it('refuses to merge copies from different installations', () => {
+    const first = emptyState('install-1');
+    const second = { ...emptyState('install-2'), sequence: 1 };
+    expect(() => mergeTrustStates(first, second)).toThrow(LicenseStateError);
+  });
+
+  it('stays readable when two writers interleave', () => {
+    const store = new LicenseStore(dir);
+    // A second process that read the state before the first one wrote: the
+    // realistic stale writer (a second window, or the repair tool).
+    const stale = new LicenseStore(dir, {
+      secret: readFileSync(join(dir, 'state.key'), 'utf8').trim(),
+    });
+    store.update((state) => {
+      state.appliedKeys.push('key_from_first');
+    });
+    stale.update((state) => {
+      state.appliedKeys.push('key_from_second');
+    });
+    stale.update((state) => {
+      state.maxSeatLimit = 9;
+    });
+    const reopened = new LicenseStore(dir);
+    // Two processes writing at once cannot produce a half state: each write is
+    // a whole authenticated document. Which write survives is last-writer-wins,
+    // and the key ledger itself is PostgreSQL's, not this file's.
+    expect(reopened.current.installId).toBe(store.current.installId);
+    expect(reopened.current.maxSeatLimit).toBe(9);
+    expect(reopened.current.sequence).toBeGreaterThan(0);
+    expect(
+      readFileSync(join(dir, 'license-state.json'), 'utf8'),
+    ).toBe(readFileSync(join(dir, 'license-state.backup.json'), 'utf8'));
   });
 });

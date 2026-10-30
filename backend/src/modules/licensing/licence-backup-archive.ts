@@ -451,6 +451,8 @@ export class LicenceBackupArchive {
 
   /** Captures newest first. Unreadable or stray folders are skipped. */
   list(): LicenceBackupRecord[] {
+    const secret = this.secret();
+    if (!secret) return [];
     let names: string[];
     try {
       names = readdirSync(this.directory);
@@ -463,8 +465,6 @@ export class LicenceBackupArchive {
       const path = join(this.directory, name);
       try {
         if (!statSync(path).isDirectory()) continue;
-        const secret = this.secret();
-        if (!secret) return [];
         records.push(this.readManifest(path, secret));
       } catch {
         continue;

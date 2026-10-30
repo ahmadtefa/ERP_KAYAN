@@ -177,6 +177,8 @@ export class LicensingService implements OnModuleInit {
   /** Timestamped licence copies; created on first use. */
   private archive?: LicenceBackupArchive;
   private lastLicenceBackup: LicenceBackupRecord | null = null;
+  private resolvedMachineId: string | null = null;
+  private machineIdWriteFailed = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -585,7 +587,13 @@ export class LicensingService implements OnModuleInit {
    * invalidate a licence that is still correct.
    */
   machineId(): string {
-    if (this.machineIdOverride) return this.machineIdOverride;
+    // Resolved once per process: the licence screens ask for it on every
+    // status call, and the answer cannot change while the program runs.
+    if (this.resolvedMachineId) return this.resolvedMachineId;
+    if (this.machineIdOverride) {
+      this.resolvedMachineId = this.machineIdOverride;
+      return this.machineIdOverride;
+    }
     const recorded = this.readRecordedMachineId();
     const resolved = machineIdentity();
     const choice = chooseMachineIdentity(recorded, resolved);
@@ -595,6 +603,7 @@ export class LicensingService implements OnModuleInit {
       );
     }
     this.recordMachineId(choice.id, recorded);
+    this.resolvedMachineId = choice.id;
     return choice.id;
   }
 
@@ -612,7 +621,7 @@ export class LicensingService implements OnModuleInit {
   }
 
   private recordMachineId(id: string, recorded: string | null): void {
-    if (recorded === id) return;
+    if (recorded === id || this.machineIdWriteFailed) return;
     try {
       // Atomic replace, so a power cut cannot leave a half-written identity.
       const temp = `${this.machineIdPath()}.${process.pid}.tmp`;
@@ -620,7 +629,9 @@ export class LicensingService implements OnModuleInit {
       renameSync(temp, this.machineIdPath());
     } catch (error) {
       // A directory this program cannot write is reported by the state store
-      // itself; identity must still work for this run.
+      // itself; identity must still work for this run, and a warning per
+      // request would only bury the real error.
+      this.machineIdWriteFailed = true;
       this.logger.warn(
         `The machine identity could not be recorded: ${describeError(error)}`,
       );

@@ -66,7 +66,13 @@ describe('machine identity for licensing', () => {
       // identity must win, because the licence was issued for it.
       const recorded = 'KM-1111-2222-3333-4444-5555';
       writeFileSync(join(dir, 'machine-id'), `${recorded}\n`);
-      const second = service.machineId();
+      // A new process, as after a reboot: it reads what was recorded.
+      const restarted = new LicensingService({} as never, {} as never, {
+        directory: dir,
+        publicKeyText: PUBLIC_PEM,
+        enforcement: 'warn',
+      });
+      const second = restarted.machineId();
       expect(second).toBe(recorded);
       expect(readFileSync(join(dir, 'machine-id'), 'utf8').trim()).toBe(recorded);
     } finally {

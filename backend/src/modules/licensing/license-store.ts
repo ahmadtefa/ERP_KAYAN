@@ -169,6 +169,98 @@ export function verifyStateDocument(
   return state;
 }
 
+const CLOCK_SEVERITY: Record<ClockState, number> = {
+  OK: 0,
+  WARNING: 1,
+  TAMPERED: 2,
+};
+
+function laterMoment(a: string | null, b: string | null): string | null {
+  if (!a) return b;
+  if (!b) return a;
+  return Date.parse(a) >= Date.parse(b) ? a : b;
+}
+
+/**
+ * Resolves two authenticated states that claim the same sequence.
+ *
+ * Two processes (the program and the repair tool, or two windows of the
+ * program) can each write once before either reads the other's result. Both
+ * copies are then authenticated, both are honest, and neither is "the right
+ * one" - so the answer is the conservative union of the two: no watermark goes
+ * down, no spent key is forgotten, nothing is invented. The result is written
+ * back with a higher sequence so the next start has a single truth.
+ *
+ * Copies that disagree about *whose* installation this is are not a race:
+ * they are refused.
+ */
+export function mergeTrustStates(
+  a: LicenseTrustState,
+  b: LicenseTrustState,
+): LicenseTrustState {
+  if (a.installId !== b.installId) {
+    throw new LicenseStateError(
+      'The two protected licence states belong to different installations.',
+      'TAMPERED',
+    );
+  }
+  if (
+    a.publicKeyFingerprint &&
+    b.publicKeyFingerprint &&
+    a.publicKeyFingerprint !== b.publicKeyFingerprint
+  ) {
+    throw new LicenseStateError(
+      'The two protected licence states name different verification keys.',
+      'TAMPERED',
+    );
+  }
+  const appliedKeys = [...a.appliedKeys];
+  for (const key of b.appliedKeys) {
+    if (!appliedKeys.includes(key)) appliedKeys.push(key);
+  }
+  const clockSuspects = [...a.clockSuspects];
+  for (const moment of b.clockSuspects) {
+    if (!clockSuspects.includes(moment)) clockSuspects.push(moment);
+  }
+  clockSuspects.sort();
+  const licenseExpiresAt =
+    a.perpetual || b.perpetual
+      ? null
+      : laterMoment(a.licenseExpiresAt, b.licenseExpiresAt);
+  const perpetual = a.perpetual || b.perpetual;
+  return {
+    v: 1,
+    installId: a.installId,
+    lastSeenAt: laterMoment(a.lastSeenAt, b.lastSeenAt),
+    maxSeatsUsed: Math.max(a.maxSeatsUsed, b.maxSeatsUsed),
+    maxSeatLimit: Math.max(a.maxSeatLimit, b.maxSeatLimit),
+    appliedKeys: appliedKeys.slice(-MAX_APPLIED_KEYS),
+    // A licence id is only ambiguous if the two copies name different ones at
+    // the same sequence; the copy with the further term wins so a concurrent
+    // renewal is not thrown away.
+    licenseId:
+      a.licenseId === b.licenseId
+        ? a.licenseId
+        : [a, b]
+            .sort(
+              (x, y) =>
+                (y.perpetual ? Number.MAX_SAFE_INTEGER : Date.parse(y.licenseExpiresAt ?? '') || 0) -
+                (x.perpetual ? Number.MAX_SAFE_INTEGER : Date.parse(x.licenseExpiresAt ?? '') || 0),
+            )[0]
+            .licenseId,
+    licenseExpiresAt,
+    perpetual,
+    clockState:
+      CLOCK_SEVERITY[a.clockState] >= CLOCK_SEVERITY[b.clockState]
+        ? a.clockState
+        : b.clockState,
+    clockSuspects: clockSuspects.slice(-MAX_SUSPECTS),
+    enforcement: a.enforcement ?? b.enforcement,
+    publicKeyFingerprint: a.publicKeyFingerprint ?? b.publicKeyFingerprint,
+    sequence: Math.max(a.sequence, b.sequence) + 1,
+  };
+}
+
 export class LicenseStore {
   private state: LicenseTrustState;
   private readonly secret: Buffer;
@@ -309,10 +401,12 @@ export class LicenseStore {
         primary.sequence === backup.sequence &&
         canonical(primary) !== canonical(backup)
       ) {
-        throw new LicenseStateError(
-          'The primary and backup licence states have conflicting contents at the same sequence.',
-          'TAMPERED',
-        );
+        // Two writers raced. Both copies authenticated, so the safe answer is
+        // their union with a higher sequence, never a fail-closed lockout and
+        // never a silent choice that could lower a watermark.
+        const merged = mergeTrustStates(primary, backup);
+        this.persist(merged);
+        return merged;
       }
       // Both copies are independently authenticated. Keep the newest sequence
       // so an interrupted two-file write cannot roll the trust state backwards.
