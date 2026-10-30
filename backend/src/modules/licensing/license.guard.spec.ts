@@ -20,7 +20,7 @@ const contextFor = (path: string): ExecutionContext =>
 function guard(options: {
   enforced?: boolean;
   blocked?: boolean;
-  state?: 'UNLICENSED' | 'ACTIVE' | 'EXPIRED' | 'SUSPENDED';
+  state?: 'UNLICENSED' | 'ACTIVE' | 'EXPIRED' | 'SUSPENDED' | 'WRONG_MACHINE';
 }) {
   const service = {
     isEnforced: () => options.enforced ?? true,
@@ -60,6 +60,13 @@ describe('LicenseGuard while the licence is blocked', () => {
     const { guard: g } = guard({ state: 'SUSPENDED' });
     const body = await codeOf(g.canActivate(contextFor('/journals')));
     expect(body.code).toBe('LICENSE_CLOCK_TAMPERED');
+  });
+
+  it('blocks a copied licence and identifies the machine mismatch', async () => {
+    const { guard: g } = guard({ state: 'WRONG_MACHINE' });
+    const body = await codeOf(g.canActivate(contextFor('/journals')));
+    expect(body.code).toBe('LICENSE_WRONG_MACHINE');
+    expect(body.detail).toContain('البيانات محفوظة');
   });
 
   it('asks for an activation when there is no licence at all', async () => {
@@ -113,7 +120,7 @@ describe('LicenseGuard while the licence is blocked', () => {
 
 describe('licenceMessage', () => {
   it('is bilingual for every state and never suggests deleting data', () => {
-    for (const state of ['EXPIRED', 'SUSPENDED', 'UNLICENSED']) {
+    for (const state of ['EXPIRED', 'SUSPENDED', 'WRONG_MACHINE', 'UNLICENSED']) {
       const message = licenceMessage(state);
       expect(message).toMatch(/[\u0600-\u06FF]/);
       expect(message).toContain('/');

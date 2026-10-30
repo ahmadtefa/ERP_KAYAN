@@ -139,8 +139,9 @@ class _LicenceScreenState extends ConsumerState<LicenceScreen> {
                 tone: _Tone.warning,
               ),
             ],
-            if (statusAsync.value!.clockState != 'OK' ||
-                statusAsync.value!.state == 'SUSPENDED') ...[
+            if (statusAsync.value!.state != 'WRONG_MACHINE' &&
+                (statusAsync.value!.clockState != 'OK' ||
+                    statusAsync.value!.state == 'SUSPENDED')) ...[
               const SizedBox(height: AppSpacing.lg),
               _ClockCard(
                 status: statusAsync.value!,
@@ -236,6 +237,10 @@ class _StatusCard extends StatelessWidget {
       'ACTIVE' => (l10n.licenceStateActive, theme.colorScheme.primary),
       'EXPIRED' => (l10n.licenceStateExpired, theme.colorScheme.error),
       'SUSPENDED' => (l10n.licenceStateSuspended, theme.colorScheme.error),
+      'WRONG_MACHINE' => (
+        l10n.licenceStateWrongMachine,
+        theme.colorScheme.error,
+      ),
       _ => (l10n.licenceStateUnlicensed, theme.colorScheme.tertiary),
     };
 

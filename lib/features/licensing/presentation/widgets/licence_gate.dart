@@ -83,7 +83,11 @@ class _BlockedView extends StatelessWidget {
               ),
               const SizedBox(height: AppSpacing.md),
               Text(
-                suspended ? l10n.licenceSuspendedBody : l10n.licenceBlockedBody,
+                status.state == 'WRONG_MACHINE'
+                    ? l10n.licenceWrongMachineBody
+                    : suspended
+                        ? l10n.licenceSuspendedBody
+                        : l10n.licenceBlockedBody,
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyLarge,
               ),

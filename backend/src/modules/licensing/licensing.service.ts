@@ -57,7 +57,7 @@ import {
  * `license_events` hold the operational state the screens read.
  */
 
-export type LicenseState = 'UNLICENSED' | 'ACTIVE' | 'EXPIRED' | 'SUSPENDED';
+export type LicenseState = 'UNLICENSED' | 'ACTIVE' | 'EXPIRED' | 'SUSPENDED' | 'WRONG_MACHINE';
 
 export interface LicenseSeatStatus {
   /** 0 means "no licence yet"; it does not mean "unlimited forever". */
@@ -485,12 +485,17 @@ export class LicensingService implements OnModuleInit {
   async status(options: { fresh?: boolean } = {}): Promise<LicenseStatus> {
     await this.ensureReady();
     const keyAvailable = await this.verificationKeyAvailable();
+    const currentMachineId = this.machineId();
     const cached = this.lastStatus;
+    const cacheAge = cached ? this.clock().getTime() - cached.at : -1;
     if (
-      !options.fresh &&
+      // An enforced request re-reads the licence row and machine binding;
+      // a cached ACTIVE result cannot authorise after a database replacement.
+      !this.isEnforced() && !options.fresh &&
       cached &&
       cached.value.configured === keyAvailable &&
-      this.clock().getTime() - cached.at < STATUS_CACHE_MS
+      cached.value.machineId === currentMachineId &&
+      cacheAge >= 0 && cacheAge < STATUS_CACHE_MS
     ) {
       return cached.value;
     }
@@ -504,6 +509,7 @@ export class LicensingService implements OnModuleInit {
 
     let state: LicenseState;
     if (!row) state = 'UNLICENSED';
+    else if (row.machineId !== currentMachineId) state = 'WRONG_MACHINE';
     else if (row.status === 'SUSPENDED' || store.clockState === 'TAMPERED') {
       state = 'SUSPENDED';
     } else if (row.expiresAt && row.expiresAt.getTime() <= now.getTime()) {
@@ -525,7 +531,7 @@ export class LicensingService implements OnModuleInit {
       enforcement: this.enforcement,
       configured: keyAvailable,
       licenseId: row?.licenseId ?? store.licenseId,
-      machineId: this.machineId(),
+      machineId: currentMachineId,
       installId: store.installId,
       issuedAt: row?.issuedAt?.toISOString() ?? null,
       startsAt: row?.startsAt?.toISOString() ?? null,
@@ -672,6 +678,14 @@ export class LicensingService implements OnModuleInit {
     }
 
     const existing = await this.licenseRow();
+    // A renewal or seat grant must never be spent against a copied licence.
+    // A separately signed transfer to this machine remains the repair path.
+    if (existing && existing.machineId !== this.machineId() && payload.type !== 'TRANSFER') {
+      throw new ForbiddenException({
+        detail: 'This licence belongs to a different computer. Preserve the data and request an authorised transfer.',
+        code: 'LICENSE_KEY_WRONG_MACHINE',
+      });
+    }
     const replay = await this.prisma.licenseKeyRecord.findUnique({
       where: { keyId: payload.keyId },
     });
@@ -1043,12 +1057,19 @@ export class LicensingService implements OnModuleInit {
       "SELECT pg_advisory_xact_lock(hashtext('kayan.license.seats'))",
     );
 
+    const row = await this.licenseRowIn(tx);
+    if (this.isEnforced() && row && row.machineId !== this.machineId()) {
+      throw new ForbiddenException({
+        detail: 'This licence belongs to a different computer. Preserve the data and request an authorised transfer.',
+        code: 'LICENSE_KEY_WRONG_MACHINE',
+      });
+    }
+
     if (input.idempotencyKey) {
       const prior = await tx.licenseSeatUsage.findUnique({
         where: { idempotencyKey: input.idempotencyKey },
       });
       if (prior) {
-        const row = await this.licenseRowIn(tx);
         return {
           reserved: false,
           alreadyApplied: true,
@@ -1058,7 +1079,6 @@ export class LicensingService implements OnModuleInit {
       }
     }
 
-    const row = await this.licenseRowIn(tx);
     const limit = row?.seatLimit ?? 0;
     let used = await tx.licenseSeatUsage.count();
 
@@ -1100,19 +1120,22 @@ export class LicensingService implements OnModuleInit {
       },
     });
 
-    // Written before the caller's transaction commits on purpose: if that
-    // transaction rolls back, the watermark is one seat too high, which can
-    // only ever refuse a seat, never grant a free one. A failure to write the
-    // file must not fail the account creation.
+    // Persist before the transaction commits. A later database rollback can
+    // overcount, but never grants a seat. If the file cannot be written while
+    // enforcing, throw so the database transaction rolls back too.
     try {
       this.store.update((state) => {
         state.maxSeatsUsed = Math.max(state.maxSeatsUsed, used + 1);
         state.maxSeatLimit = Math.max(state.maxSeatLimit, limit);
       });
-    } catch (error) {
-      this.logger.error(
-        `Seat ${used + 1} was reserved but the licence state file could not be updated: ${(error as Error).message}`,
-      );
+    } catch {
+      this.logger.error('The licence seat watermark could not be updated.');
+      if (this.isEnforced()) {
+        throw new ServiceUnavailableException({
+          code: 'LICENSE_STATE_WRITE_FAILED',
+          detail: 'The protected licence state could not be saved. The account was not created; preserve the data and contact support.',
+        });
+      }
     }
     this.lastStatus = null;
     return { reserved: true, alreadyApplied: false, used: used + 1, limit };
@@ -1151,6 +1174,8 @@ export class LicensingService implements OnModuleInit {
 
     const store = this.store.current;
     const dbRow = await this.licenseRow();
+    // Never update the copied licence or its clock state on the wrong machine.
+    if (dbRow && dbRow.machineId !== this.machineId()) return;
     const lastSeenCandidates: Date[] = [];
     if (store.lastSeenAt) lastSeenCandidates.push(new Date(store.lastSeenAt));
     if (dbRow?.lastSeenAt) lastSeenCandidates.push(dbRow.lastSeenAt);
@@ -1264,6 +1289,8 @@ export class LicensingService implements OnModuleInit {
   async reconcile(): Promise<void> {
     if (!this.ensureReadyUnlessBootstrapping()) return;
     const row = await this.licenseRow();
+    // Do not import foreign entitlements or spent-key state from a copied DB.
+    if (row && row.machineId !== this.machineId()) return;
     const store = this.store.current;
     const used = await this.prisma.licenseSeatUsage.count();
     // Older versions discarded keys after 500 entries. Recover any still
@@ -1354,6 +1381,12 @@ export class LicensingService implements OnModuleInit {
       throw new ForbiddenException({
         detail: 'There is no licence on this computer.',
         code: 'LICENSE_NOT_INSTALLED',
+      });
+    }
+    if (row.machineId !== this.machineId()) {
+      throw new ForbiddenException({
+        detail: 'This licence belongs to a different computer. Preserve the data and request an authorised transfer.',
+        code: 'LICENSE_KEY_WRONG_MACHINE',
       });
     }
     const now = this.clock();

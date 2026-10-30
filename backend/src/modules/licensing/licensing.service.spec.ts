@@ -315,6 +315,57 @@ describe('renewal', () => {
   });
 });
 
+describe('machine binding on an installed licence', () => {
+  it('blocks a copied licence and refuses renewal without mutating its entitlements', async () => {
+    const h = harness();
+    try {
+      await activation(h);
+      h.db.installations[0].machineId = OTHER_MACHINE;
+      const before = h.db.installations[0].expiresAt;
+      const status = await h.service.status(); // an earlier ACTIVE result was cached
+      expect(status.state).toBe('WRONG_MACHINE');
+      expect(status.blocked).toBe(true);
+      await expectCode(renewal(h), 'LICENSE_KEY_WRONG_MACHINE');
+      await expectCode(h.service.confirmClock({ userId: 'admin' }), 'LICENSE_KEY_WRONG_MACHINE');
+      await expectCode(h.service.reserveSeat(h.db as any, {
+        userId: 'other-machine-user', username: 'other-machine-user', reason: 'USER_CREATE',
+      }), 'LICENSE_KEY_WRONG_MACHINE');
+      expect(h.db.seats).toHaveLength(0);
+      expect(h.db.installations[0].expiresAt).toEqual(before);
+      expect(h.db.keys).toHaveLength(1);
+    } finally { h.dispose(); }
+  });
+
+  it('accepts a separately signed transfer to this machine', async () => {
+    const h = harness();
+    try {
+      await activation(h);
+      h.db.installations[0].machineId = OTHER_MACHINE;
+      expect((await h.service.status()).state).toBe('WRONG_MACHINE');
+      const status = await transferKey(h, { machineId: MACHINE });
+      expect(status.state).toBe('ACTIVE');
+      expect(h.db.installations[0].machineId).toBe(MACHINE);
+    } finally { h.dispose(); }
+  });
+
+  it('does not import limits from another machine into the protected state', async () => {
+    const h = harness();
+    try {
+      await activation(h);
+      h.db.installations[0].machineId = OTHER_MACHINE;
+      h.db.installations[0].seatLimit = 999;
+      const originalState = structuredClone(h.store.current);
+      const originalEvents = h.db.events.length;
+      h.setNow('2026-04-20T09:00:00.000Z');
+      await h.service.reconcile();
+      await h.service.runClockCheck(true);
+      expect(h.store.current).toEqual(originalState);
+      expect(h.db.installations[0].status).toBe('ACTIVE');
+      expect(h.db.events).toHaveLength(originalEvents);
+    } finally { h.dispose(); }
+  });
+});
+
 describe('replay', () => {
   it('refuses the same key a second time', async () => {
     const h = harness();
@@ -491,6 +542,20 @@ describe('seat increases', () => {
 });
 
 describe('seat ledger', () => {
+  it('rolls back a seat reservation if the protected watermark cannot be written', async () => {
+    const h = harness();
+    try {
+      await activation(h);
+      jest.spyOn(h.store, 'update').mockImplementationOnce(() => { throw new Error('simulated write failure'); });
+      const attempt = h.db.$transaction((tx) => h.service.reserveSeat(tx as any, {
+        userId: 'u-write-failure', username: 'u-write-failure', reason: 'USER_CREATE',
+      }));
+      await expect(attempt).rejects.toMatchObject({ response: expect.objectContaining({ code: 'LICENSE_STATE_WRITE_FAILED' }) });
+      expect(h.db.seats).toHaveLength(0);
+      expect(h.store.current.maxSeatsUsed).toBe(0);
+    } finally { h.dispose(); }
+  });
+
   it('consumes a seat permanently: deleting the account does not return it', async () => {
     const h = harness();
     try {
@@ -638,6 +703,19 @@ describe('expiry', () => {
 });
 
 describe('clock policy', () => {
+  it('does not return a cached active status after a backwards clock jump', async () => {
+    const h = harness();
+    try {
+      await activation(h);
+      expect((await h.service.status()).state).toBe('ACTIVE');
+      h.setNow('2026-04-20T09:00:00.000Z');
+      const status = await h.service.status(); // deliberately not fresh
+      expect(status.state).toBe('SUSPENDED');
+      expect(status.blocked).toBe(true);
+      expect(status.clock.state).toBe('TAMPERED');
+    } finally { h.dispose(); }
+  });
+
   it('ignores a small difference and does not warn', async () => {
     const h = harness();
     try {

@@ -2500,6 +2500,9 @@ class AppLocalizationsAr extends AppLocalizations {
   String get licenceStateSuspended => 'موقوف';
 
   @override
+  String get licenceStateWrongMachine => 'الترخيص لجهاز آخر';
+
+  @override
   String get licenceStateUnlicensed => 'غير مرخّص';
 
   @override
@@ -2608,6 +2611,10 @@ class AppLocalizationsAr extends AppLocalizations {
   @override
   String get licenceBlockedBody =>
       'بياناتك سليمة ولم يُحذف منها شيء. افتح شاشة الترخيص وطبّق مفتاح تجديد لمواصلة العمل.';
+
+  @override
+  String get licenceWrongMachineBody =>
+      'هذا الترخيص مخصص لجهاز آخر. بياناتك سليمة. افتح شاشة الترخيص وتواصل مع المورّد لطلب نقل معتمد.';
 
   @override
   String get licenceSuspendedBody =>

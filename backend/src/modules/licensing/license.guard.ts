@@ -77,6 +77,8 @@ export class LicenseGuard implements CanActivate {
       code:
         status.configured === false
           ? 'LICENSE_PUBLIC_KEY_MISSING'
+          : status.state === 'WRONG_MACHINE'
+          ? 'LICENSE_WRONG_MACHINE'
           : status.state === 'EXPIRED'
           ? 'LICENSE_EXPIRED'
           : status.state === 'SUSPENDED'
@@ -92,6 +94,9 @@ export class LicenseGuard implements CanActivate {
 }
 
 export function licenceMessage(state: string): string {
+  if (state === 'WRONG_MACHINE') {
+    return 'الترخيص مخصص لجهاز آخر. البيانات محفوظة؛ تواصل مع المورّد لطلب نقل معتمد. / This licence belongs to another computer. Preserve the data and request an authorised transfer.';
+  }
   if (state === 'EXPIRED') {
     return (
       'انتهت صلاحية ترخيص هذا البرنامج. البيانات محفوظة كما هي ولم يُحذف منها شيء. ' +

@@ -2519,6 +2519,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get licenceStateSuspended => 'Suspended';
 
   @override
+  String get licenceStateWrongMachine => 'Different computer';
+
+  @override
   String get licenceStateUnlicensed => 'Not licensed';
 
   @override
@@ -2628,6 +2631,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get licenceBlockedBody =>
       'Your data is intact. Nothing was deleted. Open the licence screen and apply a renewal key to continue working.';
+
+  @override
+  String get licenceWrongMachineBody =>
+      'This licence belongs to another computer. Your data is intact. Open the licence screen and contact the supplier for an authorised transfer.';
 
   @override
   String get licenceSuspendedBody =>

@@ -4868,6 +4868,12 @@ abstract class AppLocalizations {
   /// **'Suspended'**
   String get licenceStateSuspended;
 
+  /// No description provided for @licenceStateWrongMachine.
+  ///
+  /// In en, this message translates to:
+  /// **'Different computer'**
+  String get licenceStateWrongMachine;
+
   /// No description provided for @licenceStateUnlicensed.
   ///
   /// In en, this message translates to:
@@ -5077,6 +5083,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Your data is intact. Nothing was deleted. Open the licence screen and apply a renewal key to continue working.'**
   String get licenceBlockedBody;
+
+  /// No description provided for @licenceWrongMachineBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This licence belongs to another computer. Your data is intact. Open the licence screen and contact the supplier for an authorised transfer.'**
+  String get licenceWrongMachineBody;
 
   /// No description provided for @licenceSuspendedBody.
   ///
