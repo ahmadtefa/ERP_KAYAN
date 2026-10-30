@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -71,7 +71,7 @@ describe('LicenseStore', () => {
     expect(reopened.recoveredFromBackup).toBe(true);
     expect(reopened.current.maxSeatsUsed).toBe(2);
     expect(JSON.parse(readFileSync(path, 'utf8')).state.maxSeatsUsed).toBe(2);
-    expect(existsSync(join(dir, 'license-state.damaged-'))).toBe(false);
+    expect(readdirSync(dir).some((name) => name.startsWith('license-state.damaged-'))).toBe(true);
   });
 
   it('recovers a primary whose MAC was removed from the authenticated mirror', () => {
