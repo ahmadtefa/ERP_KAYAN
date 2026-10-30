@@ -362,6 +362,23 @@ describe('replay', () => {
     }
   });
 
+  it('imports historical database key IDs into independent state before a rollback', async () => {
+    const h = harness();
+    try {
+      await h.service.status();
+      const keyId = 'key_historical-01';
+      const signed = h.key({ keyId });
+      h.db.keys.push({ keyId }); // legacy row from before the 500-key fix
+      await h.service.reconcile();
+      expect(h.store.current.appliedKeys).toContain(keyId);
+      h.db.keys = [];
+      await expectCode(h.service.activate(signed), 'LICENSE_KEY_ALREADY_USED');
+      expect(h.db.installations).toHaveLength(0);
+    } finally {
+      h.dispose();
+    }
+  });
+
   it('leaves no trace of a refused key, so the corrected key can be applied', async () => {
     const h = harness();
     try {

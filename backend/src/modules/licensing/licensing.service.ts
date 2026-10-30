@@ -1266,8 +1266,13 @@ export class LicensingService implements OnModuleInit {
     const row = await this.licenseRow();
     const store = this.store.current;
     const used = await this.prisma.licenseSeatUsage.count();
+    // Older versions discarded keys after 500 entries. Recover any still
+    // present in the current database into the independent protected ledger
+    // before a later database rollback can make them replayable again.
+    const knownKeys = await this.prisma.licenseKeyRecord.findMany({ select: { keyId: true } });
 
     this.store.update((state) => {
+      state.appliedKeys = [...state.appliedKeys, ...knownKeys.map((key) => key.keyId)];
       state.maxSeatsUsed = Math.max(state.maxSeatsUsed, used);
       if (row) {
         state.maxSeatLimit = Math.max(state.maxSeatLimit, row.seatLimit);

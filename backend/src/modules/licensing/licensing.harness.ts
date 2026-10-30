@@ -116,6 +116,7 @@ export class FakeDb {
   };
 
   licenseKeyRecord = {
+    findMany: async () => this.keys.map(({ keyId }) => ({ keyId })),
     findUnique: async ({ where }: { where: { keyId: string } }) =>
       this.keys.find((row) => row.keyId === where.keyId) ?? null,
     create: async ({ data }: { data: Row }) => {

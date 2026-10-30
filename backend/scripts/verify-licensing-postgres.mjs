@@ -537,12 +537,24 @@ async function activationAndSeats() {
         replayInstance.store.update((state) => {
           state.appliedKeys.push(...Array.from({ length: 505 }, (_, index) => `probe_${index}`));
         });
+        // A legacy key dropped from the old 500-entry tail but still present
+        // in the ledger must be retained before an older restore erases it.
+        const legacyKeyId = `key_legacy_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
+        const legacyLicenseId = `lic_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
+        const legacyKey = key({ keyId: legacyKeyId, licenseId: legacyLicenseId });
+        await withClient(replayConnection, (client) => client.query(
+          'INSERT INTO license_keys (id,"keyId","licenseId",type,"payloadJson") VALUES ($1,$2,$3,$4,$5)',
+          [randomUUID(), legacyKeyId, legacyLicenseId, 'ACTIVATION', '{}'],
+        ));
+        await replayInstance.service.reconcile();
+        assert(replayInstance.store.current.appliedKeys.includes(legacyKeyId), 'legacy key was not recorded in independent state');
         const companiesBefore = await count(replayConnection, 'SELECT count(*) FROM companies');
         await withClient(replayConnection, async (client) => {
           await client.query('DELETE FROM license_keys');
           await client.query('DELETE FROM license_installations');
         });
         assertCode(await refusal(replayInstance.service.activate(replayKey)), 'LICENSE_KEY_ALREADY_USED');
+        assertCode(await refusal(replayInstance.service.activate(legacyKey)), 'LICENSE_KEY_ALREADY_USED');
         assertEqual(await count(replayConnection, 'SELECT count(*) FROM license_installations'), 0, 'no replayed installation');
         assertEqual(await count(replayConnection, 'SELECT count(*) FROM license_keys'), 0, 'no replayed key');
         assertEqual(await count(replayConnection, 'SELECT count(*) FROM companies'), companiesBefore, 'company rows remain intact');
