@@ -93,6 +93,16 @@ function canonical(state: LicenseTrustState): string {
 export class LicenseStore {
   private state: LicenseTrustState;
   private readonly secret: Buffer;
+  private _recoveredFromBackup = false;
+
+  /** True when startup recovered the primary trust file from its verified mirror. */
+  get recoveredFromBackup(): boolean {
+    return this._recoveredFromBackup;
+  }
+
+  private get backupPath(): string {
+    return join(this.directory, 'license-state.backup.json');
+  }
 
   constructor(
     private readonly directory: string,
@@ -145,8 +155,8 @@ export class LicenseStore {
     if (existsSync(keyPath)) {
       // A key without its state can mean an existing trust file was lost or
       // moved. Never silently replace its watermarks with an empty state.
-      if (!existsSync(this.path)) {
-        throw new LicenseStateError('The licence state file is missing but its authentication key exists.', 'UNREADABLE');
+      if (!existsSync(this.path) && !existsSync(this.backupPath)) {
+        throw new LicenseStateError('The licence state file and its verified backup are missing but the authentication key exists.', 'UNREADABLE');
       }
       let text: string;
       try {
@@ -159,7 +169,7 @@ export class LicenseStore {
       // way to verify an intact backup of this installation's licence state.
       throw new LicenseStateError('The licence state authentication key is invalid.', 'UNREADABLE');
     }
-    if (existsSync(this.path)) {
+    if (existsSync(this.path) || existsSync(this.backupPath)) {
       // An existing state without its authentication key cannot be verified.
       // Creating a new key would make a valid old state impossible to check.
       throw new LicenseStateError('The licence state authentication key is missing.', 'UNREADABLE');
@@ -188,24 +198,104 @@ export class LicenseStore {
   }
 
   private load(): LicenseTrustState {
-    if (!existsSync(this.path)) {
+    const primaryExists = existsSync(this.path);
+    const backupExists = existsSync(this.backupPath);
+    if (!primaryExists && !backupExists) {
       const created = emptyState(randomBytes(16).toString('hex'));
       this.persist(created);
       return created;
     }
+
+    let primary: LicenseTrustState | null = null;
+    let backup: LicenseTrustState | null = null;
+    let primaryError: unknown;
+    let backupError: unknown;
+
+    if (primaryExists) {
+      try {
+        primary = this.readVerified(this.path);
+      } catch (error) {
+        primaryError = error;
+      }
+    }
+    if (backupExists) {
+      try {
+        backup = this.readVerified(this.backupPath);
+      } catch (error) {
+        backupError = error;
+      }
+    }
+
+    if (primary && backup) {
+      if (
+        primary.sequence === backup.sequence &&
+        canonical(primary) !== canonical(backup)
+      ) {
+        throw new LicenseStateError(
+          'The primary and backup licence states have conflicting contents at the same sequence.',
+          'TAMPERED',
+        );
+      }
+      // Both copies are independently authenticated. Keep the newest sequence
+      // so an interrupted two-file write cannot roll the trust state backwards.
+      const newest = backup.sequence > primary.sequence ? backup : primary;
+      if (newest === backup) this._recoveredFromBackup = true;
+      if (newest.sequence !== primary.sequence || newest === primary) {
+        this.persist(newest);
+      }
+      return newest;
+    }
+
+    if (primary) {
+      // Existing installations gain the mirror on their first successful
+      // startup after this upgrade. A broken mirror is replaced only from a
+      // primary copy whose MAC has already been verified.
+      this.persist(primary);
+      return primary;
+    }
+
+    if (backup) {
+      // Preserve the damaged primary for diagnosis. The backup is accepted
+      // only after its MAC is checked with this installation's existing key.
+      if (primaryExists) {
+        const damaged = join(
+          this.directory,
+          `license-state.damaged-${Date.now()}.json`,
+        );
+        renameSync(this.path, damaged);
+      }
+      this._recoveredFromBackup = true;
+      this.persist(backup);
+      return backup;
+    }
+
+    // Neither copy can be authenticated. Preserve the original failure and
+    // fail closed; never create a fresh trust store over an existing key.
+    throw primaryError ?? backupError ?? new LicenseStateError(
+      'No verifiable licence state is available.',
+      'UNREADABLE',
+    );
+  }
+
+  private readVerified(path: string): LicenseTrustState {
     let parsed: { state?: unknown; mac?: unknown };
     try {
-      parsed = JSON.parse(readFileSync(this.path, 'utf8'));
+      parsed = JSON.parse(readFileSync(path, 'utf8'));
     } catch {
       throw new LicenseStateError(
-        `The licence state file ${this.path} is not readable JSON`,
+        `The licence state file ${path} is not readable JSON`,
         'UNREADABLE',
       );
     }
-    if (!parsed || parsed.state === null || typeof parsed.state !== 'object' ||
-        Array.isArray(parsed.state) || typeof parsed.mac !== 'string') {
+    if (
+      !parsed ||
+      parsed.state === null ||
+      typeof parsed.state !== 'object' ||
+      Array.isArray(parsed.state) ||
+      typeof parsed.mac !== 'string'
+    ) {
       throw new LicenseStateError(
-        `The licence state file ${this.path} has no signed state`,
+        `The licence state file ${path} has no signed state`,
         'TAMPERED',
       );
     }
@@ -215,13 +305,13 @@ export class LicenseStore {
     const wanted = Buffer.from(expected, 'hex');
     if (actual.length !== wanted.length || !timingSafeEqual(actual, wanted)) {
       throw new LicenseStateError(
-        `The licence state file ${this.path} failed its integrity check`,
+        `The licence state file ${path} failed its integrity check`,
         'TAMPERED',
       );
     }
-    if (state.v !== 1) {
+    if (state.v !== 1 || !Number.isSafeInteger(state.sequence) || state.sequence < 0) {
       throw new LicenseStateError(
-        `The licence state file uses format ${String(state.v)}`,
+        `The licence state file ${path} uses an unsupported or invalid format`,
         'UNREADABLE',
       );
     }
@@ -230,16 +320,24 @@ export class LicenseStore {
 
   private persist(state: LicenseTrustState): void {
     const body = JSON.stringify({ state, mac: this.mac(state) }, null, 2);
-    const temp = `${this.path}.${process.pid}.tmp`;
     try {
       mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-      writeFileSync(temp, body, { mode: 0o600 });
-      renameSync(temp, this.path);
+      // Write the verified mirror first. If the process stops between the two
+      // atomic renames, load() compares authenticated sequence numbers and
+      // chooses the newest complete copy.
+      this.writeAtomic(this.backupPath, body);
+      this.writeAtomic(this.path, body);
     } catch (error) {
       throw new LicenseStateError(
-        `The licence state could not be written to ${this.path}: ${(error as Error).message}`,
+        `The licence state and its protected backup could not be written: ${(error as Error).message}`,
         'WRITE_FAILED',
       );
     }
+  }
+
+  private writeAtomic(path: string, body: string): void {
+    const temp = `${path}.${process.pid}.tmp`;
+    writeFileSync(temp, body, { mode: 0o600 });
+    renameSync(temp, path);
   }
 }
