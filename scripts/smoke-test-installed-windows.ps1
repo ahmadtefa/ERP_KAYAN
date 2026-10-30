@@ -577,7 +577,11 @@ try {
   $headers = @{ Authorization = "Bearer $($login.accessToken)" }
   if ($RuntimeOnly) {
     Write-Host "Runtime-only mode: validating offline startup, local PostgreSQL backup/restore, fail-closed corrupt-state handling, restoration of saved state bytes and public-key recovery. This is not signed-licence reconstruction or activation."
-    $initialLicense = Invoke-RestMethod -Uri "$base/license/status" -TimeoutSec 15
+    # Preserve the API authentication boundary: unauthenticated callers must
+    # be rejected, while the synthetic administrator can inspect status.
+    $anonymousStatus = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/license/status" -TimeoutSec 15
+    if ([int]$anonymousStatus.StatusCode -ne 401) { Fail 'The installed license status route unexpectedly accepted an unauthenticated request.' }
+    $initialLicense = Invoke-RestMethod -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
     if ($initialLicense.state -ne 'UNLICENSED' -or $initialLicense.configured -ne $true -or $initialLicense.blocked -ne $true) {
       Fail ("Unexpected initial product license state: " + ($initialLicense | ConvertTo-Json -Compress))
     }
@@ -633,7 +637,7 @@ try {
       $base = "http://127.0.0.1:$apiPort/api/v1"
       $healthAfterCorruption = Invoke-RestMethod -Uri "$base/health" -TimeoutSec 10
       if (-not $healthAfterCorruption.status) { Fail 'Local health did not recover after the license state file was corrupted.' }
-      $damagedResponse = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/license/status" -TimeoutSec 15
+      $damagedResponse = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
       $damagedBody = $damagedResponse.Content | ConvertFrom-Json
       if ([int]$damagedResponse.StatusCode -ne 503 -or $damagedBody.code -ne 'LICENSE_STATE_DAMAGED') {
         Fail ("Corrupt license state did not fail closed with LICENSE_STATE_DAMAGED (HTTP $([int]$damagedResponse.StatusCode)): " + $damagedResponse.Content)
@@ -656,7 +660,7 @@ try {
       $client = $restart.Process
       $apiPort = $restart.Port
       $base = "http://127.0.0.1:$apiPort/api/v1"
-      $restoredLicense = Invoke-RestMethod -Uri "$base/license/status" -TimeoutSec 15
+      $restoredLicense = Invoke-RestMethod -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
       if ($restoredLicense.state -ne 'UNLICENSED' -or $restoredLicense.configured -ne $true -or $restoredLicense.blocked -ne $true) {
         Fail ("Restoring the original license state did not recover the expected unlicensed state: " + ($restoredLicense | ConvertTo-Json -Compress))
       }
@@ -669,7 +673,7 @@ try {
       $client = $restart.Process
       $apiPort = $restart.Port
       $base = "http://127.0.0.1:$apiPort/api/v1"
-      $missingKeyStatus = Invoke-RestMethod -Uri "$base/license/status" -TimeoutSec 15
+      $missingKeyStatus = Invoke-RestMethod -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
       if ($missingKeyStatus.configured -ne $false -or $missingKeyStatus.blocked -ne $true) {
         Fail ("A missing installed public key was not detected as an unconfigured, blocked license state: " + ($missingKeyStatus | ConvertTo-Json -Compress))
       }
@@ -682,7 +686,7 @@ try {
       $client = $restart.Process
       $apiPort = $restart.Port
       $base = "http://127.0.0.1:$apiPort/api/v1"
-      $restoredKeyStatus = Invoke-RestMethod -Uri "$base/license/status" -TimeoutSec 15
+      $restoredKeyStatus = Invoke-RestMethod -Uri "$base/license/status" -Headers $headers -TimeoutSec 15
       if ($restoredKeyStatus.configured -ne $true -or $restoredKeyStatus.blocked -ne $true -or $restoredKeyStatus.state -ne 'UNLICENSED') {
         Fail ("Restoring the installed public key did not recover normal product license enforcement: " + ($restoredKeyStatus | ConvertTo-Json -Compress))
       }

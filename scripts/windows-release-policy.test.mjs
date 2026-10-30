@@ -61,4 +61,8 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   assert.ok(smokeScript.indexOf('& $pgDump --no-password -h 127.0.0.1') > 0);
   assert.ok(smokeScript.indexOf('& $pgRestore --list $preUpgradeBackup') < smokeScript.indexOf('$upgrade = Start-Process'));
   assert.match(smokeScript, /not signed-licence reconstruction or activation/);
+  const licenseCalls = smokeScript.split('\n').filter((line) => line.includes('"$base/license/status"'));
+  assert.equal(licenseCalls.length, 6);
+  assert.equal(licenseCalls.filter((line) => line.includes('-Headers $headers')).length, 5);
+  assert.match(smokeScript, /\[int\]\$anonymousStatus\.StatusCode -ne 401/);
 });
