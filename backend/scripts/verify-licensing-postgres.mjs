@@ -47,6 +47,7 @@ import { LicensingService } from '../dist/src/modules/licensing/licensing.servic
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS = join(HERE, '..', 'prisma', 'migrations');
 const LICENSING_MIGRATION = '20261025120000_offline_licensing';
+const LICENSING_PROOF_MIGRATION = '20261030160000_preserve_verified_licence_proof';
 
 const SUFFIX = process.env.KAYAN_TEST_DB_SUFFIX ? `_${process.env.KAYAN_TEST_DB_SUFFIX}` : '';
 const DATABASES = {
@@ -171,7 +172,9 @@ async function applyMigrations(connectionString, { until, skipLicensing = false 
   await withClient(connectionString, async (client) => {
     for (const name of migrationDirectories()) {
       if (until && name >= until) break;
-      if (skipLicensing && name === LICENSING_MIGRATION) continue;
+      // When modelling an upgrade from before licensing, dependent licence
+      // migrations must wait until the base tables have been created too.
+      if (skipLicensing && [LICENSING_MIGRATION, LICENSING_PROOF_MIGRATION].includes(name)) continue;
       const sql = readFileSync(join(MIGRATIONS, name, 'migration.sql'), 'utf8');
       await client.query(sql);
     }
@@ -179,8 +182,12 @@ async function applyMigrations(connectionString, { until, skipLicensing = false 
 }
 
 async function applyLicensingMigration(connectionString) {
-  const sql = readFileSync(join(MIGRATIONS, LICENSING_MIGRATION, 'migration.sql'), 'utf8');
-  await withClient(connectionString, (client) => client.query(sql));
+  await withClient(connectionString, async (client) => {
+    for (const name of [LICENSING_MIGRATION, LICENSING_PROOF_MIGRATION]) {
+      const sql = readFileSync(join(MIGRATIONS, name, 'migration.sql'), 'utf8');
+      await client.query(sql);
+    }
+  });
 }
 
 async function count(connectionString, sql, params = []) {
