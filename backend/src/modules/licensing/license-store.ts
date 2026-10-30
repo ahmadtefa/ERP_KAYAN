@@ -240,7 +240,10 @@ export class LicenseStore {
       // so an interrupted two-file write cannot roll the trust state backwards.
       const newest = backup.sequence > primary.sequence ? backup : primary;
       if (newest === backup) this._recoveredFromBackup = true;
-      if (newest.sequence !== primary.sequence || newest === primary) {
+      if (
+        newest.sequence !== primary.sequence ||
+        newest.sequence !== backup.sequence
+      ) {
         this.persist(newest);
       }
       return newest;
