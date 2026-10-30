@@ -260,10 +260,13 @@ export class LicensingService implements OnModuleInit {
   }
 
   private openStore(): void {
-    // During recovery the damaged file may temporarily be moved aside. Even
-    // with an environment-provided secret, never initialize a blank store in
-    // that gap; wait for the operator to put the trusted backup in place.
-    if (this.installedStateError && !existsSync(join(this.directory, 'license-state.json'))) {
+    // Never initialize a blank trust store over an existing installation.
+    // A verified mirror is a valid recovery source when the primary is absent.
+    if (
+      this.installedStateError &&
+      !existsSync(join(this.directory, 'license-state.json')) &&
+      !existsSync(join(this.directory, 'license-state.backup.json'))
+    ) {
       throw new ServiceUnavailableException({
         code: 'LICENSE_STATE_DAMAGED',
         detail: 'Licence state recovery is incomplete. Preserve the damaged file and restore a current trusted backup from this installation before retrying.',
@@ -271,15 +274,22 @@ export class LicensingService implements OnModuleInit {
     }
     try {
       this.store = this.trustStore ?? new LicenseStore(this.directory);
+      // A previous bootstrap attempt may have failed before a verified mirror
+      // was restored. Clear that diagnostic only after the store opens cleanly.
+      this.installedStateError = null;
+      if (this.store.recoveredFromBackup) {
+        this.logger.warn(
+          'KAYAN-LICENCE-STATE-RECOVERED: restored the primary protected state from its authenticated mirror; the damaged copy was preserved.',
+        );
+      }
     } catch (error) {
       if (
         error instanceof LicenseStateError &&
         (error.code === 'TAMPERED' || error.code === 'UNREADABLE')
       ) {
-        // Do not discard or recreate an installed trust store. It contains
-        // anti-rollback watermarks that cannot be reconstructed safely from a
-        // possibly older database. Keep the file and key unchanged and fail
-        // closed, with a clear recovery path instead of a startup hang.
+        // Neither protected copy could be authenticated. Do not discard or
+        // recreate the trust store: its anti-rollback watermarks cannot be
+        // reconstructed safely from a possibly older database. Fail closed.
         this.enforcement = 'enforce';
         this.installedStateError = 'LICENSE_STATE_DAMAGED';
         throw new ServiceUnavailableException({

@@ -24,6 +24,7 @@ test('checked-in verification material matches the pinned product policy', () =>
 test('diagnostic Inno setup stays non-installable and production paths stay disabled', () => {
   const inno = readFileSync(new URL('../distribution/windows/installer.iss', import.meta.url), 'utf8');
   const workflow = readFileSync(new URL('../.github/workflows/windows-installer.yml', import.meta.url), 'utf8');
+  const extractorBuilder = readFileSync(new URL('./build-pinned-innoextract.sh', import.meta.url), 'utf8');
   const build = readFileSync(new URL('../distribution/windows/build-installer.ps1', import.meta.url), 'utf8');
   assert.match(build, /foreach \(\$runtimeDir in @\('bin', 'lib', 'share'\)\)/);
   assert.doesNotMatch(build, /Copy-Item \(Join-Path \$pgBin\.FullName '\*'\)/);
@@ -47,8 +48,10 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   const inspect = workflow.match(/\n  inspect-final:([\s\S]*?)(?=\n  [a-z-]+:|$)/);
   assert.ok(inspect);
   assert.match(inspect[1], /needs: build/);
-  assert.match(inspect[1], /34f65747e4a57d5de2582bb1ad3d540f440a3983/);
-  assert.match(inspect[1], /check-fixtures\.py/);
+  assert.match(inspect[1], /bash scripts\/build-pinned-innoextract\.sh/);
+  assert.match(extractorBuilder, /34f65747e4a57d5de2582bb1ad3d540f440a3983/);
+  assert.match(extractorBuilder, /check-fixtures\.py/);
+  assert.match(extractorBuilder, /d77d2c447dd46edaeab6b4ea5d7102000b0b8cd66970f18cea2b1eb20f21aa52/);
   assert.match(inspect[1], /node scripts\/inspect-final-inno\.mjs --artifact "candidate\/\$BASE\.exe" --mode "\$MODE"/);
   assert.match(inspect[1], /--extractor-sha256 "\$KAYAN_INNOEXTRACT_SHA256"/);
   assert.match(inspect[1], /--source-commit "\$GITHUB_SHA"/);
@@ -57,6 +60,13 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   assert.ok(runtimeSmoke);
   assert.match(runtimeSmoke[1], /needs: \[build, inspect-final\]/);
   assert.match(runtimeSmoke[1], /needs\.build\.outputs\.build_mode == 'product'/);
+  const runtimeSetup = readFileSync(new URL('../distribution/windows/install-runtime.ps1', import.meta.url), 'utf8');
+  const repairRuntime = readFileSync(new URL('../distribution/windows/repair-runtime.ps1', import.meta.url), 'utf8');
+  assert.match(repairRuntime, /health\.license\.stateError -eq 'LICENSE_STATE_DAMAGED'/);
+  assert.match(repairRuntime, /did not create or grant a replacement licence/);
+  assert.match(runtimeSetup, /function Get-FileSha256Hex/);
+  assert.match(runtimeSetup, /SHA256\]::Create\(\)/);
+  assert.doesNotMatch(runtimeSetup, /\(Get-FileHash\s+-LiteralPath/);
   const smokeScript = readFileSync(new URL('./smoke-test-installed-windows.ps1', import.meta.url), 'utf8');
   assert.ok(smokeScript.indexOf('& $pgDump --no-password -h 127.0.0.1') > 0);
   assert.ok(smokeScript.indexOf('& $pgRestore --list $preUpgradeBackup') < smokeScript.indexOf('$upgrade = Start-Process'));

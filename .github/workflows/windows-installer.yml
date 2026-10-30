@@ -10,9 +10,9 @@ on:
         default: product
         required: true
   pull_request:
-    branches: [main]
+    branches: [main, 'arena/2d794f08-erp-kayan']
   push:
-    branches: [main, 'arena/key-generator-register-ui-fix', 'arena/2d794f08-erp-kayan']
+    branches: [main, 'arena/key-generator-register-ui-fix', 'arena/2d794f08-erp-kayan', 'fix/inno-inspector-callsites-20261030']
 
 # Building or inspecting a candidate never needs permission to publish releases.
 # Any future publishing job must request write permission separately, after its
@@ -443,28 +443,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends build-essential cmake libboost-all-dev liblzma-dev zlib1g-dev libbz2-dev unzip
       - name: Build and verify pinned Inno 6.7-compatible extractor and fixtures
-        shell: bash
-        run: |
-          set -euo pipefail
-          src="$RUNNER_TEMP/innoextract-src"
-          git clone --no-checkout https://github.com/mplabsorg/innoextract.git "$src"
-          git -C "$src" fetch --depth=1 origin refs/heads/support-inno-7.1
-          git -C "$src" checkout --detach FETCH_HEAD
-          test "$(git -C "$src" rev-parse HEAD)" = 34f65747e4a57d5de2582bb1ad3d540f440a3983
-          cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
-          cmake --build "$src/build" --parallel 2
-          ctest --test-dir "$src/build" --output-on-failure
-          extractor="$(find "$src/build" -type f -name innoextract -perm -111 -print -quit)"
-          test -n "$extractor"
-          "$extractor" --version
-          sha256sum "$extractor"
-          echo "KAYAN_INNOEXTRACT=$extractor" >> "$GITHUB_ENV"
-          fixture_zip="$RUNNER_TEMP/fixtures.zip"
-          curl -fsSL https://github.com/mplabsorg/innoextract/releases/download/format-fixtures-v1/innoextract-format-fixtures.zip -o "$fixture_zip"
-          echo "d77d2c447dd46edaeab6b4ea5d7102000b0b8cd66970f18cea2b1eb20f21aa52  $fixture_zip" | sha256sum -c -
-          unzip -q "$fixture_zip" -d "$RUNNER_TEMP"
-          python3 "$src/tests/check-fixtures.py" --extractor "$extractor" --fixtures "$RUNNER_TEMP/format-fixtures" --output "$RUNNER_TEMP/fixture-results"
-          echo "KAYAN_INNOEXTRACT_SHA256=$(sha256sum "$extractor" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+        run: bash scripts/build-pinned-innoextract.sh
       - uses: actions/download-artifact@v4
         with:
           name: windows-installer-raw-internal-${{ github.sha }}
@@ -542,7 +521,7 @@ jobs:
 
   publish-windows:
     name: Publish independently verified Windows installer
-    needs: build
+    needs: [build, inspect-final, smoke-final]
     if: >-
       ${{ github.repository == 'ahmadtefa/ERP_KAYAN' && github.ref == 'refs/heads/main' &&
           github.event_name == 'push' && needs.build.outputs.build_mode == 'product' }}
@@ -563,16 +542,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/check-release-environment.mjs
-      # The build's candidate upload is intentionally still blocked. Enabling
-      # it requires final Inno content inspection before upload; this step
-      # therefore fails closed until that independently reviewed work exists.
+      - name: Install extractor build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential cmake libboost-all-dev liblzma-dev zlib1g-dev libbz2-dev unzip
+      - name: Build and verify pinned Inno extractor
+        run: bash scripts/build-pinned-innoextract.sh
+      # Consume only the exact candidate that passed payload inspection. The
+      # product release remains gated by this job's dependency on the installed
+      # runtime smoke and by independent signed release evidence below.
       - name: Retrieve candidate from this exact workflow run
         uses: actions/download-artifact@v4
         with:
-          name: KAYAN-ERP-Windows-x64-PRODUCT-CANDIDATE-NOT-FOR-RELEASE
+          name: windows-installer-inspected-internal-${{ github.sha }}
           path: release-candidate
       - name: Reinspect the final installer payload
-        run: node scripts/inspect-final-inno.mjs --artifact release-candidate/KAYAN-ERP-Setup.exe
+        run: |
+          node scripts/inspect-final-inno.mjs --artifact release-candidate/KAYAN-ERP-Setup.exe \
+            --mode product --extractor "$KAYAN_INNOEXTRACT" \
+            --extractor-sha256 "$KAYAN_INNOEXTRACT_SHA256" \
+            --source-commit "$GITHUB_SHA" --report release-candidate/reinspection-report.json
       - name: Verify independent signed evidence for the exact installer
         env:
           KAYAN_WINDOWS_RELEASE_EVIDENCE: ${{ vars.KAYAN_WINDOWS_RELEASE_EVIDENCE }}

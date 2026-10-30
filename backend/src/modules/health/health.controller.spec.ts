@@ -59,16 +59,14 @@ describe('HealthController', () => {
     expect(res.databaseName).toBe('erp_kayan');
   });
 
-  it('asks for the database name as text, the one shape Prisma can read', async () => {
-    // `current_database()` returns PostgreSQL's `name` type, which Prisma
-    // cannot deserialise in a raw query. Without the cast, /health reports a
-    // working database as down and no installation can ever prove which
-    // database it opened.
+  it('casts the database name to text for Prisma raw-query compatibility', async () => {
+    // PostgreSQL's internal `name` type is not supported by Prisma raw-query
+    // deserialization. Explicitly cast to text before returning the value.
     await controller.check();
     const statements = mockPrisma.$queryRaw.mock.calls.map(sqlOfCall);
     const nameQuery = statements.find((sql: string) => /current_database/i.test(sql));
     expect(nameQuery).toBeDefined();
-    expect(nameQuery).toMatch(/current_database\(\)\s*::text/i);
+    expect(nameQuery).toMatch(/current_database\(\)\s*::\s*text/i);
   });
 
   it('keeps the database up when only the name query cannot be read', async () => {

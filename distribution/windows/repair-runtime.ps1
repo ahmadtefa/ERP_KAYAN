@@ -265,6 +265,9 @@ try {
         if ($health.license.enforcement -ne 'enforce') {
           throw ("This installation enforces licences, but the repaired server reported '" + $health.license.enforcement + "'. Repair would have weakened it, so it is not reported as successful. See " + $bootstrapLog)
         }
+        if ($health.license.stateError -eq 'LICENSE_STATE_DAMAGED') {
+          throw ('The protected licence state is damaged. Repair preserved the original file and did not create or grant a replacement licence. Restore a trusted licence-state backup from this same installation before opening KAYAN ERP. Company data and licence enforcement were preserved.')
+        }
         if ($health.license.configured -ne $true) {
           throw ('This installation enforces licences, but its verification key is not readable by the repaired server. Run Repair again, or restore ' + (Join-Path $licenceDirectory 'public-key.pem') + ' from the Setup package.')
         }

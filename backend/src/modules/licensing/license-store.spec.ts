@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,6 +26,7 @@ describe('LicenseStore', () => {
     const store = new LicenseStore(dir);
     expect(existsSync(join(dir, 'license-state.json'))).toBe(true);
     expect(existsSync(join(dir, 'state.key'))).toBe(true);
+    expect(existsSync(join(dir, 'license-state.backup.json'))).toBe(true);
     expect(store.current.installId).toMatch(/^[0-9a-f]{32}$/);
     if (process.platform !== 'win32') {
       expect(statSync(join(dir, 'state.key')).mode & 0o777).toBe(0o600);
@@ -56,7 +57,7 @@ describe('LicenseStore', () => {
     expect(store.current.maxSeatLimit).toBe(12);
   });
 
-  it('notices a hand-edited state file and refuses to load it', () => {
+  it('recovers a hand-edited primary from the authenticated mirror and preserves the damaged file', () => {
     const store = new LicenseStore(dir);
     store.update((state) => {
       state.maxSeatsUsed = 2;
@@ -66,16 +67,14 @@ describe('LicenseStore', () => {
     body.state.maxSeatsUsed = 0; // the "restore the counter" edit
     writeFileSync(path, JSON.stringify(body));
 
-    try {
-      new LicenseStore(dir);
-      throw new Error('the edited file was accepted');
-    } catch (error) {
-      expect(error).toBeInstanceOf(LicenseStateError);
-      expect((error as LicenseStateError).code).toBe('TAMPERED');
-    }
+    const reopened = new LicenseStore(dir);
+    expect(reopened.recoveredFromBackup).toBe(true);
+    expect(reopened.current.maxSeatsUsed).toBe(2);
+    expect(JSON.parse(readFileSync(path, 'utf8')).state.maxSeatsUsed).toBe(2);
+    expect(readdirSync(dir).some((name) => name.startsWith('license-state.damaged-'))).toBe(true);
   });
 
-  it('notices a file whose MAC was removed', () => {
+  it('recovers a primary whose MAC was removed from the authenticated mirror', () => {
     const store = new LicenseStore(dir);
     store.update((state) => {
       state.appliedKeys = ['key_1'];
@@ -84,18 +83,29 @@ describe('LicenseStore', () => {
     const body = JSON.parse(readFileSync(path, 'utf8'));
     delete body.mac;
     writeFileSync(path, JSON.stringify(body));
-    expect(() => new LicenseStore(dir)).toThrow(/no signed state/i);
+
+    const reopened = new LicenseStore(dir);
+    expect(reopened.recoveredFromBackup).toBe(true);
+    expect(reopened.current.appliedKeys).toEqual(['key_1']);
   });
 
-  it('refuses a state file that is not JSON at all', () => {
+  it('recovers a primary that is not JSON from the authenticated mirror', () => {
+    const store = new LicenseStore(dir);
+    store.update((state) => {
+      state.maxSeatLimit = 8;
+    });
+    writeFileSync(join(dir, 'license-state.json'), 'not json');
+
+    const reopened = new LicenseStore(dir);
+    expect(reopened.recoveredFromBackup).toBe(true);
+    expect(reopened.current.maxSeatLimit).toBe(8);
+  });
+
+  it('fails closed when both the primary and authenticated mirror are damaged', () => {
     new LicenseStore(dir);
     writeFileSync(join(dir, 'license-state.json'), 'not json');
-    try {
-      new LicenseStore(dir);
-      throw new Error('unreadable file was accepted');
-    } catch (error) {
-      expect((error as LicenseStateError).code).toBe('UNREADABLE');
-    }
+    writeFileSync(join(dir, 'license-state.backup.json'), 'also not json');
+    expect(() => new LicenseStore(dir)).toThrow(LicenseStateError);
   });
 
   it('keeps the applied-key list bounded, dropping the oldest', () => {
