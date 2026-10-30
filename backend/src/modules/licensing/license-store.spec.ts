@@ -98,13 +98,22 @@ describe('LicenseStore', () => {
     }
   });
 
-  it('keeps the applied-key list bounded, dropping the oldest', () => {
+  it('retains every spent key across the old 500-key limit and reopen', () => {
     const store = new LicenseStore(dir);
     store.update((state) => {
       state.appliedKeys = Array.from({ length: 505 }, (_, index) => `key_${index}`);
     });
-    expect(store.current.appliedKeys).toHaveLength(500);
-    expect(store.current.appliedKeys[0]).toBe('key_5');
+    const reopened = new LicenseStore(dir);
+    expect(reopened.current.appliedKeys).toHaveLength(505);
+    expect(reopened.current.appliedKeys[0]).toBe('key_0');
+    expect(reopened.current.appliedKeys[504]).toBe('key_504');
+  });
+
+  it('does not forget spent keys if a caller attempts to remove or duplicate them', () => {
+    const store = new LicenseStore(dir);
+    store.update((state) => { state.appliedKeys = ['key_0', 'key_1']; });
+    store.update((state) => { state.appliedKeys = ['key_1', 'key_2', 'key_2']; });
+    expect(new LicenseStore(dir).current.appliedKeys).toEqual(['key_0', 'key_1', 'key_2']);
   });
 
   it('uses a configured secret instead of the file beside it', () => {

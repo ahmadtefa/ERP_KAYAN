@@ -682,10 +682,9 @@ export class LicensingService implements OnModuleInit {
         code: 'LICENSE_KEY_ALREADY_USED',
       });
     }
-    if (
-      existing &&
-      this.store.current.appliedKeys.includes(payload.keyId)
-    ) {
+    // The protected ledger is authoritative even if an older restored
+    // database predates the installation and therefore has no licence row.
+    if (this.store.current.appliedKeys.includes(payload.keyId)) {
       throw new ForbiddenException({
         detail:
           'This key was already used on this installation. A key is spent once it has been applied; ask the supplier for a new one.',

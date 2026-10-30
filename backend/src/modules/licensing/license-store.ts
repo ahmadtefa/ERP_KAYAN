@@ -53,7 +53,6 @@ export interface LicenseTrustState {
   sequence: number;
 }
 
-const MAX_APPLIED_KEYS = 500;
 const MAX_SUSPECTS = 50;
 
 export class LicenseStateError extends Error {
@@ -115,7 +114,10 @@ export class LicenseStore {
   update(change: (state: LicenseTrustState) => void): LicenseTrustState {
     const next: LicenseTrustState = JSON.parse(JSON.stringify(this.state));
     change(next);
-    next.appliedKeys = next.appliedKeys.slice(-MAX_APPLIED_KEYS);
+    // A bounded tail permits an old spent key to be re-applied after the
+    // database is rolled back. Preserve all known key IDs monotonically,
+    // including if a caller accidentally supplies a shortened list.
+    next.appliedKeys = [...new Set([...this.state.appliedKeys, ...next.appliedKeys])];
     next.clockSuspects = next.clockSuspects.slice(-MAX_SUSPECTS);
     next.sequence = this.state.sequence + 1;
     next.maxSeatsUsed = Math.max(next.maxSeatsUsed, this.state.maxSeatsUsed);

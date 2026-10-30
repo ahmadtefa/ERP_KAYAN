@@ -331,6 +331,22 @@ describe('replay', () => {
     }
   });
 
+  it('refuses an already spent activation even if an older database has no installation or key row', async () => {
+    const h = harness();
+    try {
+      const key = h.key({});
+      await h.service.activate(key);
+      // Model an older restored database while preserving the independent trust state.
+      h.db.installations = [];
+      h.db.keys = [];
+      await expectCode(h.service.activate(key), 'LICENSE_KEY_ALREADY_USED');
+      expect(h.db.installations).toHaveLength(0);
+      expect(h.db.keys).toHaveLength(0);
+    } finally {
+      h.dispose();
+    }
+  });
+
   it('leaves no trace of a refused key, so the corrected key can be applied', async () => {
     const h = harness();
     try {

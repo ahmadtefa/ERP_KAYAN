@@ -508,6 +508,36 @@ async function activationAndSeats() {
       return 'refused by the key ledger and by the protected state file';
     });
 
+    await check('R5a restored database without a licence row cannot replay an old activation', async () => {
+      // An explicitly disposable database models a restore that predates the
+      // activation. The company row stays in place throughout the test.
+      const replayDatabase = DATABASES.runtime + '_replay';
+      await recreateDatabase(replayDatabase);
+      const replayConnection = databaseUrl(replayDatabase);
+      await applyMigrations(replayConnection);
+      await seedCompany(replayConnection);
+      const replayInstance = await installation({ database: replayDatabase });
+      try {
+        const replayKey = key({ licenseId: `lic_${randomUUID().replace(/-/g, '').slice(0, 16)}` });
+        await replayInstance.service.activate(replayKey);
+        replayInstance.store.update((state) => {
+          state.appliedKeys.push(...Array.from({ length: 505 }, (_, index) => `probe_${index}`));
+        });
+        const companiesBefore = await count(replayConnection, 'SELECT count(*) FROM companies');
+        await withClient(replayConnection, async (client) => {
+          await client.query('DELETE FROM license_keys');
+          await client.query('DELETE FROM license_installations');
+        });
+        assertCode(await refusal(replayInstance.service.activate(replayKey)), 'LICENSE_KEY_ALREADY_USED');
+        assertEqual(await count(replayConnection, 'SELECT count(*) FROM license_installations'), 0, 'no replayed installation');
+        assertEqual(await count(replayConnection, 'SELECT count(*) FROM license_keys'), 0, 'no replayed key');
+        assertEqual(await count(replayConnection, 'SELECT count(*) FROM companies'), companiesBefore, 'company rows remain intact');
+        return 'protected ledger still refuses the oldest key after 505 further entries and DB rollback';
+      } finally {
+        await close(replayInstance);
+      }
+    });
+
     let firstUserId = null;
 
     await check('R6 a retried request with the same Idempotency-Key consumes no second seat', async () => {
