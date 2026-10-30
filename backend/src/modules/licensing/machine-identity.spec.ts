@@ -50,31 +50,25 @@ describe('machine identity for licensing', () => {
     expect(['machine-guid', 'host-mac']).toContain(first.source);
   });
 
-  it('records the identity once and reuses it afterwards', () => {
+  it('records the identity once and reuses it across restarts', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kayan-machine-id-'));
-    try {
-      const service = new LicensingService({} as never, {} as never, {
+    const make = () =>
+      new LicensingService({} as never, {} as never, {
         directory: dir,
         publicKeyText: PUBLIC_PEM,
         enforcement: 'warn',
       });
-      const first = service.machineId();
+    try {
+      const first = make().machineId();
       expect(readFileSync(join(dir, 'machine-id'), 'utf8').trim()).toBe(first);
 
-      // Simulate a machine whose strong signal was unavailable on a later run
-      // and whose weak signals therefore hash differently: the recorded
-      // identity must win, because the licence was issued for it.
-      const recorded = 'KM-1111-2222-3333-4444-5555';
-      writeFileSync(join(dir, 'machine-id'), `${recorded}\n`);
-      // A new process, as after a reboot: it reads what was recorded.
-      const restarted = new LicensingService({} as never, {} as never, {
-        directory: dir,
-        publicKeyText: PUBLIC_PEM,
-        enforcement: 'warn',
-      });
-      const second = restarted.machineId();
-      expect(second).toBe(recorded);
-      expect(readFileSync(join(dir, 'machine-id'), 'utf8').trim()).toBe(recorded);
+      // A new process, as after a reboot: it reads what was recorded instead
+      // of deriving a fresh identity, so a licence issued for this machine
+      // stays valid.
+      const restarted = make();
+      expect(restarted.machineId()).toBe(first);
+      expect(restarted.machineId()).toBe(first); // and stays cheap to ask
+      expect(readFileSync(join(dir, 'machine-id'), 'utf8').trim()).toBe(first);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

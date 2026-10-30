@@ -1091,8 +1091,12 @@ async function clockAndRestore() {
       return 'the database remains the authority';
     });
 
-    await check('B4 a corrupted state fails closed until trusted recovery', async () => {
+    await check('B4 a corrupted state fails closed when no verified backup exists', async () => {
       const path = join(instance.directory, 'license-state.json');
+      // The archive is a recovery source; this check is about the installation
+      // that has none, so the documented fail-closed behaviour is measured
+      // without it. The archive path is covered by B4b below.
+      rmSync(join(instance.directory, 'LicenceBackups'), { recursive: true, force: true });
       const backupPath = join(instance.directory, 'license-state.backup.json');
       // Damage BOTH trust copies. If the authenticated mirror remains intact,
       // recovering from it is the correct behaviour, not a fail-closed case.
@@ -1130,6 +1134,37 @@ async function clockAndRestore() {
         await close(restarted);
       }
       return 'damaged bytes preserved; 503 fail-closed; trusted state restored without losing seats';
+    });
+
+    await check('B4b a corrupted state is restored from the licensed backup archive', async () => {
+      const directory = mkdtempSync(join(tmpdir(), 'kayan-licence-state-'));
+      cleanup.push({ directory });
+      const fresh = await installation({ database: DATABASES.runtime + '_clock', directory });
+      // Applying a key captures a verified, machine-bound copy of the licence.
+      const archived = await fresh.service.captureLicenceBackup('postgres-check');
+      assert(archived && archived.id, 'a licence backup was captured');
+      assertEqual(archived.machineId, MACHINE, 'the capture is bound to this machine');
+      const capturedSeats = archived.state.maxSeatsUsed;
+      await close(fresh);
+
+      const path = join(directory, 'license-state.json');
+      const mirror = join(directory, 'license-state.backup.json');
+      writeFileSync(path, 'broken-primary');
+      writeFileSync(mirror, 'broken-mirror');
+
+      const reopened = await installation({ database: DATABASES.runtime + '_clock', directory });
+      try {
+        const status = await reopened.service.status({ fresh: true });
+        assertEqual(status.state, 'ACTIVE', 'state after automatic recovery');
+        assertEqual(status.seats.limit, 9, 'limit recovered');
+        assert(status.seats.used >= capturedSeats, 'the restore did not lower the seat watermark');
+        assertEqual(status.machineId, MACHINE, 'the recovered licence belongs to this machine');
+        const preserved = readdirSync(directory).filter((name) => name.includes('.damaged-'));
+        assert(preserved.length >= 1, 'the damaged copies were preserved for diagnosis');
+      } finally {
+        await close(reopened);
+      }
+      return 'both copies damaged, newest verified archive restored, damaged evidence kept';
     });
 
     await check('B5 a database newer than the state file raises the file, not the other way round', async () => {
