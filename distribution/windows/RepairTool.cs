@@ -534,11 +534,13 @@ namespace Kayan
                         diagnosis = "the last server process exited early - see the [err] lines just above it in the log";
                     }
                 }
-                bool failed = diagnosis != null
-                    && diagnosis.IndexOf("first-run setup", StringComparison.OrdinalIgnoreCase) < 0;
+                // The application log is historical evidence, not a live
+                // health probe. A stale failure can remain after Repair has
+                // restored the service, so keep this check informational.
+                // Live Node/PostgreSQL/service/API checks determine health.
                 return new RepairCheck(
                     CheckLog,
-                    !failed,
+                    true,
                     diagnosis ?? "no known failure signature in the last log lines");
             }
             catch (Exception ex)
@@ -573,9 +575,14 @@ namespace Kayan
             {
                 return "Diagnosis: database not accepting connections on the configured port, although the service claims to run. Repair re-registers the service; if it persists, check for another PostgreSQL using that port.";
             }
+            RepairCheck log = Find(checks, CheckLog);
+            if (log != null && !log.Ok)
+            {
+                return "Diagnosis: from the last server log - " + log.Detail + ".";
+            }
             for (int i = 0; i < checks.Count; i++)
             {
-                if (!checks[i].Ok)
+                if (!checks[i].Ok && checks[i].Name != CheckLog)
                 {
                     return "Diagnosis: the installation itself is incomplete (" + checks[i].Name + "). Reinstall KAYAN ERP over the top; settings and company data are kept.";
                 }
@@ -585,7 +592,6 @@ namespace Kayan
             {
                 return "Diagnosis: everything is installed and running; first-run setup has not been completed. Open KAYAN ERP and create the company and the first administrator.";
             }
-            RepairCheck log = Find(checks, CheckLog);
             if (log != null && log.Detail.IndexOf("first-run setup", StringComparison.Ordinal) >= 0)
             {
                 return "Diagnosis: the installation is healthy; the last run was waiting at first-run setup. Open KAYAN ERP and create the company and the first administrator.";
