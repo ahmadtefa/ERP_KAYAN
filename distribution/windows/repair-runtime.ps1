@@ -190,7 +190,18 @@ try {
   $backendDir = Join-Path $PSScriptRoot 'backend'
   $nodeExe = Join-Path $backendDir 'node\node.exe'
   $prepareScript = Join-Path $backendDir 'scripts\prepare-database.mjs'
-  if ((Test-Path -LiteralPath $nodeExe) -and (Test-Path -LiteralPath $prepareScript)) {
+  if (-not (Test-Path -LiteralPath $nodeExe -PathType Leaf)) {
+    throw "The bundled Node.js runtime is missing: $nodeExe. Reinstall the same KAYAN Setup over the existing installation; ProgramData company data is kept."
+  }
+  if (-not (Test-Path -LiteralPath $prepareScript -PathType Leaf)) {
+    throw "The bundled database preparation script is missing: $prepareScript. Reinstall the same KAYAN Setup over the existing installation; ProgramData company data is kept."
+  }
+  $nodeVersionOutput = @(& $nodeExe --version 2>&1)
+  $nodeVersionExit = $LASTEXITCODE
+  if ($nodeVersionExit -ne 0 -or (($nodeVersionOutput -join ' ').Trim() -notmatch '^v\d+\.')) {
+    throw ("The bundled Node.js runtime cannot execute (exit " + $nodeVersionExit + "): " + (Protect-Secret (($nodeVersionOutput -join ' ').Trim())) + ". Check the Microsoft Visual C++ runtime; reinstall Setup if the bundled node.exe is damaged.")
+  }
+  {
     $prepOut = Join-Path $env:TEMP ('kayan-repair-prep-out-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.log')
     $prepErr = Join-Path $env:TEMP ('kayan-repair-prep-err-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.log')
     try {
@@ -213,7 +224,10 @@ try {
   # the runtime, the database and the server all work, and first-run
   # setup belongs to the program window, not to this script.
   $mainJs = Join-Path $backendDir 'dist\src\main.js'
-  if ((Test-Path -LiteralPath $nodeExe) -and (Test-Path -LiteralPath $mainJs)) {
+  if (-not (Test-Path -LiteralPath $mainJs -PathType Leaf)) {
+    throw "The bundled backend entry point is missing: $mainJs. Reinstall the same KAYAN Setup over the existing installation; ProgramData company data is kept."
+  }
+  {
     $probePort = $null
     foreach ($candidate in @(3000, 3001, 3002, 3003, 3010, 3020)) {
       $listener = $null
