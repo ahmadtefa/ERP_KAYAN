@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { PRODUCTION_FINGERPRINT, fingerprint, validateFile, validatePem } from './license-build-policy.mjs';
@@ -68,13 +68,20 @@ test('Windows build checks both selected and staged keys and marks non-product i
   assert.match(inno, /OutputBaseFilename=\{#SetupBase\}/);
   assert.match(inno, /function InitializeSetup\(\): Boolean/);
   assert.match(inno, /#if KayanBuildKind != "product"[\s\S]*?Result := False/);
-  assert.match(inno, /GetSHA256OfFile\(ExistingKey\).*GetSHA256OfFile\(IncomingKey\)/);
+  assert.match(inno, /ExistingHash := GetSHA256OfFile\(ExistingKey\);/);
+  assert.match(inno, /IncomingHash := GetSHA256OfFile\(IncomingKey\);/);
+  assert.match(inno, /Length\(ExistingHash\) <> 64/);
+  assert.match(inno, /Length\(IncomingHash\) <> 64/);
+  assert.match(inno, /CompareText\(ExistingHash, IncomingHash\) <> 0/);
   const runtime = readFileSync(new URL('../distribution/windows/install-runtime.ps1', import.meta.url), 'utf8');
   assert.ok(runtime.indexOf("$runtimeManifest.licenseBuildKind -ne 'product'") < runtime.indexOf("Write-RuntimeMarker 'KAYAN-RUNTIME-START'"));
   assert.match(runtime, /existing licence key differs/i);
   assert.doesNotMatch(runtime, /Copy-Item -LiteralPath \$source -Destination \$target -Force/);
   const smoke = readFileSync(new URL('../scripts/smoke-test-installed-windows.ps1', import.meta.url), 'utf8');
-  assert.ok(smoke.indexOf("throw 'Installed smoke testing is disabled") < smoke.indexOf('$installLog ='));
+  const guard = smoke.indexOf("if (-not $RuntimeOnly) {");
+  assert.ok(guard >= 0 && guard < smoke.indexOf('$installLog ='));
+  assert.match(smoke.slice(guard, smoke.indexOf('$installLog =')), /throw 'The historical licensed smoke required a signing-key directory/);
+  assert.match(smoke, /This is not signed-licence reconstruction or activation/);
   assert.match(runtime, /Existing licence state has no protected public key/);
   const legacyBuild = readFileSync(new URL('../scripts/build-desktop-windows.ps1', import.meta.url), 'utf8');
   const legacyInno = readFileSync(new URL('../scripts/installer-windows.iss', import.meta.url), 'utf8');
@@ -97,7 +104,18 @@ test('all release paths fail closed; test artifacts have a distinct path and nam
   assert.match(workflow, /Product build refused: the approved licence public key is missing/);
   assert.match(workflow, /--mode product --public-key \$operatorKey/);
   assert.match(workflow, /-TestSignedBuild -LicencePublicKeyPath \$key/);
-  assert.doesNotMatch(workflow, /secrets\.KAYAN_LICENCE_PRIVATE_KEY/);
+  // The one approved use compares the configured key with the product public
+  // key in memory. It must not be exposed to the build or any other step.
+  const secretSteps = steps.filter(step => /secrets\.KAYAN_LICENCE_PRIVATE_KEY/.test(step));
+  assert.equal(secretSteps.length, 1);
+  assert.match(secretSteps[0], /^Verify configured product key pair in memory/);
+  assert.match(secretSteps[0], /run: node scripts\/verify-configured-key-pair\.mjs/);
+  assert.equal((workflow.match(/secrets\.KAYAN_LICENCE_PRIVATE_KEY/g) || []).length, 1);
+  const verifier = readFileSync(new URL('./verify-configured-key-pair.mjs', import.meta.url), 'utf8');
+  assert.match(verifier, /randomBytes\(32\)/);
+  assert.match(verifier, /timingSafeEqual\(derivedDer, publicDer\)/);
+  assert.match(verifier, /verify\(null, challenge, publicKey, signature\)/);
+  assert.doesNotMatch(verifier, /writeFile|appendFile|createWriteStream|https?:|fetch\(/);
   assert.doesNotMatch(workflow, /WriteAllText\([^\n]*private-key\.pem/);
   const smoke = steps.find(step => step.startsWith('Smoke-test the actual installed Windows application'));
   assert.match(smoke, /if: \$\{\{ false \}\}/);
@@ -126,14 +144,19 @@ test('Windows production publication is gated by same-run evidence and environme
   }
 });
 
-test('Android generator debug APK is named and uploaded as test-only after a successful build', () => {
-  const workflow = readFileSync(new URL('../.github/workflows/key-generator-android.yml', import.meta.url), 'utf8');
-  assert.match(workflow, /KAYAN-Key-Generator-Android-TEST-ONLY\.apk/);
-  assert.match(workflow, /name: KAYAN-Key-Generator-Android-TEST-ONLY-apk/);
-  assert.match(workflow, /name: Upload the TEST ONLY debug-signed APK\s+if: success\(\)/);
-  assert.doesNotMatch(workflow, /uses: ncipollo\/release-action/);
-  assert.match(workflow, /flutter build apk --debug/);
-  assert.doesNotMatch(workflow, /flutter build apk --release/);
+test('Android source retains test-only controls and any Android workflow cannot publish', () => {
+  // This checkout intentionally has no Android workflow. If a local or future
+  // workflow exists, validate the original controls instead of enabling it.
+  const workflowPath = new URL('../.github/workflows/key-generator-android.yml', import.meta.url);
+  if (existsSync(workflowPath)) {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    assert.match(workflow, /KAYAN-Key-Generator-Android-TEST-ONLY\.apk/);
+    assert.match(workflow, /name: KAYAN-Key-Generator-Android-TEST-ONLY-apk/);
+    assert.match(workflow, /name: Upload the TEST ONLY debug-signed APK\s+if: success\(\)/);
+    assert.doesNotMatch(workflow, /uses: ncipollo\/release-action/);
+    assert.match(workflow, /flutter build apk --debug/);
+    assert.doesNotMatch(workflow, /flutter build apk --release/);
+  }
   const gradle = readFileSync(new URL('../tools/license-generator/android-app/android/app/build.gradle.kts', import.meta.url), 'utf8');
   assert.match(gradle, /variant\.buildType != "debug"\) variant\.enable = false/);
   assert.match(gradle, /applicationIdSuffix = "\.testonly"/);
