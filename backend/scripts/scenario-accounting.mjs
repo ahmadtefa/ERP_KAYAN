@@ -1432,31 +1432,6 @@ async function main() {
     skip('backup and restore', `pg_dump is not available here: ${capabilities.data?.reason ?? 'unknown reason'}`);
   }
 
-  // ─────────────────────── 18. the server defends itself against a flood
-  const flood = await Promise.all(
-    Array.from({ length: 30 }, () =>
-      api('/auth/login', {
-        method: 'POST',
-        json: { username: USERNAME, password: 'definitely-not-the-password' },
-        noAuth: true,
-        noRetry: true,
-      }),
-    ),
-  );
-  const limited = flood.some((row) => row.status === 429);
-  const rejected = flood.filter((row) => row.status === 401).length;
-  check(
-    'repeated failed logins are rejected and then rate-limited',
-    rejected >= 1 && limited,
-    `${rejected} rejected, rate limited: ${limited}`,
-  );
-  const detail = flood.find((row) => row.status === 429)?.data?.detail ?? '';
-  check(
-    'the refusal does not leak whether the password or the account was wrong',
-    !/password|user not found|no such/i.test(String(detail)) || /too many requests/i.test(String(detail)),
-    String(detail).slice(0, 90),
-  );
-
   // This operation is intentionally disabled unless CI (or an operator using
   // a dedicated disposable database) opts in explicitly. Never let a routine
   // scenario run reset a real or developer database by accident.
@@ -1595,6 +1570,144 @@ async function main() {
     );
   } else {
     skip('live reset and first-run status', 'set ENABLE_DISPOSABLE_RESET=true only for an ephemeral test database');
+  }
+
+  // ─────────────────────── 19. the server defends itself against a flood
+  //
+  // Two different defences answer a burst of wrong passwords, and both are
+  // checked here:
+  //
+  //  * the per-address limiter, which refuses the whole address once its
+  //    sign-in window is full, and says how long to wait;
+  //  * the per-account lock, which refuses the right password for fifteen
+  //    minutes after five failures, so guessing cannot continue slowly.
+  //
+  // Last on purpose, and on a throwaway account. Early versions of this
+  // check fired the burst at the administrator: the account lock then kept
+  // the administrator out for a quarter of an hour, and every scenario that
+  // ran afterwards - the API check, the lifecycle, the statement export -
+  // failed to sign in with nothing wrong in what it tested.
+  //
+  // The window is measured from a known state. Ten misses are sent for a name
+  // that does not exist (no account is touched by those), which is enough to
+  // fill any window; the next one must be refused, and waiting out its own
+  // Retry-After leaves a fresh window.
+  const floodStamp = Date.now().toString(36);
+  const floodUsername = `scenario_flood_${floodStamp}`;
+  const floodPassword = 'Scenario-Flood-Password-12345';
+  // A token of its own: the live-reset section above recreates the company,
+  // and the session carried in from before it is not guaranteed to still be
+  // the administrator of the company that now exists.
+  const adminForFlood = await api('/auth/login', {
+    method: 'POST',
+    json: { username: USERNAME, password: PASSWORD },
+    noAuth: true,
+    noRetry: true,
+  });
+  const floodUser = await api('/admin/users', {
+    method: 'POST',
+    noAuth: true,
+    headers: { Authorization: `Bearer ${adminForFlood.data?.accessToken ?? ''}` },
+    json: {
+      username: floodUsername,
+      password: floodPassword,
+      fullNameEn: 'Scenario Flood',
+      fullNameAr: 'مستخدم اختبار الغمر',
+    },
+  });
+  check(
+    'a throwaway account exists for the flood check',
+    floodUser.status === 201 && Boolean(floodUser.data?.id),
+    floodUser.data?.detail ?? `HTTP ${floodUser.status}`,
+  );
+
+  // Fill this address's window with misses for a name that cannot exist.
+  const fill = await Promise.all(
+    Array.from({ length: 10 }, () =>
+      api('/auth/login', {
+        method: 'POST',
+        json: { username: `no_such_account_${floodStamp}`, password: 'not-the-password' },
+        noAuth: true,
+        noRetry: true,
+      }),
+    ),
+  );
+  const fillRefused = fill.filter((row) => row.status === 429).length;
+  const overflow = await api('/auth/login', {
+    method: 'POST',
+    json: { username: `no_such_account_${floodStamp}`, password: 'not-the-password' },
+    noAuth: true,
+    noRetry: true,
+  });
+  if (overflow.status === 429) {
+    const seconds = Number(overflow.headers?.get('retry-after') ?? 0) + 1;
+    console.log(`  (the sign-in window is full by design; waiting ${seconds}s for a fresh one)`);
+    await sleep(seconds * 1000);
+  } else {
+    console.log(`  (note: the window was not full after 10 misses - HTTP ${overflow.status})`);
+  }
+  console.log(`  (filled the window: ${fillRefused}/10 misses were already refused)`);
+
+  // The account lock: five wrong passwords, then the right one is refused too.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await api('/auth/login', {
+      method: 'POST',
+      json: { username: floodUsername, password: 'definitely-not-the-password' },
+      noAuth: true,
+      noRetry: true,
+    });
+  }
+  const lockedOut = await api('/auth/login', {
+    method: 'POST',
+    json: { username: floodUsername, password: floodPassword },
+    noAuth: true,
+    noRetry: true,
+  });
+  check(
+    'five wrong passwords lock the account against the right one',
+    lockedOut.status === 401 && /lock/i.test(String(lockedOut.data?.detail ?? '')),
+    `HTTP ${lockedOut.status}; ${String(lockedOut.data?.detail ?? '').slice(0, 70)}`,
+  );
+
+  const flood = await Promise.all(
+    Array.from({ length: 30 }, () =>
+      api('/auth/login', {
+        method: 'POST',
+        json: { username: floodUsername, password: 'definitely-not-the-password' },
+        noAuth: true,
+        noRetry: true,
+      }),
+    ),
+  );
+  const refusals = flood.filter((row) => row.status === 429);
+  const rejected = flood.filter((row) => row.status === 401).length;
+  const accepted = flood.filter((row) => row.status >= 200 && row.status < 300).length;
+  check(
+    'repeated failed logins are rejected and then rate-limited',
+    rejected >= 1 && refusals.length > 0 && accepted === 0,
+    `${rejected} rejected, ${refusals.length} rate limited, ${accepted} accepted`,
+  );
+  const firstRefusal = refusals[0];
+  const detail = firstRefusal?.data?.detail ?? '';
+  check(
+    'the refusal does not leak whether the password or the account was wrong',
+    !/password|user not found|no such/i.test(String(detail)) || /too many requests/i.test(String(detail)),
+    String(detail).slice(0, 90),
+  );
+  check(
+    'the refusal tells the client how long to wait',
+    Number(firstRefusal?.headers?.get('retry-after') ?? 0) > 0 && /second/i.test(String(detail)),
+    `Retry-After ${firstRefusal?.headers?.get('retry-after') ?? 'missing'}; ${String(detail).slice(0, 60)}`,
+  );
+
+  // Leave the limiter as it was found. The window belongs to the API process,
+  // not to this script, so a closed one would refuse the sign-in of whatever
+  // runs next (the API check, the lifecycle scenario, the statement export) -
+  // and those are not rate-limit tests.
+  const waitSeconds = Number(firstRefusal?.headers?.get('retry-after') ?? 0);
+  if (waitSeconds > 0) {
+    console.log(`  (waiting ${waitSeconds}s for this address's sign-in window to reopen)`);
+    await sleep((waitSeconds + 1) * 1000);
   }
 
   // ─────────────────────────────────────────────────────────── the summary

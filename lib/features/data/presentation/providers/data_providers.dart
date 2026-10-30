@@ -78,6 +78,10 @@ class ReportLinkBuilder {
     String? to,
     String? accountId,
     String? branchId,
+    /// A partner statement carries who it is about; every other report
+    /// ignores the two.
+    String? partyId,
+    String? kind,
   }) async {
     final query = <String, String>{
       'format': format,
@@ -86,6 +90,8 @@ class ReportLinkBuilder {
       'to': ?to,
       'accountId': ?accountId,
       'branchId': ?branchId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(
@@ -100,12 +106,20 @@ class ReportLinkBuilder {
     String? from,
     String? to,
     String? accountId,
+    String? partyId,
+    String? kind,
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       'from': ?from,
       'to': ?to,
       'accountId': ?accountId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(url: '$_base/exports/$report/pdf?${_encode(query)}');
@@ -121,13 +135,21 @@ class ReportLinkBuilder {
     String? from,
     String? to,
     String? accountId,
+    String? partyId,
+    String? kind,
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       'from': ?from,
       'to': ?to,
       'accountId': ?accountId,
+      'partyId': ?partyId,
+      'kind': ?kind,
       'ticket': await _downloadTicket(),
     };
     return '$_base/exports/$report/print?${_encode(query)}';
@@ -162,9 +184,13 @@ class ReportLinkBuilder {
     required String list,
     required String language,
     Map<String, String> filters = const {},
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       ...filters,
       'ticket': await _downloadTicket(),
     };
@@ -179,9 +205,13 @@ class ReportLinkBuilder {
     required String language,
     bool auto = true,
     Map<String, String> filters = const {},
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       ...filters,
       'ticket': await _downloadTicket(),
@@ -209,9 +239,13 @@ class ReportLinkBuilder {
     required String kind,
     required String id,
     required String language,
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(
@@ -224,9 +258,13 @@ class ReportLinkBuilder {
     required String id,
     required String language,
     bool auto = true,
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       'ticket': await _downloadTicket(),
     };
@@ -298,6 +336,54 @@ class ReportLinkBuilder {
     return DownloadRequest(
       url: '$_base/backup/full/${Uri.encodeComponent(name)}/download'
           '?${_encode(query)}',
+    );
+  }
+
+  /// Printable barcode label sheet for one item's units. Each spec is a
+  /// `unitId:copies` pair and repeats as its own query entry, so a unit never
+  /// has to share a line with another unit's barcode.
+  Future<String> barcodeLabelPrint({
+    required String itemId,
+    required List<({String unitId, int copies})> specs,
+    required String language,
+    required String paper,
+    required bool showPrice,
+    bool auto = true,
+  }) async {
+    final query = <String>[
+      'lang=$language',
+      'paper=$paper',
+      'showPrice=$showPrice',
+      if (auto) 'auto=1',
+      'ticket=${await _downloadTicket()}',
+      ...specs.map(
+        (spec) =>
+            'specs=${Uri.encodeQueryComponent('${spec.unitId}:${spec.copies}')}',
+      ),
+    ];
+    return '$_base/inventory/items/$itemId/barcode-labels/print?${query.join('&')}';
+  }
+
+  /// The same label sheet rendered to PDF by the server's browser pipeline.
+  Future<DownloadRequest> barcodeLabelPdf({
+    required String itemId,
+    required List<({String unitId, int copies})> specs,
+    required String language,
+    required String paper,
+    required bool showPrice,
+  }) async {
+    final query = <String>[
+      'lang=$language',
+      'paper=$paper',
+      'showPrice=$showPrice',
+      'ticket=${await _downloadTicket()}',
+      ...specs.map(
+        (spec) =>
+            'specs=${Uri.encodeQueryComponent('${spec.unitId}:${spec.copies}')}',
+      ),
+    ];
+    return DownloadRequest(
+      url: '$_base/inventory/items/$itemId/barcode-labels/pdf?${query.join('&')}',
     );
   }
 

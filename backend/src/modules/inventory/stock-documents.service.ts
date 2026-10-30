@@ -8,6 +8,7 @@ import { InvoiceStatus, Prisma, StockDirection, StockDocumentKind } from '@prism
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import { resolveUnitSelection } from '../../common/units/unit-math';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { CostCentersService } from '../accounting/cost-centers.service';
@@ -21,8 +22,18 @@ export interface StockDocumentLineInput {
   /** Adjustment: signed change. Count: ignored (countedQuantity is used). */
   quantity?: string | number;
   countedQuantity?: string | number;
+  /**
+   * The unit the person counted in, e.g. "carton" for a stock count entered as
+   * "3 cartons". The saved conversion factor of that unit turns the figure
+   * into base units, which is what stock and value are kept in. Omitted means
+   * the item's base unit.
+   */
+  unit?: string;
   unitCost?: string | number;
   notes?: string;
+  /** Optional chosen unit; quantity/countedQuantity are expressed in it. */
+  unitName?: string;
+  unitId?: string;
 }
 
 /**
@@ -100,7 +111,7 @@ export class StockDocumentsService {
     };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, mayReadCost = true) {
     const document = await this.prisma.stockDocument.findFirst({
       where: { id, companyId, deletedAt: null },
       include: {
@@ -123,9 +134,18 @@ export class StockDocumentsService {
         itemCode: line.item.code,
         itemNameEn: line.item.nameEn,
         itemNameAr: line.item.nameAr,
-        unit: line.item.unit,
+        unit: line.unitName ?? line.item.unit,
+        unitName: line.unitName ?? null,
+        unitFactor:
+          line.unitFactor === null || line.unitFactor === undefined
+            ? null
+            : line.unitFactor.toFixed(6),
+        unitQuantity: (line.unitQuantity ?? line.quantity).toFixed(MONEY_SCALE),
         quantity: line.quantity.toFixed(MONEY_SCALE),
-        unitCost: line.unitCost.toFixed(MONEY_SCALE),
+        baseQuantity: line.quantity.toFixed(MONEY_SCALE),
+        // Unit cost is a cost figure: withheld when the caller lacks cost.read;
+        // the document and its quantities remain fully readable.
+        unitCost: mayReadCost ? line.unitCost.toFixed(MONEY_SCALE) : null,
         countedQuantity: line.countedQuantity?.toFixed(MONEY_SCALE) ?? null,
         notes: line.notes,
       })),
@@ -206,22 +226,31 @@ export class StockDocumentsService {
       countedQuantity: Prisma.Decimal | null;
       unitCost: Prisma.Decimal;
       notes: string | null;
+      unitName: string | null;
+      unitFactor: Prisma.Decimal | null;
+      unitQuantity: Prisma.Decimal | null;
     }> = [];
     for (const [index, raw] of dto.lines.entries()) {
       const item = await this.prisma.item.findFirst({
         where: { id: raw.itemId, companyId, deletedAt: null },
-        select: { id: true, isStockTracked: true, code: true },
+        select: { id: true, isStockTracked: true, code: true, unit: true, units: true },
       });
       if (!item) throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
       if (!item.isStockTracked) {
         throw new BadRequestException(`Line ${index + 1}: item ${item.code} is not stock-tracked`);
       }
 
-      const quantity =
+      // One conversion path for both the stock-document `unit` field and the
+      // document-line `unitName/unitId` fields. The entered quantity stays in
+      // the chosen unit until resolveUnitSelection turns it into base units;
+      // that helper also refuses unknown/inactive units and freezes the
+      // factor in the display snapshot.
+      const requestedUnitName = raw.unitName ?? raw.unit;
+      let quantity =
         raw.quantity === undefined
           ? new Prisma.Decimal(0)
           : this.decimal(raw.quantity, `Line ${index + 1} quantity`);
-      const countedQuantity =
+      let countedQuantity =
         raw.countedQuantity === undefined
           ? null
           : this.decimal(raw.countedQuantity, `Line ${index + 1} counted quantity`);
@@ -230,8 +259,51 @@ export class StockDocumentsService {
           ? new Prisma.Decimal(0)
           : this.decimal(raw.unitCost, `Line ${index + 1} unit cost`);
 
+      // Multi-unit: convert the entered values into base-unit quantities the
+      // posting logic already understands, keeping a frozen display snapshot.
+      let unitName: string | null = null;
+      let unitFactor: Prisma.Decimal | null = null;
+      let unitQuantity: Prisma.Decimal | null = null;
+      if (requestedUnitName || raw.unitId) {
+        const units = (item as { units?: any[] }).units ?? [];
+        if (!quantity.isZero()) {
+          // Adjustments may be negative (write-off): convert the
+          // magnitude and restore the sign on the base quantity.
+          const sign = quantity.isNegative() ? new Prisma.Decimal(-1) : new Prisma.Decimal(1);
+          const resolved = resolveUnitSelection({
+            lineLabel: `Line ${index + 1}`,
+            requestedUnitId: raw.unitId,
+            requestedUnitName: requestedUnitName,
+            enteredQuantity: quantity.abs(),
+            baseUnitName: item.unit,
+            units,
+          });
+          unitName = resolved.snapshot.unitName;
+          unitFactor = resolved.snapshot.unitFactor;
+          unitQuantity = quantity;
+          quantity = resolved.baseQuantity.mul(sign);
+        }
+        if (countedQuantity && !countedQuantity.isZero()) {
+          const resolvedCount = resolveUnitSelection({
+            lineLabel: `Line ${index + 1}`,
+            requestedUnitId: raw.unitId,
+            requestedUnitName: requestedUnitName,
+            enteredQuantity: countedQuantity,
+            baseUnitName: item.unit,
+            units,
+          });
+          unitName = resolvedCount.snapshot.unitName;
+          unitFactor = resolvedCount.snapshot.unitFactor;
+          unitQuantity = countedQuantity;
+          countedQuantity = resolvedCount.baseQuantity;
+        }
+      }
+
       if (kind !== StockDocumentKind.COUNT && quantity.isZero()) {
         throw new BadRequestException(`Line ${index + 1}: a quantity is required`);
+      }
+      if (kind === StockDocumentKind.TRANSFER && quantity.isNegative()) {
+        throw new BadRequestException(`Line ${index + 1}: transfer quantity must be positive`);
       }
       if (kind === StockDocumentKind.COUNT && (!countedQuantity || countedQuantity.isNegative())) {
         throw new BadRequestException(
@@ -248,6 +320,9 @@ export class StockDocumentsService {
         countedQuantity,
         unitCost,
         notes: raw.notes ?? null,
+        unitName,
+        unitFactor,
+        unitQuantity,
       });
     }
 
@@ -311,6 +386,9 @@ export class StockDocumentsService {
               unitCost: line.unitCost,
               countedQuantity: line.countedQuantity,
               notes: line.notes,
+              unitName: line.unitName,
+              unitFactor: line.unitFactor,
+              unitQuantity: line.unitQuantity,
             })),
           },
         },
@@ -345,6 +423,10 @@ export class StockDocumentsService {
       );
     }
 
+    if (document.kind === StockDocumentKind.TRANSFER &&
+        document.lines.some((line) => !line.quantity.greaterThan(0))) {
+      throw new BadRequestException('Transfer quantities must be positive before posting');
+    }
     const settings = await this.settings.get(companyId);
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -388,6 +470,23 @@ export class StockDocumentsService {
           // Out of the source branch, into the destination, at the cost the
           // stock actually carries. No value is created or destroyed, so no
           // journal entry is needed: it is the same company's inventory.
+
+          // Warehouse-level rule first: the branch total may cover the line
+          // while this specific source warehouse does not. stock_balances is
+          // branch-granular, so without this check the warehouse's derived
+          // card could be driven below zero (observed defect). The guard
+          // locks the warehouse row, which also serialises concurrent
+          // transfers draining the same pile.
+          await this.warehouses.assertWarehouseAvailable({
+            tx,
+            companyId,
+            warehouseId: fromWarehouseId,
+            itemId: line.itemId,
+            quantity: line.quantity,
+            allowNegative: settings.allowNegativeStock,
+            reference: document.documentNumber,
+          });
+
           const fromBalance = await this.balance(tx, companyId, document.fromBranchId as string, line.itemId);
           const availableQty = fromBalance?.quantity ?? new Prisma.Decimal(0);
           const availableValue = fromBalance?.value ?? new Prisma.Decimal(0);
@@ -440,6 +539,20 @@ export class StockDocumentsService {
         // ADJUSTMENT and COUNT both come down to "this many units move".
         let quantity = line.quantity;
         let unitCost = line.unitCost;
+        // For a write-off the direction and amount are already known. Take
+        // the warehouse lock before the branch balance lock, as transfer and
+        // reversal do; taking them in the opposite order can deadlock.
+        if (document.kind === StockDocumentKind.ADJUSTMENT && quantity.lessThan(0)) {
+          await this.warehouses.assertWarehouseAvailable({
+            tx,
+            companyId,
+            warehouseId: toWarehouseId,
+            itemId: line.itemId,
+            quantity: quantity.abs(),
+            allowNegative: settings.allowNegativeStock,
+            reference: document.documentNumber,
+          });
+        }
         const balance = await this.balance(tx, companyId, document.branchId, line.itemId);
         const onHand = balance?.quantity ?? new Prisma.Decimal(0);
         const onHandValue = balance?.value ?? new Prisma.Decimal(0);
@@ -467,6 +580,8 @@ export class StockDocumentsService {
         const absoluteQuantity = quantity.abs();
         const totalCost = unitCost.mul(absoluteQuantity).toDecimalPlaces(MONEY_SCALE);
 
+        // COUNT remains a reconciliation to physically counted reality and
+        // retains its existing branch-level-only posting policy.
         await this.move(tx, {
           companyId,
           branchId: document.branchId,
@@ -580,6 +695,11 @@ export class StockDocumentsService {
       throw new BadRequestException('Only a posted stock document can be reversed');
     }
 
+    if (document.kind === StockDocumentKind.TRANSFER &&
+        document.lines.some((line) => line.quantity.isNegative())) {
+      throw new BadRequestException('Cannot automatically reverse a transfer with negative quantities; contact support');
+    }
+    const settings = await this.settings.get(companyId);
     await this.prisma.$transaction(async (tx) => {
       const claimed = await tx.stockDocument.updateMany({
         where: { id, status: InvoiceStatus.POSTED },
@@ -603,6 +723,42 @@ export class StockDocumentsService {
             document.fromWarehouseId,
           )
         : reversalToWarehouseId;
+
+      // Check every pile that the reversal will take stock from before any
+      // branch balance is locked or movement is written. Aggregate repeated
+      // items: checking each line against the same starting balance would let
+      // several individually affordable lines overdraw the warehouse.
+      const outgoing = new Map<string, { warehouseId: string; itemId: string; quantity: Prisma.Decimal }>();
+      for (const line of document.lines) {
+        const warehouseId = reversalToWarehouseId;
+        const isOutgoing = document.kind === StockDocumentKind.TRANSFER
+          ? !line.quantity.isZero()
+          : line.quantity.greaterThan(0);
+        if (!warehouseId || !isOutgoing) continue;
+        const key = `${warehouseId}:${line.itemId}`;
+        const previous = outgoing.get(key);
+        outgoing.set(key, {
+          warehouseId,
+          itemId: line.itemId,
+          quantity: (previous?.quantity ?? new Prisma.Decimal(0)).plus(line.quantity.abs()),
+        });
+      }
+      // Consistent warehouse ordering avoids taking warehouse locks in line
+      // order; other posting paths still need real-Postgres concurrency tests.
+      const checks = [...outgoing.values()].sort((a, b) =>
+        a.warehouseId.localeCompare(b.warehouseId) || a.itemId.localeCompare(b.itemId),
+      );
+      for (const check of checks) {
+        await this.warehouses.assertWarehouseAvailable({
+          tx,
+          companyId,
+          warehouseId: check.warehouseId,
+          itemId: check.itemId,
+          quantity: check.quantity,
+          allowNegative: settings.allowNegativeStock,
+          reference: document.documentNumber,
+        });
+      }
 
       for (const line of document.lines) {
         const targets =
@@ -775,6 +931,12 @@ export class StockDocumentsService {
       });
     }
   }
+
+  // Unit resolution for stock lines lives in resolveUnitSelection
+  // (common/units/unit-math): it refuses unknown and inactive units, converts
+  // the entered quantity into base units and builds the frozen snapshot. The
+  // previous private unitFactor() helper is fully subsumed by that path, which
+  // also honours the stock-document `unit` field via requestedUnitName.
 
   private decimal(value: unknown, field: string): Prisma.Decimal {
     try {

@@ -19,6 +19,7 @@ import '../../features/data/presentation/screens/import_screen.dart';
 import '../../features/inventory/presentation/screens/items_screen.dart';
 import '../../features/inventory/presentation/screens/stock_screen.dart';
 import '../../features/invoicing/presentation/providers/invoice_providers.dart';
+import '../../features/licensing/presentation/screens/licence_screen.dart';
 import '../../features/invoicing/presentation/screens/invoice_list_screen.dart';
 import '../../features/invoicing/presentation/screens/return_editor_screen.dart';
 import '../../features/invoicing/presentation/screens/returns_screen.dart';
@@ -72,6 +73,7 @@ class AppRoutes {
   static const administration = '/administration';
   static const companySettings = '/settings/company';
   static const settings = '/settings';
+  static const licence = '/settings/licence';
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -193,4 +195,5 @@ const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.administration, child: AdminScreen()),
   (path: AppRoutes.companySettings, child: CompanySettingsScreen()),
   (path: AppRoutes.settings, child: SettingsScreen()),
+  (path: AppRoutes.licence, child: LicenceScreen()),
 ];

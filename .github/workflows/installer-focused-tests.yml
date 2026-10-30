@@ -1,0 +1,67 @@
+name: Installer safety focused tests (no installer build)
+
+on:
+  push:
+    branches: ['arena/2d794f08-erp-kayan']
+    paths:
+      - '.github/workflows/installer-focused-tests.yml'
+      - 'backend/scripts/migrate-deploy.mjs'
+      - 'backend/scripts/migrate-deploy.test.mjs'
+      - 'backend/scripts/prepare-database.mjs'
+      - 'distribution/windows/build-installer.ps1'
+      - 'scripts/windows-release-policy.test.mjs'
+      - 'lib/features/data/presentation/screens/backup_screen.dart'
+      - 'test/features/data/backup_demo_visibility_test.dart'
+
+permissions:
+  contents: read
+
+jobs:
+  migration-safety:
+    # This follow-up changes only Flutter diagnostic invocation.
+    if: ${{ !startsWith(github.event.head_commit.message, 'Fix focused Flutter diagnostics') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.22.3'
+      - name: Test missing Prisma CLI handling and packaging policy
+        run: node --test backend/scripts/migrate-deploy.test.mjs scripts/windows-release-policy.test.mjs
+  backup-ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - name: Get locked Flutter dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Analyze only affected UI and test
+        shell: bash
+        run: |
+          for path in lib/features/data/presentation/screens/backup_screen.dart test/features/data/backup_demo_visibility_test.dart; do
+            log="$RUNNER_TEMP/flutter-focused-analyze.log"
+            if ! flutter analyze --no-pub --machine "$path" > "$log" 2>&1; then
+              python3 -c 'import sys; s=open(sys.argv[1],encoding="utf-8").read()[-12000:]; print("::error title=Focused Flutter analysis::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))' "$log"
+              exit 1
+            fi
+          done
+      - name: Test backup UI visibility and preserved controls
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/flutter-focused-test.jsonl"
+          if ! flutter test --no-pub --reporter json test/features/data/backup_demo_visibility_test.dart > "$log" 2>&1; then
+            node scripts/report-flutter-test-failures.mjs "$log"
+            exit 1
+          fi

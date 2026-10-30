@@ -128,9 +128,10 @@ void main() {
       await tester.tap(find.text('Open editor'));
       await tester.pumpAndSettle();
 
-      // Supplier, item, and the cost center the line belongs to.
+      // Supplier, item, cost center, and the line's unit selector.
       final dropdowns = find.byType(DropdownButtonFormField<String>);
-      expect(dropdowns, findsNWidgets(3));
+      expect(dropdowns, findsNWidgets(4));
+      expect(find.byKey(const ValueKey('line-unit-0')), findsOneWidget);
 
       await tester.tap(dropdowns.at(0));
       await tester.pumpAndSettle();
@@ -182,9 +183,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Party and item only: a company that does not use the dimension is not
-    // asked about it.
-    expect(find.byType(DropdownButtonFormField<String>), findsNWidgets(2));
+    // Party, item and unit only: a company that does not use the dimension
+    // is not asked about it.
+    expect(find.byType(DropdownButtonFormField<String>), findsNWidgets(3));
+    expect(find.byKey(const ValueKey('line-unit-0')), findsOneWidget);
     expect(find.text('No allocation'), findsNothing);
   });
 }

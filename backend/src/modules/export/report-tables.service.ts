@@ -784,7 +784,9 @@ export class ReportTablesService {
         { labelEn: 'Total', labelAr: 'الإجمالي', value: data.totals.total },
         { labelEn: 'Paid', labelAr: 'المسدَّد', value: data.totals.paid },
         { labelEn: 'Outstanding', labelAr: 'المتبقي', value: data.totals.outstanding },
-        { labelEn: 'Gross profit', labelAr: 'مجمل الربح', value: data.totals.grossProfit },
+        // Null when the caller lacks inventory.cost.read; the matching column
+        // is removed by applyPriceVisibility anyway, so an empty cell is fine.
+        { labelEn: 'Gross profit', labelAr: 'مجمل الربح', value: data.totals.grossProfit ?? '' },
       ],
       notes: [],
     });
@@ -1011,6 +1013,7 @@ export class ReportTablesService {
         { key: 'date', labelEn: 'Date', labelAr: 'التاريخ', width: 12 },
         { key: 'number', labelEn: 'Document', labelAr: 'المستند', width: 16 },
         { key: 'type', labelEn: 'Kind', labelAr: 'النوع', width: 16 },
+        { key: 'status', labelEn: 'Document status', labelAr: 'حالة المستند', width: 12 },
         { key: 'description', labelEn: 'Description', labelAr: 'البيان', width: 26 },
         { key: 'debit', labelEn: 'Debit', labelAr: 'مدين', numeric: true, width: 14 },
         { key: 'credit', labelEn: 'Credit', labelAr: 'دائن', numeric: true, width: 14 },

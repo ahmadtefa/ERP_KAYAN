@@ -30,6 +30,127 @@ The installer itself (not the build) requires elevation because it registers a P
 3. On first app start, the existing backend preparation path applies checked-in Prisma migrations and asks the first user to choose the initial administrator credentials. It does not seed a default user or reset an existing database.
 4. The Flutter client starts the bundled Nest API with the bundled Node runtime, waits for `/api/v1/health`, and renders the interface. The API is bound to loopback and serves the included web build from the same origin as well.
 
+### The company page: a new company never reuses the old database
+
+Setup asks one question: a new company, or the one already on this computer.
+
+- **A new company** creates a database of its own (`erp_kayan_<timestamp>`) with
+  the current schema and nothing in it. If this computer already holds a
+  company, Setup first takes a `pg_dump` backup of it, verifies that
+  `pg_restore --list` can read the file back, and leaves the old database
+  exactly as it is. It never empties, renames or reuses it, so the previous
+  company can always be recovered.
+- **An existing company** verifies that the database on disk really is this
+  installation's own (owner, role, tables), backs it up, and upgrades it in
+  place.
+
+Every write of `kayan.env` carries `KAYAN_SETTINGS_GENERATION`, which only
+grows. Two copies exist (the protected one in `%ProgramData%` and the per-user
+one), and the program reads the newer one, so a profile that could not be
+updated can never point the program at the previous company. The last thing
+Setup does is prove the program can reach the database its settings name
+(`KAYAN-RUNTIME-VERIFIED`); it reports success only after that.
+
+### Licence enforcement and evaluation builds
+
+A product Setup carries the operator's `public-key.pem` and switches licence
+enforcement on. `build-installer.ps1` refuses
+production when the public key is missing, invalid, or does not match the
+approved fingerprint `9153-E15E-475B-A2E2-251A-7E40-D8EB-5855`. The staged
+copy is checked again. Place the approved public key beside the build script,
+or pass `-LicencePublicKeyPath`. Never give the builder a private key.
+
+`-TestSignedBuild -LicencePublicKeyPath <test-public-key>` is a diagnostic
+build; it refuses the production public key and creates a
+`KAYAN-ERP-TEST-ONLY-Setup`. `-EvaluationBuild` creates a separate
+`KAYAN-ERP-EVALUATION-ONLY-Setup`. **Both refuse installation** because the
+runtime still shares customer paths and services; labelling is not isolation.
+The manifest records `licenseBuildKind` and `licenseEnforcement`.
+
+Pull-request CI runs are test-signed; pushes default to product and manual runs
+select the mode. Product builds fail closed rather than falling back to a test
+key. CI no longer receives the production signing secret and does not run the
+old installed smoke test. Branch prereleases and diagnostic uploads remain
+blocked. A protected production publishing job is wired but cannot presently
+obtain a candidate or trusted evidence. It requires independent inspection of
+the exact package, isolated Windows installation/upgrade testing and protected
+release approvals. The Inno preprocessor cannot prevent deliberate manual
+compilation outside that trusted pipeline.
+
+`scripts/verify-release-evidence.mjs` verifies an Ed25519
+attestation from a separately approved authority, bound to the final file's
+SHA-256, platform, commit, workflow run and run attempt, with a short expiry and explicit
+inspection/installation/upgrade/signature claims. Its hard-coded authority
+public-key file `distribution/release/approved-evidence-public.pem` is absent;
+no authority has been approved. `scripts/check-release-environment.mjs` checks
+GitHub's actual `windows-production` environment metadata for required
+reviewers, self-review prohibition and protected deployment branches. Protect
+`main`, release tags, workflow and authority-key changes separately; review
+administrator-bypass settings independently. The production job rechecks the
+metadata and signed evidence, requires a protected pre-existing tag for the
+same commit, and refuses an existing release. A signed envelope may be provided
+as a variable, but the fixed authority key and signature, not the variable or
+artifact name, establish trust. Signed claims do not replace the actual tests.
+
+`scripts/inspect-final-inno.mjs` is wired into build and publication and streams
+entries without extracting files. It needs a trusted 7z with Inno support; its
+listing/parser and actual installer handling have not been verified on Windows
+or an actual installer. Marker scans cannot prove absence of nested, encrypted
+or unknown secrets. Candidate upload remains blocked until independently reviewed
+final inspection and a trustworthy attestation mechanism are available. An
+isolated active-licence upgrade test and a trusted authority to deliver evidence
+for the exact binary are also missing.
+
+`scripts/prepare-isolated-windows-install-test.ps1` prepares, but does not
+launch, a Windows Sandbox basic install/upgrade exercise. It maps two separate,
+pre-inspected installer folders and the guest script read-only, disables guest
+networking, and maps only a new dedicated results folder writable. The guest
+runs PostgreSQL inside the disposable VM, installs the old and candidate EXEs,
+and compares the installed public key and enforcement marker. Execution needs
+independent approval and a Sandbox-capable Windows host. This untested script
+cannot establish that an active synthetic old licence survives upgrade, cannot
+inspect the final package, and its writable result is not trusted attestation.
+Keep the old smoke/test installers blocked until full isolation and synthetic
+active-licence tests are implemented and actually verified. The isolated
+`licensing-upgrade-model.spec.ts` exercises active synthetic licence state,
+rejected forgery and fake application data across a service restart; it uses
+FakeDb and is not an installed Windows upgrade or evidence about real data.
+
+The product installer refuses an upgrade before replacing files if the existing
+licence public key differs or existing licence state has no key. Runtime setup
+checks again and does not replace an existing key. Matching is deliberately
+byte-exact and may conservatively refuse differently formatted equivalent keys;
+changes require a separately reviewed and tested transition. A workflow success
+does not prove old customer licences remain compatible.
+
+Before any future key transition: inventory existing verifier fingerprints and
+licence versions without changing customer state; verify protected backups;
+design and review a time-bounded old/new verification policy accounting for
+old-key compromise; test activation, renewal, seats, transfer, replay, clock
+state, restart, backup/restore and upgrade on disposable installations using
+synthetic old/new pairs; then stage rollout with support and rollback procedures.
+Do not replace a customer verifier or retire the old one until those checks and
+an explicit approval are complete. This is a plan, not an implemented rotation.
+
+### Company databases and their names
+
+`install-runtime.ps1` accepts a company database only when the connection points
+at the bundled cluster (`erp_app` on `127.0.0.1:5432`) **and** the database is
+one this product created: `erp_kayan`, or the databases "a new company" and the
+safe reset create, `erp_kayan_<yyyyMMddHHmmss>`. Every step that names a
+database - the ownership check, the KAYAN-table check, the company count, the
+create-if-missing statement and the backup - takes the name from `DATABASE_URL`.
+Before this, those four places were written with the literal `erp_kayan`, so the
+first install after a reset whose settings named `erp_kayan_<stamp>` failed at
+"verifying the company database" with a PostgreSQL-looking error, and the
+program went on opening the previous company.
+
+Repair (`repair-runtime.ps1`) keeps the settings it found: it refuses to finish
+if the settings generation would go backwards or if the database name would
+change, and - when the protected licence folder says this installation must
+enforce - it fails unless the repaired server reports `enforcement: enforce`
+with its verification key readable.
+
 ### Two Windows rules the runtime setup has to respect
 
 **PostgreSQL refuses administrative permissions.** The server aborts with
@@ -69,6 +190,10 @@ The first install needs enough disk for the bundled installer plus a PostgreSQL 
 
 ## Verification boundary
 
-The build pipeline validates artifact hashes, staged entry points, required dependencies, absence of development `.env`, and emits a runtime manifest. The **Windows Installer** workflow goes further: on a real `windows-latest` machine it compiles the `.exe`, installs it silently, and then verifies the installed product with `scripts/smoke-test-installed-windows.ps1` - installer exit code, the `KayanERPPostgreSQL` service exists and runs as a non-administrator account, `pg_isready` on `127.0.0.1:5432`, the cluster really was initialized in `%ProgramData%\KAYAN-ERP\PostgreSQL\data`, the production database preparation, a disposable CI administrator, and a second upgrade/reinstall that must preserve a disposable company-data row. It then launches the installed `erp_kayan.exe`, verifies `/api/v1/health` reports `status=ok` and `database=up`, and logs in against the installed database. A build that only compiles is never treated as proof.
-
-The automated second install exercises the upgrade/reinstall path and proves a disposable database row survives. It does not replace a carefully supervised update of a real customer's installation, which should still be tested before a wide rollout. Uninstall retention (service removed, database kept) is not yet automated and should also be confirmed before broad distribution.
+The build pipeline validates staged entry points and emits a runtime manifest.
+The previous installed smoke test is currently disabled: it used customer paths
+and a signing private key. A candidate build does not prove installation,
+activation or upgrades work. Before any release, independently inspect the
+actual installer, exercise the product and a separately isolated test runtime
+on disposable Windows hosts, test old licences and upgrades without customer
+data, and review uninstall retention. No automatic release is enabled.

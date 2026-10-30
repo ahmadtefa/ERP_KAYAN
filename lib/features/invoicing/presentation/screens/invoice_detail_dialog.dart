@@ -259,9 +259,17 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
                       value: (r) => text(r, 'description'),
                     ),
                     ColumnSpec(
+                      l10n.unit,
+                      value: (r) => text(r, 'unit'),
+                    ),
+                    ColumnSpec(
                       l10n.quantity,
                       numeric: true,
-                      value: (r) => formatQuantity(asString(r['quantity'])),
+                      // Show what was entered in the chosen unit; a legacy row
+                      // has no snapshot and falls back to the base quantity.
+                      value: (r) => formatQuantity(
+                        asString(r['unitQuantity']) ?? asString(r['quantity']),
+                      ),
                     ),
                     ColumnSpec(
                       l10n.unitPrice,

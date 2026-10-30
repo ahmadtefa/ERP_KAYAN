@@ -14,6 +14,10 @@ import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
+import {
+  defaultUnitPrice,
+  resolveUnitSelection,
+} from '../../common/units/unit-math';
 import { PriceListsService } from '../sales/price-lists.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
@@ -61,6 +65,11 @@ interface PreparedLine {
   landedCostAmount: Prisma.Decimal;
   inventoryCostTotal: Prisma.Decimal;
   costCenterId: string | null;
+  // Multi-unit snapshot. All null on a legacy/base-unit line; `quantity` is
+  // always the internal base-unit quantity stock actually receives.
+  unitName: string | null;
+  unitFactor: Prisma.Decimal | null;
+  unitQuantity: Prisma.Decimal | null;
 }
 
 interface PreparedInvoice {
@@ -148,9 +157,16 @@ export class PurchaseInvoicesService {
         itemCode: l.item?.code ?? null,
         itemNameEn: l.item?.nameEn ?? null,
         itemNameAr: l.item?.nameAr ?? null,
-        unit: l.item?.unit ?? null,
+        // Chosen unit with legacy fallback to the item base unit.
+        unit: l.unitName ?? l.item?.unit ?? null,
+        unitName: l.unitName ?? null,
+        unitFactor: l.unitFactor === null || l.unitFactor === undefined ? null : l.unitFactor.toFixed(6),
+        // Entered quantity in the chosen unit; legacy rows fall back to stored.
+        unitQuantity: (l.unitQuantity ?? l.quantity).toFixed(MONEY_SCALE),
         description: l.description,
+        // Internal base-unit quantity received into stock.
         quantity: l.quantity.toFixed(MONEY_SCALE),
+        baseQuantity: l.quantity.toFixed(MONEY_SCALE),
         returnedQuantity: l.returnedQuantity.toFixed(MONEY_SCALE),
         unitPrice: l.unitPrice.toFixed(MONEY_SCALE),
         taxRate: l.taxRate.toFixed(RATE_SCALE),
@@ -250,6 +266,9 @@ export class PurchaseInvoicesService {
               landedCostAmount: l.landedCostAmount,
               inventoryCostTotal: l.inventoryCostTotal,
               costCenterId: l.costCenterId,
+              unitName: l.unitName,
+              unitFactor: l.unitFactor,
+              unitQuantity: l.unitQuantity,
             })),
           },
         },
@@ -377,6 +396,9 @@ export class PurchaseInvoicesService {
               landedCostAmount: line.landedCostAmount,
               inventoryCostTotal: line.inventoryCostTotal,
               costCenterId: line.costCenterId,
+              unitName: line.unitName,
+              unitFactor: line.unitFactor,
+              unitQuantity: line.unitQuantity,
             })),
           },
         },
@@ -808,6 +830,7 @@ export class PurchaseInvoicesService {
           isActive: true,
           purchasePrice: true,
           unit: true,
+          units: true,
         },
       });
       if (!item) {
@@ -819,22 +842,37 @@ export class PurchaseInvoicesService {
 
       const quantity = this.positive(raw.quantity, `Line ${index + 1} quantity`);
 
-      // A price typed on the line is the cost. When nobody typed one, the
-      // supplier's agreed list speaks, and failing that the item's own
-      // purchase price - resolved once the item is known.
+      // Resolve the chosen unit. The entered quantity is expressed in it; the
+      // base quantity is what is received into stock and drives unit cost.
+      const resolved = resolveUnitSelection({
+        lineLabel: `Line ${index + 1}`,
+        requestedUnitId: raw.unitId,
+        requestedUnitName: raw.unitName,
+        enteredQuantity: quantity,
+        baseUnitName: item.unit,
+        units: (item as { units?: any[] }).units ?? [],
+      });
+      const enteredQuantity = resolved.snapshot.unitQuantity ?? quantity;
+
+      // A price typed on the line is the cost of one CHOSEN unit. When nobody
+      // typed one, the supplier's agreed list speaks (for the chosen unit),
+      // then the unit's own purchase price, then the item's purchase price.
       let unitPrice =
         raw.unitPrice === undefined || raw.unitPrice === null || raw.unitPrice === ''
           ? null
           : this.nonNegative(raw.unitPrice, `Line ${index + 1} unitPrice`);
       if (unitPrice === null) {
+        const chosenUnitName = resolved.snapshot.unitName ?? item.unit;
         const listed = await this.prices.resolvePrice(this.prisma, companyId, {
           partyId: supplierId ?? null,
           partyKind: 'SUPPLIER',
           itemId: raw.itemId,
-          unit: item.unit,
-          quantity,
+          unit: chosenUnitName,
+          quantity: enteredQuantity,
         });
-        unitPrice = listed?.price ?? item.purchasePrice;
+        unitPrice = listed
+          ? listed.price
+          : defaultUnitPrice('purchase', resolved.row, item.purchasePrice);
       }
 
       // Line, then item, then the company's own rate - an item with no rate
@@ -845,8 +883,10 @@ export class PurchaseInvoicesService {
           : (item.taxRate ?? new Prisma.Decimal(settings.taxRate));
 
       // The discount is taken from the goods value, before tax, and the tax
-      // is then charged on what is actually being paid for the goods.
-      const grossLineTotal = quantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
+      // is then charged on what is actually being paid for the goods. Money
+      // follows the entered quantity in the chosen unit; stock uses the base
+      // quantity computed above.
+      const grossLineTotal = enteredQuantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
       const lineDiscount = this.lineDiscount(
         grossLineTotal,
         raw,
@@ -877,7 +917,8 @@ export class PurchaseInvoicesService {
         lineNumber: index + 1,
         itemId: raw.itemId,
         description: raw.description ?? `${item.code} ${item.nameEn}`,
-        quantity,
+        // Internal base-unit quantity received into stock.
+        quantity: resolved.baseQuantity,
         unitPrice,
         taxRate,
         taxAmount: new Prisma.Decimal(0),
@@ -890,6 +931,9 @@ export class PurchaseInvoicesService {
         landedCostAmount: new Prisma.Decimal(0),
         inventoryCostTotal: lineDiscount.net,
         costCenterId,
+        unitName: resolved.snapshot.unitName,
+        unitFactor: resolved.snapshot.unitFactor,
+        unitQuantity: resolved.snapshot.unitQuantity,
       });
     }
 

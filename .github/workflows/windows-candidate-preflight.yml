@@ -1,0 +1,324 @@
+name: Windows candidate preflight (no publication)
+
+# Runs only a committed tree at this session's branch. This is NOT an
+# installation/upgrade/licence-recovery test and cannot authorize a release.
+on:
+  push:
+    branches: ['arena/2d794f08-erp-kayan']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inno-probe:
+    # The dedicated packaging-probe workflow handles this one packaging-only
+    # commit; no unchanged application suites are repeated for that commit.
+    if: ${{ github.event_name != 'push' || github.event.before != '162685d56b07a5ddbdcbfc04ee387b58e99bfc28' || github.event.head_commit.message != 'Prepare production packaging probe' }}
+    name: Probe Inno inspection on Windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.22.3'
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build a synthetic Inno payload for independent inspection
+        id: probe_build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP ('kayan-inno-probe-' + [guid]::NewGuid().ToString('N'))
+          [void](New-Item -ItemType Directory -Path $dir)
+          $key = Join-Path $dir 'public-key.pem'
+          & node -e "const c=require('node:crypto'),f=require('node:fs'); f.writeFileSync(process.argv[1],c.generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'pem'}),{flag:'wx'});" $key
+          if ($LASTEXITCODE -ne 0) { throw 'Probe public key generation failed.' }
+          $script = @"
+          [Setup]
+          AppName=Kayan Inno Inspection Probe
+          AppVersion=1.0
+          DefaultDirName={autopf}\KayanInnoProbe
+          OutputDir=$dir
+          OutputBaseFilename=probe
+          Compression=lzma2
+          SolidCompression=yes
+          [Files]
+          Source: "$key"; DestDir: "{app}"
+          "@
+          $iss = Join-Path $dir 'probe.iss'
+          [IO.File]::WriteAllText($iss, $script)
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $iscc)) { $iscc = "$env:ProgramFiles\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path -LiteralPath $iscc)) { throw 'Inno compiler missing from runner.' }
+          & $iscc $iss
+          if ($LASTEXITCODE -ne 0) { throw 'Synthetic Inno probe build failed.' }
+          "dir=$dir" >> $env:GITHUB_OUTPUT
+      - name: Transfer synthetic public-key-only probe for inspection
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: synthetic-inno-probe-raw-${{ github.sha }}
+          path: |
+            ${{ steps.probe_build.outputs.dir }}/probe.exe
+            ${{ steps.probe_build.outputs.dir }}/public-key.pem
+          if-no-files-found: error
+          retention-days: 1
+  preflight:
+    if: ${{ github.event_name != 'push' || github.event.before != '162685d56b07a5ddbdcbfc04ee387b58e99bfc28' || github.event.head_commit.message != 'Prepare production packaging probe' }}
+    name: Validate the exact Windows candidate
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Confirm exact checkout
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_SHA) { throw 'Checkout did not match the event commit.' }
+          if (@(git status --porcelain=v1 --untracked-files=all).Count -ne 0) { throw 'Candidate checkout is not clean.' }
+          Write-Host "Candidate commit: $actual"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          # Flutter 3.47.6 embeds Dart 3.13.5, matching pubspec.lock.
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - name: Record tool versions
+        run: |
+          node --version
+          npm --version
+          flutter --version
+      - name: Install locked backend dependencies
+        id: install
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+      - name: Validate Prisma schema
+        id: schema
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://synthetic@127.0.0.1:5432/kayan_unused?schema=public
+        run: npx prisma validate
+      - name: Generate current Prisma Client
+        id: prisma
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://synthetic@127.0.0.1:5432/kayan_unused?schema=public
+        run: npx prisma generate
+      - name: Backend lint
+        id: lint
+        continue-on-error: true
+        working-directory: backend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          & npm.cmd run lint *> (Join-Path $env:RUNNER_TEMP 'kayan-lint.log')
+          $result = $LASTEXITCODE
+          Get-Content (Join-Path $env:RUNNER_TEMP 'kayan-lint.log') -Tail 3 | ForEach-Object { Write-Output "lint summary: $_" }
+          if ($result -ne 0) { throw 'Backend lint has known findings; see the classification report.' }
+      - name: Backend tests excluding key generator
+        id: tests
+        working-directory: backend
+        # The generator suite writes a synthetic private key to disk. It is
+        # deliberately excluded; this run must not claim a complete suite.
+        run: npm test -- --runInBand --testPathIgnorePatterns=license-generator.spec.ts
+      - name: Compile backend with current Prisma Client
+        id: backend_build
+        working-directory: backend
+        run: npm run build
+      - name: Get locked Flutter dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Analyze Flutter
+        id: flutter_analyze
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $log = Join-Path $env:RUNNER_TEMP 'kayan-flutter-analyze.log'
+          & flutter analyze --no-pub --machine *> $log
+          $result = $LASTEXITCODE
+          $diagnostics = @(Get-Content -LiteralPath $log | Where-Object { $_ -match '^(ERROR|WARNING|INFO)\|' })
+          if ($diagnostics.Count -gt 0) {
+            # Annotations are available even where log archives are blocked.
+            # Encode workflow-command metacharacters; do not truncate the first
+            # diagnostic or claim success when a later diagnostic fails.
+            $text = (($diagnostics | Select-Object -First 30) -join ' | ').Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            if ($text.Length -gt 60000) { $text = $text.Substring(0, 60000) }
+            Write-Output "::error title=Flutter analyzer diagnostics::$text"
+          }
+          if ($result -ne 0 -and $diagnostics.Count -eq 0) {
+            $tail = ((Get-Content -LiteralPath $log -Tail 20) -join ' | ').Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            if ($tail.Length -gt 12000) { $tail = $tail.Substring(0, 12000) }
+            Write-Output "::error title=Flutter analyzer output::$tail"
+          }
+          if ($result -ne 0) { throw "Flutter analyze failed with exit code $result; diagnostics=$($diagnostics.Count)." }
+      # The inherited screenshot suite is a generator; its goldens are not
+      # checked in. Regenerate only inside the disposable runner, as the
+      # existing project CI does. These PNGs are not release evidence.
+      - name: Prepare screenshot test baselines on the runner
+        id: screenshots
+        continue-on-error: true
+        run: flutter test --no-pub test/screenshots/design_screenshots_test.dart --update-goldens
+      - name: Test Flutter
+        id: flutter_test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $log = Join-Path $env:RUNNER_TEMP 'kayan-flutter-tests.jsonl'
+          & flutter test --no-pub --reporter json *> $log
+          $result = $LASTEXITCODE
+          if ($result -ne 0) {
+            & node scripts/report-flutter-test-failures.mjs $log
+            throw "Flutter tests failed with exit code $result."
+          }
+          Write-Output 'Flutter tests passed.'
+      - name: Report known lint debt
+        if: ${{ always() && steps.lint.outcome == 'failure' }}
+        shell: pwsh
+        run: Write-Output '::warning title=Known lint debt::Backend lint failed under the newer rules. See docs/release/LINT-CLASSIFICATION-2026-10-29.md; this is not a clean lint result.'
+      # No secrets, releases, installer execution or signing are configured.
+      # A diagnostic build may not be installed: test/evaluation setups remain
+      # deliberately blocked until service, path and database isolation exists.
+      - name: Install Inno Setup
+        id: inno
+        if: ${{ always() && steps.backend_build.outcome == 'success' && steps.flutter_analyze.outcome == 'success' && (steps.flutter_test.outcome == 'success' || steps.flutter_test.outcome == 'failure') }}
+        run: choco install innosetup --no-progress -y
+      - name: Build non-installable diagnostic installer
+        id: diagnostic_build
+        if: ${{ always() && steps.inno.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $key = Join-Path $env:RUNNER_TEMP 'kayan-diagnostic-public.pem'
+          & node -e "const c=require('node:crypto'),f=require('node:fs'); const p=c.generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'pem'}); f.writeFileSync(process.argv[1],p,{flag:'wx'});" $key
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create diagnostic public key.' }
+          & .\distribution\windows\build-installer.ps1 -DisposableSource -TestSignedBuild -LicencePublicKeyPath $key
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic installer build failed.' }
+          $file = Get-Item -LiteralPath 'build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe'
+          $sha = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+          Write-Output "::notice title=Diagnostic EXE::$($file.Name) bytes=$($file.Length) SHA256=$sha source=$env:GITHUB_SHA; not installable or releasable"
+      # The raw executable is a one-day internal hand-off to the independent
+      # inspector, never an installable product or release candidate.
+      - name: Record diagnostic installer identity
+        if: ${{ always() && steps.diagnostic_build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $file = Get-Item -LiteralPath build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe
+          [ordered]@{sourceCommit=$env:GITHUB_SHA; sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); size=$file.Length} | ConvertTo-Json | Set-Content -LiteralPath build/windows-installer/diagnostic-evidence.json -Encoding utf8
+      - name: Transfer raw non-installable diagnostic only to inspection
+        if: ${{ always() && steps.diagnostic_build.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: diagnostic-inno-raw-${{ github.sha }}
+          path: |
+            build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe
+            build/windows-installer/diagnostic-evidence.json
+          if-no-files-found: error
+          retention-days: 1
+      - name: Report a failed screenshot baseline run
+        if: ${{ always() && steps.screenshots.outcome == 'failure' }}
+        shell: pwsh
+        run: throw 'The screenshot baseline generator failed; see the test run. This is not release evidence.'
+
+  diagnostic-inspect:
+    name: Inspect synthetic and diagnostic Inno on Linux
+    needs: [inno-probe, preflight]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+      - run: node --test scripts/windows-candidate-preflight.test.mjs scripts/verify-synthetic-inno-probe.test.mjs scripts/inspect-final-inno.test.mjs scripts/verify-extracted-windows-installer.test.mjs
+      - name: Install extractor build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential cmake libboost-all-dev liblzma-dev zlib1g-dev libbz2-dev unzip
+      - name: Build and verify pinned Inno 6.7-compatible extractor and fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/innoextract-src"
+          git clone --no-checkout https://github.com/mplabsorg/innoextract.git "$src"
+          git -C "$src" fetch --depth=1 origin refs/heads/support-inno-7.1
+          git -C "$src" checkout --detach FETCH_HEAD
+          test "$(git -C "$src" rev-parse HEAD)" = 34f65747e4a57d5de2582bb1ad3d540f440a3983
+          cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
+          cmake --build "$src/build" --parallel 2
+          ctest --test-dir "$src/build" --output-on-failure
+          extractor="$(find "$src/build" -type f -name innoextract -perm -111 -print -quit)"
+          test -n "$extractor"
+          "$extractor" --version
+          sha256sum "$extractor"
+          echo "KAYAN_INNOEXTRACT=$extractor" >> "$GITHUB_ENV"
+          fixture_zip="$RUNNER_TEMP/fixtures.zip"
+          curl -fsSL https://github.com/mplabsorg/innoextract/releases/download/format-fixtures-v1/innoextract-format-fixtures.zip -o "$fixture_zip"
+          echo "d77d2c447dd46edaeab6b4ea5d7102000b0b8cd66970f18cea2b1eb20f21aa52  $fixture_zip" | sha256sum -c -
+          unzip -q "$fixture_zip" -d "$RUNNER_TEMP"
+          python3 "$src/tests/check-fixtures.py" --extractor "$extractor" --fixtures "$RUNNER_TEMP/format-fixtures" --output "$RUNNER_TEMP/fixture-results"
+          echo "KAYAN_INNOEXTRACT_SHA256=$(sha256sum "$extractor" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - name: Retrieve the same-run synthetic probe
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          name: synthetic-inno-probe-raw-${{ github.sha }}
+          path: probe
+      - name: Verify synthetic extractor behavior and refuse an incomplete installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -m 700 probe-extracted
+          "$KAYAN_INNOEXTRACT" --extract --test --no-extract-unknown --collisions error --output-dir probe-extracted -- probe/probe.exe
+          node scripts/verify-synthetic-inno-probe.mjs probe-extracted probe/public-key.pem
+          node --input-type=module <<'NODE'
+          import { spawnSync } from 'node:child_process';
+          const r = spawnSync(process.execPath, ['scripts/inspect-final-inno.mjs', '--artifact', 'probe/probe.exe', '--mode', 'test-signed', '--extractor', process.env.KAYAN_INNOEXTRACT, '--extractor-sha256', process.env.KAYAN_INNOEXTRACT_SHA256, '--source-commit', process.env.GITHUB_SHA], {encoding:'utf8'});
+          if (r.error || r.status === 0 || !r.stderr.includes('Required runtime payload entries are missing')) throw Error('Incomplete synthetic installer was not rejected as expected');
+          console.log('Synthetic archive extracted correctly and was rejected as an incomplete installer.');
+          NODE
+      - name: Retrieve the same-run diagnostic installer
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          name: diagnostic-inno-raw-${{ github.sha }}
+          path: diagnostic
+      - name: Check diagnostic installer identity
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          const e = JSON.parse(readFileSync('diagnostic/diagnostic-evidence.json', 'utf8').replace(/^\uFEFF/, ''));
+          const b = readFileSync('diagnostic/KAYAN-ERP-TEST-ONLY-Setup.exe');
+          if (e.sourceCommit !== process.env.GITHUB_SHA || e.size !== b.length || e.sha256 !== createHash('sha256').update(b).digest('hex')) throw Error('Diagnostic installer identity mismatch');
+          NODE
+      - name: Inspect diagnostic Inno payload before upload
+        shell: bash
+        run: |
+          node scripts/inspect-final-inno.mjs --artifact diagnostic/KAYAN-ERP-TEST-ONLY-Setup.exe --mode test-signed \
+            --extractor "$KAYAN_INNOEXTRACT" --extractor-sha256 "$KAYAN_INNOEXTRACT_SHA256" \
+            --source-commit "$GITHUB_SHA" --report diagnostic/payload-verification.json
+      - name: Upload inspected non-installable diagnostic only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-test-only-diagnostic-${{ github.sha }}
+          path: |
+            diagnostic/KAYAN-ERP-TEST-ONLY-Setup.exe
+            diagnostic/payload-verification.json
+          if-no-files-found: error
+          retention-days: 7

@@ -15,6 +15,65 @@ import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/invoice_providers.dart';
 
+/// Active units a line can choose for [item], smallest factor first.
+///
+/// A legacy item that predates multi-unit and carries no `units` array is
+/// synthesised as a single base unit, so the picker always offers the item's
+/// own unit and the document stays valid. An item that has not been picked yet
+/// yields an empty list and the control is disabled.
+List<Json> lineUnitsOf(Json? item) {
+  if (item == null) return const <Json>[];
+  final raw = item['units'];
+  final stored =
+      (raw is List ? raw.cast<Json>() : const <Json>[])
+          .where((unit) => flag(unit, 'isActive', fallback: true))
+          .toList();
+  if (stored.isNotEmpty) {
+    stored.sort((a, b) {
+      final fa = Decimal.tryParse(asString(a['factor']) ?? '') ?? Decimal.one;
+      final fb = Decimal.tryParse(asString(b['factor']) ?? '') ?? Decimal.one;
+      return fa.compareTo(fb);
+    });
+    return stored;
+  }
+  return <Json>[
+    <String, dynamic>{
+      'id': null,
+      'unit': text(item, 'unit'),
+      'factor': '1.000000',
+      'isBase': true,
+      'isActive': true,
+      'salePrice': item['salePrice'],
+      'purchasePrice': item['purchasePrice'],
+    },
+  ];
+}
+
+/// The unit-specific list price, or the base-unit price converted once into
+/// the chosen unit. An unknown/invalid unit or missing cost stays empty.
+String unitListPrice(Json item, String unitName, {required bool isSales}) {
+  final key = isSales ? 'salePrice' : 'purchasePrice';
+  for (final unit in lineUnitsOf(item)) {
+    if (text(unit, 'unit') == unitName) {
+      final specific = text(unit, key);
+      if (specific.isNotEmpty) return specific;
+      final basePrice = Decimal.tryParse(text(item, key));
+      if (basePrice == null) return '';
+      final parsedFactor = Decimal.tryParse(text(unit, 'factor'));
+      final factor = parsedFactor ??
+          (unitName == text(item, 'unit') ? Decimal.one : null);
+      if (factor == null || factor <= Decimal.zero) return '';
+      return (basePrice * factor).round(scale: moneyScale).toString();
+    }
+  }
+  return unitName == text(item, 'unit') ? text(item, key) : '';
+}
+
+/// An automatic price may follow a changed unit; a price typed by the user
+/// (including an explicit zero) must not be silently replaced.
+bool maySuggestUnitPrice(String current, {required bool automatic, required bool edited}) =>
+    automatic || (!edited && (current.trim().isEmpty || current.trim() == '0'));
+
 /// One editable invoice line.
 class _LineDraft {
   _LineDraft({
@@ -29,12 +88,19 @@ class _LineDraft {
 
   String? itemId;
 
+  /// The measurement unit the quantity is expressed in. Null on a free line
+  /// without an item; the server treats a missing unit as the item's base unit
+  /// and keeps legacy documents untouched.
+  String? unitName;
+
   /// Optional cost centre for the line. Left null on a balance-sheet-only
   /// line; the server checks that the centre is one this company may use.
   String? costCenterId;
   final TextEditingController quantity;
   final TextEditingController unitPrice;
   final TextEditingController taxRate;
+  bool unitPriceAutomatic = false;
+  bool unitPriceEdited = false;
 
   /// A line discount: a percentage or a fixed amount of money. The server
   /// resolves the other representation and stores both.
@@ -153,12 +219,22 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         ));
       }
       for (final row in listOf(invoice['lines'])) {
+        // Reopen shows exactly what the user entered. A multi-unit line keeps
+        // the entered quantity and its unit; a legacy row has no snapshot, so
+        // it falls back to the stored base quantity with no unit selected.
         final line = _LineDraft(
-          quantity: text(row, 'quantity', fallback: '1'),
+          quantity: text(
+            row,
+            'unitQuantity',
+            fallback: text(row, 'quantity', fallback: '1'),
+          ),
           unitPrice: text(row, 'unitPrice', fallback: '0'),
           taxRate: text(row, 'taxRate', fallback: '0'),
         )
           ..itemId = text(row, 'itemId').isEmpty ? null : text(row, 'itemId')
+          ..unitName =
+              text(row, 'unitName').isEmpty ? null : text(row, 'unitName')
+          ..unitPriceEdited = true
           ..costCenterId = text(row, 'costCenterId').isEmpty
               ? null
               : text(row, 'costCenterId');
@@ -277,13 +353,24 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     if (line.taxRate.text.trim().isEmpty || line.taxRate.text.trim() == '0') {
       line.taxRate.text = formatQuantity(asString(item['taxRate']), decimals: 2);
     }
-    if (widget.kind.isSales &&
-        (line.unitPrice.text.trim().isEmpty ||
-            line.unitPrice.text.trim() == '0')) {
-      line.unitPrice.text = formatQuantity(
-        asString(item['salePrice']),
-        decimals: 2,
+    final units = lineUnitsOf(item);
+    // A fractional pack can sort before the base unit; use the item's actual
+    // base label rather than assuming the smallest factor is the base.
+    if ((line.unitName == null || line.unitName!.isEmpty) && units.isNotEmpty) {
+      final baseName = text(item, 'unit');
+      line.unitName = units.any((unit) => text(unit, 'unit') == baseName)
+          ? baseName
+          : text(units.first, 'unit');
+    }
+    if (maySuggestUnitPrice(line.unitPrice.text,
+        automatic: line.unitPriceAutomatic, edited: line.unitPriceEdited)) {
+      final price = unitListPrice(
+        item,
+        line.unitName ?? text(item, 'unit'),
+        isSales: widget.kind.isSales,
       );
+      line.unitPrice.text = formatQuantity(price, decimals: 4);
+      line.unitPriceAutomatic = true;
     }
   }
 
@@ -339,6 +426,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       final discountText = line.discountValue.text.trim();
       lines.add({
         if (line.itemId != null) 'itemId': line.itemId,
+        if (line.unitName != null && line.unitName!.trim().isNotEmpty)
+          'unitName': line.unitName!.trim(),
         'quantity': quantity,
         'unitPrice': price,
         if (line.taxRate.text.trim().isNotEmpty) 'taxRate': line.taxRate.text.trim(),
@@ -794,6 +883,9 @@ class _LinesTable extends StatelessWidget {
                             ),
                         ],
                         onChanged: (value) {
+                          if (lines[index].itemId != value) {
+                            lines[index].unitName = null;
+                          }
                           lines[index].itemId = value;
                           final item = items.firstWhere(
                             (element) => text(element, 'id') == value,
@@ -816,7 +908,11 @@ class _LinesTable extends StatelessWidget {
                                 title: l10n.selectItem,
                               );
                               if (picked == null) return;
-                              lines[index].itemId = text(picked, 'id');
+                              final itemId = text(picked, 'id');
+                              if (lines[index].itemId != itemId) {
+                                lines[index].unitName = null;
+                              }
+                              lines[index].itemId = itemId;
                               onItemDefaults(lines[index], picked);
                               onChanged();
                             },
@@ -870,6 +966,74 @@ class _LinesTable extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       flex: 2,
+                      child: Builder(
+                        builder: (context) {
+                          Json? selected;
+                          for (final candidate in items) {
+                            if (text(candidate, 'id') == lines[index].itemId) {
+                              selected = candidate;
+                              break;
+                            }
+                          }
+                          final units = lineUnitsOf(selected);
+                          final names = units
+                              .map((unit) => text(unit, 'unit'))
+                              .toList();
+                          final chosen = names.contains(lines[index].unitName)
+                              ? lines[index].unitName
+                              : (names.isNotEmpty ? names.first : null);
+                          return DropdownButtonFormField<String>(
+                            key: ValueKey('line-unit-$index'),
+                            initialValue: chosen,
+                            isExpanded: true,
+                            isDense: true,
+                            decoration: InputDecoration(
+                              labelText: l10n.unit,
+                              isDense: true,
+                              border: const OutlineInputBorder(),
+                            ),
+                            items: [
+                              for (final unit in units)
+                                DropdownMenuItem<String>(
+                                  value: text(unit, 'unit'),
+                                  child: Text(
+                                    flag(unit, 'isBase', fallback: false)
+                                        ? text(unit, 'unit')
+                                        : '${text(unit, 'unit')} '
+                                              '×${formatQuantity(asString(unit['factor']), decimals: 6)}',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: units.isEmpty
+                                ? null
+                                : (value) {
+                                    if (value == null) return;
+                                    lines[index].unitName = value;
+                                    final line = lines[index];
+                                    if (maySuggestUnitPrice(line.unitPrice.text,
+                                        automatic: line.unitPriceAutomatic,
+                                        edited: line.unitPriceEdited)) {
+                                      final price = selected == null
+                                          ? ''
+                                          : unitListPrice(
+                                              selected,
+                                              value,
+                                              isSales: kind.isSales,
+                                            );
+                                      line.unitPrice.text =
+                                          formatQuantity(price, decimals: 4);
+                                      line.unitPriceAutomatic = true;
+                                    }
+                                    onChanged();
+                                  },
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 2,
                       child: TextFormField(
                         key: ValueKey('line-quantity-$index'),
                         controller: lines[index].quantity,
@@ -898,7 +1062,11 @@ class _LinesTable extends StatelessWidget {
                           isDense: true,
                           border: const OutlineInputBorder(),
                         ),
-                        onChanged: (_) => onChanged(),
+                        onChanged: (_) {
+                          lines[index].unitPriceAutomatic = false;
+                          lines[index].unitPriceEdited = true;
+                          onChanged();
+                        },
                       ),
                     ),
                     const SizedBox(width: 8),

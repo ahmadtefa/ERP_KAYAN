@@ -36,6 +36,9 @@ function dependencies(prisma: Record<string, any>, posting = { post: jest.fn(), 
   const warehouses = {
     resolve: jest.fn().mockResolvedValue(WAREHOUSE_ID),
     resolveForReversal: jest.fn().mockResolvedValue(WAREHOUSE_ID),
+    // Behaviour of the warehouse-level guard is covered in the dedicated
+    // warehouse-guard suites; here it stays a permissive no-op mock.
+    assertWarehouseAvailable: jest.fn().mockResolvedValue(undefined),
   };
   const service = new ReturnsService(
     prisma as never,
