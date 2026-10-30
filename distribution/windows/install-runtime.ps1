@@ -62,6 +62,24 @@ param(
   [ValidateSet('New','Existing','Auto')][string]$CompanyMode = 'Auto'
 )
 $ErrorActionPreference = 'Stop'
+
+# Windows PowerShell launched from Inno Setup can lack the module that exports
+# Get-FileHash. Compute exactly the same SHA-256 with the built-in .NET crypto
+# API, without relying on command auto-loading or printing the file contents.
+function Get-KayanFileSha256([string]$Path) {
+  $algorithm = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+      return [System.BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '')
+    } finally {
+      $stream.Dispose()
+    }
+  } finally {
+    $algorithm.Dispose()
+  }
+}
+
 # Refuse unsafe packages before touching services or licence state. When a
 # pre-existing protected diagnostic directory is available, record only the
 # failed preflight stage; stale success from a prior run must not hide failure.
@@ -82,9 +100,9 @@ try {
   $preflightStage = 'installed-key-presence'
   if (Test-Path -LiteralPath $installedKey -PathType Leaf) {
     $preflightStage = 'incoming-key-hash'
-    $incomingKeyHash = (Get-FileHash -LiteralPath $incomingKey -Algorithm SHA256).Hash
+    $incomingKeyHash = Get-KayanFileSha256 $incomingKey
     $preflightStage = 'installed-key-hash'
-    $installedKeyHash = (Get-FileHash -LiteralPath $installedKey -Algorithm SHA256).Hash
+    $installedKeyHash = Get-KayanFileSha256 $installedKey
     $preflightStage = 'public-key-comparison'
     if (-not $incomingKeyHash -or -not $installedKeyHash -or $incomingKeyHash -ne $installedKeyHash) {
       throw 'The existing licence key differs; refusing setup until a tested transition is approved.'
@@ -768,7 +786,7 @@ function Add-LicenceSettings([hashtable]$Values) {
   if ($source) {
     # Recheck immediately before the write, and never replace an existing key.
     if (Test-Path -LiteralPath $target -PathType Leaf) {
-      if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash) {
+      if ((Get-KayanFileSha256 $source) -ne (Get-KayanFileSha256 $target)) {
         throw 'The installed licence key changed during setup; refusing replacement.'
       }
     } elseif ((Test-Path -LiteralPath $enforcementMarker) -or (Test-Path -LiteralPath (Join-Path $licenceDirectory 'license-state.json'))) {
