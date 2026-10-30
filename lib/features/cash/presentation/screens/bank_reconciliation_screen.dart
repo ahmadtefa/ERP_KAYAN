@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
-import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -269,7 +268,7 @@ class _CreateReconciliationDialogState extends ConsumerState<_CreateReconciliati
                           child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
                         ),
                       DropdownButtonFormField<String>(
-                        value: _accountId,
+                        initialValue: _accountId,
                         decoration: InputDecoration(labelText: t('الحساب البنكي', 'Bank account')),
                         items: [
                           for (final account in _accounts)
