@@ -633,38 +633,30 @@ try {
       $base = "http://127.0.0.1:$apiPort/api/v1"
       $healthAfterCorruption = Invoke-RestMethod -Uri "$base/health" -TimeoutSec 10
       if (-not $healthAfterCorruption.status) { Fail 'Local health did not recover after the license state file was corrupted.' }
-      $damagedResponse = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/license/status" -TimeoutSec 15
-      $damagedBody = $damagedResponse.Content | ConvertFrom-Json
-      if ([int]$damagedResponse.StatusCode -ne 200 -or
-          $damagedBody.state -ne 'UNLICENSED' -or
-          $damagedBody.blocked -ne $true -or
-          $damagedBody.enforcement -ne 'enforce' -or
-          $damagedBody.stateError -ne 'LICENSE_STATE_DAMAGED') {
-        Fail ("Corrupt license state did not return a diagnostic, fail-closed status (HTTP $([int]$damagedResponse.StatusCode)): " + $damagedResponse.Content)
+      $recoveredResponse = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/license/status" -TimeoutSec 15
+      $recoveredBody = $recoveredResponse.Content | ConvertFrom-Json
+      if ([int]$recoveredResponse.StatusCode -ne 200 -or
+          $recoveredBody.state -ne 'UNLICENSED' -or
+          $recoveredBody.configured -ne $true -or
+          $recoveredBody.blocked -ne $true -or
+          $recoveredBody.enforcement -ne 'enforce' -or
+          $recoveredBody.stateError) {
+        Fail ("A damaged primary licence file was not recovered from its authenticated mirror: " + $recoveredResponse.Content)
       }
-      if ([IO.File]::ReadAllText($statePath) -ne 'not-json') { Fail 'The application silently overwrote the corrupted license state instead of preserving it for diagnosis.' }
-      # Use the already authenticated synthetic administrator on a real
-      # business route: health and license/status alone do not prove fail-closed.
+      if ((Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash -ne $originalStateHash) {
+        Fail 'The recovered primary licence state does not match the original trusted bytes.'
+      }
+      $damagedCopies = @(Get-ChildItem -LiteralPath $licenseDirectory -Filter 'license-state.damaged-*.json' -ErrorAction SilentlyContinue)
+      if ($damagedCopies.Count -lt 1) { Fail 'The original damaged licence file was not preserved for diagnosis.' }
+      # Recovery restores trust state, not entitlement. This product-mode
+      # installer is deliberately unlicensed, so a real business route must
+      # still be blocked with the ordinary activation-required response.
       $businessResponse = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/parties/customers" -Headers $headers -TimeoutSec 15
       $businessBody = $businessResponse.Content | ConvertFrom-Json
-      if ([int]$businessResponse.StatusCode -ne 503 -or $businessBody.code -ne 'LICENSE_STATE_DAMAGED') {
-        Fail ("Corrupted license state did not block the installed business route (HTTP $([int]$businessResponse.StatusCode)).")
+      if ([int]$businessResponse.StatusCode -ne 403 -or $businessBody.code -ne 'LICENSE_REQUIRED') {
+        Fail ("Recovered trust state did not preserve normal licence enforcement on a business route (HTTP $([int]$businessResponse.StatusCode)).")
       }
-      if ([IO.File]::ReadAllText($statePath) -ne 'not-json') { Fail 'The blocked business request altered the corrupt license state.' }
-      Write-Host 'PASS: health recovered and an authenticated business route failed closed without rewriting corrupt license state.'
-
-      Stop-KayanSmokeClient -Process $client -Port $apiPort
-      $client = $null
-      [IO.File]::WriteAllBytes($statePath, $originalStateBytes)
-      $restart = Start-KayanSmokeClient
-      $client = $restart.Process
-      $apiPort = $restart.Port
-      $base = "http://127.0.0.1:$apiPort/api/v1"
-      $restoredLicense = Invoke-RestMethod -Uri "$base/license/status" -TimeoutSec 15
-      if ($restoredLicense.state -ne 'UNLICENSED' -or $restoredLicense.configured -ne $true -or $restoredLicense.blocked -ne $true) {
-        Fail ("Restoring the original license state did not recover the expected unlicensed state: " + ($restoredLicense | ConvertTo-Json -Compress))
-      }
-      Write-Host 'PASS: restoring the original license-state bytes restores normal license-status reporting.'
+      Write-Host 'PASS: damaged primary recovered from the authenticated mirror, original bytes retained, and unlicensed business access remained blocked.'
 
       Stop-KayanSmokeClient -Process $client -Port $apiPort
       $client = $null
@@ -705,7 +697,7 @@ try {
         [IO.File]::WriteAllBytes($statePath, $originalStateBytes)
       }
     }
-    Write-Output '::notice::Runtime-only Windows installer smoke passed: product install, local PostgreSQL, Prisma setup, API startup/login, offline full backup/restore, corrupt-state refusal, trusted saved-state byte restoration and public-key missing/restore. Signed-licence reconstruction and activation were not tested.'
+    Write-Output '::notice::Runtime-only Windows installer smoke passed: product install, local PostgreSQL, Prisma setup, API startup/login, offline full backup/restore, authenticated trust-mirror recovery, fail-closed unlicensed business access and public-key missing/restore. Signed-licence reconstruction and activation were not tested.'
   } else {
   $originalName = 'Installed backup sentinel'
   $customerBody = @{ code = 'WIN-BACKUP-PROBE'; nameEn = $originalName; nameAr = 'Windows backup probe' } | ConvertTo-Json -Compress
