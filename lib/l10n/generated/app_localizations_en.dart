@@ -2630,6 +2630,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'Your data is intact. Nothing was deleted. Open the licence screen and apply a renewal key to continue working.';
 
   @override
+  String get licenceKeyMissingTitle =>
+      'The licence verification key is missing or invalid';
+
+  @override
+  String get licenceKeyMissingBody =>
+      'This installation cannot check any licence key, so every business operation stays blocked. Your data is intact. The program stays open so you can see this state and reach the licence and backup screens; contact support to restore the approved verification key. Do not delete the licence state and do not reinstall.';
+
+  @override
   String get licenceSuspendedBody =>
       'The program stopped because the system date is earlier than the last recorded run. Correct the date and time, then confirm on this screen. No data was lost.';
 

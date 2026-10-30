@@ -5078,6 +5078,18 @@ abstract class AppLocalizations {
   /// **'Your data is intact. Nothing was deleted. Open the licence screen and apply a renewal key to continue working.'**
   String get licenceBlockedBody;
 
+  /// No description provided for @licenceKeyMissingTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'The licence verification key is missing or invalid'**
+  String get licenceKeyMissingTitle;
+
+  /// No description provided for @licenceKeyMissingBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This installation cannot check any licence key, so every business operation stays blocked. Your data is intact. The program stays open so you can see this state and reach the licence and backup screens; contact support to restore the approved verification key. Do not delete the licence state and do not reinstall.'**
+  String get licenceKeyMissingBody;
+
   /// No description provided for @licenceSuspendedBody.
   ///
   /// In en, this message translates to:

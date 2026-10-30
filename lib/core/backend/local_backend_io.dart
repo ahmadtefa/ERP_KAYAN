@@ -24,8 +24,9 @@ class LocalBackendStatus {
       problem = null,
       logPath = null,
       databaseProblem = false,
-      needsFirstAdministrator = false;
-  const LocalBackendStatus.ready(this.baseUrl)
+      needsFirstAdministrator = false,
+      licenceWarning = null;
+  const LocalBackendStatus.ready(this.baseUrl, {this.licenceWarning})
     : problem = null,
       logPath = null,
       databaseProblem = false,
@@ -35,7 +36,8 @@ class LocalBackendStatus {
     this.logPath,
     this.databaseProblem = false,
   }) : baseUrl = null,
-       needsFirstAdministrator = false;
+       needsFirstAdministrator = false,
+       licenceWarning = null;
 
   /// The database answered and is up to date, but has no company and no user in
   /// it yet - a machine where the program has never been set up. Nothing is
@@ -46,7 +48,8 @@ class LocalBackendStatus {
       problem = null,
       logPath = null,
       databaseProblem = false,
-      needsFirstAdministrator = true;
+      needsFirstAdministrator = true,
+      licenceWarning = null;
 
   /// e.g. `http://127.0.0.1:3000/api/v1` - already the value the client wants.
   final String? baseUrl;
@@ -65,6 +68,15 @@ class LocalBackendStatus {
   /// True when this machine still needs its first administrator - see
   /// [LocalBackendStatus.needsFirstAdministrator].
   final bool needsFirstAdministrator;
+
+  /// Set when the program is usable but its licence verification key is not.
+  ///
+  /// A missing or invalid `public-key.pem` is not a reason to keep the window
+  /// shut: the server that is running enforces the licence and refuses every
+  /// business route on its own, and hiding the program would also hide the
+  /// licence screen that explains how to put the key back. So the shell opens,
+  /// and this sentence travels with the ready status for the screen to show.
+  final String? licenceWarning;
 
   bool get isReady => baseUrl != null;
 }
@@ -178,6 +190,87 @@ bool keepServerForLicenceDiagnostics(Map<String, dynamic>? health) {
       licence is Map &&
       licence['enforcement'] == 'enforce' &&
       licence['stateError'] == 'LICENSE_STATE_DAMAGED';
+}
+
+/// What the shell must prove about a local server before the program opens.
+///
+/// Every answer but the last one stops the program:
+///
+///  * the server cannot be read, or its protected trust state is damaged:
+///    nothing here can be trusted, so the window stays shut and says why;
+///  * the server is reading a different database from the one this
+///    installation's settings name: opening would show another company's books;
+///  * the server is willing to serve business data without the licence this
+///    installation requires (`warn` when `enforce` was asked for): that is the
+///    one configuration a hand-started copy could use to get round a licence.
+///
+/// A server that enforces the licence but has no usable verification key is
+/// *not* on that list. It refuses every business route by itself, and opening
+/// the program is the only way back to the licence screen that explains it.
+String? serverIdentityProblem({
+  required Map<String, dynamic>? health,
+  required String? expectedDatabaseName,
+  required bool licenceRequired,
+}) {
+  if (health == null) {
+    return 'تعذّر قراءة حالة الخادم. حاول مرة أخرى. / '
+        'Could not read the server health status. Please retry.';
+  }
+  final licenceProblem = LocalBackend._licenceStateProblem(health);
+  if (licenceProblem != null) return licenceProblem;
+
+  final actual = health['databaseName'];
+  if (expectedDatabaseName != null &&
+      actual is String &&
+      actual.isNotEmpty &&
+      actual != expectedDatabaseName) {
+    return 'The program is connected to the database "$actual", but this '
+        'installation\'s settings name "$expectedDatabaseName". Setup did not '
+        'finish switching to the company database it created, so the program '
+        'was not opened. Run Repair KAYAN ERP, or run Setup again and choose '
+        '"An existing company" to keep the data on this computer.';
+  }
+
+  if (licenceRequired) {
+    final license = health['license'];
+    final enforcement = license is Map ? license['enforcement'] : null;
+    if (enforcement != 'enforce') {
+      // A server that is willing to serve business data without the licence
+      // this installation requires is the one case that must never be used,
+      // whatever the reason it was started with.
+      return 'This installation requires a licence key, but the local server '
+          'answered with licence enforcement "${enforcement ?? 'unknown'}". '
+          'A server that does not enforce the licence is not used: close any '
+          'copy of KAYAN ERP started by hand, then open the program from its '
+          'shortcut again.';
+    }
+  }
+  return null;
+}
+
+/// Why the program opens without being licensed by a key, or null.
+///
+/// This is deliberately *not* a blocking condition. An installation whose
+/// `public-key.pem` is missing, empty, malformed or a different key reports
+/// `configured: false` while it keeps `enforcement: enforce`; every business
+/// route is then refused by the server itself with `LICENSE_PUBLIC_KEY_MISSING`
+/// and the licence + backup screens stay open. Stopping the shell at that
+/// point changed nothing about the protection and everything about the
+/// customer's ability to see what happened or to put the key back.
+String? licenceKeyWarning(Map<String, dynamic>? health) {
+  final licence = health?['license'];
+  if (licence is Map &&
+      licence['enforcement'] == 'enforce' &&
+      licence['configured'] == false) {
+    return 'مفتاح التحقق من الترخيص مفقود أو غير صالح على هذا التثبيت. '
+        'البرنامج يعمل لعرض الحالة واستعادة المفتاح، وكل العمليات التجارية '
+        'محظورة حتى يُعاد المفتاح المعتمد. احتفظ بالبيانات وحالة الترخيص.\n'
+        'The licence verification key on this installation is missing or '
+        'invalid. The program runs so the state can be seen and the key '
+        'restored; every business operation stays blocked until the approved '
+        'key is back. Preserve the data and the licence state.';
+  }
+  return null;
 }
 
 class LocalBackend {
@@ -308,7 +401,10 @@ class LocalBackend {
 
         // Retain the handle to the child so shutdown can stop it.
         if (running != null && running.port == port) {
-          return LocalBackendStatus.ready(running.baseUrl);
+          return LocalBackendStatus.ready(
+            running.baseUrl,
+            licenceWarning: licenceKeyWarning(health),
+          );
         }
         // Someone else's copy - another window, or a development server. It is
         // used only if it is reading this installation's database and enforcing
@@ -334,7 +430,10 @@ class LocalBackend {
           }
         }
         _instance = LocalBackend._(null, port, null);
-        return LocalBackendStatus.ready(_instance!.baseUrl);
+        return LocalBackendStatus.ready(
+          _instance!.baseUrl,
+          licenceWarning: licenceKeyWarning(health),
+        );
       }
     }
 
@@ -479,8 +578,21 @@ class LocalBackend {
         '(settings ${settings.sourceFile?.path ?? 'none'}, generation '
         '${settings.generation ?? 'none'})',
       );
+      final keyWarning = licenceKeyWarning(health);
+      if (keyWarning != null) {
+        // Open the program anyway: the server enforces the licence and refuses
+        // business routes by itself, so the only effect of refusing to open is
+        // that nobody can reach the licence screen that explains the fix.
+        log.writeln(
+          '[shell] opening the program without a usable licence key: every '
+          'business route stays refused until the approved key is restored.',
+        );
+      }
       _instance = LocalBackend._(process, port, log);
-      return LocalBackendStatus.ready(_instance!.baseUrl);
+      return LocalBackendStatus.ready(
+        _instance!.baseUrl,
+        licenceWarning: keyWarning,
+      );
     }
 
     final tail = await layout.logTail();
@@ -585,60 +697,19 @@ class LocalBackend {
           'contact support to restore a current trusted backup from this '
           'installation; do not delete it or reinstall. Then retry.';
     }
-    if (licence is Map &&
-        licence['enforcement'] == 'enforce' &&
-        licence['configured'] == false) {
-      return 'تعذّر التحقق من مفتاح الترخيص العام أو أنه لا يطابق المفتاح '
-          'المسجّل. احتفظ بالبيانات وتواصل مع الدعم لاستعادة المفتاح المعتمد '
-          'لهذا التثبيت؛ لا تحذف حالة الترخيص.\n'
-          'The licence verification key is unavailable or does not match '
-          'this installation. Preserve the data and licence state and '
-          'contact support to restore the approved key.';
-    }
     return null;
   }
 
   static String? _verifyServerIdentity(
     Map<String, dynamic>? health,
     RuntimeSettings settings,
-  ) {
-    if (health == null) {
-      return 'تعذّر قراءة حالة الخادم. حاول مرة أخرى. / '
-          'Could not read the server health status. Please retry.';
-    }
-    final licenceProblem = _licenceStateProblem(health);
-    if (licenceProblem != null) return licenceProblem;
-
-    final expected = KayanDatabaseConfig.databaseNameFromUrl(
+  ) => serverIdentityProblem(
+    health: health,
+    expectedDatabaseName: KayanDatabaseConfig.databaseNameFromUrl(
       settings.databaseUrl,
-    );
-    final actual = health['databaseName'];
-    if (expected != null &&
-        actual is String &&
-        actual.isNotEmpty &&
-        actual != expected) {
-      return 'The program is connected to the database "$actual", but this '
-          'installation\'s settings name "$expected". Setup did not finish '
-          'switching to the company database it created, so the program was '
-          'not opened. Run Repair KAYAN ERP, or run Setup again and choose '
-          '"An existing company" to keep the data on this computer.';
-    }
-
-    final wanted = (settings.licenceEnforcement ?? '').toLowerCase();
-    if (wanted == 'enforce') {
-      final license = health['license'];
-      final enforcement = license is Map ? license['enforcement'] : null;
-      final configured = license is Map ? license['configured'] : null;
-      if (enforcement != 'enforce' || configured != true) {
-        return 'This installation requires a licence key, but the local server '
-            'answered with licence enforcement "${enforcement ?? 'unknown'}" and '
-            'key installed = $configured. A server that does not enforce the '
-            'licence is not used: close any copy of KAYAN ERP started by hand, '
-            'then open the program from its shortcut again.';
-      }
-    }
-    return null;
-  }
+    ),
+    licenceRequired: (settings.licenceEnforcement ?? '').toLowerCase() == 'enforce',
+  );
 
 
   /// A port nothing is listening on, so two programs never share one.

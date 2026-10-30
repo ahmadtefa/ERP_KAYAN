@@ -320,7 +320,20 @@ class _StatusCard extends StatelessWidget {
               l10n.licenceSeatsExplainer,
               style: theme.textTheme.bodySmall,
             ),
-            if (status.publicKeyFingerprint == null) ...[
+            // `configured` is the server's live answer: it falls to false the
+            // moment the installed key is missing, empty, unreadable or a
+            // different key - including while the process is still holding the
+            // fingerprint it read at start-up. The card must follow that, not
+            // the recorded print.
+            if (!status.configured) ...[
+              const SizedBox(height: AppSpacing.md),
+              _MessageCard(
+                icon: Icons.key_off_outlined,
+                title: l10n.licenceKeyMissingTitle,
+                body: l10n.licenceKeyMissingBody,
+                tone: _Tone.error,
+              ),
+            ] else if (status.publicKeyFingerprint == null) ...[
               const SizedBox(height: AppSpacing.md),
               _MessageCard(
                 icon: Icons.key_off_outlined,

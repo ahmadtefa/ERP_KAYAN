@@ -60,6 +60,10 @@ class _BlockedView extends StatelessWidget {
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final suspended = status.state == 'SUSPENDED';
+    // A missing or invalid verification key is not an expiry: no renewal key
+    // can be applied until the approved key is back, and the reason has to say
+    // so. The server still refuses every business route on its own.
+    final keyMissing = !status.configured;
 
     return SingleChildScrollView(
       padding: AppSpacing.pagePadding,
@@ -71,19 +75,27 @@ class _BlockedView extends StatelessWidget {
             children: [
               const SizedBox(height: AppSpacing.xxl),
               Icon(
-                suspended ? Icons.access_time : Icons.lock_clock,
+                keyMissing
+                    ? Icons.key_off_outlined
+                    : (suspended ? Icons.access_time : Icons.lock_clock),
                 size: 56,
                 color: theme.colorScheme.error,
               ),
               const SizedBox(height: AppSpacing.lg),
               Text(
-                l10n.licenceBlockedTitle,
+                keyMissing
+                    ? l10n.licenceKeyMissingTitle
+                    : l10n.licenceBlockedTitle,
                 textAlign: TextAlign.center,
                 style: theme.textTheme.headlineSmall,
               ),
               const SizedBox(height: AppSpacing.md),
               Text(
-                suspended ? l10n.licenceSuspendedBody : l10n.licenceBlockedBody,
+                keyMissing
+                    ? l10n.licenceKeyMissingBody
+                    : (suspended
+                          ? l10n.licenceSuspendedBody
+                          : l10n.licenceBlockedBody),
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyLarge,
               ),

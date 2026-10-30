@@ -97,6 +97,82 @@ function Get-RuntimeProbe {
   return ($sections -join [Environment]::NewLine)
 }
 
+function Assert-KayanKeylessRuntime {
+  # The program must stay usable enough to explain itself and to be repaired,
+  # while the server keeps refusing every business route. Nothing here accepts
+  # a licence, creates a key, or rewrites protected state.
+  param(
+    [Parameter(Mandatory = $true)][string]$Base,
+    [Parameter(Mandatory = $true)][hashtable]$Headers,
+    [Parameter(Mandatory = $true)][string]$KeyPath,
+    [Parameter(Mandatory = $true)][string]$StatePath,
+    [Parameter(Mandatory = $true)][string]$KeyProblem,
+    [Parameter(Mandatory = $true)][string]$LoginBody,
+    [string]$KeyFileContent = '',
+    [switch]$KeyFileAbsent
+  )
+  $health = Invoke-RestMethod -Uri "$Base/health" -TimeoutSec 15
+  if (-not $health.status) { Fail ("The local runtime did not stay up with a $KeyProblem verification key.") }
+  $statusResponse = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$Base/license/status" -TimeoutSec 15
+  if ([int]$statusResponse.StatusCode -ne 200) {
+    Fail ("The licence status endpoint was unreachable with a $KeyProblem verification key (HTTP $([int]$statusResponse.StatusCode)).")
+  }
+  $status = $statusResponse.Content | ConvertFrom-Json
+  if ($status.configured -ne $false -or $status.blocked -ne $true -or $status.enforcement -ne 'enforce') {
+    Fail ("A $KeyProblem verification key was not reported as an unconfigured, blocked, enforced state: " + $statusResponse.Content)
+  }
+  if ($status.stateError) {
+    Fail ("A $KeyProblem verification key was reported as damaged licence state instead of an unconfigured key: " + $statusResponse.Content)
+  }
+  # Signing in, the licence screen and health stay reachable: that is what makes
+  # the installation repairable instead of merely refused.
+  $relogin = Invoke-RestMethod -Method Post -Uri "$Base/auth/login" -ContentType 'application/json' -Body $LoginBody -TimeoutSec 30
+  if (-not $relogin.accessToken) { Fail ("Sign-in stopped working with a $KeyProblem verification key.") }
+  $requestCode = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$Base/license/request-code" -Headers $Headers -TimeoutSec 15
+  if ([int]$requestCode.StatusCode -ne 200) {
+    Fail ("The activation screen's request-code call failed with a $KeyProblem verification key (HTTP $([int]$requestCode.StatusCode)).")
+  }
+  # Every business route is refused by the server itself, not by the shell.
+  $business = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$Base/parties/customers" -Headers $Headers -TimeoutSec 15
+  $businessBody = $business.Content | ConvertFrom-Json
+  if ([int]$business.StatusCode -ne 403 -or $businessBody.code -ne 'LICENSE_PUBLIC_KEY_MISSING') {
+    Fail ("A $KeyProblem verification key did not block a business route with LICENSE_PUBLIC_KEY_MISSING (HTTP $([int]$business.StatusCode), code $($businessBody.code)).")
+  }
+  # A licence key must not be accepted without a key that can verify it.
+  $attempt = @{ key = 'KAYAN1.NOT-A-REAL-LICENCE' } | ConvertTo-Json -Compress
+  $activation = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Method Post -Uri "$Base/license/activate" -Headers $Headers -ContentType 'application/json' -Body $attempt -TimeoutSec 20
+  $activationBody = $activation.Content | ConvertFrom-Json
+  if ([int]$activation.StatusCode -ne 503 -or $activationBody.code -ne 'LICENSE_PUBLIC_KEY_MISSING') {
+    Fail ("A licence was not refused while the verification key was $KeyProblem (HTTP $([int]$activation.StatusCode), code $($activationBody.code)).")
+  }
+  # The program must not invent a replacement key, delete state or invent a licence.
+  if ($KeyFileAbsent) {
+    if (Test-Path -LiteralPath $KeyPath) {
+      Fail ("The program wrote a replacement verification key while the installed one was $KeyProblem.")
+    }
+  } else {
+    if (-not (Test-Path -LiteralPath $KeyPath)) {
+      Fail ("The program removed the file it could not read instead of leaving it for diagnosis ($KeyProblem key).")
+    }
+    if ([IO.File]::ReadAllText($KeyPath) -ne $KeyFileContent) {
+      Fail ("The program rewrote an unusable verification key file ($KeyProblem) instead of leaving it alone.")
+    }
+  }
+  if (-not (Test-Path -LiteralPath $StatePath)) {
+    Fail ("The protected licence state was deleted while the verification key was $KeyProblem.")
+  }
+  $state = (Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json).state
+  if (-not $state -or $state.installId -ne $originalState.installId) {
+    Fail ("The protected licence state lost its installation identity while the verification key was $KeyProblem.")
+  }
+  if ("$($state.licenseId)" -ne "$($originalState.licenseId)") {
+    Fail ("The protected licence state gained or lost a licence while the verification key was $KeyProblem.")
+  }
+  if ([int]$state.maxSeatLimit -lt [int]$originalState.maxSeatLimit) {
+    Fail ("The protected licence state lost seats while the verification key was $KeyProblem.")
+  }
+}
+
 function Read-Details {
   # Ordered most relevant first: the runtime setup log is the root-cause log,
   # and GitHub annotations cut the message after 4000 characters.
@@ -798,11 +874,27 @@ try {
       $client = $restart.Process
       $apiPort = $restart.Port
       $base = "http://127.0.0.1:$apiPort/api/v1"
-      $missingKeyStatus = Invoke-RestMethod -Uri "$base/license/status" -TimeoutSec 15
-      if ($missingKeyStatus.configured -ne $false -or $missingKeyStatus.blocked -ne $true) {
-        Fail ("A missing installed public key was not detected as an unconfigured, blocked license state: " + ($missingKeyStatus | ConvertTo-Json -Compress))
+      Assert-KayanKeylessRuntime -Base $base -Headers $headers -KeyPath $publicKeyPath -StatePath $statePath -KeyProblem 'missing' -LoginBody $loginPayload -KeyFileAbsent
+      Write-Host 'PASS: a missing verification key leaves the program running, shows an unconfigured blocked licence, keeps sign-in and the activation screen reachable, and refuses every business route and every licence key.'
+
+      # An empty file and a malformed file are the same fault as a missing one,
+      # and must behave the same way: no crash, no invented key, no business.
+      foreach ($damage in @(
+        @{ Problem = 'empty'; Content = '' },
+        @{ Problem = 'invalid'; Content = 'not a public key' }
+      )) {
+        Stop-KayanSmokeClient -Process $client -Port $apiPort
+        $client = $null
+        Write-SmokePhase ("Smoke: restarting the shell with an " + $damage.Problem + " public key file.")
+        [IO.File]::WriteAllText($publicKeyPath, $damage.Content, [Text.Encoding]::ASCII)
+        $restart = Start-KayanSmokeClient
+        $client = $restart.Process
+        $apiPort = $restart.Port
+        $base = "http://127.0.0.1:$apiPort/api/v1"
+        Assert-KayanKeylessRuntime -Base $base -Headers $headers -KeyPath $publicKeyPath -StatePath $statePath -KeyProblem $damage.Problem -LoginBody $loginPayload -KeyFileContent $damage.Content
+        Write-Host ("PASS: an " + $damage.Problem + " verification key leaves the program running with the same blocked, enforced state and no business access.")
+        Remove-Item -LiteralPath $publicKeyPath -Force
       }
-      Write-Host 'PASS: a missing public key is detected without preventing the local runtime from starting.'
 
       Stop-KayanSmokeClient -Process $client -Port $apiPort
       $client = $null
@@ -819,7 +911,14 @@ try {
       if ((Get-FileHash -LiteralPath $publicKeyPath -Algorithm SHA256).Hash -ne $originalPublicKeyHash) {
         Fail 'The restored public key bytes differ from the original installed key.'
       }
-      Write-Host 'PASS: restoring the original public key restores normal product-mode license enforcement.'
+      # Nothing above may have cost the company its data or its identity.
+      $afterKeyTests = Invoke-RestMethod -Method Post -Uri "$base/auth/login" -ContentType 'application/json' -Body $loginPayload -TimeoutSec 30
+      if (-not $afterKeyTests.accessToken) { Fail 'Sign-in stopped working after the verification-key cases.' }
+      $afterKeyState = (Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).state
+      if (-not $afterKeyState -or $afterKeyState.installId -ne $originalState.installId) {
+        Fail 'The restored key left the protected licence state without its installation identity.'
+      }
+      Write-Host 'PASS: restoring the original public key restores normal product-mode license enforcement, with the installation identity and licence intact.'
     } finally {
       Stop-KayanSmokeClient -Process $client -Port $apiPort
       $client = $null
