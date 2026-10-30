@@ -243,18 +243,31 @@ namespace Kayan
             string seedScript = Path.Combine(Path.Combine(Path.Combine(Path.Combine(root, "backend"), "dist"), "prisma"), "seed.js");
             checks.Add(new RepairCheck("First-run setup program", File.Exists(seedScript), seedScript));
             string pgBin = Path.Combine(Path.Combine(Path.Combine(root, "backend"), "postgres"), "bin");
-            string pgIsReady = Path.Combine(pgBin, "pg_isready.exe");
             string[] pgRequired = new string[] { "initdb.exe", "pg_ctl.exe", "pg_isready.exe", "psql.exe", "postgres.exe" };
-            bool pgFilesPresent = true;
+            // Every required tool is executed, not only pg_isready. A package
+            // that was copied while it was still being written can leave one
+            // file present but unrunnable, and initdb.exe is the one that
+            // matters most: without it a new machine can never get a cluster,
+            // which looks exactly like a healthy installation that refuses to
+            // start. Checking one lucky executable let that pass as healthy.
+            string pgVersion = string.Empty;
+            List<string> pgProblems = new List<string>();
             for (int i = 0; i < pgRequired.Length; i++)
             {
-                if (!File.Exists(Path.Combine(pgBin, pgRequired[i]))) { pgFilesPresent = false; }
+                string pgTool = Path.Combine(pgBin, pgRequired[i]);
+                if (!File.Exists(pgTool))
+                {
+                    pgProblems.Add(pgRequired[i] + " is missing from " + pgBin);
+                    continue;
+                }
+                RepairCheck probe = RuntimeCheck("Bundled PostgreSQL executable", pgTool, "--version");
+                if (!probe.Ok) { pgProblems.Add(pgRequired[i] + " " + probe.Detail); }
+                else if (string.Equals(pgRequired[i], "pg_isready.exe", StringComparison.OrdinalIgnoreCase)) { pgVersion = probe.Detail; }
             }
-            RepairCheck pgExecutable = RuntimeCheck("Bundled PostgreSQL executable", pgIsReady, "--version");
             checks.Add(new RepairCheck(
                 "Bundled PostgreSQL tools",
-                pgFilesPresent && pgExecutable.Ok,
-                pgFilesPresent ? pgExecutable.Detail : "one or more required PostgreSQL executables are missing from " + pgBin));
+                pgProblems.Count == 0,
+                pgProblems.Count == 0 ? pgVersion : string.Join("; ", pgProblems.ToArray())));
 
             string dataDirectory = Path.Combine(Path.Combine(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "KAYAN-ERP"), "PostgreSQL"), "data");
             checks.Add(new RepairCheck(
