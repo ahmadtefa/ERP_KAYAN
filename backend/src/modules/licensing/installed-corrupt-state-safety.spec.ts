@@ -67,9 +67,11 @@ describe('installed licence state corruption safety', () => {
       let resume!: () => void;
       const wait = new Promise<void>((resolve) => { resume = resolve; });
       h.db.licenseInstallation.findFirst = async () => { await wait; return find(); };
+      // While both copies are still corrupt, the health summary must
+      // continue to expose the recovery error. Only then restore both files.
+      expect(installed.licenseSummary().stateError).toBe('LICENSE_STATE_DAMAGED');
       writeFileSync(path, original);
       writeFileSync(backup, originalBackup);
-      expect(installed.licenseSummary().stateError).toBe('LICENSE_STATE_DAMAGED');
       resume();
       expect((await installed.status({ fresh: true })).state).toBe('ACTIVE');
       expect(installed.licenseSummary().stateError).toBeUndefined();
