@@ -167,10 +167,14 @@ function Stop-KayanSmokeClient([object]$Process, [int]$Port) {
   }
 }
 
-function Start-KayanSmokeClient {
+function Start-KayanSmokeClient([string]$Stage) {
+  if ($Stage -notin @('corrupt-state', 'saved-state-restored', 'public-key-missing', 'public-key-restored')) { Fail 'Invalid synthetic licence test stage.' }
+  Write-Host "::notice title=Windows licence probe::Restarting the installed client: $Stage."
   $process = Start-Process -FilePath $clientPath -WorkingDirectory $installRoot -PassThru
+  $deadline = [DateTime]::UtcNow.AddMinutes(4)
   foreach ($attempt in 1..90) {
-    if ($process.HasExited) { Fail "The installed KAYAN client exited during a runtime-only restart (exit code $($process.ExitCode))." }
+    if ([DateTime]::UtcNow -ge $deadline) { break }
+    if ($process.HasExited) { Fail "The installed KAYAN client exited during restart phase $Stage (exit code $($process.ExitCode))." }
     foreach ($portCandidate in @(3000, 3001, 3002, 3003, 3010, 3020)) {
       try {
         $candidateHealth = Invoke-RestMethod -Uri "http://127.0.0.1:$portCandidate/api/v1/health" -TimeoutSec 2
@@ -181,7 +185,17 @@ function Start-KayanSmokeClient {
     }
     Start-Sleep -Seconds 1
   }
-  Fail "The installed KAYAN client did not recover a healthy local API within 90 seconds after a licensing-state change."
+  # Diagnostics are limited to known shell refusal messages, not settings,
+  # connection strings, raw licence data or tokens.
+  $shellLog = Join-Path $env:ProgramData 'KAYAN-ERP\logs\backend.log'
+  $refusal = ''
+  if (Test-Path -LiteralPath $shellLog) {
+    $line = @(Get-Content -LiteralPath $shellLog -Tail 100 -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\[shell\] refusing to open the program:' } | Select-Object -Last 1)
+    if ($line.Count) { $refusal = ($line[0] -replace '[\r\n]+', ' ') }
+  }
+  $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+  $serviceStatus = if ($service) { $service.Status.ToString() } else { 'missing' }
+  Fail "The installed client did not expose health in restart phase $Stage within the bounded wait (PostgreSQL=$serviceStatus). $refusal"
 }
 
 function Fail([string]$Reason) {
@@ -631,7 +645,7 @@ try {
       Stop-KayanSmokeClient -Process $client -Port $apiPort
       $client = $null
       [IO.File]::WriteAllText($statePath, 'not-json', [Text.Encoding]::ASCII)
-      $restart = Start-KayanSmokeClient
+      $restart = Start-KayanSmokeClient -Stage 'corrupt-state'
       $client = $restart.Process
       $apiPort = $restart.Port
       $base = "http://127.0.0.1:$apiPort/api/v1"
@@ -656,7 +670,7 @@ try {
       Stop-KayanSmokeClient -Process $client -Port $apiPort
       $client = $null
       [IO.File]::WriteAllBytes($statePath, $originalStateBytes)
-      $restart = Start-KayanSmokeClient
+      $restart = Start-KayanSmokeClient -Stage 'saved-state-restored'
       $client = $restart.Process
       $apiPort = $restart.Port
       $base = "http://127.0.0.1:$apiPort/api/v1"
@@ -669,7 +683,7 @@ try {
       Stop-KayanSmokeClient -Process $client -Port $apiPort
       $client = $null
       Move-Item -LiteralPath $publicKeyPath -Destination $publicKeyBackupPath
-      $restart = Start-KayanSmokeClient
+      $restart = Start-KayanSmokeClient -Stage 'public-key-missing'
       $client = $restart.Process
       $apiPort = $restart.Port
       $base = "http://127.0.0.1:$apiPort/api/v1"
@@ -682,7 +696,7 @@ try {
       Stop-KayanSmokeClient -Process $client -Port $apiPort
       $client = $null
       Move-Item -LiteralPath $publicKeyBackupPath -Destination $publicKeyPath
-      $restart = Start-KayanSmokeClient
+      $restart = Start-KayanSmokeClient -Stage 'public-key-restored'
       $client = $restart.Process
       $apiPort = $restart.Port
       $base = "http://127.0.0.1:$apiPort/api/v1"

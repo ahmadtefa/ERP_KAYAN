@@ -65,4 +65,8 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   assert.equal(licenseCalls.length, 6);
   assert.equal(licenseCalls.filter((line) => line.includes('-Headers $headers')).length, 5);
   assert.match(smokeScript, /\[int\]\$anonymousStatus\.StatusCode -ne 401/);
+  for (const stage of ['corrupt-state', 'saved-state-restored', 'public-key-missing', 'public-key-restored']) {
+    assert.ok(smokeScript.includes(`$restart = Start-KayanSmokeClient -Stage '${stage}'`));
+  }
+  assert.match(smokeScript, /\$deadline = \[DateTime\]::UtcNow\.AddMinutes\(4\)/);
 });
