@@ -69,4 +69,6 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
     assert.ok(smokeScript.includes(`$restart = Start-KayanSmokeClient -Stage '${stage}'`));
   }
   assert.match(smokeScript, /\$deadline = \[DateTime\]::UtcNow\.AddMinutes\(4\)/);
+  assert.match(smokeScript, /\$missingKeyBusiness = Invoke-WebRequest[^\n]+\$base\/parties\/customers[^\n]+-Headers \$headers/);
+  assert.match(smokeScript, /\[int\]\$missingKeyBusiness\.StatusCode -ne 403 -or \$missingKeyBusinessBody\.code -ne 'LICENSE_PUBLIC_KEY_MISSING'/);
 });

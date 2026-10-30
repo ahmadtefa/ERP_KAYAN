@@ -691,7 +691,15 @@ try {
       if ($missingKeyStatus.configured -ne $false -or $missingKeyStatus.blocked -ne $true) {
         Fail ("A missing installed public key was not detected as an unconfigured, blocked license state: " + ($missingKeyStatus | ConvertTo-Json -Compress))
       }
-      Write-Host 'PASS: a missing public key is detected without preventing the local runtime from starting.'
+      # A health/status response is not evidence that business access is blocked.
+      # Verify a real authenticated installed route fails closed with the expected
+      # missing-key error while this owned diagnostics-only backend is running.
+      $missingKeyBusiness = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/parties/customers" -Headers $headers -TimeoutSec 15
+      $missingKeyBusinessBody = $missingKeyBusiness.Content | ConvertFrom-Json
+      if ([int]$missingKeyBusiness.StatusCode -ne 403 -or $missingKeyBusinessBody.code -ne 'LICENSE_PUBLIC_KEY_MISSING') {
+        Fail ("Missing public key did not block the installed business route (HTTP $([int]$missingKeyBusiness.StatusCode)).")
+      }
+      Write-Host 'PASS: a missing public key keeps the diagnostics runtime available while the authenticated business route remains blocked.'
 
       Stop-KayanSmokeClient -Process $client -Port $apiPort
       $client = $null
