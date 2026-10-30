@@ -16,6 +16,29 @@ void main() {
         },
       };
       expect(keepServerForLicenceDiagnostics(health), isTrue);
+      // A missing verification key also needs a diagnostics-only server. It
+      // must not turn an unconfigured or warn-mode server into a ready one.
+      expect(
+        keepServerForLicenceDiagnostics({
+          ...health,
+          'license': {'enforcement': 'enforce', 'configured': false},
+        }),
+        isTrue,
+      );
+      expect(
+        keepServerForLicenceDiagnostics({
+          ...health,
+          'license': {'enforcement': 'warn', 'configured': false},
+        }),
+        isFalse,
+      );
+      expect(
+        keepServerForLicenceDiagnostics({
+          ...health,
+          'license': {'enforcement': 'enforce'},
+        }),
+        isFalse,
+      );
       expect(keepServerForLicenceDiagnostics(null), isFalse);
       expect(keepServerForLicenceDiagnostics({...health, 'database': 'down'}), isFalse);
       expect(keepServerForLicenceDiagnostics({...health, 'status': 'degraded'}), isFalse);

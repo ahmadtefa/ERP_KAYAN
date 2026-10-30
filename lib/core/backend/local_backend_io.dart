@@ -177,7 +177,8 @@ bool keepServerForLicenceDiagnostics(Map<String, dynamic>? health) {
       health?['database'] == 'up' &&
       licence is Map &&
       licence['enforcement'] == 'enforce' &&
-      licence['stateError'] == 'LICENSE_STATE_DAMAGED';
+      (licence['stateError'] == 'LICENSE_STATE_DAMAGED' ||
+          licence['configured'] == false);
 }
 
 class LocalBackend {
@@ -459,10 +460,10 @@ class LocalBackend {
       if (identityProblem != null) {
         log.writeln('[shell] refusing to open the program: $identityProblem');
         if (keepServerForLicenceDiagnostics(health)) {
-          // Keep one owned server alive so health and the explicit damaged-state
-          // error remain available while the operator restores trusted state.
-          // The business guard still fails closed. A retry must pass all
-          // identity checks before this child can ever be treated as ready.
+          // Keep only our owned, enforcement-on server alive for diagnostics
+          // when the state is damaged or the verification key is unavailable.
+          // Business routes remain guarded. A retry must pass all identity
+          // checks before this child can ever be treated as ready.
           _instance = LocalBackend._(process, port, log, true);
         } else {
           await _stop(process, log);
