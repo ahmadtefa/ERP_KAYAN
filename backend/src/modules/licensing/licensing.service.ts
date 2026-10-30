@@ -178,6 +178,7 @@ export class LicensingService implements OnModuleInit {
   private archive?: LicenceBackupArchive;
   private lastLicenceBackup: LicenceBackupRecord | null = null;
   private resolvedMachineId: string | null = null;
+  private lastLicenceBackupError: string | null = null;
   private machineIdWriteFailed = false;
 
   constructor(
@@ -365,6 +366,7 @@ export class LicensingService implements OnModuleInit {
     reason: string,
   ): LicenceBackupRecord | null {
     try {
+      this.lastLicenceBackupError = null;
       const safe = reason.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40) || 'manual';
       const record = this.licenceArchive().capture(safe);
       this.lastLicenceBackup = record;
@@ -372,8 +374,11 @@ export class LicensingService implements OnModuleInit {
     } catch (error) {
       // A backup of the database must not fail because the licence copy could
       // not be written; the reason is logged and reported by status.
+      // Remember why, so a screen (or a failing test) can say what happened
+      // instead of only reporting that nothing was written.
+      this.lastLicenceBackupError = describeError(error);
       this.logger.warn(
-        `The licence backup was not written: ${describeError(error)}`,
+        `The licence backup was not written: ${this.lastLicenceBackupError}`,
       );
       return null;
     }
@@ -382,6 +387,11 @@ export class LicensingService implements OnModuleInit {
   /** The most recent verified licence backup, for the backup screens. */
   lastLicenceBackupRecord(): LicenceBackupRecord | null {
     return this.lastLicenceBackup;
+  }
+
+  /** Why the last capture produced nothing, or null when it succeeded. */
+  lastLicenceBackupFailure(): string | null {
+    return this.lastLicenceBackupError;
   }
 
   private licenceArchive(): LicenceBackupArchive {

@@ -1148,9 +1148,16 @@ async function clockAndRestore() {
       const directory = mkdtempSync(join(tmpdir(), 'kayan-licence-state-'));
       cleanup.push({ directory });
       const fresh = await installation({ database: DATABASES.runtime + '_clock', directory });
-      // Applying a key captures a verified, machine-bound copy of the licence.
-      const archived = await fresh.service.captureLicenceBackup('postgres-check');
-      assert(archived && archived.id, 'a licence backup was captured');
+      // Start the program once, as it starts on a real machine: it creates its
+      // protected state from the database, and only then is there a state whose
+      // verified copy is worth keeping.
+      await fresh.service.status({ fresh: true });
+      const archived = fresh.service.captureLicenceBackup('postgres-check');
+      assert(
+        archived && archived.id,
+        'a licence backup was captured: ' +
+          (fresh.service.lastLicenceBackupFailure?.() ?? 'no reason recorded'),
+      );
       assertEqual(archived.machineId, MACHINE, 'the capture is bound to this machine');
       const capturedSeats = archived.state.maxSeatsUsed;
       await close(fresh);

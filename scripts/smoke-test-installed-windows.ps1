@@ -45,10 +45,66 @@ $windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\
 $settings = Join-Path $env:ProgramData "KAYAN-ERP\kayan.env"
 $offlineRuleNames = New-Object 'System.Collections.Generic.List[string]'
 
+$smokeLog = Join-Path $env:ProgramData 'KAYAN-ERP\logs\smoke.log'
+$clientLog = Join-Path $env:APPDATA 'KAYAN-ERP\logs\backend.log'
+$machineClientLog = Join-Path $env:ProgramData 'KAYAN-ERP\logs\backend.log'
+
+function Write-SmokePhase([string]$Text) {
+  $line = "{0} {1}" -f ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ssZ')), $Text
+  Write-Host $line
+  try {
+    $parent = Split-Path -Parent $smokeLog
+    if (Test-Path -LiteralPath $parent) { Add-Content -LiteralPath $smokeLog -Value $line -Encoding UTF8 }
+  } catch { }
+}
+
+function Get-InstalledLogTail([string]$Path, [int]$Lines) {
+  if (-not (Test-Path -LiteralPath $Path)) { return @("(not found: $Path)") }
+  return @(Get-Content -LiteralPath $Path -Tail $Lines -ErrorAction SilentlyContinue)
+}
+
+function Get-RuntimeProbe {
+  # Why the shell never saw a healthy API: ask each candidate port directly and
+  # read the shell's own log, which records the child's exit and the reason the
+  # shell refused to open.
+  $sections = @()
+  foreach ($portCandidate in @(3000, 3001, 3002, 3003, 3010, 3020)) {
+    $probe = Get-KayanHealth $portCandidate 3
+    if ($probe.Status -gt 0) {
+      $sections += "port $portCandidate answered HTTP $($probe.Status): $($probe.Body)"
+    } else {
+      $sections += "port $portCandidate did not answer: $($probe.Error)"
+    }
+  }
+  $sections += "--- $clientLog ---"
+  $sections += Get-InstalledLogTail $clientLog 40
+  if ((Test-Path -LiteralPath $machineClientLog) -and ($machineClientLog -ne $clientLog)) {
+    $sections += "--- $machineClientLog ---"
+    $sections += Get-InstalledLogTail $machineClientLog 20
+  }
+  $nodeProcesses = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue)
+  foreach ($nodeProcess in $nodeProcesses) {
+    $sections += "node pid $($nodeProcess.ProcessId): $($nodeProcess.CommandLine)"
+  }
+  $licenceDirectory = Join-Path $env:ProgramData 'KAYAN-ERP\license'
+  if (Test-Path -LiteralPath $licenceDirectory) {
+    foreach ($file in @(Get-ChildItem -LiteralPath $licenceDirectory -File -ErrorAction SilentlyContinue)) {
+      $hash = 'unreadable'
+      try { $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.Substring(0, 16) } catch { }
+      $sections += "licence file $($file.Name) $($file.Length) bytes sha256:$hash"
+    }
+  }
+  return ($sections -join [Environment]::NewLine)
+}
+
 function Read-Details {
   # Ordered most relevant first: the runtime setup log is the root-cause log,
   # and GitHub annotations cut the message after 4000 characters.
   $sections = @()
+  if (Test-Path -LiteralPath $smokeLog) {
+    $sections += "--- $smokeLog ---"
+    $sections += Get-InstalledLogTail $smokeLog 15
+  }
   $resultFile = Join-Path $env:ProgramData "KAYAN-ERP\logs\installer-result.txt"
   $runtimeLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\installer.log"
   if (Test-Path $resultFile) {
@@ -72,10 +128,14 @@ function Read-Details {
     $sections += "--- $($initLog.FullName) ---"
     $sections += Get-Content $initLog.FullName -Tail 25 -ErrorAction SilentlyContinue
   }
-  $backendLog = Join-Path $env:ProgramData "KAYAN-ERP\logs\backend.log"
-  if (Test-Path $backendLog) {
-    $sections += "--- $backendLog ---"
-    $sections += Get-Content $backendLog -Tail 15 -ErrorAction SilentlyContinue
+  # The shell, not the installer, owns the backend's console log: it writes it
+  # under the profile's application data, and that is where a child that dies
+  # on startup says why. Check both places so neither layout hides a failure.
+  foreach ($backendLog in @($machineClientLog, $clientLog)) {
+    if (Test-Path -LiteralPath $backendLog) {
+      $sections += "--- $backendLog ---"
+      $sections += Get-InstalledLogTail $backendLog 25
+    }
   }
   if (Test-Path $installLog) {
     $sections += "--- setup log tail ---"
@@ -167,21 +227,49 @@ function Stop-KayanSmokeClient([object]$Process, [int]$Port) {
   }
 }
 
+function Get-KayanHealth([int]$Port, [int]$TimeoutSec = 3) {
+  # A refusal is information: a 503 from a server that is running is a very
+  # different fault from a server that never listened, and the annotation has to
+  # say which one happened.
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/api/v1/health" -TimeoutSec $TimeoutSec
+    return @{ Status = [int]$response.StatusCode; Body = $response.Content; Error = $null }
+  } catch {
+    $failure = $_.Exception
+    if ($failure.Response) {
+      $body = ''
+      try {
+        $reader = New-Object System.IO.StreamReader($failure.Response.GetResponseStream())
+        $body = $reader.ReadToEnd()
+      } catch { }
+      return @{ Status = [int]$failure.Response.StatusCode; Body = $body; Error = $failure.Message }
+    }
+    return @{ Status = 0; Body = $null; Error = $failure.Message }
+  }
+}
+
 function Start-KayanSmokeClient {
   $process = Start-Process -FilePath $clientPath -WorkingDirectory $installRoot -PassThru
+  $lastRefusal = $null
   foreach ($attempt in 1..90) {
     if ($process.HasExited) { Fail "The installed KAYAN client exited during a runtime-only restart (exit code $($process.ExitCode))." }
     foreach ($portCandidate in @(3000, 3001, 3002, 3003, 3010, 3020)) {
-      try {
-        $candidateHealth = Invoke-RestMethod -Uri "http://127.0.0.1:$portCandidate/api/v1/health" -TimeoutSec 2
+      $probe = Get-KayanHealth $portCandidate 2
+      if ($probe.Status -eq 200) {
+        $candidateHealth = $probe.Body | ConvertFrom-Json
         if ($candidateHealth.status) {
           return @{ Process = $process; Port = $portCandidate; Health = $candidateHealth }
         }
-      } catch { }
+      } elseif ($probe.Status -gt 0) {
+        $lastRefusal = "port $portCandidate answered HTTP $($probe.Status): $($probe.Body)"
+      }
     }
     Start-Sleep -Seconds 1
   }
-  Fail "The installed KAYAN client did not recover a healthy local API within 90 seconds after a licensing-state change."
+  if ($lastRefusal) {
+    Write-Output ("::notice::A local server refused health checks while waiting: " + $lastRefusal)
+  }
+  Fail ("The installed KAYAN client did not recover a healthy local API within 90 seconds after a licensing-state change." + [Environment]::NewLine + "--- runtime probe ---" + [Environment]::NewLine + (Get-RuntimeProbe))
 }
 
 function Fail([string]$Reason) {
@@ -650,6 +738,7 @@ try {
     try {
       Stop-KayanSmokeClient -Process $client -Port $apiPort
       $client = $null
+      Write-SmokePhase 'Smoke: restarting the shell after damaging the protected licence state.'
       [IO.File]::WriteAllText($statePath, 'not-json', [Text.Encoding]::ASCII)
       $restart = Start-KayanSmokeClient
       $client = $restart.Process
@@ -703,6 +792,7 @@ try {
 
       Stop-KayanSmokeClient -Process $client -Port $apiPort
       $client = $null
+      Write-SmokePhase 'Smoke: restarting the shell with the installed public key moved away.'
       Move-Item -LiteralPath $publicKeyPath -Destination $publicKeyBackupPath
       $restart = Start-KayanSmokeClient
       $client = $restart.Process
@@ -716,6 +806,7 @@ try {
 
       Stop-KayanSmokeClient -Process $client -Port $apiPort
       $client = $null
+      Write-SmokePhase 'Smoke: restarting the shell with the installed public key restored.'
       Move-Item -LiteralPath $publicKeyBackupPath -Destination $publicKeyPath
       $restart = Start-KayanSmokeClient
       $client = $restart.Process
