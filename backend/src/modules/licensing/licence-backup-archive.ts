@@ -130,19 +130,17 @@ export interface LicenceBackupOptions {
 }
 
 /**
- * Where captures live.
+ * Where captures live when the installation does not say.
  *
- * On Windows this is the documented `%ProgramData%\KAYAN-ERP\LicenceBackups`:
- * beside the licence folder, writable by the service account, and outside the
- * installation directory that Setup replaces. Everywhere else - development
- * copies and tests - it stays inside the state folder, so two installations on
- * one machine never read each other's captures.
+ * Setup exports `KAYAN_LICENCE_BACKUP_DIR` = `%ProgramData%\KAYAN-ERP\LicenceBackups`
+ * - beside the licence folder, writable by the service account, outside the
+ * installation directory that Setup replaces. Without that setting (a
+ * development copy, a test, an installation whose settings predate this
+ * feature) the archive stays inside the licence state folder: still outside the
+ * program directory, and isolated per installation so one machine's copies can
+ * never be offered to another installation on the same disk.
  */
 export function defaultLicenceBackupDirectory(licenceDirectory: string): string {
-  if (process.platform === 'win32') {
-    const programData = process.env.ProgramData ?? process.env.PROGRAMDATA;
-    if (programData) return join(programData, 'KAYAN-ERP', 'LicenceBackups');
-  }
   return join(licenceDirectory, LICENCE_BACKUP_DIR_NAME);
 }
 

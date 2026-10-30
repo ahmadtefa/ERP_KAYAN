@@ -75,6 +75,14 @@ function pass(name, detail = '') {
 function fail(name, detail) {
   failures += 1;
   console.log(`FAIL  ${name} — ${detail}`);
+  // The raw job log is not always reachable from outside the runner, so the
+  // failing check names itself in an annotation too.
+  const one = String(detail ?? '')
+    .replace(/%/g, '%25')
+    .replace(/\r/g, ' ')
+    .replace(/\n/g, ' | ')
+    .slice(0, 3000);
+  console.log(`::error title=Licensing PostgreSQL check failed::${name} — ${one}`);
 }
 
 async function check(name, fn) {
