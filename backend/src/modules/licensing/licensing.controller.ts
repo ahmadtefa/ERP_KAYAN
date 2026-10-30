@@ -113,6 +113,7 @@ export class LicensingController {
       ) {
         return {
           state: 'UNLICENSED',
+          stateError: 'LICENSE_STATE_DAMAGED',
           blocked: true,
           enforcement: 'enforce',
           configured: false,
