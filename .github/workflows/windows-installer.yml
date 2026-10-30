@@ -697,7 +697,6 @@ jobs:
             --title "KAYAN ERP ${APP_VERSION} candidate (${SOURCE_COMMIT:0:12})" \
             --notes-file "$notes" \
             --prerelease \
-            --latest=false \
             "candidate/KAYAN-ERP-Setup.exe#KAYAN-ERP-Setup.exe" \
             "candidate/published-identity.json#published-identity.json" \
             "candidate/payload-verification.json#payload-verification.json" \

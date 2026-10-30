@@ -49,7 +49,9 @@ test('the branch hand-over proves the file is the one that was tested', () => {
 test('the branch hand-over is a prerelease that never replaces an existing one', () => {
   const handover = job('publish-branch-candidate');
   assert.match(handover, /--prerelease/);
-  assert.match(handover, /--latest=false/);
+  // gh's --latest takes no value; a prerelease is already never "latest", and
+  // the job must not pass the flag in a form the command would reject.
+  assert.doesNotMatch(handover, /--latest[ =]/);
   assert.match(handover, /gh release view "\$tag"[\s\S]*?refusing to replace/);
   assert.doesNotMatch(handover, /--clobber/);
   assert.doesNotMatch(handover, /makeLatest: true/);
