@@ -10,7 +10,7 @@ on:
         default: product
         required: true
   pull_request:
-    branches: [main]
+    branches: [main, 'arena/2d794f08-erp-kayan']
   push:
     branches: [main, 'arena/key-generator-register-ui-fix', 'arena/2d794f08-erp-kayan', 'fix/inno-inspector-callsites-20261030']
 
