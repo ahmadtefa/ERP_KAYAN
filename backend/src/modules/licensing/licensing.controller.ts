@@ -9,6 +9,7 @@ import {
 import { Request } from 'express';
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { LicenseKeyDto } from './dto/license-key.dto';
 import { LicensingService } from './licensing.service';
 
@@ -24,16 +25,19 @@ import { LicensingService } from './licensing.service';
 export class LicensingController {
   constructor(private readonly licensing: LicensingService) {}
 
+  @Public()
   @Get()
   status() {
     return this.licensing.status();
   }
 
+  @Public()
   @Get('status')
   statusAlias() {
     return this.licensing.status();
   }
 
+  @Public()
   @Get('request-code')
   requestCode() {
     return this.licensing.requestCode();
@@ -85,11 +89,6 @@ export class LicensingController {
     return this.licensing.transfer(dto.key, this.actor(user, request));
   }
 
-  /**
-   * Clears a suspension after the person has corrected the machine's clock.
-   * Refused while the clock is still behind, so it cannot be used to wave a
-   * rolled-back date through.
-   */
   @Post('confirm-clock')
   async confirmClock(@CurrentUser() user: AuthUser, @Req() request: Request) {
     this.superAdmin(user);
