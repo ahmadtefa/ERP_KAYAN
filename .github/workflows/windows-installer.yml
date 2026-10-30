@@ -12,7 +12,15 @@ on:
   pull_request:
     branches: [main, 'arena/2d794f08-erp-kayan']
   push:
-    branches: [main, 'arena/key-generator-register-ui-fix', 'arena/2d794f08-erp-kayan', 'fix/inno-inspector-callsites-20261030']
+    # A push to one of these branches builds a product candidate and runs the
+    # installed-runtime smoke test. It cannot publish: publication needs a push
+    # to main, the protected environment and independent release evidence.
+    branches:
+      - main
+      - 'arena/key-generator-register-ui-fix'
+      - 'arena/2d794f08-erp-kayan'
+      - 'arena/7b5dfd31-erp-kayan'
+      - 'fix/inno-inspector-callsites-20261030'
 
 # Building or inspecting a candidate never needs permission to publish releases.
 # Any future publishing job must request write permission separately, after its
