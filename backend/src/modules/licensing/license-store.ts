@@ -90,6 +90,85 @@ function canonical(state: LicenseTrustState): string {
   return JSON.stringify(state, Object.keys(state).sort());
 }
 
+/**
+ * The authentication key of an installation's protected state, read without
+ * ever creating one. A caller that only wants to *verify* a copy - the licence
+ * backup archive, a restore decision - must not be able to mint a new key that
+ * would make an old, valid state impossible to check.
+ */
+export function readStateSecret(
+  directory: string,
+  explicit?: string,
+): Buffer | null {
+  const fromEnv = explicit ?? (process.env.LICENSE_STATE_SECRET ?? '').trim();
+  if (fromEnv) return createHash('sha256').update(fromEnv).digest();
+  const keyPath = join(directory, 'state.key');
+  let text: string;
+  try {
+    text = readFileSync(keyPath, 'utf8').trim();
+  } catch {
+    return null;
+  }
+  if (text.length < 32) return null;
+  return createHash('sha256').update(text).digest();
+}
+
+/**
+ * Authenticates one stored state document (`{state, mac}`) with a known key.
+ * Kept separate from the file walk so the same check can be applied to a copy
+ * that is not (or not yet) in the licence folder.
+ */
+export function verifyStateDocument(
+  text: string,
+  secret: Buffer,
+  label = 'licence state',
+): LicenseTrustState {
+  let parsed: { state?: unknown; mac?: unknown };
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new LicenseStateError(
+      `The ${label} is not readable JSON`,
+      'UNREADABLE',
+    );
+  }
+  if (
+    !parsed ||
+    parsed.state === null ||
+    typeof parsed.state !== 'object' ||
+    Array.isArray(parsed.state) ||
+    typeof parsed.mac !== 'string'
+  ) {
+    throw new LicenseStateError(
+      `The ${label} has no signed state`,
+      'TAMPERED',
+    );
+  }
+  const state = parsed.state as LicenseTrustState;
+  const expected = createHmac('sha256', secret)
+    .update(canonical(state))
+    .digest('hex');
+  const actual = Buffer.from(parsed.mac, 'hex');
+  const wanted = Buffer.from(expected, 'hex');
+  if (actual.length !== wanted.length || !timingSafeEqual(actual, wanted)) {
+    throw new LicenseStateError(
+      `The ${label} failed its integrity check`,
+      'TAMPERED',
+    );
+  }
+  if (
+    state.v !== 1 ||
+    !Number.isSafeInteger(state.sequence) ||
+    state.sequence < 0
+  ) {
+    throw new LicenseStateError(
+      `The ${label} uses an unsupported or invalid format`,
+      'UNREADABLE',
+    );
+  }
+  return state;
+}
+
 export class LicenseStore {
   private state: LicenseTrustState;
   private readonly secret: Buffer;
@@ -280,44 +359,18 @@ export class LicenseStore {
   }
 
   private readVerified(path: string): LicenseTrustState {
-    let parsed: { state?: unknown; mac?: unknown };
+    // Same authentication as verifyStateDocument, but this copy's full path is
+    // part of the diagnostic: a damaged file has to be findable.
+    let text: string;
     try {
-      parsed = JSON.parse(readFileSync(path, 'utf8'));
+      text = readFileSync(path, 'utf8');
     } catch {
       throw new LicenseStateError(
-        `The licence state file ${path} is not readable JSON`,
+        `The licence state file ${path} cannot be read`,
         'UNREADABLE',
       );
     }
-    if (
-      !parsed ||
-      parsed.state === null ||
-      typeof parsed.state !== 'object' ||
-      Array.isArray(parsed.state) ||
-      typeof parsed.mac !== 'string'
-    ) {
-      throw new LicenseStateError(
-        `The licence state file ${path} has no signed state`,
-        'TAMPERED',
-      );
-    }
-    const state = parsed.state as LicenseTrustState;
-    const expected = this.mac(state);
-    const actual = Buffer.from(parsed.mac, 'hex');
-    const wanted = Buffer.from(expected, 'hex');
-    if (actual.length !== wanted.length || !timingSafeEqual(actual, wanted)) {
-      throw new LicenseStateError(
-        `The licence state file ${path} failed its integrity check`,
-        'TAMPERED',
-      );
-    }
-    if (state.v !== 1 || !Number.isSafeInteger(state.sequence) || state.sequence < 0) {
-      throw new LicenseStateError(
-        `The licence state file ${path} uses an unsupported or invalid format`,
-        'UNREADABLE',
-      );
-    }
-    return state;
+    return verifyStateDocument(text, this.secret, `licence state file ${path}`);
   }
 
   private persist(state: LicenseTrustState): void {

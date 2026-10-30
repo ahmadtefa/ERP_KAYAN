@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { LICENCE_BACKUP_DIR_NAME } from './licence-backup-archive';
 import { LicenseStateError, LicenseStore } from './license-store';
 import { LicenseGuard } from './license.guard';
 import { LicensingService } from './licensing.service';
@@ -52,6 +53,10 @@ describe('installed licence state corruption safety', () => {
     const h = harness();
     try {
       await activation(h);
+      // The activation above took a licence backup. This test is about the
+      // installation that has *no* recoverable copy, so the backups are
+      // removed first; the recovery path is covered separately below.
+      rmSync(join(h.dir, LICENCE_BACKUP_DIR_NAME), { recursive: true, force: true });
       const path = join(h.dir, 'license-state.json');
       const backup = join(h.dir, 'license-state.backup.json');
       const original = readFileSync(path);
@@ -89,6 +94,7 @@ describe('installed licence state corruption safety', () => {
     const h = harness();
     try {
       await activation(h);
+      rmSync(join(h.dir, LICENCE_BACKUP_DIR_NAME), { recursive: true, force: true });
       const path = join(h.dir, 'license-state.json');
       const backup = join(h.dir, 'license-state.backup.json');
       const original = readFileSync(path);
@@ -226,6 +232,62 @@ describe('installed licence state corruption safety', () => {
       expect(readFileSync(state, 'utf8')).toBe('{"state":{},"mac":"synthetic"}');
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('restores both damaged copies from the authenticated licence backup and keeps serving', async () => {
+    const h = harness();
+    try {
+      const before = await activation(h);
+      const path = join(h.dir, 'license-state.json');
+      const backup = join(h.dir, 'license-state.backup.json');
+      writeFileSync(join(h.dir, 'public-key.pem'), PUBLIC_PEM);
+      writeFileSync(path, 'broken-primary');
+      writeFileSync(backup, 'broken-backup');
+      const installed = new LicensingService(h.db as any, {} as any, {
+        installedDirectory: h.dir, machineId: MACHINE, clock: () => new Date('2026-05-01T09:00:00.000Z'),
+      });
+      await installed.onModuleInit();
+      // A verified, machine-bound backup is a recovery source: the program
+      // comes back after the damage instead of staying blocked forever.
+      const status = await installed.status({ fresh: true });
+      expect(status.state).toBe('ACTIVE');
+      expect(status.blocked).toBe(false);
+      expect(status.licenseId).toBe(before.licenseId);
+      expect(installed.licenseSummary().stateError).toBeUndefined();
+      // The damaged originals were preserved for diagnosis, not overwritten.
+      const { readdirSync } = require('node:fs') as typeof import('node:fs');
+      expect(
+        readdirSync(h.dir).filter((name: string) => name.includes('.damaged-')),
+      ).not.toHaveLength(0);
+    } finally {
+      h.dispose();
+    }
+  });
+
+  it('still fails closed when the licence backup is damaged as well', async () => {
+    const h = harness();
+    try {
+      await activation(h);
+      const { readdirSync } = require('node:fs') as typeof import('node:fs');
+      const backupsDir = join(h.dir, LICENCE_BACKUP_DIR_NAME);
+      for (const name of readdirSync(backupsDir)) {
+        if (!name.startsWith('licence-')) continue;
+        const statePath = join(backupsDir, name, 'license-state.json');
+        if (existsSync(statePath)) writeFileSync(statePath, 'broken-copy');
+      }
+      writeFileSync(join(h.dir, 'public-key.pem'), PUBLIC_PEM);
+      writeFileSync(join(h.dir, 'license-state.json'), 'broken-primary');
+      writeFileSync(join(h.dir, 'license-state.backup.json'), 'broken-backup');
+      const installed = new LicensingService(h.db as any, {} as any, {
+        installedDirectory: h.dir, machineId: MACHINE, clock: () => new Date('2026-05-01T09:00:00.000Z'),
+      });
+      await installed.onModuleInit();
+      await expect(installed.status({ fresh: true })).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'LICENSE_STATE_DAMAGED' }),
+      });
+    } finally {
+      h.dispose();
     }
   });
 });

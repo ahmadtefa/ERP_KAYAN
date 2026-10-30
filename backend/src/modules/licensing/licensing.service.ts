@@ -9,7 +9,14 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { constants, existsSync, promises as fs, readFileSync } from 'node:fs';
+import {
+  constants,
+  existsSync,
+  promises as fs,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import { arch, hostname, networkInterfaces, platform } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -36,6 +43,10 @@ import {
   LicenseStateError,
   LicenseStore,
 } from './license-store';
+import {
+  LicenceBackupArchive,
+  LicenceBackupRecord,
+} from './licence-backup-archive';
 
 /**
  * The offline licence, as the program enforces it.
@@ -163,6 +174,9 @@ export class LicensingService implements OnModuleInit {
   private lastClockCheck = 0;
   private lastStatus: { at: number; value: LicenseStatus } | null = null;
   private ready: Promise<void> | null = null;
+  /** Timestamped licence copies; created on first use. */
+  private archive?: LicenceBackupArchive;
+  private lastLicenceBackup: LicenceBackupRecord | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -259,7 +273,7 @@ export class LicensingService implements OnModuleInit {
     );
   }
 
-  private openStore(): void {
+  private openStore(allowArchiveRestore = true): void {
     // Never initialize a blank trust store over an existing installation.
     // A verified mirror is a valid recovery source when the primary is absent.
     if (
@@ -287,9 +301,17 @@ export class LicensingService implements OnModuleInit {
         error instanceof LicenseStateError &&
         (error.code === 'TAMPERED' || error.code === 'UNREADABLE')
       ) {
-        // Neither protected copy could be authenticated. Do not discard or
-        // recreate the trust store: its anti-rollback watermarks cannot be
-        // reconstructed safely from a possibly older database. Fail closed.
+        // Neither protected copy could be authenticated. Before failing
+        // closed, try the timestamped licence backups: those are authenticated
+        // with this installation's own key, so a verified one is a safe
+        // recovery source, and one restore attempt is all this gets.
+        if (allowArchiveRestore && this.restoreFromLicenceArchive()) {
+          this.openStore(false);
+          return;
+        }
+        // Do not discard or recreate the trust store: its anti-rollback
+        // watermarks cannot be reconstructed safely from a possibly older
+        // database. Fail closed.
         this.enforcement = 'enforce';
         this.installedStateError = 'LICENSE_STATE_DAMAGED';
         throw new ServiceUnavailableException({
@@ -299,6 +321,79 @@ export class LicensingService implements OnModuleInit {
       }
       throw error;
     }
+  }
+
+  /**
+   * Restores the protected state from the newest authenticated licence backup.
+   *
+   * Returns true only when a snapshot verified, was written and re-verified;
+   * every other outcome leaves the installation failing closed, because a
+   * licence that cannot be authenticated must never be invented.
+   */
+  private restoreFromLicenceArchive(): boolean {
+    // A caller-supplied trust store is a test seam, not an installation.
+    if (this.trustStore) return false;
+    try {
+      const outcome = this.licenceArchive().restoreNewestVerified();
+      if (!outcome) {
+        this.logger.error(
+          'No authenticated licence backup could be restored; the licence state stays fail-closed.',
+        );
+        return false;
+      }
+      this.installedStateError = null;
+      this.logger.warn(
+        `KAYAN-LICENCE-STATE-RESTORED: restored the protected state from backup ${outcome.restored.id} (captured ${outcome.restored.capturedAt}); ${outcome.rejected.length} backup(s) refused; damaged files preserved.`,
+      );
+      return true;
+    } catch (error) {
+      this.logger.error(
+        `Licence backup recovery failed: ${describeError(error)}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Writes a timestamped, verified copy of the licence beside the program's
+   * data. Called after a successful full backup, before a restore, and after a
+   * key is applied - never for a licence that does not authenticate.
+   */
+  captureLicenceBackup(
+    reason: string,
+  ): LicenceBackupRecord | null {
+    try {
+      const safe = reason.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40) || 'manual';
+      const record = this.licenceArchive().capture(safe);
+      this.lastLicenceBackup = record;
+      return record;
+    } catch (error) {
+      // A backup of the database must not fail because the licence copy could
+      // not be written; the reason is logged and reported by status.
+      this.logger.warn(
+        `The licence backup was not written: ${describeError(error)}`,
+      );
+      return null;
+    }
+  }
+
+  /** The most recent verified licence backup, for the backup screens. */
+  lastLicenceBackupRecord(): LicenceBackupRecord | null {
+    return this.lastLicenceBackup;
+  }
+
+  private licenceArchive(): LicenceBackupArchive {
+    if (!this.archive) {
+      this.archive = new LicenceBackupArchive(this.directory, {
+        machineId: this.machineId(),
+        clock: this.clock,
+        logger: {
+          log: (message: string) => this.logger.log(message),
+          warn: (message: string) => this.logger.warn(message),
+        },
+      });
+    }
+    return this.archive;
   }
 
   private loadKey(): void {
@@ -481,9 +576,55 @@ export class LicensingService implements OnModuleInit {
 
   // ──────────────────────────────────────────────────────────────── identity
 
+  /**
+   * This computer's licence identity, as recorded for this installation.
+   *
+   * The recorded identity is kept in the protected licence folder so that a
+   * temporary failure of a *weaker* signal (a registry read, a disabled
+   * network adapter) can never quietly change who this computer is and
+   * invalidate a licence that is still correct.
+   */
   machineId(): string {
     if (this.machineIdOverride) return this.machineIdOverride;
-    return machineFingerprint();
+    const recorded = this.readRecordedMachineId();
+    const resolved = machineIdentity();
+    const choice = chooseMachineIdentity(recorded, resolved);
+    if (choice.reusedRecorded && recorded !== resolved.id) {
+      this.logger.warn(
+        `The machine identity could not be read from the strongest source; keeping the identity recorded for this installation (${recorded}).`,
+      );
+    }
+    this.recordMachineId(choice.id, recorded);
+    return choice.id;
+  }
+
+  private machineIdPath(): string {
+    return join(this.directory, 'machine-id');
+  }
+
+  private readRecordedMachineId(): string | null {
+    try {
+      const text = readFileSync(this.machineIdPath(), 'utf8').trim();
+      return /^KM-[A-Z0-9-]{8,}$/.test(text) ? text : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private recordMachineId(id: string, recorded: string | null): void {
+    if (recorded === id) return;
+    try {
+      // Atomic replace, so a power cut cannot leave a half-written identity.
+      const temp = `${this.machineIdPath()}.${process.pid}.tmp`;
+      writeFileSync(temp, `${id}\n`, { mode: 0o600 });
+      renameSync(temp, this.machineIdPath());
+    } catch (error) {
+      // A directory this program cannot write is reported by the state store
+      // itself; identity must still work for this run.
+      this.logger.warn(
+        `The machine identity could not be recorded: ${describeError(error)}`,
+      );
+    }
   }
 
   installId(): string {
@@ -828,6 +969,9 @@ export class LicensingService implements OnModuleInit {
         result.expiresAt ? `expires ${result.expiresAt.toISOString()}` : 'perpetual'
       }`,
     );
+    // A new key is exactly the moment a verified copy is worth keeping: the
+    // state just changed, and an older backup would no longer describe it.
+    this.captureLicenceBackup(`licence-${payload.type.toLowerCase()}`);
     return this.status({ fresh: true });
   }
 
@@ -1588,7 +1732,25 @@ function base32(buffer: Buffer, length: number): string {
  * service and the desktop shell. Reinstalling Windows changes the MachineGuid;
  * that is a new machine id and needs a transfer key, by design.
  */
-export function machineFingerprint(): string {
+export type MachineIdentitySource = 'machine-guid' | 'host-mac';
+
+export interface MachineIdentity {
+  id: string;
+  /** How the identity was derived; `host-mac` is the weaker fallback. */
+  source: MachineIdentitySource;
+}
+
+/**
+ * Derives this computer's licence identity.
+ *
+ * On Windows the identity is the machine's own GUID, which is stable across
+ * reinstalls, updates and disk repairs and does not depend on the company name,
+ * the database or anything the user can edit. Everywhere else (development) it
+ * is a hash of the platform, the host name and the first non-virtual MAC
+ * address - enough to keep a test machine distinct, never used to sell a
+ * licence.
+ */
+export function machineIdentity(): MachineIdentity {
   const parts: string[] = [platform(), arch()];
   const guid = windowsMachineGuid();
   if (guid) {
@@ -1600,10 +1762,38 @@ export function machineFingerprint(): string {
   }
   const digest = createHash('sha256').update(parts.join('|')).digest();
   const body = base32(digest, 20);
-  return `KM-${body.slice(0, 4)}-${body.slice(4, 8)}-${body.slice(8, 12)}-${body.slice(
-    12,
-    16,
-  )}-${body.slice(16, 20)}`;
+  return {
+    source: guid ? 'machine-guid' : 'host-mac',
+    id: `KM-${body.slice(0, 4)}-${body.slice(4, 8)}-${body.slice(8, 12)}-${body.slice(
+      12,
+      16,
+    )}-${body.slice(16, 20)}`,
+  };
+}
+
+export function machineFingerprint(): string {
+  return machineIdentity().id;
+}
+
+/**
+ * Decides which identity to use, given what was recorded for this installation.
+ *
+ * The rule that matters: a *weaker* source must never replace a recorded
+ * identity. If the registry read fails, or a network adapter is disabled, the
+ * fallback hash changes - and silently adopting it would invalidate a licence
+ * that is perfectly valid. So the recorded identity wins over the fallback.
+ * A change in the machine GUID itself is a real hardware change and is
+ * reported, because hiding it would let one computer's licence appear on
+ * another.
+ */
+export function chooseMachineIdentity(
+  recorded: string | null,
+  resolved: MachineIdentity,
+): { id: string; reusedRecorded: boolean } {
+  if (recorded && resolved.source !== 'machine-guid') {
+    return { id: recorded, reusedRecorded: recorded !== resolved.id };
+  }
+  return { id: resolved.id, reusedRecorded: false };
 }
 
 function windowsMachineGuid(): string | null {

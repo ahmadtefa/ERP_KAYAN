@@ -765,6 +765,17 @@ function Add-LicenceSettings([hashtable]$Values) {
   Set-PrivateAcl $licenceDirectory @('BUILTIN\Administrators', $serviceAccount)
   $Values['LICENSE_STATE_DIR'] = $licenceDirectory
 
+  # Timestamped, verified copies of the licence live beside the licence folder,
+  # not inside the program folder: Setup replaces Program Files on every
+  # upgrade, and a backup there would be a backup that disappears exactly when
+  # it is needed. Same least-privilege ACL as the licence folder itself: the
+  # service account writes the copies, administrators can recover a machine,
+  # ordinary users cannot rewrite either.
+  $licenceBackupDirectory = Join-Path $ProgramDataRoot 'LicenceBackups'
+  New-Item -ItemType Directory -Force -Path $licenceBackupDirectory | Out-Null
+  Set-PrivateAcl $licenceBackupDirectory @('BUILTIN\Administrators', $serviceAccount)
+  $Values['KAYAN_LICENCE_BACKUP_DIR'] = $licenceBackupDirectory
+
   $candidates = @(
     (Join-Path $PSScriptRoot 'public-key.pem'),
     (Join-Path $PSScriptRoot 'licensing\public-key.pem')

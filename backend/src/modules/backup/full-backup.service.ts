@@ -367,12 +367,26 @@ export class FullBackupService {
 
     const file = await this.validateAndDescribe(path, name, kind);
 
+    // The licence travels with the backup: a timestamped, verified copy is
+    // written beside the dump and recorded in the audit. It is deliberately
+    // not *inside* the dump - the licence's anti-rollback watermarks must not
+    // be rewound by restoring an older database - and a licence that does not
+    // authenticate is never copied at all.
+    const licenceBackup = this.licensing.captureLicenceBackup(
+      kind === 'full' ? 'full-backup' : 'safety-backup',
+    );
+
     if (userId) {
       await this.audit.record({
         action: 'BACKUP',
         entity: 'backup_full',
         entityId: name,
-        after: { name, sizeBytes: file.sizeBytes, kind },
+        after: {
+          name,
+          sizeBytes: file.sizeBytes,
+          kind,
+          licenceBackup: licenceBackup?.id ?? null,
+        },
         userId,
       });
     }
@@ -603,6 +617,11 @@ export class FullBackupService {
       );
     }
     this.assertCustomDump(buffer, label);
+
+    // Before anything is replaced, keep a verified copy of the licence as it
+    // stands. If the restore turns out to be the wrong file, the licence it
+    // replaced is still recoverable from a timestamped snapshot.
+    this.licensing.captureLicenceBackup('pre-restore');
 
     // Only now are the tools needed — a bad request is a bad request even on
     // a machine without PostgreSQL tools.

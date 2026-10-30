@@ -10,11 +10,13 @@ import { join, resolve } from 'path';
 
 import { FullBackupService } from './full-backup.service';
 
-// Licensing is asked to re-assert its watermarks after a restore; that
-// behaviour lives in licensing.service.spec.ts.
+// Licensing is asked to re-assert its watermarks after a restore and to keep a
+// verified copy of the licence beside each backup; that behaviour lives in
+// licensing.service.spec.ts and licence-backup-archive.spec.ts.
 const licensingStub = {
   reconcile: jest.fn().mockResolvedValue(undefined),
   reserveSeat: jest.fn(),
+  captureLicenceBackup: jest.fn().mockReturnValue({ id: 'licence-test-copy' }),
 } as any;
 
 jest.mock('child_process', () => ({
