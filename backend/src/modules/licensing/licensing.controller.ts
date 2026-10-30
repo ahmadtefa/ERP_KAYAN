@@ -27,14 +27,14 @@ export class LicensingController {
 
   @Public()
   @Get()
-  status() {
-    return this.licensing.status();
+  async status() {
+    return this.safeStatus(() => this.licensing.status());
   }
 
   @Public()
   @Get('status')
-  statusAlias() {
-    return this.licensing.status();
+  async statusAlias() {
+    return this.safeStatus(() => this.licensing.status());
   }
 
   @Get('request-code')
@@ -92,6 +92,52 @@ export class LicensingController {
   async confirmClock(@CurrentUser() user: AuthUser, @Req() request: Request) {
     this.superAdmin(user);
     return this.licensing.confirmClock(this.actor(user, request));
+  }
+
+  /**
+   * A damaged protected state file must never turn the whole desktop into a
+   * startup/HTTP 503 loop. Return a deliberately blocked status so the client
+   * can open the licence/backup recovery screens. No entitlement is restored,
+   * no key is accepted and no business operation is unblocked by this path.
+   */
+  private async safeStatus(load: () => Promise<unknown>) {
+    try {
+      return await load();
+    } catch (error) {
+      const response = (error as { response?: unknown }).response;
+      if (
+        response &&
+        typeof response === 'object' &&
+        'code' in response &&
+        response.code === 'LICENSE_STATE_DAMAGED'
+      ) {
+        return {
+          state: 'UNLICENSED',
+          blocked: true,
+          enforcement: 'enforce',
+          configured: false,
+          licenseId: null,
+          machineId: '',
+          installId: 'unavailable',
+          issuedAt: null,
+          startsAt: null,
+          expiresAt: null,
+          perpetual: false,
+          daysRemaining: null,
+          expiringSoon: false,
+          seats: { limit: 0, used: 0, available: null },
+          clock: {
+            state: 'WARNING',
+            lastSeenAt: null,
+            note: 'The protected licence state is damaged. Business operations remain blocked until the original trusted state is restored.',
+          },
+          publicKeyFingerprint: null,
+          requestCode: '',
+          serverTime: new Date().toISOString(),
+        };
+      }
+      throw error;
+    }
   }
 
   private superAdmin(user: AuthUser): void {
