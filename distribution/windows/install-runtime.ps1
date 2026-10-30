@@ -211,13 +211,41 @@ if (Test-Path $vcRuntime) {
   if ($vc.ExitCode -notin @(0,1638,3010)) { throw "Microsoft Visual C++ runtime installation failed ($($vc.ExitCode))." }
 }
 
-Set-Stage 'checking the bundled PostgreSQL runtime'
-foreach ($required in @('initdb.exe','pg_ctl.exe','pg_isready.exe','psql.exe')) {
-  if (-not (Test-Path (Join-Path $pgBin $required))) {
+Set-Stage 'checking the bundled PostgreSQL and Node runtimes'
+foreach ($required in @('initdb.exe','pg_ctl.exe','pg_isready.exe','psql.exe','postgres.exe')) {
+  if (-not (Test-Path -LiteralPath (Join-Path $pgBin $required) -PathType Leaf)) {
     throw "The bundled PostgreSQL runtime is incomplete: $required is missing."
   }
 }
-if (-not (Test-Path (Join-Path $PSScriptRoot 'backend\node\node.exe'))) { throw 'Bundled Node runtime is missing.' }
+$nodeExe = Join-Path $PSScriptRoot 'backend\node\node.exe'
+if (-not (Test-Path -LiteralPath $nodeExe -PathType Leaf)) { throw "Bundled Node runtime is missing: $nodeExe" }
+
+# A file can exist and still be unusable on a clean Windows machine when a
+# native dependency (most commonly the VC++ runtime) cannot be loaded. Probe
+# the real executables now, before creating/changing the database service.
+function Invoke-RuntimeVersionProbe([string]$Exe, [string[]]$Arguments, [string]$Label) {
+  $previousEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $probeOutput = @(& $Exe @Arguments 2>&1)
+    $probeExit = $LASTEXITCODE
+  } catch {
+    throw "$Label could not be started: $($_.Exception.Message)"
+  } finally {
+    $ErrorActionPreference = $previousEap
+  }
+  $details = (($probeOutput | ForEach-Object { "$_" }) -join ' ').Trim()
+  if ($probeExit -ne 0) {
+    if ($details.Length -gt 500) { $details = $details.Substring(0,500) }
+    throw "$Label failed its runtime check (exit $probeExit): $details. Verify the bundled Microsoft Visual C++ runtime and reinstall Setup if the executable is damaged."
+  }
+  return $details
+}
+$nodeVersion = Invoke-RuntimeVersionProbe $nodeExe @('--version') 'Bundled Node.js'
+if ($nodeVersion -notmatch '^v\d+\.') { throw "Bundled Node.js returned an invalid version: $nodeVersion" }
+[void](Invoke-RuntimeVersionProbe (Join-Path $pgBin 'pg_isready.exe') @('--version') 'Bundled PostgreSQL readiness tool')
+[void](Invoke-RuntimeVersionProbe (Join-Path $pgBin 'pg_ctl.exe') @('--version') 'Bundled PostgreSQL service tool')
+[void](Invoke-RuntimeVersionProbe (Join-Path $pgBin 'initdb.exe') @('--version') 'Bundled PostgreSQL initializer')
 
 Set-Stage 'preparing the PostgreSQL bootstrap helper'
 try {
