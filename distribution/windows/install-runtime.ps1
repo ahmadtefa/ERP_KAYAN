@@ -224,20 +224,29 @@ if (-not (Test-Path -LiteralPath $nodeExe -PathType Leaf)) { throw "Bundled Node
 # native dependency (most commonly the VC++ runtime) cannot be loaded. Probe
 # the real executables now, before creating/changing the database service.
 function Invoke-RuntimeVersionProbe([string]$Exe, [string[]]$Arguments, [string]$Label) {
+  # A damaged executable fails to start at all. Under 'Continue' that error is
+  # written and $LASTEXITCODE keeps the *previous* command's value - usually 0 -
+  # so the probe used to hand back a broken runtime as if it were healthy, and
+  # the install went on to start a database and a server with it. Stop on the
+  # error and treat "no version output" as a failure too.
   $previousEap = $ErrorActionPreference
-  $ErrorActionPreference = 'Continue'
+  $ErrorActionPreference = 'Stop'
+  $probeExit = -1
   try {
     $probeOutput = @(& $Exe @Arguments 2>&1)
     $probeExit = $LASTEXITCODE
   } catch {
-    throw "$Label could not be started: $($_.Exception.Message)"
+    throw "$Label cannot run: $($_.Exception.Message). Verify the bundled Microsoft Visual C++ runtime and reinstall Setup if the executable is damaged."
   } finally {
     $ErrorActionPreference = $previousEap
   }
   $details = (($probeOutput | ForEach-Object { "$_" }) -join ' ').Trim()
+  if ($details.Length -gt 500) { $details = $details.Substring(0,500) }
   if ($probeExit -ne 0) {
-    if ($details.Length -gt 500) { $details = $details.Substring(0,500) }
     throw "$Label failed its runtime check (exit $probeExit): $details. Verify the bundled Microsoft Visual C++ runtime and reinstall Setup if the executable is damaged."
+  }
+  if ([string]::IsNullOrWhiteSpace($details)) {
+    throw "$Label produced no version output (exit 0). The executable is damaged or a required runtime is missing; reinstall Setup."
   }
   return $details
 }

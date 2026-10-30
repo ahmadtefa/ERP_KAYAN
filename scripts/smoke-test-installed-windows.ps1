@@ -52,10 +52,39 @@ $machineClientLog = Join-Path $env:ProgramData 'KAYAN-ERP\logs\backend.log'
 function Write-SmokePhase([string]$Text) {
   $line = "{0} {1}" -f ((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ssZ')), $Text
   Write-Host $line
+  # Also a check annotation: when a step is cut off by its time limit there is
+  # no step summary, and the annotations are the only surviving record of how
+  # far the run had got.
+  Write-Output ("::notice title=Smoke phase::" + $Text)
   try {
     $parent = Split-Path -Parent $smokeLog
     if (Test-Path -LiteralPath $parent) { Add-Content -LiteralPath $smokeLog -Value $line -Encoding UTF8 }
   } catch { }
+}
+
+function Invoke-KayanBoundedProcess {
+  # Runs a program the smoke test must be able to give up on. A repair that
+  # never returns is not a success, and a 60-minute job timeout hides which
+  # call hung: this names it instead.
+  param(
+    [Parameter(Mandatory = $true)][string]$FilePath,
+    [string[]]$ArgumentList = @(),
+    [Parameter(Mandatory = $true)][int]$TimeoutSeconds,
+    [Parameter(Mandatory = $true)][string]$What,
+    [string]$StandardOutput = '',
+    [string]$StandardError = ''
+  )
+  $startArgs = @{ FilePath = $FilePath; WorkingDirectory = $installRoot; PassThru = $true }
+  if ($ArgumentList.Count -gt 0) { $startArgs['ArgumentList'] = $ArgumentList }
+  if ($StandardOutput) { $startArgs['RedirectStandardOutput'] = $StandardOutput }
+  if ($StandardError) { $startArgs['RedirectStandardError'] = $StandardError }
+  $process = Start-Process @startArgs
+  if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+    try { $process.Kill() } catch { }
+    Fail ("$What did not finish within $TimeoutSeconds seconds and was stopped. An operation that cannot report its result in time is not a success.")
+  }
+  $process.WaitForExit()
+  return $process.ExitCode
 }
 
 function Get-InstalledLogTail([string]$Path, [int]$Lines) {
@@ -706,6 +735,7 @@ Write-Host "PASS: bundled RepairTool.exe recovered the 0-ACE kayan.env and stopp
 # node.exe and PostgreSQL tools directly, with the installed paths, so a missing
 # VC++ runtime or a damaged binary fails here instead of inside a customer's
 # first database backup.
+Write-SmokePhase 'Smoke: executing the bundled Node.js and PostgreSQL runtimes.'
 $installedManifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
 $bundledNodeVersion = (@(& $node --version 2>&1) -join ' ').Trim()
 if ($LASTEXITCODE -ne 0 -or $bundledNodeVersion -notmatch '^v\d+\.') {
@@ -744,9 +774,9 @@ try {
   Write-SmokePhase 'Smoke: damaging the bundled node.exe to prove the repair tool reports it.'
   [IO.File]::WriteAllText($node, 'not a node runtime', [Text.Encoding]::ASCII)
   $damagedNodeLog = Join-Path $env:TEMP 'kayan-repairtool-damaged-node.log'
-  $damagedNode = Start-Process -FilePath $repairTool -ArgumentList @('--diagnose') -WorkingDirectory $installRoot -Wait -PassThru -RedirectStandardOutput $damagedNodeLog -RedirectStandardError "$damagedNodeLog.err"
+  $damagedNodeExit = Invoke-KayanBoundedProcess -FilePath $repairTool -ArgumentList @('--diagnose') -TimeoutSeconds 240 -What 'RepairTool --diagnose with a damaged bundled Node.js runtime' -StandardOutput $damagedNodeLog -StandardError "$damagedNodeLog.err"
   $damagedNodeText = (@(Get-Content -LiteralPath $damagedNodeLog -ErrorAction SilentlyContinue) + @(Get-Content -LiteralPath "$damagedNodeLog.err" -ErrorAction SilentlyContinue)) -join "`n"
-  if ($damagedNode.ExitCode -eq 0) {
+  if ($damagedNodeExit -eq 0) {
     Fail ("RepairTool.exe --diagnose reported a healthy installation while the bundled node.exe was damaged. Output: " + $damagedNodeText)
   }
   if ($damagedNodeText -notmatch '(?i)node') {
@@ -755,15 +785,15 @@ try {
   Write-Host 'PASS: RepairTool.exe --diagnose refused a damaged bundled Node.js runtime and named it.'
 
   $badRepairLog = Join-Path $env:ProgramData 'KAYAN-ERP\logs\repairtool.log'
-  $badRepair = Start-Process -FilePath $repairTool -ArgumentList @('--repair', '--quiet') -WorkingDirectory $installRoot -Wait -PassThru
-  if ($badRepair.ExitCode -eq 0) {
+  $badRepairExit = Invoke-KayanBoundedProcess -FilePath $repairTool -ArgumentList @('--repair', '--quiet') -TimeoutSeconds 420 -What 'RepairTool --repair with a damaged bundled Node.js runtime'
+  if ($badRepairExit -eq 0) {
     Fail 'RepairTool.exe --repair reported success while the bundled Node.js runtime was damaged.'
   }
   $badRepairText = Get-Content -LiteralPath $badRepairLog -Raw -ErrorAction SilentlyContinue
   if ($badRepairText -notmatch '(?i)node') {
     Fail ("The failed repair did not record a Node.js diagnosis: " + $badRepairText)
   }
-  Write-Host ("PASS: a repair over a damaged bundled Node.js runtime failed loudly (exit " + $badRepair.ExitCode + ") instead of claiming success.")
+  Write-Host ("PASS: a repair over a damaged bundled Node.js runtime failed loudly (exit " + $badRepairExit + ") instead of claiming success.")
 
   # Nothing may have been destroyed by that refusal.
   $stateAfterNodeDamage = if (Test-Path -LiteralPath $stateFile) { (Get-FileHash -LiteralPath $stateFile -Algorithm SHA256).Hash } else { '<absent>' }
@@ -800,9 +830,9 @@ try {
   Write-SmokePhase 'Smoke: damaging the bundled initdb.exe to prove the repair tool reports it.'
   [IO.File]::WriteAllText($initdbPath, 'not a postgres tool', [Text.Encoding]::ASCII)
   $damagedPgLog = Join-Path $env:TEMP 'kayan-repairtool-damaged-pg.log'
-  $damagedPg = Start-Process -FilePath $repairTool -ArgumentList @('--diagnose') -WorkingDirectory $installRoot -Wait -PassThru -RedirectStandardOutput $damagedPgLog -RedirectStandardError "$damagedPgLog.err"
+  $damagedPgExit = Invoke-KayanBoundedProcess -FilePath $repairTool -ArgumentList @('--diagnose') -TimeoutSeconds 240 -What 'RepairTool --diagnose with a damaged bundled PostgreSQL executable' -StandardOutput $damagedPgLog -StandardError "$damagedPgLog.err"
   $damagedPgText = (@(Get-Content -LiteralPath $damagedPgLog -ErrorAction SilentlyContinue) + @(Get-Content -LiteralPath "$damagedPgLog.err" -ErrorAction SilentlyContinue)) -join "`n"
-  if ($damagedPg.ExitCode -eq 0) {
+  if ($damagedPgExit -eq 0) {
     Fail ("RepairTool.exe --diagnose reported a healthy installation while the bundled initdb.exe was damaged. Output: " + $damagedPgText)
   }
   if ($damagedPgText -notmatch '(?i)postgres') {
@@ -820,13 +850,13 @@ if ($LASTEXITCODE -ne 0) { Fail ("The restored bundled initdb.exe does not execu
 
 # ── With both runtimes restored, the repair must succeed again ───────────────
 Write-SmokePhase 'Smoke: repairing with both bundled runtimes restored.'
-$finalRepair = Start-Process -FilePath $repairTool -ArgumentList @('--repair', '--quiet') -WorkingDirectory $installRoot -Wait -PassThru
-if ($finalRepair.ExitCode -ne 0) {
-  Fail ("RepairTool.exe --repair failed after the bundled runtimes were restored (exit " + $finalRepair.ExitCode + ").")
+$finalRepairExit = Invoke-KayanBoundedProcess -FilePath $repairTool -ArgumentList @('--repair', '--quiet') -TimeoutSeconds 600 -What 'RepairTool --repair with both bundled runtimes restored'
+if ($finalRepairExit -ne 0) {
+  Fail ("RepairTool.exe --repair failed after the bundled runtimes were restored (exit " + $finalRepairExit + ").")
 }
-$finalDiagnose = Start-Process -FilePath $repairTool -ArgumentList @('--diagnose') -WorkingDirectory $installRoot -Wait -PassThru
-if ($finalDiagnose.ExitCode -ne 0) {
-  Fail ("RepairTool.exe --diagnose still reports problems after the runtimes were restored (exit " + $finalDiagnose.ExitCode + ").")
+$finalDiagnoseExit = Invoke-KayanBoundedProcess -FilePath $repairTool -ArgumentList @('--diagnose') -TimeoutSeconds 240 -What 'RepairTool --diagnose after the runtimes were restored'
+if ($finalDiagnoseExit -ne 0) {
+  Fail ("RepairTool.exe --diagnose still reports problems after the runtimes were restored (exit " + $finalDiagnoseExit + ").")
 }
 $finalService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if (-not $finalService -or $finalService.Status -ne 'Running') {
