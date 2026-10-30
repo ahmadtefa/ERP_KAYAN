@@ -225,7 +225,7 @@ namespace Kayan
             string databaseHost = ConfiguredDatabaseHost(values);
 
             string node = Path.Combine(Path.Combine(Path.Combine(root, "backend"), "node"), "node.exe");
-            checks.Add(new RepairCheck("Bundled Node.js runtime", File.Exists(node), node));
+            checks.Add(RuntimeCheck("Bundled Node.js runtime", node, "--version"));
 
             string backendDist = Path.Combine(Path.Combine(Path.Combine(root, "backend"), "dist"), "src");
             string mainJs = Path.Combine(backendDist, "main.js");
@@ -238,8 +238,19 @@ namespace Kayan
             checks.Add(new RepairCheck("Database preparation script", File.Exists(prepareScript), prepareScript));
             string seedScript = Path.Combine(Path.Combine(Path.Combine(Path.Combine(root, "backend"), "dist"), "prisma"), "seed.js");
             checks.Add(new RepairCheck("First-run setup program", File.Exists(seedScript), seedScript));
-            string pgIsReady = Path.Combine(Path.Combine(Path.Combine(Path.Combine(root, "backend"), "postgres"), "bin"), "pg_isready.exe");
-            checks.Add(new RepairCheck("Bundled PostgreSQL tools", File.Exists(pgIsReady), pgIsReady));
+            string pgBin = Path.Combine(Path.Combine(Path.Combine(root, "backend"), "postgres"), "bin");
+            string pgIsReady = Path.Combine(pgBin, "pg_isready.exe");
+            string[] pgRequired = new string[] { "initdb.exe", "pg_ctl.exe", "pg_isready.exe", "psql.exe", "postgres.exe" };
+            bool pgFilesPresent = true;
+            for (int i = 0; i < pgRequired.Length; i++)
+            {
+                if (!File.Exists(Path.Combine(pgBin, pgRequired[i]))) { pgFilesPresent = false; }
+            }
+            RepairCheck pgExecutable = RuntimeCheck("Bundled PostgreSQL executable", pgIsReady, "--version");
+            checks.Add(new RepairCheck(
+                "Bundled PostgreSQL tools",
+                pgFilesPresent && pgExecutable.Ok,
+                pgFilesPresent ? pgExecutable.Detail : "one or more required PostgreSQL executables are missing from " + pgBin));
 
             string dataDirectory = Path.Combine(Path.Combine(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "KAYAN-ERP"), "PostgreSQL"), "data");
             checks.Add(new RepairCheck(
@@ -372,6 +383,43 @@ namespace Kayan
             }
         }
 
+        // File presence is not proof that a native runtime can load on a clean
+        // Windows machine. Execute its harmless version command so missing
+        // VC++ DLLs, damaged binaries and architecture mismatches are visible.
+        private static RepairCheck RuntimeCheck(string name, string executable, string arguments)
+        {
+            if (!File.Exists(executable))
+            {
+                return new RepairCheck(name, false, "missing: " + executable);
+            }
+            try
+            {
+                ProcessStartInfo info = new ProcessStartInfo(executable, arguments);
+                info.UseShellExecute = false;
+                info.CreateNoWindow = true;
+                info.RedirectStandardOutput = true;
+                info.RedirectStandardError = true;
+                using (Process process = Process.Start(info))
+                {
+                    if (!process.WaitForExit(15000))
+                    {
+                        try { process.Kill(); } catch { }
+                        return new RepairCheck(name, false, "version check timed out: " + executable);
+                    }
+                    string output = (process.StandardOutput.ReadToEnd() + " " + process.StandardError.ReadToEnd()).Trim();
+                    if (process.ExitCode != 0)
+                    {
+                        return new RepairCheck(name, false, "cannot execute (exit " + process.ExitCode + "): " + RepairRunner.Redact(output));
+                    }
+                    return new RepairCheck(name, true, output.Length == 0 ? executable : output);
+                }
+            }
+            catch (Exception ex)
+            {
+                return new RepairCheck(name, false, "cannot load or start: " + RepairRunner.Redact(ex.Message));
+            }
+        }
+
         private static RepairCheck DatabaseCheck(string host, int port)
         {
             bool reachable = CanConnect(host, port, 4000);
@@ -486,6 +534,10 @@ namespace Kayan
                         diagnosis = "the last server process exited early - see the [err] lines just above it in the log";
                     }
                 }
+                // The application log is historical evidence, not a live
+                // health probe. A stale failure can remain after Repair has
+                // restored the service, so keep this check informational.
+                // Live Node/PostgreSQL/service/API checks determine health.
                 return new RepairCheck(
                     CheckLog,
                     true,
@@ -523,9 +575,14 @@ namespace Kayan
             {
                 return "Diagnosis: database not accepting connections on the configured port, although the service claims to run. Repair re-registers the service; if it persists, check for another PostgreSQL using that port.";
             }
+            RepairCheck log = Find(checks, CheckLog);
+            if (log != null && !log.Ok)
+            {
+                return "Diagnosis: from the last server log - " + log.Detail + ".";
+            }
             for (int i = 0; i < checks.Count; i++)
             {
-                if (!checks[i].Ok)
+                if (!checks[i].Ok && checks[i].Name != CheckLog)
                 {
                     return "Diagnosis: the installation itself is incomplete (" + checks[i].Name + "). Reinstall KAYAN ERP over the top; settings and company data are kept.";
                 }
@@ -535,7 +592,6 @@ namespace Kayan
             {
                 return "Diagnosis: everything is installed and running; first-run setup has not been completed. Open KAYAN ERP and create the company and the first administrator.";
             }
-            RepairCheck log = Find(checks, CheckLog);
             if (log != null && log.Detail.IndexOf("first-run setup", StringComparison.Ordinal) >= 0)
             {
                 return "Diagnosis: the installation is healthy; the last run was waiting at first-run setup. Open KAYAN ERP and create the company and the first administrator.";
