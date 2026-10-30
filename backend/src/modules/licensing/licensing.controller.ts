@@ -16,10 +16,10 @@ import { LicensingService } from './licensing.service';
 /**
  * The licence screen's whole conversation with the server.
  *
- * Reading the state and the activation code is open to any signed-in user, so
- * the person at the machine can read the code out over the phone. Changing
- * anything needs a super administrator: a licence is an installation-level
- * fact, not a company setting an accountant may edit.
+ * Reading the licence status itself is safe before sign-in because the desktop
+ * shell must be able to decide whether to show setup/licensing UI before an
+ * authenticated session exists. Activation, renewal and administrative event
+ * history remain authenticated and super-admin-only.
  */
 @Controller('license')
 export class LicensingController {
@@ -37,7 +37,6 @@ export class LicensingController {
     return this.licensing.status();
   }
 
-  @Public()
   @Get('request-code')
   requestCode() {
     return this.licensing.requestCode();
