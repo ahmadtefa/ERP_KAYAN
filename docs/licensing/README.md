@@ -18,6 +18,7 @@ the licence is derived from the company's name, tax number or books.
 | [`MACHINE-ID.md`](MACHINE-ID.md) | كيف يُحسب معرّف الجهاز ومتى يتغير |
 | [`CLOCK-POLICY.md`](CLOCK-POLICY.md) | سياسة تاريخ الجهاز وحدودها |
 | [`LICENSEE-GUIDE.md`](LICENSEE-GUIDE.md) | ما يقوله العميل ويفعله |
+| [`LICENCE-BACKUPS.md`](LICENCE-BACKUPS.md) | نسخ الترخيص المؤرّخة والمتحقَّق منها، والاستعادة التلقائية عند تلف الملفات |
 | [`VERIFICATION.md`](VERIFICATION.md) | ما شُغّل فعلًا وما لم يُشغَّل |
 
 ## ما لا يعتمد عليه الترخيص / What the licence is not bound to
