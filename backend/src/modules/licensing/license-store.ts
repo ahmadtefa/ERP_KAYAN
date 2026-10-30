@@ -137,9 +137,8 @@ export class LicenseStore {
 
   /** Re-reads the file, for the restore path and for tests. */
   reload(): LicenseTrustState {
-    if (!existsSync(this.path)) {
-      throw new LicenseStateError('The licence state file is missing.', 'UNREADABLE');
-    }
+    // Use the same authenticated primary/mirror selection as startup. In
+    // particular, a missing primary is recoverable when the mirror verifies.
     this.state = this.load();
     return this.state;
   }
