@@ -40,7 +40,8 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 
 import { LicenseStore } from '../dist/src/modules/licensing/license-store.js';
-import { signPayload } from '../dist/src/modules/licensing/license-key.js';
+import { loadPublicKey, signPayload } from '../dist/src/modules/licensing/license-key.js';
+import { verifyRecordedLicenseProof } from '../dist/src/modules/licensing/license-proof.js';
 import { LicensingService } from '../dist/src/modules/licensing/licensing.service.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -449,7 +450,13 @@ async function activationAndSeats() {
       assertEqual(status.expiresAt, expected, 'expiry is one calendar year later');
       const row = await licenceRowIn(DATABASES.runtime);
       assertEqual(row.machineId, MACHINE, 'stored machine id');
-      return `expires ${status.expiresAt}`;
+      const proofRow = await instance.prisma.licenseKeyRecord.findFirst({ where: { licenseId } });
+      assert(proofRow && proofRow.signedKey === activationKey, 'original signed key was not saved in the transaction');
+      const verified = verifyRecordedLicenseProof(proofRow, loadPublicKey(PUBLIC_PEM));
+      assertEqual(verified.payload.machineId, MACHINE, 'signed proof machine');
+      assertEqual(verified.payload.licenseId, licenseId, 'signed proof licence id');
+      return `expires ${status.expiresAt}; original vendor signature verified from database`;
+
     });
 
     await check('R2 a key issued for another machine is refused', async () => {

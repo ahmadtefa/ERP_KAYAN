@@ -2351,6 +2351,9 @@ model LicenseKeyRecord {
   licenseId   String
   type        String
   payloadJson String   @db.Text
+  /// Original verified signed key. Null on legacy rows that predate this field;
+  /// payloadJson alone is not cryptographic proof and cannot recover a licence.
+  signedKey   String?  @db.Text
   machineId   String?
   appliedAt   DateTime @default(now())
   appliedBy   String?  @db.Uuid

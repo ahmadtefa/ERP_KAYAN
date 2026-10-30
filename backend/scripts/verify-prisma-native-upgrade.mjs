@@ -48,11 +48,25 @@ try {
   await client.query('INSERT INTO items (id,"companyId",code,"nameEn","nameAr","salePrice","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,now())',[item,company,'synthetic-item','Synthetic Item','Synthetic Item','42.5']);
   await client.query('INSERT INTO quotation_column_templates (id,"companyId",name,columns,"updatedAt") VALUES ($1,$2,$3,$4::jsonb,now())',[template,company,'Synthetic Template',JSON.stringify([{id:'synthetic-column'}])]);
   await client.end();
+  // Add every pre-proof migration, then seed a legacy licensing row. The new
+  // field must remain null: unsigned historical payloads are not proof.
+  const proofMigration = '20261030160000_preserve_verified_licence_proof';
+  if (!entries.includes(proofMigration)) throw new Error('Missing signed-proof migration');
+  for (const entry of entries.filter(x => !old.includes(x) && x < proofMigration)) {
+    cpSync(join(root, 'prisma', 'migrations', entry), join(oldPrisma, 'migrations', entry), { recursive: true });
+  }
+  migrate(join(oldPrisma, 'schema.prisma'));
+  const legacy = new pg.Client({ connectionString: url.toString() }); await legacy.connect();
+  await legacy.query('INSERT INTO license_keys (id,"keyId","licenseId",type,"payloadJson") VALUES ($1,$2,$3,$4,$5)',
+    ['50000000-0000-4000-8000-000000000001', 'legacy-upgrade-key', 'legacy-upgrade-license', 'ACTIVATION', '{"legacy":true}']);
+  await legacy.end();
   migrate(join(root, 'prisma', 'schema.prisma'));
   const verify = new pg.Client({ connectionString: url.toString() }); await verify.connect();
   const result = await verify.query('SELECT c.code,u.username,i.code AS item_code,i."salePrice"::text AS price,t.name,t.columns,t.design FROM companies c JOIN users u ON u."companyId"=c.id JOIN items i ON i."companyId"=c.id JOIN quotation_column_templates t ON t."companyId"=c.id WHERE c.id=$1',[company]);
   const history = await verify.query('SELECT count(*)::int AS n FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL');
+  const legacyProof = await verify.query('SELECT "payloadJson", "signedKey" FROM license_keys WHERE "keyId"=$1', ['legacy-upgrade-key']);
   await verify.end();
+  if (legacyProof.rowCount !== 1 || legacyProof.rows[0].payloadJson !== '{"legacy":true}' || legacyProof.rows[0].signedKey !== null) throw new Error('Legacy licence row changed or acquired fabricated signature proof');
   const row = result.rows[0];
   if (result.rowCount !== 1 || row.code !== 'synthetic-upgrade' || row.username !== 'synthetic-user' || row.item_code !== 'synthetic-item' || Number(row.price) !== 42.5 || row.columns[0].id !== 'synthetic-column' || history.rows[0].n !== entries.length) throw new Error('Synthetic data or migration history did not survive');
   console.log(`PASS: native Prisma populated upgrade: ${old.length} old migrations, ${entries.length-old.length} new migrations; synthetic company/user/item/template preserved; ${history.rows[0].n} recorded migrations.`);

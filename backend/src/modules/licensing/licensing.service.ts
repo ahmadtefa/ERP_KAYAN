@@ -752,6 +752,9 @@ export class LicensingService implements OnModuleInit {
           licenseId: payload.licenseId,
           type: payload.type,
           payloadJson: parsed.payloadJson,
+          // Persist only the key that has just passed signature verification.
+          // Legacy rows lack this evidence; no recovery is inferred from them.
+          signedKey: `${parsed.signedText}.${parsed.signature}`,
           machineId: payload.machineId,
           appliedBy: actor.userId ?? null,
           ipAddress: actor.ipAddress ?? null,

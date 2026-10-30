@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from 'node:crypto';
 
-import { signPayload } from './license-key';
+import { loadPublicKey, signPayload, verifyKey } from './license-key';
 import {
   LICENSE,
   MACHINE,
@@ -83,6 +83,21 @@ describe('activation', () => {
       expect(status.perpetual).toBe(false);
       expect(h.db.keys).toHaveLength(1);
       expect(h.store.current.appliedKeys).toEqual(['key_activation-1']);
+    } finally {
+      h.dispose();
+    }
+  });
+
+  it('retains the original verified signature in the key transaction', async () => {
+    const h = harness();
+    try {
+      const signed = h.key({});
+      await h.service.activate(signed);
+      const record = h.db.keys[0];
+      expect(record.signedKey).toBe(signed);
+      const proof = verifyKey(record.signedKey, loadPublicKey(PUBLIC_PEM));
+      expect(proof.payload.keyId).toBe(record.keyId);
+      expect(proof.payloadJson).toBe(record.payloadJson);
     } finally {
       h.dispose();
     }
