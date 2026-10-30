@@ -274,6 +274,9 @@ export class LicensingService implements OnModuleInit {
     }
     try {
       this.store = this.trustStore ?? new LicenseStore(this.directory);
+      // A previous bootstrap attempt may have failed before a verified mirror
+      // was restored. Clear that diagnostic only after the store opens cleanly.
+      this.installedStateError = null;
       if (this.store.recoveredFromBackup) {
         this.logger.warn(
           'KAYAN-LICENCE-STATE-RECOVERED: restored the primary protected state from its authenticated mirror; the damaged copy was preserved.',
