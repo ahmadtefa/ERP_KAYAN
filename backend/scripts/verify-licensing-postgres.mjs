@@ -1093,13 +1093,18 @@ async function clockAndRestore() {
 
     await check('B4 a corrupted state fails closed until trusted recovery', async () => {
       const path = join(instance.directory, 'license-state.json');
-      // This is a synthetic state from this same test installation. Keep the
-      // exact trusted bytes in memory; never create a blank replacement store.
+      const backupPath = join(instance.directory, 'license-state.backup.json');
+      // Damage BOTH trust copies. If the authenticated mirror remains intact,
+      // recovering from it is the correct behaviour, not a fail-closed case.
+      // Keep exact trusted bytes in memory for the explicit recovery below.
       const trusted = readFileSync(path);
+      const trustedBackup = readFileSync(backupPath);
       const body = JSON.parse(trusted.toString('utf8'));
       body.state.maxSeatsUsed = 0;
       const damaged = JSON.stringify(body);
+      const damagedBackup = 'broken-authenticated-mirror';
       writeFileSync(path, damaged);
+      writeFileSync(backupPath, damagedBackup);
       const restarted = await installation({
         database: DATABASES.runtime + '_clock',
         directory: instance.directory,
@@ -1114,6 +1119,7 @@ async function clockAndRestore() {
         // isolated test directory, never an operator or customer state folder.
         writeFileSync(`${path}.damaged`, damaged, { flag: 'wx' });
         writeFileSync(path, trusted);
+        writeFileSync(backupPath, trustedBackup);
         const status = await restarted.service.status({ fresh: true });
         assertEqual(status.state, 'ACTIVE', 'trusted state restores the licence');
         assertEqual(status.machineId, MACHINE, 'the restored licence belongs to this machine');
