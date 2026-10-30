@@ -42,16 +42,19 @@ void main() {
       Object? configured = false,
       String? stateError,
       String databaseName = 'erp_kayan',
-    }) => <String, dynamic>{
-      'status': 'ok',
-      'database': 'up',
-      'databaseName': databaseName,
-      'license': {
+    }) {
+      final licence = <String, dynamic>{
         'enforcement': enforcement,
         'configured': configured,
-        if (stateError != null) 'stateError': stateError,
-      },
-    };
+      };
+      if (stateError != null) licence['stateError'] = stateError;
+      return <String, dynamic>{
+        'status': 'ok',
+        'database': 'up',
+        'databaseName': databaseName,
+        'license': licence,
+      };
+    }
 
     test('is opened, not refused, when the server enforces without a key', () {
       // The program used to stop here. It must not: the server refuses every
