@@ -635,8 +635,12 @@ try {
       if (-not $healthAfterCorruption.status) { Fail 'Local health did not recover after the license state file was corrupted.' }
       $damagedResponse = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/license/status" -TimeoutSec 15
       $damagedBody = $damagedResponse.Content | ConvertFrom-Json
-      if ([int]$damagedResponse.StatusCode -ne 503 -or $damagedBody.code -ne 'LICENSE_STATE_DAMAGED') {
-        Fail ("Corrupt license state did not fail closed with LICENSE_STATE_DAMAGED (HTTP $([int]$damagedResponse.StatusCode)): " + $damagedResponse.Content)
+      if ([int]$damagedResponse.StatusCode -ne 200 -or
+          $damagedBody.state -ne 'UNLICENSED' -or
+          $damagedBody.blocked -ne $true -or
+          $damagedBody.enforcement -ne 'enforce' -or
+          $damagedBody.stateError -ne 'LICENSE_STATE_DAMAGED') {
+        Fail ("Corrupt license state did not return a diagnostic, fail-closed status (HTTP $([int]$damagedResponse.StatusCode)): " + $damagedResponse.Content)
       }
       if ([IO.File]::ReadAllText($statePath) -ne 'not-json') { Fail 'The application silently overwrote the corrupted license state instead of preserving it for diagnosis.' }
       # Use the already authenticated synthetic administrator on a real
