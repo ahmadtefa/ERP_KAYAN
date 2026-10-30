@@ -447,6 +447,61 @@ describe('replay', () => {
   });
 });
 
+describe('key transaction interruption safety', () => {
+  it('rolls back the database when recording the spent key fails', async () => {
+    const h = harness();
+    try {
+      await activation(h);
+      jest.spyOn(h.store, 'update').mockImplementationOnce(() => {
+        throw new Error('simulated protected state write failure');
+      });
+      await expect(seatsKey(h, { keyId: 'key_write_failure' })).rejects.toThrow();
+      expect(h.db.installations[0].seatLimit).toBe(5);
+      expect(h.db.keys.map((row) => row.keyId)).toEqual(['key_activation-1']);
+      expect(h.store.current.appliedKeys).not.toContain('key_write_failure');
+    } finally { h.dispose(); }
+  });
+
+  it('fails closed when a transaction aborts after reserving the spent key', async () => {
+    const h = harness();
+    try {
+      await activation(h);
+      const tx = h.db.$transaction;
+      h.db.$transaction = async (fn) => tx(async (db) => {
+        await fn(db);
+        throw new Error('simulated transaction commit failure');
+      });
+      await expect(seatsKey(h, { keyId: 'key_commit_failure' })).rejects.toThrow();
+      expect(h.db.installations[0].seatLimit).toBe(5);
+      expect(h.db.keys.map((row) => row.keyId)).toEqual(['key_activation-1']);
+      expect(h.store.current.appliedKeys).toContain('key_commit_failure');
+      expect(h.store.current.maxSeatLimit).toBe(5);
+      h.db.$transaction = tx;
+      await expectCode(seatsKey(h, { keyId: 'key_commit_failure' }), 'LICENSE_KEY_ALREADY_USED');
+    } finally { h.dispose(); }
+  });
+
+  it('retains the spent key if the post-commit watermark update fails', async () => {
+    const h = harness();
+    try {
+      await activation(h);
+      const update = h.store.update.bind(h.store);
+      let calls = 0;
+      jest.spyOn(h.store, 'update').mockImplementation((change) => {
+        calls += 1;
+        if (calls === 2) throw new Error('simulated post-commit write failure');
+        return update(change);
+      });
+      await expect(seatsKey(h, { keyId: 'key_after_commit' })).rejects.toThrow();
+      expect(h.store.current.appliedKeys).toContain('key_after_commit');
+      // Restore a database from before that key was applied.
+      h.db.keys = h.db.keys.filter((row) => row.keyId !== 'key_after_commit');
+      h.db.installations[0].seatLimit = 5;
+      await expectCode(seatsKey(h, { keyId: 'key_after_commit' }), 'LICENSE_KEY_ALREADY_USED');
+    } finally { h.dispose(); }
+  });
+});
+
 describe('seat increases', () => {
   it('raises the limit and leaves the term untouched', async () => {
     const h = harness();

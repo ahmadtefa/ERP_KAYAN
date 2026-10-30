@@ -776,25 +776,40 @@ export class LicensingService implements OnModuleInit {
         },
       });
 
+      let outcome: AppliedOutcome;
       switch (payload.type) {
         case 'ACTIVATION':
-          return this.insertOrUpdateOnActivation(tx, payload, used, now);
+          outcome = await this.insertOrUpdateOnActivation(tx, payload, used, now);
+          break;
         case 'RENEWAL':
-          return this.applyRenewal(tx, payload, existing!, now);
+          outcome = await this.applyRenewal(tx, payload, existing!, now);
+          break;
         case 'SEATS':
-          return this.applySeats(tx, payload, existing!, used);
+          outcome = await this.applySeats(tx, payload, existing!, used);
+          break;
         case 'TRANSFER':
-          return this.applyTransfer(tx, payload, used);
+          outcome = await this.applyTransfer(tx, payload, used);
+          break;
         default:
           throw new ForbiddenException({
             detail: 'The key type is not supported by this version.',
             code: 'LICENSE_KEY_WRONG_TYPE',
           });
       }
+
+      // Reserve the key before committing its DB transaction. If this write
+      // fails, the DB must roll back. If the commit fails after this write,
+      // the key remains consumed and must be reissued; never reopen replay.
+      // Do not pre-grant the term or seats: the transaction may still abort.
+      this.store.update((state) => {
+        state.appliedKeys = [...state.appliedKeys, payload.keyId];
+      });
+      return outcome;
     });
 
-    // The file watermarks are written after the transaction commits: they are
-    // a second, independent record, not the transaction itself.
+    // Remaining entitlement watermarks are advanced only after commit. A
+    // failure here cannot unspend the already protected key, even if an old
+    // database is later restored. It can require reconciliation/reissue.
     this.store.update((state) => {
       state.appliedKeys = [...state.appliedKeys, payload.keyId];
       state.licenseId = payload.licenseId;
