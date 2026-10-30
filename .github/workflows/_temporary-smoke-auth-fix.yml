@@ -12,9 +12,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-      - name: Patch smoke checks and remove this temporary workflow
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Patch smoke checks
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -33,3 +31,12 @@ jobs:
           git add scripts/smoke-test-installed-windows.ps1
           git commit -m 'ci: fix authenticated license smoke checks'
           git push
+      - name: Remove temporary workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(git rev-parse HEAD:.github/workflows/_temporary-smoke-auth-fix.yml)
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/_temporary-smoke-auth-fix.yml" \
+            -f message='ci: remove temporary smoke auth fix' \
+            -f sha="$sha" \
+            -f branch="$GITHUB_REF_NAME"
