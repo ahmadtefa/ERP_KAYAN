@@ -517,7 +517,7 @@ jobs:
     needs: [build, inspect-final]
     if: needs.build.outputs.build_mode == 'product'
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -539,7 +539,10 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/smoke-test-installed-windows.ps1').Path, [ref]$tokens, [ref]$errors) | Out-Null
           if ($errors.Count -gt 0) { throw 'Smoke script PowerShell syntax errors' }
       - name: Install the exact product Setup and perform offline runtime checks
-        timeout-minutes: 30
+        # The installed run now repairs a damaged installation four times and
+        # drives the client through four restarts; 30 minutes cut it off in the
+        # middle of the bundled-runtime damage tests.
+        timeout-minutes: 60
         shell: pwsh
         run: |
           & pwsh -NoLogo -NoProfile -File scripts/smoke-test-installed-windows.ps1 -SetupPath "$PWD\candidate\KAYAN-ERP-Setup.exe" -RuntimeOnly -ExpectedSourceCommit $env:GITHUB_SHA
