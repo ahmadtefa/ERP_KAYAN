@@ -90,6 +90,10 @@ namespace Kayan
                     RepairLog.Write(root, report.ToString());
                     return 1;
                 }
+                // Record the intent *before* running the script: if a repair
+                // never returns, the log has to show whether the tool reached
+                // the point of starting it at all.
+                RepairLog.Write(root, "Repair starting: " + problemsBefore + " problem(s) detected. Running repair-runtime.ps1 now.");
                 string output;
                 int exitCode = RepairRunner.Run(root, out output);
                 report.AppendLine("Repair attempted (exit code " + exitCode + ").");
@@ -672,10 +676,10 @@ namespace Kayan
                     process.BeginOutputReadLine();
                     process.BeginErrorReadLine();
 
-                    if (!process.WaitForExit(900000))
+                    if (!process.WaitForExit(180000))
                     {
                         try { process.Kill(); } catch { }
-                        output = "The repair did not finish within 15 minutes and was stopped.";
+                        output = "The repair did not finish within 3 minutes and was stopped.";
                         return 124;
                     }
                     process.WaitForExit();

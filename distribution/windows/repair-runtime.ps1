@@ -112,6 +112,13 @@ function Get-DatabaseNameFromUrl([string]$Url) {
   return [Uri]::UnescapeDataString($match.Groups[1].Value)
 }
 
+# First line of record: if a repair is ever again reported as "started but
+# never finished", this says whether the script itself ever ran.
+try {
+  $script:markerSink = Join-Path (Split-Path -Parent $bootstrapLog) 'repair-result.txt'
+  Write-RepairMarker 'KAYAN-REPAIR-ENTRY'
+} catch { }
+
 try {
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
   $principal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -132,7 +139,9 @@ try {
   }
 
   Write-RepairMarker 'KAYAN-REPAIR-START'
+  Write-RepairMarker 'KAYAN-REPAIR-ADMIN'
   Get-Process -Name 'erp_kayan' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Write-RepairMarker 'KAYAN-REPAIR-CLIENT-STOPPED'
 
   # What the installation looked like before repair touched anything. Repair
   # must never move the program to another company database, and must never
@@ -153,9 +162,35 @@ try {
     throw "Bundled runtime setup script is missing: $installRuntime"
   }
 
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installRuntime -UserSettingsPath $UserSettingsPath -ProgramDataRoot $ProgramDataRoot
-  if ($LASTEXITCODE -ne 0) {
-    throw "Runtime repair step failed with exit code $LASTEXITCODE."
+  # Bounded, and with its console captured. An unbounded call let a repair that
+  # never returned look exactly like one still working: no exit code, no
+  # message, nothing in any log. The time limit names the step that stalled,
+  # and the captured output says why the runtime setup refused.
+  Write-RepairMarker 'KAYAN-REPAIR-RUNTIME-STARTING'
+  $runtimeOut = Join-Path $env:TEMP ('kayan-repair-runtime-out-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.log')
+  $runtimeErr = Join-Path $env:TEMP ('kayan-repair-runtime-err-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.log')
+  try {
+    $runtimeChild = Start-Process -FilePath 'powershell.exe' `
+      -ArgumentList @(
+        '-NoProfile','-ExecutionPolicy','Bypass',
+        '-File', ('"' + $installRuntime + '"'),
+        '-UserSettingsPath', ('"' + $UserSettingsPath + '"'),
+        '-ProgramDataRoot', ('"' + $ProgramDataRoot + '"')
+      ) -PassThru -NoNewWindow -RedirectStandardOutput $runtimeOut -RedirectStandardError $runtimeErr
+    if (-not $runtimeChild.WaitForExit(900000)) {
+      try { & taskkill.exe /PID $runtimeChild.Id /T /F 2>&1 | Out-Null } catch { }
+      throw "The runtime repair step did not finish within 15 minutes and was stopped. It was still inside install-runtime.ps1; see $bootstrapLog."
+    }
+    $runtimeChild.WaitForExit()
+    $runtimeExit = $runtimeChild.ExitCode
+    Write-RepairMarker ("KAYAN-REPAIR-RUNTIME-EXIT " + $runtimeExit)
+    if ($runtimeExit -ne 0) {
+      $runtimeDetails = (((Get-Content -LiteralPath $runtimeOut -Raw -ErrorAction SilentlyContinue) + "`n" + (Get-Content -LiteralPath $runtimeErr -Raw -ErrorAction SilentlyContinue)) | Out-String).Trim()
+      if ($runtimeDetails.Length -gt 1200) { $runtimeDetails = $runtimeDetails.Substring($runtimeDetails.Length - 1200) }
+      throw ("Runtime repair step failed with exit code " + $runtimeExit + ". " + (Protect-Secret $runtimeDetails))
+    }
+  } finally {
+    Remove-Item -LiteralPath $runtimeOut, $runtimeErr -Force -ErrorAction SilentlyContinue
   }
 
   $machineSettings = Join-Path $ProgramDataRoot 'kayan.env'

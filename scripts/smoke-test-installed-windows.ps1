@@ -80,11 +80,61 @@ function Invoke-KayanBoundedProcess {
   if ($StandardError) { $startArgs['RedirectStandardError'] = $StandardError }
   $process = Start-Process @startArgs
   if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-    try { $process.Kill() } catch { }
-    Fail ("$What did not finish within $TimeoutSeconds seconds and was stopped. An operation that cannot report its result in time is not a success.")
+    # Stop the whole tree, not only the process we started: a repair that
+    # owns a PowerShell child and a PostgreSQL service must not keep running
+    # behind a test that has already given up on it.
+    try { & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-Null } catch { }
+    try { if (-not $process.HasExited) { $process.Kill() } } catch { }
+    $captured = @()
+    foreach ($logFile in @($StandardOutput, $StandardError)) {
+      if ($logFile -and (Test-Path -LiteralPath $logFile)) {
+        $captured += ("--- " + $logFile + " ---")
+        $captured += @(Get-Content -LiteralPath $logFile -Tail 25 -ErrorAction SilentlyContinue)
+      }
+    }
+    Fail ("$What did not finish within $TimeoutSeconds seconds and was stopped. An operation that cannot report its result in time is not a success." +
+      [Environment]::NewLine + "Processes still running when it was stopped:" + [Environment]::NewLine + (Get-KayanProcessSnapshot) +
+      [Environment]::NewLine + (Read-RepairDetails) +
+      [Environment]::NewLine + ($captured -join [Environment]::NewLine))
   }
   $process.WaitForExit()
   return $process.ExitCode
+}
+
+function Get-KayanProcessSnapshot {
+  # What was actually still alive. A repair that hangs is only diagnosable if
+  # the record says which program was still running.
+  try {
+    $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop |
+      Where-Object { $_.Name -match '(?i)^(RepairTool|powershell|pwsh|node|postgres|pg_ctl|initdb|psql|erp_kayan|KAYAN).*' } |
+      Sort-Object Name |
+      ForEach-Object {
+        $cmd = ([string]$_.CommandLine) -replace '\s+', ' '
+        if ($cmd.Length -gt 300) { $cmd = $cmd.Substring(0, 300) }
+        "  pid={0} {1} :: {2}" -f $_.ProcessId, $_.Name, $cmd
+      })
+    if ($rows.Count -eq 0) { return '  (no installer, PowerShell or runtime processes were left running)' }
+    return ($rows -join [Environment]::NewLine)
+  } catch {
+    return ('  (process snapshot unavailable: ' + $_.Exception.Message + ')')
+  }
+}
+
+function Read-RepairDetails {
+  # The repair keeps its own record in repair-result.txt precisely because
+  # installer.log can be held open by the running server. Dump both, and the
+  # tool's own log, so a stuck repair can be placed at a step.
+  $sections = @()
+  foreach ($pair in @(
+      @{ Path = (Join-Path $env:ProgramData 'KAYAN-ERP\logs\repair-result.txt'); Label = 'repair result'; Tail = 25 },
+      @{ Path = (Join-Path $env:ProgramData 'KAYAN-ERP\logs\repairtool.log'); Label = 'repair tool log'; Tail = 20 },
+      @{ Path = (Join-Path $env:ProgramData 'KAYAN-ERP\logs\installer-result.txt'); Label = 'runtime result'; Tail = 5 })) {
+    if (Test-Path -LiteralPath $pair.Path) {
+      $sections += ("--- " + $pair.Label + " (" + $pair.Path + ") ---")
+      $sections += @(Get-Content -LiteralPath $pair.Path -Tail $pair.Tail -ErrorAction SilentlyContinue)
+    }
+  }
+  return ($sections -join [Environment]::NewLine)
 }
 
 function Get-InstalledLogTail([string]$Path, [int]$Lines) {
@@ -785,11 +835,20 @@ try {
   Write-Host 'PASS: RepairTool.exe --diagnose refused a damaged bundled Node.js runtime and named it.'
 
   $badRepairLog = Join-Path $env:ProgramData 'KAYAN-ERP\logs\repairtool.log'
-  $badRepairExit = Invoke-KayanBoundedProcess -FilePath $repairTool -ArgumentList @('--repair', '--quiet') -TimeoutSeconds 420 -What 'RepairTool --repair with a damaged bundled Node.js runtime'
+  $badRepairConsole = Join-Path $env:TEMP 'kayan-repairtool-damaged-node-repair.log'
+  $badRepairExit = Invoke-KayanBoundedProcess -FilePath $repairTool -ArgumentList @('--repair', '--quiet') -TimeoutSeconds 300 -What 'RepairTool --repair with a damaged bundled Node.js runtime' -StandardOutput $badRepairConsole -StandardError "$badRepairConsole.err"
+  $badRepairConsoleText = (@(Get-Content -LiteralPath $badRepairConsole -ErrorAction SilentlyContinue) + @(Get-Content -LiteralPath "$badRepairConsole.err" -ErrorAction SilentlyContinue)) -join "`n"
   if ($badRepairExit -eq 0) {
     Fail 'RepairTool.exe --repair reported success while the bundled Node.js runtime was damaged.'
   }
-  $badRepairText = Get-Content -LiteralPath $badRepairLog -Raw -ErrorAction SilentlyContinue
+  $badRepairText = (Get-Content -LiteralPath $badRepairLog -Raw -ErrorAction SilentlyContinue) + "`n" + $badRepairConsoleText
+  # A repair that refuses before it starts - because it is not elevated, for
+  # example - also lists the broken Node runtime in its report. Requiring the
+  # attempt record separates "the repair ran and refused" from "the repair
+  # never ran", which is not the same result and must not pass as one.
+  if ($badRepairText -notmatch '(?i)repair (starting|attempted)') {
+    Fail ("The tool did not attempt a repair at all over a damaged bundled Node.js runtime: " + $badRepairText)
+  }
   if ($badRepairText -notmatch '(?i)node') {
     Fail ("The failed repair did not record a Node.js diagnosis: " + $badRepairText)
   }
