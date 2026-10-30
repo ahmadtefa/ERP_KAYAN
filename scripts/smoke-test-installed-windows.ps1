@@ -701,6 +701,146 @@ if ($repairProbeExit -ne 0 -or (($repairProbe -join '').Trim() -ne 'preserved'))
 }
 Write-Host "PASS: bundled RepairTool.exe recovered the 0-ACE kayan.env and stopped PostgreSQL service while preserving company data."
 
+# ── Bundled runtimes: prove the shipped executables really run ───────────────
+# A file that exists is not a runtime. These probes execute the installed
+# node.exe and PostgreSQL tools directly, with the installed paths, so a missing
+# VC++ runtime or a damaged binary fails here instead of inside a customer's
+# first database backup.
+$installedManifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+$bundledNodeVersion = (@(& $node --version 2>&1) -join ' ').Trim()
+if ($LASTEXITCODE -ne 0 -or $bundledNodeVersion -notmatch '^v\d+\.') {
+  Fail ("The bundled Node.js runtime does not execute: " + $bundledNodeVersion)
+}
+$bundledPgVersion = (@(& $postgresExe --version 2>&1) -join ' ').Trim()
+if ($LASTEXITCODE -ne 0 -or $bundledPgVersion -notmatch 'PostgreSQL') {
+  Fail ("The bundled PostgreSQL executable does not execute: " + $bundledPgVersion)
+}
+foreach ($pgTool in @('initdb.exe', 'pg_ctl.exe', 'pg_isready.exe', 'psql.exe')) {
+  $toolPath = Join-Path (Join-Path $backend 'postgres\bin') $pgTool
+  $toolOut = (@(& $toolPath --version 2>&1) -join ' ').Trim()
+  if ($LASTEXITCODE -ne 0) { Fail ("The bundled PostgreSQL tool $pgTool does not execute: " + $toolOut) }
+}
+if ($installedManifest -and $installedManifest.nodeVersion) {
+  # node prints "v24.21.0"; the manifest records "24.21.0".
+  $reportedNodeVersion = $bundledNodeVersion.TrimStart('v')
+  if ($reportedNodeVersion -ne ([string]$installedManifest.nodeVersion).TrimStart('v')) {
+    Fail ("The bundled Node.js reports $bundledNodeVersion, but the installation manifest says $($installedManifest.nodeVersion).")
+  }
+}
+Write-Output ("::notice::Bundled runtimes execute: Node $bundledNodeVersion, $bundledPgVersion, from " + $installRoot + ".")
+
+# ── A damaged bundled Node.js must be reported, never repaired over ──────────
+# The company database, the licence state and the service must all survive this
+# untouched: the only correct outcome is a loud, specific diagnosis.
+$nodeBackup = Join-Path $env:TEMP 'kayan-bundled-node-smoke-backup.exe'
+$nodeOriginalHash = (Get-FileHash -LiteralPath $node -Algorithm SHA256).Hash
+if (Test-Path -LiteralPath $nodeBackup) { Remove-Item -LiteralPath $nodeBackup -Force }
+Copy-Item -LiteralPath $node -Destination $nodeBackup -Force
+# The licence state may not exist yet at this point in the run; either way it
+# must be exactly as it was when the repair refuses to proceed.
+$stateFile = Join-Path $env:ProgramData 'KAYAN-ERP\license\license-state.json'
+$stateBeforeNodeDamage = if (Test-Path -LiteralPath $stateFile) { (Get-FileHash -LiteralPath $stateFile -Algorithm SHA256).Hash } else { '<absent>' }
+try {
+  Write-SmokePhase 'Smoke: damaging the bundled node.exe to prove the repair tool reports it.'
+  [IO.File]::WriteAllText($node, 'not a node runtime', [Text.Encoding]::ASCII)
+  $damagedNodeLog = Join-Path $env:TEMP 'kayan-repairtool-damaged-node.log'
+  $damagedNode = Start-Process -FilePath $repairTool -ArgumentList @('--diagnose') -WorkingDirectory $installRoot -Wait -PassThru -RedirectStandardOutput $damagedNodeLog -RedirectStandardError "$damagedNodeLog.err"
+  $damagedNodeText = (@(Get-Content -LiteralPath $damagedNodeLog -ErrorAction SilentlyContinue) + @(Get-Content -LiteralPath "$damagedNodeLog.err" -ErrorAction SilentlyContinue)) -join "`n"
+  if ($damagedNode.ExitCode -eq 0) {
+    Fail ("RepairTool.exe --diagnose reported a healthy installation while the bundled node.exe was damaged. Output: " + $damagedNodeText)
+  }
+  if ($damagedNodeText -notmatch '(?i)node') {
+    Fail ("RepairTool.exe --diagnose failed but did not name the bundled Node.js runtime: " + $damagedNodeText)
+  }
+  Write-Host 'PASS: RepairTool.exe --diagnose refused a damaged bundled Node.js runtime and named it.'
+
+  $badRepairLog = Join-Path $env:ProgramData 'KAYAN-ERP\logs\repairtool.log'
+  $badRepair = Start-Process -FilePath $repairTool -ArgumentList @('--repair', '--quiet') -WorkingDirectory $installRoot -Wait -PassThru
+  if ($badRepair.ExitCode -eq 0) {
+    Fail 'RepairTool.exe --repair reported success while the bundled Node.js runtime was damaged.'
+  }
+  $badRepairText = Get-Content -LiteralPath $badRepairLog -Raw -ErrorAction SilentlyContinue
+  if ($badRepairText -notmatch '(?i)node') {
+    Fail ("The failed repair did not record a Node.js diagnosis: " + $badRepairText)
+  }
+  Write-Host ("PASS: a repair over a damaged bundled Node.js runtime failed loudly (exit " + $badRepair.ExitCode + ") instead of claiming success.")
+
+  # Nothing may have been destroyed by that refusal.
+  $stateAfterNodeDamage = if (Test-Path -LiteralPath $stateFile) { (Get-FileHash -LiteralPath $stateFile -Algorithm SHA256).Hash } else { '<absent>' }
+  if ($stateAfterNodeDamage -ne $stateBeforeNodeDamage) {
+    Fail 'A refused repair changed the protected licence state.'
+  }
+  $env:PGPASSWORD = $databasePassword
+  $probeAfterNodeDamage = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT value FROM kayan_installer_upgrade_probe WHERE id=1" 2>&1)
+  $probeAfterNodeDamageExit = $LASTEXITCODE
+  Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+  if ($probeAfterNodeDamageExit -ne 0 -or (($probeAfterNodeDamage -join '').Trim() -ne 'preserved')) {
+    Fail ("The company database did not survive a refused repair: " + ($probeAfterNodeDamage -join ' '))
+  }
+  Write-Host 'PASS: the refused repair left the company database and the protected licence state untouched.'
+} finally {
+  if (Test-Path -LiteralPath $nodeBackup) {
+    Copy-Item -LiteralPath $nodeBackup -Destination $node -Force
+    Remove-Item -LiteralPath $nodeBackup -Force -ErrorAction SilentlyContinue
+  }
+}
+if ((Get-FileHash -LiteralPath $node -Algorithm SHA256).Hash -ne $nodeOriginalHash) {
+  Fail 'The bundled node.exe was not restored to its original bytes after the damage test.'
+}
+$recoveredNodeVersion = (@(& $node --version 2>&1) -join ' ').Trim()
+if ($LASTEXITCODE -ne 0 -or $recoveredNodeVersion -ne $bundledNodeVersion) {
+  Fail ("The restored bundled Node.js runtime does not execute as before: " + $recoveredNodeVersion)
+}
+
+# ── A damaged PostgreSQL runtime must be reported the same way ───────────────
+$initdbPath = Join-Path (Join-Path $backend 'postgres\bin') 'initdb.exe'
+$initdbBackup = Join-Path $env:TEMP 'kayan-bundled-initdb-smoke-backup.exe'
+Copy-Item -LiteralPath $initdbPath -Destination $initdbBackup -Force
+try {
+  Write-SmokePhase 'Smoke: damaging the bundled initdb.exe to prove the repair tool reports it.'
+  [IO.File]::WriteAllText($initdbPath, 'not a postgres tool', [Text.Encoding]::ASCII)
+  $damagedPgLog = Join-Path $env:TEMP 'kayan-repairtool-damaged-pg.log'
+  $damagedPg = Start-Process -FilePath $repairTool -ArgumentList @('--diagnose') -WorkingDirectory $installRoot -Wait -PassThru -RedirectStandardOutput $damagedPgLog -RedirectStandardError "$damagedPgLog.err"
+  $damagedPgText = (@(Get-Content -LiteralPath $damagedPgLog -ErrorAction SilentlyContinue) + @(Get-Content -LiteralPath "$damagedPgLog.err" -ErrorAction SilentlyContinue)) -join "`n"
+  if ($damagedPg.ExitCode -eq 0) {
+    Fail ("RepairTool.exe --diagnose reported a healthy installation while the bundled initdb.exe was damaged. Output: " + $damagedPgText)
+  }
+  if ($damagedPgText -notmatch '(?i)postgres') {
+    Fail ("RepairTool.exe --diagnose failed but did not name the bundled PostgreSQL tools: " + $damagedPgText)
+  }
+  Write-Host 'PASS: RepairTool.exe --diagnose refused a damaged bundled PostgreSQL executable and named it.'
+} finally {
+  if (Test-Path -LiteralPath $initdbBackup) {
+    Copy-Item -LiteralPath $initdbBackup -Destination $initdbPath -Force
+    Remove-Item -LiteralPath $initdbBackup -Force -ErrorAction SilentlyContinue
+  }
+}
+$initdbOut = (@(& $initdbPath --version 2>&1) -join ' ').Trim()
+if ($LASTEXITCODE -ne 0) { Fail ("The restored bundled initdb.exe does not execute: " + $initdbOut) }
+
+# ── With both runtimes restored, the repair must succeed again ───────────────
+Write-SmokePhase 'Smoke: repairing with both bundled runtimes restored.'
+$finalRepair = Start-Process -FilePath $repairTool -ArgumentList @('--repair', '--quiet') -WorkingDirectory $installRoot -Wait -PassThru
+if ($finalRepair.ExitCode -ne 0) {
+  Fail ("RepairTool.exe --repair failed after the bundled runtimes were restored (exit " + $finalRepair.ExitCode + ").")
+}
+$finalDiagnose = Start-Process -FilePath $repairTool -ArgumentList @('--diagnose') -WorkingDirectory $installRoot -Wait -PassThru
+if ($finalDiagnose.ExitCode -ne 0) {
+  Fail ("RepairTool.exe --diagnose still reports problems after the runtimes were restored (exit " + $finalDiagnose.ExitCode + ").")
+}
+$finalService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if (-not $finalService -or $finalService.Status -ne 'Running') {
+  Fail 'The repaired installation does not have a running PostgreSQL service.'
+}
+$env:PGPASSWORD = $databasePassword
+$finalProbe = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT value FROM kayan_installer_upgrade_probe WHERE id=1" 2>&1)
+$finalProbeExit = $LASTEXITCODE
+Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+if ($finalProbeExit -ne 0 -or (($finalProbe -join '').Trim() -ne 'preserved')) {
+  Fail ("The company database did not survive the runtime damage and repair cycle: " + ($finalProbe -join ' '))
+}
+Write-Host 'PASS: with the bundled runtimes restored, RepairTool repaired the installation, restarted the service and kept the company database.'
+
 # The important test: start the actual installed Flutter executable by itself.
 $clientPath = Join-Path $installRoot "erp_kayan.exe"
 $client = Start-Process -FilePath $clientPath -WorkingDirectory $installRoot -PassThru
@@ -726,6 +866,19 @@ try {
   }
   if (-not $health -or -not $apiPort) { Fail "The installed KAYAN client did not start a healthy local API within 90 seconds." }
   Write-Host "PASS: launching installed erp_kayan.exe started a healthy local API on port $apiPort."
+  # The backend the window started must be the bundled node.exe, not whatever
+  # Node happens to be installed on this Windows machine.
+  $backendNodeProcesses = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue | Where-Object {
+    $_.CommandLine -and $_.CommandLine -match '(?i)dist[\\/]+src[\\/]+main\.js'
+  })
+  if ($backendNodeProcesses.Count -lt 1) { Fail 'No backend node.exe process is running for the started client.' }
+  foreach ($backendNodeProcess in $backendNodeProcesses) {
+    $exePath = [string]$backendNodeProcess.ExecutablePath
+    if (-not $exePath -or -not $exePath.StartsWith($installRoot, [StringComparison]::OrdinalIgnoreCase)) {
+      Fail ("The installed client started a backend from '$exePath' instead of the bundled Node.js runtime under $installRoot.")
+    }
+  }
+  Write-Host ("PASS: the client's backend runs on the bundled Node.js executable ({0})." -f $backendNodeProcesses[0].ExecutablePath)
 
   $loginPayload = @{ username = "ci-admin"; password = "CiSmoke-Admin-Password-7241" } | ConvertTo-Json -Compress
   try {
