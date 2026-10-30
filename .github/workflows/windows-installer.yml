@@ -64,7 +64,7 @@ jobs:
           cache-dependency-path: backend/package-lock.json
 
       - name: Test licence build policy, synthetic signatures and release gates
-        run: node --experimental-transform-types --test scripts/windows-release-policy.test.mjs scripts/license-key-compatibility.test.mjs scripts/verify-release-evidence.test.mjs scripts/release-evidence-adversarial.test.mjs scripts/release-evidence-cli-isolation.test.mjs scripts/release-workflow-order.test.mjs scripts/check-release-environment.test.mjs scripts/inspect-final-inno.test.mjs
+        run: node --experimental-transform-types --test scripts/windows-release-policy.test.mjs scripts/license-key-compatibility.test.mjs scripts/verify-release-evidence.test.mjs scripts/release-evidence-adversarial.test.mjs scripts/release-evidence-cli-isolation.test.mjs scripts/release-workflow-order.test.mjs scripts/branch-candidate-release.test.mjs scripts/check-release-environment.test.mjs scripts/inspect-final-inno.test.mjs
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -580,3 +580,126 @@ jobs:
           APP_VERSION: ${{ needs.build.outputs.version }}
           KAYAN_WINDOWS_RELEASE_EVIDENCE: ${{ vars.KAYAN_WINDOWS_RELEASE_EVIDENCE }}
         run: node scripts/publish-verified-windows.mjs
+
+  # Handing a customer a download is the one step that used to be able to
+  # happen without anybody looking at the package. This job exists so that a
+  # branch build can be handed over as a file while every guarantee of the
+  # production path stays in place:
+  #
+  #   * it needs the payload inspection and the installed-runtime smoke test,
+  #     so the exact EXE it uploads is the one that was extracted and the one
+  #     that was installed on a Windows runner;
+  #   * it proves the file still matches the recorded SHA-256 before uploading;
+  #   * it runs only for a *branch* push of a *product* build, and marks the
+  #     release as a prerelease that is never "latest";
+  #   * it refuses to touch a tag that already exists.
+  #
+  # The production release path below is untouched: it still requires main, the
+  # protected environment and independent signed evidence.
+  publish-branch-candidate:
+    name: Hand over the tested branch candidate (prerelease, not latest)
+    needs: [build, inspect-final, smoke-final]
+    if: >-
+      ${{ github.repository == 'ahmadtefa/ERP_KAYAN' &&
+          github.event_name == 'push' &&
+          github.ref != 'refs/heads/main' &&
+          needs.build.outputs.build_mode == 'product' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer-inspected-internal-${{ github.sha }}
+          path: candidate
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer-runtime-evidence-${{ github.sha }}
+          path: smoke
+      - name: Prove the uploaded EXE is the inspected and install-tested one
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const crypto = require("crypto");
+            const read = (p) => JSON.parse(fs.readFileSync(p, "utf8").replace(/^\uFEFF/, ""));
+            const build = read("candidate/build-evidence.json");
+            const payload = read("candidate/payload-verification.json");
+            const smoke = read("smoke/installation-smoke.json");
+            const body = fs.readFileSync("candidate/KAYAN-ERP-Setup.exe");
+            const actual = crypto.createHash("sha256").update(body).digest("hex");
+            if (build.sourceCommit !== process.env.GITHUB_SHA) throw new Error("build evidence is from another commit");
+            if (build.mode !== "product") throw new Error("not a product build");
+            if (build.sha256 !== actual) throw new Error("installer does not match its build evidence");
+            if (payload.installer.sha256 !== actual) throw new Error("installer does not match its payload inspection");
+            if (smoke.installerSha256 !== actual) throw new Error("installer was not the one installed by the smoke test");
+            if (smoke.sourceCommit !== process.env.GITHUB_SHA) throw new Error("smoke evidence is from another commit");
+            fs.writeFileSync("candidate/published-identity.json", JSON.stringify({
+              sourceCommit: build.sourceCommit,
+              installerSha256: actual,
+              sizeBytes: body.length,
+              inspected: "payload-verification.json",
+              installedOn: "windows-latest runtime smoke",
+            }, null, 2));
+            console.log("candidate verified: " + actual + " (" + body.length + " bytes)");
+          '
+      - name: Publish the verified candidate as a prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_VERSION: ${{ needs.build.outputs.version }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          tag="windows-v${APP_VERSION}-candidate-${SOURCE_COMMIT:0:12}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error title=Release already exists::The tag $tag already has a release; refusing to replace it."
+            exit 1
+          fi
+          sha=$(node -e 'console.log(require("./candidate/published-identity.json").installerSha256)')
+          size=$(node -e 'console.log(require("./candidate/published-identity.json").sizeBytes)')
+          notes=$(mktemp)
+          {
+            echo "# KAYAN ERP ${APP_VERSION} — candidate build"
+            echo
+            echo "Built from commit \`${SOURCE_COMMIT}\` and handed over for evaluation and installation testing."
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Installer | \`KAYAN-ERP-Setup.exe\` |"
+            echo "| SHA-256 | \`${sha}\` |"
+            echo "| Size | ${size} bytes |"
+            echo "| Source commit | \`${SOURCE_COMMIT}\` |"
+            echo "| Workflow run | ${RUN_URL} |"
+            echo
+            echo "## What this file has passed"
+            echo
+            echo "- the Windows build job (backend tests, Flutter analyze and tests, licence build policy);"
+            echo "- independent payload extraction and inspection on Linux with the pinned Inno extractor;"
+            echo "- installation and offline runtime checks on a Windows runner: fresh install, local PostgreSQL,"
+            echo "  API startup, login, full backup and restore, licence-mirror recovery and licence backups."
+            echo
+            echo "## What it has not passed"
+            echo
+            echo "- independent signed release evidence, which the production release path requires;"
+            echo "- a signed \`ACTIVATION\` key activating a real licence (the smoke test runs unlicensed)."
+            echo
+            echo "This is a **prerelease**, is never marked \`latest\`, and is not the production release."
+          } > "$notes"
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_COMMIT" \
+            --title "KAYAN ERP ${APP_VERSION} candidate (${SOURCE_COMMIT:0:12})" \
+            --notes-file "$notes" \
+            --prerelease \
+            --latest=false \
+            "candidate/KAYAN-ERP-Setup.exe#KAYAN-ERP-Setup.exe" \
+            "candidate/published-identity.json#published-identity.json" \
+            "candidate/payload-verification.json#payload-verification.json" \
+            "candidate/build-evidence.json#build-evidence.json"
+          echo "::notice title=Candidate published::gh release download $tag --pattern KAYAN-ERP-Setup.exe"
