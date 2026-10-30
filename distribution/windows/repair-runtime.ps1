@@ -201,7 +201,7 @@ try {
   if ($nodeVersionExit -ne 0 -or (($nodeVersionOutput -join ' ').Trim() -notmatch '^v\d+\.')) {
     throw ("The bundled Node.js runtime cannot execute (exit " + $nodeVersionExit + "): " + (Protect-Secret (($nodeVersionOutput -join ' ').Trim())) + ". Check the Microsoft Visual C++ runtime; reinstall Setup if the bundled node.exe is damaged.")
   }
-  {
+  if ($true) {
     $prepOut = Join-Path $env:TEMP ('kayan-repair-prep-out-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.log')
     $prepErr = Join-Path $env:TEMP ('kayan-repair-prep-err-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.log')
     try {
@@ -227,7 +227,7 @@ try {
   if (-not (Test-Path -LiteralPath $mainJs -PathType Leaf)) {
     throw "The bundled backend entry point is missing: $mainJs. Reinstall the same KAYAN Setup over the existing installation; ProgramData company data is kept."
   }
-  {
+  if ($true) {
     $probePort = $null
     foreach ($candidate in @(3000, 3001, 3002, 3003, 3010, 3020)) {
       $listener = $null
