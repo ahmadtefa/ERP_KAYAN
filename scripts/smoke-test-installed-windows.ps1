@@ -613,6 +613,24 @@ try {
     }
     Write-Output '::notice::Installed Windows runtime backup/restore passed: valid PGDMP archive, checked restore, safety backup, re-login and original SQL sentinel verified.'
 
+    # A database backup must also leave a verified copy of the licence behind,
+    # in ProgramData rather than in the program folder that Setup replaces.
+    $licenceBackupDirectory = Join-Path $env:ProgramData 'KAYAN-ERP\LicenceBackups'
+    if (-not (Test-Path -LiteralPath $licenceBackupDirectory)) {
+      Fail ("The licence backup folder was not created by the installed runtime: " + $licenceBackupDirectory)
+    }
+    $licenceCaptures = @(Get-ChildItem -LiteralPath $licenceBackupDirectory -Directory -Filter 'licence-*' -ErrorAction SilentlyContinue)
+    if ($licenceCaptures.Count -lt 1) {
+      Fail 'A full database backup did not write a timestamped licence backup.'
+    }
+    $newestCapture = $licenceCaptures | Sort-Object Name -Descending | Select-Object -First 1
+    foreach ($required in @('manifest.json', 'license-state.json')) {
+      if (-not (Test-Path -LiteralPath (Join-Path $newestCapture.FullName $required))) {
+        Fail ("The licence backup " + $newestCapture.Name + " is missing " + $required + ".")
+      }
+    }
+    Write-Output ("::notice::Licence backup verified: " + $newestCapture.Name + " (" + $licenceCaptures.Count + " capture(s) retained).")
+
     $licenseDirectory = Join-Path $env:ProgramData "KAYAN-ERP\license"
     $statePath = Join-Path $licenseDirectory "license-state.json"
     $publicKeyPath = Join-Path $licenseDirectory "public-key.pem"
@@ -622,6 +640,12 @@ try {
     if (Test-Path $publicKeyBackupPath) { Remove-Item $publicKeyBackupPath -Force }
     $originalStateBytes = [IO.File]::ReadAllBytes($statePath)
     $originalStateHash = (Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash
+    # The trusted identity of the state, not its bytes: a running backend keeps
+    # moving its own watermarks forward (last seen moment, sequence), so the
+    # recovered file is expected to differ from the bytes written before the
+    # restart. What must survive is the installation's identity and entitlement.
+    $originalState = (Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).state
+    if (-not $originalState -or -not $originalState.installId) { Fail 'The installed license state has no signed state to compare against.' }
     $originalPublicKeyHash = (Get-FileHash -LiteralPath $publicKeyPath -Algorithm SHA256).Hash
     try {
       Stop-KayanSmokeClient -Process $client -Port $apiPort
@@ -643,8 +667,27 @@ try {
           $recoveredBody.stateError) {
         Fail ("A damaged primary licence file was not recovered from its authenticated mirror: " + $recoveredResponse.Content)
       }
-      if ((Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash -ne $originalStateHash) {
-        Fail 'The recovered primary licence state does not match the original trusted bytes.'
+      $mirrorPath = Join-Path $licenseDirectory 'license-state.backup.json'
+      if (-not (Test-Path -LiteralPath $mirrorPath)) { Fail 'The installed license state has no authenticated mirror.' }
+      $recoveredEnvelope = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+      if (-not $recoveredEnvelope.mac) { Fail 'The recovered primary licence state carries no authentication tag.' }
+      $recoveredState = $recoveredEnvelope.state
+      if (-not $recoveredState -or -not $recoveredState.installId) { Fail 'The recovered primary licence state carries no installation identity.' }
+      if ($recoveredState.installId -ne $originalState.installId) {
+        Fail 'The recovered primary licence state belongs to a different installation.'
+      }
+      if ("$($recoveredState.licenseId)" -ne "$($originalState.licenseId)") {
+        Fail 'The recovered primary licence state changed the licence it belongs to.'
+      }
+      if ([int]$recoveredState.maxSeatLimit -lt [int]$originalState.maxSeatLimit -or
+          [int]$recoveredState.maxSeatsUsed -lt [int]$originalState.maxSeatsUsed) {
+        Fail 'The recovered primary licence state lowered a seat watermark.'
+      }
+      if ([int]$recoveredState.sequence -lt [int]$originalState.sequence) {
+        Fail 'The recovered primary licence state rolled the trust sequence backwards.'
+      }
+      if ((Get-FileHash -LiteralPath $statePath -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $mirrorPath -Algorithm SHA256).Hash) {
+        Fail 'The recovered primary licence state was not rewritten from its authenticated mirror.'
       }
       $damagedCopies = @(Get-ChildItem -LiteralPath $licenseDirectory -Filter 'license-state.damaged-*.json' -ErrorAction SilentlyContinue)
       if ($damagedCopies.Count -lt 1) { Fail 'The original damaged licence file was not preserved for diagnosis.' }
@@ -656,7 +699,7 @@ try {
       if ([int]$businessResponse.StatusCode -ne 403 -or $businessBody.code -ne 'LICENSE_REQUIRED') {
         Fail ("Recovered trust state did not preserve normal licence enforcement on a business route (HTTP $([int]$businessResponse.StatusCode)).")
       }
-      Write-Host 'PASS: damaged primary recovered from the authenticated mirror, original bytes retained, and unlicensed business access remained blocked.'
+      Write-Host 'PASS: damaged primary recovered from the authenticated mirror with its installation identity and watermarks intact, the damaged copy retained for diagnosis, and unlicensed business access still blocked.'
 
       Stop-KayanSmokeClient -Process $client -Port $apiPort
       $client = $null
