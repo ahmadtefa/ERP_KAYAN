@@ -1,4 +1,4 @@
-name: Temporary smoke auth fix
+name: Temporary recovery patch
 on:
   push:
     branches: ['fix/inno-inspector-callsites-20261030']
@@ -6,18 +6,33 @@ permissions:
   contents: write
 jobs:
   patch:
-    if: ${{ github.event.head_commit.message != 'ci: fix authenticated license smoke checks' && github.event.head_commit.message != 'ci: remove temporary smoke auth fix' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-      - name: Patch smoke checks and remove this temporary workflow
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Apply recovery fix and remove this temporary workflow
         run: |
           python3 - <<'PY'
           from pathlib import Path
+
+          # The installed licence state must fail closed without taking the
+          # whole desktop down. /license/status is the screen's recovery path;
+          # return a safe blocked status when the authenticated state file is
+          # damaged, instead of propagating the 503 into the startup shell.
+          p = Path('backend/src/modules/licensing/licensing.service.ts')
+          s = p.read_text(encoding='utf-8')
+          old = """  async status(options: { fresh?: boolean } = {}): Promise<LicenseStatus> {\n    await this.ensureReady();\n"""
+          new = """  async status(options: { fresh?: boolean } = {}): Promise<LicenseStatus> {\n    try {\n      await this.ensureReady();\n    } catch (error) {\n      if (this.installedStateError === 'LICENSE_STATE_DAMAGED') {\n        const now = this.clock();\n        return {\n          state: 'UNLICENSED',\n          blocked: true,\n          enforcement: this.enforcement,\n          configured: false,\n          licenseId: null,\n          machineId: this.machineId(),\n          installId: 'unavailable',\n          issuedAt: null,\n          startsAt: null,\n          expiresAt: null,\n          perpetual: false,\n          daysRemaining: null,\n          expiringSoon: false,\n          seats: { limit: 0, used: 0, available: null },\n          clock: {\n            state: 'WARNING',\n            lastSeenAt: null,\n            note: 'The protected licence state is damaged. Business operations remain blocked until the original trusted state is restored.',\n          },\n          publicKeyFingerprint: null,\n          requestCode: '',\n          serverTime: now.toISOString(),\n        };\n      }\n      throw error;\n    }\n"""
+          if old not in s:
+              raise SystemExit('licensing.service.ts status anchor not found')
+          if s.count(old) != 1:
+              raise SystemExit('licensing.service.ts status anchor is not unique')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+          # The installed smoke check is authenticated; status itself is not a
+          # public endpoint, so send the session headers on both PowerShell
+          # request forms.
           p = Path('scripts/smoke-test-installed-windows.ps1')
           s = p.read_text(encoding='utf-8')
           replacements = {
@@ -27,10 +42,41 @@ jobs:
           for old, new in replacements.items():
               s = s.replace(old, new)
           p.write_text(s, encoding='utf-8')
+
+          # Regression test: corrupting the protected state must yield a safe
+          # blocked status, not a startup-fatal exception.
+          test = Path('backend/src/modules/licensing/licensing.service.damaged-status.spec.ts')
+          test.write_text(r'''import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { LicensingService } from './licensing.service';
+
+describe('LicensingService damaged state recovery boundary', () => {
+  it('keeps /license/status reachable and fail-closed when the state file is damaged', async () => {
+    const directory = join(tmpdir(), `kayan-license-damaged-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'license-state.json'), '{ definitely-not-json', 'utf8');
+    writeFileSync(join(directory, 'state.key'), 'a'.repeat(64), 'utf8');
+
+    const service = new LicensingService(
+      {} as never,
+      {} as never,
+      { directory, installedDirectory: null, machineId: 'test-machine' },
+    );
+
+    const status = await service.status();
+    expect(status.blocked).toBe(true);
+    expect(status.enforcement).toBe('warn');
+    expect(status.configured).toBe(false);
+    expect(status.requestCode).toBe('');
+  });
+});
+''', encoding='utf-8')
+
+          Path('.github/workflows/_temporary-smoke-auth-fix.yml').unlink()
           PY
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add scripts/smoke-test-installed-windows.ps1
-          git commit -m 'ci: fix authenticated license smoke checks'
+          git add -A
+          git commit -m 'fix: keep desktop alive when licence state is damaged'
           git push
-          
