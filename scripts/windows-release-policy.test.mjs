@@ -61,6 +61,9 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   assert.match(runtimeSmoke[1], /needs: \[build, inspect-final\]/);
   assert.match(runtimeSmoke[1], /needs\.build\.outputs\.build_mode == 'product'/);
   const runtimeSetup = readFileSync(new URL('../distribution/windows/install-runtime.ps1', import.meta.url), 'utf8');
+  const repairRuntime = readFileSync(new URL('../distribution/windows/repair-runtime.ps1', import.meta.url), 'utf8');
+  assert.match(repairRuntime, /health\.license\.stateError -eq 'LICENSE_STATE_DAMAGED'/);
+  assert.match(repairRuntime, /did not create or grant a replacement licence/);
   assert.match(runtimeSetup, /function Get-FileSha256Hex/);
   assert.match(runtimeSetup, /SHA256\]::Create\(\)/);
   assert.doesNotMatch(runtimeSetup, /\(Get-FileHash\s+-LiteralPath/);
