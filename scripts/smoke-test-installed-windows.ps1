@@ -74,11 +74,29 @@ function Invoke-KayanBoundedProcess {
     [string]$StandardOutput = '',
     [string]$StandardError = ''
   )
-  $startArgs = @{ FilePath = $FilePath; WorkingDirectory = $installRoot; PassThru = $true }
-  if ($ArgumentList.Count -gt 0) { $startArgs['ArgumentList'] = $ArgumentList }
-  if ($StandardOutput) { $startArgs['RedirectStandardOutput'] = $StandardOutput }
-  if ($StandardError) { $startArgs['RedirectStandardError'] = $StandardError }
-  $process = Start-Process @startArgs
+  # A real .NET process, not Start-Process: the object Start-Process -PassThru
+  # returns does not reliably carry ExitCode, and an unreadable exit code turns
+  # "the tool refused, as required" and "the tool said it succeeded" into the
+  # same answer.
+  $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $startInfo.FileName = $FilePath
+  if ($ArgumentList.Count -gt 0) {
+    $startInfo.Arguments = (($ArgumentList | ForEach-Object { if ("$_" -match '\s') { '"' + $_ + '"' } else { "$_" } }) -join ' ')
+  }
+  $startInfo.WorkingDirectory = $installRoot
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $startInfo
+  if (-not $process.Start()) {
+    Fail ("$What could not be started: " + $FilePath)
+  }
+  # Read both pipes while it runs, so heavy output cannot fill a pipe and look
+  # like a program that hung.
+  $outTask = $process.StandardOutput.ReadToEndAsync()
+  $errTask = $process.StandardError.ReadToEndAsync()
   if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
     # Stop the whole tree, not only the process we started: a repair that
     # owns a PowerShell child and a PostgreSQL service must not keep running
@@ -86,19 +104,26 @@ function Invoke-KayanBoundedProcess {
     try { & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-Null } catch { }
     try { if (-not $process.HasExited) { $process.Kill() } } catch { }
     $captured = @()
-    foreach ($logFile in @($StandardOutput, $StandardError)) {
-      if ($logFile -and (Test-Path -LiteralPath $logFile)) {
-        $captured += ("--- " + $logFile + " ---")
-        $captured += @(Get-Content -LiteralPath $logFile -Tail 25 -ErrorAction SilentlyContinue)
-      }
-    }
+    try {
+      $partial = ((([string]$outTask.Result) + "`n" + ([string]$errTask.Result)) | Out-String).Trim()
+      if ($partial.Length -gt 1500) { $partial = $partial.Substring($partial.Length - 1500) }
+      if ($partial) { $captured += @('--- output before it was stopped ---', $partial) }
+    } catch { }
     Fail ("$What did not finish within $TimeoutSeconds seconds and was stopped. An operation that cannot report its result in time is not a success." +
       [Environment]::NewLine + "Processes still running when it was stopped:" + [Environment]::NewLine + (Get-KayanProcessSnapshot) +
       [Environment]::NewLine + (Read-RepairDetails) +
       [Environment]::NewLine + ($captured -join [Environment]::NewLine))
   }
   $process.WaitForExit()
-  return $process.ExitCode
+  $outText = [string]$outTask.Result
+  $errText = [string]$errTask.Result
+  if ($StandardOutput) { [IO.File]::WriteAllText($StandardOutput, $outText) }
+  if ($StandardError) { [IO.File]::WriteAllText($StandardError, $errText) }
+  $exitCode = $process.ExitCode
+  if ($null -eq $exitCode) {
+    Fail ("$What finished but reported no exit code, so its result cannot be read. Treating that as a pass would hide a failure.")
+  }
+  return $exitCode
 }
 
 function Get-KayanProcessSnapshot {
