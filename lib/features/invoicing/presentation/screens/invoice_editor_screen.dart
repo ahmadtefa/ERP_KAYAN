@@ -49,19 +49,30 @@ List<Json> lineUnitsOf(Json? item) {
   ];
 }
 
-/// The unit-specific list price for [unitName] on [item], or the item's own
-/// price when the unit defines none. Returns an empty string when neither is
-/// set, so the caller can leave the field the user already typed alone.
+/// The unit-specific list price, or the base-unit price converted once into
+/// the chosen unit. An unknown/invalid unit or missing cost stays empty.
 String unitListPrice(Json item, String unitName, {required bool isSales}) {
   final key = isSales ? 'salePrice' : 'purchasePrice';
   for (final unit in lineUnitsOf(item)) {
     if (text(unit, 'unit') == unitName) {
       final specific = text(unit, key);
       if (specific.isNotEmpty) return specific;
+      final basePrice = Decimal.tryParse(text(item, key));
+      if (basePrice == null) return '';
+      final parsedFactor = Decimal.tryParse(text(unit, 'factor'));
+      final factor = parsedFactor ??
+          (unitName == text(item, 'unit') ? Decimal.one : null);
+      if (factor == null || factor <= Decimal.zero) return '';
+      return (basePrice * factor).round(scale: moneyScale).toString();
     }
   }
-  return text(item, key);
+  return unitName == text(item, 'unit') ? text(item, key) : '';
 }
+
+/// An automatic price may follow a changed unit; a price typed by the user
+/// (including an explicit zero) must not be silently replaced.
+bool maySuggestUnitPrice(String current, {required bool automatic, required bool edited}) =>
+    automatic || (!edited && (current.trim().isEmpty || current.trim() == '0'));
 
 /// One editable invoice line.
 class _LineDraft {
@@ -88,6 +99,8 @@ class _LineDraft {
   final TextEditingController quantity;
   final TextEditingController unitPrice;
   final TextEditingController taxRate;
+  bool unitPriceAutomatic = false;
+  bool unitPriceEdited = false;
 
   /// A line discount: a percentage or a fixed amount of money. The server
   /// resolves the other representation and stores both.
@@ -221,6 +234,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           ..itemId = text(row, 'itemId').isEmpty ? null : text(row, 'itemId')
           ..unitName =
               text(row, 'unitName').isEmpty ? null : text(row, 'unitName')
+          ..unitPriceEdited = true
           ..costCenterId = text(row, 'costCenterId').isEmpty
               ? null
               : text(row, 'costCenterId');
@@ -340,21 +354,23 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       line.taxRate.text = formatQuantity(asString(item['taxRate']), decimals: 2);
     }
     final units = lineUnitsOf(item);
-    // Default to the smallest (base) unit the first time an item is picked;
-    // a reopened line keeps the unit its snapshot recorded.
+    // A fractional pack can sort before the base unit; use the item's actual
+    // base label rather than assuming the smallest factor is the base.
     if ((line.unitName == null || line.unitName!.isEmpty) && units.isNotEmpty) {
-      line.unitName = text(units.first, 'unit');
+      final baseName = text(item, 'unit');
+      line.unitName = units.any((unit) => text(unit, 'unit') == baseName)
+          ? baseName
+          : text(units.first, 'unit');
     }
-    if (line.unitPrice.text.trim().isEmpty ||
-        line.unitPrice.text.trim() == '0') {
+    if (maySuggestUnitPrice(line.unitPrice.text,
+        automatic: line.unitPriceAutomatic, edited: line.unitPriceEdited)) {
       final price = unitListPrice(
         item,
         line.unitName ?? text(item, 'unit'),
         isSales: widget.kind.isSales,
       );
-      if (price.isNotEmpty) {
-        line.unitPrice.text = formatQuantity(price, decimals: 2);
-      }
+      line.unitPrice.text = formatQuantity(price, decimals: 4);
+      line.unitPriceAutomatic = true;
     }
   }
 
@@ -867,6 +883,9 @@ class _LinesTable extends StatelessWidget {
                             ),
                         ],
                         onChanged: (value) {
+                          if (lines[index].itemId != value) {
+                            lines[index].unitName = null;
+                          }
                           lines[index].itemId = value;
                           final item = items.firstWhere(
                             (element) => text(element, 'id') == value,
@@ -889,7 +908,11 @@ class _LinesTable extends StatelessWidget {
                                 title: l10n.selectItem,
                               );
                               if (picked == null) return;
-                              lines[index].itemId = text(picked, 'id');
+                              final itemId = text(picked, 'id');
+                              if (lines[index].itemId != itemId) {
+                                lines[index].unitName = null;
+                              }
+                              lines[index].itemId = itemId;
                               onItemDefaults(lines[index], picked);
                               onChanged();
                             },
@@ -977,7 +1000,7 @@ class _LinesTable extends StatelessWidget {
                                     flag(unit, 'isBase', fallback: false)
                                         ? text(unit, 'unit')
                                         : '${text(unit, 'unit')} '
-                                              '×${formatQuantity(asString(unit['factor']), decimals: 0)}',
+                                              '×${formatQuantity(asString(unit['factor']), decimals: 6)}',
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
@@ -987,9 +1010,10 @@ class _LinesTable extends StatelessWidget {
                                 : (value) {
                                     if (value == null) return;
                                     lines[index].unitName = value;
-                                    final current =
-                                        lines[index].unitPrice.text.trim();
-                                    if (current.isEmpty || current == '0') {
+                                    final line = lines[index];
+                                    if (maySuggestUnitPrice(line.unitPrice.text,
+                                        automatic: line.unitPriceAutomatic,
+                                        edited: line.unitPriceEdited)) {
                                       final price = selected == null
                                           ? ''
                                           : unitListPrice(
@@ -997,10 +1021,9 @@ class _LinesTable extends StatelessWidget {
                                               value,
                                               isSales: kind.isSales,
                                             );
-                                      if (price.isNotEmpty) {
-                                        lines[index].unitPrice.text =
-                                            formatQuantity(price, decimals: 2);
-                                      }
+                                      line.unitPrice.text =
+                                          formatQuantity(price, decimals: 4);
+                                      line.unitPriceAutomatic = true;
                                     }
                                     onChanged();
                                   },
@@ -1039,7 +1062,11 @@ class _LinesTable extends StatelessWidget {
                           isDense: true,
                           border: const OutlineInputBorder(),
                         ),
-                        onChanged: (_) => onChanged(),
+                        onChanged: (_) {
+                          lines[index].unitPriceAutomatic = false;
+                          lines[index].unitPriceEdited = true;
+                          onChanged();
+                        },
                       ),
                     ),
                     const SizedBox(width: 8),

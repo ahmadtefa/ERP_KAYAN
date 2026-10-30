@@ -176,6 +176,18 @@ describe('unit prices and display fallbacks', () => {
     expect(defaultUnitPrice('sale', metre, D(12)).toFixed(4)).toBe('12.0000');
   });
 
+  it('scales the base price once when a larger unit has no explicit price', () => {
+    const carton = { id: 'u-carton', unit: 'carton', factor: D(12), isActive: true, salePrice: null, purchasePrice: null };
+    expect(defaultUnitPrice('sale', carton, D(10)).toFixed(4)).toBe('120.0000');
+    expect(defaultUnitPrice('purchase', carton, D(7)).toFixed(4)).toBe('84.0000');
+    expect(defaultUnitPrice('sale', null, D(10)).toFixed(4)).toBe('10.0000');
+  });
+
+  it('scales fractional units and rounds the result to the money scale', () => {
+    const half = { id: 'u-half', unit: 'half', factor: D('0.5'), isActive: true, salePrice: null };
+    expect(defaultUnitPrice('sale', half, D('7.1235')).toFixed(4)).toBe('3.5618');
+  });
+
   it('a legacy line displays the stored quantity and the base unit', () => {
     const line = { unitName: null as string | null, unitQuantity: null as Prisma.Decimal | null, quantity: D(10) };
     expect(displayQuantity(line).toFixed(4)).toBe('10.0000');

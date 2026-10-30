@@ -8,6 +8,7 @@ import { InvoiceStatus, Prisma, StockDirection } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
+import { defaultUnitPrice } from '../../common/units/unit-math';
 import { AccountMapService } from '../accounting/account-map.service';
 import { PostingService } from '../accounting/posting.service';
 import { isValidEan13, randomInternalBarcode, toBaseQuantity } from './barcode';
@@ -118,10 +119,9 @@ export class ItemsService {
       // A scan of a unit barcode is one of that unit, expressed in the base
       // unit the stock ledger keeps.
       quantityPerScan: toBaseQuantity(1, unit.factor).toFixed(MONEY_SCALE),
-      salePrice:
-        unit.salePrice?.toFixed(MONEY_SCALE) ?? owner.salePrice.toFixed(MONEY_SCALE),
+      salePrice: defaultUnitPrice('sale', unit, owner.salePrice).toFixed(MONEY_SCALE),
       purchasePrice: mayReadCost
-        ? unit.purchasePrice?.toFixed(MONEY_SCALE) ?? owner.purchasePrice.toFixed(MONEY_SCALE)
+        ? defaultUnitPrice('purchase', unit, owner.purchasePrice).toFixed(MONEY_SCALE)
         : null,
       item: this.toResponse(owner, mayReadCost),
       units: owner.units.map((row) =>

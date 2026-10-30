@@ -170,8 +170,9 @@ export function resolveUnitSelection(input: {
 /**
  * Choose the default price of the SELECTED unit. An explicitly typed price
  * always wins (the caller decides that before calling this); otherwise the
- * unit's own price is used, falling back to the item-level price when the unit
- * carries no price of its own. The returned value is always per chosen unit.
+ * unit's own price is used. If it has none, the item-level price is per base
+ * unit and must be multiplied once by the selected unit's conversion factor.
+ * The returned value is always per chosen unit.
  */
 export function defaultUnitPrice(
   kind: 'sale' | 'purchase',
@@ -182,7 +183,8 @@ export function defaultUnitPrice(
   if (unitPrice !== null && unitPrice !== undefined) {
     return new Prisma.Decimal(unitPrice).toDecimalPlaces(QUANTITY_SCALE);
   }
-  return itemLevelPrice;
+  const factor = row ? parseFactor(row.factor, 'unit factor') : new Prisma.Decimal(1);
+  return itemLevelPrice.mul(factor).toDecimalPlaces(QUANTITY_SCALE);
 }
 
 /** The unit label a document line displays, applying the legacy fallback. */

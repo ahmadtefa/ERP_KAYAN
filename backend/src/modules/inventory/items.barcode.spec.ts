@@ -86,6 +86,18 @@ describe('ItemsService barcode lookup', () => {
     expect(result.salePrice).toBe('220.0000');
   });
 
+  it('returns the base prices multiplied by the unit factor when unit prices are unset', async () => {
+    const { service, prisma } = build();
+    const noPriceCarton = { ...carton, salePrice: null, purchasePrice: null, isActive: true };
+    prisma.itemUnit.findFirst.mockResolvedValue({ ...noPriceCarton, item: { ...baseItem, units: [noPriceCarton] } });
+
+    const result = await service.findByBarcode('company-1', '2000000000505');
+    expect(result.salePrice).toBe('240.0000');
+    expect(result.purchasePrice).toBe('168.0000');
+    const noCost = await service.findByBarcode('company-1', '2000000000505', false);
+    expect(noCost.purchasePrice).toBeNull();
+  });
+
   it('says so when no item or unit carries the code', async () => {
     const { service, prisma } = build();
     prisma.item.findFirst.mockResolvedValue(null);

@@ -138,6 +138,22 @@ describe('Sales multi-unit — milk scenario', () => {
     expect(line.quantity.toFixed(4)).toBe('10.0000');
   });
 
+  it('derives a carton price from the base price only once when no unit price exists', async () => {
+    const item = {
+      ...milkItem,
+      units: [milkItem.units[0], { ...milkItem.units[1], factor: D(12), salePrice: null }],
+    };
+    const { service, tx } = makeService(item);
+    await service.create(COMPANY, BRANCH, 'user-1', {
+      ...baseDto,
+      lines: [{ itemId: MILK, quantity: '3', unitName: 'كرتونة' }],
+    } as any);
+    const line = tx.salesInvoice.create.mock.calls[0][0].data.lines.create[0];
+    expect(line.unitPrice.toFixed(4)).toBe('108.0000');
+    expect(line.grossLineTotal.toFixed(4)).toBe('324.0000');
+    expect(line.quantity.toFixed(4)).toBe('36.0000');
+  });
+
   it('posts both lines: exactly two OUT movements of 3 and 10 base pieces at average cost, never doubled', async () => {
     const { service, prisma, tx } = makeService();
     await service.create(COMPANY, BRANCH, 'user-1', {

@@ -158,6 +158,22 @@ function makeService(itemOverrides: Record<string, any> = {}) {
 }
 
 describe('Purchase multi-unit — milk scenario', () => {
+  it('derives a carton price from base cost once when no unit price exists', async () => {
+    const item = {
+      ...milkItem,
+      units: [milkItem.units[0], { ...milkItem.units[1], factor: D(12), purchasePrice: null }],
+    };
+    const { service, tx } = makeService({ [MILK]: item });
+    await service.create(COMPANY, BRANCH, 'user-1', {
+      invoiceDate: '2026-10-27', supplierId: SUPPLIER,
+      lines: [{ itemId: MILK, quantity: '10', unitName: 'كرتونة', taxRate: '0' }],
+    } as any);
+    const line = tx.purchaseInvoice.create.mock.calls[0][0].data.lines.create[0];
+    expect(line.unitPrice.toFixed(4)).toBe('84.0000');
+    expect(line.grossLineTotal.toFixed(4)).toBe('840.0000');
+    expect(line.quantity.toFixed(4)).toBe('120.0000');
+  });
+
   it('buys 5 cartons (factor 10): 50 pieces received, cost 375, snapshot retained', async () => {
     const { service, tx } = makeService();
     await service.create(COMPANY, BRANCH, 'user-1', {
