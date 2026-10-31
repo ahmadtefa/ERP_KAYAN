@@ -13,6 +13,7 @@ import '../../features/accounting/presentation/screens/opening_balances_screen.d
 import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/cash/presentation/screens/cash_screen.dart';
+import '../../features/cash/presentation/screens/bank_reconciliation_screen.dart';
 import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
 import '../../features/data/presentation/screens/backup_screen.dart';
 import '../../features/data/presentation/screens/import_screen.dart';
@@ -55,6 +56,7 @@ class AppRoutes {
   static const fixedAssets = '/accounting/fixed-assets';
   static const openingBalances = '/accounting/opening-balances';
   static const cash = '/cash';
+  static const bankReconciliation = '/cash/reconciliation';
   static const customers = '/parties/customers';
   static const suppliers = '/parties/suppliers';
   static const items = '/inventory/items';
@@ -155,6 +157,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.dashboard, child: DashboardScreen()),
   (path: AppRoutes.cash, child: CashScreen()),
+  (path: AppRoutes.bankReconciliation, child: BankReconciliationScreen()),
   (path: AppRoutes.journalEntries, child: JournalEntriesScreen()),
   (path: AppRoutes.fiscalPeriods, child: FiscalPeriodsScreen()),
   (path: AppRoutes.fixedAssets, child: FixedAssetsScreen()),
