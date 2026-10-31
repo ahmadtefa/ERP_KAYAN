@@ -4,6 +4,7 @@ import {
   reorderTable,
   slowMovingTable,
   stockDocumentTable,
+  stockTakeVarianceTable,
   type StockDocumentView,
 } from './inventory-print';
 
@@ -155,5 +156,87 @@ describe('the inventory report sheets', () => {
     expect(reorder.rows[0]).toMatchObject({ reorderLevel: '5', shortfall: '3' });
     const hidden = applyPriceVisibility(slow, { showCost: 'false' });
     expect(JSON.stringify(hidden.rows)).not.toContain('500');
+  });
+});
+
+describe('the stock-take sheet', () => {
+  const variance = {
+    rows: [
+      {
+        documentNumber: 'CNT-2026-0007',
+        documentDate: '2026-11-02',
+        branchCode: 'MAIN',
+        warehouseCode: 'WH-A',
+        itemCode: 'SKU-1',
+        itemNameEn: 'Network cable',
+        unit: 'قطعة',
+        unitName: 'كرتونة',
+        unitFactor: '12.000000',
+        unitQuantity: '4.0000',
+        systemQuantity: '69.0000',
+        countedQuantity: '48.0000',
+        varianceQuantity: '-21.0000',
+        unitCost: '10.0000',
+        varianceValue: '-210.0000',
+        notes: null,
+      },
+    ],
+    totals: {
+      shortageQuantity: '21.0000',
+      surplusQuantity: '0.0000',
+      shortageValue: '210.0000',
+      surplusValue: '0.0000',
+      netValue: '-210.0000',
+    },
+  };
+
+  it('shows the unit counted, the book figure, the counted figure and the difference', () => {
+    const table = stockTakeVarianceTable(variance);
+    const keys = table.columns.map((column) => column.key);
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        'unitName',
+        'unitFactor',
+        'unitQuantity',
+        'systemQuantity',
+        'countedQuantity',
+        'varianceQuantity',
+      ]),
+    );
+    expect(table.rows[0]).toMatchObject({
+      unitName: 'كرتونة',
+      unitFactor: '12.000000',
+      unitQuantity: '4.0000',
+      systemQuantity: '69.0000',
+      countedQuantity: '48.0000',
+      varianceQuantity: '-21.0000',
+    });
+    expect(table.titleEn).toBe('Stock-take differences');
+  });
+
+  it('keeps shortage and surplus apart instead of netting them', () => {
+    const labels = stockTakeVarianceTable(variance).totals.map((total) => total.labelEn);
+    expect(labels).toEqual(
+      expect.arrayContaining(['Shortage quantity', 'Surplus quantity']),
+    );
+  });
+
+  it('drops the variance cost and every cost total when this copy may not show costs', () => {
+    const redacted = applyPriceVisibility(stockTakeVarianceTable(variance), {
+      showCost: 'false',
+    });
+    const keys = redacted.columns.map((column) => column.key);
+    expect(keys).not.toContain('unitCost');
+    expect(keys).not.toContain('varianceValue');
+    // The quantities and the difference stay: they are what a storekeeper acts on.
+    expect(keys).toEqual(
+      expect.arrayContaining(['systemQuantity', 'countedQuantity', 'varianceQuantity']),
+    );
+    expect(redacted.totals.map((total) => total.key)).toEqual([
+      'shortageQuantity',
+      'surplusQuantity',
+    ]);
+    expect(JSON.stringify(redacted)).not.toContain('210.0000');
+    expect(JSON.stringify(redacted)).not.toContain('10.0000');
   });
 });

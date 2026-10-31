@@ -218,6 +218,24 @@ export class InventoryReportsController {
     return this.service.reorder(user.companyId, { branchId }, canReadCost(user));
   }
 
+  /// What the physical counts found against the ledger: the sheet a store
+  /// manager signs when stock is short or over.
+  @Get('reports/stock-take-variance')
+  @RequirePermissions('inventory.stock.read')
+  stockTakeVariance(
+    @CurrentUser() user: AuthUser,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('branchId') branchId?: string,
+    @Query('warehouseId') warehouseId?: string,
+  ) {
+    return this.service.stockTakeVariance(
+      user.companyId,
+      { from, to, branchId, warehouseId },
+      canReadCost(user),
+    );
+  }
+
   /// Printable barcode label sheet (HTML) for the item's own units. Reading
   /// items is enough to print their labels; assigning barcodes stays separate.
   @Get('items/:itemId/barcode-labels/print')

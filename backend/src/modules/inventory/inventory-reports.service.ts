@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, StockDocumentKind } from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -749,6 +749,151 @@ export class InventoryReportsService {
         estimatedOrderCost: mayReadCost
           ? totalEstimatedCost.toFixed(MONEY_SCALE)
           : null,
+      },
+    };
+  }
+
+  /// What the physical counts found against what the ledger said.
+  ///
+  /// A count document records the figure that was counted and the movement
+  /// that brings the ledger to it, so the system figure is `counted - movement`
+  /// and the difference needs no second source of truth. Shortages and
+  /// surpluses are kept apart rather than netted: a store that lost 100 pieces
+  /// and gained 100 others has two problems, not none.
+  ///
+  /// The quantities are base units, and each row carries the unit that was
+  /// actually counted with its factor, so a sheet read off the shelf ("4
+  /// cartons") can be checked against the ledger ("48 pieces") on paper.
+  async stockTakeVariance(
+    companyId: string,
+    filters: { from?: string; to?: string; branchId?: string; warehouseId?: string } = {},
+    mayReadCost = true,
+  ) {
+    const dateFilter: Prisma.DateTimeFilter = {};
+    if (filters.from) dateFilter.gte = new Date(filters.from);
+    if (filters.to) dateFilter.lte = new Date(filters.to);
+
+    const documents = await this.prisma.stockDocument.findMany({
+      where: {
+        companyId,
+        kind: StockDocumentKind.COUNT,
+        deletedAt: null,
+        ...(filters.branchId ? { branchId: filters.branchId } : {}),
+        // A count of one warehouse names it as the destination, the same way
+        // a transfer does; the count of a branch that names no warehouse
+        // belongs to the branch's default store.
+        ...(filters.warehouseId ? { toWarehouseId: filters.warehouseId } : {}),
+        ...(Object.keys(dateFilter).length ? { documentDate: dateFilter } : {}),
+      },
+      orderBy: [{ documentDate: 'asc' }, { documentNumber: 'asc' }],
+      include: {
+        branch: { select: { code: true, nameEn: true, nameAr: true } },
+        toWarehouse: { select: { code: true, nameEn: true, nameAr: true } },
+        lines: {
+          orderBy: { lineNumber: 'asc' },
+          include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } },
+        },
+      },
+    });
+
+    const rows: Array<{
+      documentId: string;
+      documentNumber: string;
+      documentDate: string;
+      branchCode: string;
+      warehouseCode: string | null;
+      itemCode: string;
+      itemNameEn: string;
+      itemNameAr: string;
+      unit: string;
+      unitName: string | null;
+      unitFactor: string | null;
+      unitQuantity: string | null;
+      systemQuantity: Prisma.Decimal;
+      countedQuantity: Prisma.Decimal;
+      varianceQuantity: Prisma.Decimal;
+      unitCost: Prisma.Decimal;
+      varianceValue: Prisma.Decimal;
+      notes: string | null;
+    }> = [];
+
+    for (const document of documents) {
+      for (const line of document.lines) {
+        // `quantity` is the movement that brings the ledger to the counted
+        // figure, so it *is* the variance; `countedQuantity` is what a person
+        // wrote down when the count was entered.
+        const variance = line.quantity;
+        const counted = line.countedQuantity ?? variance;
+        const system = counted.minus(variance);
+        rows.push({
+          documentId: document.id,
+          documentNumber: document.documentNumber,
+          documentDate: document.documentDate.toISOString().slice(0, 10),
+          branchCode: document.branch.code,
+          warehouseCode: document.toWarehouse?.code ?? null,
+          itemCode: line.item.code,
+          itemNameEn: line.item.nameEn,
+          itemNameAr: line.item.nameAr,
+          unit: line.item.unit,
+          unitName: line.unitName ?? null,
+          unitFactor: line.unitFactor ? line.unitFactor.toFixed(6) : null,
+          unitQuantity: line.unitQuantity ? line.unitQuantity.toFixed(4) : null,
+          systemQuantity: system,
+          countedQuantity: counted,
+          varianceQuantity: variance,
+          unitCost: line.unitCost,
+          varianceValue: variance.mul(line.unitCost),
+          notes: line.notes ?? null,
+        });
+      }
+    }
+
+    const zero = new Prisma.Decimal(0);
+    let shortageQuantity = zero;
+    let surplusQuantity = zero;
+    let shortageValue = zero;
+    let surplusValue = zero;
+    for (const row of rows) {
+      if (row.varianceQuantity.isNegative()) {
+        shortageQuantity = shortageQuantity.plus(row.varianceQuantity.abs());
+        shortageValue = shortageValue.plus(row.varianceValue.abs());
+      } else if (row.varianceQuantity.greaterThan(0)) {
+        surplusQuantity = surplusQuantity.plus(row.varianceQuantity);
+        surplusValue = surplusValue.plus(row.varianceValue);
+      }
+    }
+
+    return {
+      rows: rows.map((row) => ({
+        documentId: row.documentId,
+        documentNumber: row.documentNumber,
+        documentDate: row.documentDate,
+        branchCode: row.branchCode,
+        warehouseCode: row.warehouseCode,
+        itemCode: row.itemCode,
+        itemNameEn: row.itemNameEn,
+        itemNameAr: row.itemNameAr,
+        unit: row.unit,
+        unitName: row.unitName,
+        unitFactor: row.unitFactor,
+        unitQuantity: row.unitQuantity,
+        systemQuantity: row.systemQuantity.toFixed(MONEY_SCALE),
+        countedQuantity: row.countedQuantity.toFixed(MONEY_SCALE),
+        varianceQuantity: row.varianceQuantity.toFixed(MONEY_SCALE),
+        // A variance value is a cost: withheld entirely from a caller who may
+        // not read costs, so no total can be inferred from a row.
+        unitCost: mayReadCost ? row.unitCost.toFixed(MONEY_SCALE) : null,
+        varianceValue: mayReadCost ? row.varianceValue.toFixed(MONEY_SCALE) : null,
+        notes: row.notes,
+      })),
+      totals: {
+        documents: documents.length,
+        lines: rows.length,
+        shortageQuantity: shortageQuantity.toFixed(MONEY_SCALE),
+        surplusQuantity: surplusQuantity.toFixed(MONEY_SCALE),
+        shortageValue: mayReadCost ? shortageValue.toFixed(MONEY_SCALE) : null,
+        surplusValue: mayReadCost ? surplusValue.toFixed(MONEY_SCALE) : null,
+        netValue: mayReadCost ? surplusValue.minus(shortageValue).toFixed(MONEY_SCALE) : null,
       },
     };
   }

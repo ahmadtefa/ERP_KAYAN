@@ -147,6 +147,7 @@ export const PRINT_TYPES: readonly PrintType[] = [
   report('inventory-valuation', 'Inventory valuation', 'تقييم المخزون', { cost: true }),
   report('slow-moving', 'Slow-moving stock', 'المخزون الراكد', { cost: true }),
   report('reorder', 'Reorder levels', 'حدود إعادة الطلب', { cost: true }),
+  report('stock-take-variance', 'Stock-take differences', 'فروق الجرد', { cost: true }),
 
   // Labels
   {

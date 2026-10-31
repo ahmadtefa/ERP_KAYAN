@@ -296,3 +296,129 @@ export function reorderTable(report: {
     notes: [],
   };
 }
+
+/// A stock-take sheet: what the ledger said, what was counted, and the
+/// difference that was posted.
+///
+/// The unit columns come first because that is how the count was written down
+/// on the shelf ("4 cartons"), followed by the base figure the ledger holds, so
+/// the two can be checked against each other on paper. The variance value is a
+/// cost and carries a key the shared redaction recognises.
+export function stockTakeVarianceTable(report: {
+  rows: Array<{
+    documentNumber?: string | null;
+    documentDate?: string | null;
+    branchCode?: string | null;
+    warehouseCode?: string | null;
+    itemCode?: string | null;
+    itemNameEn?: string | null;
+    itemNameAr?: string | null;
+    unit?: string | null;
+    unitName?: string | null;
+    unitFactor?: string | null;
+    unitQuantity?: string | null;
+    systemQuantity?: string | null;
+    countedQuantity?: string | null;
+    varianceQuantity?: string | null;
+    unitCost?: string | number | null;
+    varianceValue?: string | number | null;
+    notes?: string | null;
+  }>;
+  totals?: {
+    shortageQuantity?: string | null;
+    surplusQuantity?: string | null;
+    shortageValue?: string | null;
+    surplusValue?: string | null;
+    netValue?: string | null;
+  };
+}): ReportTable {
+  const columns = [
+    { key: 'documentNumber', labelEn: 'Count', labelAr: 'الجرد', width: 14 },
+    { key: 'documentDate', labelEn: 'Date', labelAr: 'التاريخ', width: 12 },
+    { key: 'warehouseCode', labelEn: 'Warehouse', labelAr: 'المخزن', width: 12 },
+    { key: 'itemCode', labelEn: 'Item code', labelAr: 'كود الصنف', width: 14 },
+    { key: 'itemName', labelEn: 'Item', labelAr: 'الصنف', width: 30 },
+    { key: 'unitName', labelEn: 'Unit counted', labelAr: 'الوحدة المجرودة', width: 14 },
+    { key: 'unitFactor', labelEn: 'Factor', labelAr: 'معامل التحويل', numeric: true, width: 10 },
+    { key: 'unitQuantity', labelEn: 'Quantity in unit', labelAr: 'الكمية بالوحدة', numeric: true, width: 12 },
+    { key: 'systemQuantity', labelEn: 'System (base)', labelAr: 'رصيد الدفتر (أساسي)', numeric: true, width: 14 },
+    { key: 'countedQuantity', labelEn: 'Counted (base)', labelAr: 'المجرود (أساسي)', numeric: true, width: 14 },
+    { key: 'varianceQuantity', labelEn: 'Difference', labelAr: 'الفرق', numeric: true, width: 12 },
+    // Named as a cost twice over: the key is on the slug's cost list and the
+    // label says "cost", so either rule removes it on its own.
+    { key: 'unitCost', labelEn: 'Unit cost', labelAr: 'تكلفة الوحدة', numeric: true, width: 12 },
+    { key: 'varianceValue', labelEn: 'Variance cost', labelAr: 'تكلفة الفرق', numeric: true, width: 14 },
+    { key: 'notes', labelEn: 'Notes', labelAr: 'ملاحظات', width: 18 },
+  ];
+
+  const rows = report.rows.map((row) => ({
+    documentNumber: row.documentNumber ?? '',
+    documentDate: row.documentDate ?? '',
+    warehouseCode: row.warehouseCode ?? row.branchCode ?? '',
+    itemCode: row.itemCode ?? '',
+    itemName: row.itemNameEn || row.itemNameAr || '',
+    unitName: row.unitName ?? row.unit ?? '',
+    unitFactor: row.unitFactor ?? '',
+    unitQuantity: row.unitQuantity ?? '',
+    systemQuantity: row.systemQuantity ?? '',
+    countedQuantity: row.countedQuantity ?? '',
+    varianceQuantity: row.varianceQuantity ?? '',
+    unitCost: row.unitCost ?? '',
+    varianceValue: row.varianceValue ?? '',
+    notes: row.notes ?? '',
+  }));
+
+  const totals: ReportTable['totals'] = [];
+  const totalsSource = report.totals ?? {};
+  if (totalsSource.shortageQuantity != null) {
+    totals.push({
+      key: 'shortageQuantity',
+      labelEn: 'Shortage quantity',
+      labelAr: 'كمية النقص',
+      value: totalsSource.shortageQuantity,
+    });
+  }
+  if (totalsSource.surplusQuantity != null) {
+    totals.push({
+      key: 'surplusQuantity',
+      labelEn: 'Surplus quantity',
+      labelAr: 'كمية الزيادة',
+      value: totalsSource.surplusQuantity,
+    });
+  }
+  if (totalsSource.shortageValue != null) {
+    totals.push({
+      key: 'shortageValue',
+      labelEn: 'Shortage cost',
+      labelAr: 'تكلفة النقص',
+      value: totalsSource.shortageValue,
+    });
+  }
+  if (totalsSource.surplusValue != null) {
+    totals.push({
+      key: 'surplusValue',
+      labelEn: 'Surplus cost',
+      labelAr: 'تكلفة الزيادة',
+      value: totalsSource.surplusValue,
+    });
+  }
+  if (totalsSource.netValue != null) {
+    totals.push({
+      key: 'netValue',
+      labelEn: 'Net cost of differences',
+      labelAr: 'صافي تكلفة الفروق',
+      value: totalsSource.netValue,
+    });
+  }
+
+  return {
+    slug: 'stock-take-variance',
+    titleEn: 'Stock-take differences',
+    titleAr: 'فروق الجرد',
+    meta: [],
+    columns,
+    rows,
+    totals,
+    notes: [],
+  };
+}

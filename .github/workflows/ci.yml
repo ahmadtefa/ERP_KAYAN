@@ -381,6 +381,26 @@ jobs:
           NODE
       - name: Build API
         run: npm run build
+      # The unit tests prove the merge arithmetic. Only a browser and a
+      # rasteriser can prove the finished sheet: that the artwork is really
+      # underneath the text, that the overlay stayed transparent, and that
+      # "n / N" sits above the artwork. GitHub's Ubuntu image already carries
+      # Chrome; poppler supplies pdftoppm.
+      - name: Prove the attached artwork prints on a real sheet
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends poppler-utils
+          if [ -z "${KAYAN_PDF_BROWSER:-}" ]; then
+            for candidate in /opt/google/chrome/chrome /usr/bin/google-chrome /usr/bin/chromium /usr/bin/chromium-browser; do
+              if [ -x "$candidate" ]; then export KAYAN_PDF_BROWSER="$candidate"; break; fi
+            done
+          fi
+          if [ -z "${KAYAN_PDF_BROWSER:-}" ]; then
+            echo "::error::No Chrome/Chromium on this runner, so the finished PDF cannot be proven here."
+            exit 1
+          fi
+          echo "Using $KAYAN_PDF_BROWSER"
+          node scripts/verify-artwork-pdf.mjs
       - name: Serve the web client and run the regression scenario
         run: |
           mkdir -p /tmp/kayan-web-probe/build/web
@@ -421,6 +441,14 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
+
+          echo "Running the packing-unit stock cycle (carton 12, roll 5, piece 1)..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/scenario-units-cycle.mjs http://127.0.0.1:3000/api/v1 | tee /tmp/kayan-units-scenario.log'; then
+            echo "::group::API logs after the packing-unit scenario failure"
+            cat /tmp/kayan-regressions-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
       # Same reason as the backend job: the per-scenario totals are the
       # evidence a run can be read without the log host.
       - name: Record scenario totals
@@ -428,7 +456,7 @@ jobs:
         run: |
           # The two scenarios word their summary differently ("checks passed"
           # and "passed"), so both shapes are looked for.
-          summary=$(grep -hE "checks passed|[0-9]+/[0-9]+ passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log 2>/dev/null | tr '\n' ' | ')
+          summary=$(grep -hE "checks passed|[0-9]+/[0-9]+ passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log /tmp/kayan-units-scenario.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Regression scenario checks::${summary:-summary not captured}"
 
   flutter:

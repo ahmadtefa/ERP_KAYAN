@@ -76,6 +76,15 @@ const SLUG_COST_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // movement is worth as well as how much moved, so its value column is a cost
   // even though the sheet is not a purchase document.
   'stock-document': new Set(['costValue', 'unitCost']),
+  // A stock-take sheet compares counted and book quantities; what the
+  // difference is worth is a cost, and its arithmetic must leave with it.
+  'stock-take-variance': new Set([
+    'unitCost',
+    'varianceValue',
+    'shortageValue',
+    'surplusValue',
+    'netValue',
+  ]),
 };
 
 /// Columns that carry an amount rather than a quantity: a total, a subtotal, a

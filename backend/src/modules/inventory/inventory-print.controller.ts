@@ -16,6 +16,7 @@ import {
   reorderTable,
   slowMovingTable,
   stockDocumentTable,
+  stockTakeVarianceTable,
 } from './inventory-print';
 import { InventoryReportsService } from './inventory-reports.service';
 import { StockDocumentsService } from './stock-documents.service';
@@ -28,6 +29,9 @@ interface PriceQuery {
   branchId?: string;
   categoryId?: string;
   days?: string;
+  from?: string;
+  to?: string;
+  warehouseId?: string;
 }
 
 /// The warehouse's own paper: a stock document, and the three inventory
@@ -147,6 +151,30 @@ export class InventoryPrintController {
     await this.sendPdf(response, table, user.companyId, query, 'reorder');
   }
 
+  @Get('reports/stock-take-variance/print')
+  @AllowQueryToken()
+  @RequirePermissions('inventory.stock.read')
+  async stockTakeVariancePrint(
+    @CurrentUser() user: AuthUser,
+    @Query() query: PriceQuery,
+    @Res() response: Response,
+  ): Promise<void> {
+    const table = await this.stockTakeVarianceFor(user, query);
+    await this.sendPage(response, table, user.companyId, query);
+  }
+
+  @Get('reports/stock-take-variance/pdf')
+  @AllowQueryToken()
+  @RequirePermissions('inventory.stock.read')
+  async stockTakeVariancePdf(
+    @CurrentUser() user: AuthUser,
+    @Query() query: PriceQuery,
+    @Res() response: Response,
+  ): Promise<void> {
+    const table = await this.stockTakeVarianceFor(user, query);
+    await this.sendPdf(response, table, user.companyId, query, 'stock-take-variance');
+  }
+
   // -------------------------------------------------------------- builders
 
   private async stockDocumentTableFor(
@@ -184,6 +212,28 @@ export class InventoryPrintController {
       canReadCost(user),
     );
     return this.redact(user, reorderTable(report as never), query, 'reorder');
+  }
+
+  private async stockTakeVarianceFor(
+    user: AuthUser,
+    query: PriceQuery,
+  ): Promise<ReportTable> {
+    const report = await this.reports.stockTakeVariance(
+      user.companyId,
+      {
+        from: query.from,
+        to: query.to,
+        branchId: query.branchId,
+        warehouseId: query.warehouseId,
+      },
+      canReadCost(user),
+    );
+    return this.redact(
+      user,
+      stockTakeVarianceTable(report as never),
+      query,
+      'stock-take-variance',
+    );
   }
 
   private async redact(

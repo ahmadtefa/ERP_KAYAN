@@ -38,6 +38,7 @@ describe('print price settings', () => {
         'inventory-valuation',
         'slow-moving',
         'reorder',
+        'stock-take-variance',
         'barcode-labels',
       ]) {
         expect(keys).toContain(key);
