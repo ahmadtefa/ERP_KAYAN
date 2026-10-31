@@ -24,7 +24,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import sharp from 'sharp';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
@@ -159,29 +159,19 @@ function offerFixture() {
 }
 
 /// Renders one page of a PDF to raw RGBA pixels through poppler.
+let sheetSerial = 0;
+
 function rasterise(pdf, directory, page) {
-  const source = join(directory, `sheet-${page}.pdf`);
-  const stem = join(directory, `sheet-${page}`);
+  // Each call gets its own pair of files: two merges of the same overlay would
+  // otherwise write the same name and hand back the wrong sheet.
+  sheetSerial += 1;
+  const source = join(directory, `sheet-${page}-${sheetSerial}.pdf`);
+  const stem = join(directory, `sheet-${page}-${sheetSerial}`);
   writeFileSync(source, pdf);
   execFileSync('pdftoppm', ['-f', String(page), '-l', String(page), '-r', '72', '-png', '-singlefile', source, stem], {
     stdio: 'pipe',
   });
   return sharp(`${stem}.png`).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-}
-
-/// The text the sheet actually carries on one page, as the PDF stores it.
-function pageText(pdf, page) {
-  const source = join(mkdtempSync(join(tmpdir(), 'kayan-text-')), 'sheet.pdf');
-  writeFileSync(source, pdf);
-  try {
-    return execFileSync(
-      'pdftotext',
-      ['-f', String(page), '-l', String(page), source, '-'],
-      { encoding: 'utf8' },
-    ).replace(/\f/g, ' ');
-  } finally {
-    rmSync(dirname(source), { recursive: true, force: true });
-  }
 }
 
 function pixel(raw, info, x, y) {
@@ -278,11 +268,28 @@ async function main() {
       right: Math.round(first.info.width / 2) + 40,
     });
     check('"n / N" is stamped at the bottom centre', footer > 8, `${footer} ink pixels in the footer`);
-    const firstPageText = pageText(merged.pdf, 1);
+    // The stamp is proved by difference rather than by reading the text back:
+    // pdf-lib subsets the font, and an extractor can return the same digits
+    // twice for one drawn string, which says nothing about the sheet. Two
+    // merges of the same overlay - one numbered, one not - differ only by the
+    // stamp, so any extra ink in the footer is the stamp.
+    const unnumbered = await mergeOfferOntoBackground({
+      background: single,
+      overlay,
+      settings: parseBackgroundSettings({ mode: 'REPEAT', showPageNumbers: false }, 1),
+      pageNumber: { y: 8, size: 8 },
+    });
+    const plainSheet = await rasterise(unnumbered.pdf, directory, 1);
+    const plainFooter = await inkIn(plainSheet.data, plainSheet.info, {
+      top: plainSheet.info.height - 26,
+      bottom: plainSheet.info.height - 2,
+      left: Math.round(plainSheet.info.width / 2) - 40,
+      right: Math.round(plainSheet.info.width / 2) + 40,
+    });
     check(
-      'the stamp on the first page of two reads as "1 / 2"',
-      /1\s*\/\s*2/.test(firstPageText),
-      JSON.stringify(firstPageText.trim().slice(-40)),
+      'the stamp is the only difference in the footer of a numbered copy',
+      footer > plainFooter + 6,
+      `${footer} stamped vs ${plainFooter} unnumbered ink pixels`,
     );
 
     const topLeftCorner = pixel(first.data, first.info, 2, 2);

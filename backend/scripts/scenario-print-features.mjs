@@ -271,11 +271,17 @@ async function main() {
     );
   const clerkSheet = await ledgerFor(clerkToken, 'showCost=true&showSalePrice=true');
   const clerkHtml = String(clerkSheet.data ?? '');
-  const unitCost = Number(movement.unitCost);
-  const printedCost = unitCost.toFixed(2);
+  // The sheet prints four decimals. Comparing two would also match the first
+  // two digits of "10.0000", and a check that cannot tell present from absent
+  // is no check at all.
+  const printedCost = Number(movement.unitCost).toFixed(4);
+  const costColumn = /Unit cost|Running value|تكلفة الوحدة|القيمة الجارية/i;
   check(
     'a clerk who asks for the cost in the URL still gets a sheet without it',
-    clerkSheet.status === 200 && clerkHtml.includes('<table') && !clerkHtml.includes(printedCost),
+    clerkSheet.status === 200 &&
+      clerkHtml.includes('<table') &&
+      !clerkHtml.includes(printedCost) &&
+      !costColumn.test(clerkHtml),
     `status ${clerkSheet.status}, cost ${printedCost} ${clerkHtml.includes(printedCost) ? 'present' : 'absent'}`,
   );
   const adminSheet = await ledgerFor(token, 'showCost=true');
@@ -301,7 +307,9 @@ async function main() {
   );
   check(
     'the exported file obeys the same floor as the printed sheet',
-    exportsAfter.status === 200 && !String(exportsAfter.data).includes(printedCost),
+    exportsAfter.status === 200 &&
+      !String(exportsAfter.data).includes(printedCost) &&
+      !costColumn.test(String(exportsAfter.data)),
     `status ${exportsAfter.status}`,
   );
 
@@ -402,14 +410,19 @@ async function main() {
     unitPrice: String(100 + index),
     unit: 'piece',
   }));
+  // An edit replaces the document, so the whole document is sent back with the
+  // artwork fields added: the API validates what it is about to store, and
+  // rightly refuses a body that names no customer and no tables.
+  const offerBody = (extra = {}) => ({
+    quotationDate: today,
+    customerId: customer.id,
+    subject: `Artwork offer ${stamp}`,
+    tables: [{ title: `Printing ${stamp}`, lines }],
+    ...extra,
+  });
   const offer = await must('create an offer with enough lines to overflow a page', '/sales/quotations', {
     method: 'POST',
-    json: {
-      quotationDate: today,
-      customerId: customer.id,
-      subject: `Artwork offer ${stamp}`,
-      tables: [{ title: `Printing ${stamp}`, lines }],
-    },
+    json: offerBody(),
   });
   if (!offer) return false;
 
@@ -426,10 +439,10 @@ async function main() {
 
   const attached = await must('attach the letterhead to the offer', `/sales/quotations/${offer.id}`, {
     method: 'PUT',
-    json: {
+    json: offerBody({
       backgroundFileId: uploaded.id,
       background: { mode: 'REPEAT', showPageNumbers: true, marginMm: { top: 20, bottom: 18, left: 12, right: 12 } },
-    },
+    }),
   });
   check(
     'the offer remembers its letterhead and how to use it',
@@ -449,7 +462,7 @@ async function main() {
 
   await must('switch the offer to the sequence rule', `/sales/quotations/${offer.id}`, {
     method: 'PUT',
-    json: { backgroundFileId: uploaded.id, background: { mode: 'SEQUENCE' } },
+    json: offerBody({ backgroundFileId: uploaded.id, background: { mode: 'SEQUENCE' } }),
   });
   const sequenced = await api(`/sales/quotations/${offer.id}/pdf?lang=ar`);
   const sequenceSizes = Buffer.isBuffer(sequenced.data) ? await pageSizes(sequenced.data) : [];
@@ -463,7 +476,7 @@ async function main() {
 
   await must('detach the letterhead', `/sales/quotations/${offer.id}`, {
     method: 'PUT',
-    json: { backgroundFileId: null, background: null },
+    json: offerBody({ backgroundFileId: null, background: null }),
   });
   const detached = await api(`/sales/quotations/${offer.id}/pdf?lang=en`);
   const detachedSizes = Buffer.isBuffer(detached.data) ? await pageSizes(detached.data) : [];
