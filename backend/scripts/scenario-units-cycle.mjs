@@ -109,9 +109,29 @@ async function main() {
   }
   token = signedIn.data.accessToken;
   const me = await api('/auth/me');
-  const companyId = me.data.companyId;
-  const branchId = me.data.branchId;
-  check('signed in with a company and a branch', Boolean(companyId && branchId));
+  // The session answers under "user"; reading the top level silently produced
+  // two undefined ids and a scenario that blamed the warehouse endpoint.
+  const session = me.data?.user ?? me.data ?? {};
+  const companyId = session.companyId;
+  let branchId = session.branchId ?? null;
+  if (companyId && !branchId) {
+    // An administrator who works across every branch has none of their own.
+    // The cycle needs one real place to receive goods at, so it uses the
+    // company's first branch rather than inventing an id.
+    const [firstBranch] = await prisma.$queryRaw`
+      select id::text as id from branches
+       where "companyId" = ${companyId}::uuid and "deletedAt" is null
+       order by code limit 1`;
+    branchId = firstBranch?.id ?? null;
+  }
+  check(
+    'signed in with a company and a branch',
+    Boolean(companyId && branchId),
+    `company ${String(companyId).slice(0, 8)}, branch ${String(branchId).slice(0, 8)}`,
+  );
+  if (!companyId || !branchId) {
+    throw new Error('the session names no company or branch to run the cycle in');
+  }
 
   // ── fixtures ────────────────────────────────────────────────────────────
   const warehouses = await api('/inventory/warehouses');
