@@ -109,10 +109,19 @@ const _customer = <String, dynamic>{
   'isActive': true,
 };
 
+const _supplier = <String, dynamic>{
+  'id': 'supplier-1',
+  'code': 'SUP-1',
+  'nameEn': 'Test supplier',
+  'nameAr': 'مورد تجريبي',
+  'isActive': true,
+};
+
 Future<_FakeApiClient> _openEditor(
   WidgetTester tester,
-  Map<String, dynamic> item,
-) async {
+  Map<String, dynamic> item, {
+  bool isSales = true,
+}) async {
   tester.view.physicalSize = const Size(1600, 1000);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -126,6 +135,7 @@ Future<_FakeApiClient> _openEditor(
         currentUserProvider.overrideWithValue(testUser),
         activeItemsProvider.overrideWith((ref) async => [item]),
         activeCustomersProvider.overrideWith((ref) async => [_customer]),
+        activeSuppliersProvider.overrideWith((ref) async => [_supplier]),
       ],
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -136,8 +146,9 @@ Future<_FakeApiClient> _openEditor(
               child: TextButton(
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
-                    builder: (_) =>
-                        const InvoiceEditorScreen(kind: InvoiceKind.sales),
+                    builder: (_) => InvoiceEditorScreen(
+                      kind: isSales ? InvoiceKind.sales : InvoiceKind.purchase,
+                    ),
                   ),
                 ),
                 child: const Text('Open editor'),
@@ -154,11 +165,22 @@ Future<_FakeApiClient> _openEditor(
   return api;
 }
 
-/// Picks the customer, then the water item, through the real drop-downs.
-Future<void> _chooseCustomerAndItem(WidgetTester tester) async {
+/// Picks the party, then the water item, through the real drop-downs.
+Future<void> _chooseCustomerAndItem(
+  WidgetTester tester, {
+  bool isSales = true,
+}) async {
   await tester.tap(find.byType(DropdownButtonFormField<String>).at(0));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('CUS-1 — Test customer').last);
+  await tester.tap(
+    find
+        .text(
+          isSales
+              ? 'CUS-1 — Test customer'
+              : 'SUP-1 — Test supplier',
+        )
+        .last,
+  );
   await tester.pumpAndSettle();
 
   await tester.tap(find.byKey(const ValueKey('item-choice-null')));
@@ -252,6 +274,32 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(api.postPath, isNull);
+  });
+
+  testWidgets('buying ten cartons is sent as ten cartons at the carton price', (
+    tester,
+  ) async {
+    final api = await _openEditor(tester, waterItem(), isSales: false);
+    await _chooseCustomerAndItem(tester, isSales: false);
+    await _chooseCarton(tester);
+
+    await tester.enterText(find.byKey(const ValueKey('line-quantity-0')), '10');
+    await tester.pumpAndSettle();
+
+    // Buying is the same sentence as selling: the warehouse will receive a
+    // hundred and twenty bottles against a document of ten cartons.
+    expect(find.text('10 كرتونة = 120 عبوة'), findsOneWidget);
+    // Four a bottle is forty-eight a carton for the purchase side.
+    expect(_priceOf(0, value: '48'), findsOneWidget);
+
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(api.postPath, '/purchases/invoices');
+    final lines = (api.postBody?['lines'] as List).cast<Map>();
+    expect(lines.single['quantity'], '10');
+    expect(lines.single['unitName'], 'كرتونة');
+    expect(lines.single['unitPrice'], '48');
   });
 
   testWidgets('a price typed on purpose survives a unit switch', (
