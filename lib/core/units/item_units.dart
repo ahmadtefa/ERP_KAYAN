@@ -139,9 +139,9 @@ String unitListPrice(Json item, String unitName, {required bool isSales}) {
   final base = entered * factor;
   // Four decimals is the scale the ledger keeps; showing more would claim a
   // precision the stored quantity does not have.
-  final text = formatQuantity(base.toString(), decimals: 4);
+  final baseQuantity = formatQuantity(base.toString(), decimals: 4);
   final baseUnit = text(item, 'unit');
-  return (quantity: text, unit: baseUnit);
+  return (quantity: baseQuantity, unit: baseUnit);
 }
 
 /// A short label for what the conversion is, or an empty string.
