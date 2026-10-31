@@ -110,7 +110,9 @@ export class QuotationBackgroundsService {
         pageWidth: info.pageWidth,
         pageHeight: info.pageHeight,
         sha256: info.sha256,
-        data: file.buffer,
+        // Prisma's Bytes is Uint8Array; a Buffer is Uint8Array<ArrayBufferLike>
+        // and does not narrow to it, so the bytes are copied into a plain view.
+        data: new Uint8Array(file.buffer),
         createdBy: userId,
       },
       select: {
