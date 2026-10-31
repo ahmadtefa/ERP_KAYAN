@@ -24,7 +24,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import sharp from 'sharp';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
@@ -169,6 +169,21 @@ function rasterise(pdf, directory, page) {
   return sharp(`${stem}.png`).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
 }
 
+/// The text the sheet actually carries on one page, as the PDF stores it.
+function pageText(pdf, page) {
+  const source = join(mkdtempSync(join(tmpdir(), 'kayan-text-')), 'sheet.pdf');
+  writeFileSync(source, pdf);
+  try {
+    return execFileSync(
+      'pdftotext',
+      ['-f', String(page), '-l', String(page), source, '-'],
+      { encoding: 'utf8' },
+    ).replace(/\f/g, ' ');
+  } finally {
+    rmSync(dirname(source), { recursive: true, force: true });
+  }
+}
+
 function pixel(raw, info, x, y) {
   const offset = (Math.round(y) * info.width + Math.round(x)) * 4;
   return { r: raw[offset], g: raw[offset + 1], b: raw[offset + 2] };
@@ -184,8 +199,10 @@ function near(colour, target, tolerance = 24) {
 
 async function inkIn(raw, info, box) {
   let ink = 0;
-  for (let y = box.top; y < box.bottom; y += 2) {
-    for (let x = box.left; x < box.right; x += 2) {
+  // Every pixel, not every second one: the stamp is small type on a coloured
+  // band, and a coarse grid steps straight over its strokes.
+  for (let y = box.top; y < box.bottom; y += 1) {
+    for (let x = box.left; x < box.right; x += 1) {
       const colour = pixel(raw, info, x, y);
       const luminance = 0.299 * colour.r + 0.587 * colour.g + 0.114 * colour.b;
       if (luminance < 120) ink += 1;
@@ -261,6 +278,12 @@ async function main() {
       right: Math.round(first.info.width / 2) + 40,
     });
     check('"n / N" is stamped at the bottom centre', footer > 8, `${footer} ink pixels in the footer`);
+    const firstPageText = pageText(merged.pdf, 1);
+    check(
+      'the stamp on the first page of two reads as "1 / 2"',
+      /1\s*\/\s*2/.test(firstPageText),
+      JSON.stringify(firstPageText.trim().slice(-40)),
+    );
 
     const topLeftCorner = pixel(first.data, first.info, 2, 2);
     check(

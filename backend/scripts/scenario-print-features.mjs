@@ -50,28 +50,37 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function api(path, options = {}) {
   const headers = { ...(options.headers ?? {}) };
   const auth = options.token ?? token;
   if (auth) headers.Authorization = `Bearer ${auth}`;
   if (options.json !== undefined) headers['Content-Type'] = 'application/json';
-  const response = await fetch(`${API}${path}`, {
-    method: options.method ?? 'GET',
-    headers,
-    body:
-      options.json !== undefined
-        ? JSON.stringify(options.json)
-        : options.body instanceof FormData
-          ? options.body
-          : options.body,
-  });
-  const type = response.headers.get('content-type') ?? '';
-  const data = type.includes('application/json')
-    ? await response.json().catch(() => null)
-    : type.startsWith('application/pdf')
-      ? Buffer.from(await response.arrayBuffer())
-      : await response.text();
-  return { status: response.status, data, type };
+  // A scenario signs in several times, and the program throttles that on
+  // purpose. Waiting for the moment it names is how the scenario tests the
+  // product instead of testing the throttle.
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch(`${API}${path}`, {
+      method: options.method ?? 'GET',
+      headers,
+      body: options.json !== undefined ? JSON.stringify(options.json) : options.body,
+    });
+    const type = response.headers.get('content-type') ?? '';
+    const data = type.includes('application/json')
+      ? await response.json().catch(() => null)
+      : type.startsWith('application/pdf')
+        ? Buffer.from(await response.arrayBuffer())
+        : await response.text();
+    if (response.status !== 429 || attempt >= 6) {
+      if (response.status === 429) {
+        console.log(`  WAIT  ${path} stayed throttled after ${attempt} attempts`);
+      }
+      return { status: response.status, data, type };
+    }
+    const seconds = Number(/(\d+)\s*second/.exec(String(data?.detail ?? ''))?.[1] ?? 5);
+    await sleep(Math.min(seconds + 1, 90) * 1000);
+  }
 }
 
 async function must(label, path, options = {}) {
@@ -309,6 +318,7 @@ async function main() {
     method: 'POST',
     body: form,
   });
+  if (!uploaded) return false;
   check(
     'the upload is measured from the file itself',
     uploaded?.pageCount === 2 &&
