@@ -53,6 +53,46 @@ class _PhoneBrowserNoticeState extends State<PhoneBrowserNotice> {
 
     final l10n = context.l10n;
     final scheme = Theme.of(context).colorScheme;
+    final message = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          Icons.phonelink_off_outlined,
+          size: 20,
+          color: scheme.onSecondaryContainer,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                l10n.phoneBrowserNoticeTitle,
+                style: Theme.of(
+                  context,
+                ).textTheme.labelLarge?.copyWith(
+                  color: scheme.onSecondaryContainer,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                l10n.phoneBrowserNoticeBody,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(
+                  color: scheme.onSecondaryContainer,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    final action = TextButton(
+      onPressed: () => setState(() => _dismissed = true),
+      child: Text(l10n.phoneBrowserNoticeDismiss),
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -60,41 +100,43 @@ class _PhoneBrowserNoticeState extends State<PhoneBrowserNotice> {
           color: scheme.secondaryContainer,
           child: SafeArea(
             bottom: false,
-            child: Padding(
-              padding: const EdgeInsetsDirectional.fromSTEB(16, 10, 8, 10),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.phonelink_off_outlined,
-                    size: 20,
-                    color: scheme.onSecondaryContainer,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+            // The banner may never take the screen it is warning about: it is
+            // capped and scrolls, so a small window or a large accessibility
+            // text size can make it tight but not broken.
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * 0.4,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsetsDirectional.fromSTEB(16, 10, 8, 10),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Beside the text the dismiss button is 300 pixels of
+                    // Arabic on a 390-pixel phone, which left the sentence two
+                    // characters wide. Under this width the action moves
+                    // below the sentence instead.
+                    if (constraints.maxWidth >= 640) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: message),
+                          const SizedBox(width: 8),
+                          action,
+                        ],
+                      );
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text(
-                          l10n.phoneBrowserNoticeTitle,
-                          style: Theme.of(context).textTheme.labelLarge
-                              ?.copyWith(color: scheme.onSecondaryContainer),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          l10n.phoneBrowserNoticeBody,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: scheme.onSecondaryContainer),
+                        message,
+                        Align(
+                          alignment: AlignmentDirectional.centerEnd,
+                          child: action,
                         ),
                       ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: () => setState(() => _dismissed = true),
-                    child: Text(l10n.phoneBrowserNoticeDismiss),
-                  ),
-                ],
+                    );
+                  },
+                ),
               ),
             ),
           ),

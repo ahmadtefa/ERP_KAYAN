@@ -86,4 +86,48 @@ void main() {
     );
     expect(find.text('المتابعة على أي حال'), findsOneWidget);
   });
+
+  // Regression: the longest Arabic sentence next to the dismiss button left
+  // the text two characters wide and the banner 366 pixels taller than the
+  // phone screen it was warning about.
+  for (final width in <double>[320, 360, 390, 430]) {
+    testWidgets('the Arabic banner fits a ${width.toInt()} pixel phone', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        isWeb: true,
+        locale: const Locale('ar'),
+        size: Size(width, 700),
+      );
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('المتابعة على أي حال'), findsOneWidget);
+      expect(find.text('INVOICE-SCREEN'), findsOneWidget);
+    });
+  }
+
+  testWidgets('the banner survives a large accessibility text size', (
+    tester,
+  ) async {
+    await pump(tester, isWeb: true, size: const Size(320, 640));
+    await tester.pumpWidget(
+      wrapWithApp(
+        child: MediaQuery(
+          data: const MediaQueryData(
+            size: Size(320, 640),
+            textScaler: TextScaler.linear(2),
+          ),
+          child: PhoneBrowserNotice(
+            isWeb: true,
+            child: const Scaffold(body: Center(child: Text('INVOICE-SCREEN'))),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('INVOICE-SCREEN'), findsOneWidget);
+  });
 }
