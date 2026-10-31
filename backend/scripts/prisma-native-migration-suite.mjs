@@ -484,6 +484,18 @@ async function phase5PopulatedUpgrade({ names }) {
     nameAr: 'صنف قديم',
     salePrice: '125.5000',
   });
+  // A posting trigger in this schema refuses an invoice whose date has no fiscal
+  // period, which is the real accounting rule: proving the upgrade means the
+  // seeded data has to be data the schema itself accepts.
+  await insertRow(url, 'fiscal_periods', {
+    companyId: company.id,
+    code: 'FY2026',
+    nameEn: 'Fiscal year 2026',
+    nameAr: 'السنة المالية ٢٠٢٦',
+    startDate: '2026-01-01',
+    endDate: '2026-12-31',
+    status: 'OPEN',
+  });
   // A historical invoice in a terminal status ("POSTED" is the terminal member of
   // the InvoiceStatus enum this schema shipped with), the shape of data that must
   // never be rewritten by an upgrade.
@@ -493,6 +505,8 @@ async function phase5PopulatedUpgrade({ names }) {
     customerId: customer.id,
     invoiceNumber: 'LEGACY-INV-1',
     status: 'POSTED',
+    invoiceDate: '2026-01-15',
+    totalAmount: '125.5000',
   });
   note(`seeded company ${company.code}, item ${item.code}, invoice ${invoice.invoiceNumber}`);
 
