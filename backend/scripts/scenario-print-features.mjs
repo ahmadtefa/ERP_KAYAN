@@ -659,6 +659,50 @@ async function main() {
     `status ${policyAfterRestore.status}`,
   );
 
+  // ── 7. the company's own JSON file carries the artwork and the policy ─
+  // The full dump above is the database's copy. This is the company file a
+  // person downloads to move the books to another machine, and it is a
+  // different format: JSON has no binary type, so the artwork has to travel as
+  // base64 and the policy as rows. Both were missing before version 2, and a
+  // file that looks complete while dropping them is how a new machine ends up
+  // printing every sheet with costs the company had hidden.
+  const companyFile = await api('/backup/download');
+  // The route answers with JSON, so the helper has already parsed it.
+  const parsed = (() => {
+    if (companyFile.data && typeof companyFile.data === 'object') return companyFile.data;
+    try {
+      return JSON.parse(String(companyFile.data ?? ''));
+    } catch {
+      return null;
+    }
+  })();
+  check(
+    'the company backup downloads as readable JSON',
+    companyFile.status === 200 && parsed?.format === 'kayan-backup',
+    `status ${companyFile.status}`,
+  );
+  const storedArtwork = parsed?.tables?.quotationBackground?.find(
+    (row) => row.id === uploaded.id,
+  );
+  check(
+    'the company file carries the letterhead artwork, as base64 under its marker',
+    typeof storedArtwork?.data === 'string' &&
+      storedArtwork.data === `base64:${pdf.toString('base64')}`,
+    `${typeof storedArtwork?.data === 'string' ? storedArtwork.data.length : 0} chars`,
+  );
+  check(
+    'the company file carries the print policy it was saved with',
+    parsed?.tables?.printPriceSetting?.some?.(
+      (row) => row.documentType === 'sales-quotation' && row.showSalePrice === false,
+    ) === true,
+    `${parsed?.tables?.printPriceSetting?.length ?? 0} rows`,
+  );
+  check(
+    'the company file says which format it is, so an older program refuses it clearly',
+    parsed?.version === 2,
+    `version ${parsed?.version}`,
+  );
+
   return true;
 }
 

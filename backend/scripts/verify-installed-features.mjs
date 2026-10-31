@@ -92,12 +92,12 @@ async function pageSizes(pdf) {
   });
 }
 
-async function letterhead() {
+async function letterhead({ width = 600, height = 800, secondWidth = 620, secondHeight = 820 } = {}) {
   const document = await PDFDocument.create();
-  const first = document.addPage([600, 800]);
-  first.drawRectangle({ x: 0, y: 720, width: 600, height: 80, color: { type: 'RGB', red: 0.86, green: 0.06, blue: 0.52 } });
-  const second = document.addPage([620, 820]);
-  second.drawRectangle({ x: 0, y: 740, width: 620, height: 80, color: { type: 'RGB', red: 0.86, green: 0.06, blue: 0.52 } });
+  const first = document.addPage([width, height]);
+  first.drawRectangle({ x: 0, y: height - 80, width, height: 80, color: { type: 'RGB', red: 0.86, green: 0.06, blue: 0.52 } });
+  const second = document.addPage([secondWidth, secondHeight]);
+  second.drawRectangle({ x: 0, y: secondHeight - 80, width: secondWidth, height: 80, color: { type: 'RGB', red: 0.86, green: 0.06, blue: 0.52 } });
   return Buffer.from(await document.save());
 }
 
@@ -348,6 +348,94 @@ async function verifyArtwork() {
     'F1: a price-free copy of the offer carries no figures, artwork or not',
     hiddenCopy.status === 200 && !String(hiddenCopy.data).includes('100.00'),
     `status ${hiddenCopy.status}`,
+  );
+
+  // ── the rest of the library's life: rename, replace, detach, delete ──
+  const renamed = await api(`/sales/quotation-backgrounds/${uploaded.id}`, {
+    method: 'PUT',
+    json: { name: `Renamed letterhead ${stamp}` },
+  });
+  check(
+    'F1: the attached letterhead can be renamed without losing its bytes',
+    renamed.status === 200 && renamed.data?.name === `Renamed letterhead ${stamp}`,
+    `status ${renamed.status}, name ${renamed.data?.name}`,
+  );
+
+  // Replacing is attaching another file: the offer has to print on the new
+  // one, not on the one it was pointing at before.
+  const other = await letterhead({ width: 500, height: 700 });
+  const otherForm = new FormData();
+  otherForm.append('name', `Replacement letterhead ${stamp}`);
+  otherForm.append('file', new Blob([other], { type: 'application/pdf' }), `replacement-${stamp}.pdf`);
+  const replacement = await must('F1: upload the replacement letterhead', '/sales/quotation-backgrounds', {
+    method: 'POST',
+    body: otherForm,
+  });
+  if (replacement) {
+    await must('F1: attach the replacement', `/sales/quotations/${offer.id}`, {
+      method: 'PUT',
+      json: body({ backgroundFileId: replacement.id, background: { mode: 'REPEAT' } }),
+    });
+    const replacedPdf = await api(`/sales/quotations/${offer.id}/pdf?lang=en`);
+    const replacedSizes = Buffer.isBuffer(replacedPdf.data) ? await pageSizes(replacedPdf.data) : [];
+    check(
+      'F1: the replaced letterhead is the sheet the offer now prints on',
+      replacedPdf.status === 200 &&
+        replacedSizes.length === plainSizes.length &&
+        replacedSizes.every((size) => Math.abs(size[0] - 500) < 1 && Math.abs(size[1] - 700) < 1),
+      replacedSizes.map((size) => size.join('x')).join(' '),
+    );
+  }
+
+  // Detaching puts the offer back on its drawn design.
+  await must('F1: detach the letterhead', `/sales/quotations/${offer.id}`, {
+    method: 'PUT',
+    json: body({ backgroundFileId: null }),
+  });
+  const detachedPdf = await api(`/sales/quotations/${offer.id}/pdf?lang=en`);
+  const detachedSizes = Buffer.isBuffer(detachedPdf.data) ? await pageSizes(detachedPdf.data) : [];
+  check(
+    'F1: detaching returns the offer to its drawn sheet',
+    detachedPdf.status === 200 && Math.abs(detachedSizes[0]?.[0] - 595.3) < 2,
+    `${detachedSizes[0]?.join('x') ?? 'no page'}`,
+  );
+
+  // Deleting the replacement removes it from the library, and the offer that
+  // no longer names it still prints.
+  if (replacement) {
+    const removed = await api(`/sales/quotation-backgrounds/${replacement.id}`, { method: 'DELETE' });
+    const list = await api('/sales/quotation-backgrounds');
+    const ids = (Array.isArray(list.data) ? list.data : []).map((row) => row.id);
+    check(
+      'F1: a letterhead can be deleted and leaves the library',
+      removed.status === 200 && !ids.includes(replacement.id) && ids.includes(uploaded.id),
+      `status ${removed.status}, ${ids.length} left`,
+    );
+  }
+
+  // The company file is the copy a person moves to another machine. It is
+  // JSON, so the artwork has to be in it - a file that looks complete and
+  // drops the letterhead is how the new machine prints on blank paper.
+  const companyFile = await api('/backup/download');
+  // The route answers with JSON, so the helper has already parsed it; a text
+  // body is still accepted in case the content type ever changes.
+  const parsedFile = (() => {
+    if (companyFile.data && typeof companyFile.data === 'object' && !Buffer.isBuffer(companyFile.data)) {
+      return companyFile.data;
+    }
+    try {
+      return JSON.parse(String(companyFile.data ?? ''));
+    } catch {
+      return null;
+    }
+  })();
+  const carried = parsedFile?.tables?.quotationBackground?.find((row) => row.id === uploaded.id);
+  check(
+    'F1: the installed company backup carries the letterhead itself',
+    companyFile.status === 200 &&
+      typeof carried?.data === 'string' &&
+      carried.data === `base64:${pdf.toString('base64')}`,
+    `version ${parsedFile?.version ?? 'n/a'}, ${typeof carried?.data === 'string' ? carried.data.length : 0} chars`,
   );
 }
 
