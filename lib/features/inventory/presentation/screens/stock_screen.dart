@@ -15,6 +15,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
+import '../../../data/presentation/widgets/print_visibility_prompt.dart';
 
 class StockController extends JsonListController {
   @override
@@ -228,6 +229,49 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
     final links = ref.read(reportLinkProvider);
     final filters = {'itemId': widget.itemId};
 
+    // The movement sheet carries the unit cost of every line, so it asks the
+    // same question every other print asks - and the server answers it again
+    // against the caller's permission, whatever this dialog said.
+    Future<void> printLedger() async {
+      final visibility = await promptPriceVisibility(
+        context,
+        ref,
+        typeKey: 'stock-ledger',
+        arabic: language == 'ar',
+      );
+      if (visibility == null || !context.mounted) return;
+      await runPrint(
+        context,
+        links.listPrint(
+          list: 'stock-ledger',
+          language: language,
+          filters: filters,
+          showSalePrice: visibility.showSalePrice,
+          showCost: visibility.showCost,
+        ),
+      );
+    }
+
+    Future<void> downloadLedgerPdf() async {
+      final visibility = await promptPriceVisibility(
+        context,
+        ref,
+        typeKey: 'stock-ledger',
+        arabic: language == 'ar',
+      );
+      if (visibility == null || !context.mounted) return;
+      await runDownload(
+        context,
+        links.listPdf(
+          list: 'stock-ledger',
+          language: language,
+          filters: filters,
+          showSalePrice: visibility.showSalePrice,
+          showCost: visibility.showCost,
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 4, 18, 18),
       child: Column(
@@ -248,26 +292,12 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
             spacing: 8,
             children: [
               OutlinedButton.icon(
-                onPressed: () => runPrint(
-                  context,
-                  links.listPrint(
-                    list: 'stock-ledger',
-                    language: language,
-                    filters: filters,
-                  ),
-                ),
+                onPressed: printLedger,
                 icon: const Icon(Icons.print_outlined, size: 18),
                 label: Text(l10n.printPreview),
               ),
               OutlinedButton.icon(
-                onPressed: () => runDownload(
-                  context,
-                  links.listPdf(
-                    list: 'stock-ledger',
-                    language: language,
-                    filters: filters,
-                  ),
-                ),
+                onPressed: downloadLedgerPdf,
                 icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
                 label: Text(l10n.exportPdf),
               ),

@@ -263,6 +263,31 @@ jobs:
             exit 1
           fi
 
+          # The packing-unit cycle is arithmetic nobody can eyeball: 10 cartons
+          # of 12, issued and transferred and counted, then a factor changed
+          # afterwards. It reads the database directly rather than trusting the
+          # API's own answer, and it runs here - on a disposable database, past
+          # every other scenario - because it deliberately leaves stock behind.
+          echo "Running the multi-unit cycle: pieces, cartons and rolls through receipts, issues, transfers, counts and a factor change..."
+          if ! DATABASE_URL="$DATABASE_URL" ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-units-cycle.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after unit cycle failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          # The print policy and the attached artwork, through the real HTTP
+          # API: a saved setting, a role without inventory.cost.read, a
+          # letterhead that is uploaded and then really is the sheet, and a
+          # damaged file that must be refused rather than crash a screen.
+          echo "Running the print policy and artwork scenario: saved settings, the cost floor, artwork upload, print and detach..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-print-features.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after print/artwork scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
       - name: Verify the PostgreSQL client tools used by the backup checks
         run: |
           pg_dump --version
