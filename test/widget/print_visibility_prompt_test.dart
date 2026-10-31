@@ -1,6 +1,6 @@
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
-import 'package:erp_kayan/features/data/presentation/widgets/print_visibility_dialog.dart';
+import 'package:erp_kayan/features/data/presentation/widgets/price_visibility_dialog.dart';
 import 'package:erp_kayan/features/data/presentation/widgets/print_visibility_prompt.dart';
 import 'package:erp_kayan/features/settings/data/print_settings_data_source.dart';
 import 'package:erp_kayan/features/settings/presentation/providers/print_settings_providers.dart';
