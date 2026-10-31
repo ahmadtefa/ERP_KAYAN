@@ -149,6 +149,24 @@ export class QuotationsController {
     @Res() response: Response,
   ): Promise<void> {
     const lang = query.lang === 'ar' ? 'ar' : 'en';
+
+    // A page with no artwork is the drawn design: the browser prints it, and
+    // its own print dialogue handles the sheet. Artwork cannot be printed that
+    // way - a browser drops a page background it was not given as content, and
+    // the artwork would silently vanish from the paper. So the offer is merged
+    // onto the artwork first and the viewer prints one finished file.
+    const artwork = await this.service.renderArtworkPdf(user.companyId, id, lang);
+    if (artwork) {
+      response.setHeader('Content-Type', 'application/pdf');
+      response.setHeader(
+        'Content-Disposition',
+        `inline; filename="${quotationDocumentFileName(artwork.quotationNumber, id)}"`,
+      );
+      response.setHeader('Cache-Control', 'no-store');
+      response.send(artwork.pdf);
+      return;
+    }
+
     const html = await this.service.printHtml(
       user.companyId,
       id,
@@ -173,6 +191,22 @@ export class QuotationsController {
     @Res() response: Response,
   ): Promise<void> {
     const lang = query.lang === 'ar' ? 'ar' : 'en';
+
+    const artwork = await this.service.renderArtworkPdf(user.companyId, id, lang);
+    if (artwork) {
+      response.setHeader('Content-Type', 'application/pdf');
+      response.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${quotationDocumentFileName(
+          artwork.quotationNumber,
+          id,
+        )}"`,
+      );
+      response.setHeader('Cache-Control', 'no-store');
+      response.send(artwork.pdf);
+      return;
+    }
+
     const document = await this.service.printDocument(
       user.companyId,
       id,

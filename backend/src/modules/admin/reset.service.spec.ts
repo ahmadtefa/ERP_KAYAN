@@ -40,6 +40,9 @@ describe('ResetService', () => {
   const MODELS = [
     'cashVoucherAllocation',
     'quotation',
+    // The artwork is cleared straight after the offers that name it, before
+    // the tables those offers hang off.
+    'quotationBackground',
     'cashVoucher',
     'cashTransfer',
     'bankReconciliation',
@@ -178,6 +181,10 @@ describe('ResetService', () => {
       // The offers and the money vouchers are business data too: the warning
       // has to name them, so the stub counts them.
       quotation: { count: async () => 1 },
+      // The artwork offers print on is company data too, so the reset clears
+      // it; the stub has to know about it for the same reason it knows about
+      // the offers themselves.
+      quotationBackground: { count: async () => 0, deleteMany: async () => ({ count: 1 }) },
       cashVoucher: { count: async () => 2 },
       stockMovement: { count: async () => 7 },
       fiscalPeriod: { count: async () => 1 },

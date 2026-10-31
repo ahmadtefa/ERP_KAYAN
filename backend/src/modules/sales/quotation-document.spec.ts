@@ -419,3 +419,70 @@ describe('quotation document template', () => {
     expect(html.split('1,420.00 EGP').length - 1).toBe(1);
   });
 });
+
+/// The attached-artwork sheet.
+///
+/// These pin the part of the feature a person would notice if it broke: the
+/// page is the artwork's own size (never A4 stretched over a letterhead), the
+/// drawn design is not painted on top of the company's letterhead, and the
+/// offer's own text still starts inside the margins the template asked for.
+describe('renderQuotationDocument on attached artwork', () => {
+  it('uses the artwork page box as the sheet, and paints no drawn design', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false, {
+      widthMm: 210,
+      heightMm: 297,
+      marginMm: { top: 20, bottom: 18, left: 12, right: 12 },
+    });
+
+    expect(html).toContain('@page { size: 210mm 297mm; margin: 0; }');
+    expect(html).not.toContain('A4 portrait');
+    // No drawn letterhead: no bands, no watermark, no inlined logo image.
+    expect(html).not.toContain('class="page-bg"');
+    expect(html).not.toContain('class="watermark"');
+    expect(html).not.toContain('data:image/png;base64');
+    expect(html).toContain('body { background: transparent; }');
+  });
+
+  it('keeps a landscape artwork landscape instead of forcing A4 portrait', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'en', false, {
+      widthMm: 297,
+      heightMm: 210,
+      marginMm: { top: 15, bottom: 15, left: 10, right: 10 },
+    });
+    expect(html).toContain('@page { size: 297mm 210mm; margin: 0; }');
+  });
+
+  it('reserves the template margins for the artwork header and footer', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false, {
+      widthMm: 210,
+      heightMm: 297,
+      marginMm: { top: 32, bottom: 26, left: 18, right: 18 },
+    });
+    expect(html).toContain('width: 174mm');
+    expect(html).toContain('height: 32mm');
+    expect(html).toContain('height: 26mm');
+    expect(html).toContain('margin-inline-start: 18mm');
+    expect(html).toContain('margin-inline-end: 18mm');
+  });
+
+  it('still prints the customer, the lines, the totals and the Arabic', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false, {
+      widthMm: 210,
+      heightMm: 297,
+      marginMm: { top: 20, bottom: 18, left: 12, right: 12 },
+    });
+    expect(html).toContain('dir="rtl"');
+    expect(html).toContain('lang="ar"');
+    expect(html).toContain('دلتا للهندسة');
+    expect(html).toContain('QT-2026-0007');
+    expect(html).toContain('1,420.00 EGP');
+    expect(html).toContain('class="items"');
+  });
+
+  it('leaves the drawn design untouched when no artwork is attached', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false);
+    expect(html).toContain('@page { size: A4 portrait; margin: 0; }');
+    expect(html).toContain('class="page-bg"');
+    expect(html).toContain('class="watermark"');
+  });
+});

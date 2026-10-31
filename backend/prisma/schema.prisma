@@ -85,6 +85,7 @@ model Company {
   fiscalPeriods FiscalPeriod[]
   quotations    Quotation[]
   quotationTermTemplates QuotationTermTemplate[]
+  quotationBackgrounds QuotationBackground[]
   quotationColumnTemplates QuotationColumnTemplate[]
 
   warehouses     Warehouse[]
@@ -1835,6 +1836,12 @@ model Quotation {
   /// العرض ويُستعاد عند الطباعة أو المعاينة.
   design        Json? @default("{}")
 
+  /// The PDF artwork this offer prints on, and how its pages are used. Both
+  /// are snapshotted with the issued content, so an offer reprints exactly as
+  /// it was sent even after the template or the file is replaced.
+  backgroundFileId String? @db.Uuid
+  background       Json?
+
   /// Who signs the offer. Taken from the company profile or typed on the
   /// quotation, and snapshotted when it is issued.
   managerName       String?
@@ -1869,6 +1876,7 @@ model Quotation {
   branch           Branch          @relation(fields: [branchId], references: [id], onDelete: Restrict)
   customer         Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
   convertedInvoice SalesInvoice?   @relation(fields: [convertedInvoiceId], references: [id], onDelete: Restrict)
+  backgroundFile   QuotationBackground? @relation(fields: [backgroundFileId], references: [id], onDelete: SetNull)
   revisionOf       Quotation?      @relation("QuotationRevisions", fields: [revisionOfId], references: [id], onDelete: Restrict)
   revisions        Quotation[]     @relation("QuotationRevisions")
   tables           QuotationTable[]
@@ -2394,4 +2402,46 @@ model LicenseEvent {
 
   @@index([licenseId, occurredAt])
   @@map("license_events")
+}
+
+// ------------------------------------------------- quotation backgrounds
+
+/// A PDF the company supplies and prints its offers on.
+///
+/// The bytes live in the database, exactly like the company logo and for the
+/// same reason: a full backup carries the artwork, a restore brings it back,
+/// and no directory on an operator's machine can lose it. Nothing in the
+/// printed sheet points at a network location, so printing works offline.
+model QuotationBackground {
+  id        String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+
+  /// What the operator called it, e.g. "ورق الشركة 2026".
+  name String @db.VarChar(160)
+
+  /// Always application/pdf today; recorded so a reader never has to guess,
+  /// and so a future format is an explicit decision rather than an assumption.
+  mimeType String @default("application/pdf") @db.VarChar(64)
+
+  /// What was accepted, and what was measured from the file itself.
+  byteSize   Int
+  pageCount  Int
+  pageWidth  Float
+  pageHeight Float
+
+  /// The digest of the bytes as stored: attaching the same artwork twice is
+  /// recognisable, and bytes swapped behind the row would be noticed.
+  sha256 String @db.Char(64)
+
+  data Bytes
+
+  createdAt DateTime  @default(now())
+  createdBy String?   @db.Uuid
+  deletedAt DateTime?
+
+  company    Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  quotations Quotation[]
+
+  @@index([companyId])
+  @@map("quotation_backgrounds")
 }

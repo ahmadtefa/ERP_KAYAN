@@ -338,6 +338,15 @@ export class ResetService {
             });
             return count;
           });
+          // The artwork the offers printed on lives in the database, so a
+          // reset that promises to remove the company's documents must remove
+          // it too - once the offers that named it are gone.
+          await step('quotationBackgrounds', async () => {
+            const { count } = await tx.quotationBackground.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
           // Rows written before the offers were rebuilt live in two tables no
           // model knows about any more, but the same restrictive constraints
           // still apply to them. They belong to the company being cleared.

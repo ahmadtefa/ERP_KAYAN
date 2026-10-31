@@ -87,6 +87,13 @@ export interface QuotationSnapshot {
     /// VAT charged on the discounted net value. Applied exactly once.
     taxAmount?: string;
   };
+  /// The attached PDF this offer prints on, frozen when it was issued. Absent
+  /// or null means the drawn design, which is what every offer written before
+  /// artwork existed carries.
+  background?: {
+    fileId: string;
+    settings: Record<string, unknown>;
+  } | null;
 }
 
 /// The live company row used only for the mark. Every other company field in
@@ -300,6 +307,15 @@ export const QUOTATION_FOOTER_INSET_MM = 9.5;
 /// and both are inside the {@link QUOTATION_BOTTOM_BAND_MM} band.
 export const QUOTATION_PAGE_NUMBER = { y: 10, size: 9 };
 
+/// The same footer line, but placed against artwork the company designed.
+///
+/// The drawn design has a 26 mm band and a legal line at 9.5 mm, so its number
+/// sits at 10 pt. Artwork has whatever footer its designer drew, which is why
+/// the figure is a separate constant: it can be moved without touching the
+/// drawn sheet, and the template's own margins keep the offer's text clear of
+/// it.
+export const QUOTATION_ARTWORK_PAGE_NUMBER = { y: 8, size: 8 };
+
 export interface PageNumberInk {
   r: number;
   g: number;
@@ -343,16 +359,49 @@ export function quotationPageNumberInk(
 /// The visual identity follows the Stitch reference (primary #1e60aa,
 /// secondary #0088cc, accent #e67e22, right-to-left Arabic) while keeping
 /// the structural hooks the Flutter preview and the document tests rely on.
+/// The sheet an offer is laid out on when the company prints on its own
+/// attached PDF artwork.
+///
+/// The size is the artwork's own page box, converted to millimetres, so the
+/// browser lays the offer out on exactly the paper the artwork was designed
+/// for. The margins are where the artwork's own letterhead and footer live;
+/// the offer's text starts below them and stops above them.
+export interface QuotationSheetMode {
+  widthMm: number;
+  heightMm: number;
+  marginMm: { top: number; bottom: number; left: number; right: number };
+}
+
 export function renderQuotationDocument(
   content: QuotationSnapshot,
   company: QuotationDocumentCompanyMark,
   lang: 'en' | 'ar',
   autoPrint: boolean,
+  sheet?: QuotationSheetMode | null,
 ): string {
   const rtl = lang === 'ar';
   const L = (en: string, ar: string) => (rtl ? ar : en);
   const numAlign = rtl ? 'left' : 'right';
   const money = (value: string) => `${amount(value)} ${content.currency}`;
+
+  // With attached artwork the sheet is the artwork's: its page box decides the
+  // paper size, its margins decide where the offer's text may live, and the
+  // drawn bands/watermark/logo are left out entirely - painting them over the
+  // company's own letterhead would be drawing a second letterhead on top of it.
+  const artwork = sheet ?? null;
+  const pageCss = artwork
+    ? `${artwork.widthMm}mm ${artwork.heightMm}mm`
+    : 'A4 portrait';
+  const contentWidthMm = artwork
+    ? Math.max(artwork.widthMm - artwork.marginMm.left - artwork.marginMm.right, 20)
+    : 186;
+  const headerGapMm = artwork
+    ? artwork.marginMm.top
+    : QUOTATION_TOP_BAND_MM + 4;
+  const footerGapMm = artwork
+    ? artwork.marginMm.bottom
+    : QUOTATION_BOTTOM_BAND_MM + 3;
+  const sheetBackground = artwork ? 'transparent' : '#f3f4f6';
 
   const logo =
     company.logoData && company.logoData.length > 0
@@ -621,8 +670,9 @@ export function renderQuotationDocument(
 <style>
 ${NASKH_FONT_FACE}
   /* The sheet is the whole page: the design owns the margins, so the fixed
-     background can reach the paper's edge. */
-  @page { size: A4 portrait; margin: 0; }
+     background can reach the paper's edge. When the company attached its own
+     artwork, the page box is the artwork's own - never A4 stretched over it. */
+  @page { size: ${pageCss}; margin: 0; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
@@ -631,7 +681,7 @@ ${NASKH_FONT_FACE}
     color: ${INK};
     font-size: 9.5pt;
     line-height: 1.45;
-    background: #f3f4f6;
+    background: ${sheetBackground};
     position: relative;
   }
   .toolbar { position: relative; z-index: 3; display: flex; gap: 8px; justify-content: flex-end; padding: 10px 4px; background: #ffffff; }
@@ -693,11 +743,18 @@ ${NASKH_FONT_FACE}
      table, not in the cell's padding: padding is applied to the first fragment
      of a row only, so a row that runs onto a second page would otherwise
      widen to the paper's edge there. */
-  table.page-flow { position: relative; z-index: 1; width: 186mm; margin: 0 auto; border-collapse: collapse; table-layout: fixed; }
+  table.page-flow {
+    position: relative; z-index: 1; width: ${contentWidthMm}mm;
+    margin-block: 0; margin-inline-start: ${artwork ? artwork.marginMm.left : 0}mm;
+    margin-inline-end: ${artwork ? artwork.marginMm.right : 0}mm;
+    border-collapse: collapse; table-layout: fixed;
+  }
+  ${artwork ? '' : 'table.page-flow { margin-left: auto; margin-right: auto; }'}
   /* The two bands, plus a little air: the header and footer groups repeat on
-     every page, so the gap they leave is repeated too. */
-  .page-flow > thead > tr > td { height: ${QUOTATION_TOP_BAND_MM + 4}mm; padding: 0; }
-  .page-flow > tfoot > tr > td { height: ${QUOTATION_BOTTOM_BAND_MM + 3}mm; padding: 0; }
+     every page, so the gap they leave is repeated too. With artwork the gap is
+     the artwork's own margin, so the offer's text never sits in the letterhead. */
+  .page-flow > thead > tr > td { height: ${headerGapMm}mm; padding: 0; }
+  .page-flow > tfoot > tr > td { height: ${footerGapMm}mm; padding: 0; }
   .page-flow > tbody > tr > td { padding: 0; vertical-align: top; }
 
   .title-band { text-align: center; padding: 1mm 0 3mm; }
@@ -766,11 +823,15 @@ ${NASKH_FONT_FACE}
   /* On screen the design sits at the top of the sheet instead of sticking to
      the viewport; the print pipeline is the only place it repeats. */
   @media screen {
-    body { width: 210mm; margin: 0 auto; background: #e9edf3; }
-    .page-bg { position: absolute; }
+    body {
+      width: ${artwork ? `${artwork.widthMm}mm` : '210mm'};
+      margin: 0 auto;
+      background: ${artwork ? '#e9edf3' : '#e9edf3'};
+    }
+    ${artwork ? '' : '.page-bg { position: absolute; }'}
   }
   @media print {
-    body { background: #fff; }
+    body { background: ${artwork ? 'transparent' : '#fff'}; }
     .toolbar { display: none; }
     .items thead { display: table-header-group; }
     /* One subtotal per section, not one per printed fragment. */
@@ -785,7 +846,7 @@ ${designCss(content.design)}
 </head>
 <body>
 ${
-  autoPrint
+  autoPrint || artwork
     ? ''
     : `<div class="toolbar">
          <button class="primary" onclick="window.print()">${L(
@@ -794,7 +855,12 @@ ${
          )}</button>
        </div>`
 }
-<!-- The page design. Fixed, so Chromium repeats it on every printed page;
+${
+  artwork
+    ? `<!-- The company's own PDF is the background: this page carries the offer
+       only, and the merge draws it on top of the artwork. Painting the drawn
+       design here would cover the letterhead the company supplied. -->`
+    : `<!-- The page design. Fixed, so Chromium repeats it on every printed page;
      everything below is drawn on top of it. -->
 <div class="page-bg" aria-hidden="true">
   <div class="band band-top">
@@ -822,7 +888,7 @@ ${
       <div class="legal">${legalLine}</div>
     </footer>
   </div>
-</div>
+</div>`}
 
 <table class="page-flow">
   <thead><tr><td></td></tr></thead>
