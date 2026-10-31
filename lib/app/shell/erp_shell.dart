@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/providers/auth_providers.dart';
+import '../../features/licensing/presentation/widgets/licence_gate.dart';
 import '../../features/search/presentation/search_dialog.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
@@ -141,7 +142,12 @@ class _ErpShellState extends ConsumerState<ErpShell> {
                     isWide: isWide,
                     isExtended: isExtended,
                   ),
-                  Expanded(child: widget.child),
+                  Expanded(
+                    child: LicenceGate(
+                      currentPath: widget.currentPath,
+                      child: widget.child,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -275,6 +281,17 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         AppRoutes.stock,
         Icons.inventory_2_outlined,
         l10n.stock,
+        permissions: const ['inventory.stock.read'],
+        group: _NavGroup.inventory,
+      ),
+      _NavItem(
+        AppRoutes.stockDocuments,
+        Icons.assignment_outlined,
+        // No catalogue key yet: the label is written where it is used rather
+        // than regenerating the localisations for one screen.
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'المستندات المخزنية'
+            : 'Stock documents',
         permissions: const ['inventory.stock.read'],
         group: _NavGroup.inventory,
       ),

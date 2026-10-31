@@ -13,7 +13,7 @@ import '../../../inventory/presentation/screens/items_screen.dart'
     show itemsListProvider;
 import '../../../inventory/presentation/screens/stock_screen.dart'
     show stockListProvider;
-import '../../../parties/presentation/screens/parties_screen.dart'
+import '../../../parties/presentation/providers/party_providers.dart'
     show customersListProvider, suppliersListProvider;
 import '../providers/data_providers.dart';
 

@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
 import { readFile, unlink } from 'node:fs/promises';
 
@@ -13,6 +15,7 @@ import {
   AuditPurgeService,
 } from '../../common/audit/audit-purge.service';
 import { AuditService } from '../../common/audit/audit.service';
+import { LicensingService } from '../licensing/licensing.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { reconcileRestoredAccess } from './restore-access';
 import {
@@ -25,7 +28,11 @@ import {
 /// The file format. Kept as a constant so a backup taken today can still be
 /// recognised by a later version of the program.
 export const BACKUP_FORMAT = 'kayan-backup';
-export const BACKUP_VERSION = 1;
+/// 2 added the company's print price policy, its budgets, its quotation
+/// templates and the attached letterhead artwork. Version 1 files still
+/// restore; they simply say nothing about those tables, and a restore never
+/// empties a table the file does not mention.
+export const BACKUP_VERSION = 2;
 
 export interface BackupFile {
   format: typeof BACKUP_FORMAT;
@@ -105,6 +112,94 @@ interface TableSpec {
   selfReferencing?: boolean;
   /// The scalar column that names the parent row in this same table.
   selfReferenceField?: string;
+  /// Columns that hold bytes. JSON has no binary type, so they travel as
+  /// base64 under an explicit marker and are turned back into bytes on the
+  /// way in; anything else would write a map of offsets into the column.
+  binaryFields?: readonly string[];
+  /// The file version that first carried this table. A restore of an older
+  /// file must not read the absence of the key as "this company has none".
+  addedIn?: number;
+}
+
+/// How a byte column is spelled in the file. The marker is part of the value
+/// so a reader can tell base64 from a column that happens to be text, and so a
+/// hand-edited file that drops it is refused rather than written as garbage.
+const BINARY_MARKER = 'base64:';
+
+function toBase64(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (value instanceof Uint8Array) return BINARY_MARKER + Buffer.from(value).toString('base64');
+  if (typeof value === 'string' && value.startsWith(BINARY_MARKER)) return value;
+  if (typeof value === 'string') return BINARY_MARKER + Buffer.from(value, 'binary').toString('base64');
+  throw new BadRequestException(
+    'A file column in this backup is neither bytes nor base64 text; nothing was changed.',
+  );
+}
+
+function fromBase64(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value !== 'string' || !value.startsWith(BINARY_MARKER)) {
+    throw new BadRequestException(
+      'A file column in this backup is missing its base64 marker; nothing was changed.',
+    );
+  }
+  return new Uint8Array(Buffer.from(value.slice(BINARY_MARKER.length), 'base64'));
+}
+
+function encodeBinaryFields(
+  row: Record<string, unknown>,
+  fields: readonly string[],
+): Record<string, unknown> {
+  const next = { ...row };
+  for (const field of fields) {
+    if (field in next) next[field] = toBase64(next[field]);
+  }
+  return next;
+}
+
+/// A byte column that travels with its own size or digest is only as
+/// trustworthy as the text it came from.
+///
+/// Base64 is forgiving: a string with a few characters changed still decodes,
+/// into different bytes. Without this check such a file would restore a
+/// letterhead the program cannot print and never say so, and every later backup
+/// would carry the same damage. When the row says how big the file is or what
+/// its digest is, the restore verifies it before anything is written.
+function assertBinaryIntegrity(row: Record<string, unknown>, fields: readonly string[]): void {
+  for (const field of fields) {
+    const value = row[field];
+    if (!(value instanceof Uint8Array)) continue;
+
+    const size = row.byteSize;
+    if (typeof size === 'number' && Number.isFinite(size) && size !== value.byteLength) {
+      throw new BadRequestException(
+        `A file in this backup is ${value.byteLength} bytes, but the row says ${size}. ` +
+          'The file is damaged; nothing was changed.',
+      );
+    }
+
+    const digest = row.sha256;
+    if (typeof digest === 'string' && /^[0-9a-f]{64}$/i.test(digest)) {
+      const actual = createHash('sha256').update(Buffer.from(value)).digest('hex');
+      if (actual !== digest.toLowerCase()) {
+        throw new BadRequestException(
+          'A file in this backup does not match the digest recorded with it. ' +
+            'The file is damaged; nothing was changed.',
+        );
+      }
+    }
+  }
+}
+
+function decodeBinaryFields(
+  row: Record<string, unknown>,
+  fields: readonly string[],
+): Record<string, unknown> {
+  const next = { ...row };
+  for (const field of fields) {
+    if (field in next) next[field] = fromBase64(next[field]);
+  }
+  return next;
 }
 
 /// Backs everything up as one JSON file, and puts it back again.
@@ -144,6 +239,11 @@ const TABLES: TableSpec[] = [
   },
   { model: 'costCenter', scope: 'company' },
   { model: 'companySetting', scope: 'company' },
+  // The print price policy is company data: a restored company that forgot
+  // which sheets leave without a cost would start printing them again.
+  { model: 'printPriceSetting', scope: 'company', addedIn: 2 },
+  // Budgets hang from a cost centre and an account, both written above.
+  { model: 'budget', scope: 'company', addedIn: 2 },
   { model: 'priceList', scope: 'company' },
   { model: 'itemCategory', scope: 'company' },
   { model: 'customer', scope: 'company' },
@@ -204,6 +304,18 @@ const TABLES: TableSpec[] = [
   },
   { model: 'stockDocument', scope: 'company' },
   { model: 'stockDocumentLine', scope: 'child', parent: 'stockDocument', foreignKey: 'documentId' },
+  // The quotation library: the terms and column sets an offer is drafted
+  // from, and the letterhead artwork a quotation may print on. Artwork comes
+  // before the offers that name it, because an offer's background is a
+  // foreign key into this table.
+  { model: 'quotationTermTemplate', scope: 'company', addedIn: 2 },
+  { model: 'quotationColumnTemplate', scope: 'company', addedIn: 2 },
+  {
+    model: 'quotationBackground',
+    scope: 'company',
+    addedIn: 2,
+    binaryFields: ['data'],
+  },
   // Quotations point at the invoice they became, so they follow sales
   // invoices. The content snapshot is a column on the quotation, so an issued
   // offer survives the round trip exactly as it was sent.
@@ -254,12 +366,17 @@ const OMITTED: Record<string, string> = {
 
 @Injectable()
 export class BackupService {
+  private readonly logger = new Logger('BackupService');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     /// The one place that is allowed to remove audit rows, and only inside the
     /// caller's transaction, with a reason, and never silently.
     private readonly purge: AuditPurgeService,
+    /// The licence is installation-level state that a company file cannot
+    /// carry; the restore asks it to re-assert its watermarks afterwards.
+    private readonly licensing: LicensingService,
   ) {}
 
   /// ───────────────────────────────────────────────────────── taking one
@@ -274,7 +391,10 @@ export class BackupService {
     const counts: Record<string, number> = {};
 
     for (const spec of TABLES) {
-      const rows = await this.readTable(this.prisma, spec, companyId);
+      const stored = await this.readTable(this.prisma, spec, companyId);
+      const rows = spec.binaryFields
+        ? stored.map((row) => encodeBinaryFields(row, spec.binaryFields!))
+        : stored;
       tables[spec.model] = rows;
       // A count of zero is noise on the screen and in the file.
       if (rows.length > 0) counts[spec.model] = rows.length;
@@ -447,6 +567,13 @@ export class BackupService {
     // A complete backup produced by this version includes every TABLES key.
     const missingTablesWithLiveData = Object.entries(existing)
       .filter(([model, count]) => count > 0 && !Array.isArray(file.tables[model]))
+      // A table this file's format could not have carried is not a gap in the
+      // file: an old backup genuinely says nothing about a table that did not
+      // exist when it was written.
+      .filter(([model]) => {
+        const spec = TABLES.find((candidate) => candidate.model === model);
+        return !spec?.addedIn || spec.addedIn <= file.version;
+      })
       .map(([model]) => model);
     if (missingTablesWithLiveData.length > 0) {
       throw new BadRequestException(
@@ -466,7 +593,7 @@ export class BackupService {
 
     // One transaction: a restore that stops half way would leave a company that
     // is neither the old one nor the new one.
-    await this.prisma.$transaction(
+    await this.runRestoreTransaction(
       async (tx) => {
         // Everything is cleared first, children before parents. An empty
         // company has nothing to clear and the same code runs anyway, so the
@@ -504,6 +631,13 @@ export class BackupService {
           };
 
           for (const spec of [...TABLES].reverse()) {
+            // A table this file's format could not have carried is left
+            // alone. Clearing it first and writing nothing back is how a
+            // restore of an older file silently deletes data that did not
+            // exist when the file was written. Every table the file's own
+            // format knows is still cleared, and the guard above refuses a
+            // current-format file that is missing one of them.
+            if (spec.addedIn && spec.addedIn > file.version) continue;
             if (spec.model === 'auditLog') {
               // Without the record for now: it names the administrator, and
               // the administrator's account is deleted further down this same
@@ -619,6 +753,16 @@ export class BackupService {
       await unlink(join(uploadsDir(), basename(previousLogoPath))).catch(() => {});
     }
 
+    // The company file never contains licence rows, and the seat ledger is
+    // outside it, so a restore cannot hand seats back. Reconcile anyway: it
+    // records the restore in the licence history and proves the counters did
+    // not move.
+    await this.licensing.reconcile().catch((error: Error) => {
+      this.logger.warn(
+        `The licence could not be reconciled after the restore: ${error.message}`,
+      );
+    });
+
     return {
       companyId: requesterCompanyId,
       companyName: file.companyProfile?.nameAr ?? file.companyName,
@@ -654,6 +798,48 @@ export class BackupService {
   }
 
   /// ───────────────────────────────────────────────────────── helpers
+
+  /// Bytes out: JSON has no binary type. A field written as an object of
+  /// offsets would restore as nothing at all, so bytes become base64 under a
+  /// marker a reader can recognise.
+  /// Runs the restore transaction, and turns a database-level refusal into an
+  /// answer the person can act on.
+  ///
+  /// The transaction itself is the safety net: a foreign key that points at a
+  /// row the file does not carry, or a duplicate id, aborts the whole thing and
+  /// the company is left exactly as it was. What the person would otherwise see
+  /// is "Unexpected server error", which says nothing about the file they chose
+  /// - and a damaged file is the most likely reason a restore fails at all.
+  private async runRestoreTransaction(
+    work: (tx: Prisma.TransactionClient) => Promise<void>,
+    options: { timeout: number; maxWait: number },
+  ): Promise<void> {
+    try {
+      await this.prisma.$transaction(work, options);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2003') {
+          throw new BadRequestException(
+            'The backup names a record that is not in the file it points at, so it could not be written as a set. ' +
+              'The file is incomplete or was edited; nothing was changed.',
+          );
+        }
+        if (error.code === 'P2002') {
+          throw new BadRequestException(
+            'The backup holds two rows with the same identity, so it cannot be restored as a set. ' +
+              'The file was edited; nothing was changed.',
+          );
+        }
+        if (error.code === 'P2025' || error.code === 'P2014') {
+          throw new BadRequestException(
+            'The backup refers to a row this company does not have, so the restore was stopped. ' +
+              'Nothing was changed.',
+          );
+        }
+      }
+      throw error;
+    }
+  }
 
   private validate(file: BackupFile): void {
     if (!file || typeof file !== 'object' || file.format !== BACKUP_FORMAT) {
@@ -835,7 +1021,10 @@ export class BackupService {
     // file carries it, but this is what makes a restore into a repaired
     // database correct). Dates arrive as text and have to become dates again.
     let prepared = rows.map((row) => {
-      const clean: Record<string, unknown> = { ...row };
+      const clean: Record<string, unknown> = spec.binaryFields
+        ? decodeBinaryFields(row, spec.binaryFields)
+        : { ...row };
+      if (spec.binaryFields) assertBinaryIntegrity(clean, spec.binaryFields);
       if (spec.scope === 'company') clean.companyId = companyId;
       // New cost fields default to the historical line value when a v1
       // purchase backup predates explicit landed-cost storage.

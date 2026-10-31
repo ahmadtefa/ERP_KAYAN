@@ -90,11 +90,27 @@ namespace Kayan
                     RepairLog.Write(root, report.ToString());
                     return 1;
                 }
+                // Record the intent *before* running the script: if a repair
+                // never returns, the log has to show whether the tool reached
+                // the point of starting it at all.
+                RepairLog.Write(root, "Repair starting: " + problemsBefore + " problem(s) detected. Running repair-runtime.ps1 now.");
                 string output;
                 int exitCode = RepairRunner.Run(root, out output);
                 report.AppendLine("Repair attempted (exit code " + exitCode + ").");
                 if (output.Length > 0) { report.AppendLine(output.TrimEnd()); }
                 if (!quiet) { Console.WriteLine(report.ToString()); }
+                if (exitCode != 0)
+                {
+                    // The repair script says it did not finish. Diagnostics
+                    // happening to look clean afterwards is not a repair: it
+                    // can be clean because the script got as far as restarting
+                    // the service and then failed. Reporting 0 here made a
+                    // failed repair indistinguishable from a successful one.
+                    report.AppendLine("The repair did not complete; its own exit code was " + exitCode + ".");
+                    RepairLog.Write(root, report.ToString());
+                    if (!quiet) { Console.WriteLine(report.ToString()); }
+                    return exitCode == 0 ? 1 : exitCode;
+                }
             }
             else if (repair)
             {
@@ -213,7 +229,7 @@ namespace Kayan
             string databaseHost = ConfiguredDatabaseHost(values);
 
             string node = Path.Combine(Path.Combine(Path.Combine(root, "backend"), "node"), "node.exe");
-            checks.Add(new RepairCheck("Bundled Node.js runtime", File.Exists(node), node));
+            checks.Add(RuntimeCheck("Bundled Node.js runtime", node, "--version"));
 
             string backendDist = Path.Combine(Path.Combine(Path.Combine(root, "backend"), "dist"), "src");
             string mainJs = Path.Combine(backendDist, "main.js");
@@ -226,8 +242,32 @@ namespace Kayan
             checks.Add(new RepairCheck("Database preparation script", File.Exists(prepareScript), prepareScript));
             string seedScript = Path.Combine(Path.Combine(Path.Combine(Path.Combine(root, "backend"), "dist"), "prisma"), "seed.js");
             checks.Add(new RepairCheck("First-run setup program", File.Exists(seedScript), seedScript));
-            string pgIsReady = Path.Combine(Path.Combine(Path.Combine(Path.Combine(root, "backend"), "postgres"), "bin"), "pg_isready.exe");
-            checks.Add(new RepairCheck("Bundled PostgreSQL tools", File.Exists(pgIsReady), pgIsReady));
+            string pgBin = Path.Combine(Path.Combine(Path.Combine(root, "backend"), "postgres"), "bin");
+            string[] pgRequired = new string[] { "initdb.exe", "pg_ctl.exe", "pg_isready.exe", "psql.exe", "postgres.exe" };
+            // Every required tool is executed, not only pg_isready. A package
+            // that was copied while it was still being written can leave one
+            // file present but unrunnable, and initdb.exe is the one that
+            // matters most: without it a new machine can never get a cluster,
+            // which looks exactly like a healthy installation that refuses to
+            // start. Checking one lucky executable let that pass as healthy.
+            string pgVersion = string.Empty;
+            List<string> pgProblems = new List<string>();
+            for (int i = 0; i < pgRequired.Length; i++)
+            {
+                string pgTool = Path.Combine(pgBin, pgRequired[i]);
+                if (!File.Exists(pgTool))
+                {
+                    pgProblems.Add(pgRequired[i] + " is missing from " + pgBin);
+                    continue;
+                }
+                RepairCheck probe = RuntimeCheck("Bundled PostgreSQL executable", pgTool, "--version");
+                if (!probe.Ok) { pgProblems.Add(pgRequired[i] + " " + probe.Detail); }
+                else if (string.Equals(pgRequired[i], "pg_isready.exe", StringComparison.OrdinalIgnoreCase)) { pgVersion = probe.Detail; }
+            }
+            checks.Add(new RepairCheck(
+                "Bundled PostgreSQL tools",
+                pgProblems.Count == 0,
+                pgProblems.Count == 0 ? pgVersion : string.Join("; ", pgProblems.ToArray())));
 
             string dataDirectory = Path.Combine(Path.Combine(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "KAYAN-ERP"), "PostgreSQL"), "data");
             checks.Add(new RepairCheck(
@@ -360,6 +400,43 @@ namespace Kayan
             }
         }
 
+        // File presence is not proof that a native runtime can load on a clean
+        // Windows machine. Execute its harmless version command so missing
+        // VC++ DLLs, damaged binaries and architecture mismatches are visible.
+        private static RepairCheck RuntimeCheck(string name, string executable, string arguments)
+        {
+            if (!File.Exists(executable))
+            {
+                return new RepairCheck(name, false, "missing: " + executable);
+            }
+            try
+            {
+                ProcessStartInfo info = new ProcessStartInfo(executable, arguments);
+                info.UseShellExecute = false;
+                info.CreateNoWindow = true;
+                info.RedirectStandardOutput = true;
+                info.RedirectStandardError = true;
+                using (Process process = Process.Start(info))
+                {
+                    if (!process.WaitForExit(15000))
+                    {
+                        try { process.Kill(); } catch { }
+                        return new RepairCheck(name, false, "version check timed out: " + executable);
+                    }
+                    string output = (process.StandardOutput.ReadToEnd() + " " + process.StandardError.ReadToEnd()).Trim();
+                    if (process.ExitCode != 0)
+                    {
+                        return new RepairCheck(name, false, "cannot execute (exit " + process.ExitCode + "): " + RepairRunner.Redact(output));
+                    }
+                    return new RepairCheck(name, true, output.Length == 0 ? executable : output);
+                }
+            }
+            catch (Exception ex)
+            {
+                return new RepairCheck(name, false, "cannot load or start: " + RepairRunner.Redact(ex.Message));
+            }
+        }
+
         private static RepairCheck DatabaseCheck(string host, int port)
         {
             bool reachable = CanConnect(host, port, 4000);
@@ -474,6 +551,10 @@ namespace Kayan
                         diagnosis = "the last server process exited early - see the [err] lines just above it in the log";
                     }
                 }
+                // The application log is historical evidence, not a live
+                // health probe. A stale failure can remain after Repair has
+                // restored the service, so keep this check informational.
+                // Live Node/PostgreSQL/service/API checks determine health.
                 return new RepairCheck(
                     CheckLog,
                     true,
@@ -511,9 +592,14 @@ namespace Kayan
             {
                 return "Diagnosis: database not accepting connections on the configured port, although the service claims to run. Repair re-registers the service; if it persists, check for another PostgreSQL using that port.";
             }
+            RepairCheck log = Find(checks, CheckLog);
+            if (log != null && !log.Ok)
+            {
+                return "Diagnosis: from the last server log - " + log.Detail + ".";
+            }
             for (int i = 0; i < checks.Count; i++)
             {
-                if (!checks[i].Ok)
+                if (!checks[i].Ok && checks[i].Name != CheckLog)
                 {
                     return "Diagnosis: the installation itself is incomplete (" + checks[i].Name + "). Reinstall KAYAN ERP over the top; settings and company data are kept.";
                 }
@@ -523,7 +609,6 @@ namespace Kayan
             {
                 return "Diagnosis: everything is installed and running; first-run setup has not been completed. Open KAYAN ERP and create the company and the first administrator.";
             }
-            RepairCheck log = Find(checks, CheckLog);
             if (log != null && log.Detail.IndexOf("first-run setup", StringComparison.Ordinal) >= 0)
             {
                 return "Diagnosis: the installation is healthy; the last run was waiting at first-run setup. Open KAYAN ERP and create the company and the first administrator.";
@@ -604,10 +689,10 @@ namespace Kayan
                     process.BeginOutputReadLine();
                     process.BeginErrorReadLine();
 
-                    if (!process.WaitForExit(900000))
+                    if (!process.WaitForExit(180000))
                     {
                         try { process.Kill(); } catch { }
-                        output = "The repair did not finish within 15 minutes and was stopped.";
+                        output = "The repair did not finish within 3 minutes and was stopped.";
                         return 124;
                     }
                     process.WaitForExit();

@@ -163,35 +163,42 @@ export class BankReconciliationService {
     const difference = bookBalance.minus(statementBalance);
 
     const voucherIds = dto.voucherIds ?? [];
+    // Fast-fail validation before opening a transaction. This cannot prove the
+    // vouchers are still unclaimed at write time, so the authoritative check is
+    // repeated on the locked rows inside the transaction below.
     if (voucherIds.length > 0) {
       const vouchers = await this.prisma.cashVoucher.findMany({
         where: { id: { in: voucherIds }, companyId, deletedAt: null },
         select: { id: true, cashAccountId: true, status: true, reconciliationId: true, voucherNumber: true },
       });
-      if (vouchers.length !== voucherIds.length) {
-        throw new BadRequestException('One or more vouchers do not exist in this company');
-      }
-      const wrongAccount = vouchers.filter((voucher) => voucher.cashAccountId !== cashAccount.id);
-      if (wrongAccount.length > 0) {
-        throw new BadRequestException(
-          `Voucher ${wrongAccount[0].voucherNumber} belongs to another cash account`,
-        );
-      }
-      const notPosted = vouchers.filter((voucher) => voucher.status !== 'POSTED');
-      if (notPosted.length > 0) {
-        throw new BadRequestException(
-          `Voucher ${notPosted[0].voucherNumber} is not posted, so it cannot appear on a bank statement match`,
-        );
-      }
-      const alreadyMatched = vouchers.filter((voucher) => voucher.reconciliationId);
-      if (alreadyMatched.length > 0) {
-        throw new BadRequestException(
-          `Voucher ${alreadyMatched[0].voucherNumber} is already matched to another reconciliation`,
-        );
-      }
+      this.assertVouchersClaimable(vouchers, voucherIds, cashAccount.id);
     }
 
     const created = await this.prisma.$transaction(async (tx) => {
+      let lockedVouchers: Array<{
+        id: string;
+        cashAccountId: string;
+        status: string;
+        reconciliationId: string | null;
+        voucherNumber: string;
+      }> = [];
+      if (voucherIds.length > 0) {
+        // Lock the target voucher rows in one stable order, so two concurrent
+        // reconciliations claiming the same voucher serialise here instead of
+        // overwriting each other's reconciliationId. The second caller blocks
+        // until the first commits, then fails the re-validation on the lock.
+        lockedVouchers = await tx.$queryRaw<typeof lockedVouchers>(Prisma.sql`
+          SELECT id, "cashAccountId", status, "reconciliationId", "voucherNumber"
+            FROM cash_vouchers
+           WHERE "companyId" = ${companyId}::uuid
+             AND "deletedAt" IS NULL
+             AND id IN (${Prisma.join(voucherIds.map((id) => Prisma.sql`${id}::uuid`))})
+           ORDER BY id
+             FOR UPDATE
+        `);
+        this.assertVouchersClaimable(lockedVouchers, voucherIds, cashAccount.id);
+      }
+
       const reconciliation = await tx.bankReconciliation.create({
         data: {
           companyId,
@@ -209,10 +216,19 @@ export class BankReconciliationService {
       });
 
       if (voucherIds.length > 0) {
-        await tx.cashVoucher.updateMany({
-          where: { id: { in: voucherIds }, companyId },
+        // Conditional claim: only still-unclaimed rows may be updated. The row
+        // lock makes the outcome deterministic; the predicate and the count
+        // assertion are a second guarantee, and the database trigger is the
+        // third. A mismatch rolls the whole reconciliation back.
+        const claimed = await tx.cashVoucher.updateMany({
+          where: { id: { in: voucherIds }, companyId, reconciliationId: null },
           data: { reconciledAt: new Date(), reconciliationId: reconciliation.id },
         });
+        if (claimed.count !== lockedVouchers.length) {
+          throw new BadRequestException(
+            'One or more vouchers were already matched by another reconciliation',
+          );
+        }
       }
 
       return reconciliation;
@@ -235,6 +251,44 @@ export class BankReconciliationService {
     });
 
     return this.findOne(companyId, created.id);
+  }
+
+  /**
+   * The four voucher rules, applied both before the transaction (fast fail)
+   * and again on the FOR UPDATE-locked rows inside it (authoritative).
+   */
+  private assertVouchersClaimable(
+    vouchers: Array<{
+      id: string;
+      cashAccountId: string;
+      status: string;
+      reconciliationId: string | null;
+      voucherNumber: string;
+    }>,
+    requestedIds: string[],
+    cashAccountId: string,
+  ): void {
+    if (vouchers.length !== requestedIds.length) {
+      throw new BadRequestException('One or more vouchers do not exist in this company');
+    }
+    const wrongAccount = vouchers.filter((voucher) => voucher.cashAccountId !== cashAccountId);
+    if (wrongAccount.length > 0) {
+      throw new BadRequestException(
+        `Voucher ${wrongAccount[0].voucherNumber} belongs to another cash account`,
+      );
+    }
+    const notPosted = vouchers.filter((voucher) => voucher.status !== 'POSTED');
+    if (notPosted.length > 0) {
+      throw new BadRequestException(
+        `Voucher ${notPosted[0].voucherNumber} is not posted, so it cannot appear on a bank statement match`,
+      );
+    }
+    const alreadyMatched = vouchers.filter((voucher) => voucher.reconciliationId);
+    if (alreadyMatched.length > 0) {
+      throw new BadRequestException(
+        `Voucher ${alreadyMatched[0].voucherNumber} is already matched to another reconciliation`,
+      );
+    }
   }
 
   private date(value: string, field: string): Date {

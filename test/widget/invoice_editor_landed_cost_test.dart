@@ -106,7 +106,8 @@ void main() {
     await tester.pumpAndSettle();
 
     final dropdowns = find.byType(DropdownButtonFormField<String>);
-    expect(dropdowns, findsNWidgets(2));
+    expect(dropdowns, findsNWidgets(3));
+    expect(find.byKey(const ValueKey('line-unit-0')), findsOneWidget);
     await tester.tap(dropdowns.at(0));
     await tester.pumpAndSettle();
     await tester.tap(find.text('SUP-1 — Test supplier').last);

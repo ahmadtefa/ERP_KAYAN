@@ -15,6 +15,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/providers/data_providers.dart';
+import '../../../data/presentation/widgets/print_visibility_prompt.dart';
 import '../providers/quotation_providers.dart';
 import '../quotation_status.dart';
 import 'quotation_detail_dialog.dart';
@@ -113,6 +114,27 @@ class _QuotationListScreenState extends ConsumerState<QuotationListScreen> {
     final canManage = user?.can('sales.quotations.manage') ?? false;
     final canExport = user?.can('sales.quotations.export') ?? false;
     final links = ref.read(reportLinkProvider);
+
+    /// The list's print button asks the same question, with the same saved
+    /// policy behind it, as the button inside the offer.
+    Future<void> printQuotation(String id) async {
+      final visibility = await promptPriceVisibility(
+        context,
+        ref,
+        typeKey: 'sales-quotation',
+        arabic: language == 'ar',
+      );
+      if (visibility == null || !context.mounted) return;
+      await runPrint(
+        context,
+        links.quotationPrint(
+          id: id,
+          language: language,
+          showSalePrice: visibility.showSalePrice,
+          showCost: visibility.showCost,
+        ),
+      );
+    }
 
     return ModuleScaffold(
       title: l10n.quotations,
@@ -277,13 +299,7 @@ class _QuotationListScreenState extends ConsumerState<QuotationListScreen> {
                     IconButton(
                       tooltip: l10n.print,
                       onPressed: canExport
-                          ? () => runPrint(
-                                context,
-                                links.quotationPrint(
-                                  id: text(row, 'id'),
-                                  language: language,
-                                ),
-                              )
+                          ? () => printQuotation(text(row, 'id'))
                           : null,
                       icon: const Icon(Icons.print_outlined, size: 18),
                     ),

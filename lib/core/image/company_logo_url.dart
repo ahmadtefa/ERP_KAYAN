@@ -50,10 +50,20 @@ String? resolveCompanyLogoUrl(String apiBaseUrl, Object? raw) {
 /// API has used: the explicit `logoUrl` it returns today, or - for a payload
 /// that only carries the flag and the id - the public endpoint itself.
 String? companyLogoUrl(String apiBaseUrl, Map<String, dynamic> company) {
+  final version = company['updatedAt']?.toString().trim() ?? '';
   final direct = resolveCompanyLogoUrl(apiBaseUrl, company['logoUrl']);
-  if (direct != null) return direct;
+  if (direct != null) {
+    if (version.isEmpty) return direct;
+    final uri = Uri.tryParse(direct);
+    if (uri == null) return direct;
+    final query = Map<String, String>.from(uri.queryParameters)..['v'] = version;
+    return uri.replace(queryParameters: query).toString();
+  }
 
   final id = company['id']?.toString().trim() ?? '';
   if (id.isEmpty || company['hasLogo'] != true) return null;
-  return resolveCompanyLogoUrl(apiBaseUrl, '/companies/logo/$id');
+  // Bust browser caches when the company logo changes, including when the API
+  // payload only provides the public logo endpoint instead of logoUrl.
+  final suffix = version.isEmpty ? '' : '?v=$version';
+  return resolveCompanyLogoUrl(apiBaseUrl, '/companies/logo/$id$suffix');
 }

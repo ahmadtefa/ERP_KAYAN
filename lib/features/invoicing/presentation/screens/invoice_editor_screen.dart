@@ -15,6 +15,107 @@ import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/invoice_providers.dart';
 
+/// Active units a line can choose for [item], smallest factor first.
+///
+/// A legacy item that predates multi-unit and carries no `units` array is
+/// synthesised as a single base unit, so the picker always offers the item's
+/// own unit and the document stays valid. An item that has not been picked yet
+/// yields an empty list and the control is disabled.
+List<Json> lineUnitsOf(Json? item, {bool? forSales}) {
+  if (item == null) return const <Json>[];
+  final raw = item['units'];
+  final stored =
+      (raw is List ? raw.cast<Json>() : const <Json>[])
+          .where((unit) => flag(unit, 'isActive', fallback: true))
+          .where((unit) {
+            // A unit can be switched off for one side of the business: a
+            // supplier sells by the carton, the shop by the bottle. When the
+            // caller names a side, a unit meant for the other one is not
+            // offered - the server refuses it anyway, and offering it would
+            // only produce an error after the line was typed.
+            if (forSales == null) return true;
+            return flag(
+              unit,
+              forSales ? 'usedInSales' : 'usedInPurchases',
+              fallback: true,
+            );
+          })
+          .toList();
+  if (stored.isNotEmpty) {
+    stored.sort((a, b) {
+      final oa = int.tryParse(asString(a['sortOrder']) ?? '') ?? 0;
+      final ob = int.tryParse(asString(b['sortOrder']) ?? '') ?? 0;
+      if (oa != ob) return oa.compareTo(ob);
+      final fa = Decimal.tryParse(asString(a['factor']) ?? '') ?? Decimal.one;
+      final fb = Decimal.tryParse(asString(b['factor']) ?? '') ?? Decimal.one;
+      return fa.compareTo(fb);
+    });
+    return stored;
+  }
+  return <Json>[
+    <String, dynamic>{
+      'id': null,
+      'unit': text(item, 'unit'),
+      'factor': '1.000000',
+      'isBase': true,
+      'isActive': true,
+      'allowFraction': true,
+      'salePrice': item['salePrice'],
+      'purchasePrice': item['purchasePrice'],
+    },
+  ];
+}
+
+/// The unit a line names, or the item's base unit when the line names none.
+Json? lineUnitOf(Json? item, String? unitName) {
+  final units = lineUnitsOf(item);
+  for (final unit in units) {
+    if (text(unit, 'unit') == unitName) return unit;
+  }
+  for (final unit in units) {
+    if (flag(unit, 'isBase', fallback: false)) return unit;
+  }
+  return units.isEmpty ? null : units.first;
+}
+
+/// Whether a quantity typed in [unit] is a whole number of it.
+///
+/// A carton of twenty-four bottles has no half: the shelf either has a carton
+/// or it does not. The server refuses it; catching it here says so while the
+/// person is still on the field instead of after Save.
+bool quantityAllowedInUnit(Json? unit, String quantity) {
+  if (unit == null) return true;
+  if (flag(unit, 'allowFraction', fallback: true)) return true;
+  final parsed = Decimal.tryParse(quantity.trim());
+  if (parsed == null) return true;
+  return parsed == parsed.truncate();
+}
+
+/// The unit-specific list price for [unitName] on [item], or the item's own
+/// price when the unit defines none. Returns an empty string when neither is
+/// set, so the caller can leave the field the user already typed alone.
+String unitListPrice(Json item, String unitName, {required bool isSales}) {
+  final key = isSales ? 'salePrice' : 'purchasePrice';
+  final base = text(item, key);
+  for (final unit in lineUnitsOf(item)) {
+    if (text(unit, 'unit') == unitName) {
+      final specific = text(unit, key);
+      if (specific.isNotEmpty) return specific;
+      // The item price is per BASE unit, so a reel of five hundred must not be
+      // offered at the price of one metre. Multiplying here mirrors what the
+      // server does when the price is left empty - one rule, two callers.
+      final factor = Decimal.tryParse(asString(unit['factor']) ?? '');
+      final price = Decimal.tryParse(base);
+      if (factor == null || price == null) return base;
+      // The base unit is the item price already; multiplying by one would only
+      // reformat a number the person typed.
+      if (factor.compareTo(Decimal.one) == 0) return base;
+      return (price * factor).toStringAsFixed(2);
+    }
+  }
+  return base;
+}
+
 /// One editable invoice line.
 class _LineDraft {
   _LineDraft({
@@ -28,6 +129,11 @@ class _LineDraft {
       discountValue = TextEditingController(text: discountValue);
 
   String? itemId;
+
+  /// The measurement unit the quantity is expressed in. Null on a free line
+  /// without an item; the server treats a missing unit as the item's base unit
+  /// and keeps legacy documents untouched.
+  String? unitName;
 
   /// Optional cost centre for the line. Left null on a balance-sheet-only
   /// line; the server checks that the centre is one this company may use.
@@ -153,12 +259,21 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         ));
       }
       for (final row in listOf(invoice['lines'])) {
+        // Reopen shows exactly what the user entered. A multi-unit line keeps
+        // the entered quantity and its unit; a legacy row has no snapshot, so
+        // it falls back to the stored base quantity with no unit selected.
         final line = _LineDraft(
-          quantity: text(row, 'quantity', fallback: '1'),
+          quantity: text(
+            row,
+            'unitQuantity',
+            fallback: text(row, 'quantity', fallback: '1'),
+          ),
           unitPrice: text(row, 'unitPrice', fallback: '0'),
           taxRate: text(row, 'taxRate', fallback: '0'),
         )
           ..itemId = text(row, 'itemId').isEmpty ? null : text(row, 'itemId')
+          ..unitName =
+              text(row, 'unitName').isEmpty ? null : text(row, 'unitName')
           ..costCenterId = text(row, 'costCenterId').isEmpty
               ? null
               : text(row, 'costCenterId');
@@ -277,13 +392,22 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     if (line.taxRate.text.trim().isEmpty || line.taxRate.text.trim() == '0') {
       line.taxRate.text = formatQuantity(asString(item['taxRate']), decimals: 2);
     }
-    if (widget.kind.isSales &&
-        (line.unitPrice.text.trim().isEmpty ||
-            line.unitPrice.text.trim() == '0')) {
-      line.unitPrice.text = formatQuantity(
-        asString(item['salePrice']),
-        decimals: 2,
+    final units = lineUnitsOf(item);
+    // Default to the smallest (base) unit the first time an item is picked;
+    // a reopened line keeps the unit its snapshot recorded.
+    if ((line.unitName == null || line.unitName!.isEmpty) && units.isNotEmpty) {
+      line.unitName = text(units.first, 'unit');
+    }
+    if (line.unitPrice.text.trim().isEmpty ||
+        line.unitPrice.text.trim() == '0') {
+      final price = unitListPrice(
+        item,
+        line.unitName ?? text(item, 'unit'),
+        isSales: widget.kind.isSales,
       );
+      if (price.isNotEmpty) {
+        line.unitPrice.text = formatQuantity(price, decimals: 2);
+      }
     }
   }
 
@@ -339,6 +463,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       final discountText = line.discountValue.text.trim();
       lines.add({
         if (line.itemId != null) 'itemId': line.itemId,
+        if (line.unitName != null && line.unitName!.trim().isNotEmpty)
+          'unitName': line.unitName!.trim(),
         'quantity': quantity,
         'unitPrice': price,
         if (line.taxRate.text.trim().isNotEmpty) 'taxRate': line.taxRate.text.trim(),
@@ -870,6 +996,77 @@ class _LinesTable extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       flex: 2,
+                      child: Builder(
+                        builder: (context) {
+                          Json? selected;
+                          for (final candidate in items) {
+                            if (text(candidate, 'id') == lines[index].itemId) {
+                              selected = candidate;
+                              break;
+                            }
+                          }
+                          final units = lineUnitsOf(
+                            selected,
+                            forSales: kind.isSales,
+                          );
+                          final names = units
+                              .map((unit) => text(unit, 'unit'))
+                              .toList();
+                          final chosen = names.contains(lines[index].unitName)
+                              ? lines[index].unitName
+                              : (names.isNotEmpty ? names.first : null);
+                          return DropdownButtonFormField<String>(
+                            key: ValueKey('line-unit-$index'),
+                            initialValue: chosen,
+                            isExpanded: true,
+                            isDense: true,
+                            decoration: InputDecoration(
+                              labelText: l10n.unit,
+                              isDense: true,
+                              border: const OutlineInputBorder(),
+                            ),
+                            items: [
+                              for (final unit in units)
+                                DropdownMenuItem<String>(
+                                  value: text(unit, 'unit'),
+                                  child: Text(
+                                    flag(unit, 'isBase', fallback: false)
+                                        ? text(unit, 'unit')
+                                        : '${text(unit, 'unit')} '
+                                              '×${formatQuantity(asString(unit['factor']), decimals: 0)}',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: units.isEmpty
+                                ? null
+                                : (value) {
+                                    if (value == null) return;
+                                    lines[index].unitName = value;
+                                    final current =
+                                        lines[index].unitPrice.text.trim();
+                                    if (current.isEmpty || current == '0') {
+                                      final price = selected == null
+                                          ? ''
+                                          : unitListPrice(
+                                              selected,
+                                              value,
+                                              isSales: kind.isSales,
+                                            );
+                                      if (price.isNotEmpty) {
+                                        lines[index].unitPrice.text =
+                                            formatQuantity(price, decimals: 2);
+                                      }
+                                    }
+                                    onChanged();
+                                  },
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 2,
                       child: TextFormField(
                         key: ValueKey('line-quantity-$index'),
                         controller: lines[index].quantity,
@@ -881,6 +1078,28 @@ class _LinesTable extends StatelessWidget {
                           isDense: true,
                           border: const OutlineInputBorder(),
                         ),
+                        // A unit that takes whole units only says so before
+                        // the document is saved, not after it is refused.
+                        validator: (value) {
+                          Json? itemOfLine;
+                          for (final candidate in items) {
+                            if (text(candidate, 'id') ==
+                                lines[index].itemId) {
+                              itemOfLine = candidate;
+                              break;
+                            }
+                          }
+                          final chosenUnit = lineUnitOf(
+                            itemOfLine,
+                            lines[index].unitName,
+                          );
+                          if (quantityAllowedInUnit(chosenUnit, value ?? '')) {
+                            return null;
+                          }
+                          return l10n.unitTakesWholeNumbers(
+                            text(chosenUnit ?? const <String, dynamic>{}, 'unit'),
+                          );
+                        },
                         onChanged: (_) => onChanged(),
                       ),
                     ),

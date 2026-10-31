@@ -342,16 +342,35 @@ try {
   # twice would back up the already-switched content as its own
   # "previous" copy and defeat the rollback.
   $settingsPaths = @($machineSettings, $UserSettingsPath) | Select-Object -Unique
+  # Every copy that is switched carries a generation stamp that only grows, so
+  # a per-user copy this tool could not reach (another Windows account) is
+  # recognisably older than the machine copy - and the program then reads the
+  # machine copy instead of the database it used before the reset.
+  $highestGeneration = 0
+  foreach ($path in $settingsPaths) {
+    if (-not (Test-Path -LiteralPath $path)) { continue }
+    foreach ($existingLine in @(Get-Content -LiteralPath $path -ErrorAction SilentlyContinue)) {
+      if ($existingLine -match '^\s*KAYAN_SETTINGS_GENERATION="?(\d+)"?\s*$') {
+        if ([int64]$matches[1] -gt $highestGeneration) { $highestGeneration = [int64]$matches[1] }
+      }
+    }
+  }
+  $generationStamp = [string]([Math]::Max([DateTimeOffset]::UtcNow.ToUnixTimeSeconds(), $highestGeneration + 1))
   foreach ($path in $settingsPaths) {
     if (-not (Test-Path -LiteralPath $path)) { continue }
     $backupCopy = $path + '.before-reset-' + $timestamp + '.bak'
     Copy-Item -LiteralPath $path -Destination $backupCopy -Force
     $lines = Get-Content -LiteralPath $path
+    $sawGeneration = $false
     $rewritten = foreach ($line in $lines) {
       if ($line -match '^\s*DATABASE_URL=') {
         [regex]::Replace($line, '(postgres(?:ql)?://[^/]+/)[^?"'']+', ('$1' + $newDatabase))
+      } elseif ($line -match '^\s*KAYAN_SETTINGS_GENERATION=') {
+        $sawGeneration = $true
+        ('KAYAN_SETTINGS_GENERATION="' + $generationStamp + '"')
       } else { $line }
     }
+    if (-not $sawGeneration) { $rewritten = @($rewritten) + ('KAYAN_SETTINGS_GENERATION="' + $generationStamp + '"') }
     # UTF-8 without a BOM: the shell's own parser reads this file line
     # by line, and a BOM would ride into the first line's key.
     [System.IO.File]::WriteAllLines($path, [string[]]$rewritten, (New-Object System.Text.UTF8Encoding($false)))

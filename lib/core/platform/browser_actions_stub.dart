@@ -10,7 +10,6 @@
 /// here to prevent.
 library;
 
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -22,7 +21,11 @@ import 'picked_file.dart';
 ///
 /// The browser then shows the print page and its print dialogue. The server
 /// listens on this machine, so the browser can reach the address as-is.
-void openInNewTab(String url) => _openInBrowser(url);
+///
+/// It finishes only once the browser has been started, and fails with a
+/// sentence the person can act on when it cannot be. Saying "the print page
+/// opened" before that is how a print button comes to look broken.
+Future<void> openInNewTab(String url) => _openInBrowser(url);
 
 /// Checks the server really has the file, then lets the machine's browser
 /// fetch it.
@@ -108,7 +111,7 @@ Future<void> downloadFile(DownloadRequest request) async {
     client.close(force: true);
   }
 
-  _openInBrowser(request.url);
+  await _openInBrowser(request.url);
 }
 
 
@@ -178,7 +181,7 @@ String _reasonFrom(String body, int status) {
       : trimmed;
 }
 
-void _openInBrowser(String url) {
+Future<void> _openInBrowser(String url) async {
   final Future<Process> started;
   if (Platform.isWindows) {
     // The documented Windows way to open a URL with the user's own browser,
@@ -193,11 +196,17 @@ void _openInBrowser(String url) {
   } else {
     started = Process.start('xdg-open', [url], mode: ProcessStartMode.detached);
   }
-  // Fire and forget: these calls are the void "open/download" buttons. If
-  // the machine's browser cannot be started there is no screen to tell -
-  // that is a machine problem, not a silent one, because the browser itself
-  // is what reports the next step.
-  unawaited(started.then<void>((_) {}).catchError((Object _) {}));
+  // A machine with no browser, or a policy that forbids starting one, used to
+  // be swallowed here - the button said the page had opened and nothing had.
+  // The caller shows this as an error instead.
+  try {
+    await started;
+  } catch (_) {
+    throw const DownloadFailure(
+      'No web browser could be opened on this computer. Install one, or make '
+      'one the default program for web addresses, then try again.',
+    );
+  }
 }
 
 /// Asks the user for a spreadsheet or a backup file.

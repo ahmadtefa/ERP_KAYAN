@@ -21,8 +21,9 @@ class LocalBackendStatus {
       problem = null,
       logPath = null,
       databaseProblem = false,
-      needsFirstAdministrator = false;
-  const LocalBackendStatus.ready(this.baseUrl)
+      needsFirstAdministrator = false,
+      licenceWarning = null;
+  const LocalBackendStatus.ready(this.baseUrl, {this.licenceWarning})
     : problem = null,
       logPath = null,
       databaseProblem = false,
@@ -32,7 +33,8 @@ class LocalBackendStatus {
     this.logPath,
     this.databaseProblem = false,
   }) : baseUrl = null,
-       needsFirstAdministrator = false;
+       needsFirstAdministrator = false,
+       licenceWarning = null;
 
   /// Present for shape parity with the desktop class. A browser build
   /// never starts a server, so it never meets an empty database either -
@@ -42,7 +44,8 @@ class LocalBackendStatus {
       problem = null,
       logPath = null,
       databaseProblem = false,
-      needsFirstAdministrator = true;
+      needsFirstAdministrator = true,
+      licenceWarning = null;
 
   /// e.g. `http://127.0.0.1:3000/api/v1` - already the value the client wants.
   final String? baseUrl;
@@ -59,6 +62,10 @@ class LocalBackendStatus {
 
   /// True when this machine still needs its first administrator.
   final bool needsFirstAdministrator;
+
+  /// Present for shape parity with the desktop class: a browser build never
+  /// starts a server, so nothing here can be missing a licence key.
+  final String? licenceWarning;
 
   bool get isReady => baseUrl != null;
 }

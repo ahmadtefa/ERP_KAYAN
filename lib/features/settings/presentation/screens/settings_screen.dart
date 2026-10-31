@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../app/router/app_router.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/page_header.dart';
@@ -115,6 +117,39 @@ class SettingsScreen extends ConsumerWidget {
                 ),
               ],
             ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        // What every printed copy carries, decided once for the company rather
+        // than remembered at each print button.
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.print_outlined),
+            title: Text(
+              Localizations.localeOf(context).languageCode == 'ar'
+                  ? 'إعدادات الطباعة'
+                  : 'Print settings',
+            ),
+            subtitle: Text(
+              Localizations.localeOf(context).languageCode == 'ar'
+                  ? 'إظهار أو إخفاء سعر البيع والتكلفة في كل نوع طباعة'
+                  : 'Show or hide the sale price and the cost on each kind of print',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.go(AppRoutes.printSettings),
+          ),
+        ),
+        const SizedBox(height: 16),
+        // The licence screen: state, the activation code, and the one place a
+        // key is entered. Visible to everyone, because the person at the
+        // machine is often the one who has to read the code out.
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.verified_user_outlined),
+            title: Text(l10n.licence),
+            subtitle: Text(l10n.licenceSettingsSubtitle),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.go(AppRoutes.licence),
           ),
         ),
         const SizedBox(height: 16),

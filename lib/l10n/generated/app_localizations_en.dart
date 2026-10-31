@@ -45,10 +45,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'Your session has expired. Sign in again to continue.';
 
   @override
-  String get permissionDenied =>
-      'You do not have permission to perform this action.';
-
-  @override
   String get openingQuantity => 'Opening quantity';
 
   @override
@@ -57,6 +53,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get openingStockHint =>
       'Optional. Posts the stock and its inventory/equity entry with the item. Leave blank to enter opening stock later through Opening balances.';
+
+  @override
+  String get permissionDenied =>
+      'You do not have permission to perform this action.';
 
   @override
   String get loading => 'Loading…';
@@ -106,42 +106,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settings => 'Settings';
-
-  @override
-  String get signInIncomplete => 'The server accepted the sign-in but did not send the account details. This usually means the program and the server are different versions, or the company setup was not finished. The technical detail is in the program log.';
-
-  @override
-  String get sessionNotPersisted => 'This session is kept in memory only: the browser will not store it on a plain http:// address. Reloading signs you out. Serve the program over HTTPS to keep the session.';
-
-  @override
-  String get sessionStorageLabel => 'Session storage';
-
-  @override
-  String get sessionStorageDurable => 'Saved on this device';
-
-  @override
-  String get sessionStorageMemoryOnly => 'Memory only';
-
-  @override
-  String get sessionStorageMemoryHint => 'This page is not served over HTTPS, so the browser keeps the session only until it is reloaded. Serve the program over HTTPS to keep people signed in.';
-
-  @override
-  String get fontSize => 'Font size';
-
-  @override
-  String get fontSizeDescription => 'Applies to the whole program: buttons, menus, the sidebar, tables, dialogs and reports. It is remembered for the next sign-in.';
-
-  @override
-  String get fontSizeSmaller => 'Smaller text';
-
-  @override
-  String get fontSizeLarger => 'Larger text';
-
-  @override
-  String get fontSizeReset => 'Default size';
-
-  @override
-  String get fontSizePreview => 'Preview: invoice 1,250.00 EGP · 12.5% discount';
 
   @override
   String get language => 'Language';
@@ -402,7 +366,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get landedCosts => 'Landed costs';
 
   @override
-  String get landedCostAllocationHint => 'Add each freight, shipping, duty, or other charge. The total is allocated across stock lines by line value.';
+  String get landedCostAllocationHint =>
+      'Add each freight, shipping, duty, or other charge. The total is allocated across stock lines by line value.';
 
   @override
   String get landedCostCannotBeNegative => 'Landed costs cannot be negative';
@@ -417,16 +382,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get otherLandedCosts => 'Other landed costs';
 
   @override
-  String get landedCostDescriptionRequired => 'Enter a description for each landed-cost charge';
+  String get landedCostDescriptionRequired =>
+      'Enter a description for each landed-cost charge';
 
   @override
-  String get landedCostAmountInvalid => 'Enter a valid non-negative amount for each landed-cost charge';
+  String get landedCostAmountInvalid =>
+      'Enter a valid non-negative amount for each landed-cost charge';
 
   @override
   String get editDraftInvoice => 'Edit draft invoice';
 
   @override
-  String get onlyDraftInvoiceCanBeEdited => 'Only a draft invoice can be edited';
+  String get onlyDraftInvoiceCanBeEdited =>
+      'Only a draft invoice can be edited';
 
   @override
   String get salesReturns => 'Sales returns';
@@ -468,7 +436,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get returnCreated => 'Return saved as a draft';
 
   @override
-  String get confirmPostReturn => 'Posting updates stock and the customer or supplier balance. Continue?';
+  String get confirmPostReturn =>
+      'Posting updates stock and the customer or supplier balance. Continue?';
 
   @override
   String get returnPosted => 'Return posted';
@@ -907,6 +876,98 @@ class AppLocalizationsEn extends AppLocalizations {
   String get fiscalPeriods => 'Fiscal periods';
 
   @override
+  String get fixedAssets => 'Fixed assets';
+
+  @override
+  String get newAsset => 'New asset';
+
+  @override
+  String get editAsset => 'Edit asset';
+
+  @override
+  String get assetCode => 'Asset code';
+
+  @override
+  String get purchaseDate => 'Purchase date';
+
+  @override
+  String get inServiceDate => 'In-service date';
+
+  @override
+  String get assetCost => 'Cost';
+
+  @override
+  String get salvageValue => 'Salvage value';
+
+  @override
+  String get usefulLifeMonths => 'Useful life (months)';
+
+  @override
+  String get assetAccount => 'Asset account';
+
+  @override
+  String get accumulatedAccount => 'Accumulated depreciation account';
+
+  @override
+  String get depreciationExpenseAccount => 'Depreciation expense account';
+
+  @override
+  String get fundingAccount => 'Funding account';
+
+  @override
+  String get activateAsset => 'Activate (post acquisition)';
+
+  @override
+  String get disposeAsset => 'Dispose of asset';
+
+  @override
+  String get disposalDate => 'Disposal date';
+
+  @override
+  String get disposalProceeds => 'Proceeds';
+
+  @override
+  String get proceedsAccount => 'Proceeds account';
+
+  @override
+  String get gainLossAccount => 'Gain/loss account';
+
+  @override
+  String get runDepreciation => 'Run depreciation';
+
+  @override
+  String get depreciationPeriod => 'Month (YYYY-MM)';
+
+  @override
+  String get accumulatedDepreciation => 'Accumulated depreciation';
+
+  @override
+  String get bookValue => 'Book value';
+
+  @override
+  String get assetCategory => 'Category';
+
+  @override
+  String get assetLocation => 'Location';
+
+  @override
+  String get noAssets => 'No fixed assets yet.';
+
+  @override
+  String get assetDetails => 'Asset details';
+
+  @override
+  String get depreciationSchedule => 'Depreciation schedule';
+
+  @override
+  String get confirmActivateAsset =>
+      'Activation posts the acquisition entry (Dr asset / Cr funding). Continue?';
+
+  @override
+  String get confirmDisposeAsset =>
+      'Disposal removes the asset from the books and posts its result. Continue?';
+
+  @override
   String get newPeriod => 'New period';
 
   @override
@@ -1136,6 +1197,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get downloadList => 'Download the list';
 
   @override
+  String get downloadStatement => 'Download the statement';
+
+  @override
+  String get exportStatementHint =>
+      'Download this statement as it stands: Excel, CSV, PDF, or a page to print.';
+
+  @override
   String get exportListHint =>
       'Download this list as it stands: Excel, CSV, PDF, or a page to print.';
 
@@ -1219,7 +1287,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get removeLogo => 'Remove logo';
 
   @override
-  String get logoHint => 'Optional — PNG, JPEG or WebP; resized to 1024 × 1024 px, up to 2 MB.';
+  String get logoHint =>
+      'Optional — PNG, JPEG or WebP; resized to 1024 × 1024 px, up to 2 MB.';
 
   @override
   String get logoUpdated => 'Logo updated';
@@ -1365,19 +1434,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String get printOpened => 'The print page is opening in a new tab.';
 
   @override
-  String get printBlocked => 'The browser blocked the new tab. Allow pop-ups for this address, then press Print again.';
+  String get printBlocked =>
+      'The browser blocked the new tab. Allow pop-ups for this address, then press Print again.';
 
   @override
   String get resetData => 'Reset program';
 
   @override
-  String get resetDataHint => 'Clears this company’s books and returns the program to its first run. A backup is taken and checked before anything is deleted, and the reset stops if that backup fails.';
+  String get resetDataHint =>
+      'Clears this company’s books and returns the program to its first run. A backup is taken and checked before anything is deleted, and the reset stops if that backup fails.';
 
   @override
   String get resetButton => 'Reset program';
 
   @override
-  String get resetOnlyAdmins => 'Only an administrator of the program can do this.';
+  String get resetOnlyAdmins =>
+      'Only an administrator of the program can do this.';
 
   @override
   String resetForCompany(Object company) {
@@ -1391,10 +1463,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get resetWhatIsKept => 'What is kept';
 
   @override
-  String get resetDeletedHint => 'Every record the company holds: its books, its parties, its stock and its documents.';
+  String get resetDeletedHint =>
+      'Every record the company holds: its books, its parties, its stock and its documents.';
 
   @override
-  String get resetKeptAdmin => 'The administrator account you are signed in with';
+  String get resetKeptAdmin =>
+      'The administrator account you are signed in with';
 
   @override
   String get resetKeptPermissions => 'The permission catalogue';
@@ -1403,7 +1477,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get resetKeptRoles => 'The roles the program ships with';
 
   @override
-  String get resetKeptConfig => 'The database connection and the program’s settings';
+  String get resetKeptConfig =>
+      'The database connection and the program’s settings';
 
   @override
   String get resetCountJournalEntries => 'Journal entries';
@@ -1424,6 +1499,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get resetCountSalesInvoices => 'Sales invoices';
 
   @override
+  String get resetCountQuotations => 'Quotations';
+
+  @override
+  String get resetCountCashVouchers => 'Receipts and payments';
+
+  @override
   String get resetCountPurchaseInvoices => 'Purchase invoices';
 
   @override
@@ -1439,7 +1520,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get resetCountUsers => 'Other users';
 
   @override
-  String get resetBackupFirst => 'A full backup will be taken and checked before anything is deleted. If the backup cannot be taken, or cannot be read back, nothing is deleted at all.';
+  String get resetBackupFirst =>
+      'A full backup will be taken and checked before anything is deleted. If the backup cannot be taken, or cannot be read back, nothing is deleted at all.';
 
   @override
   String get resetConfirmTitle => 'This cannot be undone';
@@ -1453,7 +1535,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get resetPasswordLabel => 'Your password';
 
   @override
-  String get resetPasswordHint => 'The password of the account you are signed in with. The server checks it.';
+  String get resetPasswordHint =>
+      'The password of the account you are signed in with. The server checks it.';
 
   @override
   String resetWordLabel(Object word) {
@@ -1471,11 +1554,12 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get resetNeedsSetup => 'The program will ask to be set up again the next time it is opened.';
+  String get resetNeedsSetup =>
+      'The program will ask to be set up again the next time it is opened.';
 
   @override
-  String get resetPreviewFailed => 'What a reset would remove could not be read.';
-
+  String get resetPreviewFailed =>
+      'What a reset would remove could not be read.';
 
   @override
   String get cashAndBanks => 'Cash & banks';
@@ -1557,33 +1641,34 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settleOldestFirst => 'Applied to the oldest open invoices';
-@override
+
+  @override
   String get rememberLogin => 'Remember sign-in details';
 
-@override
+  @override
   String get rememberWebUsernameOnly =>
       'Only the username is saved in this browser.';
 
-@override
+  @override
   String get rememberNativeSecure =>
       'Password is stored in device secure storage.';
 
-@override
+  @override
   String get newExpenseAccount => 'New expense account';
 
-@override
+  @override
   String get editExpenseAccount => 'Edit expense account';
 
-@override
+  @override
   String get noParentAccount => 'No parent';
 
-@override
+  @override
   String get accountCanPost => 'Can receive journal postings';
 
-@override
+  @override
   String get activateAccount => 'Activate account';
 
-@override
+  @override
   String get deactivateAccount => 'Deactivate account';
 
   @override
@@ -1654,13 +1739,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get costCenterDeactivated => 'Cost center deactivated';
 
   @override
-  String get confirmDeactivateCostCenter => 'Deactivating stops new postings. Existing transactions keep their centre. Continue?';
+  String get confirmDeactivateCostCenter =>
+      'Deactivating stops new postings. Existing transactions keep their centre. Continue?';
 
   @override
   String get deleteCostCenter => 'Delete cost center';
 
   @override
-  String get confirmDeleteCostCenter => 'Only an unused cost center can be deleted. If it has transactions, deactivate it instead. Continue?';
+  String get confirmDeleteCostCenter =>
+      'Only an unused cost center can be deleted. If it has transactions, deactivate it instead. Continue?';
 
   @override
   String get costCenterDeleted => 'Cost center deleted';
@@ -1738,7 +1825,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get retireBudget => 'Retire budget';
 
   @override
-  String get confirmRetireBudget => 'A retired budget keeps its history and leaves the active list. Continue?';
+  String get confirmRetireBudget =>
+      'A retired budget keeps its history and leaves the active list. Continue?';
 
   @override
   String get budgetReport => 'Budget vs actual';
@@ -1771,7 +1859,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get splitAcrossCenters => 'Split across cost centers';
 
   @override
-  String get allocationMustReconcile => 'Allocations must add up to the line amount exactly.';
+  String get allocationMustReconcile =>
+      'Allocations must add up to the line amount exactly.';
 
   @override
   String get duplicateCostCenter => 'This cost center is already in the split.';
@@ -1783,7 +1872,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get noAllocation => 'No cost center';
 
   @override
-  String get costCenterInactive => 'Inactive cost centers cannot receive new postings.';
+  String get costCenterInactive =>
+      'Inactive cost centers cannot receive new postings.';
 
   @override
   String get addAllocation => 'Add cost center';
@@ -1796,32 +1886,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get resultLabel => 'Result';
-  @override
-  String get @@locale => 'en';
-
-  @override
-  String get deleteAccountConfirm => 'The account “{account}” will be deleted, as long as it has no movements or sub-accounts. Continue?';
-
-  @override
-  String get deleteBranchConfirm => 'The unit “{unit}” will be deleted. Units with movements cannot be deleted.';
-
-  @override
-  String get deleteBackupConfirm => 'The file “{file}” will be permanently removed from the server.';
-
-  @override
-  String get resetForCompany => 'This will reset “{company}”.';
-
-  @override
-  String get resetConfirmBody => 'The only way back is to restore the backup that is about to be taken. Type your password and the word {word} to go ahead.';
-
-  @override
-  String get resetWordLabel => 'Type {word}';
-
-  @override
-  String get resetWrongWord => 'Type {word} exactly as it is written to confirm.';
-
-  @override
-  String get resetDone => 'The company’s data was cleared. “{file}” holds the old data.';
 
   @override
   String get rowDensity => 'Row density';
@@ -1854,10 +1918,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get availableInBranch => 'Available in branch';
 
   @override
-  String get branchStockHint => 'The branch\'s actual on-hand balance, the same figure posting checks. Warehouse-level balances are not tracked.';
+  String get branchStockHint =>
+      'The branch\'s actual on-hand balance, the same figure posting checks. Warehouse-level balances are not tracked.';
 
   @override
-  String get stockNotVisible => 'Stock quantities need the inventory.stock.read permission, so they are not shown.';
+  String get stockNotVisible =>
+      'Stock quantities need the inventory.stock.read permission, so they are not shown.';
 
   @override
   String get useItem => 'Use';
@@ -1866,7 +1932,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get invoiceDiscount => 'Invoice discount';
 
   @override
-  String get discountBeforeTaxHint => 'Applied before tax and allocated across the lines';
+  String get discountBeforeTaxHint =>
+      'Applied before tax and allocated across the lines';
 
   @override
   String get noDiscount => 'No discount';
@@ -2007,7 +2074,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get followUpNote => 'What was discussed';
 
   @override
-  String get followUpRequired => 'Write what was discussed before saving the follow-up.';
+  String get followUpRequired =>
+      'Write what was discussed before saving the follow-up.';
 
   @override
   String get statusHistory => 'History';
@@ -2034,10 +2102,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get convertedInvoice => 'Converted invoice';
 
   @override
-  String get conversionConfirm => 'Create a draft sales invoice from this accepted quotation? Nothing is posted and no stock moves until the invoice is posted separately.';
+  String get conversionConfirm =>
+      'Create a draft sales invoice from this accepted quotation? Nothing is posted and no stock moves until the invoice is posted separately.';
 
   @override
-  String get conversionTaxNote => 'The quotation total is before tax. The invoice applies the company tax rules, so its total may be higher.';
+  String get conversionTaxNote =>
+      'The quotation total is before tax. The invoice applies the company tax rules, so its total may be higher.';
 
   @override
   String get noQuotations => 'No quotations yet';
@@ -2070,7 +2140,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get quotationDeleted => 'Draft quotation removed';
 
   @override
-  String get deleteQuotationConfirm => 'Remove this draft quotation? Issued quotations are never deleted.';
+  String get deleteQuotationConfirm =>
+      'Remove this draft quotation? Issued quotations are never deleted.';
 
   @override
   String get quotationNeedsTable => 'Add at least one table with one line.';
@@ -2085,7 +2156,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get toDate => 'To date';
 
   @override
-  String get quotationDraftHint => 'This is a draft: nothing is posted and stock is untouched. Issuing it freezes the content that the customer receives.';
+  String get quotationDraftHint =>
+      'This is a draft: nothing is posted and stock is untouched. Issuing it freezes the content that the customer receives.';
 
   @override
   String get optional => 'Optional';
@@ -2106,10 +2178,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get maximumDiscount => 'Maximum discount %';
 
   @override
-  String get showTaxIdOnQuotations => 'Print the tax registration number on quotations';
+  String get showTaxIdOnQuotations =>
+      'Print the tax registration number on quotations';
 
   @override
-  String get taxIdLegalNote => 'A display choice only. It never deletes the number, and it cannot override a legal requirement to show it.';
+  String get taxIdLegalNote =>
+      'A display choice only. It never deletes the number, and it cannot override a legal requirement to show it.';
 
   @override
   String get salesManagerName => 'Sales manager';
@@ -2124,7 +2198,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get saveSettings => 'Save settings';
 
   @override
-  String get readOnlySettings => 'Changing these needs the company administration permission.';
+  String get readOnlySettings =>
+      'Changing these needs the company administration permission.';
 
   @override
   String get invalidSetting => 'Enter a value between 0 and 100.';
@@ -2133,7 +2208,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get networkAccessTitle => 'Network and remote access';
 
   @override
-  String get networkUnavailable => 'The server did not answer its network report. Check that it is running.';
+  String get networkUnavailable =>
+      'The server did not answer its network report. Check that it is running.';
 
   @override
   String get lanReachable => 'Available on the local network';
@@ -2169,10 +2245,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get copyAddress => 'Copy address';
 
   @override
-  String get lanNotEnabledHint => 'The server is bound to this computer only, so the addresses below do not answer from another device. To allow the other computers on the network, set HOST=0.0.0.0 in the installation settings file and restart the program.';
+  String get lanNotEnabledHint =>
+      'The server is bound to this computer only, so the addresses below do not answer from another device. To allow the other computers on the network, set HOST=0.0.0.0 in the installation settings file and restart the program.';
 
   @override
-  String get lanFirewallHint => 'Windows Firewall must also allow the program on private networks. The database port (5432) is never opened: other devices only reach the program, and still have to sign in.';
+  String get lanFirewallHint =>
+      'Windows Firewall must also allow the program on private networks. The database port (5432) is never opened: other devices only reach the program, and still have to sign in.';
 
   @override
   String get publicAddressTitle => 'Public (internet) address';
@@ -2181,16 +2259,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get detectPublicAddress => 'Detect';
 
   @override
-  String get publicAddressHint => 'Detected only when you press Detect. A public address alone does not make this server reachable from the internet: the router or the carrier may block incoming connections. For remote use, prefer a VPN or an HTTPS gateway; never expose the database.';
+  String get publicAddressHint =>
+      'Detected only when you press Detect. A public address alone does not make this server reachable from the internet: the router or the carrier may block incoming connections. For remote use, prefer a VPN or an HTTPS gateway; never expose the database.';
 
   @override
   String get publicAddressChecking => 'Checking…';
 
   @override
-  String get publicAddressUnavailable => 'The public address could not be detected.';
+  String get publicAddressUnavailable =>
+      'The public address could not be detected.';
 
   @override
-  String get publicAddressNotProof => 'an address alone does not prove that incoming connections reach this computer.';
+  String get publicAddressNotProof =>
+      'an address alone does not prove that incoming connections reach this computer.';
 
   @override
   String get lastChecked => 'Last checked';
@@ -2214,7 +2295,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get termsBody => 'Terms text';
 
   @override
-  String get noSavedTerms => 'No saved terms yet. Write the terms below and save them for reuse.';
+  String get noSavedTerms =>
+      'No saved terms yet. Write the terms below and save them for reuse.';
 
   @override
   String get termsSaved => 'Terms saved to the library';
@@ -2223,10 +2305,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get manageSavedTerms => 'Manage saved terms';
 
   @override
-  String get termsInserted => 'Saved terms inserted. You can edit this copy freely.';
+  String get termsInserted =>
+      'Saved terms inserted. You can edit this copy freely.';
 
   @override
-  String get removeSavedTerm => 'Remove this saved entry? Documents that already used it keep their own copy.';
+  String get removeSavedTerm =>
+      'Remove this saved entry? Documents that already used it keep their own copy.';
+
   @override
   String get itemCode => 'Item code';
 
@@ -2234,13 +2319,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get subject => 'Subject';
 
   @override
-  String get subjectHint => 'The headline of this offer, printed above the customer\'s name.';
+  String get subjectHint =>
+      'The headline of this offer, printed above the customer\'s name.';
 
   @override
-  String get showTaxNumberOnOffer => 'Print the company tax number on this offer';
+  String get showTaxNumberOnOffer =>
+      'Print the company tax number on this offer';
 
   @override
-  String get showTaxNumberOnOfferHint => 'The company setting is only the default; this offer keeps its own choice.';
+  String get showTaxNumberOnOfferHint =>
+      'The company setting is only the default; this offer keeps its own choice.';
 
   @override
   String get quotationColumns => 'Line columns';
@@ -2249,7 +2337,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get columnLayout => 'Column layout';
 
   @override
-  String get columnLayoutHint => 'Choose, rename, order and size the columns this offer prints.';
+  String get columnLayoutHint =>
+      'Choose, rename, order and size the columns this offer prints.';
 
   @override
   String get columnLabelEn => 'English label';
@@ -2288,7 +2377,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get columnTypePercent => 'Percent';
 
   @override
-  String get columnNameRequired => 'Give the column a name in Arabic or English.';
+  String get columnNameRequired =>
+      'Give the column a name in Arabic or English.';
 
   @override
   String get tablePreview => 'Table preview';
@@ -2322,17 +2412,59 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get keepOneColumnVisible => 'Keep at least one column visible.';
+
   @override
   String get printedOnOffer => 'Printed';
 
   @override
   String get notPrintedOnOffer => 'Not printed';
+
   @override
   String get perWarehouse => 'Warehouses';
 
   @override
   String get unassignedWarehouse => 'Unassigned';
 
+  @override
+  String get fontSize => 'Font size';
+
+  @override
+  String get fontSizeDescription =>
+      'Applies to the whole program: buttons, menus, the sidebar, tables, dialogs and reports. It is remembered for the next sign-in.';
+
+  @override
+  String get fontSizeSmaller => 'Smaller text';
+
+  @override
+  String get fontSizeLarger => 'Larger text';
+
+  @override
+  String get fontSizeReset => 'Default size';
+
+  @override
+  String get fontSizePreview =>
+      'Preview: invoice 1,250.00 EGP · 12.5% discount';
+
+  @override
+  String get sessionNotPersisted =>
+      'This session is kept in memory only: the browser will not store it on a plain http:// address. Reloading signs you out. Serve the program over HTTPS to keep the session.';
+
+  @override
+  String get signInIncomplete =>
+      'The server accepted the sign-in but did not send the account details. This usually means the program and the server are different versions, or the company setup was not finished. The technical detail is in the program log.';
+
+  @override
+  String get sessionStorageLabel => 'Session storage';
+
+  @override
+  String get sessionStorageDurable => 'Saved on this device';
+
+  @override
+  String get sessionStorageMemoryOnly => 'Memory only';
+
+  @override
+  String get sessionStorageMemoryHint =>
+      'This page is not served over HTTPS, so the browser keeps the session only until it is reloaded. Serve the program over HTTPS to keep people signed in.';
 
   @override
   String get errorDialogTitle => 'Something went wrong';
@@ -2344,115 +2476,401 @@ class AppLocalizationsEn extends AppLocalizations {
   String get okAction => 'OK';
 
   @override
-  String get errorGenericBody => 'The operation could not be completed because of an unexpected error. Nothing was saved. Try again, and if it keeps happening tell your system administrator.';
+  String get errorGenericBody =>
+      'The operation could not be completed because of an unexpected error. Nothing was saved. Try again, and if it keeps happening tell your system administrator.';
 
   @override
-  String get errorInvalidInputBody => 'The submitted data is not valid, so nothing was changed. Check the fields and try again.';
+  String get errorInvalidInputBody =>
+      'The submitted data is not valid, so nothing was changed. Check the fields and try again.';
 
   @override
-  String get errorNotFoundBody => 'The record could not be found. It may have been deleted or moved, or you may not be allowed to see it. Reload the page and try again.';
+  String get errorNotFoundBody =>
+      'The record could not be found. It may have been deleted or moved, or you may not be allowed to see it. Reload the page and try again.';
 
   @override
-  String get errorPermissionBody => 'You do not have permission to do this. Ask your system administrator if you need it.';
+  String get errorPermissionBody =>
+      'You do not have permission to do this. Ask your system administrator if you need it.';
 
   @override
-  String get errorConflictBody => 'Someone else changed this record while you were working on it, so your change was not saved. Reload the page to see the latest version, then try again.';
+  String get errorConflictBody =>
+      'Someone else changed this record while you were working on it, so your change was not saved. Reload the page to see the latest version, then try again.';
 
   @override
-  String get errorServerBody => 'The server failed while carrying out the operation and nothing was saved. Try again shortly, and if it keeps happening tell your system administrator.';
+  String get errorServerBody =>
+      'The server failed while carrying out the operation and nothing was saved. Try again shortly, and if it keeps happening tell your system administrator.';
 
   @override
-  String backupSavedIn(Object directory) {
-    return 'Saved in: \$directory';
+  String get licence => 'Licence';
+
+  @override
+  String get licenceSubtitle => 'Licence status, activation and renewal';
+
+  @override
+  String get licenceSettingsSubtitle =>
+      'Activation, renewal and user-account limit';
+
+  @override
+  String get licenceStateActive => 'Active';
+
+  @override
+  String get licenceStateExpired => 'Expired';
+
+  @override
+  String get licenceStateSuspended => 'Suspended';
+
+  @override
+  String get licenceStateUnlicensed => 'Not licensed';
+
+  @override
+  String get licenceMachineId => 'Machine ID';
+
+  @override
+  String get licenceLicenceId => 'Licence ID';
+
+  @override
+  String get licenceIssuedAt => 'Issued';
+
+  @override
+  String get licenceStartsAt => 'Started';
+
+  @override
+  String get licenceExpiresAt => 'Expires';
+
+  @override
+  String get licencePerpetual => 'Perpetual — no expiry';
+
+  @override
+  String get licenceDaysRemaining => 'Days remaining';
+
+  @override
+  String get licenceSeats => 'User accounts';
+
+  @override
+  String get licenceSeatsUsedLabel => 'Used';
+
+  @override
+  String get licenceSeatsLimitLabel => 'Limit';
+
+  @override
+  String get licenceSeatsAvailableLabel => 'Available';
+
+  @override
+  String get licenceSeatsExplainer =>
+      'A seat is consumed when a login account is created and is never returned by deleting the account.';
+
+  @override
+  String get licenceRequestCode => 'Activation request code';
+
+  @override
+  String get licenceRequestCodeHint =>
+      'Send this code to the supplier. It carries only this machine\'s ID and the program version.';
+
+  @override
+  String get licenceCopy => 'Copy';
+
+  @override
+  String get licenceCopied => 'Copied';
+
+  @override
+  String get licenceEnterKey => 'Licence key';
+
+  @override
+  String get licenceKeyHint =>
+      'Paste the key the supplier sent, starting with KYN1.';
+
+  @override
+  String get licenceApply => 'Apply key';
+
+  @override
+  String get licenceOperation => 'What the key does';
+
+  @override
+  String get licenceOperationActivation => 'New activation';
+
+  @override
+  String get licenceOperationRenewal => 'Renewal';
+
+  @override
+  String get licenceOperationSeats => 'Add user accounts';
+
+  @override
+  String get licenceOperationTransfer => 'Move to this computer';
+
+  @override
+  String get licenceApplied => 'The licence was updated.';
+
+  @override
+  String get licenceClockTitle => 'System date check';
+
+  @override
+  String get licenceClockWarning =>
+      'The system date is earlier than the last recorded run. Set the correct date and time in Windows, then confirm.';
+
+  @override
+  String get licenceConfirmClock => 'Confirm date and time';
+
+  @override
+  String get licenceEvents => 'Licence history';
+
+  @override
+  String get licenceEventsEmpty => 'No licence events yet.';
+
+  @override
+  String get licencePublicKey => 'Verification key';
+
+  @override
+  String get licenceNotConfigured =>
+      'This installation has no verification key, so it cannot check any licence key. Reinstall with the supplier\'s public key.';
+
+  @override
+  String get licenceBlockedTitle => 'Work is stopped by the licence';
+
+  @override
+  String get licenceBlockedBody =>
+      'Your data is intact. Nothing was deleted. Open the licence screen and apply a renewal key to continue working.';
+
+  @override
+  String get licenceKeyMissingTitle =>
+      'The licence verification key is missing or invalid';
+
+  @override
+  String get licenceKeyMissingBody =>
+      'This installation cannot check any licence key, so every business operation stays blocked. Your data is intact. The program stays open so you can see this state and reach the licence and backup screens; contact support to restore the approved verification key. Do not delete the licence state and do not reinstall.';
+
+  @override
+  String get licenceSuspendedBody =>
+      'The program stopped because the system date is earlier than the last recorded run. Correct the date and time, then confirm on this screen. No data was lost.';
+
+  @override
+  String get licenceOpenLicence => 'Open the licence screen';
+
+  @override
+  String get licenceBackupStillAvailable =>
+      'Backups and restores stay available while the licence is expired.';
+
+  @override
+  String get licenceOpenBackup => 'Backup and restore';
+
+  @override
+  String get licenceEnforcementEnforce => 'Enforced';
+
+  @override
+  String get licenceEnforcementWarn => 'Warning only';
+
+  @override
+  String get licenceEnforcementOff => 'Off';
+
+  @override
+  String get licenceSuperAdminOnly =>
+      'Only a super administrator can change the licence.';
+
+  @override
+  String get licenceExpiringSoon =>
+      'This licence expires soon. Renew it before it ends so no workday is interrupted.';
+
+  @override
+  String unitsBarcodesTitle(Object itemName) {
+    return 'Units & barcodes — $itemName';
   }
 
   @override
-  String get accumulatedAccount => 'Accumulated depreciation account';
+  String get unitsBarcodesEmpty =>
+      'No additional units or barcodes have been added.';
 
   @override
-  String get accumulatedDepreciation => 'Accumulated depreciation';
+  String unitsBarcodesInactiveUnit(Object unitName) {
+    return '$unitName (inactive)';
+  }
 
   @override
-  String get activateAsset => 'Activate (post acquisition)';
+  String unitsBarcodesFactorBarcode(Object barcode, Object factor) {
+    return 'Factor: $factor  •  Barcode: $barcode';
+  }
 
   @override
-  String get assetAccount => 'Asset account';
+  String get unitsFieldAbbreviation => 'Short label';
 
   @override
-  String get assetCategory => 'Category';
+  String get unitsFieldAbbreviationHelper => 'Printed where the full name is too long: م, كرت.';
 
   @override
-  String get assetCode => 'Asset code';
+  String unitsFieldAbbreviationValue(Object abbreviation) {
+    return 'Short label: $abbreviation';
+  }
 
   @override
-  String get assetCost => 'Cost';
+  String get unitsFieldAllowFraction => 'Allow fractions';
 
   @override
-  String get assetDetails => 'Asset details';
+  String get unitsFieldAllowFractionHelper =>
+      'Off for a unit that cannot be split: half a carton does not exist.';
 
   @override
-  String get assetLocation => 'Location';
+  String get unitsFieldPriceHelper =>
+      'Per this unit. Leave empty to follow the item price × factor.';
 
   @override
-  String get bookValue => 'Book value';
+  String get unitsFieldSortOrder => 'Display order';
 
   @override
-  String get confirmActivateAsset => 'Activation posts the acquisition entry (Dr asset / Cr funding). Continue?';
+  String get unitsFieldSortOrderHelper =>
+      'Lower numbers appear first; the base unit always leads.';
 
   @override
-  String get confirmDisposeAsset => 'Disposal removes the asset from the books and posts its result. Continue?';
+  String get unitsFieldUsedInPurchases => 'Used when buying';
 
   @override
-  String get depreciationExpenseAccount => 'Depreciation expense account';
+  String get unitsFieldUsedInSales => 'Used when selling';
 
   @override
-  String get depreciationPeriod => 'Month (YYYY-MM)';
+  String unitsPerBasePrice(Object baseUnit, Object price) {
+    return '$price per $baseUnit';
+  }
 
   @override
-  String get depreciationSchedule => 'Depreciation schedule';
+  String get unitsPriceDisagrees => 'differs from the item price';
 
   @override
-  String get disposalDate => 'Disposal date';
+  String unitTakesWholeNumbers(Object unit) {
+    return '$unit does not accept fractions; enter a whole number.';
+  }
 
   @override
-  String get disposalProceeds => 'Proceeds';
+  String get unitsBarcodesHidden => 'hidden from new documents';
 
   @override
-  String get disposeAsset => 'Dispose of asset';
+  String get unitsBarcodesBaseUnit => 'Base unit';
 
   @override
-  String get editAsset => 'Edit asset';
+  String get unitsBarcodesGenerateTooltip => 'Generate / replace barcode';
 
   @override
-  String get fixedAssets => 'Fixed assets';
+  String get unitsBarcodesEditTooltip => 'Edit unit';
 
   @override
-  String get fundingAccount => 'Funding account';
+  String get unitsBarcodesReactivateTooltip => 'Reactivate unit';
 
   @override
-  String get gainLossAccount => 'Gain/loss account';
+  String get unitsBarcodesBaseCannotRemove => 'The base unit cannot be removed';
 
   @override
-  String get inServiceDate => 'In-service date';
+  String get unitsBarcodesRemoveTooltip => 'Remove unit';
 
   @override
-  String get newAsset => 'New asset';
+  String get unitsBarcodesPrintLabels => 'Print labels';
 
   @override
-  String get noAssets => 'No fixed assets yet.';
+  String get unitsBarcodesAdd => 'Add unit / barcode';
 
   @override
-  String get proceedsAccount => 'Proceeds account';
+  String get unitsBarcodesFieldUnit => 'Unit name';
 
   @override
-  String get purchaseDate => 'Purchase date';
+  String get unitsBarcodesFieldFactor => 'Base units per unit';
 
   @override
-  String get runDepreciation => 'Run depreciation';
+  String get unitsBarcodesFactorHelper =>
+      'Example: 1 carton = 20 base units → factor 20.';
 
   @override
-  String get salvageValue => 'Salvage value';
+  String get unitsBarcodesFieldBarcode => 'Barcode';
 
   @override
-  String get usefulLifeMonths => 'Useful life (months)';
+  String get unitsBarcodesFieldSalePrice => 'Sale price';
+
+  @override
+  String get unitsBarcodesFieldPurchasePrice => 'Purchase price';
+
+  @override
+  String get unitsBarcodesAdded => 'Unit / barcode added.';
+
+  @override
+  String get unitsBarcodesBarcodeGenerated => 'Barcode generated.';
+
+  @override
+  String get unitsBarcodesReactivated => 'Unit reactivated.';
+
+  @override
+  String get unitsBarcodesRemoveTitle => 'Remove unit';
+
+  @override
+  String unitsBarcodesRemoveConfirm(Object unit) {
+    return 'Remove $unit from this item? If it was used on a saved document, it will be deactivated instead of deleted, and hidden from new documents.';
+  }
+
+  @override
+  String get unitsBarcodesDeactivated =>
+      'Unit used on documents: deactivated, not deleted.';
+
+  @override
+  String get unitsBarcodesRemoved => 'Unit removed.';
+
+  @override
+  String get unitsBarcodesEditTitle => 'Edit unit';
+
+  @override
+  String get unitsBarcodesBaseCannotRenameHelper =>
+      'The base unit cannot be renamed.';
+
+  @override
+  String get unitsBarcodesBaseFactorHelper =>
+      'The base unit always converts 1:1.';
+
+  @override
+  String get unitsBarcodesFactorEditHelper =>
+      'The saved factor is used when this unit is scanned or counted.';
+
+  @override
+  String get unitsBarcodesUpdated => 'Unit updated.';
+
+  @override
+  String get unitsBarcodesTooltip => 'Units & barcodes';
+
+  @override
+  String barcodeLabelsTitle(Object itemName) {
+    return 'Print barcode labels — $itemName';
+  }
+
+  @override
+  String barcodeLabelsInactiveUnit(Object unitName) {
+    return '$unitName (inactive)';
+  }
+
+  @override
+  String barcodeLabelsBarcode(Object barcode) {
+    return 'Barcode: $barcode';
+  }
+
+  @override
+  String get barcodeLabelsNoBarcode =>
+      'No barcode assigned — assign one before printing';
+
+  @override
+  String get barcodeLabelsCopies => 'Copies';
+
+  @override
+  String get barcodeLabelsPaper => 'Paper';
+
+  @override
+  String get barcodeLabelsPaperA4 => 'A4 sheet (3 labels per row)';
+
+  @override
+  String get barcodeLabelsPaperThermal80 => 'Thermal roll 80 mm';
+
+  @override
+  String get barcodeLabelsPaperThermal58 => 'Thermal roll 58 mm';
+
+  @override
+  String get barcodeLabelsShowPrice => 'Show sale price';
+
+  @override
+  String get barcodeLabelsPdf => 'PDF';
+
+  @override
+  String get barcodeLabelsPrint => 'Print';
+
+  @override
+  String barcodeLabelsPrintCount(Object count) {
+    return 'Print ($count)';
+  }
 }

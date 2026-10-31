@@ -20,6 +20,7 @@ import {
 import { join, resolve, sep } from 'path';
 
 import { AuditService } from '../../common/audit/audit.service';
+import { LicensingService } from '../licensing/licensing.service';
 import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { reconcileRestoredAccess } from './restore-access';
@@ -109,6 +110,7 @@ export class FullBackupService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly maintenance: MaintenanceService,
+    private readonly licensing: LicensingService,
   ) {}
 
   /// ────────────────────────────────────────────────────────────── tools
@@ -365,12 +367,26 @@ export class FullBackupService {
 
     const file = await this.validateAndDescribe(path, name, kind);
 
+    // The licence travels with the backup: a timestamped, verified copy is
+    // written beside the dump and recorded in the audit. It is deliberately
+    // not *inside* the dump - the licence's anti-rollback watermarks must not
+    // be rewound by restoring an older database - and a licence that does not
+    // authenticate is never copied at all.
+    const licenceBackup = this.licensing.captureLicenceBackup(
+      kind === 'full' ? 'full-backup' : 'safety-backup',
+    );
+
     if (userId) {
       await this.audit.record({
         action: 'BACKUP',
         entity: 'backup_full',
         entityId: name,
-        after: { name, sizeBytes: file.sizeBytes, kind },
+        after: {
+          name,
+          sizeBytes: file.sizeBytes,
+          kind,
+          licenceBackup: licenceBackup?.id ?? null,
+        },
         userId,
       });
     }
@@ -602,6 +618,11 @@ export class FullBackupService {
     }
     this.assertCustomDump(buffer, label);
 
+    // Before anything is replaced, keep a verified copy of the licence as it
+    // stands. If the restore turns out to be the wrong file, the licence it
+    // replaced is still recoverable from a timestamped snapshot.
+    this.licensing.captureLicenceBackup('pre-restore');
+
     // Only now are the tools needed — a bad request is a bad request even on
     // a machine without PostgreSQL tools.
     const tools = this.requireTools();
@@ -754,6 +775,16 @@ export class FullBackupService {
           accessReconciled: accessRepair,
         },
         userId,
+      });
+
+      // The archive is a snapshot: its licence rows are as old as the file.
+      // The protected watermarks remember the latest term and seat limit, so
+      // a restore is repaired after it lands instead of quietly shrinking the
+      // licence the customer paid for (or handing seats back).
+      await this.licensing.reconcile().catch((error: Error) => {
+        this.logger.warn(
+          `The licence could not be reconciled after the restore: ${error.message}`,
+        );
       });
 
       return {

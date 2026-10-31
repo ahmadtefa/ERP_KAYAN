@@ -17,6 +17,11 @@ import {
 } from '../../common/pricing/discount';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
+import {
+  defaultUnitPrice,
+  movementUnitSnapshot,
+  resolveUnitSelection,
+} from '../../common/units/unit-math';
 import { PriceListsService } from './price-lists.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
@@ -48,6 +53,11 @@ interface PreparedLine {
   discountAmount: Prisma.Decimal;
   invoiceDiscountAmount: Prisma.Decimal;
   costCenterId: string | null;
+  // Multi-unit snapshot. All null on a legacy/base-unit line; `quantity` above
+  // is always the internal base-unit quantity the stock ledger moves.
+  unitName: string | null;
+  unitFactor: Prisma.Decimal | null;
+  unitQuantity: Prisma.Decimal | null;
 }
 
 interface PreparedInvoice {
@@ -69,7 +79,7 @@ export class SalesInvoicesService {
     private readonly audit: AuditService,
   ) {}
 
-  async findAll(companyId: string, query: ListInvoicesDto) {
+  async findAll(companyId: string, query: ListInvoicesDto, mayReadCost = true) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
 
@@ -106,14 +116,14 @@ export class SalesInvoicesService {
     ]);
 
     return {
-      items: items.map((i) => this.toSummary(i)),
+      items: items.map((i) => this.toSummary(i, mayReadCost)),
       total,
       page,
       pageSize,
     };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, mayReadCost = true) {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
       include: {
@@ -128,7 +138,7 @@ export class SalesInvoicesService {
     if (!invoice) throw new NotFoundException('Sales invoice not found');
 
     return {
-      ...this.toSummary(invoice),
+      ...this.toSummary(invoice, mayReadCost),
       branch: invoice.branch,
       notes: invoice.notes,
       journalEntryId: invoice.journalEntryId,
@@ -140,9 +150,18 @@ export class SalesInvoicesService {
         itemCode: l.item?.code ?? null,
         itemNameEn: l.item?.nameEn ?? null,
         itemNameAr: l.item?.nameAr ?? null,
-        unit: l.item?.unit ?? null,
+        // Display unit: the unit the user chose, falling back to the item base
+        // unit for rows written before multi-unit existed.
+        unit: l.unitName ?? l.item?.unit ?? null,
+        unitName: l.unitName ?? null,
+        unitFactor: l.unitFactor === null || l.unitFactor === undefined ? null : l.unitFactor.toFixed(6),
+        // What the user entered in the chosen unit. Legacy rows fall back to
+        // the stored quantity, which already is what they typed.
+        unitQuantity: (l.unitQuantity ?? l.quantity).toFixed(MONEY_SCALE),
         description: l.description,
+        // Internal base-unit quantity used by stock and returns.
         quantity: l.quantity.toFixed(MONEY_SCALE),
+        baseQuantity: l.quantity.toFixed(MONEY_SCALE),
         returnedQuantity: l.returnedQuantity.toFixed(MONEY_SCALE),
         unitPrice: l.unitPrice.toFixed(MONEY_SCALE),
         taxRate: l.taxRate.toFixed(RATE_SCALE),
@@ -154,8 +173,10 @@ export class SalesInvoicesService {
         discountAmount: l.discountAmount.toFixed(MONEY_SCALE),
         invoiceDiscountAmount: l.invoiceDiscountAmount.toFixed(MONEY_SCALE),
         costCenterId: l.costCenterId ?? null,
-        unitCost: l.unitCost.toFixed(MONEY_SCALE),
-        costTotal: l.costTotal.toFixed(MONEY_SCALE),
+        // Cost snapshots must not leave the API for a role without cost.read;
+        // selling, totals and tax figures are unaffected by the redaction.
+        unitCost: mayReadCost ? l.unitCost.toFixed(MONEY_SCALE) : null,
+        costTotal: mayReadCost ? l.costTotal.toFixed(MONEY_SCALE) : null,
       })),
     };
   }
@@ -235,6 +256,9 @@ export class SalesInvoicesService {
               discountAmount: l.discountAmount,
               invoiceDiscountAmount: l.invoiceDiscountAmount,
               costCenterId: l.costCenterId,
+              unitName: l.unitName,
+              unitFactor: l.unitFactor,
+              unitQuantity: l.unitQuantity,
             })),
           },
         },
@@ -356,6 +380,9 @@ export class SalesInvoicesService {
               discountAmount: line.discountAmount,
               invoiceDiscountAmount: line.invoiceDiscountAmount,
               costCenterId: line.costCenterId,
+              unitName: line.unitName,
+              unitFactor: line.unitFactor,
+              unitQuantity: line.unitQuantity,
             })),
           },
         },
@@ -473,6 +500,19 @@ export class SalesInvoicesService {
           );
         }
 
+        // The branch balance above can hide that the goods are not in the
+        // warehouse this invoice actually issues from. Sales never allow
+        // negative stock, so enforce the warehouse-level rule unconditionally.
+        await this.warehouses.assertWarehouseAvailable({
+          tx,
+          companyId,
+          warehouseId,
+          itemId: item.id,
+          quantity: line.quantity,
+          allowNegative: false,
+          reference: invoice.invoiceNumber,
+        });
+
         const unitCost = qtyOnHand.isZero()
           ? new Prisma.Decimal(0)
           : valueOnHand.div(qtyOnHand).toDecimalPlaces(MONEY_SCALE);
@@ -480,6 +520,17 @@ export class SalesInvoicesService {
 
         costOfGoods = costOfGoods.plus(costTotal);
         costByLine.set(line.id, { unitCost, costTotal });
+
+        // The movement says how the line was typed, not just what it came to:
+        // "1 reel of 500 m" and "500 m" move the same goods but are different
+        // statements, and the stock card shows the first.
+        const movementUnits = movementUnitSnapshot({
+          enteredUnit: line.unitName,
+          enteredQuantity: line.unitQuantity,
+          unitFactor: line.unitFactor,
+          baseUnitName: item.unit,
+          baseQuantity: line.quantity,
+        });
 
         await tx.stockMovement.create({
           data: {
@@ -490,6 +541,7 @@ export class SalesInvoicesService {
             movementDate: invoice.invoiceDate,
             direction: StockDirection.OUT,
             quantity: line.quantity,
+            ...movementUnits,
             unitCost,
             totalCost: costTotal,
             referenceType: 'SALES_INVOICE',
@@ -682,7 +734,7 @@ export class SalesInvoicesService {
         if (!line.itemId) continue;
         const item = await tx.item.findFirst({
           where: { id: line.itemId, companyId, deletedAt: null },
-          select: { id: true, isStockTracked: true },
+          select: { id: true, isStockTracked: true, unit: true },
         });
         if (!item) throw new BadRequestException('A sales invoice item no longer exists');
         if (!item.isStockTracked) continue;
@@ -696,6 +748,13 @@ export class SalesInvoicesService {
             movementDate: new Date(),
             direction: StockDirection.IN,
             quantity: line.quantity,
+            ...movementUnitSnapshot({
+              enteredUnit: line.unitName,
+              enteredQuantity: line.unitQuantity,
+              unitFactor: line.unitFactor,
+              baseUnitName: item.unit,
+              baseQuantity: line.quantity,
+            }),
             unitCost: line.unitCost,
             totalCost: line.costTotal,
             referenceType: 'SALES_INVOICE_REVERSAL',
@@ -808,13 +867,43 @@ export class SalesInvoicesService {
       if (raw.itemId) {
         item = await this.prisma.item.findFirst({
           where: { id: raw.itemId, companyId, deletedAt: null },
-          select: { code: true, nameEn: true, taxRate: true, isActive: true, salePrice: true, unit: true },
+          select: {
+            code: true,
+            nameEn: true,
+            taxRate: true,
+            isActive: true,
+            salePrice: true,
+            unit: true,
+            units: true,
+          },
         });
         if (!item) throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
         if (!(item as any).isActive) {
           throw new BadRequestException(`Line ${index + 1}: the item is inactive`);
         }
       }
+
+      // Resolve the chosen unit before any money is calculated. The entered
+      // quantity is in the chosen unit; the base quantity is what stock moves.
+      const resolved = item
+        ? resolveUnitSelection({
+            lineLabel: `Line ${index + 1}`,
+            requestedUnitId: raw.unitId,
+            requestedUnitName: raw.unitName,
+            enteredQuantity: quantity,
+            baseUnitName: item.unit,
+            units: (item as { units?: any[] }).units ?? [],
+            purpose: 'sale',
+          })
+        : {
+            snapshot: { unitName: null, unitFactor: null, unitQuantity: null },
+            baseQuantity: quantity,
+            row: null,
+            isLegacy: true,
+          };
+      // What the user typed, measured in the unit they picked. All money is
+      // computed from this; the base quantity is reserved for stock.
+      const enteredQuantity = resolved.snapshot.unitQuantity ?? quantity;
 
       const description = raw.description?.trim() || (item ? `${item.code} ${item.nameEn}` : '');
       if (!description) {
@@ -826,20 +915,26 @@ export class SalesInvoicesService {
       // What this line costs, when the person did not say.
       let unitPrice: Prisma.Decimal;
       if (typedPrice !== null) {
+        // A price typed on the line is the price of one CHOSEN unit.
         unitPrice = typedPrice;
       } else if (item) {
+        const chosenUnitName = resolved.snapshot.unitName ?? item.unit;
         const listed = await this.prices.resolvePrice(this.prisma, companyId, {
           partyId: customerId ?? null,
           partyKind: 'CUSTOMER',
           itemId: raw.itemId ?? null,
-          unit: item.unit,
-          quantity,
+          unit: chosenUnitName,
+          quantity: enteredQuantity,
         });
-        unitPrice = listed
-          ? listed.price
-              .mul(new Prisma.Decimal(1).minus(listed.discountPercent.div(100)))
-              .toDecimalPlaces(MONEY_SCALE)
-          : item.salePrice;
+        if (listed) {
+          unitPrice = listed.price
+            .mul(new Prisma.Decimal(1).minus(listed.discountPercent.div(100)))
+            .toDecimalPlaces(MONEY_SCALE);
+        } else {
+          // The unit's own independent price, falling back to the item-level
+          // price when the unit carries none. Always per chosen unit.
+          unitPrice = defaultUnitPrice('sale', resolved.row, item.salePrice);
+        }
       } else {
         throw new BadRequestException(
           `Line ${index + 1}: a price is required when the line names no item`,
@@ -858,8 +953,9 @@ export class SalesInvoicesService {
       // What the person typed is the price of the goods, unless the company
       // has said its prices already include VAT - in which case the tax is
       // inside the number and has to be taken back out of it, not added on top
-      // of it a second time.
-      const typedTotal = quantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
+      // of it a second time. Money always follows the entered quantity in the
+      // chosen unit, never the converted base quantity.
+      const typedTotal = enteredQuantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
       const grossUp = new Prisma.Decimal(1).plus(taxRate.div(100));
 
       // When prices include tax, the typed total is a tax-inclusive number:
@@ -902,7 +998,8 @@ export class SalesInvoicesService {
         lineNumber: index + 1,
         itemId: raw.itemId ?? null,
         description,
-        quantity,
+        // Internal base-unit quantity that stock and cost operate on.
+        quantity: resolved.baseQuantity,
         unitPrice,
         taxRate,
         // Replaced below, once the document-level discount has been spread.
@@ -914,6 +1011,10 @@ export class SalesInvoicesService {
         discountAmount: lineDiscount.amount,
         invoiceDiscountAmount: new Prisma.Decimal(0),
         costCenterId,
+        // Frozen display snapshot (null on legacy/base-unit lines).
+        unitName: resolved.snapshot.unitName,
+        unitFactor: resolved.snapshot.unitFactor,
+        unitQuantity: resolved.snapshot.unitQuantity,
       });
     }
 
@@ -1041,7 +1142,8 @@ export class SalesInvoicesService {
     }
   }
 
-  private toSummary(invoice: {
+  private toSummary(
+    invoice: {
     id: string;
     branchId: string;
     invoiceNumber: string;
@@ -1060,7 +1162,9 @@ export class SalesInvoicesService {
     discountAmount?: Prisma.Decimal;
     lineDiscountTotal?: Prisma.Decimal;
     customer?: { id?: string; code: string; nameEn: string; nameAr: string };
-  }) {
+    },
+    mayReadCost = true,
+  ) {
     return {
       id: invoice.id,
       branchId: invoice.branchId,
@@ -1079,8 +1183,11 @@ export class SalesInvoicesService {
       totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),
       paidAmount: invoice.paidAmount.toFixed(MONEY_SCALE),
       balanceDue: invoice.totalAmount.minus(invoice.paidAmount).toFixed(MONEY_SCALE),
-      costOfGoods: invoice.costOfGoods.toFixed(MONEY_SCALE),
-      grossProfit: invoice.subTotal.minus(invoice.costOfGoods).toFixed(MONEY_SCALE),
+      // Cost-derived figures: withheld for callers without inventory.cost.read.
+      costOfGoods: mayReadCost ? invoice.costOfGoods.toFixed(MONEY_SCALE) : null,
+      grossProfit: mayReadCost
+        ? invoice.subTotal.minus(invoice.costOfGoods).toFixed(MONEY_SCALE)
+        : null,
       createdAt: invoice.createdAt.toISOString(),
     };
   }

@@ -21,6 +21,7 @@ import {
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { DocumentNumberService } from '../accounting/document-number.service';
+import { PdfService } from '../export/pdf.service';
 import { SalesInvoicesService } from './sales-invoices.service';
 import {
   CreateQuotationDto,
@@ -37,10 +38,20 @@ import {
 } from './quotation-columns';
 import {
   PageNumberInk,
+  QUOTATION_ARTWORK_PAGE_NUMBER,
+  QuotationSheetMode,
   QuotationSnapshot,
   quotationPageNumberInk,
   renderQuotationDocument,
 } from './quotation-document';
+import {
+  mergeOfferOntoBackground,
+  parseBackgroundSettings,
+  sheetForBackground,
+  type QuotationBackgroundSettings,
+} from './quotation-background';
+import { QuotationBackgroundsService } from './quotation-backgrounds.service';
+import { redactQuotationPrices } from './quotation-redaction';
 
 const MONEY_SCALE = 4;
 const RATE_SCALE = 4;
@@ -114,6 +125,8 @@ export class QuotationsService {
     private readonly settings: CompanySettingsService,
     private readonly invoices: SalesInvoicesService,
     private readonly audit: AuditService,
+    private readonly backgrounds: QuotationBackgroundsService,
+    private readonly pdfService: PdfService,
   ) {}
 
   // ------------------------------------------------------------------ lists
@@ -240,6 +253,9 @@ export class QuotationsService {
           taxRate: prepared.taxRate,
           taxAmount: prepared.taxAmount,
           design: dto.design as Prisma.InputJsonValue ?? {},
+          backgroundFileId: await this.backgroundFileId(dto.backgroundFileId, companyId),
+          background: (this.backgroundSettings(dto.background) ??
+            {}) as Prisma.InputJsonValue,
           managerName: this.text(dto.managerName) ?? settings.managerName,
           responsibleName: this.text(dto.responsibleName) ?? settings.salesManagerName,
           responsiblePhone: this.text(dto.responsiblePhone) ?? settings.salesManagerPhone,
@@ -345,6 +361,15 @@ export class QuotationsService {
           taxRate: prepared.taxRate,
           taxAmount: prepared.taxAmount,
           design: dto.design as Prisma.InputJsonValue ?? {},
+          // Absent means "leave the offer on the artwork it already prints on";
+          // an explicit null removes the binding. A partial update must never
+          // silently unbind a sheet somebody already approved.
+          ...(dto.backgroundFileId === undefined
+            ? {}
+            : { backgroundFileId: await this.backgroundFileId(dto.backgroundFileId, companyId) }),
+          ...(dto.background === undefined
+            ? {}
+            : { background: this.backgroundSettings(dto.background) as Prisma.InputJsonValue }),
           managerName: this.text(dto.managerName),
           responsibleName: this.text(dto.responsibleName),
           responsiblePhone: this.text(dto.responsiblePhone),
@@ -849,6 +874,144 @@ export class QuotationsService {
     }
   }
 
+  // --------------------------------------------------------------- artwork
+
+  /// A quotation may only print on artwork this company owns, and the settings
+  /// are stored as a small object. Both are checked here rather than trusted,
+  /// because a hand-made request could otherwise name another company's file.
+  private async backgroundFileId(
+    id: string | null | undefined,
+    companyId: string,
+  ): Promise<string | null> {
+    if (!id) return null;
+    await this.backgrounds.assertOwned(companyId, id);
+    return id;
+  }
+
+  private backgroundSettings(value: Record<string, unknown> | null | undefined) {
+    if (value === undefined) return undefined;
+    if (value === null) return {};
+    if (typeof value !== 'object' || Array.isArray(value)) {
+      throw new BadRequestException('Quotation background settings must be an object');
+    }
+    const encoded = JSON.stringify(value);
+    if (encoded.length > 4000) {
+      throw new BadRequestException('Quotation background settings are too large');
+    }
+    return JSON.parse(encoded) as Record<string, unknown>;
+  }
+
+  /// Everything the PDF route needs to print an offer on its attached artwork,
+  /// or null when the offer prints on the drawn design.
+  ///
+  /// The overlay is the same document the print route serves, laid out on the
+  /// artwork's sheet: no drawn letterhead, no drawn page number (the merge
+  /// stamps that on top of the artwork), and the same Arabic font, table,
+  /// totals and terms.
+  async printArtwork(
+    companyId: string,
+    id: string,
+    lang: 'en' | 'ar',
+    visibility: { showSalePrice: boolean } | null = null,
+  ): Promise<{
+    overlayHtml: string;
+    background: Buffer;
+    settings: QuotationBackgroundSettings;
+    sheet: QuotationSheetMode;
+    quotationNumber: string;
+    pageNumberInk: PageNumberInk;
+  } | null> {
+    const quotation = await this.prisma.quotation.findFirst({
+      where: { id, companyId, deletedAt: null },
+      include: QUOTATION_INCLUDE,
+    });
+    if (!quotation) throw new NotFoundException('Quotation not found');
+
+    const stored =
+      quotation.status !== QuotationStatus.DRAFT && quotation.contentSnapshot
+        ? (quotation.contentSnapshot as unknown as QuotationSnapshot)
+        : await this.snapshotContent(companyId, quotation);
+    const content = visibility
+      ? redactQuotationPrices(stored, { showSalePrice: visibility.showSalePrice })
+      : stored;
+
+    const bound = content.background ?? null;
+    const fileId = bound?.fileId ?? quotation.backgroundFileId ?? null;
+    if (!fileId) return null;
+
+    const asset = await this.backgrounds.assetFor(companyId, fileId);
+    if (!asset) return null;
+
+    const settings = parseBackgroundSettings(
+      bound?.settings ?? quotation.background,
+      asset.pageCount,
+    );
+    const sheet = sheetForBackground(
+      { width: asset.pageWidth, height: asset.pageHeight },
+      settings,
+    );
+    const company = await this.companyHeader(companyId);
+    return {
+      overlayHtml: renderQuotationDocument(content, company, lang, true, sheet),
+      background: asset.data,
+      settings,
+      sheet,
+      quotationNumber: content.quotationNumber,
+      pageNumberInk: quotationPageNumberInk(
+        content.design as Record<string, unknown> | null | undefined,
+      ),
+    };
+  }
+
+  /// The finished file: overlay drawn by the browser, merged onto the artwork,
+  /// page numbers stamped above both.
+  async renderArtworkPdf(
+    companyId: string,
+    id: string,
+    lang: 'en' | 'ar',
+    visibility: { showSalePrice: boolean } | null = null,
+  ): Promise<
+    | {
+        pdf: Buffer;
+        quotationNumber: string;
+        pages: number;
+        backgroundPages: number[];
+      }
+    | null
+  > {
+    const artwork = await this.printArtwork(companyId, id, lang, visibility);
+    if (!artwork) return null;
+    let overlay: Buffer;
+    try {
+      // Exactly one implementation of "HTML to PDF" exists in this program:
+      // the same headless browser pipeline the drawn design uses.
+      overlay = await this.pdfService.render(artwork.overlayHtml, { fullBleed: true });
+    } catch (error) {
+      if (error instanceof Error && /no browser/i.test(error.message)) {
+        throw new BadRequestException(
+          'لا يوجد متصفح على هذا الجهاز لإنشاء ملف PDF بالخلفية. استخدم زر الطباعة من المتصفح. / ' +
+            'This machine has no browser, so the artwork PDF cannot be produced here. Use the print button and choose "Save as PDF".',
+        );
+      }
+      throw error;
+    }
+    const merged = await mergeOfferOntoBackground({
+      background: artwork.background,
+      overlay,
+      settings: artwork.settings,
+      pageNumber: {
+        y: QUOTATION_ARTWORK_PAGE_NUMBER.y,
+        size: QUOTATION_ARTWORK_PAGE_NUMBER.size,
+      },
+    });
+    return {
+      pdf: merged.pdf,
+      quotationNumber: artwork.quotationNumber,
+      pages: merged.pages,
+      backgroundPages: merged.backgroundPages,
+    };
+  }
+
   // --------------------------------------------------------------- printing
 
   /** The HTML behind the print preview and the PDF. Uses the snapshot once issued. */
@@ -860,6 +1023,10 @@ export class QuotationsService {
     id: string,
     lang: 'en' | 'ar',
     autoPrint = false,
+    /// What this copy may show, already resolved against the company's print
+    /// settings and the caller's permission. Null means "as stored", which is
+    /// how every caller behaved before print settings existed.
+    visibility: { showSalePrice: boolean } | null = null,
   ): Promise<{
     html: string;
     quotationNumber: string;
@@ -875,10 +1042,15 @@ export class QuotationsService {
     });
     if (!quotation) throw new NotFoundException('Quotation not found');
     const company = await this.companyHeader(companyId);
-    const content =
+    const stored =
       quotation.status !== QuotationStatus.DRAFT && quotation.contentSnapshot
         ? (quotation.contentSnapshot as unknown as QuotationSnapshot)
         : await this.snapshotContent(companyId, quotation);
+    // Redaction is applied to the copy that is being rendered, never to the
+    // document: the database keeps every price, and the next copy can show it.
+    const content = visibility
+      ? redactQuotationPrices(stored, { showSalePrice: visibility.showSalePrice })
+      : stored;
     return {
       html: renderQuotationDocument(content, company, lang, autoPrint),
       quotationNumber: content.quotationNumber,
@@ -888,8 +1060,14 @@ export class QuotationsService {
     };
   }
 
-  async printHtml(companyId: string, id: string, lang: 'en' | 'ar', autoPrint = false) {
-    const document = await this.printDocument(companyId, id, lang, autoPrint);
+  async printHtml(
+    companyId: string,
+    id: string,
+    lang: 'en' | 'ar',
+    autoPrint = false,
+    visibility: { showSalePrice: boolean } | null = null,
+  ) {
+    const document = await this.printDocument(companyId, id, lang, autoPrint, visibility);
     return document.html;
   }
 
@@ -1195,6 +1373,16 @@ export class QuotationsService {
         quotation.design && typeof quotation.design === 'object' && !Array.isArray(quotation.design)
           ? (quotation.design as Record<string, unknown>)
           : {},
+      // The artwork is part of the issued document: an offer that was sent on
+      // the company's letterhead reprints on that letterhead, even if the
+      // template is re-bound to a new file or the file is removed later.
+      background:
+        quotation.backgroundFileId
+          ? {
+              fileId: quotation.backgroundFileId,
+              settings: (quotation.background as Record<string, unknown>) ?? {},
+            }
+          : null,
     };
   }
 
@@ -1224,6 +1412,11 @@ export class QuotationsService {
       responsiblePhone: quotation.responsiblePhone,
       showTaxId: quotation.showTaxId,
       subject: quotation.subject,
+      // The editor reads these back so the artwork card shows the sheet the
+      // offer is actually printed on, and so saving an unrelated field does
+      // not silently unbind the file.
+      backgroundFileId: quotation.backgroundFileId ?? null,
+      background: (quotation.background as Record<string, unknown> | null) ?? null,
       columns: this.columnsOf(quotation.columns),
       issuedAt: quotation.issuedAt?.toISOString() ?? null,
       sentAt: quotation.sentAt?.toISOString() ?? null,

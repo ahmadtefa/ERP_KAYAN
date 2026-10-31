@@ -5,6 +5,7 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { canReadCost } from '../../common/auth/cost-visibility';
 import { BudgetsService } from '../accounting/budgets.service';
 import { AgingService } from './aging.service';
 import { FinancialStatementsService } from './financial-statements.service';
@@ -177,7 +178,7 @@ export class ReportsController {
   @Get('sales')
   @RequirePermissions('reports.read')
   salesReport(@CurrentUser() user: AuthUser, @Query() query: OperationsQueryDto) {
-    return this.operations.sales(user.companyId, query);
+    return this.operations.sales(user.companyId, query, canReadCost(user));
   }
 
   @Get('purchases')

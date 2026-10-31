@@ -4,6 +4,7 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { canReadCost } from '../../common/auth/cost-visibility';
 import {
   CreateSalesInvoiceDto,
   ListInvoicesDto,
@@ -17,13 +18,13 @@ export class SalesInvoicesController {
   @Get()
   @RequirePermissions('sales.invoices.read')
   findAll(@CurrentUser() user: AuthUser, @Query() query: ListInvoicesDto) {
-    return this.service.findAll(user.companyId, query);
+    return this.service.findAll(user.companyId, query, canReadCost(user));
   }
 
   @Get(':id')
   @RequirePermissions('sales.invoices.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id);
+    return this.service.findOne(user.companyId, id, canReadCost(user));
   }
 
   @Post()

@@ -3,6 +3,9 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../../common/audit/audit.module';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { AccountingModule } from '../accounting/accounting.module';
+import { ExportModule } from '../export/export.module';
+import { BarcodeLabelsService } from './barcode-labels.service';
+import { InventoryPrintController } from './inventory-print.controller';
 import { InventoryReportsController } from './inventory-reports.controller';
 import { InventoryReportsService } from './inventory-reports.service';
 import { ItemsController } from './items.controller';
@@ -14,15 +17,22 @@ import { StockService } from './stock.service';
 import { WarehousesController } from './warehouses.controller';
 
 @Module({
-  imports: [PrismaModule, AuditModule, AccountingModule],
+  imports: [PrismaModule, AuditModule, AccountingModule, ExportModule],
   controllers: [
     ItemsController,
     StockController,
     StockDocumentsController,
     InventoryReportsController,
+    InventoryPrintController,
     WarehousesController,
   ],
-  providers: [ItemsService, StockService, StockDocumentsService, InventoryReportsService],
+  providers: [
+    ItemsService,
+    StockService,
+    StockDocumentsService,
+    InventoryReportsService,
+    BarcodeLabelsService,
+  ],
   exports: [StockService, StockDocumentsService, InventoryReportsService],
 })
 export class InventoryModule {}

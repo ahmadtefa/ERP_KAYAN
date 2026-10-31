@@ -15,6 +15,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
+import '../../../data/presentation/widgets/print_visibility_prompt.dart';
 
 class StockController extends JsonListController {
   @override
@@ -76,9 +77,17 @@ class _StockScreenState extends ConsumerState<StockScreen> {
                     ColumnSpec('الاسم', value: (r) => text(r, 'itemNameAr')),
                     ColumnSpec(l10n.unit, value: (r) => text(r, 'unit')),
                     ColumnSpec(
+                      // The ledger keeps metres; the storekeeper counts reels.
+                      // Both are shown, and they are the same number.
                       l10n.onHand,
                       numeric: true,
-                      value: (r) => formatQuantity(asString(r['quantity'])),
+                      value: (r) {
+                        final composed = text(r, 'displayQuantity');
+                        final base = formatQuantity(asString(r['quantity']));
+                        return composed.isEmpty || composed == base
+                            ? base
+                            : '$base  ($composed)';
+                      },
                     ),
                     ColumnSpec(
                       l10n.averageCost,
@@ -228,6 +237,49 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
     final links = ref.read(reportLinkProvider);
     final filters = {'itemId': widget.itemId};
 
+    // The movement sheet carries the unit cost of every line, so it asks the
+    // same question every other print asks - and the server answers it again
+    // against the caller's permission, whatever this dialog said.
+    Future<void> printLedger() async {
+      final visibility = await promptPriceVisibility(
+        context,
+        ref,
+        typeKey: 'stock-ledger',
+        arabic: language == 'ar',
+      );
+      if (visibility == null || !context.mounted) return;
+      await runPrint(
+        context,
+        links.listPrint(
+          list: 'stock-ledger',
+          language: language,
+          filters: filters,
+          showSalePrice: visibility.showSalePrice,
+          showCost: visibility.showCost,
+        ),
+      );
+    }
+
+    Future<void> downloadLedgerPdf() async {
+      final visibility = await promptPriceVisibility(
+        context,
+        ref,
+        typeKey: 'stock-ledger',
+        arabic: language == 'ar',
+      );
+      if (visibility == null || !context.mounted) return;
+      await runDownload(
+        context,
+        links.listPdf(
+          list: 'stock-ledger',
+          language: language,
+          filters: filters,
+          showSalePrice: visibility.showSalePrice,
+          showCost: visibility.showCost,
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 4, 18, 18),
       child: Column(
@@ -237,7 +289,14 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
             spacing: 24,
             runSpacing: 8,
             children: [
-              _stat(l10n.onHand, formatQuantity(asString(widget.row['quantity']))),
+              _stat(
+                l10n.onHand,
+                [
+                  formatQuantity(asString(widget.row['quantity'])),
+                  if (text(widget.row, 'displayQuantity').isNotEmpty)
+                    text(widget.row, 'displayQuantity'),
+                ].join('  ·  '),
+              ),
               _stat(l10n.averageCost, formatAmount(asString(widget.row['averageCost']))),
               _stat(l10n.stockValue, formatAmount(asString(widget.row['value']))),
               _stat(l10n.branch, text(widget.row, 'branchCode')),
@@ -248,26 +307,12 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
             spacing: 8,
             children: [
               OutlinedButton.icon(
-                onPressed: () => runPrint(
-                  context,
-                  links.listPrint(
-                    list: 'stock-ledger',
-                    language: language,
-                    filters: filters,
-                  ),
-                ),
+                onPressed: printLedger,
                 icon: const Icon(Icons.print_outlined, size: 18),
                 label: Text(l10n.printPreview),
               ),
               OutlinedButton.icon(
-                onPressed: () => runDownload(
-                  context,
-                  links.listPdf(
-                    list: 'stock-ledger',
-                    language: language,
-                    filters: filters,
-                  ),
-                ),
+                onPressed: downloadLedgerPdf,
                 icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
                 label: Text(l10n.exportPdf),
               ),
@@ -342,9 +387,17 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
                       ),
                       ResizableColumn(
                         l10n.quantity,
-                        width: 110,
+                        width: 150,
                         numeric: true,
-                        value: (r) => formatQuantity(asString(r['quantity'])),
+                        // What the document said, with the base quantity
+                        // underneath when the two differ: "1 لفة (500)".
+                        value: (r) {
+                          final entered = text(r, 'displayQuantity');
+                          final base = formatQuantity(asString(r['quantity']));
+                          return entered.isEmpty || entered == base
+                              ? base
+                              : '$entered = $base';
+                        },
                       ),
                       ResizableColumn(
                         l10n.unitPrice,
@@ -360,10 +413,10 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
                       ),
                       ResizableColumn(
                         l10n.runningBalance,
-                        width: 190,
+                        width: 210,
                         numeric: true,
                         value: (r) =>
-                            '${formatQuantity(asString(r['runningQuantity']))} / '
+                            '${text(r, 'runningDisplay').isEmpty ? formatQuantity(asString(r['runningQuantity'])) : text(r, 'runningDisplay')} / '
                             '${formatAmount(asString(r['runningValue']))}',
                       ),
                     ],

@@ -5,6 +5,7 @@ import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../providers/data_providers.dart';
+import 'print_visibility_prompt.dart';
 
 /// The way out of a list: the same four choices a report has.
 ///
@@ -55,20 +56,46 @@ class ListExportActions extends ConsumerWidget {
           ),
         );
 
-    Future<void> downloadPdf() => runDownload(
-          context,
-          links.listPdf(list: list, language: language, filters: filters),
-        );
+    Future<void> downloadPdf() async {
+      final visibility = await promptPriceVisibility(
+        context,
+        ref,
+        typeKey: list,
+        arabic: language == 'ar',
+      );
+      if (visibility == null || !context.mounted) return;
+      await runDownload(
+        context,
+        links.listPdf(
+          list: list,
+          language: language,
+          filters: filters,
+          showSalePrice: visibility.showSalePrice,
+          showCost: visibility.showCost,
+        ),
+      );
+    }
 
-    Future<void> print(bool auto) => runPrint(
-          context,
-          links.listPrint(
-            list: list,
-            language: language,
-            auto: auto,
-            filters: filters,
-          ),
-        );
+    Future<void> print(bool auto) async {
+      final visibility = await promptPriceVisibility(
+        context,
+        ref,
+        typeKey: list,
+        arabic: language == 'ar',
+      );
+      if (visibility == null || !context.mounted) return;
+      await runPrint(
+        context,
+        links.listPrint(
+          list: list,
+          language: language,
+          auto: auto,
+          filters: filters,
+          showSalePrice: visibility.showSalePrice,
+          showCost: visibility.showCost,
+        ),
+      );
+    }
 
     return PopupMenuButton<String>(
       tooltip: l10n.exportListHint,

@@ -9,6 +9,7 @@ import * as argon2 from 'argon2';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { LicensingService } from '../licensing/licensing.service';
 import { Prisma } from '@prisma/client';
 import { CreateUserDto, ListUsersDto, UpdateUserDto } from './dto/user.dto';
 
@@ -20,6 +21,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly licensing: LicensingService,
   ) {}
 
   async list(companyId: string, query: ListUsersDto) {
@@ -72,6 +74,7 @@ export class UsersService {
     dto: CreateUserDto,
     actorPermissions: string[],
     isSuperAdmin: boolean,
+    idempotencyKey?: string,
   ) {
     const username = dto.username.trim().toLowerCase();
     if (username === SYSTEM_USERNAME) {
@@ -108,6 +111,16 @@ export class UsersService {
           isSuperAdmin: false,
           createdBy: actorId,
         },
+      });
+      // The licence seat is reserved inside the same transaction as the
+      // account: a refusal rolls the account back, and a failure anywhere
+      // after this point gives the seat back with it. See LicensingService
+      // for the lock that makes simultaneous creations safe.
+      await this.licensing.reserveSeat(tx, {
+        userId: user.id,
+        username,
+        reason: 'USER_CREATE',
+        idempotencyKey: idempotencyKey ?? `user:${companyId}:${username}`,
       });
       await this.replaceRoles(tx, companyId, user.id, dto.roleIds);
       await this.replaceBranches(tx, user.id, dto.branchIds);

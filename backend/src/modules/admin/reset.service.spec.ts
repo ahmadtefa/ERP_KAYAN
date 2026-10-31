@@ -33,11 +33,16 @@ describe('ResetService', () => {
   let purgeSessions: string[];
   let purgeRecords: Array<Record<string, unknown>>;
   let linkStatements: string[];
+  let rawDeletes: string[];
   let failOn: string | null;
 
   /// The models the reset clears, and the order it clears them in.
   const MODELS = [
     'cashVoucherAllocation',
+    'quotation',
+    // The artwork is cleared straight after the offers that name it, before
+    // the tables those offers hang off.
+    'quotationBackground',
     'cashVoucher',
     'cashTransfer',
     'bankReconciliation',
@@ -87,7 +92,11 @@ describe('ResetService', () => {
   function transaction() {
     const tx: Record<string, unknown> = {
       $queryRaw: async () => [{ id: 'x' }],
-      $executeRaw: async () => 1,
+      // Prisma calls a tagged template as ($executeRaw(strings, ...values)).
+      $executeRaw: async (strings: TemplateStringsArray) => {
+        rawDeletes.push(String(strings.raw?.join('?') ?? strings));
+        return 1;
+      },
       // What the purge helper uses to announce the purge to this transaction
       // and to put the guard back on straight afterwards.
       $queryRawUnsafe: async (sql: string) => {
@@ -169,6 +178,14 @@ describe('ResetService', () => {
       item: { count: async () => 5 },
       salesInvoice: { count: async () => 6 },
       purchaseInvoice: { count: async () => 2 },
+      // The offers and the money vouchers are business data too: the warning
+      // has to name them, so the stub counts them.
+      quotation: { count: async () => 1 },
+      // The artwork offers print on is company data too, so the reset clears
+      // it; the stub has to know about it for the same reason it knows about
+      // the offers themselves.
+      quotationBackground: { count: async () => 0, deleteMany: async () => ({ count: 1 }) },
+      cashVoucher: { count: async () => 2 },
       stockMovement: { count: async () => 7 },
       fiscalPeriod: { count: async () => 1 },
       branch: { count: async () => 1 },
@@ -285,6 +302,7 @@ describe('ResetService', () => {
     purgeSessions = [];
     purgeRecords = [];
     linkStatements = [];
+    rawDeletes = [];
     failOn = null;
     jest.mocked(argon2.verify).mockReset();
     jest.mocked(argon2.verify).mockResolvedValue(true);
@@ -336,6 +354,35 @@ describe('ResetService', () => {
       BadRequestException,
     );
     expect(deletions).toEqual([]);
+  });
+
+  it('clears the offers before the invoices and parties their constraints point at', async () => {
+    // A converted quotation holds a restrictive reference to the invoice it
+    // became, and every quotation holds one to its customer and its items.
+    // Deleting them in the wrong order is what made a real reset fail with
+    // "Foreign key constraint violated on quotations_convertedInvoiceId_fkey",
+    // so the order is the contract this test guards.
+    await service().reset(admin(), 'pw', 'RESET');
+    const at = (model: string) => deletions.indexOf(model);
+    expect(at('quotation')).toBeGreaterThanOrEqual(0);
+    expect(at('quotation')).toBeLessThan(at('salesInvoice'));
+    expect(at('quotation')).toBeLessThan(at('customer'));
+    expect(at('quotation')).toBeLessThan(at('item'));
+    expect(at('quotation')).toBeLessThan(at('account'));
+  });
+
+  it('removes the pre-upgrade offers too, so their constraints cannot block the reset', async () => {
+    await service().reset(admin(), 'pw', 'RESET');
+    const legacyLines = rawDeletes.find((sql) => sql.includes('quotation_lines_legacy'));
+    const legacyOffers = rawDeletes.find(
+      (sql) =>
+        sql.includes('DELETE FROM quotations_legacy') &&
+        !sql.includes('quotation_lines_legacy'),
+    );
+    expect(legacyLines).toBeDefined();
+    expect(legacyOffers).toBeDefined();
+    // Scoped to the company being reset, never the whole table.
+    expect(legacyOffers).toContain('companyId');
   });
 
   it('clears the company and puts it back into the first-run state', async () => {
@@ -520,6 +567,8 @@ describe('ResetService', () => {
       journalEntries: 3,
       accounts: 30,
       customers: 4,
+      quotations: 1,
+      cashVouchers: 2,
     });
     expect(preview.confirmationWord).toBe('RESET');
     // The administrator keeping their account is not counted as a deletion.

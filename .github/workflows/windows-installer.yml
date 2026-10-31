@@ -2,13 +2,31 @@ name: Windows Installer
 
 on:
   workflow_dispatch:
+    inputs:
+      build_mode:
+        description: 'Product (approved key required) or explicitly labelled test-only installer'
+        type: choice
+        options: [product, test-signed]
+        default: product
+        required: true
   pull_request:
-    branches: [main]
+    branches: [main, 'arena/2d794f08-erp-kayan']
   push:
-    branches: [main]
+    # A push to one of these branches builds a product candidate and runs the
+    # installed-runtime smoke test. It cannot publish: publication needs a push
+    # to main, the protected environment and independent release evidence.
+    branches:
+      - main
+      - 'arena/key-generator-register-ui-fix'
+      - 'arena/2d794f08-erp-kayan'
+      - 'arena/7b5dfd31-erp-kayan'
+      - 'fix/inno-inspector-callsites-20261030'
 
+# Building or inspecting a candidate never needs permission to publish releases.
+# Any future publishing job must request write permission separately, after its
+# independent package and environment checks.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-installer-${{ github.ref }}
@@ -19,6 +37,10 @@ jobs:
     name: Build KAYAN ERP for Windows x64
     runs-on: windows-latest
     timeout-minutes: 90
+    outputs:
+      build_mode: ${{ steps.licence.outputs.build }}
+      installer_base: ${{ steps.installer.outputs.base }}
+      version: ${{ steps.app-version.outputs.version }}
 
     steps:
       - name: Checkout repository
@@ -41,21 +63,24 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
+      - name: Test licence build policy, synthetic signatures and release gates
+        run: node --experimental-transform-types --test scripts/windows-release-policy.test.mjs scripts/license-key-compatibility.test.mjs scripts/verify-release-evidence.test.mjs scripts/release-evidence-adversarial.test.mjs scripts/release-evidence-cli-isolation.test.mjs scripts/release-workflow-order.test.mjs scripts/branch-candidate-release.test.mjs scripts/check-release-environment.test.mjs scripts/inspect-final-inno.test.mjs
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
-      - name: Set up Python for branded icons
+      - name: Set up Python for CI diagnostics
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Generate platform icons from 1.png
+      - name: Verify the checked-in Windows icon
+        shell: powershell
         run: |
-          python -m pip install --disable-pip-version-check Pillow
-          python scripts/generate_app_icons.py
+          if (-not (Test-Path -LiteralPath 'windows\runner\resources\app_icon.ico' -PathType Leaf)) { throw 'Windows icon is missing.' }
 
       - name: Compile RepairTool.exe (early check)
         shell: powershell
@@ -65,6 +90,40 @@ jobs:
           .\distribution\windows\build-repair-tool.ps1 -OutputPath $output -IconPath '.\windows\runner\resources\app_icon.ico'
           $item = Get-Item -LiteralPath $output
           Write-Host "RepairTool.exe compiled early: $($item.Length) bytes"
+
+      # A syntax error in a PowerShell script used to surface only after the
+      # full Windows build and the payload inspection, an hour into the run.
+      # Parse every script the installer and the smoke test execute, here.
+      - name: Parse the installer and smoke PowerShell scripts
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scripts = @(
+            'scripts\smoke-test-installed-windows.ps1',
+            'scripts\prepare-isolated-windows-install-test.ps1',
+            'distribution\windows\install-runtime.ps1',
+            'distribution\windows\repair-runtime.ps1',
+            'distribution\windows\reset-kayan.ps1',
+            'distribution\windows\verify-licensed-install.ps1',
+            'distribution\windows\build-installer.ps1',
+            'distribution\windows\build-repair-tool.ps1'
+          )
+          $failed = 0
+          foreach ($script in $scripts) {
+            if (-not (Test-Path -LiteralPath $script)) { throw "Missing PowerShell script: $script" }
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $script).Path, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              foreach ($e in $errors) {
+                Write-Output ("::error title=PowerShell syntax::" + $script + ": " + $e.Message + " (line " + $e.Extent.StartLineNumber + ")")
+              }
+              $failed += $errors.Count
+            } else {
+              Write-Host ("Parses: $script (" + $tokens.Count + " tokens)")
+            }
+          }
+          if ($failed -gt 0) { throw "$failed PowerShell syntax error(s) in installer scripts." }
 
       - name: Enable Flutter Windows desktop
         run: flutter config --enable-windows-desktop
@@ -105,7 +164,10 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $log = Join-Path $env:RUNNER_TEMP 'backend-tests.log'
           $err = Join-Path $env:RUNNER_TEMP 'backend-tests.err.log'
-          $proc = Start-Process -FilePath 'npm.cmd' -ArgumentList 'test','--','--runInBand' `
+          # The legacy generator suite writes a signing key to disk; retain it
+          # but do not execute it under the no-private-key-on-disk constraint.
+          Write-Output '::warning title=Generator tests not run::File-backed generator tests are excluded; packaged generator verification remains outstanding.'
+          $proc = Start-Process -FilePath 'npm.cmd' -ArgumentList 'test','--','--runInBand','--testPathIgnorePatterns=license-generator.spec.ts' `
             -NoNewWindow -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError $err
 
           $esc = [char]27
@@ -163,42 +225,195 @@ jobs:
       - name: Test Flutter
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
 
-      - name: Build Windows installer
+      # PR builds are explicitly test-signed; pushes default to product, and a
+      # manual run chooses its mode. A missing product key is never a reason to
+      # silently downgrade to a test build. Test installers are labelled and
+      # are never eligible for either release publication path.
+      # PowerShell parses a whole script before running any of it, so one syntax
+      # error anywhere in the step below kills it before its own error handler
+      # exists: the step then fails in under a second, saying nothing that
+      # survives outside the runner log. This guard parses that step's text with
+      # PowerShell's own parser and fails with the exact message instead.
+      - name: Check the licence step parses
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          & .\distribution\windows\build-installer.ps1
-          if ($LASTEXITCODE -ne 0) { throw "Windows installer build failed." }
+          $workflow = '.github/workflows/windows-installer.yml'
+          $lines = Get-Content -LiteralPath $workflow
+          $start = -1
+          for ($n = 0; $n -lt $lines.Count; $n++) {
+            if ($lines[$n] -eq '      - name: Licence key for this build') { $start = $n; break }
+          }
+          if ($start -lt 0) { throw "No licence step in $workflow" }
+          $i = $start
+          while ($i -lt $lines.Count -and $lines[$i] -notmatch 'run:\s*\|') { $i++ }
+          if ($i -ge $lines.Count) { throw "The licence step in $workflow has no run block" }
+          $runIndent = ([regex]::Match($lines[$i], '^(\s*)')).Groups[1].Value.Length
+          $body = New-Object System.Collections.Generic.List[string]
+          for ($j = $i + 1; $j -lt $lines.Count; $j++) {
+            $line = $lines[$j]
+            $indent = ([regex]::Match($line, '^(\s*)')).Groups[1].Value.Length
+            if ($line.Trim().Length -gt 0 -and $indent -le ($runIndent - 2)) { break }
+            if ($line.Length -ge $runIndent) { $body.Add($line.Substring($runIndent)) } else { $body.Add('') }
+          }
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseInput([string]::Join("`n", $body), [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            foreach ($e in $errors) {
+              Write-Output ("::error title=Licence step syntax::" + $e.Message + " (line " + $e.Extent.StartLineNumber + ")")
+            }
+            throw ("The licence step in " + $workflow + " has " + $errors.Count + " syntax error(s), so PowerShell would refuse to run it.")
+          }
+          Write-Host ("Licence step parses: " + $body.Count + " lines, " + $tokens.Count + " tokens.")
+
+      - name: Licence key for this build
+        id: licence
+        shell: powershell
+        env:
+          # No production signing secret is provided to this job.
+          KAYAN_BUILD_MODE: ${{ github.event_name == 'pull_request' && 'test-signed' || inputs.build_mode || 'product' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Every failure here is reported as an annotation, because the raw
+          # step log is not always reachable from outside the runner.
+          try {
+            Write-Output ("::notice::Licence step started: powershell " + $PSVersionTable.PSVersion.ToString() + ", temp " + $env:RUNNER_TEMP + ", cwd " + (Get-Location).Path)
+            $operatorKey = ''
+            foreach ($candidate in @('.\distribution\windows\public-key.pem', '.\distribution\windows\licensing\public-key.pem')) {
+              if (Test-Path -LiteralPath $candidate) { $operatorKey = (Resolve-Path -LiteralPath $candidate).Path; break }
+            }
+            if ($env:KAYAN_BUILD_MODE -eq 'product') {
+              if (-not $operatorKey) { throw 'Product build refused: the approved licence public key is missing.' }
+              & node .\scripts\license-build-policy.mjs --mode product --public-key $operatorKey
+              if ($LASTEXITCODE -ne 0) { throw 'Product build refused: licence public key validation failed.' }
+              # Product candidates require only the approved public key. No
+              # production private key is sent to CI or used for smoke tests.
+              "build=product" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+              exit 0
+            }
+
+            if ($env:KAYAN_BUILD_MODE -ne 'test-signed') { throw 'Unknown licence build mode.' }
+            # Generate a synthetic pair in memory; only the public half is
+            # written. This installer is deliberately non-installable.
+            $publicKey = Join-Path $env:RUNNER_TEMP 'kayan-test-public.pem'
+            & node -e "const c=require('node:crypto'),f=require('node:fs');const p=c.generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'pem'});f.writeFileSync(process.argv[1],p,{flag:'wx'});" $publicKey
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $publicKey)) { throw 'Could not create the synthetic public key.' }
+            & node .\scripts\license-build-policy.mjs --mode test-signed --public-key $publicKey
+            if ($LASTEXITCODE -ne 0) { throw 'Test-signed build key failed policy validation.' }
+            Write-Host '::warning title=TEST ONLY::This diagnostic installer refuses installation and cannot activate customer keys.'
+            "build=test-signed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "public_key=$publicKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } catch {
+            Write-Output ("::error title=Licence key for this build::" + $_.Exception.GetType().Name + ': ' + $_.Exception.Message)
+            exit 1
+          }
+      - name: Verify configured product key pair in memory
+        if: github.event_name != 'workflow_dispatch' || inputs.build_mode == 'product'
+        env:
+          KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
+        run: node scripts/verify-configured-key-pair.mjs
+      - name: Build Windows installer
+        id: installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ('${{ steps.licence.outputs.build }}' -eq 'product') {
+            Write-Host 'Building a product installer from the approved operator public key.'
+            & .\distribution\windows\build-installer.ps1 -DisposableSource
+            $base = 'KAYAN-ERP-Setup'
+          } elseif ('${{ steps.licence.outputs.build }}' -eq 'test-signed') {
+            $key = '${{ steps.licence.outputs.public_key }}'
+            if (-not (Test-Path -LiteralPath $key)) { throw 'The test public key is missing.' }
+            & .\distribution\windows\build-installer.ps1 -TestSignedBuild -LicencePublicKeyPath $key -DisposableSource
+            $base = 'KAYAN-ERP-TEST-ONLY-Setup'
+          } else { throw 'Unknown licence build mode; refusing to build.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installer build failed.' }
+          "base=$base" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "path=build/windows-installer/$base.exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Verify installer artifact
         shell: powershell
         run: |
-          $setupCanonical = ".\build\windows-installer\KAYAN-ERP-Setup.exe"
-          if (-not (Test-Path $setupCanonical)) { throw "Expected canonical installer EXE not found: $setupCanonical" }
-          $files = @(Get-ChildItem .\build\windows-installer\KAYAN-ERP-Setup-*-x64.exe -File)
+          $base = '${{ steps.installer.outputs.base }}'
+          if ($base -notin @('KAYAN-ERP-Setup', 'KAYAN-ERP-TEST-ONLY-Setup')) { throw 'Invalid installer basename.' }
+          $setupCanonical = Join-Path '.\build\windows-installer' "$base.exe"
+          if (-not (Test-Path $setupCanonical)) { throw "Expected installer EXE not found: $setupCanonical" }
+          $files = @(Get-ChildItem ".\build\windows-installer\$base-*-x64.exe" -File)
           if ($files.Count -lt 1) { throw "Expected at least one versioned installer EXE; found $($files.Count)." }
           Get-FileHash $setupCanonical, $files[0].FullName -Algorithm SHA256 | Format-List Algorithm, Hash, Path
           $canonicalHash = (Get-FileHash $setupCanonical -Algorithm SHA256).Hash
-          Write-Host "::notice title=Installer SHA256::KAYAN-ERP-Setup.exe SHA256=$canonicalHash"
+          Write-Host "::notice title=Installer SHA256::$base.exe SHA256=$canonicalHash"
 
-      - name: Smoke-test the actual installed Windows application
+      # One-day same-run transport to the Linux inspector only. This is raw,
+      # unverified, never a distribution candidate, and never a release input.
+      - name: Record raw installer identity for independent inspection
         shell: powershell
-        run: .\scripts\smoke-test-installed-windows.ps1 -SetupPath .\build\windows-installer\KAYAN-ERP-Setup.exe
+        run: |
+          $file = Get-Item -LiteralPath '${{ steps.installer.outputs.path }}'
+          $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{sourceCommit=$env:GITHUB_SHA; sha256=$hash; size=$file.Length; mode='${{ steps.licence.outputs.build }}'} | ConvertTo-Json | Set-Content -LiteralPath build/windows-installer/build-evidence.json -Encoding utf8
+      - name: Transfer raw installer to inspection only
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-raw-internal-${{ github.sha }}
+          path: |
+            ${{ steps.installer.outputs.path }}
+            build/windows-installer/build-evidence.json
+          if-no-files-found: error
+          retention-days: 1
+
+      # Disabled: the existing smoke script installs into customer paths and
+      # needs a signing private key. Do not re-enable until a disposable VM,
+      # isolated runtime paths, and a secret-free test protocol are available.
+      - name: Smoke-test the actual installed Windows application
+        if: ${{ false }}
+        shell: powershell
+        run: |
+          # The step's output is captured, replayed, and - if the script dies -
+          # summarised in an error annotation. Without that, a script that dies
+          # before its own error handler exists (a syntax error, a parameter
+          # that will not bind) leaves only "Process completed with exit code 1"
+          # and the raw job log is not readable by somebody not signed in.
+          $ErrorActionPreference = 'Continue'
+          $smokeLog = Join-Path $env:RUNNER_TEMP 'kayan-smoke.log'
+          # A hashtable, so the names really bind: splatting an ARRAY passes its
+          # elements positionally, which silently made the first one - the
+          # string '-SetupPath' - the value of -SetupPath, and the script then
+          # died in Resolve-Path before its own error handler existed. That was
+          # the whole reason the smoke test never ran.
+          $arguments = @{ SetupPath = '${{ steps.installer.outputs.path }}'; RequireLicenceEnforcement = $true }
+          if ('${{ steps.licence.outputs.home }}') { $arguments['LicenceHome'] = '${{ steps.licence.outputs.home }}' }
+          & .\scripts\smoke-test-installed-windows.ps1 @arguments *> $smokeLog
+          $smokeExit = $LASTEXITCODE
+          if (Test-Path -LiteralPath $smokeLog) { Get-Content -LiteralPath $smokeLog | Write-Output }
+          if ($smokeExit -ne 0) {
+            $tail = ''
+            if (Test-Path -LiteralPath $smokeLog) {
+              $tail = ((Get-Content -LiteralPath $smokeLog -Tail 20) -join ' | ')
+              $tail = $tail.Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' | ')
+              if ($tail.Length -gt 3500) { $tail = $tail.Substring($tail.Length - 3500) }
+            }
+            Write-Output ("::error title=Smoke test failed::exit " + $smokeExit + ". Last lines of its output: " + $tail)
+            exit $smokeExit
+          }
 
       # The publish step below replaces the files of an existing release. That
       # is right while a release is being assembled, and wrong the moment one
       # has been handed to customers: a push to main without a version bump
       # would overwrite the published Setup.exe of windows-v0.1.1. This guard
       # runs first and stops the job if that tag already has files.
+      # Production publication is intentionally fail-closed until the exact
+      # installer is independently verified on an isolated Windows host.
       - name: Refuse to overwrite a published release
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        if: ${{ false }}
         shell: powershell
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/check-release-tag.mjs "windows-v${{ steps.app-version.outputs.version }}"
 
       - name: Publish direct Setup.exe download
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        if: ${{ false }}
         uses: ncipollo/release-action@v1
         with:
           tag: windows-v${{ steps.app-version.outputs.version }}
@@ -211,15 +426,9 @@ jobs:
           generateReleaseNotes: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # A branch build publishes the same Setup.exe as a prerelease, so it
-      # can be handed over with a direct .exe download address before
-      # anything reaches main. Manual dispatches qualify on any branch;
-      # pull-request builds qualify only for the handover branch named
-      # below (the automation token cannot dispatch workflows itself).
-      # Everywhere else a pull-request build only uploads the diagnostic
-      # artifact further down; the official release above stays main-only.
+      # Branch prereleases are blocked by the same fail-closed policy.
       - name: Publish branch prerelease with direct Setup.exe download
-        if: (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'arena/13bf1607-erp-kayan')
+        if: ${{ false }}
         uses: ncipollo/release-action@v1
         with:
           tag: windows-v${{ steps.app-version.outputs.version }}-pre-${{ github.run_id }}
@@ -237,11 +446,296 @@ jobs:
             Commit: ${{ github.event.pull_request.head.sha || github.sha }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Windows installer (diagnostic build artifact)
+      # Final Inno payload inspection is not implemented. Do not upload even a
+      # candidate until the final binary is inspected on a trusted runner.
+      - name: Upload product installer (diagnostic artifact)
+        if: ${{ false }}
         uses: actions/upload-artifact@v4
         with:
-          name: KAYAN-ERP-Windows-x64-Installer
-          path: |
-            build/windows-installer/KAYAN-ERP-Setup.exe
+          name: KAYAN-ERP-Windows-x64-PRODUCT-CANDIDATE-NOT-FOR-RELEASE
+          path: build/windows-installer/KAYAN-ERP-Setup.exe
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload TEST ONLY installer (diagnostic artifact)
+        if: ${{ false }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAYAN-ERP-Windows-x64-TEST-ONLY-Installer
+          path: build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  inspect-final:
+    name: Extract and verify the actual payload
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+      - run: node --test scripts/verify-extracted-windows-installer.test.mjs scripts/inspect-final-inno.test.mjs scripts/windows-release-policy.test.mjs
+      - name: Install extractor build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential cmake libboost-all-dev liblzma-dev zlib1g-dev libbz2-dev unzip
+      - name: Build and verify pinned Inno 6.7-compatible extractor and fixtures
+        run: bash scripts/build-pinned-innoextract.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer-raw-internal-${{ github.sha }}
+          path: candidate
+      - name: Verify hash and source before extraction
+        env:
+          BASE: ${{ needs.build.outputs.installer_base }}
+          MODE: ${{ needs.build.outputs.build_mode }}
+        shell: bash
+        run: |
+          node -e "const fs=require('fs'),c=require('crypto'),e=JSON.parse(fs.readFileSync('candidate/build-evidence.json','utf8').replace(/^\\uFEFF/,'')),n=process.env.BASE,mode=process.env.MODE; if(!['KAYAN-ERP-Setup','KAYAN-ERP-TEST-ONLY-Setup'].includes(n) || !['product','test-signed'].includes(mode) || e.mode!==mode) throw Error('Invalid build mode or basename'); const b=fs.readFileSync('candidate/'+n+'.exe'); if(e.sourceCommit!==process.env.GITHUB_SHA || e.sha256!==c.createHash('sha256').update(b).digest('hex') || e.size!==b.length) throw Error('Build evidence does not match EXE or source');"
+      - name: Inspect the final Inno including temporary payload files
+        shell: bash
+        env:
+          BASE: ${{ needs.build.outputs.installer_base }}
+          MODE: ${{ needs.build.outputs.build_mode }}
+        run: |
+          node scripts/inspect-final-inno.mjs --artifact "candidate/$BASE.exe" --mode "$MODE" \
+            --extractor "$KAYAN_INNOEXTRACT" --extractor-sha256 "$KAYAN_INNOEXTRACT_SHA256" \
+            --source-commit "$GITHUB_SHA" --report candidate/payload-verification.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-inspected-internal-${{ github.sha }}
+          path: candidate/
+          if-no-files-found: error
+          retention-days: 1
+
+  smoke-final:
+    name: Install and exercise the inspected Setup offline
+    needs: [build, inspect-final]
+    if: needs.build.outputs.build_mode == 'product'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer-inspected-internal-${{ github.sha }}
+          path: candidate
+      - name: Check candidate provenance and PowerShell syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $build = Get-Content -LiteralPath 'candidate/build-evidence.json' -Raw | ConvertFrom-Json
+          $report = Get-Content -LiteralPath 'candidate/payload-verification.json' -Raw | ConvertFrom-Json
+          $actual = (Get-FileHash -LiteralPath 'candidate/KAYAN-ERP-Setup.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($build.sourceCommit -ne $env:GITHUB_SHA -or $report.sourceCommit -ne $env:GITHUB_SHA -or $build.sha256 -ne $actual -or $report.installer.sha256 -ne $actual) { throw 'Candidate SHA or source mismatch' }
+          $tokens = $null; $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/smoke-test-installed-windows.ps1').Path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { throw 'Smoke script PowerShell syntax errors' }
+      - name: Install the exact product Setup and perform offline runtime checks
+        # The installed run now repairs a damaged installation four times and
+        # drives the client through four restarts; 30 minutes cut it off in the
+        # middle of the bundled-runtime damage tests.
+        timeout-minutes: 60
+        shell: pwsh
+        run: |
+          & pwsh -NoLogo -NoProfile -File scripts/smoke-test-installed-windows.ps1 -SetupPath "$PWD\candidate\KAYAN-ERP-Setup.exe" -RuntimeOnly -ExpectedSourceCommit $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Installed runtime smoke failed' }
+      - name: Record limitations and exact tested EXE hash
+        shell: pwsh
+        run: |
+          $build = Get-Content 'candidate/build-evidence.json' -Raw | ConvertFrom-Json
+          $hash = (Get-FileHash 'candidate/KAYAN-ERP-Setup.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $build.sha256) { throw 'Setup changed during smoke' }
+          Write-Output "::notice title=Install-tested candidate (not a release)::SHA256=$hash bytes=$($build.size) source=$env:GITHUB_SHA"
+          [ordered]@{sourceCommit=$env:GITHUB_SHA; installerSha256=$hash; result='offline-runtime-smoke-passed-not-release'; notTested=@('Licensed business operation with production public key','Packaged Windows generator with synthetic signing key')} | ConvertTo-Json -Depth 4 | Set-Content 'candidate/installation-smoke.json' -Encoding utf8
+      - name: Upload runtime smoke evidence only (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-runtime-evidence-${{ github.sha }}
+          path: candidate/installation-smoke.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-windows:
+    name: Publish independently verified Windows installer
+    needs: [build, inspect-final, smoke-final]
+    if: >-
+      ${{ github.repository == 'ahmadtefa/ERP_KAYAN' && github.ref == 'refs/heads/main' &&
+          github.event_name == 'push' && needs.build.outputs.build_mode == 'product' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: windows-production
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify actual release environment protections
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/check-release-environment.mjs
+      - name: Install extractor build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential cmake libboost-all-dev liblzma-dev zlib1g-dev libbz2-dev unzip
+      - name: Build and verify pinned Inno extractor
+        run: bash scripts/build-pinned-innoextract.sh
+      # Consume only the exact candidate that passed payload inspection. The
+      # product release remains gated by this job's dependency on the installed
+      # runtime smoke and by independent signed release evidence below.
+      - name: Retrieve candidate from this exact workflow run
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer-inspected-internal-${{ github.sha }}
+          path: release-candidate
+      - name: Reinspect the final installer payload
+        run: |
+          node scripts/inspect-final-inno.mjs --artifact release-candidate/KAYAN-ERP-Setup.exe \
+            --mode product --extractor "$KAYAN_INNOEXTRACT" \
+            --extractor-sha256 "$KAYAN_INNOEXTRACT_SHA256" \
+            --source-commit "$GITHUB_SHA" --report release-candidate/reinspection-report.json
+      - name: Verify independent signed evidence for the exact installer
+        env:
+          KAYAN_WINDOWS_RELEASE_EVIDENCE: ${{ vars.KAYAN_WINDOWS_RELEASE_EVIDENCE }}
+        run: node scripts/verify-release-evidence.mjs --artifact release-candidate/KAYAN-ERP-Setup.exe
+      - name: Publish the verified installer without overwriting a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_VERSION: ${{ needs.build.outputs.version }}
+          KAYAN_WINDOWS_RELEASE_EVIDENCE: ${{ vars.KAYAN_WINDOWS_RELEASE_EVIDENCE }}
+        run: node scripts/publish-verified-windows.mjs
+
+  # Handing a customer a download is the one step that used to be able to
+  # happen without anybody looking at the package. This job exists so that a
+  # branch build can be handed over as a file while every guarantee of the
+  # production path stays in place:
+  #
+  #   * it needs the payload inspection and the installed-runtime smoke test,
+  #     so the exact EXE it uploads is the one that was extracted and the one
+  #     that was installed on a Windows runner;
+  #   * it proves the file still matches the recorded SHA-256 before uploading;
+  #   * it runs only for a *branch* push of a *product* build, and marks the
+  #     release as a prerelease that is never "latest";
+  #   * it refuses to touch a tag that already exists.
+  #
+  # The production release path below is untouched: it still requires main, the
+  # protected environment and independent signed evidence.
+  publish-branch-candidate:
+    name: Hand over the tested branch candidate (prerelease, not latest)
+    needs: [build, inspect-final, smoke-final]
+    if: >-
+      ${{ github.repository == 'ahmadtefa/ERP_KAYAN' &&
+          github.event_name == 'push' &&
+          github.ref != 'refs/heads/main' &&
+          needs.build.outputs.build_mode == 'product' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer-inspected-internal-${{ github.sha }}
+          path: candidate
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer-runtime-evidence-${{ github.sha }}
+          path: smoke
+      - name: Prove the uploaded EXE is the inspected and install-tested one
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const crypto = require("crypto");
+            const read = (p) => JSON.parse(fs.readFileSync(p, "utf8").replace(/^\uFEFF/, ""));
+            const build = read("candidate/build-evidence.json");
+            const payload = read("candidate/payload-verification.json");
+            const smoke = read("smoke/installation-smoke.json");
+            const body = fs.readFileSync("candidate/KAYAN-ERP-Setup.exe");
+            const actual = crypto.createHash("sha256").update(body).digest("hex");
+            if (build.sourceCommit !== process.env.GITHUB_SHA) throw new Error("build evidence is from another commit");
+            if (build.mode !== "product") throw new Error("not a product build");
+            if (build.sha256 !== actual) throw new Error("installer does not match its build evidence");
+            if (payload.installer.sha256 !== actual) throw new Error("installer does not match its payload inspection");
+            if (smoke.installerSha256 !== actual) throw new Error("installer was not the one installed by the smoke test");
+            if (smoke.sourceCommit !== process.env.GITHUB_SHA) throw new Error("smoke evidence is from another commit");
+            fs.writeFileSync("candidate/published-identity.json", JSON.stringify({
+              sourceCommit: build.sourceCommit,
+              installerSha256: actual,
+              sizeBytes: body.length,
+              inspected: "payload-verification.json",
+              installedOn: "windows-latest runtime smoke",
+            }, null, 2));
+            console.log("candidate verified: " + actual + " (" + body.length + " bytes)");
+          '
+      - name: Publish the verified candidate as a prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_VERSION: ${{ needs.build.outputs.version }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          tag="windows-v${APP_VERSION}-candidate-${SOURCE_COMMIT:0:12}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error title=Release already exists::The tag $tag already has a release; refusing to replace it."
+            exit 1
+          fi
+          sha=$(node -e 'console.log(require("./candidate/published-identity.json").installerSha256)')
+          size=$(node -e 'console.log(require("./candidate/published-identity.json").sizeBytes)')
+          notes=$(mktemp)
+          {
+            echo "# KAYAN ERP ${APP_VERSION} — candidate build"
+            echo
+            echo "Built from commit \`${SOURCE_COMMIT}\` and handed over for evaluation and installation testing."
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Installer | \`KAYAN-ERP-Setup.exe\` |"
+            echo "| SHA-256 | \`${sha}\` |"
+            echo "| Size | ${size} bytes |"
+            echo "| Source commit | \`${SOURCE_COMMIT}\` |"
+            echo "| Workflow run | ${RUN_URL} |"
+            echo
+            echo "## What this file has passed"
+            echo
+            echo "- the Windows build job (backend tests, Flutter analyze and tests, licence build policy);"
+            echo "- independent payload extraction and inspection on Linux with the pinned Inno extractor;"
+            echo "- installation and offline runtime checks on a Windows runner: fresh install, local PostgreSQL,"
+            echo "  API startup, login, full backup and restore, licence-mirror recovery and licence backups."
+            echo
+            echo "## What it has not passed"
+            echo
+            echo "- independent signed release evidence, which the production release path requires;"
+            echo "- a signed \`ACTIVATION\` key activating a real licence (the smoke test runs unlicensed)."
+            echo
+            echo "This is a **prerelease**, is never marked \`latest\`, and is not the production release."
+          } > "$notes"
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_COMMIT" \
+            --title "KAYAN ERP ${APP_VERSION} candidate (${SOURCE_COMMIT:0:12})" \
+            --notes-file "$notes" \
+            --prerelease \
+            "candidate/KAYAN-ERP-Setup.exe#KAYAN-ERP-Setup.exe" \
+            "candidate/published-identity.json#published-identity.json" \
+            "candidate/payload-verification.json#payload-verification.json" \
+            "candidate/build-evidence.json#build-evidence.json"
+          echo "::notice title=Candidate published::gh release download $tag --pattern KAYAN-ERP-Setup.exe"

@@ -108,6 +108,13 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['cash.reconcile', 'Reconcile bank statements', 'تسوية كشوف البنك', 'cash'],
 
   ['inventory.items.delete', 'Deactivate items', 'إيقاف الأصناف', 'inventory'],
+  // Reading a cost is its own privilege: a warehouse clerk may price a sale
+  // without ever seeing what the goods cost the company, and the print/PDF
+  // options can only hide what the API is willing to send.
+  ['inventory.cost.read', 'View cost and purchase prices', 'عرض التكلفة وأسعار الشراء', 'inventory'],
+  // A barcode is an identifier, so changing one is guarded separately from
+  // editing the item's descriptive fields. Generating a code is a write too.
+  ['inventory.barcodes.manage', 'Edit and generate barcodes', 'تعديل وتوليد أكواد الباركود', 'inventory'],
   ['inventory.stock.adjust', 'Adjust, transfer and count stock', 'تسويات وتحويلات وجرد المخزون', 'inventory'],
   ['sales.invoices.export', 'Export sales documents', 'تصدير مستندات البيع', 'sales'],
   ['purchases.invoices.export', 'Export purchase documents', 'تصدير مستندات الشراء', 'purchases'],

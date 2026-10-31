@@ -83,7 +83,13 @@ jobs:
         # `-o pipefail` a failing suite would leave this step green and the
         # whole job would pass. The log is kept because the summary step below
         # reads it.
-        run: python ../scripts/ci-diagnose.py bash -o pipefail -c 'npm test -- --runInBand 2>&1 | tee /tmp/kayan-jest.log'
+        # This older CLI integration suite creates a private signing key on disk.
+        # It is retained in source but is not run under the no-private-key-on-disk
+        # constraint. The source-level in-memory generator check is a separate job;
+        # neither that check nor this partial suite proves the packaged generator.
+        run: |
+          echo '::warning title=Generator tests not run::The file-backed generator suite is excluded; the packaged Windows generator is not verified by this job.'
+          python ../scripts/ci-diagnose.py bash -o pipefail -c 'npm test -- --runInBand --testPathIgnorePatterns=license-generator.spec.ts 2>&1 | tee /tmp/kayan-jest.log'
       - name: Record unit-test totals
         if: always()
         run: |
@@ -92,7 +98,21 @@ jobs:
       - name: Build API
         run: npm run build
       - name: Apply migrations to ephemeral PostgreSQL
+        # prisma.config.ts selects Prisma 6's classic (native) schema engine
+        # unconditionally; there is no environment switch to the experimental
+        # JavaScript engine, so this step runs exactly what the installer runs.
         run: npx prisma migrate deploy
+
+      # Licensing is the one subsystem whose real behaviour cannot be shown
+      # with a mocked database: the migration has to survive an installation
+      # that already has accounts, seats have to be refused at the limit, two
+      # simultaneous creations must produce exactly one account, and an old
+      # backup must not hand seats back. The script creates throwaway
+      # databases on the same server and drives the compiled service.
+      - name: Prove licensing on real PostgreSQL (populated upgrade, seats, concurrency, restore)
+        env:
+          KAYAN_TEST_ADMIN_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
+        run: python ../scripts/ci-diagnose.py node scripts/verify-licensing-postgres.mjs
       - name: Prove the required-accounts chart upgrade (old, complete and renumbered companies; run twice)
         run: python ../scripts/ci-diagnose.py node scripts/check-chart-upgrade.mjs
 
@@ -130,13 +150,25 @@ jobs:
           npm run start:prod > /tmp/kayan-api.log 2>&1 &
           API_PID=$!
           trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          # Wait for a *working* database, not merely for an answer. The
+          # health route answers 200 with `"database":"down"` while the
+          # connection is still being established, so a loop that stops at the
+          # first 200 would read a starting server as a broken one. It is also
+          # what made a raw-query failure look like a database outage.
+          health_ok=false
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json; then
-              break
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json 2>/dev/null; then
+              if node -e 'const h=JSON.parse(require("fs").readFileSync("/tmp/kayan-health.json","utf8")); process.exit(h.status==="ok" && h.database==="up" ? 0 : 1)'; then
+                health_ok=true
+                break
+              fi
+              echo "health attempt ${attempt}: $(cat /tmp/kayan-health.json)"
             fi
             sleep 2
           done
-          if [ ! -s /tmp/kayan-health.json ]; then
+          if [ "$health_ok" != "true" ]; then
+            echo "::error::The API never reported a working database within 60 seconds."
+            cat /tmp/kayan-health.json 2>/dev/null || true
             cat /tmp/kayan-api.log
             exit 1
           fi
@@ -219,6 +251,30 @@ jobs:
           if [ "$FAIL" != "0" ]; then exit 1; fi
           echo "Isolated restore verified: $CHECKED non-volatile tables have identical row counts in source and restored databases."
 
+          # Last, because it deliberately recreates the shape old restored data
+          # can have: a receipt that reaches its partner only through the
+          # invoices it settled. That data is inconsistent by construction, so
+          # it must not be in place while the ageing/reconciliation checks run.
+          echo "Running the partner statement end to end: allocation-only vouchers, the card, exports, print and the ledger behind every figure..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-statement-export.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after statement scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          # The print policy and the attached artwork, through the real HTTP
+          # API: a saved setting, a role without inventory.cost.read, a
+          # letterhead that is uploaded and then really is the sheet, and a
+          # damaged file that must be refused rather than crash a screen.
+          echo "Running the print policy and artwork scenario: saved settings, the cost floor, artwork upload, print and detach..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-print-features.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after print/artwork scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
       - name: Verify the PostgreSQL client tools used by the backup checks
         run: |
           pg_dump --version
@@ -247,7 +303,12 @@ jobs:
           summary=$(grep -h "checks passed" /tmp/kayan-smoke.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Scenario checks::${summary:-summary not captured}"
       - name: Audit production dependencies
-        run: npm audit --omit=dev
+        # Never weaker than `npm audit --omit=dev`, but precise: high and critical
+        # fail outright, and anything else must be a reviewed, expiring entry in
+        # backend/security/audit-allowlist.json with the reason it is unreachable.
+        # A stale entry - or an entry that no longer matches a live advisory -
+        # fails the step, so the list cannot become a blanket suppression.
+        run: node scripts/audit-gate.mjs
 
   regressions:
     name: Regression scenario (reported issues 1-9)
@@ -294,6 +355,8 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
       - name: Apply migrations to a freshly created database
+        env:
+          KAYAN_PRISMA_CLASSIC_MIGRATIONS: '1'
         run: npx prisma migrate deploy
       - name: Seed an isolated company and administrator
         run: npx ts-node prisma/seed.ts
@@ -330,6 +393,38 @@ jobs:
           NODE
       - name: Build API
         run: npm run build
+      # The unit tests prove the merge arithmetic. Only a browser and a
+      # rasteriser can prove the finished sheet: that the artwork is really
+      # underneath the text, that the overlay stayed transparent, and that
+      # "n / N" sits above the artwork. GitHub's Ubuntu image already carries
+      # Chrome; poppler supplies pdftoppm.
+      - name: Prove the attached artwork prints on a real sheet
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends poppler-utils
+          if [ -z "${KAYAN_PDF_BROWSER:-}" ]; then
+            for candidate in /opt/google/chrome/chrome /usr/bin/google-chrome /usr/bin/chromium /usr/bin/chromium-browser; do
+              if [ -x "$candidate" ]; then export KAYAN_PDF_BROWSER="$candidate"; break; fi
+            done
+          fi
+          if [ -z "${KAYAN_PDF_BROWSER:-}" ]; then
+            echo "::error::No Chrome/Chromium on this runner, so the finished PDF cannot be proven here."
+            exit 1
+          fi
+          echo "Using $KAYAN_PDF_BROWSER"
+          # A rasterised-sheet check either passes or has something to say, and
+          # its own output is the only place that says it. On failure the tail
+          # is lifted into annotations, so the reason is visible without
+          # downloading a log.
+          set +e
+          node scripts/verify-artwork-pdf.mjs 2>&1 | tee /tmp/kayan-artwork.log
+          artwork_status=${PIPESTATUS[0]}
+          if [ "$artwork_status" -ne 0 ]; then
+            tail -n 60 /tmp/kayan-artwork.log | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit "$artwork_status"
+          fi
       - name: Serve the web client and run the regression scenario
         run: |
           mkdir -p /tmp/kayan-web-probe/build/web
@@ -370,6 +465,26 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
+
+          echo "Running the packing-unit stock cycle (carton 12, roll 5, piece 1)..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/scenario-units-cycle.mjs http://127.0.0.1:3000/api/v1 | tee /tmp/kayan-units-scenario.log'; then
+            echo "::group::API logs after the packing-unit scenario failure"
+            cat /tmp/kayan-regressions-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          # The worked example the multi-unit feature is judged by: reels of
+          # 500 metres, cartons of 24, prices that follow the factor, a factor
+          # change that must not restate history, and a refusal of half a
+          # carton. Every figure is read back from PostgreSQL as well.
+          echo "Running the cable-and-carton multi-unit scenario..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/scenario-multiunit-cable-carton.mjs http://127.0.0.1:3000/api/v1 | tee /tmp/kayan-multiunit-scenario.log'; then
+            echo "::group::API logs after the multi-unit scenario failure"
+            cat /tmp/kayan-regressions-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
       # Same reason as the backend job: the per-scenario totals are the
       # evidence a run can be read without the log host.
       - name: Record scenario totals
@@ -377,7 +492,7 @@ jobs:
         run: |
           # The two scenarios word their summary differently ("checks passed"
           # and "passed"), so both shapes are looked for.
-          summary=$(grep -hE "checks passed|[0-9]+/[0-9]+ passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log 2>/dev/null | tr '\n' ' | ')
+          summary=$(grep -hE "checks passed|[0-9]+/[0-9]+ passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log /tmp/kayan-units-scenario.log /tmp/kayan-multiunit-scenario.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Regression scenario checks::${summary:-summary not captured}"
 
   flutter:

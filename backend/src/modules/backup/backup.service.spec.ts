@@ -1,8 +1,14 @@
+import { createHash } from 'node:crypto';
+
 import { BadRequestException } from '@nestjs/common';
 
 import { AUDIT_PURGE_SETTING, AuditPurgeService } from '../../common/audit/audit-purge.service';
 import { BackupController } from './backup.controller';
 import { BackupFile, BackupService } from './backup.service';
+
+// The seat reservation is the only licensing call these specs reach;
+// its own behaviour is covered by licensing.service.spec.ts.
+const licensingStub = { reserveSeat: jest.fn().mockResolvedValue({ reserved: true }), reconcile: jest.fn().mockResolvedValue(undefined) } as any;
 
 describe('BackupService & BackupController (Company JSON Backup)', () => {
   const COMPANY_ID = '11111111-1111-4111-8111-111111111111';
@@ -61,6 +67,11 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     'cashVoucherAllocation',
     'companySetting',
     'costCenter',
+    'budget',
+    'printPriceSetting',
+    'quotationTermTemplate',
+    'quotationColumnTemplate',
+    'quotationBackground',
     'documentSequence',
     'auditLog',
   ];
@@ -139,7 +150,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     };
 
     purge = new AuditPurgeService();
-    service = new BackupService(prismaMock, auditMock, purge);
+    service = new BackupService(prismaMock, auditMock, purge, licensingStub);
     controller = new BackupController(service, auditMock);
   });
 
@@ -1043,6 +1054,184 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       expect(txMock.auditLog.deleteMany).toHaveBeenCalledWith({
         where: { companyId: COMPANY_ID },
       });
+    });
+  });
+
+  describe('Letterhead artwork, print policy and budgets in a company file', () => {
+    const artwork = Buffer.from('%PDF-1.4\nletterhead\n%%EOF', 'latin1');
+
+    test('writes byte columns as base64 and reads them back as bytes', async () => {
+      // A company backup carries the portable profile, so the company this
+      // file is taken from has to be a complete one.
+      prismaMock.company.findUnique.mockResolvedValueOnce({
+        id: COMPANY_ID,
+        code: 'KAYAN',
+        nameEn: 'Kayan Company',
+        nameAr: 'شركة كيان',
+        taxId: null,
+        commercialRegistration: null,
+        addressEn: null,
+        addressAr: null,
+        phone: null,
+        email: null,
+        address: null,
+        currency: 'EGP',
+        timezone: 'Africa/Cairo',
+        logoData: null,
+        logoMime: null,
+        logoPath: null,
+      });
+      prismaMock.quotationBackground.findMany.mockResolvedValueOnce([
+        {
+          id: 'dddddddd-dddd-4ddd-8ddd-dddddddddd01',
+          companyId: COMPANY_ID,
+          name: 'ورق الشركة',
+          byteSize: artwork.length,
+          sha256: createHash('sha256').update(artwork).digest('hex'),
+          data: new Uint8Array(artwork),
+        },
+      ]);
+      prismaMock.printPriceSetting.findMany.mockResolvedValueOnce([
+        {
+          id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeee01',
+          companyId: COMPANY_ID,
+          documentType: 'stock',
+          showSalePrice: false,
+          showCost: false,
+        },
+      ]);
+
+      const file = await service.create(COMPANY_ID);
+      expect(file.version).toBe(2);
+      // JSON has no binary type: a map of offsets would restore as nothing.
+      expect(file.tables.quotationBackground[0].data).toBe(
+        `base64:${artwork.toString('base64')}`,
+      );
+      expect(file.tables.printPriceSetting).toHaveLength(1);
+
+      await service.restore(file, COMPANY_ID, { replace: true });
+
+      const written = txMock.quotationBackground.createMany.mock.calls[0][0].data[0];
+      expect(Buffer.from(written.data)).toEqual(artwork);
+      const policy = txMock.printPriceSetting.createMany.mock.calls[0][0].data[0];
+      expect(policy).toMatchObject({
+        documentType: 'stock',
+        showCost: false,
+        showSalePrice: false,
+        companyId: COMPANY_ID,
+      });
+      // The artwork is written before the offers that point at it: an offer's
+      // background is a foreign key, so the order in the file is the order the
+      // restore has to use.
+      const keys = Object.keys(file.tables);
+      expect(keys.indexOf('quotationBackground')).toBeLessThan(keys.indexOf('quotation'));
+    });
+
+    test('refuses a byte column that lost its marker instead of writing garbage', async () => {
+      const file: BackupFile = {
+        format: 'kayan-backup',
+        version: 2,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'Test',
+        counts: {},
+        tables: {
+          quotationBackground: [
+            { id: 'dddddddd-dddd-4ddd-8ddd-dddddddddd02', data: { 0: 37, 1: 80 } },
+          ],
+        },
+      };
+      await expect(service.restore(file, COMPANY_ID, { replace: true })).rejects.toThrow(
+        /missing its base64 marker/i,
+      );
+      expect(txMock.quotationBackground.createMany).not.toHaveBeenCalled();
+    });
+
+    test('refuses artwork whose bytes no longer match the digest recorded with it', async () => {
+      // Base64 is forgiving: one changed character still decodes, into other
+      // bytes. Writing those would give the company a letterhead it cannot
+      // print, and every backup taken afterwards would carry the damage.
+      const artwork = Buffer.from('%PDF-1.4\nletterhead\n%%EOF', 'latin1');
+      const digest = createHash('sha256').update(artwork).digest('hex');
+      const file: BackupFile = {
+        format: 'kayan-backup',
+        version: 2,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'Test',
+        counts: {},
+        tables: {
+          quotationBackground: [
+            {
+              id: 'dddddddd-dddd-4ddd-8ddd-dddddddddd03',
+              name: 'ورق الشركة',
+              byteSize: artwork.length,
+              sha256: digest,
+              data: `base64:${Buffer.from('%PDF-1.4\nletterheae\n%%EOF', 'latin1').toString('base64')}`,
+            },
+          ],
+        },
+      };
+
+      await expect(service.restore(file, COMPANY_ID, { replace: true })).rejects.toThrow(
+        /does not match the digest/i,
+      );
+      expect(txMock.quotationBackground.createMany).not.toHaveBeenCalled();
+    });
+
+    test('refuses artwork whose byte count is not the one the row records', async () => {
+      const artwork = Buffer.from('%PDF-1.4\nletterhead\n%%EOF', 'latin1');
+      const file: BackupFile = {
+        format: 'kayan-backup',
+        version: 2,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'Test',
+        counts: {},
+        tables: {
+          quotationBackground: [
+            {
+              id: 'dddddddd-dddd-4ddd-8ddd-dddddddddd04',
+              name: 'ورق الشركة',
+              byteSize: artwork.length + 10,
+              data: `base64:${artwork.toString('base64')}`,
+            },
+          ],
+        },
+      };
+
+      await expect(service.restore(file, COMPANY_ID, { replace: true })).rejects.toThrow(
+        /but the row says/,
+      );
+      expect(txMock.quotationBackground.createMany).not.toHaveBeenCalled();
+    });
+
+    test('a version-1 file does not empty tables its format never carried', async () => {
+      const oldFile: BackupFile = {
+        format: 'kayan-backup',
+        version: 1,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'Test',
+        counts: {},
+        tables: { account: [{ id: 'a1', code: '1000' }] },
+      };
+      // This company already holds a print policy and artwork. The old file
+      // says nothing about either, which is not the same as "it had none":
+      // clearing them would delete what the restore cannot put back.
+      prismaMock.printPriceSetting.findMany.mockResolvedValueOnce([{ id: 'p1' }]);
+      prismaMock.quotationBackground.findMany.mockResolvedValueOnce([{ id: 'b1' }]);
+
+      await service.restore(oldFile, COMPANY_ID, { replace: true });
+
+      expect(txMock.printPriceSetting.deleteMany).not.toHaveBeenCalled();
+      expect(txMock.quotationBackground.deleteMany).not.toHaveBeenCalled();
+      // And the live rows are not treated as a gap in the file.
+      expect(txMock.account.deleteMany).toHaveBeenCalled();
     });
   });
 });
