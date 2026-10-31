@@ -118,10 +118,30 @@ async function main() {
   const warehouseRows = Array.isArray(warehouses.data)
     ? warehouses.data
     : warehouses.data?.items ?? [];
-  const mainWarehouse =
+  let mainWarehouse =
     warehouseRows.find((row) => row.branchId === branchId && row.isDefault) ??
     warehouseRows.find((row) => row.branchId === branchId);
-  if (!mainWarehouse) throw new Error('the test company has no warehouse in its branch');
+  if (!mainWarehouse) {
+    // A branch that has never held stock has no warehouse yet, and a scenario
+    // that only runs on somebody else's data proves nothing about a fresh
+    // installation. Naming the first one makes it the branch default.
+    const first = await api('/inventory/warehouses', {
+      method: 'POST',
+      json: {
+        branchId,
+        code: `MAIN-${stamp}`,
+        nameEn: `Main store ${stamp}`,
+        nameAr: `المخزن الرئيسي ${stamp}`,
+      },
+    });
+    if (first.status >= 300) {
+      throw new Error(
+        `the branch has no warehouse and one could not be made: ${first.status} ${JSON.stringify(first.data)}`,
+      );
+    }
+    mainWarehouse = first.data;
+    check('a branch with no warehouse gets its first one, and it is the default', Boolean(mainWarehouse?.id));
+  }
 
   // A second warehouse: the transfer must move goods between two real places.
   const createdWarehouse = await api('/inventory/warehouses', {

@@ -205,3 +205,58 @@ describe('applyPriceVisibility on the stock list table', () => {
     expect(JSON.stringify(result)).toContain('50.0000');
   });
 });
+
+describe('applyPriceVisibility on a stock movement sheet', () => {
+  const ledger: ReportTable = {
+    slug: 'stock-ledger',
+    titleEn: 'Stock card',
+    titleAr: 'بطاقة صنف',
+    meta: [],
+    columns: [
+      { key: 'date', labelEn: 'Date', labelAr: 'التاريخ' },
+      { key: 'quantity', labelEn: 'Quantity', labelAr: 'الكمية', numeric: true },
+      { key: 'unitCost', labelEn: 'Unit cost', labelAr: 'تكلفة الوحدة', numeric: true },
+      { key: 'totalCost', labelEn: 'Cost', labelAr: 'التكلفة', numeric: true },
+      { key: 'runningQuantity', labelEn: 'Running quantity', labelAr: 'الرصيد الجاري', numeric: true },
+      { key: 'runningValue', labelEn: 'Running value', labelAr: 'القيمة الجارية', numeric: true },
+    ],
+    rows: [
+      {
+        date: '2026-01-01',
+        quantity: '12.0000',
+        unitCost: '10.0000',
+        totalCost: '120.0000',
+        runningQuantity: '12.0000',
+        runningValue: '120.0000',
+      },
+    ],
+    totals: [],
+    notes: [],
+  };
+
+  it('takes every cost column off the sheet, including the running valuation', () => {
+    const result = applyPriceVisibility(ledger, { showCost: 'false' });
+    expect(result.columns.map((column) => column.key)).toEqual([
+      'date',
+      'quantity',
+      'runningQuantity',
+    ]);
+    expect(result.rows[0]).toEqual({
+      date: '2026-01-01',
+      quantity: '12.0000',
+      runningQuantity: '12.0000',
+    });
+    const html = toPrintHtml(result, 'en', 'KAYAN', { autoPrint: false, logo: null, companyDetails: [] });
+    expect(html).not.toContain('10.0000');
+    expect(html).not.toContain('120.0000');
+  });
+
+  it('keeps the quantities a storekeeper needs, and only those', () => {
+    const result = applyPriceVisibility(ledger, { showCost: 'false', showSalePrice: 'false' });
+    expect(result.rows[0]).toEqual({
+      date: '2026-01-01',
+      quantity: '12.0000',
+      runningQuantity: '12.0000',
+    });
+  });
+});

@@ -76,6 +76,10 @@ const SLUG_COST_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // movement is worth as well as how much moved, so its value column is a cost
   // even though the sheet is not a purchase document.
   'stock-document': new Set(['costValue', 'unitCost']),
+  // The movement sheet of one item: what each movement cost, what it was worth,
+  // and the running valuation it leaves behind. The running figure is a cost
+  // that happens to be called "value", and it discloses the same thing.
+  'stock-ledger': new Set(['unitCost', 'totalCost', 'runningValue']),
   // A stock-take sheet compares counted and book quantities; what the
   // difference is worth is a cost, and its arithmetic must leave with it.
   'stock-take-variance': new Set([

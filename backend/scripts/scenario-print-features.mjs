@@ -253,10 +253,14 @@ async function main() {
     `status ${clerkSaves.status}`,
   );
 
+  // The quantity must differ from the unit cost, or "10.0000" on the sheet
+  // could be the quantity and the check would pass while the cost leaked.
   const [movement] = await sql(
     `SELECT m."itemId"::text AS "itemId", m."unitCost"::text AS "unitCost"
        FROM stock_movements m
-      WHERE m."companyId" = $1::uuid AND m."unitCost" IS NOT NULL AND m."unitCost" > 0
+      WHERE m."companyId" = $1::uuid
+        AND m."unitCost" > 0
+        AND m."quantity" <> m."unitCost"
       ORDER BY m."createdAt" DESC LIMIT 1`,
     [companyId],
   );
