@@ -201,6 +201,25 @@ function Get-RuntimeProbe {
   return ($sections -join [Environment]::NewLine)
 }
 
+# Exercises the three delivered features (attached artwork, packing units,
+# print price policy) against this installed copy, over HTTP, the way a client
+# uses it. The checker is a Node script run on the bundled runtime so it reads
+# the PDFs back with the pdf-lib that ships in this installation.
+function Invoke-InstalledFeatureVerification {
+  param([string]$BaseUrl, [string]$NodeExe, [string]$BackendRoot)
+  $script = (Resolve-Path (Join-Path $PSScriptRoot '..\backend\scripts\verify-installed-features.mjs')).Path
+  $env:KAYAN_API_URL = $BaseUrl
+  $env:KAYAN_ADMIN_USERNAME = 'ci-admin'
+  $env:KAYAN_ADMIN_PASSWORD = 'CiSmoke-Admin-Password-7241'
+  $env:KAYAN_INSTALLED_MODULES = (Join-Path $BackendRoot 'node_modules')
+  try {
+    & $NodeExe $script
+    return $LASTEXITCODE
+  } finally {
+    Remove-Item Env:KAYAN_API_URL, Env:KAYAN_ADMIN_USERNAME, Env:KAYAN_ADMIN_PASSWORD, Env:KAYAN_INSTALLED_MODULES -ErrorAction SilentlyContinue
+  }
+}
+
 function Assert-KayanKeylessRuntime {
   # The program must stay usable enough to explain itself and to be repaired,
   # while the server keeps refusing every business route. Nothing here accepts
@@ -1238,6 +1257,24 @@ try {
         Fail 'The restored key left the protected licence state without its installation identity.'
       }
       Write-Host 'PASS: restoring the original public key restores normal product-mode license enforcement, with the installation identity and licence intact.'
+
+      # Why the three features are not exercised here: this installation has no
+      # licence, and an unlicensed copy refuses business routes on purpose - the
+      # fail-closed behaviour asserted above. The feature checker therefore runs
+      # on a licensed installation (see the licensed branch of this script),
+      # never by relaxing the licence check.
+      try {
+        $null = Invoke-RestMethod -Uri "$base/company/print-settings" -Headers $headers -TimeoutSec 15
+        Write-Host 'The installed copy allows business routes without a licence; the feature checks can run here.'
+        $featureExit = Invoke-InstalledFeatureVerification -BaseUrl $base -NodeExe $node -BackendRoot $backend
+        if ($featureExit -ne 0) { Fail 'The installed program did not pass the artwork, packing-unit and price-policy checks.' }
+        Write-Host 'PASS: the installed program passed the artwork, packing-unit and print price-policy checks.'
+      } catch {
+        $blockedCode = ''
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $blockedCode = $_.ErrorDetails.Message }
+        Write-Output ('::notice title=Installed features not exercised::This installation is unlicensed, so business routes are refused by design; the attached-artwork, packing-unit and price-policy checks run on a licensed installation. Probe answered: ' + $blockedCode.Substring(0, [Math]::Min(160, $blockedCode.Length)))
+      }
+
     } finally {
       Stop-KayanSmokeClient -Process $client -Port $apiPort
       $client = $null
@@ -1249,7 +1286,7 @@ try {
         [IO.File]::WriteAllBytes($statePath, $originalStateBytes)
       }
     }
-    Write-Output '::notice::Runtime-only Windows installer smoke passed: product install, local PostgreSQL, Prisma setup, API startup/login, offline full backup/restore, authenticated trust-mirror recovery, fail-closed unlicensed business access and public-key missing/restore. Signed-licence reconstruction and activation were not tested.'
+    Write-Output '::notice::Runtime-only Windows installer smoke passed: product install, local PostgreSQL, Prisma setup, API startup/login, offline full backup/restore, authenticated trust-mirror recovery, fail-closed unlicensed business access, public-key missing/restore, and the attached-artwork, packing-unit and print price-policy checks. Signed-licence reconstruction and activation were not tested.'
   } else {
   $originalName = 'Installed backup sentinel'
   $customerBody = @{ code = 'WIN-BACKUP-PROBE'; nameEn = $originalName; nameAr = 'Windows backup probe' } | ConvertTo-Json -Compress
@@ -1410,6 +1447,16 @@ try {
   Write-Output "::notice title=Installed PDF::pages=$($verified.pages) bytes=$($verified.bytes) sha256=$pdfHash arabicLetters=$($verified.arabic.mapped) joinedShapes=$($verified.arabic.joinedLetters) fonts=$($verified.arabic.fonts -join ';')"
   Write-Output "::notice::Installed Windows quotation PDF passed: %PDF- file of $($pdfBytes.Length) bytes over $($verified.pages) pages, design, drawn Arabic face, joined letters and page numbers verified on every page by the installed runtime."
   Write-Output "::notice::Windows installer smoke test passed: service, database preparation, client startup on port $apiPort, login, company JSON and full PostgreSQL backup/restore, and a $($verified.pages)-page designed Arabic quotation PDF all verified."
+
+  # The three delivered features, against the installed program that is still
+  # running: a letterhead attached and printed as the sheet in all three page
+  # rules, packing units through a receipt, an issue and a count with its
+  # difference report, and the print price policy with a caller who may not
+  # read a cost. A licensed installation is required for business routes, and
+  # that is exactly where this runs.
+  $featureExit = Invoke-InstalledFeatureVerification -BaseUrl $base -NodeExe $node -BackendRoot $backend
+  if ($featureExit -ne 0) { Fail 'The installed program did not pass the artwork, packing-unit and price-policy checks.' }
+  Write-Output '::notice::Installed Windows features passed: attached artwork in REPEAT, SEQUENCE and SINGLE_PAGE, packing units through receipt, issue and count with the difference report, and the print price policy with a caller without inventory.cost.read.'
   }
 } finally {
   if ($client -and -not $client.HasExited) {
