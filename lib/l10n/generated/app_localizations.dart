@@ -5192,6 +5192,24 @@ abstract class AppLocalizations {
   /// **'Packing units'**
   String get itemUnitsColumn;
 
+  /// No description provided for @phoneBrowserNoticeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'This looks like a phone or tablet browser'**
+  String get phoneBrowserNoticeTitle;
+
+  /// No description provided for @phoneBrowserNoticeBody.
+  ///
+  /// In en, this message translates to:
+  /// **'KAYAN ERP is laid out for a desktop screen. Invoices, the item table and the reports are cramped here and printing may cut pages. Sign in from a computer on the same network to work without limits.'**
+  String get phoneBrowserNoticeBody;
+
+  /// No description provided for @phoneBrowserNoticeDismiss.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue anyway'**
+  String get phoneBrowserNoticeDismiss;
+
   /// No description provided for @unitConversionHint.
   ///
   /// In en, this message translates to:

@@ -2679,6 +2679,15 @@ class AppLocalizationsAr extends AppLocalizations {
   String get itemUnitsColumn => 'وحدات التعبئة';
 
   @override
+  String get phoneBrowserNoticeTitle => 'يبدو أنك تستخدم متصفح هاتف أو جهاز لوحي';
+
+  @override
+  String get phoneBrowserNoticeBody => 'برنامج كيان ERP مصمم لشاشة حاسوب. الفواتير وجدول الأصناف والتقارير ستكون مزدحمة هنا، وقد تُقطع صفحات الطباعة. سجّل الدخول من حاسوب على الشبكة نفسها لتعمل دون قيود.';
+
+  @override
+  String get phoneBrowserNoticeDismiss => 'المتابعة على أي حال';
+
+  @override
   String unitConversionHint(
     Object base,
     Object baseUnit,

@@ -2702,6 +2702,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get itemUnitsColumn => 'Packing units';
 
   @override
+  String get phoneBrowserNoticeTitle => 'This looks like a phone or tablet browser';
+
+  @override
+  String get phoneBrowserNoticeBody => 'KAYAN ERP is laid out for a desktop screen. Invoices, the item table and the reports are cramped here and printing may cut pages. Sign in from a computer on the same network to work without limits.';
+
+  @override
+  String get phoneBrowserNoticeDismiss => 'Continue anyway';
+
+  @override
   String unitConversionHint(
     Object base,
     Object baseUnit,
