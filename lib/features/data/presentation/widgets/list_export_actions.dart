@@ -5,8 +5,7 @@ import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../providers/data_providers.dart';
-import 'price_visibility_dialog.dart';
-import '../../../auth/presentation/providers/auth_providers.dart';
+import 'print_visibility_prompt.dart';
 
 /// The way out of a list: the same four choices a report has.
 ///
@@ -58,10 +57,11 @@ class ListExportActions extends ConsumerWidget {
         );
 
     Future<void> downloadPdf() async {
-      final visibility = await choosePriceVisibility(
+      final visibility = await promptPriceVisibility(
         context,
+        ref,
+        typeKey: list,
         arabic: language == 'ar',
-        canSeeCost: ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false,
       );
       if (visibility == null || !context.mounted) return;
       await runDownload(
@@ -70,17 +70,18 @@ class ListExportActions extends ConsumerWidget {
           list: list,
           language: language,
           filters: filters,
-          showSalePrice: visibility['showSalePrice'],
-          showCost: visibility['showCost'],
+          showSalePrice: visibility.showSalePrice,
+          showCost: visibility.showCost,
         ),
       );
     }
 
     Future<void> print(bool auto) async {
-      final visibility = await choosePriceVisibility(
+      final visibility = await promptPriceVisibility(
         context,
+        ref,
+        typeKey: list,
         arabic: language == 'ar',
-        canSeeCost: ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false,
       );
       if (visibility == null || !context.mounted) return;
       await runPrint(
@@ -90,8 +91,8 @@ class ListExportActions extends ConsumerWidget {
           language: language,
           auto: auto,
           filters: filters,
-          showSalePrice: visibility['showSalePrice'],
-          showCost: visibility['showCost'],
+          showSalePrice: visibility.showSalePrice,
+          showCost: visibility.showCost,
         ),
       );
     }

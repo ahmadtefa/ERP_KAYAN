@@ -17,6 +17,7 @@ import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
 import '../../features/data/presentation/screens/backup_screen.dart';
 import '../../features/data/presentation/screens/import_screen.dart';
 import '../../features/inventory/presentation/screens/items_screen.dart';
+import '../../features/inventory/presentation/screens/stock_documents_screen.dart';
 import '../../features/inventory/presentation/screens/stock_screen.dart';
 import '../../features/invoicing/presentation/providers/invoice_providers.dart';
 import '../../features/licensing/presentation/screens/licence_screen.dart';
@@ -28,6 +29,7 @@ import '../../features/quotations/presentation/screens/quotation_editor_screen.d
 import '../../features/quotations/presentation/screens/quotation_list_screen.dart';
 import '../../features/reports/presentation/reports_screen.dart';
 import '../../features/settings/presentation/screens/company_settings_screen.dart';
+import '../../features/settings/presentation/screens/print_settings_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
 import '../shell/erp_shell.dart';
 
@@ -59,6 +61,7 @@ class AppRoutes {
   static const suppliers = '/parties/suppliers';
   static const items = '/inventory/items';
   static const stock = '/inventory/stock';
+  static const stockDocuments = '/inventory/documents';
   static const salesInvoices = '/sales/invoices';
   static const purchaseInvoices = '/purchases/invoices';
   static const quotations = '/sales/quotations';
@@ -74,6 +77,7 @@ class AppRoutes {
   static const companySettings = '/settings/company';
   static const settings = '/settings';
   static const licence = '/settings/licence';
+  static const printSettings = '/settings/print';
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -169,6 +173,7 @@ const _shellRoutes = <({String path, Widget child})>[
   ),
   (path: AppRoutes.items, child: ItemsScreen()),
   (path: AppRoutes.stock, child: StockScreen()),
+  (path: AppRoutes.stockDocuments, child: StockDocumentsScreen()),
   (
     path: AppRoutes.salesInvoices,
     child: InvoiceListScreen(kind: InvoiceKind.sales),
@@ -196,4 +201,5 @@ const _shellRoutes = <({String path, Widget child})>[
   (path: AppRoutes.companySettings, child: CompanySettingsScreen()),
   (path: AppRoutes.settings, child: SettingsScreen()),
   (path: AppRoutes.licence, child: LicenceScreen()),
+  (path: AppRoutes.printSettings, child: PrintSettingsScreen()),
 ];

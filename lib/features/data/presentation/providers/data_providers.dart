@@ -277,22 +277,116 @@ class ReportLinkBuilder {
     required String id,
     required String language,
     bool auto = true,
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       if (auto) 'auto': '1',
       'ticket': await _downloadTicket(),
     };
     return '$_base/sales/quotations/$id/print?${_encode(query)}';
   }
 
+  /// A stock document (count, transfer, adjustment, opening) as paper or as a
+  /// file. These routes exist for exactly this: the warehouse's own sheets,
+  /// printed under the same price policy as everything else.
+  Future<String> stockDocumentPrint({
+    required String id,
+    required String language,
+    bool auto = true,
+    bool? showSalePrice,
+    bool? showCost,
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
+      if (auto) 'auto': '1',
+      'ticket': await _downloadTicket(),
+    };
+    return '$_base/inventory/stock-documents/$id/print?${_encode(query)}';
+  }
+
+  Future<DownloadRequest> stockDocumentPdf({
+    required String id,
+    required String language,
+    bool? showSalePrice,
+    bool? showCost,
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
+      'ticket': await _downloadTicket(),
+    };
+    return DownloadRequest(
+      url: '$_base/inventory/stock-documents/$id/pdf?${_encode(query)}',
+    );
+  }
+
+  /// One of the inventory reports that has its own print routes:
+  /// `stock-take-variance`, `valuation`, `slow-moving`, `reorder`.
+  Future<String> inventoryReportPrint({
+    required String report,
+    required String language,
+    bool auto = true,
+    Map<String, String> filters = const {},
+    bool? showSalePrice,
+    bool? showCost,
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
+      if (auto) 'auto': '1',
+      ...filters,
+      'ticket': await _downloadTicket(),
+    };
+    return '$_base/inventory/reports/$report/print?${_encode(query)}';
+  }
+
+  Future<DownloadRequest> inventoryReportPdf({
+    required String report,
+    required String language,
+    Map<String, String> filters = const {},
+    bool? showSalePrice,
+    bool? showCost,
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
+      ...filters,
+      'ticket': await _downloadTicket(),
+    };
+    return DownloadRequest(
+      url: '$_base/inventory/reports/$report/pdf?${_encode(query)}',
+    );
+  }
+
+  /// One letterhead PDF, for the preview in the design screen.
+  ///
+  /// Opened in a new tab like every other browser-facing file, so it carries a
+  /// one-minute ticket rather than the sign-in token.
+  Future<String> backgroundFile({required String id}) async {
+    final query = <String, String>{'ticket': await _downloadTicket()};
+    return '$_base/sales/quotation-backgrounds/$id/file?${_encode(query)}';
+  }
+
   /// The quotation as the finished PDF the customer receives.
   Future<DownloadRequest> quotationPdf({
     required String id,
     required String language,
+    bool? showSalePrice,
+    bool? showCost,
   }) async {
     final query = <String, String>{
       'lang': language,
+      if (showSalePrice != null) 'showSalePrice': showSalePrice.toString(),
+      if (showCost != null) 'showCost': showCost.toString(),
       'ticket': await _downloadTicket(),
     };
     return DownloadRequest(

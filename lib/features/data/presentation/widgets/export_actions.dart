@@ -5,8 +5,7 @@ import '../../../../core/platform/browser_actions.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../providers/data_providers.dart';
-import 'price_visibility_dialog.dart';
-import '../../../auth/presentation/providers/auth_providers.dart';
+import 'print_visibility_prompt.dart';
 
 /// The ways out of a report: a spreadsheet, a plain file, a PDF, or paper.
 ///
@@ -55,10 +54,11 @@ class ReportExportActions extends ConsumerWidget {
         runDownload(context, link);
 
     Future<void> downloadPdf() async {
-      final visibility = await choosePriceVisibility(
+      final visibility = await promptPriceVisibility(
         context,
+        ref,
+        typeKey: report,
         arabic: language == 'ar',
-        canSeeCost: ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false,
       );
       if (visibility == null || !context.mounted) return;
       await download(links.pdf(
@@ -67,16 +67,17 @@ class ReportExportActions extends ConsumerWidget {
         from: from,
         to: to,
         accountId: accountId,
-        showSalePrice: visibility['showSalePrice'],
-        showCost: visibility['showCost'],
+        showSalePrice: visibility.showSalePrice,
+        showCost: visibility.showCost,
       ));
     }
 
     Future<void> showPage() async {
-      final visibility = await choosePriceVisibility(
+      final visibility = await promptPriceVisibility(
         context,
+        ref,
+        typeKey: report,
         arabic: language == 'ar',
-        canSeeCost: ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false,
       );
       if (visibility == null || !context.mounted) return;
       await runPrint(context, links.print(
@@ -85,8 +86,8 @@ class ReportExportActions extends ConsumerWidget {
         from: from,
         to: to,
         accountId: accountId,
-        showSalePrice: visibility['showSalePrice'],
-        showCost: visibility['showCost'],
+        showSalePrice: visibility.showSalePrice,
+        showCost: visibility.showCost,
       ));
     }
 

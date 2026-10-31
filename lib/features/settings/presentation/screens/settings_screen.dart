@@ -120,6 +120,26 @@ class SettingsScreen extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 16),
+        // What every printed copy carries, decided once for the company rather
+        // than remembered at each print button.
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.print_outlined),
+            title: Text(
+              Localizations.localeOf(context).languageCode == 'ar'
+                  ? 'إعدادات الطباعة'
+                  : 'Print settings',
+            ),
+            subtitle: Text(
+              Localizations.localeOf(context).languageCode == 'ar'
+                  ? 'إظهار أو إخفاء سعر البيع والتكلفة في كل نوع طباعة'
+                  : 'Show or hide the sale price and the cost on each kind of print',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.go(AppRoutes.printSettings),
+          ),
+        ),
+        const SizedBox(height: 16),
         // The licence screen: state, the activation code, and the one place a
         // key is entered. Visible to everyone, because the person at the
         // machine is often the one who has to read the code out.

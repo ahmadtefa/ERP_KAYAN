@@ -16,6 +16,7 @@ import '../../../../shared/widgets/status_pill.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/providers/data_providers.dart';
+import '../../../data/presentation/widgets/print_visibility_prompt.dart';
 import '../providers/quotation_providers.dart';
 import 'quotation_preview_screen.dart';
 import '../quotation_status.dart';
@@ -135,6 +136,44 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
     final async = ref.watch(quotationDetailProvider(widget.id));
     final user = ref.watch(currentUserProvider);
     final links = ref.read(reportLinkProvider);
+
+    Future<void> printQuotation() async {
+      final visibility = await promptPriceVisibility(
+        context,
+        ref,
+        typeKey: 'sales-quotation',
+        arabic: language == 'ar',
+      );
+      if (visibility == null || !context.mounted) return;
+      await runPrint(
+        context,
+        links.quotationPrint(
+          id: widget.id,
+          language: language,
+          showSalePrice: visibility.showSalePrice,
+          showCost: visibility.showCost,
+        ),
+      );
+    }
+
+    Future<void> pdfQuotation() async {
+      final visibility = await promptPriceVisibility(
+        context,
+        ref,
+        typeKey: 'sales-quotation',
+        arabic: language == 'ar',
+      );
+      if (visibility == null || !context.mounted) return;
+      await runDownload(
+        context,
+        links.quotationPdf(
+          id: widget.id,
+          language: language,
+          showSalePrice: visibility.showSalePrice,
+          showCost: visibility.showCost,
+        ),
+      );
+    }
     final canManage = user?.can('sales.quotations.manage') ?? false;
     final canConvert =
         (user?.can('sales.quotations.convert') ?? false) &&
@@ -306,21 +345,12 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
                     label: Text(l10n.printPreview),
                   ),
                   OutlinedButton.icon(
-                      onPressed: () => runPrint(
-                        context,
-                        links.quotationPrint(
-                          id: widget.id,
-                          language: language,
-                        ),
-                      ),
+                      onPressed: printQuotation,
                       icon: const Icon(Icons.print_outlined, size: 18),
                       label: Text(l10n.print),
                     ),
                   OutlinedButton.icon(
-                      onPressed: () => runDownload(
-                        context,
-                        links.quotationPdf(id: widget.id, language: language),
-                      ),
+                      onPressed: pdfQuotation,
                       icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
                       label: Text(l10n.downloadPdf),
                     ),
