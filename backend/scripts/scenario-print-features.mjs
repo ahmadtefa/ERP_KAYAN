@@ -278,28 +278,52 @@ async function main() {
       `/exports/lists/stock-ledger/print?itemId=${movement.itemId}&lang=en&${request}`,
       { token: who },
     );
+  // A sheet's columns and its header figures, read out of the page that is
+  // handed to the printer - not guessed at by looking for a number, because a
+  // plain quantity can be written the same way a cost can.
+  const sheetShape = (html) => ({
+    headers: [...String(html).matchAll(/<th[^>]*>([^<]*)<\/th>/g)].map((m) => m[1].trim()),
+    meta: [...String(html).matchAll(/<span class="label">([^<]*)<\/span>/g)].map((m) => m[1].trim()),
+  });
+  const COST_HEADERS = /Unit cost|Running value|Stock value|Cost|Average cost|تكلفة|القيمة/i;
+
   const clerkSheet = await ledgerFor(clerkToken, 'showCost=true&showSalePrice=true');
-  const clerkHtml = String(clerkSheet.data ?? '');
-  // The sheet prints four decimals. Comparing two would also match the first
-  // two digits of "10.0000", and a check that cannot tell present from absent
-  // is no check at all.
-  const printedCost = Number(movement.unitCost).toFixed(4);
-  const costColumn = /Unit cost|Running value|تكلفة الوحدة|القيمة الجارية/i;
+  const clerkShape = sheetShape(clerkSheet.data);
   check(
     'a clerk who asks for the cost in the URL still gets a sheet without it',
     clerkSheet.status === 200 &&
-      clerkHtml.includes('<table') &&
-      !clerkHtml.includes(printedCost) &&
-      !costColumn.test(clerkHtml),
-    `status ${clerkSheet.status}, cost ${printedCost} ${clerkHtml.includes(printedCost) ? 'present' : 'absent'}`,
+      String(clerkSheet.data).includes('<table') &&
+      !clerkShape.headers.some((header) => COST_HEADERS.test(header)) &&
+      !clerkShape.meta.some((label) => COST_HEADERS.test(label)),
+    `status ${clerkSheet.status}, headers ${clerkShape.headers.join(', ')}`,
   );
+
+  // The floor is the permission, not the URL: asking for the cost and being
+  // refused it must produce exactly the page this caller gets when they ask
+  // for nothing. A byte comparison is too strict (the page carries a
+  // timestamp), so the columns and the header figures are compared.
+  const clerkPlain = await ledgerFor(clerkToken, 'showCost=false');
+  check(
+    'asking for the cost changes nothing for a caller who may not read it',
+    JSON.stringify(sheetShape(clerkPlain.data)) === JSON.stringify(clerkShape),
+    'the page is the same either way',
+  );
+
   const adminSheet = await ledgerFor(token, 'showCost=true');
-  const adminHtml = String(adminSheet.data ?? '');
+  const adminShape = sheetShape(adminSheet.data);
   check(
     'the same sheet still carries the cost for somebody who may read it',
-    adminSheet.status === 200 && adminHtml.includes(printedCost),
-    `status ${adminSheet.status}`,
+    adminSheet.status === 200 &&
+      adminShape.headers.some((header) => /Unit cost|Running value|تكلفة/i.test(header)),
+    `status ${adminSheet.status}, headers ${adminShape.headers.join(', ')}`,
   );
+  const adminHidden = await ledgerFor(token, 'showCost=false');
+  check(
+    'hiding the cost takes those columns off even for somebody allowed to see them',
+    !sheetShape(adminHidden.data).headers.some((header) => /Unit cost|Running value|تكلفة/i.test(header)),
+    sheetShape(adminHidden.data).headers.join(', '),
+  );
+
   const [afterMovement] = await sql(
     `SELECT "unitCost"::text AS "unitCost" FROM stock_movements WHERE "itemId" = $1::uuid
       AND "unitCost" IS NOT NULL ORDER BY "createdAt" DESC LIMIT 1`,
@@ -314,12 +338,14 @@ async function main() {
     `/exports/lists/stock-ledger/download?itemId=${movement.itemId}&format=csv&lang=en&showCost=true`,
     { token: clerkToken },
   );
+  const exportText = String(exportsAfter.data ?? '');
+  // The file carries the same column labels as the page, so the same rule
+  // decides it: no cost column heading, in either language, anywhere in it.
+  const COST_LABELS = /Unit cost|Running value|Stock value|Average cost|Purchase price|تكلفة|قيمة المخزون|سعر الشراء/i;
   check(
     'the exported file obeys the same floor as the printed sheet',
-    exportsAfter.status === 200 &&
-      !String(exportsAfter.data).includes(printedCost) &&
-      !costColumn.test(String(exportsAfter.data)),
-    `status ${exportsAfter.status}`,
+    exportsAfter.status === 200 && !COST_LABELS.test(exportText),
+    `status ${exportsAfter.status}, ${exportText.split('\n').length} lines`,
   );
 
   // ── 3. the artwork library ───────────────────────────────────────────
