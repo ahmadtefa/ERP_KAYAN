@@ -188,6 +188,13 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         group: _NavGroup.overview,
       ),
       _NavItem(
+        AppRoutes.bankReconciliation,
+        Icons.fact_check_outlined,
+        Localizations.localeOf(context).languageCode == 'ar' ? 'تسوية كشوف البنوك' : 'Bank reconciliation',
+        permissions: const ['cash.reconcile'],
+        group: _NavGroup.accounting,
+      ),
+      _NavItem(
         AppRoutes.cash,
         Icons.account_balance_outlined,
         l10n.cashAndBanks,
