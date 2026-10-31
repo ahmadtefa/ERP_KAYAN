@@ -2688,6 +2688,30 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get itemBaseUnit => 'Base unit';
+
+  @override
+  String get itemBaseUnitEditHelper =>
+      'The base unit cannot be changed while the item has movements; add another unit instead.';
+
+  @override
+  String get itemBaseUnitHelper =>
+      'The unit stock is counted in — bottles, metres, kilos. Every carton, box or reel is defined against it.';
+
+  @override
+  String get itemUnitsColumn => 'Packing units';
+
+  @override
+  String unitConversionHint(
+    Object base,
+    Object baseUnit,
+    Object quantity,
+    Object unit,
+  ) {
+    return '$quantity $unit = $base $baseUnit';
+  }
+
+  @override
   String get unitsFieldAbbreviation => 'Short label';
 
   @override

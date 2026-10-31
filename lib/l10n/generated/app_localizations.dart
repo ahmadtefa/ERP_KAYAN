@@ -5168,6 +5168,41 @@ abstract class AppLocalizations {
   /// **'Factor: {factor}  •  Barcode: {barcode}'**
   String unitsBarcodesFactorBarcode(Object barcode, Object factor);
 
+  /// No description provided for @itemBaseUnit.
+  ///
+  /// In en, this message translates to:
+  /// **'Base unit'**
+  String get itemBaseUnit;
+
+  /// No description provided for @itemBaseUnitEditHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'The base unit cannot be changed while the item has movements; add another unit instead.'**
+  String get itemBaseUnitEditHelper;
+
+  /// No description provided for @itemBaseUnitHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'The unit stock is counted in — bottles, metres, kilos. Every carton, box or reel is defined against it.'**
+  String get itemBaseUnitHelper;
+
+  /// No description provided for @itemUnitsColumn.
+  ///
+  /// In en, this message translates to:
+  /// **'Packing units'**
+  String get itemUnitsColumn;
+
+  /// No description provided for @unitConversionHint.
+  ///
+  /// In en, this message translates to:
+  /// **'{quantity} {unit} = {base} {baseUnit}'**
+  String unitConversionHint(
+    Object base,
+    Object baseUnit,
+    Object quantity,
+    Object unit,
+  );
+
   /// No description provided for @unitsFieldAbbreviation.
   ///
   /// In en, this message translates to:

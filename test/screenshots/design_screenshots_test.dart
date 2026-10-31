@@ -12,6 +12,8 @@ import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/dashboard/presentation/providers/dashboard_providers.dart';
 import 'package:erp_kayan/features/dashboard/presentation/screens/dashboard_screen.dart';
+import 'package:erp_kayan/features/inventory/presentation/screens/items_screen.dart';
+import 'package:erp_kayan/features/invoicing/presentation/screens/invoice_editor_screen.dart';
 import 'package:erp_kayan/features/invoicing/presentation/providers/invoice_providers.dart';
 import 'package:erp_kayan/features/invoicing/presentation/screens/invoice_list_screen.dart';
 import 'package:erp_kayan/features/parties/presentation/screens/parties_screen.dart';
@@ -45,6 +47,7 @@ class _FakeApiClient extends ApiClient {
     return switch (path) {
       '/parties/customers' => _customers,
       '/sales/invoices' => _invoices,
+      '/inventory/items' => _items,
       _ => const <Map<String, dynamic>>[],
     };
   }
@@ -53,8 +56,106 @@ class _FakeApiClient extends ApiClient {
   Future<Map<String, dynamic>> getObject(
     String path, {
     Map<String, dynamic>? query,
-  }) async => const <String, dynamic>{};
+  }) async {
+    if (path == '/inventory/items/item-water/units') {
+      return <String, dynamic>{
+        'item': <String, dynamic>{
+          'id': 'item-water',
+          'code': 'WATER-1',
+          'unit': 'عبوة',
+        },
+        'items': _waterUnits,
+      };
+    }
+    return const <String, dynamic>{};
+  }
 }
+
+/// Mineral water: a bottle is the base unit, a carton is twelve of them. The
+/// screens shown here are the ones a shopkeeper uses to say so and to sell
+/// by it.
+const _waterUnits = <Map<String, dynamic>>[
+  <String, dynamic>{
+    'id': 'unit-bottle',
+    'unit': 'عبوة',
+    'factor': '1.000000',
+    'barcode': '6221000000011',
+    'salePrice': null,
+    'purchasePrice': null,
+    'isBase': true,
+    'isActive': true,
+    'allowFraction': true,
+    'usedInSales': true,
+    'usedInPurchases': true,
+    'sortOrder': 0,
+    'abbreviation': 'عبوة',
+    'perBaseSalePrice': '5.0000',
+    'salePriceAgrees': true,
+  },
+  <String, dynamic>{
+    'id': 'unit-carton',
+    'unit': 'كرتونة',
+    'factor': '12.000000',
+    'barcode': '6221000000028',
+    'salePrice': null,
+    'purchasePrice': null,
+    'isBase': false,
+    'isActive': true,
+    'allowFraction': true,
+    'usedInSales': true,
+    'usedInPurchases': true,
+    'sortOrder': 1,
+    'abbreviation': 'كرت',
+    'perBaseSalePrice': '5.0000',
+    'salePriceAgrees': true,
+  },
+];
+
+final _items = <Map<String, dynamic>>[
+  <String, dynamic>{
+    'id': 'item-water',
+    'code': 'WATER-1',
+    'nameEn': 'Mineral water',
+    'nameAr': 'مياه معدنية',
+    'unit': 'عبوة',
+    'barcode': '6221000000011',
+    'salePrice': '5.0000',
+    'purchasePrice': '4.0000',
+    'taxRate': '0.0000',
+    'isActive': true,
+    'isStockTracked': true,
+    'units': _waterUnits,
+  },
+  <String, dynamic>{
+    'id': 'item-cable',
+    'code': 'CAB-500',
+    'nameEn': 'Cable reel 500 m',
+    'nameAr': 'لفة كابل ٥٠٠ متر',
+    'unit': 'متر',
+    'barcode': null,
+    'salePrice': '10.0000',
+    'purchasePrice': '8.0000',
+    'taxRate': '0.0000',
+    'isActive': true,
+    'isStockTracked': true,
+    'units': <Map<String, dynamic>>[
+      <String, dynamic>{
+        'id': 'unit-metre',
+        'unit': 'متر',
+        'factor': '1.000000',
+        'isBase': true,
+        'isActive': true,
+      },
+      <String, dynamic>{
+        'id': 'unit-reel',
+        'unit': 'لفة',
+        'factor': '500.000000',
+        'isBase': false,
+        'isActive': true,
+      },
+    ],
+  },
+];
 
 const _customers = <Map<String, dynamic>>[
   {
@@ -276,8 +377,9 @@ Future<void> _pumpShot(
   WidgetTester tester, {
   required String route,
   required Widget child,
+  Size size = const Size(1440, 900),
 }) async {
-  tester.view.physicalSize = const Size(1440, 900);
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(() {
     tester.view.resetPhysicalSize();
@@ -366,6 +468,65 @@ void main() {
     await expectLater(
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/sales_invoices_ar.png'),
+    );
+  });
+
+  // The two pictures that answer "where do I type 12, and what does the
+  // invoice say afterwards": the item's units with the carton already defined,
+  // and a sales line that reads ten cartons, one hundred and twenty bottles.
+  testWidgets('screenshot: the units of an item, carton of twelve (Arabic)', (
+    tester,
+  ) async {
+    await _pumpShot(
+      tester,
+      route: AppRoutes.items,
+      child: const ItemsScreen(),
+    );
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/items_packing_units_ar.png'),
+    );
+
+    // The row action that opens the units of this item.
+    await tester.tap(find.byIcon(Icons.qr_code_2_outlined).first);
+    await tester.pumpAndSettle();
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/item_units_dialog_ar.png'),
+    );
+  });
+
+  testWidgets('screenshot: ten cartons on a sales line (Arabic)', (
+    tester,
+  ) async {
+    await _pumpShot(
+      tester,
+      route: AppRoutes.salesInvoices,
+      size: const Size(1600, 1000),
+      child: const InvoiceEditorScreen(kind: InvoiceKind.sales),
+    );
+
+    await tester.tap(find.byType(DropdownButtonFormField<String>).at(0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('CUS-001 — Noor Trading').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('item-choice-null')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('WATER-1 — Mineral water').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('line-unit-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('كرتونة ×12').last);
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const ValueKey('line-quantity-0')), '10');
+    await tester.pumpAndSettle();
+
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/invoice_carton_line_ar.png'),
     );
   });
 }

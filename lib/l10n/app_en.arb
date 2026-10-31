@@ -901,5 +901,10 @@
   "unitsFieldPriceHelper": "Per this unit. Leave empty to follow the item price × factor.",
   "unitsPerBasePrice": "{price} per {baseUnit}",
   "unitsPriceDisagrees": "differs from the item price",
-  "unitTakesWholeNumbers": "{unit} does not accept fractions; enter a whole number."
+  "unitTakesWholeNumbers": "{unit} does not accept fractions; enter a whole number.",
+  "unitConversionHint": "{quantity} {unit} = {base} {baseUnit}",
+  "itemBaseUnit": "Base unit",
+  "itemBaseUnitHelper": "The unit stock is counted in — bottles, metres, kilos. Every carton, box or reel is defined against it.",
+  "itemBaseUnitEditHelper": "The base unit cannot be changed while the item has movements; add another unit instead.",
+  "itemUnitsColumn": "Packing units"
 }

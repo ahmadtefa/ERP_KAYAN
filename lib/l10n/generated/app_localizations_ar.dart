@@ -2665,6 +2665,30 @@ class AppLocalizationsAr extends AppLocalizations {
   }
 
   @override
+  String get itemBaseUnit => 'وحدة الأساس';
+
+  @override
+  String get itemBaseUnitEditHelper =>
+      'لا تتغيّر وحدة الأساس بعد وجود حركات على الصنف؛ أضف وحدة أخرى بدلاً منها.';
+
+  @override
+  String get itemBaseUnitHelper =>
+      'الوحدة التي يُحصى بها المخزون — عبوة، متر، كيلو. كل كرتونة أو صندوق أو لفة تُعرَّف بالنسبة لها.';
+
+  @override
+  String get itemUnitsColumn => 'وحدات التعبئة';
+
+  @override
+  String unitConversionHint(
+    Object base,
+    Object baseUnit,
+    Object quantity,
+    Object unit,
+  ) {
+    return '$quantity $unit = $base $baseUnit';
+  }
+
+  @override
   String get unitsFieldAbbreviation => 'الاختصار';
 
   @override

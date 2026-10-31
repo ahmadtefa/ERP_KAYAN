@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
+import '../../../../core/units/item_units.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
@@ -49,7 +50,15 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         if (!isEdit) FieldSpec('code', l10n.accountCode, required: true),
         FieldSpec('nameEn', 'Name (English)', required: true),
         FieldSpec('nameAr', 'الاسم (عربي)', required: true),
-        FieldSpec('unit', l10n.unit),
+        // The unit every conversion is measured against. Calling it "unit"
+        // made it look optional, and an item without one fell back to a
+        // placeholder that then anchored all of its packs.
+        FieldSpec(
+          'unit',
+          l10n.itemBaseUnit,
+          required: !isEdit,
+          helper: isEdit ? l10n.itemBaseUnitEditHelper : l10n.itemBaseUnitHelper,
+        ),
         FieldSpec('barcode', 'Barcode'),
         FieldSpec('salePrice', l10n.salePrice, kind: FieldKind.decimal),
         FieldSpec(
@@ -121,10 +130,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         ref.read(currentUserProvider)?.can('inventory.cost.read') ?? false;
 
     Future<List<Map<String, dynamic>>> loadUnits() async {
-      final response = await client.raw.get<Map<String, dynamic>>(
+      // The same reader every other screen uses, so the dialog can be driven
+      // by a test without a live server (and reports a failure as a Failure
+      // instead of a raw DioException).
+      final response = await client.getObject(
         '/inventory/items/$itemId/units',
       );
-      final values = response.data?['items'] as List<dynamic>? ?? const [];
+      final values = response['items'] as List<dynamic>? ?? const [];
       return values
           .whereType<Map>()
           .map((value) => Map<String, dynamic>.from(value))
@@ -577,7 +589,14 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             ColumnSpec(l10n.accountCode, value: (r) => text(r, 'code'), emphasise: true),
             ColumnSpec('Name', value: (r) => text(r, 'nameEn')),
             ColumnSpec('الاسم', value: (r) => text(r, 'nameAr')),
-            ColumnSpec(l10n.unit, value: (r) => text(r, 'unit')),
+            ColumnSpec(
+              l10n.unit,
+              value: (r) => text(r, 'unit'),
+            ),
+            // The packs this item is really bought and sold in, so a person can
+            // see at a glance that the carton has been defined - and open it
+            // to check its contents.
+            ColumnSpec(l10n.itemUnitsColumn, value: _unitsLabel),
             ColumnSpec(
               l10n.salePrice,
               numeric: true,
@@ -631,6 +650,20 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         ),
       ),
     );
+  }
+
+  /// "عبوة + كرتونة + 1" — the base unit first, then a count of the others.
+  String _unitsLabel(Json row) {
+    final base = text(row, 'unit');
+    final others = <String>[];
+    for (final unit in lineUnitsOf(row)) {
+      final name = text(unit, 'unit');
+      if (name.isNotEmpty && name != base) others.add(name);
+    }
+    if (others.isEmpty) return base;
+    final shown = others.take(2).join('، ');
+    final rest = others.length - 2;
+    return rest > 0 ? '$base، $shown +$rest' : '$base، $shown';
   }
 
   List<Json> _filter(List<Json> rows) {

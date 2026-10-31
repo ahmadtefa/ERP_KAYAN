@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/json/amount_format.dart';
+import '../../../../core/units/item_units.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/json/discount_math.dart';
 import '../../../../core/error/failure.dart';
@@ -15,105 +16,112 @@ import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/invoice_providers.dart';
 
-/// Active units a line can choose for [item], smallest factor first.
+// The unit rules themselves live in core/units/item_units.dart: the invoice
+// editor, the stock documents screen and the stock card must agree about what
+// a carton converts to, and they can only agree by calling the same function.
+// They are re-exported here so the screens and tests that already import this
+// file keep working unchanged.
+export '../../../../core/units/item_units.dart'
+    show
+        baseUnitNameOf,
+        lineUnitOf,
+        lineUnitsOf,
+        quantityAllowedInUnit,
+        unitConversionOf,
+        unitFactorText,
+        unitListPrice;
+
+/// The line's quantity said in the unit stock is kept in.
 ///
-/// A legacy item that predates multi-unit and carries no `units` array is
-/// synthesised as a single base unit, so the picker always offers the item's
-/// own unit and the document stays valid. An item that has not been picked yet
-/// yields an empty list and the control is disabled.
-List<Json> lineUnitsOf(Json? item, {bool? forSales}) {
-  if (item == null) return const <Json>[];
-  final raw = item['units'];
-  final stored =
-      (raw is List ? raw.cast<Json>() : const <Json>[])
-          .where((unit) => flag(unit, 'isActive', fallback: true))
-          .where((unit) {
-            // A unit can be switched off for one side of the business: a
-            // supplier sells by the carton, the shop by the bottle. When the
-            // caller names a side, a unit meant for the other one is not
-            // offered - the server refuses it anyway, and offering it would
-            // only produce an error after the line was typed.
-            if (forSales == null) return true;
-            return flag(
-              unit,
-              forSales ? 'usedInSales' : 'usedInPurchases',
-              fallback: true,
-            );
-          })
-          .toList();
-  if (stored.isNotEmpty) {
-    stored.sort((a, b) {
-      final oa = int.tryParse(asString(a['sortOrder']) ?? '') ?? 0;
-      final ob = int.tryParse(asString(b['sortOrder']) ?? '') ?? 0;
-      if (oa != ob) return oa.compareTo(ob);
-      final fa = Decimal.tryParse(asString(a['factor']) ?? '') ?? Decimal.one;
-      final fb = Decimal.tryParse(asString(b['factor']) ?? '') ?? Decimal.one;
-      return fa.compareTo(fb);
-    });
-    return stored;
-  }
-  return <Json>[
-    <String, dynamic>{
-      'id': null,
-      'unit': text(item, 'unit'),
-      'factor': '1.000000',
-      'isBase': true,
-      'isActive': true,
-      'allowFraction': true,
-      'salePrice': item['salePrice'],
-      'purchasePrice': item['purchasePrice'],
-    },
-  ];
-}
+/// "10 كرتونة = 120 عبوة" appears under the line the moment a non-base unit is
+/// chosen, so the person sees what the warehouse will record before saving.
+/// It says nothing for a base-unit line, where the typed number is already the
+/// stored number.
+class _LineUnitHint extends StatelessWidget {
+  const _LineUnitHint({required this.items, required this.line});
 
-/// The unit a line names, or the item's base unit when the line names none.
-Json? lineUnitOf(Json? item, String? unitName) {
-  final units = lineUnitsOf(item);
-  for (final unit in units) {
-    if (text(unit, 'unit') == unitName) return unit;
-  }
-  for (final unit in units) {
-    if (flag(unit, 'isBase', fallback: false)) return unit;
-  }
-  return units.isEmpty ? null : units.first;
-}
+  final List<Json> items;
+  final _LineDraft line;
 
-/// Whether a quantity typed in [unit] is a whole number of it.
-///
-/// A carton of twenty-four bottles has no half: the shelf either has a carton
-/// or it does not. The server refuses it; catching it here says so while the
-/// person is still on the field instead of after Save.
-bool quantityAllowedInUnit(Json? unit, String quantity) {
-  if (unit == null) return true;
-  if (flag(unit, 'allowFraction', fallback: true)) return true;
-  final parsed = Decimal.tryParse(quantity.trim());
-  if (parsed == null) return true;
-  return parsed == parsed.truncate();
-}
-
-/// The unit-specific list price for [unitName] on [item], or the item's own
-/// price when the unit defines none. Returns an empty string when neither is
-/// set, so the caller can leave the field the user already typed alone.
-String unitListPrice(Json item, String unitName, {required bool isSales}) {
-  final key = isSales ? 'salePrice' : 'purchasePrice';
-  final base = text(item, key);
-  for (final unit in lineUnitsOf(item)) {
-    if (text(unit, 'unit') == unitName) {
-      final specific = text(unit, key);
-      if (specific.isNotEmpty) return specific;
-      // The item price is per BASE unit, so a reel of five hundred must not be
-      // offered at the price of one metre. Multiplying here mirrors what the
-      // server does when the price is left empty - one rule, two callers.
-      final factor = Decimal.tryParse(asString(unit['factor']) ?? '');
-      final price = Decimal.tryParse(base);
-      if (factor == null || price == null) return base;
-      // The base unit is the item price already; multiplying by one would only
-      // reformat a number the person typed.
-      if (factor.compareTo(Decimal.one) == 0) return base;
-      return (price * factor).toStringAsFixed(2);
+  @override
+  Widget build(BuildContext context) {
+    Json? item;
+    for (final candidate in items) {
+      if (text(candidate, 'id') == line.itemId) {
+        item = candidate;
+        break;
+      }
     }
+    final chosenUnit = lineUnitOf(item, line.unitName);
+    final l10n = context.l10n;
+    // A unit sold as a sealed pack says so the moment a fraction is typed:
+    // the number is on the field, not discovered after Save.
+    if (!quantityAllowedInUnit(chosenUnit, line.quantity.text)) {
+      return Padding(
+        padding: const EdgeInsetsDirectional.only(start: 4, end: 12),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 14,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                l10n.unitTakesWholeNumbers(text(chosenUnit!, 'unit')),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    final conversion = unitConversionOf(
+      item,
+      line.unitName,
+      line.quantity.text,
+    );
+    if (conversion == null) return const SizedBox.shrink();
+    final entered = formatQuantity(line.quantity.text, decimals: 4);
+    final unitName = line.unitName == null || line.unitName!.isEmpty
+        ? baseUnitNameOf(item)
+        : line.unitName!;
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(start: 4, end: 12),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.sync_alt,
+            size: 14,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              // Positional arguments follow the generated signature, which
+              // orders the message's placeholders alphabetically.
+              l10n.unitConversionHint(
+                conversion.quantity,
+                conversion.unit,
+                entered,
+                unitName,
+              ),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
   }
-  return base;
 }
 
 /// One editable invoice line.
@@ -141,6 +149,12 @@ class _LineDraft {
   final TextEditingController quantity;
   final TextEditingController unitPrice;
   final TextEditingController taxRate;
+
+  /// Whether [unitPrice] still holds a figure the screen put there rather than
+  /// one the person typed. Switching from a bottle to a carton of twelve has
+  /// to re-state the price (5 a bottle is 60 a carton); a price somebody typed
+  /// on purpose is theirs and is never overwritten.
+  bool priceAutoFilled = true;
 
   /// A line discount: a percentage or a fixed amount of money. The server
   /// resolves the other representation and stores both.
@@ -276,7 +290,11 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
               text(row, 'unitName').isEmpty ? null : text(row, 'unitName')
           ..costCenterId = text(row, 'costCenterId').isEmpty
               ? null
-              : text(row, 'costCenterId');
+              : text(row, 'costCenterId')
+          // The price of a saved draft is the price it was agreed at; changing
+          // the unit while editing must not re-derive it from today's list
+          // price.
+          ..priceAutoFilled = false;
         final discountKind = discountKindOf(text(row, 'discountType'));
         if (discountKind == DiscountKind.percent) {
           line.discountValue.text = text(row, 'discountPercent', fallback: '');
@@ -407,6 +425,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       );
       if (price.isNotEmpty) {
         line.unitPrice.text = formatQuantity(price, decimals: 2);
+        line.priceAutoFilled = true;
       }
     }
   }
@@ -458,6 +477,27 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       final parsed = Decimal.tryParse(quantity);
       if (parsed == null || parsed <= Decimal.zero) {
         showMessage(context, l10n.mustBePositive, error: true);
+        return;
+      }
+      // Half a sealed carton is not stock anyone can hand over. The server
+      // refuses it too; refusing it here keeps the typed invoice on screen
+      // instead of losing it to a failed save.
+      Json? itemOfLine;
+      for (final candidate in ref.read(activeItemsProvider).value ?? const <Json>[]) {
+        if (text(candidate, 'id') == line.itemId) {
+          itemOfLine = candidate;
+          break;
+        }
+      }
+      final lineUnit = lineUnitOf(itemOfLine, line.unitName);
+      if (!quantityAllowedInUnit(lineUnit, quantity)) {
+        showMessage(
+          context,
+          l10n.unitTakesWholeNumbers(
+            text(lineUnit ?? const <String, dynamic>{}, 'unit'),
+          ),
+          error: true,
+        );
         return;
       }
       final discountText = line.discountValue.text.trim();
@@ -1045,7 +1085,13 @@ class _LinesTable extends StatelessWidget {
                                     lines[index].unitName = value;
                                     final current =
                                         lines[index].unitPrice.text.trim();
-                                    if (current.isEmpty || current == '0') {
+                                    // The price follows the unit only while it
+                                    // is still the screen's own figure. Ten
+                                    // cartons at the bottle price would be a
+                                    // silent 92 % discount.
+                                    if (current.isEmpty ||
+                                        current == '0' ||
+                                        lines[index].priceAutoFilled) {
                                       final price = selected == null
                                           ? ''
                                           : unitListPrice(
@@ -1056,6 +1102,7 @@ class _LinesTable extends StatelessWidget {
                                       if (price.isNotEmpty) {
                                         lines[index].unitPrice.text =
                                             formatQuantity(price, decimals: 2);
+                                        lines[index].priceAutoFilled = true;
                                       }
                                     }
                                     onChanged();
@@ -1117,7 +1164,10 @@ class _LinesTable extends StatelessWidget {
                           isDense: true,
                           border: const OutlineInputBorder(),
                         ),
-                        onChanged: (_) => onChanged(),
+                        onChanged: (_) {
+                          lines[index].priceAutoFilled = false;
+                          onChanged();
+                        },
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -1152,6 +1202,9 @@ class _LinesTable extends StatelessWidget {
                   padding: const EdgeInsetsDirectional.only(start: 12, top: 4),
                   child: Row(
                     children: [
+                      // What the warehouse will record, before Save.
+                      _LineUnitHint(items: items, line: lines[index]),
+                      const SizedBox(width: 12),
                       SizedBox(
                         width: 170,
                         child: DropdownButtonFormField<DiscountKind>(

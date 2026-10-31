@@ -5,6 +5,7 @@ import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
+import '../../../../core/units/item_units.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
@@ -666,37 +667,54 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                             separatorBuilder: (_, _) => const Divider(height: 1),
                             itemBuilder: (context, index) {
                               final line = lines[index];
-                              return Row(
+                              return Column(
+                                // Keyed by the draft line itself: removing a
+                                // row must not hand its loaded units to the
+                                // row that moves up into its place.
+                                key: ObjectKey(line),
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  Expanded(child: Text(line.itemLabel)),
-                                  SizedBox(
-                                    width: 120,
-                                    child: TextField(
-                                      controller: line.quantity,
-                                      decoration: InputDecoration(
-                                        labelText: _arabic ? 'الكمية' : 'Quantity',
-                                        isDense: true,
+                                  Row(
+                                    children: [
+                                      Expanded(child: Text(line.itemLabel)),
+                                      SizedBox(
+                                        width: 120,
+                                        child: TextField(
+                                          controller: line.quantity,
+                                          decoration: InputDecoration(
+                                            labelText: _arabic ? 'الكمية' : 'Quantity',
+                                            isDense: true,
+                                          ),
+                                        ),
                                       ),
-                                    ),
+                                      const SizedBox(width: 8),
+                                      SizedBox(
+                                        width: 130,
+                                        child: _UnitField(
+                                          itemId: line.itemId,
+                                          baseUnit: line.baseUnit,
+                                          value: line.unitName,
+                                          arabic: _arabic,
+                                          onChanged: (unit) =>
+                                              setDialogState(() => line.unitName = unit),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        tooltip: _arabic ? 'حذف' : 'Remove',
+                                        onPressed: () => setDialogState(() {
+                                          lines.removeAt(index).dispose();
+                                        }),
+                                        icon: const Icon(Icons.delete_outline),
+                                      ),
+                                    ],
                                   ),
-                                  const SizedBox(width: 8),
-                                  SizedBox(
-                                    width: 130,
-                                    child: _UnitField(
-                                      itemId: line.itemId,
-                                      baseUnit: line.baseUnit,
-                                      value: line.unitName,
-                                      arabic: _arabic,
-                                      onChanged: (unit) =>
-                                          setDialogState(() => line.unitName = unit),
-                                    ),
-                                  ),
-                                  IconButton(
-                                    tooltip: _arabic ? 'حذف' : 'Remove',
-                                    onPressed: () => setDialogState(() {
-                                      lines.removeAt(index).dispose();
-                                    }),
-                                    icon: const Icon(Icons.delete_outline),
+                                  // What the shelf count becomes in the unit
+                                  // the ledger keeps, as it is typed.
+                                  _StockLineConversion(
+                                    itemId: line.itemId,
+                                    baseUnit: line.baseUnit,
+                                    unitName: line.unitName,
+                                    quantity: line.quantity,
                                   ),
                                 ],
                               );
@@ -740,6 +758,101 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
     for (final line in lines) {
       line.dispose();
     }
+  }
+}
+
+/// The counted quantity said in the unit stock is kept in.
+///
+/// A storekeeper counting "3 cartons" of a twelve-bottle item is recording 36
+/// bottles; the document stores both, and this line shows the second one while
+/// the first is still being typed.
+class _StockLineConversion extends ConsumerStatefulWidget {
+  const _StockLineConversion({
+    required this.itemId,
+    required this.baseUnit,
+    required this.unitName,
+    required this.quantity,
+  });
+
+  final String itemId;
+  final String baseUnit;
+  final String? unitName;
+  final TextEditingController quantity;
+
+  @override
+  ConsumerState<_StockLineConversion> createState() =>
+      _StockLineConversionState();
+}
+
+class _StockLineConversionState extends ConsumerState<_StockLineConversion> {
+  Future<List<Json>>? _units;
+
+  @override
+  void initState() {
+    super.initState();
+    _units = _load();
+  }
+
+  Future<List<Json>> _load() async {
+    try {
+      final response = await ref
+          .read(apiClientProvider)
+          .getObject('/inventory/items/${widget.itemId}/units');
+      return (response['items'] as List? ?? const [])
+          .whereType<Map>()
+          .map((value) => Map<String, dynamic>.from(value))
+          .toList(growable: false);
+    } catch (_) {
+      return const <Json>[];
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Json>>(
+      future: _units,
+      builder: (context, snapshot) {
+        final units = snapshot.data ?? const <Json>[];
+        // The item the line names, rebuilt from what the picker already knew
+        // plus the conversions the API returns: enough for the same helper the
+        // invoice editor uses.
+        final item = <String, dynamic>{
+          'unit': widget.baseUnit,
+          'units': units,
+        };
+        return ValueListenableBuilder<TextEditingValue>(
+          valueListenable: widget.quantity,
+          builder: (context, value, _) {
+            final conversion = unitConversionOf(
+              item,
+              widget.unitName,
+              value.text,
+            );
+            if (conversion == null) {
+              return const SizedBox.shrink();
+            }
+            final entered = formatQuantity(value.text, decimals: 4);
+            final unitName = (widget.unitName ?? '').isEmpty
+                ? widget.baseUnit
+                : widget.unitName!;
+            return Padding(
+              padding: const EdgeInsetsDirectional.only(
+                start: 12,
+                bottom: 6,
+              ),
+              child: Text(
+                // Digits and unit names in the order the language reads them;
+                // the "=" is the same statement in both.
+                '$entered $unitName = ${conversion.quantity} ${conversion.unit}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 }
 

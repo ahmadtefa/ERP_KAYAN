@@ -898,5 +898,10 @@
   "unitsFieldPriceHelper": "لهذه الوحدة. اتركه فارغاً ليُحسب من سعر الصنف × المعامل.",
   "unitsPerBasePrice": "{price} لكل {baseUnit}",
   "unitsPriceDisagrees": "يخالف سعر الصنف",
-  "unitTakesWholeNumbers": "{unit} لا تقبل كسوراً؛ أدخل عدداً صحيحاً."
+  "unitTakesWholeNumbers": "{unit} لا تقبل كسوراً؛ أدخل عدداً صحيحاً.",
+  "unitConversionHint": "{quantity} {unit} = {base} {baseUnit}",
+  "itemBaseUnit": "وحدة الأساس",
+  "itemBaseUnitHelper": "الوحدة التي يُحصى بها المخزون — عبوة، متر، كيلو. كل كرتونة أو صندوق أو لفة تُعرَّف بالنسبة لها.",
+  "itemBaseUnitEditHelper": "لا تتغيّر وحدة الأساس بعد وجود حركات على الصنف؛ أضف وحدة أخرى بدلاً منها.",
+  "itemUnitsColumn": "وحدات التعبئة"
 }
