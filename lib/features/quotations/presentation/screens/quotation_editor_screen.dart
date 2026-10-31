@@ -1102,8 +1102,6 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 const SizedBox(height: 12),
                 _designCard(context),
                 const SizedBox(height: 12),
-                _backgroundCard(context),
-                const SizedBox(height: 12),
                 for (var index = 0; index < _tables.length; index++)
                   _tableCard(index, language, items),
                 Center(
@@ -1116,6 +1114,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 ),
                 const SizedBox(height: 8),
                 _summary(context),
+                // Last, because it is the sheet rather than the content: the
+                // offer is written first and then laid on the company's paper.
+                const SizedBox(height: 12),
+                _backgroundCard(context),
                     ],
                   ),
           ),

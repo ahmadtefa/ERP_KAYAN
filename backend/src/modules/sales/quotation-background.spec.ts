@@ -222,7 +222,7 @@ describe('attached PDF background', () => {
       expect(result.pages).toBe(1);
       expect(result.backgroundPages).toEqual([0]);
 
-      const merged = await PDFDocument.load(result.pdf);
+      const merged = await PDFDocument.load(new Uint8Array(result.pdf));
       const { width, height } = merged.getPage(0).getSize();
       expect(width).toBeCloseTo(A4.width, 1);
       expect(height).toBeCloseTo(A4.height, 1);
@@ -238,7 +238,7 @@ describe('attached PDF background', () => {
       });
       expect(result.pages).toBe(3);
       expect(result.backgroundPages).toEqual([0, 0, 0]);
-      expect((await PDFDocument.load(result.pdf)).getPageCount()).toBe(3);
+      expect((await PDFDocument.load(new Uint8Array(result.pdf))).getPageCount()).toBe(3);
     });
 
     it('uses a two-page artwork in order behind a five-page offer', async () => {
@@ -261,7 +261,7 @@ describe('attached PDF background', () => {
         overlay,
         settings: parseBackgroundSettings({ mode: 'REPEAT' }),
       });
-      const merged = await PDFDocument.load(result.pdf);
+      const merged = await PDFDocument.load(new Uint8Array(result.pdf));
       for (const index of [0, 1]) {
         const size = merged.getPage(index).getSize();
         expect(size.width).toBeCloseTo(612, 1);
@@ -278,7 +278,7 @@ describe('attached PDF background', () => {
         settings: parseBackgroundSettings({ mode: 'REPEAT' }),
         pageNumber: { y: 10, size: 9 },
       });
-      const merged = await PDFDocument.load(result.pdf);
+      const merged = await PDFDocument.load(new Uint8Array(result.pdf));
       const first = drawnText(merged, 0);
       const second = drawnText(merged, 1);
       expect(first).toContain('1 / 2');
@@ -293,7 +293,7 @@ describe('attached PDF background', () => {
         overlay,
         settings: parseBackgroundSettings({ showPageNumbers: false }),
       });
-      const merged = await PDFDocument.load(result.pdf);
+      const merged = await PDFDocument.load(new Uint8Array(result.pdf));
       expect(drawnText(merged, 0)).not.toContain('/ 1');
     });
 
@@ -305,7 +305,7 @@ describe('attached PDF background', () => {
         overlay,
         settings: parseBackgroundSettings({ mode: 'REPEAT' }),
       });
-      const merged = await PDFDocument.load(result.pdf);
+      const merged = await PDFDocument.load(new Uint8Array(result.pdf));
       const content = drawnText(merged, 0);
       // The artwork's own label and the offer's label are both painted; the
       // artwork is drawn first, so its operations come before the offer's.
