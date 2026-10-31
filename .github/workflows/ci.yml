@@ -400,7 +400,19 @@ jobs:
             exit 1
           fi
           echo "Using $KAYAN_PDF_BROWSER"
-          node scripts/verify-artwork-pdf.mjs
+          # A rasterised-sheet check either passes or has something to say, and
+          # its own output is the only place that says it. On failure the tail
+          # is lifted into annotations, so the reason is visible without
+          # downloading a log.
+          set +e
+          node scripts/verify-artwork-pdf.mjs 2>&1 | tee /tmp/kayan-artwork.log
+          artwork_status=${PIPESTATUS[0]}
+          if [ "$artwork_status" -ne 0 ]; then
+            tail -n 60 /tmp/kayan-artwork.log | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit "$artwork_status"
+          fi
       - name: Serve the web client and run the regression scenario
         run: |
           mkdir -p /tmp/kayan-web-probe/build/web

@@ -1,18 +1,11 @@
 import { Body, Controller, Get, Put } from '@nestjs/common';
-import {
-  IsArray,
-  IsBoolean,
-  IsOptional,
-  IsString,
-  MaxLength,
-  ValidateNested,
-} from 'class-validator';
+import { IsArray, IsBoolean, IsString, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost } from '../../common/auth/cost-visibility';
-import { PrintSettingsService } from './print-settings.module';
+import { PrintSettingsService } from './print-settings.service';
 
 class PrintPriceSettingDto {
   /// A catalogue key, or "default" for everything not configured.
