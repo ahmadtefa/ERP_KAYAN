@@ -241,7 +241,11 @@ export async function inspectPdfUpload(upload: {
   let pages: ReturnType<PDFDocument['getPages']>;
   let sizes: Array<{ width: number; height: number }>;
   try {
-    const document = await PDFDocument.load(buffer, { updateMetadata: false });
+    // pdf-lib asks for Uint8Array<ArrayBuffer>; a Node Buffer is
+    // Uint8Array<ArrayBufferLike>, so it is copied into a plain view.
+    const document = await PDFDocument.load(new Uint8Array(buffer), {
+      updateMetadata: false,
+    });
     pages = document.getPages();
     sizes = pages.map((page) => page.getSize());
   } catch (error) {
@@ -339,8 +343,8 @@ export async function mergeOfferOntoBackground(
   options: MergeOptions,
 ): Promise<MergeResult> {
   const [backgroundDocument, overlayDocument] = await Promise.all([
-    PDFDocument.load(options.background, { updateMetadata: false }),
-    PDFDocument.load(options.overlay, { updateMetadata: false }),
+    PDFDocument.load(new Uint8Array(options.background), { updateMetadata: false }),
+    PDFDocument.load(new Uint8Array(options.overlay), { updateMetadata: false }),
   ]);
 
   const backgroundPages = backgroundDocument.getPages();

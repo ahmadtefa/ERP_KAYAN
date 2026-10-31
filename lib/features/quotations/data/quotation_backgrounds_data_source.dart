@@ -45,6 +45,9 @@ class QuotationBackgroundFile {
   final double pageWidth;
   final double pageHeight;
 
+  /// When it was attached, for the library list. Optional: the API may omit it.
+  final String? createdAt;
+
   String get readableSize {
     if (byteSize < 1024) return '$byteSize B';
     if (byteSize < 1024 * 1024) return '${(byteSize / 1024).toStringAsFixed(0)} KB';

@@ -21,7 +21,6 @@ class _DraftLine {
     required this.itemLabel,
     required this.baseUnit,
     String quantity = '1',
-    this.unitName,
   }) : quantity = TextEditingController(text: quantity);
 
   final String itemId;
@@ -231,7 +230,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${text(row, 'documentDate')} • ${text(row, 'lineCount').isEmpty ? '0' : text(row, 'lineCount')} '
+                    '${text(row, 'documentDate')} • ${row['lineCount'] ?? 0} '
                     '${_arabic ? 'سطر' : 'line(s)'} • ${posted ? (_arabic ? 'مُرحّل' : 'posted') : (_arabic ? 'مسودة' : 'draft')}'
                     '${canSeeCost ? '' : ' • ${_arabic ? 'بدون تكلفة' : 'no cost'}'}',
                     style: Theme.of(context).textTheme.bodySmall,
@@ -359,7 +358,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
               width: 860,
               height: 460,
               child: error != null
-                  ? Text(error!)
+                  ? Text(error)
                   : rows.isEmpty
                   ? Text(_arabic ? 'لا توجد فروق مسجلة.' : 'No counted differences recorded.')
                   : SingleChildScrollView(
@@ -499,6 +498,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
               saving = true;
               error = null;
             });
+            final navigator = Navigator.of(dialogContext);
             try {
               final body = <String, dynamic>{
                 'kind': kind,
@@ -521,7 +521,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
               };
               await ref.read(apiClientProvider).post('/inventory/stock-documents', body: body);
               if (!mounted) return;
-              Navigator.of(dialogContext).pop();
+              navigator.pop();
               showMessage(
                 context,
                 _arabic

@@ -57,6 +57,10 @@ describe('QuotationsService subject and column layout', () => {
       settings as never,
       {} as never,
       audit as never,
+      // The artwork library and the PDF renderer: neither is reached by these
+      // column tests, but the service takes them, so they are named here.
+      {} as never,
+      {} as never,
     );
     jest.spyOn(instance, 'findOne').mockResolvedValue({ id: 'quotation-1' } as never);
     return { instance, tx, prisma };
@@ -254,6 +258,8 @@ describe('QuotationsService subject and column layout', () => {
         settings as never,
         {} as never,
         { record: jest.fn() } as never,
+        {} as never,
+        {} as never,
       );
     }
 
@@ -462,6 +468,8 @@ describe('QuotationsService subject and column layout', () => {
         settings as never,
         {} as never,
         { record: jest.fn() } as never,
+        {} as never,
+        {} as never,
       );
 
       const result = (await instance.findOne(COMPANY_ID, 'quotation-1')) as {

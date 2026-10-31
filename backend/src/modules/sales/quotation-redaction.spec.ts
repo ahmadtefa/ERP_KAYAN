@@ -50,8 +50,8 @@ function snapshot(): QuotationSnapshot {
     discountType: 'PERCENT',
     discountPercent: '5.0000',
     discountAmount: '71.0000',
-    taxRate: '14.0000',
-    taxAmount: '188.8600',
+    // Tax is part of `totals`, which is where the document reads it from; a
+    // top-level copy is not part of the snapshot.
     tables: [
       {
         title: 'توريد وتركيب',
