@@ -16,6 +16,7 @@ import { CompanySettingsService } from '../../common/settings/company-settings.m
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import {
   defaultUnitPrice,
+  movementUnitSnapshot,
   resolveUnitSelection,
 } from '../../common/units/unit-math';
 import { PriceListsService } from '../sales/price-lists.service';
@@ -482,7 +483,7 @@ export class PurchaseInvoicesService {
         }
         const item = await tx.item.findFirst({
           where: { id: line.itemId, companyId, deletedAt: null },
-          select: { id: true, code: true, isStockTracked: true },
+          select: { id: true, code: true, unit: true, isStockTracked: true },
         });
         if (!item) throw new BadRequestException('An invoice line references a missing item');
         if (!item.isStockTracked) {
@@ -505,6 +506,15 @@ export class PurchaseInvoicesService {
             movementDate: invoice.invoiceDate,
             direction: StockDirection.IN,
             quantity: line.quantity,
+            // What was typed stays with the movement: ten cartons is how the
+            // supplier's invoice arrived, however many pieces that is.
+            ...movementUnitSnapshot({
+              enteredUnit: line.unitName,
+              enteredQuantity: line.unitQuantity,
+              unitFactor: line.unitFactor,
+              baseUnitName: item.unit,
+              baseQuantity: line.quantity,
+            }),
             unitCost,
             totalCost: costTotal,
             referenceType: 'PURCHASE_INVOICE',
@@ -654,6 +664,15 @@ export class PurchaseInvoicesService {
       // The journal claim itself happens inside PostingService.reverse,
       // below, in the same transaction as the stock going back out.
 
+      // The reversal movement says "1 carton" the way the invoice did, so the
+      // stock card reads the same in both directions. The base unit of each
+      // item is read once here rather than per line.
+      const reversalItems = await tx.item.findMany({
+        where: { companyId, id: { in: [...new Set(invoice.lines.map((row) => row.itemId).filter((id): id is string => Boolean(id)))] } },
+        select: { id: true, unit: true },
+      });
+      const reversalBaseName = new Map(reversalItems.map((row) => [row.id, row.unit]));
+
       for (const line of invoice.lines) {
         if (!line.itemId) {
           throw new BadRequestException(
@@ -691,6 +710,13 @@ export class PurchaseInvoicesService {
             movementDate: new Date(),
             direction: StockDirection.OUT,
             quantity: line.quantity,
+            ...movementUnitSnapshot({
+              enteredUnit: line.unitName,
+              enteredQuantity: line.unitQuantity,
+              unitFactor: line.unitFactor,
+              baseUnitName: reversalBaseName.get(line.itemId ?? '') ?? 'unit',
+              baseQuantity: line.quantity,
+            }),
             unitCost: inventoryCostTotal.div(line.quantity).toDecimalPlaces(MONEY_SCALE),
             totalCost: inventoryCostTotal,
             referenceType: 'PURCHASE_INVOICE_REVERSAL',

@@ -2665,6 +2665,51 @@ class AppLocalizationsAr extends AppLocalizations {
   }
 
   @override
+  String get unitsFieldAbbreviation => 'الاختصار';
+
+  @override
+  String get unitsFieldAbbreviationHelper => 'يُطبع حين يطول الاسم الكامل: م، كرت.';
+
+  @override
+  String unitsFieldAbbreviationValue(Object abbreviation) {
+    return 'الاختصار: $abbreviation';
+  }
+
+  @override
+  String get unitsFieldAllowFraction => 'السماح بالكسور';
+
+  @override
+  String get unitsFieldAllowFractionHelper => 'أوقفها لوحدة لا تُجزّأ: نصف كرتونة غير موجود.';
+
+  @override
+  String get unitsFieldPriceHelper => 'لهذه الوحدة. اتركه فارغاً ليُحسب من سعر الصنف × المعامل.';
+
+  @override
+  String get unitsFieldSortOrder => 'ترتيب العرض';
+
+  @override
+  String get unitsFieldSortOrderHelper => 'الأرقام الأصغر تظهر أولاً، والوحدة الأساسية أولاً دائماً.';
+
+  @override
+  String get unitsFieldUsedInPurchases => 'تُستخدم في الشراء';
+
+  @override
+  String get unitsFieldUsedInSales => 'تُستخدم في البيع';
+
+  @override
+  String unitsPerBasePrice(Object baseUnit, Object price) {
+    return '$price لكل $baseUnit';
+  }
+
+  @override
+  String get unitsPriceDisagrees => 'يخالف سعر الصنف';
+
+  @override
+  String unitTakesWholeNumbers(Object unit) {
+    return '$unit لا تقبل كسوراً؛ أدخل عدداً صحيحاً.';
+  }
+
+  @override
   String get unitsBarcodesHidden => 'مخفية عن المستندات الجديدة';
 
   @override

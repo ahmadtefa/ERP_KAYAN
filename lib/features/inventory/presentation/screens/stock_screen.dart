@@ -77,9 +77,17 @@ class _StockScreenState extends ConsumerState<StockScreen> {
                     ColumnSpec('الاسم', value: (r) => text(r, 'itemNameAr')),
                     ColumnSpec(l10n.unit, value: (r) => text(r, 'unit')),
                     ColumnSpec(
+                      // The ledger keeps metres; the storekeeper counts reels.
+                      // Both are shown, and they are the same number.
                       l10n.onHand,
                       numeric: true,
-                      value: (r) => formatQuantity(asString(r['quantity'])),
+                      value: (r) {
+                        final composed = text(r, 'displayQuantity');
+                        final base = formatQuantity(asString(r['quantity']));
+                        return composed.isEmpty || composed == base
+                            ? base
+                            : '$base  ($composed)';
+                      },
                     ),
                     ColumnSpec(
                       l10n.averageCost,
@@ -281,7 +289,14 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
             spacing: 24,
             runSpacing: 8,
             children: [
-              _stat(l10n.onHand, formatQuantity(asString(widget.row['quantity']))),
+              _stat(
+                l10n.onHand,
+                [
+                  formatQuantity(asString(widget.row['quantity'])),
+                  if (text(widget.row, 'displayQuantity').isNotEmpty)
+                    text(widget.row, 'displayQuantity'),
+                ].join('  ·  '),
+              ),
               _stat(l10n.averageCost, formatAmount(asString(widget.row['averageCost']))),
               _stat(l10n.stockValue, formatAmount(asString(widget.row['value']))),
               _stat(l10n.branch, text(widget.row, 'branchCode')),
@@ -372,9 +387,17 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
                       ),
                       ResizableColumn(
                         l10n.quantity,
-                        width: 110,
+                        width: 150,
                         numeric: true,
-                        value: (r) => formatQuantity(asString(r['quantity'])),
+                        // What the document said, with the base quantity
+                        // underneath when the two differ: "1 لفة (500)".
+                        value: (r) {
+                          final entered = text(r, 'displayQuantity');
+                          final base = formatQuantity(asString(r['quantity']));
+                          return entered.isEmpty || entered == base
+                              ? base
+                              : '$entered = $base';
+                        },
                       ),
                       ResizableColumn(
                         l10n.unitPrice,
@@ -390,10 +413,10 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
                       ),
                       ResizableColumn(
                         l10n.runningBalance,
-                        width: 190,
+                        width: 210,
                         numeric: true,
                         value: (r) =>
-                            '${formatQuantity(asString(r['runningQuantity']))} / '
+                            '${text(r, 'runningDisplay').isEmpty ? formatQuantity(asString(r['runningQuantity'])) : text(r, 'runningDisplay')} / '
                             '${formatAmount(asString(r['runningValue']))}',
                       ),
                     ],

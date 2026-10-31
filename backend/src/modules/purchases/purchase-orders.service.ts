@@ -461,6 +461,7 @@ export class PurchaseOrdersService {
         enteredQuantity,
         baseUnitName: item.unit,
         units: (item as { units?: any[] }).units ?? [],
+        purpose: 'purchase',
       });
       // Internal base quantity; the entered quantity lives in the snapshot.
       const quantity = resolved.baseQuantity;

@@ -885,5 +885,18 @@
   "barcodeLabelsShowPrice": "إظهار سعر البيع",
   "barcodeLabelsPdf": "PDF",
   "barcodeLabelsPrint": "طباعة",
-  "barcodeLabelsPrintCount": "طباعة ({count})"
+  "barcodeLabelsPrintCount": "طباعة ({count})",
+  "unitsFieldAbbreviation": "الاختصار",
+  "unitsFieldAbbreviationHelper": "يُطبع حين يطول الاسم الكامل: م، كرت.",
+  "unitsFieldAbbreviationValue": "الاختصار: {abbreviation}",
+  "unitsFieldAllowFraction": "السماح بالكسور",
+  "unitsFieldAllowFractionHelper": "أوقفها لوحدة لا تُجزّأ: نصف كرتونة غير موجود.",
+  "unitsFieldUsedInSales": "تُستخدم في البيع",
+  "unitsFieldUsedInPurchases": "تُستخدم في الشراء",
+  "unitsFieldSortOrder": "ترتيب العرض",
+  "unitsFieldSortOrderHelper": "الأرقام الأصغر تظهر أولاً، والوحدة الأساسية أولاً دائماً.",
+  "unitsFieldPriceHelper": "لهذه الوحدة. اتركه فارغاً ليُحسب من سعر الصنف × المعامل.",
+  "unitsPerBasePrice": "{price} لكل {baseUnit}",
+  "unitsPriceDisagrees": "يخالف سعر الصنف",
+  "unitTakesWholeNumbers": "{unit} لا تقبل كسوراً؛ أدخل عدداً صحيحاً."
 }

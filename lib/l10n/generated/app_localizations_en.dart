@@ -2688,6 +2688,54 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get unitsFieldAbbreviation => 'Short label';
+
+  @override
+  String get unitsFieldAbbreviationHelper => 'Printed where the full name is too long: م, كرت.';
+
+  @override
+  String unitsFieldAbbreviationValue(Object abbreviation) {
+    return 'Short label: $abbreviation';
+  }
+
+  @override
+  String get unitsFieldAllowFraction => 'Allow fractions';
+
+  @override
+  String get unitsFieldAllowFractionHelper =>
+      'Off for a unit that cannot be split: half a carton does not exist.';
+
+  @override
+  String get unitsFieldPriceHelper =>
+      'Per this unit. Leave empty to follow the item price × factor.';
+
+  @override
+  String get unitsFieldSortOrder => 'Display order';
+
+  @override
+  String get unitsFieldSortOrderHelper =>
+      'Lower numbers appear first; the base unit always leads.';
+
+  @override
+  String get unitsFieldUsedInPurchases => 'Used when buying';
+
+  @override
+  String get unitsFieldUsedInSales => 'Used when selling';
+
+  @override
+  String unitsPerBasePrice(Object baseUnit, Object price) {
+    return '$price per $baseUnit';
+  }
+
+  @override
+  String get unitsPriceDisagrees => 'differs from the item price';
+
+  @override
+  String unitTakesWholeNumbers(Object unit) {
+    return '$unit does not accept fractions; enter a whole number.';
+  }
+
+  @override
   String get unitsBarcodesHidden => 'hidden from new documents';
 
   @override

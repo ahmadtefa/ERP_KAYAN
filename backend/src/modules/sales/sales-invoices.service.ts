@@ -19,6 +19,7 @@ import { CompanySettingsService } from '../../common/settings/company-settings.m
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import {
   defaultUnitPrice,
+  movementUnitSnapshot,
   resolveUnitSelection,
 } from '../../common/units/unit-math';
 import { PriceListsService } from './price-lists.service';
@@ -520,6 +521,17 @@ export class SalesInvoicesService {
         costOfGoods = costOfGoods.plus(costTotal);
         costByLine.set(line.id, { unitCost, costTotal });
 
+        // The movement says how the line was typed, not just what it came to:
+        // "1 reel of 500 m" and "500 m" move the same goods but are different
+        // statements, and the stock card shows the first.
+        const movementUnits = movementUnitSnapshot({
+          enteredUnit: line.unitName,
+          enteredQuantity: line.unitQuantity,
+          unitFactor: line.unitFactor,
+          baseUnitName: item.unit,
+          baseQuantity: line.quantity,
+        });
+
         await tx.stockMovement.create({
           data: {
             companyId,
@@ -529,6 +541,7 @@ export class SalesInvoicesService {
             movementDate: invoice.invoiceDate,
             direction: StockDirection.OUT,
             quantity: line.quantity,
+            ...movementUnits,
             unitCost,
             totalCost: costTotal,
             referenceType: 'SALES_INVOICE',
@@ -721,7 +734,7 @@ export class SalesInvoicesService {
         if (!line.itemId) continue;
         const item = await tx.item.findFirst({
           where: { id: line.itemId, companyId, deletedAt: null },
-          select: { id: true, isStockTracked: true },
+          select: { id: true, isStockTracked: true, unit: true },
         });
         if (!item) throw new BadRequestException('A sales invoice item no longer exists');
         if (!item.isStockTracked) continue;
@@ -735,6 +748,13 @@ export class SalesInvoicesService {
             movementDate: new Date(),
             direction: StockDirection.IN,
             quantity: line.quantity,
+            ...movementUnitSnapshot({
+              enteredUnit: line.unitName,
+              enteredQuantity: line.unitQuantity,
+              unitFactor: line.unitFactor,
+              baseUnitName: item.unit,
+              baseQuantity: line.quantity,
+            }),
             unitCost: line.unitCost,
             totalCost: line.costTotal,
             referenceType: 'SALES_INVOICE_REVERSAL',
@@ -873,6 +893,7 @@ export class SalesInvoicesService {
             enteredQuantity: quantity,
             baseUnitName: item.unit,
             units: (item as { units?: any[] }).units ?? [],
+            purpose: 'sale',
           })
         : {
             snapshot: { unitName: null, unitFactor: null, unitQuantity: null },

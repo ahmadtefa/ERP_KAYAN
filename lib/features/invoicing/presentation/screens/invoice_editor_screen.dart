@@ -21,15 +21,31 @@ import '../providers/invoice_providers.dart';
 /// synthesised as a single base unit, so the picker always offers the item's
 /// own unit and the document stays valid. An item that has not been picked yet
 /// yields an empty list and the control is disabled.
-List<Json> lineUnitsOf(Json? item) {
+List<Json> lineUnitsOf(Json? item, {bool? forSales}) {
   if (item == null) return const <Json>[];
   final raw = item['units'];
   final stored =
       (raw is List ? raw.cast<Json>() : const <Json>[])
           .where((unit) => flag(unit, 'isActive', fallback: true))
+          .where((unit) {
+            // A unit can be switched off for one side of the business: a
+            // supplier sells by the carton, the shop by the bottle. When the
+            // caller names a side, a unit meant for the other one is not
+            // offered - the server refuses it anyway, and offering it would
+            // only produce an error after the line was typed.
+            if (forSales == null) return true;
+            return flag(
+              unit,
+              forSales ? 'usedInSales' : 'usedInPurchases',
+              fallback: true,
+            );
+          })
           .toList();
   if (stored.isNotEmpty) {
     stored.sort((a, b) {
+      final oa = int.tryParse(asString(a['sortOrder']) ?? '') ?? 0;
+      final ob = int.tryParse(asString(b['sortOrder']) ?? '') ?? 0;
+      if (oa != ob) return oa.compareTo(ob);
       final fa = Decimal.tryParse(asString(a['factor']) ?? '') ?? Decimal.one;
       final fb = Decimal.tryParse(asString(b['factor']) ?? '') ?? Decimal.one;
       return fa.compareTo(fb);
@@ -43,10 +59,36 @@ List<Json> lineUnitsOf(Json? item) {
       'factor': '1.000000',
       'isBase': true,
       'isActive': true,
+      'allowFraction': true,
       'salePrice': item['salePrice'],
       'purchasePrice': item['purchasePrice'],
     },
   ];
+}
+
+/// The unit a line names, or the item's base unit when the line names none.
+Json? lineUnitOf(Json? item, String? unitName) {
+  final units = lineUnitsOf(item);
+  for (final unit in units) {
+    if (text(unit, 'unit') == unitName) return unit;
+  }
+  for (final unit in units) {
+    if (flag(unit, 'isBase', fallback: false)) return unit;
+  }
+  return units.isEmpty ? null : units.first;
+}
+
+/// Whether a quantity typed in [unit] is a whole number of it.
+///
+/// A carton of twenty-four bottles has no half: the shelf either has a carton
+/// or it does not. The server refuses it; catching it here says so while the
+/// person is still on the field instead of after Save.
+bool quantityAllowedInUnit(Json? unit, String quantity) {
+  if (unit == null) return true;
+  if (flag(unit, 'allowFraction', fallback: true)) return true;
+  final parsed = Decimal.tryParse(quantity.trim());
+  if (parsed == null) return true;
+  return parsed == parsed.truncate();
 }
 
 /// The unit-specific list price for [unitName] on [item], or the item's own
@@ -54,13 +96,24 @@ List<Json> lineUnitsOf(Json? item) {
 /// set, so the caller can leave the field the user already typed alone.
 String unitListPrice(Json item, String unitName, {required bool isSales}) {
   final key = isSales ? 'salePrice' : 'purchasePrice';
+  final base = text(item, key);
   for (final unit in lineUnitsOf(item)) {
     if (text(unit, 'unit') == unitName) {
       final specific = text(unit, key);
       if (specific.isNotEmpty) return specific;
+      // The item price is per BASE unit, so a reel of five hundred must not be
+      // offered at the price of one metre. Multiplying here mirrors what the
+      // server does when the price is left empty - one rule, two callers.
+      final factor = Decimal.tryParse(asString(unit['factor']) ?? '');
+      final price = Decimal.tryParse(base);
+      if (factor == null || price == null) return base;
+      // The base unit is the item price already; multiplying by one would only
+      // reformat a number the person typed.
+      if (factor.compareTo(Decimal.one) == 0) return base;
+      return (price * factor).toStringAsFixed(2);
     }
   }
-  return text(item, key);
+  return base;
 }
 
 /// One editable invoice line.
@@ -952,7 +1005,10 @@ class _LinesTable extends StatelessWidget {
                               break;
                             }
                           }
-                          final units = lineUnitsOf(selected);
+                          final units = lineUnitsOf(
+                            selected,
+                            forSales: kind.isSales,
+                          );
                           final names = units
                               .map((unit) => text(unit, 'unit'))
                               .toList();
@@ -1022,6 +1078,28 @@ class _LinesTable extends StatelessWidget {
                           isDense: true,
                           border: const OutlineInputBorder(),
                         ),
+                        // A unit that takes whole units only says so before
+                        // the document is saved, not after it is refused.
+                        validator: (value) {
+                          Json? itemOfLine;
+                          for (final candidate in items) {
+                            if (text(candidate, 'id') ==
+                                lines[index].itemId) {
+                              itemOfLine = candidate;
+                              break;
+                            }
+                          }
+                          final chosenUnit = lineUnitOf(
+                            itemOfLine,
+                            lines[index].unitName,
+                          );
+                          if (quantityAllowedInUnit(chosenUnit, value ?? '')) {
+                            return null;
+                          }
+                          return l10n.unitTakesWholeNumbers(
+                            text(chosenUnit ?? const <String, dynamic>{}, 'unit'),
+                          );
+                        },
                         onChanged: (_) => onChanged(),
                       ),
                     ),

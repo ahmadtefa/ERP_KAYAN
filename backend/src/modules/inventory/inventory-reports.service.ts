@@ -9,9 +9,58 @@ import { Prisma, StockDocumentKind } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import {
+  impliedUnitPrice,
+  priceConsistency,
+  PRICE_CONSISTENCY_TOLERANCE,
+} from '../../common/units/unit-math';
 import { isValidEan13, randomInternalBarcode } from './barcode';
 
 const MONEY_SCALE = 4;
+
+/// How far a unit price may sit from the item price per base unit before it is
+/// treated as a typing mistake rather than a pack discount. Half: a 4% bulk
+/// discount passes, a misplaced decimal point does not.
+const UNIT_PRICE_MAX_DEVIATION = new Prisma.Decimal('0.5');
+
+/// What the API tells the screen when a unit price is deliberately different
+/// from the item price. Never an error on its own - the screen shows it.
+export interface UnitPriceWarning {
+  kind: 'sale' | 'purchase';
+  unit: string;
+  price: string;
+  perBaseUnit: string;
+  itemPerBaseUnit: string;
+  consistentPrice: string;
+}
+
+/// A unit's price expressed per base unit, or null when the unit carries no
+/// price of its own. Nothing is invented: a unit without its own price is
+/// quoted by the item's price, which is already per base unit.
+function perBasePrice(
+  price: Prisma.Decimal | null | undefined,
+  factor: Prisma.Decimal,
+): string | null {
+  if (price === null || price === undefined) return null;
+  return impliedUnitPrice({ fromPrice: price, fromFactor: factor, toFactor: 1 }).toFixed(
+    MONEY_SCALE,
+  );
+}
+
+/// Whether a unit's own price implies the same base-unit price as the item's.
+/// Null when there is nothing to compare - no unit price, no item price, or
+/// the base unit itself - so an item that has never had prices cannot be
+/// reported as inconsistent.
+function pricesAgree(
+  price: Prisma.Decimal | null | undefined,
+  factor: Prisma.Decimal,
+  basePrice: Prisma.Decimal | null | undefined,
+): boolean | null {
+  if (price === null || price === undefined) return null;
+  if (basePrice === null || basePrice === undefined) return null;
+  if (factor.equals(1)) return null;
+  return priceConsistency({ price, factor, expectedPerBaseUnit: basePrice }).consistent;
+}
 
 /**
  * Inventory reporting, and the item catalogue that feeds it.
@@ -72,13 +121,13 @@ export class InventoryReportsService {
   async listUnits(companyId: string, itemId: string, mayReadCost = true) {
     const item = await this.prisma.item.findFirst({
       where: { id: itemId, companyId, deletedAt: null },
-      select: { id: true, code: true, unit: true },
+      select: { id: true, code: true, unit: true, salePrice: true, purchasePrice: true },
     });
     if (!item) throw new NotFoundException('Item not found');
 
     const units = await this.prisma.itemUnit.findMany({
       where: { itemId },
-      orderBy: { factor: 'asc' },
+      orderBy: [{ sortOrder: 'asc' }, { factor: 'asc' }],
     });
     return {
       item,
@@ -93,6 +142,23 @@ export class InventoryReportsService {
           ? unit.purchasePrice?.toFixed(MONEY_SCALE) ?? null
           : null,
         isBase: unit.unit === item.unit,
+        // What the unit costs per base unit, so 5,000 a reel can be seen to be
+        // 10 a metre without anyone doing division in their head.
+        perBaseSalePrice: perBasePrice(unit.salePrice, unit.factor),
+        perBasePurchasePrice: mayReadCost
+          ? perBasePrice(unit.purchasePrice, unit.factor)
+          : null,
+        salePriceAgrees: pricesAgree(unit.salePrice, unit.factor, item.salePrice),
+        purchasePriceAgrees: mayReadCost
+          ? pricesAgree(unit.purchasePrice, unit.factor, item.purchasePrice)
+          : null,
+        // Where the unit may be chosen, and whether a fraction of it is a real
+        // thing (half a metre of cable: yes; half a carton: no).
+        allowFraction: unit.allowFraction,
+        usedInSales: unit.usedInSales,
+        usedInPurchases: unit.usedInPurchases,
+        abbreviation: unit.abbreviation,
+        sortOrder: unit.sortOrder,
         // Multi-unit: inactive units stay readable on old documents but are
         // refused on new ones (resolveUnitSelection enforces that).
         isActive: unit.isActive,
@@ -119,7 +185,7 @@ export class InventoryReportsService {
   ) {
     const item = await this.prisma.item.findFirst({
       where: { id: itemId, companyId, deletedAt: null },
-      select: { id: true, code: true, unit: true },
+      select: { id: true, code: true, unit: true, salePrice: true, purchasePrice: true },
     });
     if (!item) throw new NotFoundException('Item not found');
 
@@ -139,7 +205,7 @@ export class InventoryReportsService {
         );
       }
       const clash = await this.prisma.itemUnit.findFirst({
-        where: { itemId, unit: name, id: { not: unitId } },
+        where: { itemId, unit: { equals: name, mode: 'insensitive' }, id: { not: unitId } },
         select: { id: true },
       });
       if (clash) throw new ConflictException(`Item ${item.code} already has a unit called ${name}`);
@@ -162,17 +228,58 @@ export class InventoryReportsService {
 
     for (const key of ['salePrice', 'purchasePrice'] as const) {
       if (dto[key] === undefined) continue;
-      if (dto[key] === null || dto[key] === '') {
-        data[key] = null;
-        continue;
-      }
-      try {
-        const value = new Prisma.Decimal(String(dto[key])).toDecimalPlaces(MONEY_SCALE);
-        if (value.isNegative()) throw new Error('negative');
-        data[key] = value;
-      } catch {
-        throw new BadRequestException(`${key} is not a valid amount`);
-      }
+      data[key] = this.parsePrice(dto[key], key);
+    }
+
+    // New in this version: how the unit prints, whether a fraction of it is
+    // real, and where it may be chosen.
+    if (dto.abbreviation !== undefined) data.abbreviation = this.parseAbbreviation(dto.abbreviation);
+    const allowFraction = this.parseFlag(dto.allowFraction, 'allowFraction');
+    if (allowFraction !== null) data.allowFraction = allowFraction;
+    const usedInSales = this.parseFlag(dto.usedInSales, 'usedInSales');
+    if (usedInSales !== null) data.usedInSales = usedInSales;
+    const usedInPurchases = this.parseFlag(dto.usedInPurchases, 'usedInPurchases');
+    if (usedInPurchases !== null) data.usedInPurchases = usedInPurchases;
+    const sortOrder = this.parseSortOrder(dto.sortOrder);
+    if (sortOrder !== null) data.sortOrder = sortOrder;
+
+    // A new factor re-prices the unit even when its own price did not change:
+    // 5,000 a reel of 500 is 10 a metre, and the same 5,000 on a reel of 400
+    // is 12.50. So the check runs whenever a factor or a price is touched.
+    const priceTouched =
+      dto.factor !== undefined || dto.salePrice !== undefined || dto.purchasePrice !== undefined;
+    let warnings: UnitPriceWarning[] = [];
+    if (priceTouched) {
+      const effectiveFactor = (data.factor as Prisma.Decimal | undefined) ?? unit.factor;
+      const effectiveSale =
+        dto.salePrice !== undefined ? (data.salePrice as Prisma.Decimal | null) : unit.salePrice;
+      const effectivePurchase =
+        dto.purchasePrice !== undefined
+          ? (data.purchasePrice as Prisma.Decimal | null)
+          : unit.purchasePrice;
+      const overridden =
+        this.parseFlag(dto.allowPriceOverride, 'allowPriceOverride') === true;
+      const label = (data.unit as string | undefined) ?? unit.unit;
+      warnings = [
+        this.checkUnitPrice({
+          itemCode: item.code,
+          unitLabel: label,
+          factor: effectiveFactor,
+          price: effectiveSale,
+          basePrice: item.salePrice,
+          kind: 'sale',
+          overridden,
+        }),
+        this.checkUnitPrice({
+          itemCode: item.code,
+          unitLabel: label,
+          factor: effectiveFactor,
+          price: effectivePurchase,
+          basePrice: item.purchasePrice,
+          kind: 'purchase',
+          overridden,
+        }),
+      ].filter((warning): warning is UnitPriceWarning => warning !== null);
     }
 
     const updated = await this.prisma.itemUnit.update({ where: { id: unitId }, data });
@@ -188,9 +295,14 @@ export class InventoryReportsService {
         unit: updated.unit,
         factor: updated.factor.toFixed(6),
         barcode: updated.barcode,
+        abbreviation: updated.abbreviation,
+        allowFraction: updated.allowFraction,
+        usedInSales: updated.usedInSales,
+        usedInPurchases: updated.usedInPurchases,
+        sortOrder: updated.sortOrder,
       },
     });
-    return this.listUnits(companyId, itemId, mayReadCost);
+    return { ...(await this.listUnits(companyId, itemId, mayReadCost)), priceWarnings: warnings };
   }
 
   /// Removes a unit.
@@ -382,6 +494,101 @@ export class InventoryReportsService {
     return factor;
   }
 
+  /// A short printed label: "م", "كرت". Empty means "use the full name".
+  private parseAbbreviation(value: unknown): string | null {
+    if (value === undefined) return null;
+    const text = String(value ?? '').trim();
+    if (!text) return null;
+    if (text.length > 20) {
+      throw new BadRequestException('abbreviation cannot be longer than 20 characters');
+    }
+    return text;
+  }
+
+  /// A tri-state flag. Omitted stays null ("leave unchanged" on an update).
+  private parseFlag(value: unknown, field: string): boolean | null {
+    if (value === undefined || value === null || value === '') return null;
+    if (typeof value === 'boolean') return value;
+    const text = String(value).trim().toLowerCase();
+    if (['true', '1', 'yes'].includes(text)) return true;
+    if (['false', '0', 'no'].includes(text)) return false;
+    throw new BadRequestException(`${field} must be true or false`);
+  }
+
+  private parseSortOrder(value: unknown): number | null {
+    if (value === undefined || value === null || value === '') return null;
+    const number = Number(value);
+    if (!Number.isInteger(number) || number < 0 || number > 9999) {
+      throw new BadRequestException('sortOrder must be a whole number between 0 and 9999');
+    }
+    return number;
+  }
+
+  private parsePrice(value: unknown, field: string): Prisma.Decimal | null {
+    if (value === undefined || value === null || value === '') return null;
+    try {
+      const price = new Prisma.Decimal(String(value)).toDecimalPlaces(MONEY_SCALE);
+      if (price.isNegative()) throw new Error('negative');
+      return price;
+    } catch {
+      throw new BadRequestException(`${field} is not a valid amount`);
+    }
+  }
+
+  /// A unit price that disagrees with the item's own price.
+  ///
+  /// A reel of 500 m at 5,000 and a metre at 10 are the same price said twice,
+  /// so there is nothing to check. A reel at 5,200 is a 4% pack discount - a
+  /// decision, reported back so the screen can show "10.40 per metre against
+  /// 10.00" and let a person confirm it. A reel at 500 is a slip of a decimal
+  /// point (1.00 per metre against 10.00): that is refused, because accepting
+  /// it would sell five hundred metres for the price of fifty, and the message
+  /// says exactly which number to type instead. `allowPriceOverride: true` is
+  /// the deliberate way past even that.
+  private checkUnitPrice(input: {
+    itemCode: string;
+    unitLabel: string;
+    factor: Prisma.Decimal;
+    price: Prisma.Decimal | null;
+    basePrice: Prisma.Decimal | null | undefined;
+    kind: 'sale' | 'purchase';
+    overridden: boolean;
+  }): UnitPriceWarning | null {
+    const { price, basePrice } = input;
+    if (!price || basePrice === null || basePrice === undefined) return null;
+    const result = priceConsistency({
+      price,
+      factor: input.factor,
+      expectedPerBaseUnit: basePrice,
+    });
+    if (result.consistent) return null;
+
+    const warning: UnitPriceWarning = {
+      kind: input.kind,
+      unit: input.unitLabel,
+      price: price.toFixed(MONEY_SCALE),
+      perBaseUnit: result.perBaseUnit.toFixed(MONEY_SCALE),
+      itemPerBaseUnit: basePrice.toFixed(MONEY_SCALE),
+      consistentPrice: basePrice
+        .mul(input.factor)
+        .toDecimalPlaces(MONEY_SCALE)
+        .toFixed(MONEY_SCALE),
+    };
+    // Nothing to measure a ratio against, or a deliberate override.
+    if (basePrice.isZero() || input.overridden) return warning;
+
+    const deviation = result.perBaseUnit.minus(basePrice).abs().div(basePrice);
+    if (deviation.lessThanOrEqualTo(UNIT_PRICE_MAX_DEVIATION)) return warning;
+
+    throw new BadRequestException(
+      `The ${input.kind} price ${warning.price} for "${input.unitLabel}" means ` +
+        `${warning.perBaseUnit} per base unit of ${input.itemCode}, but the item's ` +
+        `${input.kind} price is ${warning.itemPerBaseUnit}. A difference that large is ` +
+        `almost always the wrong number in the wrong box: ${warning.consistentPrice} is ` +
+        `the same price as the item. Send allowPriceOverride: true if the difference is intended.`,
+    );
+  }
+
   private async barcodeTaken(
     companyId: string,
     barcode: string,
@@ -445,7 +652,7 @@ export class InventoryReportsService {
   ) {
     const item = await this.prisma.item.findFirst({
       where: { id: itemId, companyId, deletedAt: null },
-      select: { id: true, unit: true, code: true },
+      select: { id: true, unit: true, code: true, salePrice: true, purchasePrice: true },
     });
     if (!item) throw new NotFoundException('Item not found');
 
@@ -487,8 +694,36 @@ export class InventoryReportsService {
       }
     }
 
-    const existing = await this.prisma.itemUnit.findFirst({ where: { itemId, unit } });
+    // A duplicate under a different capitalisation is still the same unit to a
+    // person reading the dropdown, so it is refused too.
+    const existing = await this.prisma.itemUnit.findFirst({
+      where: { itemId, unit: { equals: unit, mode: 'insensitive' } },
+    });
     if (existing) throw new ConflictException(`Item ${item.code} already has a unit called ${unit}`);
+
+    const salePrice = this.parsePrice(dto.salePrice, 'salePrice');
+    const purchasePrice = this.parsePrice(dto.purchasePrice, 'purchasePrice');
+    const overridden = this.parseFlag(dto.allowPriceOverride, 'allowPriceOverride') === true;
+    const warnings = [
+      this.checkUnitPrice({
+        itemCode: item.code,
+        unitLabel: unit,
+        factor,
+        price: salePrice,
+        basePrice: item.salePrice,
+        kind: 'sale',
+        overridden,
+      }),
+      this.checkUnitPrice({
+        itemCode: item.code,
+        unitLabel: unit,
+        factor,
+        price: purchasePrice,
+        basePrice: item.purchasePrice,
+        kind: 'purchase',
+        overridden,
+      }),
+    ].filter((warning): warning is UnitPriceWarning => warning !== null);
 
     const created = await this.prisma.itemUnit.create({
       data: {
@@ -497,9 +732,13 @@ export class InventoryReportsService {
         factor,
         barcode,
         isActive: true,
-        salePrice: dto.salePrice === undefined ? null : new Prisma.Decimal(String(dto.salePrice)),
-        purchasePrice:
-          dto.purchasePrice === undefined ? null : new Prisma.Decimal(String(dto.purchasePrice)),
+        salePrice,
+        purchasePrice,
+        abbreviation: this.parseAbbreviation(dto.abbreviation),
+        allowFraction: this.parseFlag(dto.allowFraction, 'allowFraction') ?? true,
+        usedInSales: this.parseFlag(dto.usedInSales, 'usedInSales') ?? true,
+        usedInPurchases: this.parseFlag(dto.usedInPurchases, 'usedInPurchases') ?? true,
+        sortOrder: this.parseSortOrder(dto.sortOrder) ?? 0,
       },
     });
 
@@ -509,10 +748,18 @@ export class InventoryReportsService {
       action: 'CREATE',
       entity: 'item_units',
       entityId: created.id,
-      after: { item: item.code, unit, factor: factor.toFixed(6) },
+      after: {
+        item: item.code,
+        unit,
+        factor: factor.toFixed(6),
+        abbreviation: created.abbreviation,
+        allowFraction: created.allowFraction,
+        usedInSales: created.usedInSales,
+        usedInPurchases: created.usedInPurchases,
+      },
     });
 
-    return this.listUnits(companyId, itemId, mayReadCost);
+    return { ...(await this.listUnits(companyId, itemId, mayReadCost)), priceWarnings: warnings };
   }
 
   // -------------------------------------------------------------- reports

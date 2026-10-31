@@ -888,5 +888,18 @@
   "barcodeLabelsShowPrice": "Show sale price",
   "barcodeLabelsPdf": "PDF",
   "barcodeLabelsPrint": "Print",
-  "barcodeLabelsPrintCount": "Print ({count})"
+  "barcodeLabelsPrintCount": "Print ({count})",
+  "unitsFieldAbbreviation": "Short label",
+  "unitsFieldAbbreviationHelper": "Printed where the full name is too long: م, كرت.",
+  "unitsFieldAbbreviationValue": "Short label: {abbreviation}",
+  "unitsFieldAllowFraction": "Allow fractions",
+  "unitsFieldAllowFractionHelper": "Off for a unit that cannot be split: half a carton does not exist.",
+  "unitsFieldUsedInSales": "Used when selling",
+  "unitsFieldUsedInPurchases": "Used when buying",
+  "unitsFieldSortOrder": "Display order",
+  "unitsFieldSortOrderHelper": "Lower numbers appear first; the base unit always leads.",
+  "unitsFieldPriceHelper": "Per this unit. Leave empty to follow the item price × factor.",
+  "unitsPerBasePrice": "{price} per {baseUnit}",
+  "unitsPriceDisagrees": "differs from the item price",
+  "unitTakesWholeNumbers": "{unit} does not accept fractions; enter a whole number."
 }

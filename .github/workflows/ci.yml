@@ -473,6 +473,18 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
+
+          # The worked example the multi-unit feature is judged by: reels of
+          # 500 metres, cartons of 24, prices that follow the factor, a factor
+          # change that must not restate history, and a refusal of half a
+          # carton. Every figure is read back from PostgreSQL as well.
+          echo "Running the cable-and-carton multi-unit scenario..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/scenario-multiunit-cable-carton.mjs http://127.0.0.1:3000/api/v1 | tee /tmp/kayan-multiunit-scenario.log'; then
+            echo "::group::API logs after the multi-unit scenario failure"
+            cat /tmp/kayan-regressions-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
       # Same reason as the backend job: the per-scenario totals are the
       # evidence a run can be read without the log host.
       - name: Record scenario totals
@@ -480,7 +492,7 @@ jobs:
         run: |
           # The two scenarios word their summary differently ("checks passed"
           # and "passed"), so both shapes are looked for.
-          summary=$(grep -hE "checks passed|[0-9]+/[0-9]+ passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log /tmp/kayan-units-scenario.log 2>/dev/null | tr '\n' ' | ')
+          summary=$(grep -hE "checks passed|[0-9]+/[0-9]+ passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log /tmp/kayan-units-scenario.log /tmp/kayan-multiunit-scenario.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Regression scenario checks::${summary:-summary not captured}"
 
   flutter:

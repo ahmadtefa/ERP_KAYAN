@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { composeQuantity, trimZeros } from '../../common/units/unit-math';
 
 const MONEY_SCALE = 4;
 
@@ -28,7 +29,19 @@ export class StockService {
       where,
       include: {
         item: {
-          select: { code: true, nameEn: true, nameAr: true, unit: true },
+          select: {
+            code: true,
+            nameEn: true,
+            nameAr: true,
+            unit: true,
+            // The item's own units, so a balance can be read as "9 بكرات +
+            // 400 متر" instead of one long number of metres. Read-only: the
+            // stored quantity is never anything but base units.
+            units: {
+              select: { id: true, unit: true, factor: true, isActive: true, sortOrder: true },
+              orderBy: [{ sortOrder: 'asc' }, { factor: 'asc' }],
+            },
+          },
         },
         branch: { select: { code: true, nameEn: true, nameAr: true } },
       },
@@ -43,6 +56,8 @@ export class StockService {
         ? new Prisma.Decimal(0)
         : value.div(quantity).toDecimalPlaces(MONEY_SCALE);
 
+      const composed = composeQuantity(quantity, r.item.units ?? [], r.item.unit);
+
       return {
         itemId: r.itemId,
         itemCode: r.item.code,
@@ -51,7 +66,11 @@ export class StockService {
         unit: r.item.unit,
         branchId: r.branchId,
         branchCode: r.branch.code,
+        // The number the ledger keeps, in base units...
         quantity: quantity.toFixed(MONEY_SCALE),
+        // ...and the same number said in the item's own units.
+        displayQuantity: composed.text,
+        quantityParts: composed.parts,
         // Valuation and average cost are cost figures: redact without cost.read.
         value: mayReadCost ? value.toFixed(MONEY_SCALE) : null,
         averageCost: mayReadCost ? averageCost.toFixed(MONEY_SCALE) : null,
@@ -131,7 +150,17 @@ export class StockService {
   async itemLedger(companyId: string, itemId: string, mayReadCost = true) {
     const item = await this.prisma.item.findFirst({
       where: { id: itemId, companyId, deletedAt: null },
-      select: { id: true, code: true, nameEn: true, nameAr: true, unit: true },
+      select: {
+        id: true,
+        code: true,
+        nameEn: true,
+        nameAr: true,
+        unit: true,
+        units: {
+          select: { id: true, unit: true, factor: true, isActive: true, sortOrder: true },
+          orderBy: [{ sortOrder: 'asc' }, { factor: 'asc' }],
+        },
+      },
     });
     if (!item) throw new NotFoundException('Item not found');
 
@@ -167,6 +196,25 @@ export class StockService {
           warehouseNameEn: m.warehouse?.nameEn ?? null,
           warehouseNameAr: m.warehouse?.nameAr ?? null,
           quantity: m.quantity.toFixed(MONEY_SCALE),
+          // How the movement was typed when it was recorded. The factor is the
+          // one frozen at that moment, not today's: a later correction to the
+          // unit cannot restate this line.
+          enteredUnit: m.enteredUnit ?? item.unit,
+          enteredQuantity:
+            m.enteredQuantity === null || m.enteredQuantity === undefined
+              ? trimZeros(m.quantity)
+              : trimZeros(m.enteredQuantity),
+          unitFactor:
+            m.unitFactor === null || m.unitFactor === undefined
+              ? '1.000000'
+              : m.unitFactor.toFixed(6),
+          displayQuantity: `${trimZeros(
+            m.enteredQuantity === null || m.enteredQuantity === undefined
+              ? m.quantity
+              : m.enteredQuantity,
+          )} ${m.enteredUnit ?? item.unit}`,
+          // The whole balance at this point, in the item's units.
+          runningDisplay: composeQuantity(runningQty, item.units ?? [], item.unit).text,
           // Ledger money columns reveal unit cost: redact without cost.read.
           unitCost: mayReadCost ? m.unitCost.toFixed(MONEY_SCALE) : null,
           totalCost: mayReadCost ? m.totalCost.toFixed(MONEY_SCALE) : null,

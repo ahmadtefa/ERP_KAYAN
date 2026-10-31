@@ -1376,6 +1376,17 @@ model StockMovement {
   unitCost     Decimal        @db.Decimal(19, 4)
   totalCost    Decimal        @db.Decimal(19, 4)
 
+  /// What the person actually typed: the unit, the quantity in that unit and
+  /// the conversion factor applied. `quantity` above is always the base-unit
+  /// quantity; these three say how it was entered ("1 reel of 500 m" rather
+  /// than "500"), and the factor is frozen at the moment of the movement so a
+  /// later change to the unit's definition cannot restate history.
+  /// Null on movements recorded before units were snapshotted: those are
+  /// base-unit movements whose entered quantity is `quantity` itself.
+  enteredUnit     String?        @db.VarChar(40)
+  enteredQuantity Decimal?       @db.Decimal(19, 4)
+  unitFactor      Decimal?       @db.Decimal(19, 6)
+
   referenceType   String  @db.VarChar(32)
   referenceId     String? @db.Uuid
   referenceNumber String?
@@ -1997,9 +2008,29 @@ model ItemUnit {
   /// How many base units one of this unit contains. The base unit itself is 1.
   factor Decimal @db.Decimal(19, 6)
 
+  /// A short label for printed documents and stock cards ("م", "كرت"),
+  /// when the full name is too long for a column.
+  abbreviation String? @db.VarChar(20)
+
   barcode       String?
   salePrice     Decimal? @db.Decimal(19, 4)
   purchasePrice Decimal? @db.Decimal(19, 4)
+
+  /// Whether a quantity may be fractional in this unit. A reel of cable can be
+  /// sold as 0.5 reel; a carton of bottles cannot be sold as half a carton,
+  /// because there is no such thing to hand over. True for every unit that
+  /// existed before this column, so no historic document becomes invalid.
+  allowFraction Boolean @default(true)
+
+  /// Where the unit may be chosen. A supplier sells by the carton while the
+  /// shop sells by the bottle: the carton is a purchase unit and the bottle a
+  /// sales unit. Both stay usable for stock movements either way.
+  usedInSales     Boolean @default(true)
+  usedInPurchases Boolean @default(true)
+
+  /// Display order on screens and printed documents. The base unit sorts
+  /// first, then the smallest pack.
+  sortOrder Int @default(0)
 
   /// A unit used on a saved document is never hard-deleted: it is deactivated
   /// instead, so old documents still name a unit that exists. New documents
@@ -2013,6 +2044,7 @@ model ItemUnit {
 
   @@unique([itemId, unit])
   @@index([itemId, isActive])
+  @@index([itemId, sortOrder, factor])
   @@map("item_units")
 }
 

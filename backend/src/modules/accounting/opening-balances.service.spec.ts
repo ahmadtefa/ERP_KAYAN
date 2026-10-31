@@ -140,6 +140,10 @@ describe('OpeningBalancesService', () => {
       $queryRaw: jest.fn().mockResolvedValue([
         { quantity: new Prisma.Decimal(5), value: new Prisma.Decimal(100) },
       ]),
+      // The real client exposes the item delegate; the reversal reads the base
+      // unit names it needs for the movement it writes. It is answered here so
+      // the fake stays a plausible client instead of failing on a missing key.
+      item: { findMany: jest.fn().mockResolvedValue([]) },
       stockMovement: { create: jest.fn() },
       stockBalance: { update: jest.fn() },
       openingBalance: { update: jest.fn() },

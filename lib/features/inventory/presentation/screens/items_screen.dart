@@ -162,6 +162,15 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                       final isBase = unit['isBase'] == true;
                       final isActive = unit['isActive'] != false;
                       final unitId = '${unit['id'] ?? ''}';
+                      // The unit everything else is measured in: a price per
+                      // base unit is only meaningful with its name.
+                      var baseUnitName = '${unit['unit'] ?? ''}';
+                      for (final row in units) {
+                        if (row['isBase'] == true) {
+                          baseUnitName = '${row['unit'] ?? ''}';
+                          break;
+                        }
+                      }
                       return ListTile(
                         dense: true,
                         title: Text(
@@ -173,14 +182,43 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                               ? null
                               : const TextStyle(color: Colors.grey),
                         ),
-                        subtitle: Text(
-                          l10n.unitsBarcodesFactorBarcode(
-                            '${unit['factor'] ?? ''}',
-                            '${unit['barcode'] ?? '—'}',
-                          ) +
-                              (isActive
-                                  ? ''
-                                  : '  •  ${l10n.unitsBarcodesHidden}'),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.unitsBarcodesFactorBarcode(
+                                '${unit['factor'] ?? ''}',
+                                '${unit['barcode'] ?? '—'}',
+                              ) +
+                                  (isActive
+                                      ? ''
+                                      : '  •  ${l10n.unitsBarcodesHidden}'),
+                            ),
+                            // The same price said per base unit: 5,000 a reel
+                            // of 500 is 10 a metre, and a price that disagrees
+                            // with the item price says so here.
+                            if ('${unit['perBaseSalePrice'] ?? ''}'
+                                .isNotEmpty)
+                              Text(
+                                l10n.unitsPerBasePrice(
+                                  '${unit['perBaseSalePrice']}',
+                                  baseUnitName,
+                                ) +
+                                    (unit['salePriceAgrees'] == false
+                                        ? '  •  ${l10n.unitsPriceDisagrees}'
+                                        : ''),
+                                style: TextStyle(
+                                  color: unit['salePriceAgrees'] == false
+                                      ? Theme.of(context).colorScheme.error
+                                      : null,
+                                ),
+                              ),
+                            if (unit['abbreviation'] != null &&
+                                '${unit['abbreviation']}'.isNotEmpty)
+                              Text(l10n.unitsFieldAbbreviationValue(
+                                '${unit['abbreviation']}',
+                              )),
+                          ],
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -256,6 +294,14 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         final values = await showFormSheet(
           context,
           title: l10n.unitsBarcodesAdd,
+          // A new unit behaves like every unit that existed before today
+          // unless the person says otherwise: it takes fractions, and it may
+          // be used when selling and when buying.
+          initial: const {
+            'allowFraction': true,
+            'usedInSales': true,
+            'usedInPurchases': true,
+          },
           fields: [
             FieldSpec('unit', l10n.unitsBarcodesFieldUnit, required: true),
             FieldSpec(
@@ -265,13 +311,30 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               required: true,
               helper: l10n.unitsBarcodesFactorHelper,
             ),
+            FieldSpec(
+              'abbreviation',
+              l10n.unitsFieldAbbreviation,
+              helper: l10n.unitsFieldAbbreviationHelper,
+            ),
             if (canManageBarcodes)
               FieldSpec('barcode', l10n.unitsBarcodesFieldBarcode),
             FieldSpec('salePrice', l10n.unitsBarcodesFieldSalePrice,
-                kind: FieldKind.decimal),
+                kind: FieldKind.decimal,
+                helper: l10n.unitsFieldPriceHelper),
             if (canSeeCost)
               FieldSpec('purchasePrice', l10n.unitsBarcodesFieldPurchasePrice,
-                  kind: FieldKind.decimal),
+                  kind: FieldKind.decimal,
+                  helper: l10n.unitsFieldPriceHelper),
+            FieldSpec('allowFraction', l10n.unitsFieldAllowFraction,
+                kind: FieldKind.toggle,
+                helper: l10n.unitsFieldAllowFractionHelper),
+            FieldSpec('usedInSales', l10n.unitsFieldUsedInSales,
+                kind: FieldKind.toggle),
+            FieldSpec('usedInPurchases', l10n.unitsFieldUsedInPurchases,
+                kind: FieldKind.toggle),
+            FieldSpec('sortOrder', l10n.unitsFieldSortOrder,
+                kind: FieldKind.integer,
+                helper: l10n.unitsFieldSortOrderHelper),
           ],
         );
         if (values == null || !mounted) return;
@@ -384,6 +447,11 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             if (canManageBarcodes) 'barcode': unit['barcode'],
             'salePrice': unit['salePrice'],
             if (canSeeCost) 'purchasePrice': unit['purchasePrice'],
+            'abbreviation': unit['abbreviation'],
+            'allowFraction': unit['allowFraction'] != false,
+            'usedInSales': unit['usedInSales'] != false,
+            'usedInPurchases': unit['usedInPurchases'] != false,
+            'sortOrder': unit['sortOrder'],
           },
           fields: [
             FieldSpec(
@@ -401,13 +469,30 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                   ? l10n.unitsBarcodesBaseFactorHelper
                   : l10n.unitsBarcodesFactorEditHelper,
             ),
+            FieldSpec(
+              'abbreviation',
+              l10n.unitsFieldAbbreviation,
+              helper: l10n.unitsFieldAbbreviationHelper,
+            ),
             if (canManageBarcodes)
               FieldSpec('barcode', l10n.unitsBarcodesFieldBarcode),
             FieldSpec('salePrice', l10n.unitsBarcodesFieldSalePrice,
-                kind: FieldKind.decimal),
+                kind: FieldKind.decimal,
+                helper: l10n.unitsFieldPriceHelper),
             if (canSeeCost)
               FieldSpec('purchasePrice', l10n.unitsBarcodesFieldPurchasePrice,
-                  kind: FieldKind.decimal),
+                  kind: FieldKind.decimal,
+                  helper: l10n.unitsFieldPriceHelper),
+            FieldSpec('allowFraction', l10n.unitsFieldAllowFraction,
+                kind: FieldKind.toggle,
+                helper: l10n.unitsFieldAllowFractionHelper),
+            FieldSpec('usedInSales', l10n.unitsFieldUsedInSales,
+                kind: FieldKind.toggle),
+            FieldSpec('usedInPurchases', l10n.unitsFieldUsedInPurchases,
+                kind: FieldKind.toggle),
+            FieldSpec('sortOrder', l10n.unitsFieldSortOrder,
+                kind: FieldKind.integer,
+                helper: l10n.unitsFieldSortOrderHelper),
           ],
         );
         if (values == null || !mounted) return;

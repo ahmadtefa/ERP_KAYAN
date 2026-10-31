@@ -13,6 +13,7 @@ import {
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { movementUnitSnapshot } from '../../common/units/unit-math';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
@@ -582,7 +583,7 @@ export class ReturnsService {
         if (line.itemId) {
           const item = await tx.item.findFirst({
             where: { id: line.itemId, companyId, deletedAt: null },
-            select: { id: true, isStockTracked: true },
+            select: { id: true, isStockTracked: true, unit: true },
           });
           if (!item) throw new BadRequestException('A sales-return item no longer exists');
           if (!item.isStockTracked && !returnedCost.isZero()) {
@@ -598,6 +599,13 @@ export class ReturnsService {
                 movementDate: document.invoiceDate,
                 direction: StockDirection.IN,
                 quantity: line.quantity,
+                ...movementUnitSnapshot({
+                  enteredUnit: line.unitName,
+                  enteredQuantity: line.unitQuantity,
+                  unitFactor: line.unitFactor,
+                  baseUnitName: item.unit,
+                  baseQuantity: line.quantity,
+                }),
                 unitCost,
                 totalCost: returnedCost,
                 referenceType: 'SALES_RETURN',
@@ -1088,7 +1096,7 @@ export class ReturnsService {
         if (line.itemId) {
           const item = await tx.item.findFirst({
             where: { id: line.itemId, companyId, deletedAt: null },
-            select: { id: true, isStockTracked: true },
+            select: { id: true, isStockTracked: true, unit: true },
           });
           if (!item || !item.isStockTracked) {
             throw new BadRequestException('A purchase-return item is no longer tracked in stock');
@@ -1141,6 +1149,13 @@ export class ReturnsService {
               movementDate: document.invoiceDate,
               direction: StockDirection.OUT,
               quantity: line.quantity,
+              ...movementUnitSnapshot({
+                enteredUnit: line.unitName,
+                enteredQuantity: line.unitQuantity,
+                unitFactor: line.unitFactor,
+                baseUnitName: item.unit,
+                baseQuantity: line.quantity,
+              }),
               unitCost,
               totalCost: returnedCost,
               referenceType: 'PURCHASE_RETURN',
@@ -1323,6 +1338,15 @@ export class ReturnsService {
               movementDate: new Date(),
               direction: StockDirection.OUT,
               quantity: line.quantity,
+              ...movementUnitSnapshot({
+                enteredUnit: line.unitName,
+                enteredQuantity: line.unitQuantity,
+                unitFactor: line.unitFactor,
+                // The line already names its unit; the base name is only a
+                // fallback for a row saved before units were snapshotted.
+                baseUnitName: line.unitName ?? 'unit',
+                baseQuantity: line.quantity,
+              }),
               unitCost: line.unitCost,
               totalCost: line.costTotal,
               referenceType: 'SALES_RETURN_REVERSAL',
@@ -1422,6 +1446,13 @@ export class ReturnsService {
             movementDate: new Date(),
             direction: StockDirection.IN,
             quantity: line.quantity,
+            ...movementUnitSnapshot({
+              enteredUnit: line.unitName,
+              enteredQuantity: line.unitQuantity,
+              unitFactor: line.unitFactor,
+              baseUnitName: line.unitName ?? 'unit',
+              baseQuantity: line.quantity,
+            }),
             unitCost,
             totalCost,
             referenceType: 'PURCHASE_RETURN_REVERSAL',

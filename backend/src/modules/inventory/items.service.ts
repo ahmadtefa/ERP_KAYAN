@@ -7,6 +7,7 @@ import {
 import { InvoiceStatus, Prisma, StockDirection } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { movementUnitSnapshot } from '../../common/units/unit-math';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { PostingService } from '../accounting/posting.service';
@@ -396,6 +397,12 @@ export class ItemsService {
             movementDate: asOf,
             direction: StockDirection.IN,
             quantity: openingQuantity!,
+            // Opening stock is counted in the item's base unit, which is the
+            // unit the create form asks for; say so on the movement.
+            ...movementUnitSnapshot({
+              baseUnitName: item.unit,
+              baseQuantity: openingQuantity!,
+            }),
             unitCost: openingUnitCost!,
             totalCost: total,
             referenceType: 'ITEM_OPENING_STOCK',
@@ -723,6 +730,11 @@ export class ItemsService {
       purchasePrice: Prisma.Decimal | null;
       isActive?: boolean;
       createdAt?: Date | null;
+      abbreviation?: string | null;
+      allowFraction?: boolean;
+      usedInSales?: boolean;
+      usedInPurchases?: boolean;
+      sortOrder?: number;
     },
     mayReadCost = true,
   ) {
@@ -745,6 +757,13 @@ export class ItemsService {
       // than hiding a unit the catalogue always offered.
       isActive: unit.isActive ?? true,
       isBase: unit.factor.equals(1),
+      // The rest of what a unit now carries. Defaults repeat the column
+      // defaults so a row read before this migration cannot turn a unit off.
+      abbreviation: unit.abbreviation ?? null,
+      allowFraction: unit.allowFraction ?? true,
+      usedInSales: unit.usedInSales ?? true,
+      usedInPurchases: unit.usedInPurchases ?? true,
+      sortOrder: unit.sortOrder ?? 0,
       createdAt: unit.createdAt ? unit.createdAt.toISOString() : null,
     };
   }

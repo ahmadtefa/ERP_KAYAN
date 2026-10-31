@@ -8,7 +8,10 @@ import { InvoiceStatus, Prisma, StockDirection, StockDocumentKind } from '@prism
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
-import { resolveUnitSelection } from '../../common/units/unit-math';
+import {
+  movementUnitSnapshot,
+  resolveUnitSelection,
+} from '../../common/units/unit-math';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { CostCentersService } from '../accounting/cost-centers.service';
@@ -277,6 +280,9 @@ export class StockDocumentsService {
             enteredQuantity: quantity.abs(),
             baseUnitName: item.unit,
             units,
+            // Stock movements are neither a sale nor a purchase: a unit that is
+            // only enabled for one of them is still usable to count goods.
+            purpose: 'stock',
           });
           unitName = resolved.snapshot.unitName;
           unitFactor = resolved.snapshot.unitFactor;
@@ -291,6 +297,7 @@ export class StockDocumentsService {
             enteredQuantity: countedQuantity,
             baseUnitName: item.unit,
             units,
+            purpose: 'stock',
           });
           unitName = resolvedCount.snapshot.unitName;
           unitFactor = resolvedCount.snapshot.unitFactor;
@@ -508,6 +515,10 @@ export class StockDocumentsService {
             date: document.documentDate,
             direction: StockDirection.OUT,
             quantity: line.quantity,
+            enteredUnit: line.unitName,
+            enteredQuantity: line.unitQuantity,
+            unitFactor: line.unitFactor,
+            baseUnitName: line.unitName ?? 'unit',
             unitCost,
             totalCost,
             referenceType: 'STOCK_TRANSFER_OUT',
@@ -524,6 +535,10 @@ export class StockDocumentsService {
             date: document.documentDate,
             direction: StockDirection.IN,
             quantity: line.quantity,
+            enteredUnit: line.unitName,
+            enteredQuantity: line.unitQuantity,
+            unitFactor: line.unitFactor,
+            baseUnitName: line.unitName ?? 'unit',
             unitCost,
             totalCost,
             referenceType: 'STOCK_TRANSFER_IN',
@@ -604,6 +619,10 @@ export class StockDocumentsService {
           date: document.documentDate,
           direction,
           quantity: absoluteQuantity,
+          enteredUnit: line.unitName,
+          enteredQuantity: line.unitQuantity,
+          unitFactor: line.unitFactor,
+          baseUnitName: line.unitName ?? 'unit',
           unitCost,
           totalCost,
           referenceType:
@@ -799,6 +818,10 @@ export class StockDocumentsService {
             date: new Date(),
             direction: wasOut ? StockDirection.IN : StockDirection.OUT,
             quantity: line.quantity.abs(),
+            enteredUnit: line.unitName,
+            enteredQuantity: line.unitQuantity,
+            unitFactor: line.unitFactor,
+            baseUnitName: line.unitName ?? 'unit',
             unitCost: line.unitCost,
             totalCost: line.unitCost.mul(line.quantity.abs()).toDecimalPlaces(MONEY_SCALE),
             referenceType: 'STOCK_DOCUMENT_REVERSAL',
@@ -873,6 +896,13 @@ export class StockDocumentsService {
       /// Which pile the goods sat in, or moved to. Null only when the company
       /// has no warehouse for the branch at all.
       warehouseId?: string | null;
+      /// How the line was typed. The document line already froze these three
+      /// values; the movement carries them so the stock card can say "1 reel"
+      /// as readily as "500 m" long after the document is closed.
+      enteredUnit?: string | null;
+      enteredQuantity?: Prisma.Decimal | null;
+      unitFactor?: Prisma.Decimal | null;
+      baseUnitName?: string | null;
     },
   ) {
     const balance = await this.balance(tx, input.companyId, input.branchId, input.itemId);
@@ -900,6 +930,13 @@ export class StockDocumentsService {
         movementDate: input.date,
         direction: input.direction,
         quantity: input.quantity,
+        ...movementUnitSnapshot({
+          enteredUnit: input.enteredUnit,
+          enteredQuantity: input.enteredQuantity,
+          unitFactor: input.unitFactor,
+          baseUnitName: input.baseUnitName ?? 'unit',
+          baseQuantity: input.quantity,
+        }),
         unitCost: input.unitCost,
         totalCost: input.totalCost,
         referenceType: input.referenceType,

@@ -460,6 +460,7 @@ export class SalesOrdersService {
         enteredQuantity,
         baseUnitName: item.unit,
         units: (item as { units?: any[] }).units ?? [],
+        purpose: 'sale',
       });
       const quantity = resolved.baseQuantity;
       const discountPercent = this.percent(raw.discountPercent, `Line ${index + 1} discountPercent`);

@@ -5168,6 +5168,84 @@ abstract class AppLocalizations {
   /// **'Factor: {factor}  •  Barcode: {barcode}'**
   String unitsBarcodesFactorBarcode(Object barcode, Object factor);
 
+  /// No description provided for @unitsFieldAbbreviation.
+  ///
+  /// In en, this message translates to:
+  /// **'Short label'**
+  String get unitsFieldAbbreviation;
+
+  /// No description provided for @unitsFieldAbbreviationHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Printed where the full name is too long: م, كرت.'**
+  String get unitsFieldAbbreviationHelper;
+
+  /// No description provided for @unitsFieldAbbreviationValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Short label: {abbreviation}'**
+  String unitsFieldAbbreviationValue(Object abbreviation);
+
+  /// No description provided for @unitsFieldAllowFraction.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow fractions'**
+  String get unitsFieldAllowFraction;
+
+  /// No description provided for @unitsFieldAllowFractionHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Off for a unit that cannot be split: half a carton does not exist.'**
+  String get unitsFieldAllowFractionHelper;
+
+  /// No description provided for @unitsFieldPriceHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Per this unit. Leave empty to follow the item price × factor.'**
+  String get unitsFieldPriceHelper;
+
+  /// No description provided for @unitsFieldSortOrder.
+  ///
+  /// In en, this message translates to:
+  /// **'Display order'**
+  String get unitsFieldSortOrder;
+
+  /// No description provided for @unitsFieldSortOrderHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Lower numbers appear first; the base unit always leads.'**
+  String get unitsFieldSortOrderHelper;
+
+  /// No description provided for @unitsFieldUsedInPurchases.
+  ///
+  /// In en, this message translates to:
+  /// **'Used when buying'**
+  String get unitsFieldUsedInPurchases;
+
+  /// No description provided for @unitsFieldUsedInSales.
+  ///
+  /// In en, this message translates to:
+  /// **'Used when selling'**
+  String get unitsFieldUsedInSales;
+
+  /// No description provided for @unitsPerBasePrice.
+  ///
+  /// In en, this message translates to:
+  /// **'{price} per {baseUnit}'**
+  String unitsPerBasePrice(Object baseUnit, Object price);
+
+  /// No description provided for @unitsPriceDisagrees.
+  ///
+  /// In en, this message translates to:
+  /// **'differs from the item price'**
+  String get unitsPriceDisagrees;
+
+  /// No description provided for @unitTakesWholeNumbers.
+  ///
+  /// In en, this message translates to:
+  /// **'{unit} does not accept fractions; enter a whole number.'**
+  String unitTakesWholeNumbers(Object unit);
+
   /// No description provided for @unitsBarcodesHidden.
   ///
   /// In en, this message translates to:
