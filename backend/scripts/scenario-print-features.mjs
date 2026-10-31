@@ -67,9 +67,14 @@ async function api(path, options = {}) {
       body: options.json !== undefined ? JSON.stringify(options.json) : options.body,
     });
     const type = response.headers.get('content-type') ?? '';
+    const binary =
+      type.startsWith('application/pdf') ||
+      type.includes('octet-stream') ||
+      type.includes('application/zip') ||
+      type.includes('application/octet-stream');
     const data = type.includes('application/json')
       ? await response.json().catch(() => null)
-      : type.startsWith('application/pdf')
+      : binary
         ? Buffer.from(await response.arrayBuffer())
         : await response.text();
     if (response.status !== 429 || attempt >= 6) {
@@ -529,6 +534,60 @@ async function main() {
     'the price is still on the stored offer after being hidden from copies',
     Number(priceStillThere?.unitPrice) === 100,
     priceStillThere?.unitPrice,
+  );
+
+  // ── 6. it survives a backup and a restore ────────────────────────────
+  // A letterhead is only durable if the copy that comes back from a dump is the
+  // same file. The policy is only durable if it comes back as the same row.
+  const created = await must('take a full backup', '/backup/full', { method: 'POST' });
+  const backupName = created?.file?.name ?? '';
+  const dumpResponse = backupName
+    ? await api(`/backup/full/${encodeURIComponent(backupName)}/download`)
+    : { status: 0, data: null };
+  const dump = Buffer.isBuffer(dumpResponse.data) ? dumpResponse.data : null;
+  check(
+    'the backup downloads as a real dump',
+    Boolean(dump) && dump.length > 1024,
+    `${backupName ?? 'no file name'} · ${dump?.length ?? 0} bytes`,
+  );
+  if (!dump || !backupName) return false;
+
+  const restoreForm = new FormData();
+  restoreForm.append('confirm', 'true');
+  restoreForm.append('file', new Blob([dump]), 'print-features.dump');
+  const restored = await api('/backup/full/restore', { method: 'POST', body: restoreForm });
+  check(
+    'the dump restores, after a rehearsal in a scratch database',
+    restored.status === 201 &&
+      restored.data?.restored === true &&
+      restored.data?.rehearsed === true,
+    `status ${restored.status}, rehearsed ${restored.data?.rehearsed}`,
+  );
+
+  const afterRestore = await api(`/sales/quotation-backgrounds/${uploaded.id}/file`);
+  check(
+    'the letterhead comes back from the backup byte for byte',
+    afterRestore.status === 200 &&
+      Buffer.isBuffer(afterRestore.data) &&
+      sha256(afterRestore.data) === sha256(pdf),
+    `status ${afterRestore.status}`,
+  );
+  const [restoredBlob] = await sql(
+    `SELECT sha256, "byteSize" FROM quotation_backgrounds WHERE id = $1::uuid`,
+    [uploaded.id],
+  );
+  check(
+    'the restored database holds the artwork itself, not a reference to a file',
+    restoredBlob?.sha256 === sha256(pdf) && restoredBlob?.byteSize === pdf.length,
+    `${restoredBlob?.byteSize ?? 0} bytes`,
+  );
+  const policyAfterRestore = await api('/company/print-settings');
+  check(
+    'the print policy is still the saved one after the restore',
+    policyAfterRestore.data?.settings?.some(
+      (row) => row.documentType === 'sales-quotation' && row.showSalePrice === false,
+    ),
+    `status ${policyAfterRestore.status}`,
   );
 
   return true;
