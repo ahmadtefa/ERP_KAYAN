@@ -5,6 +5,7 @@ import {
   PDFName,
   PDFRawStream,
   decodePDFRawStream,
+  rgb,
 } from 'pdf-lib';
 import { PdfService } from '../export/pdf.service';
 import {
@@ -356,10 +357,20 @@ describeWithBrowser('quotation PDF through the real browser renderer', () => {
       );
       const overlay = await browser.render(html, ARTWORK_OVERLAY_RENDER);
 
-      // A two-page letterhead, drawn here so the test needs no upload.
+      // A two-page letterhead, drawn here so the test needs no upload. Each
+      // page is painted, because a PDF page with no content stream is exactly
+      // what the merge refuses to lay an offer on.
       const artwork = await PDFDocument.create();
-      artwork.addPage([595.28, 841.89]);
-      artwork.addPage([595.28, 841.89]);
+      for (const shade of [0.97, 0.92]) {
+        const sheet = artwork.addPage([595.28, 841.89]);
+        sheet.drawRectangle({
+          x: 0,
+          y: 0,
+          width: 595.28,
+          height: 841.89,
+          color: rgb(shade, shade, 1),
+        });
+      }
 
       const merged = await mergeOfferOntoBackground({
         background: Buffer.from(await artwork.save()),
