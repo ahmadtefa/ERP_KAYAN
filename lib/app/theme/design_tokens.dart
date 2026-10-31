@@ -61,6 +61,22 @@ abstract final class AppColors {
   static const errorSoft = Color(0xFFFBEAEA);
   static const infoSoft = Color(0xFFE9F0FD);
 
+  // The steps used for *words* on the soft chips above. The drawing steps are
+  // fine for a dot, a rule or a 20-pixel icon, but at 10.5 pixels a label in
+  // #12805C on #E6F4EE measures 4.34:1 and a red one 4.15:1 - under the 4.5:1
+  // that small text needs. These are the same hues, stepped down until each
+  // pair measures at least 5:1; the strong steps keep drawing icons.
+  static const successText = Color(0xFF0C6146);
+  static const warningText = Color(0xFF825603);
+  static const errorText = Color(0xFFB71C14);
+
+  // And the same meanings on the dark canvas, where a deep green or the brand
+  // blue measures 2.8-3.4:1 against #111E33: unreadable at any size.
+  static const successTextDark = Color(0xFF4CC79A);
+  static const warningTextDark = Color(0xFFE3B25E);
+  static const errorTextDark = Color(0xFFF19A93);
+  static const infoTextDark = Color(0xFF7FA9F5);
+
   // Dashboard chart series. Sales follow the brand primary and the result
   // line the success green; purchases keep a warm gold so the two bar
   // series stay tellable apart at a glance in either theme.
@@ -240,14 +256,16 @@ abstract final class AppShadows {
 enum AppTone { neutral, info, success, warning, danger }
 
 extension AppToneColors on AppTone {
+  /// The light-theme ink for this meaning, measured on [background].
   Color get foreground => switch (this) {
     AppTone.neutral => AppColors.textSecondary,
     AppTone.info => AppColors.primary,
-    AppTone.success => AppColors.success,
-    AppTone.warning => const Color(0xFF9A6508),
-    AppTone.danger => AppColors.error,
+    AppTone.success => AppColors.successText,
+    AppTone.warning => AppColors.warningText,
+    AppTone.danger => AppColors.errorText,
   };
 
+  /// The light-theme chip behind [foreground].
   Color get background => switch (this) {
     AppTone.neutral => AppColors.surfaceSunken,
     AppTone.info => AppColors.infoSoft,
@@ -255,4 +273,35 @@ extension AppToneColors on AppTone {
     AppTone.warning => AppColors.warningSoft,
     AppTone.danger => AppColors.errorSoft,
   };
+
+  /// The same meaning, drawn on whichever canvas the person is looking at.
+  ///
+  /// A tone is not a colour: on the dark canvas the success green has to be
+  /// the bright step or the words disappear, and the chip behind it has to be
+  /// a tint of that step rather than a pale patch from the light theme. Both
+  /// answers are pinned by `test/theme/contrast_test.dart`.
+  Color foregroundOn(Brightness brightness) {
+    if (brightness != Brightness.dark) return foreground;
+    return switch (this) {
+      AppTone.neutral => AppColors.darkTextMuted,
+      AppTone.info => AppColors.infoTextDark,
+      AppTone.success => AppColors.successTextDark,
+      AppTone.warning => AppColors.warningTextDark,
+      AppTone.danger => AppColors.errorTextDark,
+    };
+  }
+
+  /// [foregroundOn], laid on [surface] as a tint so the chip belongs to the
+  /// card it sits on - [AppColors.darkSurface] by default, since that is what
+  /// a card inside the dark canvas is painted with.
+  Color backgroundOn(
+    Brightness brightness, {
+    Color? surface,
+  }) {
+    if (brightness != Brightness.dark) return background;
+    return Color.alphaBlend(
+      foregroundOn(brightness).withValues(alpha: 0.14),
+      surface ?? AppColors.darkSurface,
+    );
+  }
 }

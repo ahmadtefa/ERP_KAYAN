@@ -606,7 +606,10 @@ class _ComparisonStrip extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                  color: changeTone.background,
+                  color: changeTone.backgroundOn(
+                    scheme.brightness,
+                    surface: scheme.surface,
+                  ),
                   borderRadius: BorderRadius.circular(AppRadii.sm),
                 ),
                 child: Text(
@@ -615,7 +618,7 @@ class _ComparisonStrip extends StatelessWidget {
                       : '${change >= 0 ? '+' : ''}${change.toStringAsFixed(1)}%',
                   style: theme.textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: changeTone.foreground,
+                    color: changeTone.foregroundOn(scheme.brightness),
                   ),
                 ),
               ),

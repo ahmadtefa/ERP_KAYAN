@@ -61,13 +61,17 @@ class KpiCard extends StatelessWidget {
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: accent?.softOf(scheme.brightness) ??
-                        tone.background,
+                        tone.backgroundOn(
+                          scheme.brightness,
+                          surface: scheme.surface,
+                        ),
                     borderRadius: BorderRadius.circular(AppRadii.md),
                   ),
                   child: Icon(
                     icon,
                     size: compact ? 14 : 16,
-                    color: accent?.of(scheme.brightness) ?? tone.foreground,
+                    color: accent?.of(scheme.brightness) ??
+                        tone.foregroundOn(scheme.brightness),
                   ),
                 ),
               const Spacer(),
@@ -75,13 +79,16 @@ class KpiCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: tone.background,
+                    color: tone.backgroundOn(
+                      scheme.brightness,
+                      surface: scheme.surface,
+                    ),
                     borderRadius: BorderRadius.circular(AppRadii.sm),
                   ),
                   child: Text(
                     trend!,
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: tone.foreground,
+                      color: tone.foregroundOn(scheme.brightness),
                       fontWeight: FontWeight.w700,
                       fontSize: 10.5,
                     ),
@@ -178,7 +185,7 @@ class StatStripItem extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (icon != null) ...[
-          Icon(icon, size: 16, color: tone.foreground),
+          Icon(icon, size: 16, color: tone.foregroundOn(scheme.brightness)),
           const SizedBox(width: AppSpacing.sm),
         ],
         // Loose, so a long label at a large text size wraps inside the strip
