@@ -24,6 +24,7 @@
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -62,6 +63,11 @@ if (!['127.0.0.1', 'localhost', '::1'].includes(live.hostname)) {
 }
 
 const scratchPrefix = process.env.KAYAN_SHADOW_TEST_PREFIX ?? 'kayan_shadow_';
+
+function liveMigrationCount() {
+  return readdirSync(join(backendDir, 'prisma', 'migrations'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory()).length;
+}
 const created = [];
 
 function pass(message) {
@@ -237,9 +243,15 @@ async function main() {
   }
   pass('a shadow on a separate server passes the guard');
 
-  // The real engine, using the real shadow: `migrate diff` replays the migration
-  // history into the shadow database and diffs it against the schema. If the
-  // engine could not use a shadow at all, this is where it shows.
+  // The real engine, using the real shadow. `migrate diff --from-migrations`
+  // has to replay the whole migration history somewhere before it can compare it
+  // with the schema, and that "somewhere" is the shadow database. The credentials
+  // below exist ONLY on the second server, so a successful run is proof the
+  // engine connected to server B and not to the live server.
+  //
+  // --exit-code is deliberately NOT passed: the repository's migrations do not
+  // reproduce schema.prisma byte-for-byte (legacy tables and default drift), and
+  // that difference is a known state reported below - not a shadow failure.
   const diff = await run(
     process.execPath,
     [
@@ -252,17 +264,50 @@ async function main() {
       'prisma/schema.prisma',
       '--shadow-database-url',
       shadowDb,
-      '--exit-code',
+      '--script',
     ],
     { DATABASE_URL: liveDb },
   );
   if (diff.code !== 0) {
     fail(
       `prisma migrate diff could not use a real shadow database (exit ${diff.code}). ` +
-        `Shadow work is therefore not proven and must stay disabled:\n${diff.output}`,
+        `Shadow work is therefore not proven and must stay disabled:\n${diff.output.slice(0, 2000)}`,
     );
   }
-  pass('the native engine replayed the migration history into the shadow database (migrate diff)');
+  const diffLines = diff.output.split('\n').filter((line) => line.trim() !== '');
+  pass(
+    `the native engine replayed ${liveMigrationCount()} migrations into the shadow database on the second server (migrate diff, exit 0)`,
+  );
+  if (diffLines.length > 0) {
+    note(
+      `known drift between the migration history and schema.prisma: ${diffLines.length} statement lines (reported, not hidden)`,
+    );
+  }
+
+  // A shadow that cannot be reached must fail loudly rather than silently fall
+  // back to anything local.
+  const wrongCredentials = new URL(shadowDb);
+  wrongCredentials.password = 'definitely-not-the-password';
+  const badShadow = await run(
+    process.execPath,
+    [
+      prismaCli,
+      'migrate',
+      'diff',
+      '--from-migrations',
+      'prisma/migrations',
+      '--to-schema-datamodel',
+      'prisma/schema.prisma',
+      '--shadow-database-url',
+      wrongCredentials.toString(),
+      '--script',
+    ],
+    { DATABASE_URL: liveDb },
+  );
+  if (badShadow.code === 0) {
+    fail('a shadow database with wrong credentials was accepted; the engine is not really using the configured shadow');
+  }
+  pass('a shadow database with the wrong credentials fails instead of falling back');
 
   // The shadow database exists on server B only, and the live server never grew
   // a database named after it.

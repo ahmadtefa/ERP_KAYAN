@@ -179,11 +179,20 @@ async function history(databaseUrl) {
 }
 
 /**
- * A stable fingerprint of the business data: every row of every application
- * table, hashed. Used to prove that a migration run changed no data it should
- * not have.
+ * A fingerprint of the business *content*: explicit columns, not `row::text`.
+ *
+ * `row::text` would also change when a migration adds a column, and then a
+ * perfectly correct upgrade would look like data corruption. These column lists
+ * describe what must never change: which company, which item, which invoice, in
+ * which status, for how much.
  */
-async function dataFingerprint(databaseUrl, tables) {
+const BUSINESS_COLUMNS = {
+  companies: ['id', 'code', 'nameEn', 'nameAr'],
+  items: ['id', 'code', 'nameEn', 'nameAr', 'salePrice'],
+  sales_invoices: ['id', 'invoiceNumber', 'status', 'totalAmount'],
+};
+
+async function dataFingerprint(databaseUrl, tables = Object.keys(BUSINESS_COLUMNS)) {
   return withClient(databaseUrl, async (client) => {
     const parts = [];
     for (const table of tables) {
@@ -194,8 +203,10 @@ async function dataFingerprint(databaseUrl, tables) {
         parts.push(`${table}:<absent>`);
         continue;
       }
+      const columns = BUSINESS_COLUMNS[table] ?? ['id'];
+      const projection = columns.map((column) => `"${column}"::text`).join(" || '|' || ");
       const { rows } = await client.query(
-        `SELECT count(*)::text AS n, coalesce(md5(string_agg(t::text, '|' ORDER BY t::text)), '') AS digest FROM "${table}" t`,
+        `SELECT count(*)::text AS n, coalesce(md5(string_agg(${projection}, '#' ORDER BY ${projection})), '') AS digest FROM "${table}"`,
       );
       parts.push(`${table}:${rows[0].n}:${rows[0].digest}`);
     }
@@ -357,7 +368,7 @@ async function phase2History({ url, names }) {
 
 async function phase3Idempotent({ url, names }) {
   const before = await history(url);
-  const fingerprintBefore = await dataFingerprint(url, ['companies', 'items', 'sales_invoices']);
+  const fingerprintBefore = await dataFingerprint(url);
   const run = await deploy({ databaseUrl: url, label: 'second deploy (no changes)' });
   if (run.code !== 0) {
     fail(`a second prisma migrate deploy failed:\n${run.output}`);
@@ -369,7 +380,7 @@ async function phase3Idempotent({ url, names }) {
   if (after.length !== before.length || after.length !== names.length) {
     fail(`a second deploy changed the history: ${before.length} -> ${after.length}`);
   }
-  const fingerprintAfter = await dataFingerprint(url, ['companies', 'items', 'sales_invoices']);
+  const fingerprintAfter = await dataFingerprint(url);
   if (fingerprintAfter !== fingerprintBefore) {
     fail('a second deploy changed business data');
   }
