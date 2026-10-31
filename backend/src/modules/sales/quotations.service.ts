@@ -1412,6 +1412,11 @@ export class QuotationsService {
       responsiblePhone: quotation.responsiblePhone,
       showTaxId: quotation.showTaxId,
       subject: quotation.subject,
+      // The editor reads these back so the artwork card shows the sheet the
+      // offer is actually printed on, and so saving an unrelated field does
+      // not silently unbind the file.
+      backgroundFileId: quotation.backgroundFileId ?? null,
+      background: (quotation.background as Record<string, unknown> | null) ?? null,
       columns: this.columnsOf(quotation.columns),
       issuedAt: quotation.issuedAt?.toISOString() ?? null,
       sentAt: quotation.sentAt?.toISOString() ?? null,

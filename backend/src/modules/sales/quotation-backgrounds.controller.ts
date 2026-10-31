@@ -16,6 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { IsOptional, IsString, MaxLength } from 'class-validator';
 
+import { AllowQueryToken } from '../../common/decorators/allow-query-token.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { BACKGROUND_UPLOAD_MAX_BYTES } from './quotation-background';
@@ -86,6 +87,7 @@ export class QuotationBackgroundsController {
   /// The preview, and the sheet a person checks before saving the template.
   /// Sent inline so the browser's PDF viewer shows it instead of saving it.
   @Get(':id/file')
+  @AllowQueryToken()
   @RequirePermissions('sales.quotations.read')
   async file(
     @CurrentUser() user: AuthUser,

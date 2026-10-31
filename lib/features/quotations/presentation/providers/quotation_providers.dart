@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/quotation_backgrounds_data_source.dart';
+
 import '../../../../core/json/json_utils.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 
@@ -118,4 +120,19 @@ final quotationColumnTemplatesProvider = FutureProvider<List<Json>>((
 /// Company-wide reusable visual designs for quotation documents.
 final quotationDesignTemplatesProvider = FutureProvider<List<Json>>((ref) async {
   return ref.read(apiClientProvider).getList('/sales/quotation-design-templates');
+});
+
+/// The PDFs the company can print its offers on. Fetched once per screen and
+/// refreshed after an upload or a delete, so the picker never shows a file that
+/// has been removed.
+final quotationBackgroundsProvider =
+    FutureProvider<List<QuotationBackgroundFile>>((ref) async {
+  return ref
+      .watch(quotationBackgroundsDataSourceProvider)
+      .fetch();
+});
+
+final quotationBackgroundsDataSourceProvider =
+    Provider<QuotationBackgroundsDataSource>((ref) {
+  return QuotationBackgroundsDataSource(ref.watch(apiClientProvider));
 });

@@ -9,11 +9,15 @@ import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/discount_math.dart';
 import '../../../../core/json/json_utils.dart';
+import '../../../../core/platform/browser_actions.dart';
+import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
 import '../../../../shared/widgets/page_header.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../data/quotation_backgrounds_data_source.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
+import '../../../data/presentation/providers/data_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../../shared/widgets/discount_kind_label.dart';
 import '../document/quotation_document.dart';
@@ -412,6 +416,17 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   final _tables = <_QTableDraft>[];
   final _subject = TextEditingController();
   QuotationDocumentDesign _design = QuotationDocumentDesign.defaultDesign();
+  /// The PDF this offer prints on, and how its pages are used behind the
+  /// offer. Both are stored with the quotation, so reopening it - or printing
+  /// it again next year - reproduces the same sheet.
+  String? _backgroundFileId;
+  Map<String, dynamic> _background = <String, dynamic>{
+    'mode': 'REPEAT',
+    'page': 1,
+    'showPageNumbers': true,
+    'pageNumberColor': '#1f2a38',
+    'marginMm': {'top': 20, 'bottom': 18, 'left': 12, 'right': 12},
+  };
   bool _showTaxId = true;
   final _discountValue = TextEditingController();
   final _terms = TextEditingController();
@@ -517,6 +532,12 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         _date = text(quotation, 'quotationDate', fallback: _date);
         final valid = text(quotation, 'validUntil');
         _validUntil = valid.isEmpty ? null : valid;
+        final fileId = text(quotation, 'backgroundFileId');
+        _backgroundFileId = fileId.isEmpty ? null : fileId;
+        final rawBackground = quotation['background'];
+        if (rawBackground is Map) {
+          _background = Map<String, dynamic>.from(rawBackground);
+        }
         final rawDesign = quotation['design'];
         if (rawDesign is Map) {
           _design = QuotationDocumentDesign.fromJson(
@@ -793,6 +814,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         // table's); each table's own layout above is what prints.
         'columns': _columnBodyOf(_tables.first.columns),
         if (_design.toJson().isNotEmpty) 'design': _design.toJson(),
+        // Explicit null unbinds the artwork; the settings travel with it so a
+        // later reprint lays the offer out exactly as it is laid out today.
+        'backgroundFileId': _backgroundFileId,
+        'background': _background,
         'discountType': ?discountTypeOf(_discountKind),
         if (_discountKind == DiscountKind.percent &&
             _discountValue.text.trim().isNotEmpty)
@@ -1078,6 +1103,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 const SizedBox(height: 12),
                 _designCard(context),
                 const SizedBox(height: 12),
+                _backgroundCard(context),
+                const SizedBox(height: 12),
                 for (var index = 0; index < _tables.length; index++)
                   _tableCard(index, language, items),
                 Center(
@@ -1094,6 +1121,313 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                   ),
           ),
         ],
+      ),
+    );
+  }
+
+  static const _backgroundModes = <String, String>{
+    'REPEAT': 'تكرار صفحة الغلاف خلف كل صفحة',
+    'SEQUENCE': 'بالترتيب، ثم آخر صفحة تتكرر',
+    'SINGLE_PAGE': 'صفحة واحدة محددة خلف كل صفحة',
+  };
+
+  QuotationBackgroundFile? _boundBackground(List<QuotationBackgroundFile> files) {
+    for (final file in files) {
+      if (file.id == _backgroundFileId) return file;
+    }
+    return null;
+  }
+
+  void _setBackgroundSetting(String key, Object? value) {
+    setState(() => _background = {..._background, key: value});
+  }
+
+  /// The artwork card: which PDF the offer prints on, how its pages are used,
+  /// and where "n / N" sits.
+  ///
+  /// The file itself is chosen in a library dialog, because a company keeps a
+  /// handful of letterheads and picking from them is faster - and safer - than
+  /// hunting for a file on disk every time.
+  Widget _backgroundCard(BuildContext context) {
+    final async = ref.watch(quotationBackgroundsProvider);
+    final files = async.asData?.value ?? const <QuotationBackgroundFile>[];
+    final current = _boundBackground(files);
+    final mode = '${_background['mode'] ?? 'REPEAT'}';
+    final showNumbers = _background['showPageNumbers'] != false;
+    final pages = current?.pageCount ?? 1;
+    final selectedPage = (_background['page'] is int)
+        ? (_background['page'] as int).clamp(1, pages)
+        : 1;
+    final canManage = ref.watch(currentUserProvider)?.can('sales.quotations.manage') ?? false;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('خلفية عرض السعر (PDF)', style: Theme.of(context).textTheme.titleSmall),
+                    const SizedBox(height: 4),
+                    Text(
+                      current == null
+                          ? 'لا توجد خلفية مرفقة — يُطبَع العرض بتنسيقه المرسوم.'
+                          : '${current.name} — ${current.pageCount} صفحة، ${current.readableSheet}، ${current.readableSize}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    if (current != null)
+                      Text(
+                        'التوزيع: ${_backgroundModes[mode] ?? mode}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                  ],
+                ),
+              ),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                OutlinedButton.icon(
+                  key: const ValueKey('quotation-background-picker'),
+                  onPressed: canManage ? () => _openBackgrounds() : null,
+                  icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                  label: const Text('اختيار أو رفع خلفية'),
+                ),
+                if (current != null)
+                  OutlinedButton.icon(
+                    key: const ValueKey('quotation-background-preview'),
+                    onPressed: () => _previewBackground(current.id),
+                    icon: const Icon(Icons.visibility_outlined, size: 18),
+                    label: const Text('معاينة'),
+                  ),
+                if (current != null)
+                  OutlinedButton.icon(
+                    key: const ValueKey('quotation-background-remove'),
+                    onPressed: canManage
+                        ? () => setState(() => _backgroundFileId = null)
+                        : null,
+                    icon: const Icon(Icons.link_off, size: 18),
+                    label: const Text('فصل الخلفية'),
+                  ),
+              ]),
+            ]),
+            if (current != null) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 16,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 340,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: mode,
+                      decoration: const InputDecoration(
+                        labelText: 'توزيع صفحات الخلفية',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: [
+                        for (final entry in _backgroundModes.entries)
+                          DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) _setBackgroundSetting('mode', value);
+                      },
+                    ),
+                  ),
+                  if (mode == 'SINGLE_PAGE')
+                    SizedBox(
+                      width: 160,
+                      child: DropdownButtonFormField<int>(
+                        initialValue: selectedPage,
+                        decoration: const InputDecoration(
+                          labelText: 'الصفحة',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: [
+                          for (var page = 1; page <= pages; page += 1)
+                            DropdownMenuItem(value: page, child: Text('$page')),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) _setBackgroundSetting('page', value);
+                        },
+                      ),
+                    ),
+                  SizedBox(
+                    width: 320,
+                    child: SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: showNumbers,
+                      title: const Text('رقم الصفحة أسفل المنتصف (n / N)'),
+                      onChanged: (value) => _setBackgroundSetting('showPageNumbers', value),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            if (async.hasError)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'تعذر تحميل مكتبة الخلفيات: ${async.error}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _previewBackground(String id) async {
+    try {
+      final url = await ref.read(reportLinkProvider).backgroundFile(id: id);
+      await openInNewTab(url);
+    } catch (error) {
+      if (mounted) showMessage(context, 'تعذر فتح المعاينة: $error', error: true);
+    }
+  }
+
+  Future<void> _uploadBackground(StateSetter setDialogState) async {
+    try {
+      final picked = await pickFile(extensions: const ['.pdf']);
+      if (picked == null) return;
+      if (!picked.name.toLowerCase().endsWith('.pdf')) {
+        if (mounted) showMessage(context, 'اختر ملف PDF فقط.', error: true);
+        return;
+      }
+      await ref.read(quotationBackgroundsDataSourceProvider).upload(picked);
+      ref.invalidate(quotationBackgroundsProvider);
+      if (!mounted) return;
+      setDialogState(() {});
+      showMessage(context, 'تم رفع الخلفية وحفظها.');
+    } on Failure catch (error) {
+      if (mounted) showMessage(context, error.message, error: true);
+    } catch (error) {
+      if (mounted) showMessage(context, 'تعذر رفع الملف: $error', error: true);
+    }
+  }
+
+  /// The saved letterheads: choose one, upload another, preview or delete.
+  Future<void> _openBackgrounds() async {
+    ref.invalidate(quotationBackgroundsProvider);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final async = ref.watch(quotationBackgroundsProvider);
+          final files = async.asData?.value ?? const <QuotationBackgroundFile>[];
+          return AlertDialog(
+            title: const Text('خلفيات عروض الأسعار'),
+            content: SizedBox(
+              width: 680,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Expanded(
+                      child: Text(
+                        'ملف PDF بحجم لا يزيد على 8 ميجابايت. يُفحص الملف من محتواه: النوع والصفحات والمقاس.',
+                        style: Theme.of(dialogContext).textTheme.bodySmall,
+                      ),
+                    ),
+                    FilledButton.icon(
+                      key: const ValueKey('quotation-background-upload'),
+                      onPressed: () => _uploadBackground(setDialogState),
+                      icon: const Icon(Icons.upload_file, size: 18),
+                      label: const Text('رفع ملف'),
+                    ),
+                  ]),
+                  const Divider(height: 24),
+                  if (async.isLoading && files.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (files.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text('لا توجد خلفيات محفوظة بعد. ارفع ملف PDF ليظهر هنا.'),
+                    )
+                  else
+                    Flexible(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: files.length,
+                        separatorBuilder: (_, _) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final file = files[index];
+                          final bound = file.id == _backgroundFileId;
+                          return ListTile(
+                            leading: Icon(
+                              Icons.picture_as_pdf_outlined,
+                              color: bound ? Theme.of(context).colorScheme.primary : null,
+                            ),
+                            title: Text(file.name),
+                            subtitle: Text(
+                              '${file.pageCount} صفحة • ${file.readableSheet} • ${file.readableSize}'
+                              '${bound ? ' • مستخدمة في هذا العرض' : ''}',
+                            ),
+                            trailing: Wrap(spacing: 2, children: [
+                              IconButton(
+                                tooltip: 'معاينة',
+                                icon: const Icon(Icons.visibility_outlined),
+                                onPressed: () => _previewBackground(file.id),
+                              ),
+                              IconButton(
+                                tooltip: 'استخدام هذه الخلفية',
+                                icon: const Icon(Icons.check_circle_outline),
+                                onPressed: () {
+                                  setState(() {
+                                    _backgroundFileId = file.id;
+                                    if (_background['page'] is int &&
+                                        (_background['page'] as int) > file.pageCount) {
+                                      _background = {..._background, 'page': 1};
+                                    }
+                                  });
+                                  Navigator.of(dialogContext).pop();
+                                },
+                              ),
+                              IconButton(
+                                tooltip: 'حذف من المكتبة',
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: () async {
+                                  try {
+                                    await ref
+                                        .read(quotationBackgroundsDataSourceProvider)
+                                        .remove(file.id);
+                                    ref.invalidate(quotationBackgroundsProvider);
+                                    if (_backgroundFileId == file.id) {
+                                      setState(() => _backgroundFileId = null);
+                                    }
+                                    if (dialogContext.mounted) setDialogState(() {});
+                                  } on Failure catch (error) {
+                                    if (dialogContext.mounted) {
+                                      showMessage(dialogContext, error.message, error: true);
+                                    }
+                                  }
+                                },
+                              ),
+                            ]),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: Text(context.l10n.close),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
