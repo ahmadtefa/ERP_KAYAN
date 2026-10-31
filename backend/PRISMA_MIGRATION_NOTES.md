@@ -60,23 +60,33 @@ allowed.
 
 ## OID 18 (`char`) and OID 19 (`name`)
 
-`scripts/prisma-catalog-types.mjs` reads, through the **shipped client**
-(engine-less client + `@prisma/adapter-pg`):
+Measured by `scripts/prisma-catalog-types.mjs` on real PostgreSQL, in layers:
 
-* `pg_class.relname`, `pg_attribute.attname`, `pg_type.typname` — OID 19;
-* `pg_attribute.attstorage`, `pg_attribute.attidentity` — OID 18;
-* `NULL::"char"` and `NULL::name` — the null cases;
-* the `name` boundary: 63 characters survive, 70 are truncated by the server;
-* a real 63-character table name created and read back;
-* `DECIMAL(19,4)` money, to show the same path keeps exact numerics.
+| Layer | OID 19 (`name`) | OID 18 (`char`) |
+| --- | --- | --- |
+| PostgreSQL server + `pg` driver | works | works |
+| **Prisma Client 6.19.3 (engine-less query compiler), raw column** | **cannot deserialize** — `Failed to deserialize column of type 'name'` | **cannot deserialize** — `Failed to deserialize column of type 'char'` |
+| Prisma Client with a cast at the query boundary (`relname::text`) | works, exact values | works, exact values |
+| Native (classic) migration engine | unaffected — applies the whole history, including two migrations that query `pg_type.typname` (OID 19) themselves | unaffected |
 
-The migration history also proves the *engine* side: two checked-in migrations
-query `pg_type.typname` (an OID 19 column) inside `DO` blocks, and the classic
-engine applies them on every fresh install.
+So the defect is in the **client's catalog type mapping**, not in the migration
+engine and not in the customer's schema. Consequences, and what is done about
+them:
 
-**Conclusion:** the OID 18/19 defect affects the experimental JavaScript schema
-engine. It does not affect the shipped client, and it does not affect the native
-migration path. No type was changed or cast to hide it.
+* Nothing is cast in the schema and no column type was changed. `char`/`name` are
+  never "converted to text" to make the client happy; the data model is untouched.
+* No application query reads `pg_catalog` at all (`scripts/prisma-catalog-types.mjs`
+  scans `src/` and fails the build if one ever appears without a boundary cast).
+  There is therefore no product path affected by the limitation.
+* Where catalog metadata must be read, the cast happens **at the query boundary**
+  (`relname::text`), which is Prisma's documented approach for
+  `Unsupported`/unmapped PostgreSQL types and changes no stored data.
+* The test also guards the failure mode nobody wants: if the client ever returns a
+  *mangled* value (a truncated name, or the string `"null"`), the job fails. Only
+  "works" or "refuses with the documented error" are acceptable.
+* Null handling and the `name` boundary were verified separately: `NULL::name` and
+  `NULL::"char"` arrive as `null`, 63 characters survive, 70 are truncated by the
+  server.
 
 ## What is proven, where
 

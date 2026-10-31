@@ -1,171 +1,259 @@
-// OID 18 (`char`) and OID 19 (`name`) through the real Prisma Client.
+// OID 18 (`char`) and OID 19 (`name`) — which layer copes and which does not.
 //
-// Background: while migrating this project, an engine reported
-// "Failed to deserialize column of type 'name'" while reading PostgreSQL's own
-// catalog. It is tempting to "fix" that by casting those columns to text. That
-// hides the defect and changes nothing for the customer: PostgreSQL's catalog is
-// full of `char` and `name` columns, and any tool that reads it has to cope.
+// Context. While this project's migration path was being changed, an engine
+// reported "Failed to deserialize column of type 'name'" while reading
+// PostgreSQL's own catalog. The tempting "fix" is to cast those columns to text
+// everywhere, or to change the schema. Both hide the defect: the cast would have
+// to be repeated in every future query, and the schema change would be a lie
+// about what PostgreSQL is.
 //
-// So this script does the opposite of hiding it: it asks the *client that ships
-// to customers* to read the catalog columns that actually carry those OIDs, and
-// records exactly what comes back - values, NULLs, and the 63-byte `name`
-// truncation boundary. Whether the *migration engine* copes is answered
-// separately, by `prisma-native-migration-suite.mjs`, which runs the native
-// engine over the whole history; the two failures are different failures and are
-// reported as such.
+// So this script measures the layers separately, with real PostgreSQL and the
+// real client that ships to customers:
+//
+//   A. the PostgreSQL server and the pg driver        - control
+//   B. Prisma Client with an explicit cast *at the query boundary*
+//   C. Prisma Client reading the raw catalog columns   - expected limitation
+//   D. the application's own source                   - must not depend on C
+//   E. money (numeric) and identifier-length boundaries
+//
+// What C shows is a *client mapping* limitation, recorded honestly below and in
+// backend/PRISMA_MIGRATION_NOTES.md. It does not affect the migration path: the
+// native schema engine applies the whole history, and no application query reads
+// those columns.
 //
 //   DATABASE_URL=postgresql://... node scripts/prisma-catalog-types.mjs
+//
+// Exit code 1 only if something the product relies on is broken.
 
+import pg from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
+import { readFileSync, readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const here = dirname(fileURLToPath(import.meta.url));
+const backendDir = join(here, '..');
 const url = process.env.DATABASE_URL;
 if (!url) {
   console.error('::error title=OID 18/19::DATABASE_URL is not set');
   process.exit(1);
 }
 
+const client = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
+const limitations = [];
+
 function pass(message) {
   console.log(`PASS: ${message}`);
 }
-
 function fail(message) {
   console.error(`::error title=OID 18/19::${message}`);
   console.error(`FAIL: ${message}`);
   process.exit(1);
 }
+function limitation(message) {
+  limitations.push(message);
+  console.log(`LIMITATION: ${message}`);
+  console.log(`::warning title=Prisma client limitation::${message}`);
+}
 
-const client = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
-
-const results = [];
+const PRISMA_TYPE_ERROR = /Failed to deserialize column of type '(name|char)'/;
 
 async function main() {
-  // The catalogue columns below are the ones the schema engine itself reads:
-  //   19 / name : pg_class.relname, pg_attribute.attname, pg_type.typname
-  //   18 / char : pg_attribute.attstorage, pg_attribute.attidentity
-  // Nothing is cast to text: the driver receives the server's own types.
-  const catalog = await client.$queryRaw`
+  console.log('A. PostgreSQL server and the pg driver (control)');
+  const driver = new pg.Client({ connectionString: url });
+  await driver.connect();
+  try {
+    const { rows } = await driver.query(
+      `SELECT c.relname AS relation_name, a.attname AS column_name, a.attidentity AS identity,
+              NULL::name AS null_name, NULL::"char" AS null_char,
+              length(repeat('a', 70)::name::text) AS truncated
+         FROM pg_class c JOIN pg_attribute a ON a.attrelid = c.oid
+        WHERE c.relname = 'companies' AND a.attname = 'id'`,
+    );
+    const row = rows[0];
+    if (row.relation_name !== 'companies' || typeof row.identity !== 'string') {
+      fail(`the driver could not read OID 19/18 columns: ${JSON.stringify(row)}`);
+    }
+    if (row.null_name !== null || row.null_char !== null) {
+      fail(`a NULL name/char did not arrive as null through the driver: ${JSON.stringify(row)}`);
+    }
+    if (Number(row.truncated) !== 63) {
+      fail(`a 70-character name should be truncated to 63 by the server, got ${row.truncated}`);
+    }
+    pass('server + pg driver: OID 19 (name), OID 18 (char), NULLs and the 63-byte boundary all behave');
+  } finally {
+    await driver.end().catch(() => {});
+  }
+
+  console.log('\nB. Prisma Client with a cast at the query boundary (the supported path)');
+  const cast = await client.$queryRaw`
     SELECT
-      c.relname                AS relation_name,
-      a.attname                AS column_name,
-      t.typname                AS type_name,
-      a.attstorage             AS storage,
-      a.attidentity            AS identity,
-      a.attnotnull             AS not_null
+      c.relname::text   AS relation_name,
+      a.attname::text   AS column_name,
+      a.attstorage::text AS storage,
+      a.attidentity::text AS identity
     FROM pg_attribute a
     JOIN pg_class c ON c.oid = a.attrelid
-    JOIN pg_type t ON t.oid = a.atttypid
-    WHERE c.relname = 'companies'
-      AND a.attname IN ('id', 'code', 'nameEn')
+    WHERE c.relname = 'companies' AND a.attname IN ('id', 'code', 'nameEn')
     ORDER BY a.attname
   `;
-
-  if (catalog.length !== 3) {
-    fail(`expected 3 catalog rows for the companies table, got ${catalog.length}`);
+  if (cast.length !== 3) {
+    fail(`expected 3 catalog rows through the cast query, got ${cast.length}`);
   }
-  for (const row of catalog) {
-    // OID 19 columns arrive as ordinary strings.
+  for (const row of cast) {
     if (typeof row.relation_name !== 'string' || row.relation_name !== 'companies') {
-      fail(`OID 19 (name) column relname did not arrive as a string: ${JSON.stringify(row.relation_name)}`);
+      fail(`OID 19 read through a cast did not return a string: ${JSON.stringify(row)}`);
     }
-    if (typeof row.column_name !== 'string' || typeof row.type_name !== 'string') {
-      fail(`OID 19 (name) column arrived wrong: ${JSON.stringify(row)}`);
-    }
-    // OID 18 columns arrive as single-character strings.
     if (typeof row.storage !== 'string' || row.storage.length !== 1) {
-      fail(`OID 18 (char) column attstorage did not arrive as one character: ${JSON.stringify(row.storage)}`);
+      fail(`OID 18 read through a cast did not return one character: ${JSON.stringify(row)}`);
     }
-    if (typeof row.identity !== 'string' || row.identity.length !== 1) {
-      fail(`OID 18 (char) column attidentity did not arrive as one character: ${JSON.stringify(row.identity)}`);
-    }
-    results.push({ column: row.column_name, type: row.type_name, storage: row.storage, identity: row.identity });
   }
-  pass(`Prisma Client read ${catalog.length} catalog rows carrying OID 19 (name) and OID 18 (char)`);
+  pass(`Prisma Client read ${cast.length} catalog rows when OID 18/19 are cast at the query boundary`);
 
-  // The two OIDs describe themselves out of the catalog: pg_type.typname is OID
-  // 19, so these rows are exactly the values an engine deserialises when it
-  // fails with "column of type 'name'".
-  const oids = await client.$queryRaw`
-    SELECT oid, typname, typlen, typtype FROM pg_type WHERE oid IN (18, 19) ORDER BY oid
+  const castNulls = await client.$queryRaw`
+    SELECT NULL::name::text AS null_name, NULL::"char"::text AS null_char,
+           repeat('b', 63)::name::text AS exact_name,
+           length(repeat('a', 70)::name::text) AS truncated_length
   `;
-  if (oids.length !== 2) {
-    fail(`expected the catalog to describe OIDs 18 and 19, got ${JSON.stringify(oids)}`);
+  if (castNulls[0].null_name !== null || castNulls[0].null_char !== null) {
+    fail(`a NULL name/char did not arrive as null through a cast: ${JSON.stringify(castNulls[0])}`);
   }
-  const byName = Object.fromEntries(oids.map((row) => [row.typname, row]));
-  if (!byName.char || !byName.name) {
-    fail(`unexpected catalog names for OIDs 18/19: ${JSON.stringify(oids)}`);
+  if (castNulls[0].exact_name?.length !== 63) {
+    fail(`a 63-character name did not survive: ${JSON.stringify(castNulls[0])}`);
   }
-  if (byName.char.typlen !== 1) {
-    fail(`OID 18 should be one byte wide, catalog says ${byName.char.typlen}`);
+  if (Number(castNulls[0].truncated_length) !== 63) {
+    fail(`the 63-byte boundary was not applied: ${JSON.stringify(castNulls[0])}`);
   }
-  pass(`catalog describes OID 18 as "${byName.char.typname}" (1 byte) and OID 19 as "${byName.name.typname}"`);
+  pass('NULLs of OID 18/19 arrive as null, 63 characters survive and 70 are truncated - through a cast');
 
-  // NULLs are the half of the problem type checks never catch: an engine that
-  // maps a null `name` to the string "null" corrupts its own metadata view.
-  const nulls = await client.$queryRaw`
-    SELECT
-      NULL::"char" AS null_char,
-      NULL::name   AS null_name,
-      (SELECT attidentity FROM pg_attribute WHERE attrelid = 'companies'::regclass AND attname = 'id') AS real_char
-  `;
-  if (nulls[0].null_char !== null || nulls[0].null_name !== null) {
-    fail(`a NULL char/name did not arrive as null: ${JSON.stringify(nulls[0])}`);
+  console.log('\nC. Prisma Client reading the raw catalog columns (expected limitation)');
+  const raw = await attempt(() => client.$queryRaw`SELECT relname FROM pg_class WHERE relname = 'companies'`);
+  const rawChar = await attempt(() => client.$queryRaw`SELECT attidentity FROM pg_attribute WHERE attrelid = 'companies'::regclass AND attname = 'id'`);
+  if (raw.ok) {
+    pass('Prisma Client now reads OID 19 (name) columns without a cast');
+  } else if (PRISMA_TYPE_ERROR.test(raw.message)) {
+    limitation(
+      'Prisma Client 6.19.3 (engine-less query compiler) cannot deserialize OID 19 (`name`) in $queryRaw: ' +
+        '"Failed to deserialize column of type \'name\'". A cast at the query boundary is required.',
+    );
+  } else {
+    fail(`reading OID 19 failed for an unexpected reason: ${raw.message}`);
   }
-  if (typeof nulls[0].real_char !== 'string' || nulls[0].real_char.length !== 1) {
-    fail(`a real char value did not arrive as one character: ${JSON.stringify(nulls[0].real_char)}`);
+  if (rawChar.ok) {
+    pass('Prisma Client now reads OID 18 (char) columns without a cast');
+  } else if (PRISMA_TYPE_ERROR.test(rawChar.message)) {
+    limitation(
+      'Prisma Client 6.19.3 cannot deserialize OID 18 (`char`) in $queryRaw either; the same cast applies.',
+    );
+  } else {
+    fail(`reading OID 18 failed for an unexpected reason: ${rawChar.message}`);
   }
-  pass('NULL values of OID 18 and OID 19 arrive as null, not as the string "null" or an empty string');
-
-  // The `name` boundary: PostgreSQL truncates identifiers at NAMEDATALEN-1 = 63
-  // bytes. Both directions are checked, because an engine sized for text instead
-  // of name fails at exactly this edge.
-  const boundary = await client.$queryRaw`
-    SELECT
-      length(repeat('a', 70)::name) AS truncated_length,
-      repeat('b', 63)::name        AS exact_name
-  `;
-  if (Number(boundary[0].truncated_length) !== 63) {
-    fail(`a 70-character name should be truncated to 63 by the server, got ${boundary[0].truncated_length}`);
-  }
-  if (typeof boundary[0].exact_name !== 'string' || boundary[0].exact_name.length !== 63) {
-    fail(`a 63-character name did not survive intact: ${JSON.stringify(boundary[0].exact_name?.length)}`);
-  }
-  pass('a 63-character name survives intact and a 70-character name is truncated at the server boundary');
-
-  // A long identifier is also exercised where it matters: a real table whose
-  // name is at the limit, read back through the client.
-  const longName = `kayan_${'x'.repeat(50)}`.slice(0, 63);
-  await client.$executeRawUnsafe(`DROP TABLE IF EXISTS "${longName}"`);
-  await client.$executeRawUnsafe(`CREATE TABLE "${longName}" (id int primary key)`);
-  try {
-    const found = await client.$queryRaw`
-      SELECT c.relname FROM pg_class c WHERE c.oid = ${longName}::regclass
-    `;
-    if (found[0]?.relname !== longName) {
-      fail(`a ${longName.length}-character table name did not read back unchanged`);
-    }
-    pass(`a ${longName.length}-character table name is created and read back unchanged through OID 19`);
-  } finally {
-    await client.$executeRawUnsafe(`DROP TABLE IF EXISTS "${longName}"`);
+  // The regression guard: whatever the client does, it must never hand back a
+  // mangled value. Either it deserialises, or it refuses with the documented
+  // error - never a truncated name or the string "null".
+  if (raw.ok && raw.value?.[0]?.relname !== 'companies') {
+    fail(`Prisma Client returned a wrong value for an OID 19 column: ${JSON.stringify(raw.value)}`);
   }
 
-  // Decimal money is not part of the OID question, but a client that mangles
-  // types often mangles these too, so the same query path proves them.
+  console.log('\nD. The application does not depend on C');
+  const offenders = scanSourceForRawCatalogReads();
+  if (offenders.length > 0) {
+    fail(
+      `production code reads catalog char/name columns without a cast: ${offenders.join(', ')}. ` +
+        'Cast at the query boundary (::text) - do not change the schema or the data.',
+    );
+  }
+  pass('no application query reads pg_catalog char/name columns, so the client limitation is not on any product path');
+
+  console.log('\nE. Values that must round-trip exactly');
   const money = await client.$queryRaw`SELECT 1234567890.1234::numeric(19,4) AS amount`;
   if (String(money[0].amount) !== '1234567890.1234') {
     fail(`DECIMAL(19,4) did not round-trip exactly: ${String(money[0].amount)}`);
   }
   pass('DECIMAL(19,4) money round-trips exactly through the same client');
 
-  console.log('\nOID 18/19 summary (Prisma Client):');
-  for (const row of results) {
-    console.log(`  ${row.column}: type=${row.type} storage=${JSON.stringify(row.storage)} identity=${JSON.stringify(row.identity)}`);
+  const longName = `kayan_${'x'.repeat(50)}`.slice(0, 63);
+  await client.$executeRawUnsafe(`DROP TABLE IF EXISTS "${longName}"`);
+  await client.$executeRawUnsafe(`CREATE TABLE "${longName}" (id int primary key)`);
+  try {
+    const found = await client.$queryRaw`
+      SELECT c.relname::text AS relname FROM pg_class c WHERE c.oid = ${longName}::regclass`;
+    if (found[0]?.relname !== longName) {
+      fail(`a ${longName.length}-character table name did not read back unchanged`);
+    }
+    pass(`a ${longName.length}-character table name is created and read back unchanged`);
+  } finally {
+    await client.$executeRawUnsafe(`DROP TABLE IF EXISTS "${longName}"`);
   }
+
+  // A single notice line, because GitHub annotations are the only part of a job
+  // log that survives a failed step in this repository's reporting.
+  const matrix = {
+    driver: 'ok',
+    clientWithCast: 'ok',
+    clientRawName: raw.ok ? 'ok' : 'fails',
+    clientRawChar: rawChar.ok ? 'ok' : 'fails',
+    appDependsOnRawCatalogRead: offenders.length > 0,
+    money: 'ok',
+  };
+  console.log(`::notice title=OID 18/19 matrix::${JSON.stringify(matrix)}`);
+
+  console.log('\nSummary');
+  console.log('  A. server + driver            : OID 18 and 19 fully usable');
+  console.log(`  B. Prisma Client + cast       : works${limitations.length ? '' : ' (unchanged)'}`);
   console.log(
-    '\nNote: this proves the *client* handles OID 18 and 19. It says nothing about the\n' +
-      'migration engine, which is proven separately by prisma-native-migration-suite.mjs\n' +
-      'running the native schema engine over the full migration history.',
+    `  C. Prisma Client, no cast     : ${limitations.length ? 'cannot deserialize OID 18/19 (documented limitation)' : 'works'}`,
   );
+  console.log('  D. application dependencies   : none');
+  console.log(
+    '\nThe migration engine is a different component and is proven separately: the native\n' +
+      'schema engine applied every checked-in migration in prisma-native-migration-suite.mjs,\n' +
+      'including the two migrations that query pg_type.typname (an OID 19 column) themselves.',
+  );
+}
+
+async function attempt(fn) {
+  try {
+    return { ok: true, value: await fn() };
+  } catch (error) {
+    return { ok: false, message: String(error?.message ?? error) };
+  }
+}
+
+/** Finds raw catalog reads in application source that do not cast to text. */
+function scanSourceForRawCatalogReads() {
+  const offenders = [];
+  const root = join(backendDir, 'src');
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(path);
+        continue;
+      }
+      if (!path.endsWith('.ts') || path.endsWith('.spec.ts')) continue;
+      const source = readFileSync(path, 'utf8');
+      const queries = source.match(/\$queryRaw(?:Unsafe)?`[^`]*`/g) ?? [];
+      for (const query of queries) {
+        if (!/\bpg_(class|attribute|type|namespace|catalog)\b/.test(query)) continue;
+        // Every catalog select in application code must cast the column it reads.
+        const selects = query.match(/SELECT[\s\S]*?FROM/i)?.[0] ?? '';
+        const columns = selects
+          .replace(/^SELECT/i, '')
+          .split(',')
+          .map((part) => part.trim())
+          .filter(Boolean);
+        for (const column of columns) {
+          if (/::text\b/.test(column)) continue;
+          if (/^(count|sum|exists|\d)/i.test(column)) continue;
+          offenders.push(`${path.replace(backendDir + '/', '')}: ${column.slice(0, 60)}`);
+        }
+      }
+    }
+  };
+  walk(root);
+  return offenders;
 }
 
 main()
