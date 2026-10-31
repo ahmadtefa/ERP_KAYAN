@@ -45,6 +45,7 @@ import {
   renderQuotationDocument,
 } from './quotation-document';
 import {
+  ARTWORK_OVERLAY_RENDER,
   mergeOfferOntoBackground,
   parseBackgroundSettings,
   sheetForBackground,
@@ -985,7 +986,13 @@ export class QuotationsService {
     try {
       // Exactly one implementation of "HTML to PDF" exists in this program:
       // the same headless browser pipeline the drawn design uses.
-      overlay = await this.pdfService.render(artwork.overlayHtml, { fullBleed: true });
+      // The number is stamped once, by the merge below, in the artwork's own
+      // ink and at its own height. Letting the renderer stamp it too printed
+      // two identical numbers four points apart on every page.
+      overlay = await this.pdfService.render(
+        artwork.overlayHtml,
+        ARTWORK_OVERLAY_RENDER,
+      );
     } catch (error) {
       if (error instanceof Error && /no browser/i.test(error.message)) {
         throw new BadRequestException(

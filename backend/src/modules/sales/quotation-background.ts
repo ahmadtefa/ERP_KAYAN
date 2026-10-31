@@ -309,6 +309,14 @@ export function overlayPlacement(
   };
 }
 
+/// How the offer's overlay is printed when it will be laid on artwork.
+///
+/// `fullBleed` keeps the design's own sheet and background; `pageNumbers:
+/// false` leaves the numbering to the merge below, which knows the artwork's
+/// ink and height. Both values live here so the service and the test that
+/// counts the numbers cannot drift apart.
+export const ARTWORK_OVERLAY_RENDER = { fullBleed: true, pageNumbers: false } as const;
+
 export interface MergeOptions {
   background: Buffer;
   overlay: Buffer;
