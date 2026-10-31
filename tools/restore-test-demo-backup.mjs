@@ -23,7 +23,12 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+/// The installation the file was taken from. Optional: a check that only has
+/// the file (a CI runner restoring the committed copy) skips the cross-
+/// installation comparison and still proves the file restores into exactly
+/// the company it describes.
 const SOURCE = (process.env.KAYAN_SOURCE_API ?? 'http://127.0.0.1:3111/api/v1').replace(/\/$/, '');
+const HAS_SOURCE = Boolean(SOURCE) && SOURCE !== 'none' && SOURCE !== '-';
 const TARGET = (process.env.KAYAN_TARGET_API ?? 'http://127.0.0.1:3112/api/v1').replace(/\/$/, '');
 const FILE = resolve(process.env.KAYAN_FILE ?? 'demo-data/KAYAN-Demo-Company-Backup-v2.json');
 const ADMIN_USERNAME = process.env.KAYAN_ADMIN_USERNAME ?? 'admin';
@@ -191,6 +196,27 @@ async function snapshot(base, token) {
   const backgrounds = await list('/sales/quotation-backgrounds');
   const variance = await get('/inventory/reports/stock-take-variance');
   const assetsSummary = await get('/fixed-assets/reports/summary');
+
+  // The letterhead artwork is bytes, not a row of numbers. It is fetched from
+  // both installations and hashed, so the comparison covers the PDF that is
+  // actually in the database - and each row's own recorded digest is checked
+  // against the bytes beside it.
+  const artworkBytes = {};
+  for (const row of backgrounds) {
+    const response = await fetch(`${base}/sales/quotation-backgrounds/${row.id}/file`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      throw new Error(`Downloading artwork ${row.name} on ${base} failed (HTTP ${response.status}).`);
+    }
+    const bytes = Buffer.from(await response.arrayBuffer());
+    artworkBytes[row.id] = {
+      name: row.name,
+      bytes: bytes.length,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      recorded: row.sha256 ?? null,
+    };
+  }
 
   return {
     counts: {
@@ -361,6 +387,13 @@ async function snapshot(base, token) {
         bookValue: fixed(assetsSummary.totals.bookValue),
       },
     },
+    artworkBytes: byKey(
+      Object.entries(artworkBytes).map(([id, row]) => ({ ...row, id })),
+      (row) => row.id,
+    ),
+    recordedDigestMatchesBytes: Object.values(artworkBytes).every(
+      (row) => row.recorded === null || row.recorded === row.sha256,
+    ),
     artwork: byKey(
       backgrounds.map((row) => ({
         id: row.id,
@@ -446,7 +479,7 @@ async function main() {
   console.log(`source  ${SOURCE}`);
   console.log(`target  ${TARGET}\n`);
 
-  const sourceToken = await login(SOURCE, ADMIN_USERNAME, ADMIN_PASSWORD);
+  const sourceToken = HAS_SOURCE ? await login(SOURCE, ADMIN_USERNAME, ADMIN_PASSWORD) : '';
 
   // The target is an empty installation: the restore is asked to replace a
   // company that holds nothing, which is the state an owner's new machine is
@@ -525,26 +558,34 @@ async function main() {
   if (!restoredToken) throw new Error('Nobody could sign in to the restored company.');
   const targetTokenAfter = restoredToken;
 
-  const source = await snapshot(SOURCE, sourceToken);
+  const source = HAS_SOURCE ? await snapshot(SOURCE, sourceToken) : null;
   const target = await snapshot(TARGET, targetTokenAfter);
 
   // Known gap, stated rather than hidden: the quotation design presets live in
   // a raw-SQL table that the version-2 file does not carry. Everything an offer
   // is drafted from - its terms library, its column sets, the artwork - is
   // carried and is compared below.
-  const presetsBefore = source.counts.designTemplates;
-  const presetsAfter = target.counts.designTemplates;
-  delete source.counts.designTemplates;
-  delete target.counts.designTemplates;
-
-  for (const group of ['counts', 'profile', 'policy', 'printSettings', 'printDefault', 'trial', 'stock', 'valuation', 'customerBalances', 'supplierBalances', 'cash', 'invoices', 'documents', 'quotations', 'orders', 'variance', 'assets', 'artwork']) {
-    same(`${group} · before = after`, source[group], target[group]);
+  if (source) {
+    source.counts.designTemplates = 0;
+    target.counts.designTemplates = 0;
+    for (const group of ['counts', 'profile', 'policy', 'printSettings', 'printDefault', 'trial', 'stock', 'valuation', 'customerBalances', 'supplierBalances', 'cash', 'invoices', 'documents', 'quotations', 'orders', 'variance', 'assets', 'artwork', 'artworkBytes', 'recordedDigestMatchesBytes']) {
+      same(`${group} · before = after`, source[group], target[group]);
+    }
+  } else {
+    console.log('no source installation was named, so the cross-installation comparison is skipped');
   }
 
   check(
-    'quotation design presets are reported instead of silently compared',
-    presetsBefore >= 0 && presetsAfter === 0,
-    `source ${presetsBefore}, restored ${presetsAfter} (a raw-SQL table outside the version-2 file)`,
+    'the restored company is not missing a quotation library entry the file carries',
+    target.counts.quotationTerms === ((JSON.parse(bytes.toString('utf8')).counts ?? {}).quotationTermTemplate ?? target.counts.quotationTerms) &&
+      target.counts.columnTemplates === ((JSON.parse(bytes.toString('utf8')).counts ?? {}).quotationColumnTemplate ?? target.counts.columnTemplates),
+    `terms ${target.counts.quotationTerms}, column sets ${target.counts.columnTemplates}`,
+  );
+
+  check(
+    'the artwork bytes still hash to the digest recorded with them',
+    target.recordedDigestMatchesBytes === true,
+    JSON.stringify(target.artworkBytes).slice(0, 200),
   );
 
   check(

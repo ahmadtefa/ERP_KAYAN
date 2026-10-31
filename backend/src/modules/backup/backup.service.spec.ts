@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { BadRequestException } from '@nestjs/common';
 
 import { AUDIT_PURGE_SETTING, AuditPurgeService } from '../../common/audit/audit-purge.service';
@@ -1084,7 +1086,8 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
           id: 'dddddddd-dddd-4ddd-8ddd-dddddddddd01',
           companyId: COMPANY_ID,
           name: 'ورق الشركة',
-          sha256: 'a'.repeat(64),
+          byteSize: artwork.length,
+          sha256: createHash('sha256').update(artwork).digest('hex'),
           data: new Uint8Array(artwork),
         },
       ]);
@@ -1141,6 +1144,67 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       };
       await expect(service.restore(file, COMPANY_ID, { replace: true })).rejects.toThrow(
         /missing its base64 marker/i,
+      );
+      expect(txMock.quotationBackground.createMany).not.toHaveBeenCalled();
+    });
+
+    test('refuses artwork whose bytes no longer match the digest recorded with it', async () => {
+      // Base64 is forgiving: one changed character still decodes, into other
+      // bytes. Writing those would give the company a letterhead it cannot
+      // print, and every backup taken afterwards would carry the damage.
+      const artwork = Buffer.from('%PDF-1.4\nletterhead\n%%EOF', 'latin1');
+      const digest = createHash('sha256').update(artwork).digest('hex');
+      const file: BackupFile = {
+        format: 'kayan-backup',
+        version: 2,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'Test',
+        counts: {},
+        tables: {
+          quotationBackground: [
+            {
+              id: 'dddddddd-dddd-4ddd-8ddd-dddddddddd03',
+              name: 'ورق الشركة',
+              byteSize: artwork.length,
+              sha256: digest,
+              data: `base64:${Buffer.from('%PDF-1.4\nletterheae\n%%EOF', 'latin1').toString('base64')}`,
+            },
+          ],
+        },
+      };
+
+      await expect(service.restore(file, COMPANY_ID, { replace: true })).rejects.toThrow(
+        /does not match the digest/i,
+      );
+      expect(txMock.quotationBackground.createMany).not.toHaveBeenCalled();
+    });
+
+    test('refuses artwork whose byte count is not the one the row records', async () => {
+      const artwork = Buffer.from('%PDF-1.4\nletterhead\n%%EOF', 'latin1');
+      const file: BackupFile = {
+        format: 'kayan-backup',
+        version: 2,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'Test',
+        counts: {},
+        tables: {
+          quotationBackground: [
+            {
+              id: 'dddddddd-dddd-4ddd-8ddd-dddddddddd04',
+              name: 'ورق الشركة',
+              byteSize: artwork.length + 10,
+              data: `base64:${artwork.toString('base64')}`,
+            },
+          ],
+        },
+      };
+
+      await expect(service.restore(file, COMPANY_ID, { replace: true })).rejects.toThrow(
+        /but the row says/,
       );
       expect(txMock.quotationBackground.createMany).not.toHaveBeenCalled();
     });

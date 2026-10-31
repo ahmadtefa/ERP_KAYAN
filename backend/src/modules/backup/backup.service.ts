@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
 import { readFile, unlink } from 'node:fs/promises';
 
@@ -154,6 +155,40 @@ function encodeBinaryFields(
     if (field in next) next[field] = toBase64(next[field]);
   }
   return next;
+}
+
+/// A byte column that travels with its own size or digest is only as
+/// trustworthy as the text it came from.
+///
+/// Base64 is forgiving: a string with a few characters changed still decodes,
+/// into different bytes. Without this check such a file would restore a
+/// letterhead the program cannot print and never say so, and every later backup
+/// would carry the same damage. When the row says how big the file is or what
+/// its digest is, the restore verifies it before anything is written.
+function assertBinaryIntegrity(row: Record<string, unknown>, fields: readonly string[]): void {
+  for (const field of fields) {
+    const value = row[field];
+    if (!(value instanceof Uint8Array)) continue;
+
+    const size = row.byteSize;
+    if (typeof size === 'number' && Number.isFinite(size) && size !== value.byteLength) {
+      throw new BadRequestException(
+        `A file in this backup is ${value.byteLength} bytes, but the row says ${size}. ` +
+          'The file is damaged; nothing was changed.',
+      );
+    }
+
+    const digest = row.sha256;
+    if (typeof digest === 'string' && /^[0-9a-f]{64}$/i.test(digest)) {
+      const actual = createHash('sha256').update(Buffer.from(value)).digest('hex');
+      if (actual !== digest.toLowerCase()) {
+        throw new BadRequestException(
+          'A file in this backup does not match the digest recorded with it. ' +
+            'The file is damaged; nothing was changed.',
+        );
+      }
+    }
+  }
 }
 
 function decodeBinaryFields(
@@ -558,7 +593,7 @@ export class BackupService {
 
     // One transaction: a restore that stops half way would leave a company that
     // is neither the old one nor the new one.
-    await this.prisma.$transaction(
+    await this.runRestoreTransaction(
       async (tx) => {
         // Everything is cleared first, children before parents. An empty
         // company has nothing to clear and the same code runs anyway, so the
@@ -767,6 +802,45 @@ export class BackupService {
   /// Bytes out: JSON has no binary type. A field written as an object of
   /// offsets would restore as nothing at all, so bytes become base64 under a
   /// marker a reader can recognise.
+  /// Runs the restore transaction, and turns a database-level refusal into an
+  /// answer the person can act on.
+  ///
+  /// The transaction itself is the safety net: a foreign key that points at a
+  /// row the file does not carry, or a duplicate id, aborts the whole thing and
+  /// the company is left exactly as it was. What the person would otherwise see
+  /// is "Unexpected server error", which says nothing about the file they chose
+  /// - and a damaged file is the most likely reason a restore fails at all.
+  private async runRestoreTransaction(
+    work: (tx: Prisma.TransactionClient) => Promise<void>,
+    options: { timeout: number; maxWait: number },
+  ): Promise<void> {
+    try {
+      await this.prisma.$transaction(work, options);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2003') {
+          throw new BadRequestException(
+            'The backup names a record that is not in the file it points at, so it could not be written as a set. ' +
+              'The file is incomplete or was edited; nothing was changed.',
+          );
+        }
+        if (error.code === 'P2002') {
+          throw new BadRequestException(
+            'The backup holds two rows with the same identity, so it cannot be restored as a set. ' +
+              'The file was edited; nothing was changed.',
+          );
+        }
+        if (error.code === 'P2025' || error.code === 'P2014') {
+          throw new BadRequestException(
+            'The backup refers to a row this company does not have, so the restore was stopped. ' +
+              'Nothing was changed.',
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
   private validate(file: BackupFile): void {
     if (!file || typeof file !== 'object' || file.format !== BACKUP_FORMAT) {
       throw new BadRequestException(
@@ -950,6 +1024,7 @@ export class BackupService {
       const clean: Record<string, unknown> = spec.binaryFields
         ? decodeBinaryFields(row, spec.binaryFields)
         : { ...row };
+      if (spec.binaryFields) assertBinaryIntegrity(clean, spec.binaryFields);
       if (spec.scope === 'company') clean.companyId = companyId;
       // New cost fields default to the historical line value when a v1
       // purchase backup predates explicit landed-cost storage.
