@@ -71,7 +71,11 @@ function matchesCost(key: string, label: string): boolean {
 const SLUG_COST_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // Stock balances: `value` is the cost valuation of the quantity on hand and
   // `averageCost` is its weighted-average unit cost (also matched by regex).
-  stock: new Set(['value', 'averageCost']),
+  stock: new Set(['value', 'averageCost', 'costValue']),
+  // A stock document (a count, a transfer, an adjustment) states what the
+  // movement is worth as well as how much moved, so its value column is a cost
+  // even though the sheet is not a purchase document.
+  'stock-document': new Set(['costValue', 'unitCost']),
 };
 
 /// Columns that carry an amount rather than a quantity: a total, a subtotal, a

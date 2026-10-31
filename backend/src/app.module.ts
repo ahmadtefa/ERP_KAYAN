@@ -5,6 +5,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { validateEnvironment } from './common/config/validate-environment';
 import { CompanySettingsModule } from './common/settings/company-settings.module';
+import { PrintSettingsModule } from './common/print/print-settings.module';
 import { AuditModule } from './common/audit/audit.module';
 import { LicensingModule } from './modules/licensing/licensing.module';
 import { LicenseGuard } from './modules/licensing/license.guard';
@@ -41,6 +42,9 @@ import { SearchModule } from './modules/search/search.module';
     LicensingModule,
     // Global: every posting path reads the company's policies from here.
     CompanySettingsModule,
+    // Global: every PDF and print route asks what this company allows a copy
+    // to show, so the rule lives in one place instead of fourteen.
+    PrintSettingsModule,
     // Global: every module that moves goods asks which warehouse it moved in.
     WarehouseModule,
     AuditModule,

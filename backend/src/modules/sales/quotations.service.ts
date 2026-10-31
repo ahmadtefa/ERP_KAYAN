@@ -51,6 +51,7 @@ import {
   type QuotationBackgroundSettings,
 } from './quotation-background';
 import { QuotationBackgroundsService } from './quotation-backgrounds.service';
+import { redactQuotationPrices } from './quotation-redaction';
 
 const MONEY_SCALE = 4;
 const RATE_SCALE = 4;
@@ -911,6 +912,7 @@ export class QuotationsService {
     companyId: string,
     id: string,
     lang: 'en' | 'ar',
+    visibility: { showSalePrice: boolean } | null = null,
   ): Promise<{
     overlayHtml: string;
     background: Buffer;
@@ -925,10 +927,13 @@ export class QuotationsService {
     });
     if (!quotation) throw new NotFoundException('Quotation not found');
 
-    const content =
+    const stored =
       quotation.status !== QuotationStatus.DRAFT && quotation.contentSnapshot
         ? (quotation.contentSnapshot as unknown as QuotationSnapshot)
         : await this.snapshotContent(companyId, quotation);
+    const content = visibility
+      ? redactQuotationPrices(stored, { showSalePrice: visibility.showSalePrice })
+      : stored;
 
     const bound = content.background ?? null;
     const fileId = bound?.fileId ?? quotation.backgroundFileId ?? null;
@@ -960,7 +965,12 @@ export class QuotationsService {
 
   /// The finished file: overlay drawn by the browser, merged onto the artwork,
   /// page numbers stamped above both.
-  async renderArtworkPdf(companyId: string, id: string, lang: 'en' | 'ar'): Promise<
+  async renderArtworkPdf(
+    companyId: string,
+    id: string,
+    lang: 'en' | 'ar',
+    visibility: { showSalePrice: boolean } | null = null,
+  ): Promise<
     | {
         pdf: Buffer;
         quotationNumber: string;
@@ -969,7 +979,7 @@ export class QuotationsService {
       }
     | null
   > {
-    const artwork = await this.printArtwork(companyId, id, lang);
+    const artwork = await this.printArtwork(companyId, id, lang, visibility);
     if (!artwork) return null;
     let overlay: Buffer;
     try {
@@ -1013,6 +1023,10 @@ export class QuotationsService {
     id: string,
     lang: 'en' | 'ar',
     autoPrint = false,
+    /// What this copy may show, already resolved against the company's print
+    /// settings and the caller's permission. Null means "as stored", which is
+    /// how every caller behaved before print settings existed.
+    visibility: { showSalePrice: boolean } | null = null,
   ): Promise<{
     html: string;
     quotationNumber: string;
@@ -1028,10 +1042,15 @@ export class QuotationsService {
     });
     if (!quotation) throw new NotFoundException('Quotation not found');
     const company = await this.companyHeader(companyId);
-    const content =
+    const stored =
       quotation.status !== QuotationStatus.DRAFT && quotation.contentSnapshot
         ? (quotation.contentSnapshot as unknown as QuotationSnapshot)
         : await this.snapshotContent(companyId, quotation);
+    // Redaction is applied to the copy that is being rendered, never to the
+    // document: the database keeps every price, and the next copy can show it.
+    const content = visibility
+      ? redactQuotationPrices(stored, { showSalePrice: visibility.showSalePrice })
+      : stored;
     return {
       html: renderQuotationDocument(content, company, lang, autoPrint),
       quotationNumber: content.quotationNumber,
@@ -1041,8 +1060,14 @@ export class QuotationsService {
     };
   }
 
-  async printHtml(companyId: string, id: string, lang: 'en' | 'ar', autoPrint = false) {
-    const document = await this.printDocument(companyId, id, lang, autoPrint);
+  async printHtml(
+    companyId: string,
+    id: string,
+    lang: 'en' | 'ar',
+    autoPrint = false,
+    visibility: { showSalePrice: boolean } | null = null,
+  ) {
+    const document = await this.printDocument(companyId, id, lang, autoPrint, visibility);
     return document.html;
   }
 

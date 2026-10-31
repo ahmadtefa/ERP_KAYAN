@@ -41,7 +41,26 @@ describe('barcode label routes', () => {
         return Buffer.from('pdf');
       }),
     };
-    const controller = new InventoryReportsController({} as never, labels as never);
+    // The label route now asks the company's print settings whether a sheet
+    // carries the price. An installation that never configured them answers
+    // "yes", which is the behaviour this test has always pinned.
+    const printSettings = {
+      resolve: async (
+        _company: string,
+        _user: unknown,
+        requested: { showSalePrice?: string },
+      ) => ({
+        showSalePrice: requested.showSalePrice === 'false' ? false : true,
+        showCost: false,
+        source: 'builtin' as const,
+        costLocked: true,
+      }),
+    };
+    const controller = new InventoryReportsController(
+      {} as never,
+      labels as never,
+      printSettings as never,
+    );
     const user = { companyId: 'company-1' } as never;
     const response = { type: jest.fn(), setHeader: jest.fn(), send: jest.fn() } as any;
 

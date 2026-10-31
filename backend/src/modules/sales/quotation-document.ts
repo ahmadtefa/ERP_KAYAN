@@ -87,6 +87,11 @@ export interface QuotationSnapshot {
     /// VAT charged on the discounted net value. Applied exactly once.
     taxAmount?: string;
   };
+  /// Set on a copy that is being prepared for printing when the company's
+  /// policy says this copy must not disclose selling prices. The money fields
+  /// of that copy are blanked as well, so a renderer that forgot a cell cannot
+  /// leak a figure: the value is not in the document it is given.
+  hidePrices?: boolean;
   /// The attached PDF this offer prints on, frozen when it was issued. Absent
   /// or null means the drawn design, which is what every offer written before
   /// artwork existed carries.
@@ -389,6 +394,11 @@ export function renderQuotationDocument(
   // drawn bands/watermark/logo are left out entirely - painting them over the
   // company's own letterhead would be drawing a second letterhead on top of it.
   const artwork = sheet ?? null;
+  // A copy printed without prices: the columns, the per-section totals and the
+  // summary are left out entirely rather than drawn empty, because a blank
+  // money column still says "there is a price here".
+  const hidePrices = content.hidePrices === true;
+  const priceColumnKeys = new Set(['unitPrice', 'lineTotal']);
   const pageCss = artwork
     ? `${artwork.widthMm}mm ${artwork.heightMm}mm`
     : 'A4 portrait';
@@ -454,9 +464,17 @@ export function renderQuotationDocument(
 
   // The quotation-level layout: every section's fallback, and the only
   // layout a snapshot frozen before per-table columns has.
+  const visibleForPrint = (column: QuotationColumn) => {
+    if (!column.visible) return false;
+    if (!hidePrices) return true;
+    if (priceColumnKeys.has(column.key)) return false;
+    // A custom column of kind price/percent carries the same secret as the
+    // built-in ones, so it is treated the same way.
+    return column.kind !== 'price' && column.kind !== 'percent';
+  };
   const fallbackColumns = (
     content.columns?.length ? content.columns : standardColumns()
-  ).filter((column) => column.visible);
+  ).filter(visibleForPrint);
 
   const tables = content.tables
     .map((table, index) => {
@@ -465,7 +483,7 @@ export function renderQuotationDocument(
       // of one offer no longer have to share one layout.
       const columns =
         table.columns?.length
-          ? table.columns.filter((column) => column.visible)
+          ? table.columns.filter(visibleForPrint)
           : fallbackColumns;
       const columnCount =
         columns.reduce((sum, column) => sum + column.width, 0) || 1;
@@ -519,7 +537,10 @@ export function renderQuotationDocument(
           </thead>
           <tbody>${rows}</tbody>
           <tfoot>
-            <tr>
+            ${
+              hidePrices
+                ? ''
+                : `<tr>
               <th colspan="${span - 1}">${L('Section subtotal', 'إجمالي القسم')}</th>
               <td class="num strong">${money(table.subTotal)}</td>
             </tr>
@@ -540,6 +561,7 @@ export function renderQuotationDocument(
                   'الصافي بعد الخصم',
                 )}</th><td class="num strong">${money(table.netTotal)}</td></tr>`
                 : ''
+            }`
             }
           </tfoot>
         </table>
@@ -811,7 +833,9 @@ ${NASKH_FONT_FACE}
   .totals tr.grand td:first-child { color: #fff; }
   .totals tr.tax td { background: ${WASH}; color: ${ACCENT}; font-weight: 800; }
   .terms, .notes { margin-top: 2.5mm; break-inside: avoid; }
-  .terms h3, .notes h3 { margin: 0 0 1mm; color: ${PRIMARY}; font-size: 10pt; line-height: 1.2; font-weight: 800; }
+  .terms h3, .notes h3, .summary-omitted h3 { margin: 0 0 1mm; color: ${PRIMARY}; font-size: 10pt; line-height: 1.2; font-weight: 800; }
+  .summary-omitted { margin-top: 0; margin-bottom: 4mm; break-inside: avoid; }
+  .summary-omitted div { color: ${MUTED}; font-size: 8.5pt; line-height: 1.45; }
   .terms div, .notes div { color: ${MUTED}; font-size: 8.3pt; line-height: 1.45; }
   .signs { display: flex; gap: 12mm; margin-top: 4mm; break-inside: avoid; }
   .sign { flex: 1; font-size: 8.5pt; }
@@ -932,7 +956,13 @@ ${
 
   ${tables}
 
-  <section class="summary">
+  ${
+    hidePrices
+      ? `<div class="summary-omitted"><h3>${L('Prices', 'الأسعار')}</h3><div>${L(
+          'This copy was printed without prices, by the company\'s print settings. Quantities and descriptions are complete; no price, discount or total appears in it.',
+          'طُبعت هذه النسخة دون أسعار وفق إعدادات الطباعة في الشركة. الكميات والأوصاف كاملة، ولا يظهر فيها أي سعر أو خصم أو إجمالي.',
+        )}</div></div>`
+      : `<section class="summary">
     <h3>${L('Tables summary', 'ملخص الجداول')}</h3>
     <table>
       <thead>
@@ -954,7 +984,8 @@ ${
         </tr>
       </tbody>
     </table>
-  </section>
+  </section>`
+  }
 
   ${terms}
   ${notes}

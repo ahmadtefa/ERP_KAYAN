@@ -86,6 +86,7 @@ model Company {
   quotations    Quotation[]
   quotationTermTemplates QuotationTermTemplate[]
   quotationBackgrounds QuotationBackground[]
+  printPriceSettings   PrintPriceSetting[]
   quotationColumnTemplates QuotationColumnTemplate[]
 
   warehouses     Warehouse[]
@@ -2444,4 +2445,35 @@ model QuotationBackground {
 
   @@index([companyId])
   @@map("quotation_backgrounds")
+}
+
+// ----------------------------------------------------- print visibility
+
+/// What a printed copy of one kind of document may show.
+///
+/// This is policy, not data: the invoice keeps every price it was posted with.
+/// The row decides only what leaves the program on paper or as a PDF, and the
+/// `inventory.cost.read` permission always has the last word over `showCost`,
+/// so a hand-made request cannot restore a cost the role was never granted.
+/// "default" is the fallback row for any print type the company has not
+/// configured; a company that never opens the screen has no rows at all and
+/// prints exactly what it printed before this table existed.
+model PrintPriceSetting {
+  id        String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+
+  /// A print type from the catalogue (a document kind, a list slug, a report
+  /// slug, a stock document or the label sheet), or "default".
+  documentType String @db.VarChar(48)
+
+  showSalePrice Boolean @default(true)
+  showCost      Boolean @default(true)
+
+  updatedAt DateTime @default(now()) @updatedAt
+  updatedBy String?  @db.Uuid
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, documentType])
+  @@map("print_price_settings")
 }

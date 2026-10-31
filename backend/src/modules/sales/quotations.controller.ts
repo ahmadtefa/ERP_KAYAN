@@ -26,6 +26,7 @@ import {
   quotationDocumentFileName,
 } from './quotation-document';
 import { QuotationsService } from './quotations.service';
+import { PrintSettingsService } from '../../common/print/print-settings.module';
 
 /// Quotation endpoints.
 ///
@@ -39,6 +40,7 @@ export class QuotationsController {
   constructor(
     private readonly service: QuotationsService,
     private readonly pdf: PdfService,
+    private readonly printSettings: PrintSettingsService,
   ) {}
 
   @Get()
@@ -145,17 +147,23 @@ export class QuotationsController {
   async print(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
-    @Query() query: { lang?: string; auto?: string },
+    @Query() query: { lang?: string; auto?: string; showSalePrice?: string; showCost?: string },
     @Res() response: Response,
   ): Promise<void> {
     const lang = query.lang === 'ar' ? 'ar' : 'en';
+    const visibility = await this.priceVisibility(user, query);
 
     // A page with no artwork is the drawn design: the browser prints it, and
     // its own print dialogue handles the sheet. Artwork cannot be printed that
     // way - a browser drops a page background it was not given as content, and
     // the artwork would silently vanish from the paper. So the offer is merged
     // onto the artwork first and the viewer prints one finished file.
-    const artwork = await this.service.renderArtworkPdf(user.companyId, id, lang);
+    const artwork = await this.service.renderArtworkPdf(
+      user.companyId,
+      id,
+      lang,
+      visibility,
+    );
     if (artwork) {
       response.setHeader('Content-Type', 'application/pdf');
       response.setHeader(
@@ -172,6 +180,7 @@ export class QuotationsController {
       id,
       lang,
       query.auto === '1' || query.auto === 'true',
+      visibility,
     );
     response.type('text/html; charset=utf-8');
     response.setHeader('Cache-Control', 'no-store');
@@ -187,12 +196,18 @@ export class QuotationsController {
   async downloadPdf(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
-    @Query() query: { lang?: string },
+    @Query() query: { lang?: string; showSalePrice?: string; showCost?: string },
     @Res() response: Response,
   ): Promise<void> {
     const lang = query.lang === 'ar' ? 'ar' : 'en';
+    const visibility = await this.priceVisibility(user, query);
 
-    const artwork = await this.service.renderArtworkPdf(user.companyId, id, lang);
+    const artwork = await this.service.renderArtworkPdf(
+      user.companyId,
+      id,
+      lang,
+      visibility,
+    );
     if (artwork) {
       response.setHeader('Content-Type', 'application/pdf');
       response.setHeader(
@@ -212,6 +227,7 @@ export class QuotationsController {
       id,
       lang,
       false,
+      visibility,
     );
     // The whole page is a design: printed the ordinary way - the browser's
     // command line printer - the background artwork is dropped and the paper
@@ -233,5 +249,24 @@ export class QuotationsController {
     );
     response.setHeader('Cache-Control', 'no-store');
     response.send(file);
+  }
+
+  /// What a printed offer may show.
+  ///
+  /// The offer is the one document where hiding the sale price is a normal
+  /// request - a copy for a tender, or for a customer who asked for quantities
+  /// only. Costs are resolved too so the permission floor stays in one place,
+  /// although an offer never prints a cost.
+  private async priceVisibility(
+    user: AuthUser,
+    query: { showSalePrice?: string; showCost?: string },
+  ): Promise<{ showSalePrice: boolean }> {
+    const resolved = await this.printSettings.resolve(
+      user.companyId,
+      user,
+      { showSalePrice: query.showSalePrice, showCost: query.showCost },
+      'sales-quotation',
+    );
+    return { showSalePrice: resolved.showSalePrice };
   }
 }

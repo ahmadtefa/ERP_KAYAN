@@ -5,6 +5,7 @@ import { PrismaModule } from '../../common/prisma/prisma.module';
 import { AccountingModule } from '../accounting/accounting.module';
 import { ExportModule } from '../export/export.module';
 import { BarcodeLabelsService } from './barcode-labels.service';
+import { InventoryPrintController } from './inventory-print.controller';
 import { InventoryReportsController } from './inventory-reports.controller';
 import { InventoryReportsService } from './inventory-reports.service';
 import { ItemsController } from './items.controller';
@@ -22,6 +23,7 @@ import { WarehousesController } from './warehouses.controller';
     StockController,
     StockDocumentsController,
     InventoryReportsController,
+    InventoryPrintController,
     WarehousesController,
   ],
   providers: [

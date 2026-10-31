@@ -19,12 +19,14 @@ import { canReadCost } from '../../common/auth/cost-visibility';
 import { BarcodeLabelsService } from './barcode-labels.service';
 import { BarcodeLabelsQueryDto } from './dto/barcode-labels.dto';
 import { InventoryReportsService } from './inventory-reports.service';
+import { PrintSettingsService } from '../../common/print/print-settings.module';
 
 @Controller('inventory')
 export class InventoryReportsController {
   constructor(
     private readonly service: InventoryReportsService,
     private readonly labels: BarcodeLabelsService,
+    private readonly printSettings: PrintSettingsService,
   ) {}
 
   @Get('categories')
@@ -156,6 +158,25 @@ export class InventoryReportsController {
     );
   }
 
+  /// Whether a label sheet carries the selling price.
+  ///
+  /// The sheet's own switch still wins, because a person printing one shelf of
+  /// labels is making a choice about that sheet; otherwise the company's saved
+  /// setting for labels decides, and the built-in default is to show it - the
+  /// behaviour this route had before settings existed.
+  private async labelShowsPrice(
+    user: AuthUser,
+    requested: string | undefined,
+  ): Promise<boolean> {
+    const resolved = await this.printSettings.resolve(
+      user.companyId,
+      user,
+      requested === undefined ? {} : { showSalePrice: requested },
+      'barcode-labels',
+    );
+    return resolved.showSalePrice;
+  }
+
   private mayManageBarcodes(user: AuthUser): boolean {
     return user.isSuperAdmin || user.permissions.includes('inventory.barcodes.manage');
   }
@@ -210,9 +231,10 @@ export class InventoryReportsController {
     @Res() response: Response,
   ): Promise<void> {
     const specs = this.labels.parseSpecs(specsQuery);
+    const showPrice = await this.labelShowsPrice(user, query.showPrice);
     const html = await this.labels.buildHtml(user.companyId, itemId, specs, {
       paper: this.labels.parsePaper(query.paper),
-      showPrice: query.showPrice !== 'false',
+      showPrice,
       lang: query.lang === 'en' ? 'en' : 'ar',
       autoPrint: query.auto === '1' || query.auto === 'true',
     });
@@ -234,9 +256,10 @@ export class InventoryReportsController {
     @Res() response: Response,
   ): Promise<void> {
     const specs = this.labels.parseSpecs(specsQuery);
+    const showPrice = await this.labelShowsPrice(user, query.showPrice);
     const pdf = await this.labels.renderPdf(user.companyId, itemId, specs, {
       paper: this.labels.parsePaper(query.paper),
-      showPrice: query.showPrice !== 'false',
+      showPrice,
       lang: query.lang === 'en' ? 'en' : 'ar',
       autoPrint: false,
     });
