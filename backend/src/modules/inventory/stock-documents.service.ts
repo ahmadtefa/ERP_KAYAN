@@ -561,8 +561,23 @@ export class StockDocumentsService {
           : onHandValue.div(onHand).toDecimalPlaces(MONEY_SCALE);
 
         if (document.kind === StockDocumentKind.COUNT) {
+          // A count is of a place, not of a company. When it names a
+          // warehouse, the book figure it is compared with is that warehouse's
+          // own card - the same figure the difference report calls the system
+          // quantity. Measuring it against the branch total made counting one
+          // store while another held goods post the whole difference here,
+          // which moved stock that had never been counted.
+          const bookQuantity =
+            document.kind === StockDocumentKind.COUNT && toWarehouseId
+              ? await this.warehouses.availableQuantity(
+                  tx,
+                  companyId,
+                  toWarehouseId,
+                  line.itemId,
+                )
+              : onHand;
           const counted = line.countedQuantity ?? new Prisma.Decimal(0);
-          quantity = counted.minus(onHand);
+          quantity = counted.minus(bookQuantity);
           if (unitCost.isZero()) unitCost = averageCost;
           await tx.stockDocumentLine.update({
             where: { id: line.id },

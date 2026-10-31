@@ -462,6 +462,19 @@ describe('warehouse-level negative stock guard on transfer posting', () => {
 
     await h.service.post(COMPANY, 'user-1', 'doc-1'); // counting 2 where the warehouse shows 3
     expect(h.state.movements().some((m) => m.referenceType === 'STOCK_COUNT')).toBe(true);
+
+    // The count is of the place named on it. The branch holds 20 (17 in the
+    // other warehouse, 3 here), so measuring the difference against the branch
+    // would post 2 - 20 = -18 out of a warehouse that only ever held 3, and
+    // would move stock nobody counted. The figure compared with is this
+    // warehouse's own card, exactly as the difference report states it.
+    const countMovement = h.state.movements().find((m) => m.referenceType === 'STOCK_COUNT') as
+      | { quantity: Prisma.Decimal; direction: string }
+      | undefined;
+    expect(countMovement?.direction).toBe('OUT');
+    expect(countMovement?.quantity.toFixed(4)).toBe('1.0000');
+    expect(h.state.warehouseQuantity(W_DST).toFixed(4)).toBe('2.0000');
+    expect(h.state.branchBalance().toFixed(4)).toBe('19.0000');
   });
 });
 
