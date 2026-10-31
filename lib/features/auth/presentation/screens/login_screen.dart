@@ -644,28 +644,29 @@ class _ErrorBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // #D92D20 on #FBEAEA measured 4.15:1, and this is the first sentence a
+    // person reads when a sign-in fails: the ink has to clear 4.5:1, and on
+    // the dark theme the chip has to belong to the dark canvas.
+    final danger = AppTone.danger.foregroundOn(theme.brightness);
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: AppColors.errorSoft,
+        color: AppTone.danger.backgroundOn(
+          theme.brightness,
+          surface: theme.colorScheme.surface,
+        ),
         borderRadius: AppRadii.control,
-        border: Border.all(color: AppColors.error.withValues(alpha: 0.35)),
+        border: Border.all(color: danger.withValues(alpha: 0.35)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(
-            Icons.error_outline,
-            size: 18,
-            color: AppColors.error,
-          ),
+          Icon(Icons.error_outline, size: 18, color: danger),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               message,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: AppColors.error,
-              ),
+              style: theme.textTheme.bodySmall?.copyWith(color: danger),
             ),
           ),
         ],

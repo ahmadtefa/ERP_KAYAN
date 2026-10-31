@@ -40,8 +40,12 @@ class AppErrorDialog extends StatelessWidget {
     final theme = Theme.of(context);
     final l10n = context.l10n;
     final isWarning = severity == AppErrorSeverity.warning;
-    final accent = isWarning ? AppColors.warning : theme.colorScheme.error;
-    final soft = isWarning ? AppColors.warningSoft : AppColors.errorSoft;
+    final tone = isWarning ? AppTone.warning : AppTone.danger;
+    final accent = tone.foregroundOn(theme.brightness);
+    final soft = tone.backgroundOn(
+      theme.brightness,
+      surface: theme.colorScheme.surface,
+    );
 
     return AlertDialog(
       // The title and the action sit at the start edge, which is the right

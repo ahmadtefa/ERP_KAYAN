@@ -309,16 +309,23 @@ class _SummarySections extends StatelessWidget {
               vertical: AppSpacing.sm,
             ),
             decoration: BoxDecoration(
-              color: AppColors.infoSoft,
+              color: AppTone.info.backgroundOn(
+                theme.brightness,
+                surface: theme.colorScheme.surface,
+              ),
               borderRadius: AppRadii.card,
-              border: Border.all(color: AppColors.primary.withValues(alpha: 0.18)),
+              border: Border.all(
+                color: AppTone.info
+                    .foregroundOn(theme.brightness)
+                    .withValues(alpha: 0.24),
+              ),
             ),
             child: Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.info_outline_rounded,
                   size: 18,
-                  color: AppColors.primary,
+                  color: AppTone.info.foregroundOn(theme.brightness),
                 ),
                 const SizedBox(width: AppSpacing.sm),
                 Expanded(
@@ -327,7 +334,7 @@ class _SummarySections extends StatelessWidget {
                         ? 'لا توجد مستندات في هذه الفترة بعد. ابدأ بتسجيل أول فاتورة أو سند.'
                         : 'There are no documents in this period yet. Raise your first invoice or voucher.',
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: AppColors.textPrimary,
+                      color: AppTone.info.foregroundOn(theme.brightness),
                     ),
                   ),
                 ),
@@ -719,6 +726,8 @@ class _ErrorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final danger = AppTone.danger.foregroundOn(theme.brightness);
     return SurfaceCard(
       padding: const EdgeInsets.all(AppSpacing.xxl),
       child: Column(
@@ -728,14 +737,13 @@ class _ErrorCard extends StatelessWidget {
             height: 44,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: AppColors.errorSoft,
+              color: AppTone.danger.backgroundOn(
+                theme.brightness,
+                surface: theme.colorScheme.surface,
+              ),
               borderRadius: BorderRadius.circular(AppRadii.lg),
             ),
-            child: const Icon(
-              Icons.cloud_off_rounded,
-              size: 21,
-              color: AppColors.error,
-            ),
+            child: Icon(Icons.cloud_off_rounded, size: 21, color: danger),
           ),
           const SizedBox(height: AppSpacing.md),
           Text(
