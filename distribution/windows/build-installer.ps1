@@ -232,6 +232,12 @@ foreach ($relative in @('dist','prisma')) {
 foreach ($relative in @('package.json','package-lock.json','nest-cli.json','tsconfig.json','OFL-NotoNaskhArabic.txt')) {
   Copy-Item -LiteralPath (Join-Path $backend $relative) -Destination (Join-Path $app 'backend')
 }
+# The Prisma config travels with the package. Without it the installed CLI would
+# fall back to whatever the schema happens to say, so the engine choice and the
+# shadow-database rules that are tested here would not be the rules a customer's
+# machine runs. It contains no secrets: only the engine kind and the datasource
+# wiring, both read from the environment at run time.
+Copy-Item -LiteralPath (Join-Path $backend 'prisma.config.ts') -Destination (Join-Path $app 'backend')
 # Do not ship scenario runners or the demo data generator. These two modules
 # are the runtime database preparer and its direct dependencies.
 $runtimeScripts = Join-Path $app 'backend\scripts'
@@ -361,10 +367,34 @@ $repairToolExe = Join-Path $app 'RepairTool.exe'
 if (-not (Test-Path -LiteralPath $repairToolExe)) { throw 'RepairTool.exe was not produced by the C# compiler.' }
 
 Write-Host '[6/8] Verify staged runtime essentials and absence of development .env'
-$required = @('erp_kayan.exe','backend\dist\src\main.js','backend\dist\prisma\seed.js','backend\scripts\prepare-database.mjs','backend\scripts\database-state.mjs','backend\scripts\migrate-deploy.mjs','backend\node_modules\prisma\build\index.js','backend\prisma\schema.prisma','backend\prisma\migrations\migration_lock.toml','backend\node\node.exe','backend\postgres\bin\pg_ctl.exe','backend\postgres\bin\pg_isready.exe','backend\postgres\bin\initdb.exe','backend\postgres\bin\psql.exe','backend\postgres\bin\pg_dump.exe','backend\postgres\bin\pg_restore.exe','build\web\index.html','install-runtime.ps1','repair-runtime.ps1','reset-kayan.ps1','repair-kayan.bat','remove-runtime.ps1','database-control.ps1','UnelevatedProcess.cs','RepairTool.exe','prerequisites\vc_redist.x64.exe')
+$required = @('erp_kayan.exe','backend\dist\src\main.js','backend\dist\prisma\seed.js','backend\scripts\prepare-database.mjs','backend\scripts\database-state.mjs','backend\scripts\migrate-deploy.mjs','backend\node_modules\prisma\build\index.js','backend\prisma.config.ts','backend\prisma\schema.prisma','backend\prisma\migrations\migration_lock.toml','backend\node\node.exe','backend\postgres\bin\pg_ctl.exe','backend\postgres\bin\pg_isready.exe','backend\postgres\bin\initdb.exe','backend\postgres\bin\psql.exe','backend\postgres\bin\pg_dump.exe','backend\postgres\bin\pg_restore.exe','build\web\index.html','install-runtime.ps1','repair-runtime.ps1','reset-kayan.ps1','repair-kayan.bat','remove-runtime.ps1','database-control.ps1','UnelevatedProcess.cs','RepairTool.exe','prerequisites\vc_redist.x64.exe')
 foreach ($item in $required) { if (-not (Test-Path (Join-Path $app $item))) { throw "Staged package is missing $item" } }
 $migrationFiles = @(Get-ChildItem -LiteralPath (Join-Path $app 'backend\prisma\migrations') -Filter 'migration.sql' -File -Recurse)
 if ($migrationFiles.Count -eq 0) { throw 'Staged package has no Prisma migrations.' }
+# Every checked-in migration must travel. A package that ships a subset would
+# silently build a database at an older schema than the program expects.
+$sourceMigrations = @(Get-ChildItem -LiteralPath (Join-Path $backend 'prisma\migrations') -Filter 'migration.sql' -File -Recurse)
+if ($sourceMigrations.Count -ne $migrationFiles.Count) {
+  throw "Staged package has $($migrationFiles.Count) migrations but the source has $($sourceMigrations.Count)."
+}
+$sourceNames = ($sourceMigrations | ForEach-Object { $_.Directory.Name } | Sort-Object) -join ','
+$stagedNames = ($migrationFiles | ForEach-Object { $_.Directory.Name } | Sort-Object) -join ','
+if ($sourceNames -ne $stagedNames) { throw 'Staged migration set differs from the checked-in migration set.' }
+# The native (classic) schema engine is the only thing that applies migrations on
+# a customer machine, and that machine is offline: the binary has to be in the
+# package, not downloaded on first use.
+$stagedEngines = Join-Path $app 'backend\node_modules\@prisma\engines'
+$engineFiles = @(Get-ChildItem -LiteralPath $stagedEngines -File -Recurse -ErrorAction SilentlyContinue)
+if (-not $engineFiles) { throw 'Staged package has no Prisma engine files; migrate deploy could not run offline.' }
+if (-not ($engineFiles | Where-Object { $_.Name -like '*schema-engine*' })) {
+  throw 'Staged package has no Prisma schema engine; migrate deploy could not run offline.'
+}
+$schemaEngine = @($engineFiles | Where-Object { $_.Name -like '*schema-engine*' })
+$schemaEngineBytes = ($schemaEngine | Measure-Object -Property Length -Sum).Sum
+if ($schemaEngineBytes -lt 1MB) {
+  throw "The staged Prisma schema engine is implausibly small ($schemaEngineBytes bytes); it is a stub, not the engine."
+}
+Write-Host ("      Prisma schema engine staged: " + ($schemaEngine[0].Name) + " (" + $schemaEngineBytes + " bytes), migrations: " + $migrationFiles.Count)
 $secretEnvironmentFiles = Get-ChildItem -LiteralPath $app -Force -File -Recurse | Where-Object { $_.Name -eq '.env' -or $_.Name -like '.env.*' }
 if ($secretEnvironmentFiles) { throw 'Environment files are forbidden in the installer package.' }
 

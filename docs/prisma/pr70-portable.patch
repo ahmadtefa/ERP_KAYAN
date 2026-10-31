@@ -1,0 +1,220 @@
+diff --git a/backend/prisma/migrations/20261030160000_preserve_verified_licence_proof/migration.sql b/backend/prisma/migrations/20261030160000_preserve_verified_licence_proof/migration.sql
+new file mode 100644
+index 0000000..d05c534
+--- /dev/null
++++ b/backend/prisma/migrations/20261030160000_preserve_verified_licence_proof/migration.sql
+@@ -0,0 +1,3 @@
++-- Additive and nullable: existing records have no recoverable signature and
++-- must never be treated as signed merely because their payload JSON exists.
++ALTER TABLE "license_keys" ADD COLUMN "signedKey" TEXT;
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+index 0fd354f..de97213 100644
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -2351,6 +2351,9 @@ model LicenseKeyRecord {
+   licenseId   String
+   type        String
+   payloadJson String   @db.Text
++  /// Original verified signed key. Null on legacy rows that predate this field;
++  /// payloadJson alone is not cryptographic proof and cannot recover a licence.
++  signedKey   String?  @db.Text
+   machineId   String?
+   appliedAt   DateTime @default(now())
+   appliedBy   String?  @db.Uuid
+diff --git a/backend/src/modules/licensing/license-proof.spec.ts b/backend/src/modules/licensing/license-proof.spec.ts
+new file mode 100644
+index 0000000..a8fb55a
+--- /dev/null
++++ b/backend/src/modules/licensing/license-proof.spec.ts
+@@ -0,0 +1,55 @@
++import { generateKeyPairSync } from 'node:crypto';
++import { signPayload, splitKey } from './license-key';
++import { LicenseProofError, RecordedLicenseProof, verifyRecordedLicenseProof } from './license-proof';
++
++const pair = generateKeyPairSync('ed25519');
++const other = generateKeyPairSync('ed25519');
++const signedKey = signPayload({
++  v: 1, keyId: 'key_proof-0001', type: 'ACTIVATION', licenseId: 'license-proof-0001',
++  machineId: 'KM-TEST-AAAA-BBBB', issuedAt: '2026-01-01T00:00:00.000Z',
++  term: { kind: 'PERPETUAL' }, seats: { mode: 'CAP', value: 5 }, state: null,
++}, pair.privateKey);
++const payload = splitKey(signedKey);
++const record: RecordedLicenseProof = {
++  keyId: payload.payload.keyId, licenseId: payload.payload.licenseId,
++  type: payload.payload.type, machineId: payload.payload.machineId,
++  payloadJson: payload.payloadJson, signedKey,
++};
++
++describe('recorded vendor signature', () => {
++  it('returns the signed payload only after verifying the key and its row', () => {
++    expect(verifyRecordedLicenseProof(record, pair.publicKey).payload).toEqual(payload.payload);
++  });
++
++  it('refuses legacy payload-only rows rather than inventing a signature', () => {
++    try {
++      verifyRecordedLicenseProof({ ...record, signedKey: null }, pair.publicKey);
++      throw new Error('a row without proof was accepted');
++    } catch (error) {
++      expect(error).toBeInstanceOf(LicenseProofError);
++      expect((error as LicenseProofError).code).toBe('MISSING_PROOF');
++    }
++  });
++
++  it.each([
++    ['key id', { keyId: 'key_changed-1' }],
++    ['licence id', { licenseId: 'license-changed-1' }],
++    ['type', { type: 'RENEWAL' }],
++    ['machine', { machineId: 'KM-OTHER-AAAA-BBBB' }],
++    ['payload', { payloadJson: '{}' }],
++    ['signature', { signedKey: `${signedKey.slice(0, -1)}!` }],
++  ])('rejects a changed %s without exposing its contents', (_name, change) => {
++    try {
++      verifyRecordedLicenseProof({ ...record, ...change }, pair.publicKey);
++      throw new Error('changed proof was accepted');
++    } catch (error) {
++      expect(error).toBeInstanceOf(LicenseProofError);
++      expect((error as LicenseProofError).code).toBe('INVALID_PROOF');
++      expect(String(error)).not.toContain(signedKey);
++    }
++  });
++
++  it('rejects a key issued by another signer', () => {
++    expect(() => verifyRecordedLicenseProof(record, other.publicKey)).toThrow(LicenseProofError);
++  });
++});
+diff --git a/backend/src/modules/licensing/license-proof.ts b/backend/src/modules/licensing/license-proof.ts
+new file mode 100644
+index 0000000..b1b7faf
+--- /dev/null
++++ b/backend/src/modules/licensing/license-proof.ts
+@@ -0,0 +1,51 @@
++import { KeyObject } from 'node:crypto';
++
++import { ParsedLicenseKey, verifyKey } from './license-key';
++
++/** A database row is not trusted until the original signature is checked. */
++export interface RecordedLicenseProof {
++  keyId: string;
++  licenseId: string;
++  type: string;
++  machineId: string | null;
++  payloadJson: string;
++  signedKey: string | null;
++}
++
++export class LicenseProofError extends Error {
++  constructor(readonly code: 'MISSING_PROOF' | 'INVALID_PROOF') {
++    super(code === 'MISSING_PROOF'
++      ? 'The original signed licence key is unavailable; a trusted proof or reissue is required.'
++      : 'The recorded licence key could not be verified against the protected record.');
++    this.name = 'LicenseProofError';
++  }
++}
++
++/**
++ * Verify the exact vendor-signed payload, then bind it to the row. This does
++ * not validate the current machine, term, replay ledger or clock; callers
++ * must independently verify those before using the result for recovery.
++ */
++export function verifyRecordedLicenseProof(
++  record: RecordedLicenseProof,
++  publicKey: KeyObject,
++): ParsedLicenseKey {
++  if (typeof record.signedKey !== 'string' || !record.signedKey) {
++    throw new LicenseProofError('MISSING_PROOF');
++  }
++  let parsed: ParsedLicenseKey;
++  try {
++    parsed = verifyKey(record.signedKey, publicKey);
++  } catch {
++    // Do not include signed keys or payload contents in error messages.
++    throw new LicenseProofError('INVALID_PROOF');
++  }
++  if (parsed.payload.keyId !== record.keyId ||
++      parsed.payload.licenseId !== record.licenseId ||
++      parsed.payload.type !== record.type ||
++      parsed.payload.machineId !== record.machineId ||
++      parsed.payloadJson !== record.payloadJson) {
++    throw new LicenseProofError('INVALID_PROOF');
++  }
++  return parsed;
++}
+diff --git a/backend/test/units-91.integration.ts b/backend/test/units-91.integration.ts
+new file mode 100644
+index 0000000..c9a6b3d
+--- /dev/null
++++ b/backend/test/units-91.integration.ts
+@@ -0,0 +1,73 @@
++/**
++ * Real-PostgreSQL unit roundtrip. This creates data and must only be run on a
++ * disposable isolated test cluster, never on a user installation. Before
++ * running, apply the project's migrations and seed the disposable database
++ * with company KAYAN, branch MAIN and user isolated_test_operator. The fiscal
++ * period for October 2026 must be open. No HTTP/auth or licence is tested.
++ *
++ * Guarded by a dedicated opt-in, loopback port and database-name prefix. The
++ * script does not create or delete databases or alter any existing records.
++ */
++import 'reflect-metadata';
++import assert from 'node:assert/strict';
++import { NestFactory } from '@nestjs/core';
++import { AppModule } from '../src/app.module';
++import { PrismaService } from '../src/common/prisma/prisma.service';
++import { InventoryReportsService } from '../src/modules/inventory/inventory-reports.service';
++import { ItemsService } from '../src/modules/inventory/items.service';
++import { PurchaseInvoicesService } from '../src/modules/purchases/purchase-invoices.service';
++import { SalesInvoicesService } from '../src/modules/sales/sales-invoices.service';
++import { ReturnsService } from '../src/modules/returns/returns.service';
++
++async function main() {
++  assert.equal(process.env.KAYAN_DISPOSABLE_UNIT_TEST, 'yes');
++  const dbUrl = new URL(process.env.DATABASE_URL ?? '');
++  assert.equal(dbUrl.hostname, '127.0.0.1');
++  assert.equal(dbUrl.port, '55437');
++  assert.match(dbUrl.pathname, /^\/kayan_units_test_[a-z0-9_]+$/);
++  assert.ok(process.env.LICENSE_STATE_DIR?.startsWith('/home/user/demo-work/'),
++    'Use a separate disposable licence state directory');
++  const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn'] });
++  try {
++    const db = app.get(PrismaService), purchases = app.get(PurchaseInvoicesService), sales = app.get(SalesInvoicesService), returns = app.get(ReturnsService);
++    const units = app.get(InventoryReportsService), itemService = app.get(ItemsService);
++    const company = await db.company.findUniqueOrThrow({where: {code: 'KAYAN'}});
++    const branch = await db.branch.findFirstOrThrow({where: {companyId: company.id, code: 'MAIN'}});
++    const user = await db.user.findUniqueOrThrow({where: {username: 'isolated_test_operator'}});
++    const C=company.id, B=branch.id, U=user.id;
++    const supplier = await db.supplier.create({data:{companyId:C,code:'SYN-SUP',nameEn:'Synthetic supplier',nameAr:'مورد افتراضي'}});
++    const customer = await db.customer.create({data:{companyId:C,code:'SYN-CUS',nameEn:'Synthetic customer',nameAr:'عميل افتراضي'}});
++    const item = await db.item.create({data:{companyId:C,code:'SYN-ITEM',nameEn:'Synthetic item',nameAr:'صنف افتراضي',unit:'عبوة',salePrice:'10',purchasePrice:'7',taxRate:'14',units:{create:[{unit:'عبوة',factor:'1',barcode:'2000000000103'},{unit:'كرتونة',factor:'12',barcode:'2000000000202'}]}},include:{units:true}});
++    const carton = item.units.find(x=>x.unit==='كرتونة')!;
++    const barcode = await itemService.findByBarcode(C,'2000000000202');
++    assert.equal(barcode.quantityPerScan,'12.0000'); assert.equal(barcode.salePrice,'120.0000'); assert.equal(barcode.purchasePrice,'84.0000');
++    const balance = async ()=>(await db.stockBalance.findUniqueOrThrow({where:{companyId_branchId_itemId:{companyId:C,branchId:B,itemId:item.id}}}));
++    const purchase = await purchases.create(C,B,U,{invoiceDate:'2026-10-01',supplierId:supplier.id,lines:[{itemId:item.id,quantity:'10',unitName:'كرتونة',taxRate:'14'}]} as never);
++    await purchases.post(C,U,purchase.id);
++    const pi=await db.purchaseInvoice.findUniqueOrThrow({where:{id:purchase.id},include:{lines:true}});
++    assert.equal(pi.lines[0].quantity.toFixed(4),'120.0000'); assert.equal(pi.lines[0].unitPrice.toFixed(4),'84.0000'); assert.equal(pi.subTotal.toFixed(4),'840.0000'); assert.equal(pi.taxAmount.toFixed(4),'117.6000');
++    assert.equal((await balance()).quantity.toFixed(4),'120.0000');
++    const saleCarton=await sales.create(C,B,U,{invoiceDate:'2026-10-02',customerId:customer.id,lines:[{itemId:item.id,quantity:'3',unitName:'كرتونة',taxRate:'14'}]} as never);
++    await sales.post(C,U,saleCarton.id);
++    const si=await db.salesInvoice.findUniqueOrThrow({where:{id:saleCarton.id},include:{lines:true}});
++    assert.equal(si.lines[0].quantity.toFixed(4),'36.0000');assert.equal(si.lines[0].unitPrice.toFixed(4),'120.0000');assert.equal(si.subTotal.toFixed(4),'360.0000');assert.equal(si.taxAmount.toFixed(4),'50.4000');
++    assert.equal((await balance()).quantity.toFixed(4),'84.0000');
++    const salePiece=await sales.create(C,B,U,{invoiceDate:'2026-10-03',customerId:customer.id,lines:[{itemId:item.id,quantity:'5',unitName:'عبوة',taxRate:'14'}]} as never);
++    await sales.post(C,U,salePiece.id);assert.equal((await balance()).quantity.toFixed(4),'79.0000');
++    await units.updateUnit(C,U,item.id,carton.id,{factor:'10'});
++    const still=await db.salesInvoiceLine.findUniqueOrThrow({where:{id:si.lines[0].id}});
++    assert.equal(still.unitFactor!.toFixed(6),'12.000000'); assert.equal(still.quantity.toFixed(4),'36.0000');
++    const ret=await returns.createSalesReturn(C,B,U,{originalInvoiceId:saleCarton.id,returnDate:'2026-10-04',lines:[{originalLineId:si.lines[0].id,quantity:'1',unitName:'كرتونة'}]});
++    await returns.postSalesReturn(C,U,ret.id);
++    const returned=await db.salesInvoice.findUniqueOrThrow({where:{id:ret.id},include:{lines:true}});
++    assert.equal(returned.lines[0].unitFactor!.toFixed(6),'12.000000');assert.equal(returned.lines[0].quantity.toFixed(4),'12.0000');
++    const final=await balance(); assert.equal(final.quantity.toFixed(4),'91.0000'); assert.equal(final.value.toFixed(4),'637.0000');
++    for(const entry of await db.journalEntry.findMany({where:{companyId:C},include:{lines:true}})) {
++      const debit=entry.lines.reduce((sum,l)=>sum.plus(l.debit),new (require('@prisma/client').Prisma.Decimal)(0));
++      const credit=entry.lines.reduce((sum,l)=>sum.plus(l.credit),new (require('@prisma/client').Prisma.Decimal)(0));
++      assert(debit.equals(credit),`unbalanced journal ${entry.entryNumber}`);
++    }
++    console.log(JSON.stringify({result:'PASS',purchase:'120',afterThreeCartons:'84',afterFivePieces:'79',afterOneCartonReturn:'91',stockValue:final.value.toFixed(4),historicFactor:'12',newUnitFactor:'10',taxPurchase:pi.taxAmount.toFixed(4),taxSales:si.taxAmount.toFixed(4),note:'direct Nest services and synthetic PostgreSQL; no HTTP, authorization or UI'}));
++  } finally { await app.close(); }
++}
++main().catch(e=>{console.error(e);process.exitCode=1});

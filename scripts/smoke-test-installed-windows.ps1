@@ -834,6 +834,58 @@ if ($installedManifest -and $installedManifest.nodeVersion) {
 }
 Write-Output ("::notice::Bundled runtimes execute: Node $bundledNodeVersion, $bundledPgVersion, from " + $installRoot + ".")
 
+# ── The installed package really can migrate a database offline ──────────────
+# The installer claims to ship everything Prisma needs. That claim is only worth
+# anything if the *installed* copy is checked: the config, the schema, every
+# checked-in migration and the native schema engine, which is what actually
+# applies migrations on a customer machine that has no internet access.
+Write-SmokePhase 'Smoke: checking the installed Prisma migration payload.'
+$backendRoot = Join-Path $installRoot 'backend'
+$prismaCli = Join-Path $backendRoot 'node_modules\prisma\build\index.js'
+$prismaConfig = Join-Path $backendRoot 'prisma.config.ts'
+$prismaSchema = Join-Path $backendRoot 'prisma\schema.prisma'
+$prismaMigrations = Join-Path $backendRoot 'prisma\migrations'
+foreach ($item in @($prismaCli, $prismaConfig, $prismaSchema)) {
+  if (-not (Test-Path -LiteralPath $item -PathType Leaf)) {
+    Fail "The installed package is missing a Prisma file the migration path needs: $item"
+  }
+}
+$installedMigrations = @(Get-ChildItem -LiteralPath $prismaMigrations -Filter 'migration.sql' -File -Recurse -ErrorAction SilentlyContinue)
+if ($installedMigrations.Count -lt 40) {
+  Fail ("The installed package ships only $($installedMigrations.Count) migrations; the program would build an older database than it expects.")
+}
+$engineDir = Join-Path $backendRoot 'node_modules\@prisma\engines'
+$schemaEngines = @(Get-ChildItem -LiteralPath $engineDir -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*schema-engine*' })
+if ($schemaEngines.Count -eq 0) {
+  Fail "The installed package has no Prisma schema engine, so an offline machine could never apply a migration."
+}
+$schemaEngineBytes = ($schemaEngines | Measure-Object -Property Length -Sum).Sum
+if ($schemaEngineBytes -lt 1MB) {
+  Fail ("The installed Prisma schema engine is implausibly small ($schemaEngineBytes bytes); it is a stub, not the engine.")
+}
+# The config must select the native engine, not the experimental JavaScript one:
+# a package whose config switched engines would migrate customer databases with
+# something CI never tested.
+$configText = Get-Content -LiteralPath $prismaConfig -Raw
+if ($configText -notmatch "engine:\s*'classic'") {
+  Fail 'The installed prisma.config.ts does not select the classic (native) schema engine.'
+}
+if ($configText -match "engine:\s*'js'") {
+  Fail "The installed prisma.config.ts selects the experimental JavaScript schema engine, which is not the tested migration path."
+}
+# And the installed CLI must be able to report its own engine version offline,
+# which fails if the engine binary is missing or unreadable.
+$engineProbe = Join-Path $env:TEMP 'kayan-prisma-version.log'
+$engineProbeExit = Invoke-KayanBoundedProcess -FilePath $node -ArgumentList @($prismaCli, '--version') -TimeoutSeconds 180 -What 'the installed Prisma CLI engine check' -StandardOutput $engineProbe -StandardError "$engineProbe.err"
+$engineProbeText = ((@(Get-Content -LiteralPath $engineProbe -ErrorAction SilentlyContinue) + @(Get-Content -LiteralPath "$engineProbe.err" -ErrorAction SilentlyContinue)) -join "`n").Trim()
+if ($engineProbeExit -ne 0) {
+  Fail ("The installed Prisma CLI cannot report its engine version (exit $engineProbeExit): $engineProbeText")
+}
+if ($engineProbeText -notmatch '(?i)engines|schema-engine') {
+  Fail ("The installed Prisma CLI reported no engine information: $engineProbeText")
+}
+Write-Output ("::notice::Installed Prisma payload: " + $installedMigrations.Count + " migrations, schema engine " + $schemaEngines[0].Name + " (" + $schemaEngineBytes + " bytes), offline CLI report OK.")
+
 # ── A damaged bundled Node.js must be reported, never repaired over ──────────
 # The company database, the licence state and the service must all survive this
 # untouched: the only correct outcome is a loud, specific diagnosis.
