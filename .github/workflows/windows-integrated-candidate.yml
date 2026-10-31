@@ -78,18 +78,20 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
-      # Use a separate native config: the local experimental JS schema-engine
-      # configuration is not evidence for a standard Prisma CLI migration.
+      # The shipped prisma.config.ts now selects Prisma 6's classic (native)
+      # schema engine itself, so this job exercises the same configuration the
+      # installer ships instead of a config invented for CI. If that ever drifts
+      # back to the experimental engine, these commands fail here.
       - name: Standard native Prisma generate, validate and clean deploy
         shell: bash
         run: |
           set -euo pipefail
           test -z "${PRISMA_SCHEMA_ENGINE_BINARY:-}${PRISMA_QUERY_ENGINE_LIBRARY:-}"
-          printf "import { defineConfig } from 'prisma/config';\nexport default defineConfig({schema: 'prisma/schema.prisma'});\n" > prisma-native-ci.config.ts
-          trap 'rm -f prisma-native-ci.config.ts' EXIT
-          npx prisma generate --config prisma-native-ci.config.ts
-          npx prisma validate --config prisma-native-ci.config.ts
-          npx prisma migrate deploy --config prisma-native-ci.config.ts
+          test -z "${KAYAN_PRISMA_SHADOW_DATABASE_URL:-}${KAYAN_PRISMA_SHADOW_VERIFIED:-}"
+          grep -q "engine: 'classic'" prisma.config.ts
+          npx prisma generate
+          npx prisma validate
+          npx prisma migrate deploy
       - run: npx tsc --noEmit
       - run: npm run build
       - name: Standard native Prisma populated upgrade with data checks
