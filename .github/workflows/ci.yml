@@ -291,7 +291,12 @@ jobs:
           summary=$(grep -h "checks passed" /tmp/kayan-smoke.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Scenario checks::${summary:-summary not captured}"
       - name: Audit production dependencies
-        run: npm audit --omit=dev
+        # Never weaker than `npm audit --omit=dev`, but precise: high and critical
+        # fail outright, and anything else must be a reviewed, expiring entry in
+        # backend/security/audit-allowlist.json with the reason it is unreachable.
+        # A stale entry - or an entry that no longer matches a live advisory -
+        # fails the step, so the list cannot become a blanket suppression.
+        run: node scripts/audit-gate.mjs
 
   regressions:
     name: Regression scenario (reported issues 1-9)
