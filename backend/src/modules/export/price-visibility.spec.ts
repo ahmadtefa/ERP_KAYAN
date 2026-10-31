@@ -262,6 +262,18 @@ describe('applyPriceVisibility on a stock movement sheet', () => {
     expect(html).not.toContain('120.0000');
   });
 
+  it('keeps a cost centre, which is a place, while hiding what things are worth', () => {
+    const withCentre: ReportTable = {
+      ...ledger,
+      meta: [
+        ...ledger.meta,
+        { labelEn: 'Cost centre', labelAr: 'مركز التكلفة', value: 'Marketing' },
+      ],
+    };
+    const result = applyPriceVisibility(withCentre, { showCost: 'false' });
+    expect(result.meta.map((row) => row.labelEn)).toEqual(['Item code', 'Cost centre']);
+  });
+
   it('keeps the quantities a storekeeper needs, and only those', () => {
     const result = applyPriceVisibility(ledger, { showCost: 'false', showSalePrice: 'false' });
     expect(result.rows[0]).toEqual({

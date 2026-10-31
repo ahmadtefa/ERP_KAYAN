@@ -148,8 +148,11 @@ export function applyPriceVisibility<T extends ReportTable>(
     // figure a cost?".
     meta: source.meta.filter((row) => {
       const labels = row.labelEn + ' ' + row.labelAr;
-      if (!showCost && COST_TOTAL_LABEL.test(labels)) return false;
-      if (!showSalePrice && SALE_TOTAL_LABEL.test(labels)) return false;
+      // A cost centre is a dimension, not a figure: hiding the money must not
+      // take away the name of the department a sheet is filed under.
+      const isDimension = /centre|center|مركز/i.test(labels);
+      if (!showCost && !isDimension && COST_TOTAL_LABEL.test(labels)) return false;
+      if (!showSalePrice && !isDimension && SALE_TOTAL_LABEL.test(labels)) return false;
       return true;
     }),
     columns: source.columns.filter((column) => !hiddenKeys.has(column.key)),
