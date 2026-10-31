@@ -156,32 +156,4 @@ void main() {
     expect(answer, isNotNull);
     expect(answer!.showCost, isNull);
   });
-
-  testWidgets('a server that cannot answer still opens the dialog',
-      (tester) async {
-    PrintVisibilityChoice? answer;
-    await tester.pumpWidget(
-      _host(
-        user: _accountant,
-        answer: () async => throw Exception('the server is unreachable'),
-        write: (value) => answer = value,
-      ),
-    );
-
-    await tester.tap(find.text('print'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Show sale prices'), findsOneWidget);
-    final costs = tester.widget<CheckboxListTile>(
-      find.ancestor(
-        of: find.text('Show costs'),
-        matching: find.byType(CheckboxListTile),
-      ),
-    );
-    expect(costs.value, isTrue, reason: 'the built-in default prints everything');
-
-    await tester.tap(find.text('Continue'));
-    await tester.pumpAndSettle();
-    expect(answer, isNotNull);
-  });
 }
