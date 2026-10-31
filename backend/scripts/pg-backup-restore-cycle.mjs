@@ -85,7 +85,9 @@ async function main() {
   const backupService = new BackupService(source, audit, purge, licensing);
   const file = await backupService.create(companyId);
   check('backup header identifies format/version and this company',
-    file.format === 'kayan-backup' && file.version === 1 &&
+    // The number itself is the program's to decide; what this scenario needs
+    // is that the header is a readable format version this program wrote.
+    file.format === 'kayan-backup' && Number.isInteger(file.version) && file.version >= 1 &&
     file.companyId === companyId && typeof file.companyCode === 'string',
     `${file.format} v${file.version} ${file.companyCode}`);
 

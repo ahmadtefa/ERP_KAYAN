@@ -10,27 +10,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'test_harness.dart';
 
-/// The server's answer, as the screen would receive it.
-class _FakePrintSettings implements PrintSettingsDataSource {
-  _FakePrintSettings(this._answer);
-
-  final PrintSettings? _answer;
-  int fetches = 0;
-
-  @override
-  Future<PrintSettings> fetch() async {
-    fetches += 1;
-    if (_answer == null) throw Exception('the server is unreachable');
-    return _answer!;
-  }
-
-  @override
-  Future<PrintSettings> save(
-    List<PrintPriceSetting> settings,
-    List<String> keys,
-  ) async => _answer!;
-}
-
 const _accountant = AppUser(
   id: 'u1',
   username: 'accountant',
@@ -66,16 +45,25 @@ PrintSettings _policy({
       costLocked: costLocked,
     );
 
+/// A screen with one button that opens the shared dialog, so a test reads
+/// exactly what a print button would send.
 Widget _host({
   required AppUser user,
-  required PrintSettingsDataSource source,
+  required Future<PrintSettings> Function() answer,
   required void Function(PrintVisibilityChoice?) write,
+  void Function()? onFetched,
 }) =>
     wrapWithApp(
       child: ProviderScope(
         overrides: [
           currentUserProvider.overrideWithValue(user),
-          printSettingsDataSourceProvider.overrideWithValue(source),
+          // The company's policy, straight from the provider the print buttons
+          // read. Counting the reads is what shows the dialog asked for it
+          // instead of starting from the built-in default.
+          printSettingsProvider.overrideWith((ref) async {
+            onFetched?.call();
+            return answer();
+          }),
         ],
         child: Consumer(
           builder: (context, ref, _) => Center(
@@ -102,20 +90,22 @@ void main() {
     'the first print of a session already starts from the saved policy',
     (tester) async {
       PrintVisibilityChoice? answer;
-      final source = _FakePrintSettings(
-        _policy(showSalePrice: false, showCost: true),
-      );
+      var fetches = 0;
       await tester.pumpWidget(
-        _host(user: _accountant, source: source, write: (value) => answer = value),
+        _host(
+          user: _accountant,
+          answer: () async => _policy(showSalePrice: false, showCost: true),
+          onFetched: () => fetches += 1,
+          write: (value) => answer = value,
+        ),
       );
 
       await tester.tap(find.text('print'));
       await tester.pumpAndSettle();
 
-      // The provider had not been read before this tap: the dialog had to go
-      // and fetch the policy, which is exactly what the screen never did when
-      // the settings page had not been opened.
-      expect(source.fetches, 1);
+      // Nothing had read the policy before this tap, so the dialog had to ask
+      // for it. That is exactly the step the screen never took before.
+      expect(fetches, 1);
 
       final salePrice = tester.widget<CheckboxListTile>(
         find.ancestor(
@@ -136,13 +126,16 @@ void main() {
     },
   );
 
-  testWidgets('a caller who may not read a cost is not offered one', (tester) async {
+  testWidgets('a caller who may not read a cost is not offered one',
+      (tester) async {
     PrintVisibilityChoice? answer;
-    final source = _FakePrintSettings(
-      _policy(showSalePrice: true, showCost: true, costLocked: true),
-    );
     await tester.pumpWidget(
-      _host(user: _clerk, source: source, write: (value) => answer = value),
+      _host(
+        user: _clerk,
+        answer: () async =>
+            _policy(showSalePrice: true, showCost: true, costLocked: true),
+        write: (value) => answer = value,
+      ),
     );
 
     await tester.tap(find.text('print'));
@@ -164,11 +157,15 @@ void main() {
     expect(answer!.showCost, isNull);
   });
 
-  testWidgets('a server that cannot answer still opens the dialog', (tester) async {
+  testWidgets('a server that cannot answer still opens the dialog',
+      (tester) async {
     PrintVisibilityChoice? answer;
-    final source = _FakePrintSettings(null);
     await tester.pumpWidget(
-      _host(user: _accountant, source: source, write: (value) => answer = value),
+      _host(
+        user: _accountant,
+        answer: () async => throw Exception('the server is unreachable'),
+        write: (value) => answer = value,
+      ),
     );
 
     await tester.tap(find.text('print'));

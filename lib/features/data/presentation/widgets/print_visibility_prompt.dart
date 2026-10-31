@@ -38,8 +38,8 @@ Future<PrintVisibilityChoice?> promptPriceVisibility(
     } catch (_) {
       settings = null;
     }
-    if (!context.mounted) return null;
   }
+  if (!context.mounted) return null;
   final locked = settings?.costLocked ?? !mayReadCost;
   final start = settings?.forType(typeKey) ??
       const PrintPriceSetting(showSalePrice: true, showCost: true);

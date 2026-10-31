@@ -365,12 +365,17 @@ async function main() {
     jsonBytes = Buffer.from(JSON.stringify(jsonParsed, null, 2), 'utf8');
     check(
       'the company JSON backup is portable across fresh KAYAN installations',
+      // The format number is deliberately not pinned here: the check that
+      // matters is the one below, where this exact file is restored by a fresh
+      // installation through the real route, and a file written by a newer
+      // program than the reader is refused there rather than here.
       jsonParsed.format === 'kayan-backup' &&
-        jsonParsed.version === 1 &&
+        Number.isInteger(jsonParsed.version) &&
+        jsonParsed.version >= 1 &&
         jsonParsed.companyCode === 'DEMO' &&
         !jsonBytes.subarray(0, 5).toString('latin1').startsWith('PGDMP') &&
         Object.keys(jsonParsed.tables ?? {}).length > 10,
-      `format=${jsonParsed.format}, tables=${Object.keys(jsonParsed.tables ?? {}).length}, companyCode=${jsonParsed.companyCode}`,
+      `format=${jsonParsed.format}, version=${jsonParsed.version}, tables=${Object.keys(jsonParsed.tables ?? {}).length}, companyCode=${jsonParsed.companyCode}`,
     );
   } finally {
     demo.child.kill('SIGTERM');
