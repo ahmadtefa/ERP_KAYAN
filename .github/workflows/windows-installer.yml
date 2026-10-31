@@ -104,6 +104,7 @@ jobs:
             'distribution\windows\install-runtime.ps1',
             'distribution\windows\repair-runtime.ps1',
             'distribution\windows\reset-kayan.ps1',
+            'distribution\windows\verify-licensed-install.ps1',
             'distribution\windows\build-installer.ps1',
             'distribution\windows\build-repair-tool.ps1'
           )

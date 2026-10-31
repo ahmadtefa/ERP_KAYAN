@@ -67,6 +67,36 @@ build; it refuses the production public key and creates a
 runtime still shares customer paths and services; labelling is not isolation.
 The manifest records `licenseBuildKind` and `licenseEnforcement`.
 
+### Exercising the three delivered features on a licensed installation
+
+`scripts\smoke-test-installed-windows.ps1` installs on a throwaway GitHub
+runner and is deliberately non-installable for a licensed case: a product Setup
+enforces its licence, an activation key names one computer's fingerprint, and
+only the supplier's private key can sign one. CI therefore proves the licence
+*wall* (business routes 403 while unlicensed, sign-in and activation reachable,
+public key removal and restoration) and stops there; it never claims the three
+features passed on an installed copy.
+
+On the machine the licence names, run the checker against the installation:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File distribution\windows\verify-licensed-install.ps1 `
+  -ActivationKeyPath .\kayan-activation.key `
+  -AdminUsername administrator -AdminPassword '<password>' -ConfirmTestCompany
+```
+
+It finds the running API of the installed program (never a development
+server), activates this machine with the key if one is given - the same call
+the licence screen makes - refuses nothing and bypasses nothing, and then runs
+`backend\scripts\verify-installed-features.mjs` on the bundled Node runtime so
+the PDFs are read back with the `pdf-lib` that ships in the installation. It
+writes `%TEMP%\kayan-licensed-install-report.json` and exits 0 only when every
+check passed; exit code 2 means "no licence, nothing proven", with this
+machine's activation request code printed. It moves no key, resets nothing and
+edits no company setting. The checker creates test documents (an item, a
+quotation, a purchase, an issue, a stock count, a clerk user), so point it at a
+test company.
+
 Pull-request CI runs are test-signed; pushes default to product and manual runs
 select the mode. Product builds fail closed rather than falling back to a test
 key. CI no longer receives the production signing secret and does not run the
