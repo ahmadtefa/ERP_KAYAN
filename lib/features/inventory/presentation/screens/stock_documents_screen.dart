@@ -128,17 +128,17 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                 label: Text(_arabic ? 'فروق الجرد' : 'Stock-take differences'),
               ),
               OutlinedButton.icon(
-                onPressed: () => _printReport('valuation'),
+                onPressed: () => _printReport('valuation', typeKey: 'inventory-valuation'),
                 icon: const Icon(Icons.price_check_outlined, size: 18),
                 label: Text(_arabic ? 'تقييم المخزون (طباعة)' : 'Valuation (print)'),
               ),
               OutlinedButton.icon(
-                onPressed: () => _printReport('slow-moving'),
+                onPressed: () => _printReport('slow-moving', typeKey: 'slow-moving'),
                 icon: const Icon(Icons.hourglass_bottom_outlined, size: 18),
                 label: Text(_arabic ? 'المخزون الراكد (طباعة)' : 'Slow-moving (print)'),
               ),
               OutlinedButton.icon(
-                onPressed: () => _printReport('reorder'),
+                onPressed: () => _printReport('reorder', typeKey: 'reorder'),
                 icon: const Icon(Icons.shopping_cart_checkout_outlined, size: 18),
                 label: Text(_arabic ? 'حدود إعادة الطلب (طباعة)' : 'Reorder (print)'),
               ),
@@ -231,7 +231,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${text(row, 'documentDate')} • ${(row['lines'] is List) ? (row['lines'] as List).length : 0} '
+                    '${text(row, 'documentDate')} • ${text(row, 'lineCount').isEmpty ? '0' : text(row, 'lineCount')} '
                     '${_arabic ? 'سطر' : 'line(s)'} • ${posted ? (_arabic ? 'مُرحّل' : 'posted') : (_arabic ? 'مسودة' : 'draft')}'
                     '${canSeeCost ? '' : ' • ${_arabic ? 'بدون تكلفة' : 'no cost'}'}',
                     style: Theme.of(context).textTheme.bodySmall,
@@ -311,11 +311,11 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
     }
   }
 
-  Future<void> _printReport(String report) async {
+  Future<void> _printReport(String report, {required String typeKey}) async {
     final visibility = await promptPriceVisibility(
       context,
       ref,
-      typeKey: 'inventory-$report',
+      typeKey: typeKey,
       arabic: _arabic,
     );
     if (visibility == null || !mounted) return;

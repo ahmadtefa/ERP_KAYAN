@@ -10,7 +10,6 @@ import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/discount_math.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/platform/browser_actions.dart';
-import '../../../../core/platform/picked_file.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
 import '../../../../shared/widgets/page_header.dart';
@@ -1156,7 +1155,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     final showNumbers = _background['showPageNumbers'] != false;
     final pages = current?.pageCount ?? 1;
     final selectedPage = (_background['page'] is int)
-        ? (_background['page'] as int).clamp(1, pages)
+        ? (_background['page'] as int).clamp(1, pages).toInt()
         : 1;
     final canManage = ref.watch(currentUserProvider)?.can('sales.quotations.manage') ?? false;
 

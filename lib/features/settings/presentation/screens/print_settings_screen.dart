@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/widgets/page_header.dart';
-import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../data/print_settings_data_source.dart';
 import '../providers/print_settings_providers.dart';
 

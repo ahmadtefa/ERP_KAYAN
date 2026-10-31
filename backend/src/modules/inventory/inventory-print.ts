@@ -372,7 +372,6 @@ export function stockTakeVarianceTable(report: {
   const totalsSource = report.totals ?? {};
   if (totalsSource.shortageQuantity != null) {
     totals.push({
-      key: 'shortageQuantity',
       labelEn: 'Shortage quantity',
       labelAr: 'كمية النقص',
       value: totalsSource.shortageQuantity,
@@ -380,7 +379,6 @@ export function stockTakeVarianceTable(report: {
   }
   if (totalsSource.surplusQuantity != null) {
     totals.push({
-      key: 'surplusQuantity',
       labelEn: 'Surplus quantity',
       labelAr: 'كمية الزيادة',
       value: totalsSource.surplusQuantity,
@@ -388,7 +386,6 @@ export function stockTakeVarianceTable(report: {
   }
   if (totalsSource.shortageValue != null) {
     totals.push({
-      key: 'shortageValue',
       labelEn: 'Shortage cost',
       labelAr: 'تكلفة النقص',
       value: totalsSource.shortageValue,
@@ -396,7 +393,6 @@ export function stockTakeVarianceTable(report: {
   }
   if (totalsSource.surplusValue != null) {
     totals.push({
-      key: 'surplusValue',
       labelEn: 'Surplus cost',
       labelAr: 'تكلفة الزيادة',
       value: totalsSource.surplusValue,
@@ -404,7 +400,6 @@ export function stockTakeVarianceTable(report: {
   }
   if (totalsSource.netValue != null) {
     totals.push({
-      key: 'netValue',
       labelEn: 'Net cost of differences',
       labelAr: 'صافي تكلفة الفروق',
       value: totalsSource.netValue,

@@ -232,9 +232,9 @@ describe('the stock-take sheet', () => {
     expect(keys).toEqual(
       expect.arrayContaining(['systemQuantity', 'countedQuantity', 'varianceQuantity']),
     );
-    expect(redacted.totals.map((total) => total.key)).toEqual([
-      'shortageQuantity',
-      'surplusQuantity',
+    expect(redacted.totals.map((total) => total.labelEn)).toEqual([
+      'Shortage quantity',
+      'Surplus quantity',
     ]);
     expect(JSON.stringify(redacted)).not.toContain('210.0000');
     expect(JSON.stringify(redacted)).not.toContain('10.0000');

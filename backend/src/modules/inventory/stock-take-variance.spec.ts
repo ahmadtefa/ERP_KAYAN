@@ -53,8 +53,8 @@ describe('the stock-take variance report', () => {
       prisma,
       report: new InventoryReportsService(
         prisma as never,
-        settings as never,
         audit as never,
+        settings as never,
       ),
     };
   }
