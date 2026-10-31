@@ -483,6 +483,49 @@ async function main() {
     sequenceSizes.map((size) => size.join('x')).join(' '),
   );
 
+  // SINGLE_PAGE names one artwork page and uses it behind every page of the
+  // offer. The two pages of this letterhead are deliberately different sizes,
+  // so "which page was used" is visible in the printed sheet itself.
+  const singlePage = await must('print the offer on one chosen artwork page', `/sales/quotations/${offer.id}`, {
+    method: 'PUT',
+    json: offerBody({
+      backgroundFileId: uploaded.id,
+      background: { mode: 'SINGLE_PAGE', page: 2, showPageNumbers: true },
+    }),
+  });
+  check(
+    'the offer remembers the single page it was told to use',
+    singlePage?.background?.mode === 'SINGLE_PAGE' && Number(singlePage?.background?.page) === 2,
+    JSON.stringify(singlePage?.background ?? null),
+  );
+  const singlePdf = await api(`/sales/quotations/${offer.id}/pdf?lang=en`);
+  const singleSizes = Buffer.isBuffer(singlePdf.data) ? await pageSizes(singlePdf.data) : [];
+  check(
+    'SINGLE_PAGE puts the second artwork page behind every page, and the first behind none',
+    singlePdf.status === 200 &&
+      singleSizes.length === plainSizes.length &&
+      singleSizes.every((size) => Math.abs(size[0] - 620) < 1 && Math.abs(size[1] - 820) < 1),
+    singleSizes.map((size) => size.join('x')).join(' '),
+  );
+
+  // A page the file does not have is clamped to the last page that exists,
+  // rather than producing a sheet with no artwork on it.
+  await must('ask for an artwork page that does not exist', `/sales/quotations/${offer.id}`, {
+    method: 'PUT',
+    json: offerBody({
+      backgroundFileId: uploaded.id,
+      background: { mode: 'SINGLE_PAGE', page: 99 },
+    }),
+  });
+  const clampedPdf = await api(`/sales/quotations/${offer.id}/pdf?lang=en`);
+  const clampedSizes = Buffer.isBuffer(clampedPdf.data) ? await pageSizes(clampedPdf.data) : [];
+  check(
+    'a page beyond the file falls back to the last page it has',
+    clampedSizes.length === plainSizes.length &&
+      clampedSizes.every((size) => Math.abs(size[0] - 620) < 1),
+    clampedSizes.map((size) => size.join('x')).join(' '),
+  );
+
   await must('detach the letterhead', `/sales/quotations/${offer.id}`, {
     method: 'PUT',
     json: offerBody({ backgroundFileId: null, background: null }),
