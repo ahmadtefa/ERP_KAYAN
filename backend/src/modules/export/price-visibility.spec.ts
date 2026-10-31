@@ -1,5 +1,5 @@
 import { applyPriceVisibility, resolvePriceVisibility } from './price-visibility';
-import { toPrintHtml } from './writers';
+import { toCsv, toPrintHtml } from './writers';
 import { ReportTable } from './report-table';
 
 const table: ReportTable = {
@@ -211,7 +211,10 @@ describe('applyPriceVisibility on a stock movement sheet', () => {
     slug: 'stock-ledger',
     titleEn: 'Stock card',
     titleAr: 'بطاقة صنف',
-    meta: [],
+    meta: [
+      { labelEn: 'Item code', labelAr: 'كود الصنف', value: 'A1' },
+      { labelEn: 'Stock value', labelAr: 'قيمة المخزون', value: '120.0000' },
+    ],
     columns: [
       { key: 'date', labelEn: 'Date', labelAr: 'التاريخ' },
       { key: 'quantity', labelEn: 'Quantity', labelAr: 'الكمية', numeric: true },
@@ -251,6 +254,14 @@ describe('applyPriceVisibility on a stock movement sheet', () => {
     expect(html).not.toContain('120.0000');
   });
 
+  it('also takes the valuation figure that sits above the table', () => {
+    const result = applyPriceVisibility(ledger, { showCost: 'false' });
+    expect(result.meta.map((row) => row.labelEn)).toEqual(['Item code']);
+    const html = toPrintHtml(result, 'en', 'KAYAN', { autoPrint: false, logo: null, companyDetails: [] });
+    expect(html).not.toContain('Stock value');
+    expect(html).not.toContain('120.0000');
+  });
+
   it('keeps the quantities a storekeeper needs, and only those', () => {
     const result = applyPriceVisibility(ledger, { showCost: 'false', showSalePrice: 'false' });
     expect(result.rows[0]).toEqual({
@@ -258,5 +269,44 @@ describe('applyPriceVisibility on a stock movement sheet', () => {
       quantity: '12.0000',
       runningQuantity: '12.0000',
     });
+  });
+
+  it('takes a cost total off the sheet and leaves the counts', () => {
+    const withTotal: ReportTable = {
+      ...ledger,
+      totals: [
+        { labelEn: 'Total quantity', labelAr: 'إجمالي الكمية', value: '12.0000' },
+        { labelEn: 'Stock value', labelAr: 'قيمة المخزون', value: '120.0000' },
+      ],
+    };
+    const result = applyPriceVisibility(withTotal, { showCost: 'false' });
+    expect(result.totals).toEqual([
+      { labelEn: 'Total quantity', labelAr: 'إجمالي الكمية', value: '12.0000' },
+    ]);
+  });
+
+  it('leaves the same hole in the exported file, not only in the printed page', () => {
+    const result = applyPriceVisibility(ledger, { showCost: 'false' });
+    const csv = toCsv(result, 'en', 'KAYAN').toString('utf8');
+    expect(csv).toContain('Quantity');
+    expect(csv).not.toContain('Stock value');
+    expect(csv).not.toContain('Unit cost');
+    expect(csv).not.toContain('10.0000');
+    expect(csv).not.toContain('120.0000');
+
+    const arabic = toCsv(applyPriceVisibility(ledger, { showCost: 'false' }), 'ar', 'كيان').toString('utf8');
+    expect(arabic).not.toContain('قيمة المخزون');
+    expect(arabic).not.toContain('تكلفة الوحدة');
+  });
+
+  it('never changes the table it was handed', () => {
+    const before = JSON.parse(JSON.stringify(ledger));
+    applyPriceVisibility(ledger, { showCost: 'false', showSalePrice: 'false' });
+    expect(JSON.parse(JSON.stringify(ledger))).toEqual(before);
+  });
+
+  it('gives the whole sheet to a caller who may read cost', () => {
+    expect(applyPriceVisibility(ledger, { showCost: 'true' })).toBe(ledger);
+    expect(applyPriceVisibility(ledger, {})).toBe(ledger);
   });
 });

@@ -140,6 +140,18 @@ export function applyPriceVisibility<T extends ReportTable>(
 
   return {
     ...source,
+    // The figures above the table - "Stock value", "Average cost", a valuation
+    // at the top of a report - are not columns, so hiding a column never
+    // touched them. A storekeeper reading a movement sheet does not need what
+    // the item is worth, and leaving these behind told them anyway. The same
+    // labels decide here as for the totals, so one place answers "is this
+    // figure a cost?".
+    meta: source.meta.filter((row) => {
+      const labels = row.labelEn + ' ' + row.labelAr;
+      if (!showCost && COST_TOTAL_LABEL.test(labels)) return false;
+      if (!showSalePrice && SALE_TOTAL_LABEL.test(labels)) return false;
+      return true;
+    }),
     columns: source.columns.filter((column) => !hiddenKeys.has(column.key)),
     rows: source.rows.map((row) => {
       const next = { ...row };
