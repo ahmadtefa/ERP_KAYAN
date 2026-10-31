@@ -382,9 +382,10 @@ describeWithBrowser('quotation PDF through the real browser renderer', () => {
         expect(numbers).toEqual([`${index + 1} / ${merged.pages}`]);
       });
 
-      // The artwork sits behind: the first page of the letterhead, then the
-      // second, repeated once its pages run out.
-      expect(merged.backgroundPages.slice(0, 3)).toEqual([1, 2, 2]);
+      // The artwork sits behind: its first page, then its second, repeated
+      // once its pages run out. The numbers are zero-based page indexes, the
+      // same shape the merge has always returned.
+      expect(merged.backgroundPages.slice(0, 3)).toEqual([0, 1, 1]);
     },
     240_000,
   );
