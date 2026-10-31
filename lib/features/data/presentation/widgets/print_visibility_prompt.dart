@@ -24,7 +24,22 @@ Future<PrintVisibilityChoice?> promptPriceVisibility(
   // when the policy has loaded.
   final user = ref.read(currentUserProvider);
   final mayReadCost = user?.can('inventory.cost.read') ?? false;
-  final settings = ref.read(printSettingsProvider).asData?.value;
+
+  // The policy has to be read, not remembered: until something asks for it the
+  // provider holds no value, and starting from "everything visible" would mean
+  // a company that decided its warehouse sheets leave without costs is asked
+  // again on the first print of every session. A server that cannot answer
+  // still opens the dialog - the built-in default is the same promise an
+  // installation that never saved a policy makes.
+  var settings = ref.read(printSettingsProvider).asData?.value;
+  if (settings == null && user != null) {
+    try {
+      settings = await ref.read(printSettingsProvider.future);
+    } catch (_) {
+      settings = null;
+    }
+    if (!context.mounted) return null;
+  }
   final locked = settings?.costLocked ?? !mayReadCost;
   final start = settings?.forType(typeKey) ??
       const PrintPriceSetting(showSalePrice: true, showCost: true);
