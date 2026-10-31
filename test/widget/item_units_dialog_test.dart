@@ -144,7 +144,10 @@ void main() {
   testWidgets('the units button opens the item units and a carton of 12 is saved', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(1440, 900);
+    // The items table is wider than a laptop: the row actions sit at the far
+    // end of a horizontally scrollable list, so the view has to be wide enough
+    // for the button to be on it (or the tap lands outside the render tree).
+    tester.view.physicalSize = const Size(2200, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -170,7 +173,10 @@ void main() {
     expect(find.text('عبوة'), findsWidgets);
 
     // The per-row button that opens the units of this item, by its own icon.
-    await tester.tap(find.byIcon(Icons.qr_code_2_outlined).first);
+    final unitsButton = find.byIcon(Icons.qr_code_2_outlined).first;
+    await tester.ensureVisible(unitsButton);
+    await tester.pumpAndSettle();
+    await tester.tap(unitsButton);
     await tester.pumpAndSettle();
 
     // The dialog is this item's, by its own name.
@@ -213,7 +219,10 @@ void main() {
   });
 
   testWidgets('the item form asks for the base unit by name', (tester) async {
-    tester.view.physicalSize = const Size(1440, 900);
+    // The items table is wider than a laptop: the row actions sit at the far
+    // end of a horizontally scrollable list, so the view has to be wide enough
+    // for the button to be on it (or the tap lands outside the render tree).
+    tester.view.physicalSize = const Size(2200, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);

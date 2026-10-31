@@ -480,6 +480,9 @@ void main() {
     await _pumpShot(
       tester,
       route: AppRoutes.items,
+      // Wide enough for the row actions, which sit at the far end of a
+      // horizontally scrollable table.
+      size: const Size(2000, 1000),
       child: const ItemsScreen(),
     );
     await expectLater(
@@ -488,7 +491,10 @@ void main() {
     );
 
     // The row action that opens the units of this item.
-    await tester.tap(find.byIcon(Icons.qr_code_2_outlined).first);
+    final unitsButton = find.byIcon(Icons.qr_code_2_outlined).first;
+    await tester.ensureVisible(unitsButton);
+    await tester.pumpAndSettle();
+    await tester.tap(unitsButton);
     await tester.pumpAndSettle();
     await expectLater(
       find.byType(MaterialApp),
