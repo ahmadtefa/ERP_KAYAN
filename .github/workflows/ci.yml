@@ -646,7 +646,7 @@ jobs:
           flutter analyze 2>&1 | tee /tmp/kayan-analyze.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
-            grep -E "^(error|warning|info)" /tmp/kayan-analyze.log | head -n 80 | while IFS= read -r line; do
+            grep -E "(error|warning|info) •" /tmp/kayan-analyze.log | head -n 80 | while IFS= read -r line; do
               echo "::error::$line"
             done
             exit "$status"
@@ -754,7 +754,7 @@ jobs:
           flutter analyze 2>&1 | tee /tmp/kayan-analyze.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
-            grep -E "^(error|warning|info)" /tmp/kayan-analyze.log | head -n 80 | while IFS= read -r line; do
+            grep -E "(error|warning|info) •" /tmp/kayan-analyze.log | head -n 80 | while IFS= read -r line; do
               echo "::error::$line"
             done
             exit "$status"
