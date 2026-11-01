@@ -68,7 +68,7 @@ export class QuotationBackgroundsController {
   ) {
     if (!file?.buffer?.length) {
       throw new BadRequestException(
-        'لم يتم اختيار ملف PDF للخلفية. / No background PDF was chosen.',
+        'لم يتم اختيار ملف للخلفية. / No background file was chosen.',
       );
     }
     return this.service.upload(user.companyId, user.userId, file, body?.name);

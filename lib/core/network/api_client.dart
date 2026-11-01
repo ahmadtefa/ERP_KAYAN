@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 
 import '../config/app_config.dart';
@@ -204,6 +206,60 @@ class ApiClient {
               : {'Idempotency-Key': idempotencyKey},
         ),
       ),
+    );
+  }
+
+  /// Reads an endpoint that answers with bytes rather than JSON.
+  ///
+  /// Used for a person's photo: the API sends `image/png|jpeg|webp` with
+  /// `nosniff`, and the client needs the bytes to draw them. The request still
+  /// goes through the same interceptor stack, so the access token, the tenant
+  /// and the renewal-on-401 all behave exactly as they do for JSON - an image
+  /// endpoint must not become a second, less careful way into the API.
+  Future<Uint8List> getBytes(String path) async {
+    try {
+      final response = await _dio.get<List<int>>(
+        path,
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final data = response.data;
+      if (data == null) {
+        throw const ServerFailure('The server returned no image');
+      }
+      return Uint8List.fromList(data);
+    } on DioException catch (e) {
+      throw _mapDioException(e);
+    } on Failure {
+      rethrow;
+    } catch (e) {
+      throw ServerFailure('Unexpected client error', e);
+    }
+  }
+
+  /// Uploads one file to a multipart endpoint.
+  ///
+  /// `bytes` are sent as they are - the server validates the real content, so
+  /// nothing is re-encoded or "fixed up" here, and the filename is only a hint.
+  Future<Map<String, dynamic>> uploadFile(
+    String path, {
+    required String field,
+    required String filename,
+    required Uint8List bytes,
+    String? contentType,
+    Map<String, String>? fields,
+  }) async {
+    final form = FormData.fromMap({
+      ...?fields,
+      field: MultipartFile.fromBytes(
+        bytes,
+        filename: filename,
+        contentType: contentType == null
+            ? null
+            : DioMediaType.parse(contentType),
+      ),
+    });
+    return _send(
+      () => _dio.put<dynamic>(path, data: form),
     );
   }
 

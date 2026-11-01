@@ -11,7 +11,7 @@ import {
   BACKGROUND_UPLOAD_MAX_BYTES,
   DEFAULT_BACKGROUND_SETTINGS,
   colourToHex,
-  inspectPdfUpload,
+  inspectBackgroundUpload,
   parseBackgroundSettings,
 } from './quotation-background';
 
@@ -82,7 +82,10 @@ export class QuotationBackgroundsService {
     file: UploadedBackgroundFile,
     name?: string,
   ): Promise<BackgroundSummary> {
-    const info = await inspectPdfUpload({
+    // PNG/JPG artwork is embedded into a one-page PDF here, so everything
+    // downstream - page selection, sheet size, the merge, the preview - keeps
+    // seeing exactly one kind of file.
+    const info = await inspectBackgroundUpload({
       buffer: file.buffer,
       originalname: file.originalname,
       mimetype: file.mimetype,
@@ -104,7 +107,7 @@ export class QuotationBackgroundsService {
       data: {
         companyId,
         name: label,
-        mimeType: 'application/pdf',
+        mimeType: info.mimeType,
         byteSize: info.byteSize,
         pageCount: info.pageCount,
         pageWidth: info.pageWidth,
@@ -112,7 +115,7 @@ export class QuotationBackgroundsService {
         sha256: info.sha256,
         // Prisma's Bytes is Uint8Array; a Buffer is Uint8Array<ArrayBufferLike>
         // and does not narrow to it, so the bytes are copied into a plain view.
-        data: new Uint8Array(file.buffer),
+        data: new Uint8Array(info.data),
         createdBy: userId,
       },
       select: {

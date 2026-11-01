@@ -287,6 +287,132 @@ export async function inspectPdfUpload(upload: {
   };
 }
 
+/// A picture used as artwork, wrapped into a one-page PDF.
+///
+/// PNG and JPG are accepted because a letterhead is often a picture an office
+/// already has, and asking for "the PDF version" is a support conversation.
+/// Rather than teach every later stage (page selection, sheet size, the merge,
+/// the preview) about raster images, the picture is embedded once, at upload
+/// time, into a single-page PDF.
+///
+/// The page is A4 portrait in points and the picture is scaled uniformly to
+/// fit inside it and centred: a 3000 × 1000 banner is not stretched to A4, and
+/// a page-shaped picture fills the sheet. Whatever the offer's own text needs
+/// is then decided by the same margins every PDF background already uses.
+const A4_POINTS = { width: 595.28, height: 841.89 } as const;
+
+export async function imageToArtworkPdf(
+  buffer: Buffer,
+  kind: 'image/png' | 'image/jpeg',
+): Promise<{ pdf: Buffer; width: number; height: number; pixelWidth: number; pixelHeight: number }> {
+  let image: Awaited<ReturnType<PDFDocument['embedPng']>>;
+  const document = await PDFDocument.create();
+  try {
+    image =
+      kind === 'image/png'
+        ? await document.embedPng(new Uint8Array(buffer))
+        : await document.embedJpg(new Uint8Array(buffer));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new BadRequestException(
+      `تعذر قراءة الصورة: ${message} / The image could not be read: ${message}`,
+    );
+  }
+
+  const page = document.addPage([A4_POINTS.width, A4_POINTS.height]);
+  const scale = Math.min(
+    A4_POINTS.width / image.width,
+    A4_POINTS.height / image.height,
+  );
+  const drawnWidth = image.width * scale;
+  const drawnHeight = image.height * scale;
+  page.drawImage(image, {
+    x: (A4_POINTS.width - drawnWidth) / 2,
+    y: (A4_POINTS.height - drawnHeight) / 2,
+    width: drawnWidth,
+    height: drawnHeight,
+  });
+
+  return {
+    pdf: Buffer.from(await document.save()),
+    width: A4_POINTS.width,
+    height: A4_POINTS.height,
+    pixelWidth: image.width,
+    pixelHeight: image.height,
+  };
+}
+
+/// Reads an uploaded background of any accepted kind and returns the PDF that
+/// will actually be stored, together with what was measured.
+///
+/// One entry point for all three formats so the service, the controller and
+/// the tests cannot disagree about what "a valid background" is: the type is
+/// decided from the bytes, never from the filename; a damaged file is refused
+/// with a sentence a person can act on; and an image is converted before
+/// anything is written, so a failed conversion leaves no row behind.
+export async function inspectBackgroundUpload(upload: {
+  buffer: Buffer;
+  originalname?: string;
+  mimetype?: string;
+  maxBytes?: number;
+}): Promise<BackgroundFileInfo & { data: Buffer; mimeType: string; sourceKind: 'pdf' | 'png' | 'jpeg' }> {
+  const maxBytes = upload.maxBytes ?? BACKGROUND_UPLOAD_MAX_BYTES;
+  const buffer = upload.buffer;
+  if (!buffer || buffer.length === 0) {
+    throw new BadRequestException('لم يتم اختيار ملف / No file was uploaded.');
+  }
+  if (buffer.length > maxBytes) {
+    throw new BadRequestException(
+      `حجم ملف الخلفية أكبر من الحد المسموح (${Math.round(maxBytes / 1024 / 1024)} ميجابايت). / ` +
+        `The background file is larger than the ${Math.round(maxBytes / 1024 / 1024)} MB limit.`,
+    );
+  }
+
+  // Magic numbers, not extensions: a .png that is really a script never
+  // reaches an embedder.
+  const isPdf = buffer.subarray(0, 1024).toString('latin1').includes(PDF_MAGIC);
+  const isPng =
+    buffer.length > 8 &&
+    buffer[0] === 0x89 &&
+    buffer.subarray(1, 4).toString('latin1') === 'PNG';
+  const isJpeg =
+    buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+
+  if (isPng || isJpeg) {
+    const converted = await imageToArtworkPdf(
+      buffer,
+      isPng ? 'image/png' : 'image/jpeg',
+    );
+    return {
+      pageCount: 1,
+      pageWidth: Math.round(converted.width * 100) / 100,
+      pageHeight: Math.round(converted.height * 100) / 100,
+      byteSize: converted.pdf.length,
+      sha256: createHash('sha256').update(converted.pdf).digest('hex'),
+      mixedPageSizes: false,
+      data: converted.pdf,
+      // What is stored is a PDF; the original picture is not kept twice.
+      mimeType: 'application/pdf',
+      sourceKind: isPng ? 'png' : 'jpeg',
+    };
+  }
+
+  if (!isPdf) {
+    throw new BadRequestException(
+      'الملف ليس PDF ولا صورة PNG أو JPG، حتى لو كان امتداده كذلك. / ' +
+        'The file is not a PDF, PNG or JPG, whatever its extension says.',
+    );
+  }
+
+  const info = await inspectPdfUpload({
+    buffer,
+    originalname: upload.originalname,
+    mimetype: upload.mimetype,
+    maxBytes,
+  });
+  return { ...info, data: buffer, mimeType: 'application/pdf', sourceKind: 'pdf' };
+}
+
 /// Where the overlay is drawn on an artwork page.
 ///
 /// Zoomed to the artwork's box with one scale for both axes, then centred.

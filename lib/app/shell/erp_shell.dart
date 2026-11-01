@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -8,6 +7,10 @@ import '../../features/licensing/presentation/widgets/licence_gate.dart';
 import '../../features/search/presentation/search_dialog.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
+import '../../shared/widgets/kayan_logo.dart';
+import '../../shared/widgets/user_avatar.dart';
+import '../../features/admin/presentation/widgets/user_photo_dialog.dart';
+import '../theme/section_theme.dart';
 import '../router/app_router.dart';
 import '../theme/design_tokens.dart';
 
@@ -64,7 +67,9 @@ enum _NavGroup { overview, accounting, parties, inventory, sales, purchases, ins
 SectionAccent _accentForGroup(_NavGroup group) => switch (group) {
   _NavGroup.overview => SectionAccents.overview,
   _NavGroup.accounting => SectionAccents.accounting,
-  _NavGroup.parties => SectionAccents.parties,
+  // The group heading is the customers' colour; each entry carries its own
+  // (turquoise for a customer, violet for a supplier) as an override.
+  _NavGroup.parties => SectionAccents.customers,
   _NavGroup.inventory => SectionAccents.inventory,
   _NavGroup.sales => SectionAccents.sales,
   _NavGroup.purchases => SectionAccents.purchases,
@@ -82,10 +87,22 @@ SectionAccent _accentForGroup(_NavGroup group) => switch (group) {
 /// The navigation model itself changes with the available width; this is not
 /// a phone layout stretched across a monitor.
 class ErpShell extends ConsumerStatefulWidget {
-  const ErpShell({super.key, required this.currentPath, required this.child});
+  const ErpShell({
+    super.key,
+    required this.currentPath,
+    this.child,
+    this.navigationShell,
+  });
 
   final String currentPath;
-  final Widget child;
+
+  /// The screen, when the shell is used directly (a test, or a screen that
+  /// wants the frame without the router).
+  final Widget? child;
+
+  /// The router's branch container. Present in the real app: navigating
+  /// switches the visible branch without rebuilding this shell.
+  final StatefulNavigationShell? navigationShell;
 
   static const _wideBreakpoint = 900.0;
   static const _extendedBreakpoint = 1280.0;
@@ -112,7 +129,9 @@ class _ErpShellState extends ConsumerState<ErpShell> {
     final selectedIndex = _selectedIndex(items);
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: items[selectedIndex].accent.pageOf(
+        Theme.of(context).brightness,
+      ),
       drawer: isWide
           ? null
           : _ModuleDrawer(
@@ -143,9 +162,17 @@ class _ErpShellState extends ConsumerState<ErpShell> {
                     isExtended: isExtended,
                   ),
                   Expanded(
-                    child: LicenceGate(
-                      currentPath: widget.currentPath,
-                      child: widget.child,
+                    child: SectionTheme(
+                      accent: items[selectedIndex].accent,
+                      child: SectionCanvas(
+                        child: LicenceGate(
+                          currentPath: widget.currentPath,
+                          child:
+                              widget.navigationShell ??
+                              widget.child ??
+                              const SizedBox.shrink(),
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -262,6 +289,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         l10n.customers,
         permissions: const ['parties.customers.read'],
         group: _NavGroup.parties,
+        accentOverride: SectionAccents.customers,
       ),
       _NavItem(
         AppRoutes.suppliers,
@@ -269,6 +297,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         l10n.suppliers,
         permissions: const ['parties.suppliers.read'],
         group: _NavGroup.parties,
+        accentOverride: SectionAccents.suppliers,
       ),
       _NavItem(
         AppRoutes.items,
@@ -462,11 +491,21 @@ class _Sidebar extends StatelessWidget {
               thickness: 6,
               child: ListView(
                 key: const Key('erp-shell-nav-list'),
+                // Two independent guarantees that the menu stays where it was:
+                // the controller lives in the shell's State (which the router
+                // no longer recreates), and the list remembers its offset in
+                // page storage even if it were.
+                pageStorageKey: const PageStorageKey<String>('erp-shell-nav'),
                 controller: scrollController,
                 primary: false,
-                // All items stay built: permission tests and keyboard users
-                // must be able to reach a module without scrolling first.
-                scrollCacheExtent: const ScrollCacheExtent.pixels(4000),
+                // Taps on the menu must not steal focus from the list and
+                // scroll it into view.
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
+                // All items stay built and painted a long way past the
+                // viewport: permission tests and keyboard users must be able to
+                // reach a module without scrolling first, and a scrollbar that
+                // is dragged quickly must not show blank rows.
+                cacheExtent: 4000,
                 padding: EdgeInsets.fromLTRB(
                   extended ? 10 : 8,
                   10,
@@ -521,56 +560,33 @@ class _SidebarBrand extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final logo = Container(
-      width: 34,
-      height: 34,
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
-        boxShadow: const [
-          BoxShadow(color: Color(0x40000000), blurRadius: 10, offset: Offset(0, 3)),
-        ],
-      ),
-      child: Image.asset('1.png', fit: BoxFit.contain),
-    );
+
+    // The owner's artwork, shown as it is: no white plate, no square crop.
+    // The lockup is 3.13 : 1, so it is sized by height and allowed its own
+    // width. In the narrow rail it is the whole lockup at a smaller height
+    // rather than a cropped fragment - the mark and the word are one drawing
+    // and cutting it in half is a different logo.
     if (!extended) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        child: Tooltip(message: 'KAYAN ERP', child: logo),
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Tooltip(message: 'KAYAN ERP', child: KayanLogo(height: 18)),
       );
     }
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      child: Row(
+      padding: const EdgeInsetsDirectional.fromSTEB(16, 16, 12, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          logo,
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'KAYAN',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: AppColors.onSidebar,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.6,
-                    fontSize: 15,
-                  ),
-                ),
-                Text(
-                  'ERP SUITE',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: AppColors.onSidebarMuted,
-                    letterSpacing: 2.0,
-                    fontSize: 9,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
+          const KayanLogo(height: 30),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'ERP SUITE',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: AppColors.onSidebarMuted,
+              letterSpacing: 2.0,
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -790,21 +806,17 @@ class _SidebarFooter extends ConsumerWidget {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Row(
         children: [
-          Container(
-            width: 30,
-            height: 30,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(AppRadii.sm),
-            ),
-            child: Text(
-              initials,
-              style: const TextStyle(
-                color: AppColors.onSidebar,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
+          // The same face as the top bar: the account's photo when it has
+          // one, the initial otherwise. `initials` is kept for the tooltip so
+          // the rail's meaning does not change.
+          Tooltip(
+            message: initials,
+            child: UserAvatar(
+              userId: user.id,
+              name: user.fullName.isEmpty ? user.username : user.fullName,
+              hasPhoto: user.hasAvatar,
+              size: 30,
+              ring: true,
             ),
           ),
           const SizedBox(width: 10),
@@ -968,6 +980,8 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: AppSpacing.xs),
           const _LanguageMenu(),
           const SizedBox(width: AppSpacing.xxs),
+          const _AccountMenu(),
+          const SizedBox(width: AppSpacing.xxs),
           const _SignOutButton(),
         ],
       ),
@@ -1059,6 +1073,102 @@ class _SignOutButton extends ConsumerWidget {
       icon: const Icon(Icons.logout_rounded, size: 19),
       tooltip: context.l10n.signOut,
       onPressed: () => ref.read(authControllerProvider.notifier).signOut(),
+    );
+  }
+}
+
+/// The signed-in person, in the top bar, with their own face.
+///
+/// The photo is the account's, not the machine's: it comes from
+/// `/users/:id/avatar`, so signing in on another computer shows the same
+/// picture. Without one, the initial letter is drawn - never a generic
+/// silhouette, which at this size reads as a broken image.
+///
+/// The menu is also the only place the person can change their own photo
+/// without being an administrator: changing *your* picture is not a
+/// privileged act, changing somebody else's is.
+class _AccountMenu extends ConsumerWidget {
+  const _AccountMenu();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final user = ref.watch(currentUserProvider);
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    if (user == null) return const SizedBox.shrink();
+
+    final name = user.fullName.isEmpty ? user.username : user.fullName;
+
+    return PopupMenuButton<String>(
+      tooltip: name,
+      offset: const Offset(0, 44),
+      onSelected: (value) async {
+        if (value == 'photo') {
+          await showUserPhotoDialog(
+            context,
+            userId: user.id,
+            userName: name,
+            hasPhoto: user.hasAvatar,
+            isSelf: true,
+          );
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem<String>(
+          enabled: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(name, style: theme.textTheme.titleSmall),
+              Text(
+                user.username,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem<String>(
+          value: 'photo',
+          child: Row(
+            children: [
+              const Icon(Icons.photo_camera_outlined, size: 18),
+              const SizedBox(width: AppSpacing.sm),
+              Text(arabic ? 'صورتي' : 'My photo'),
+            ],
+          ),
+        ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            UserAvatar(
+              userId: user.id,
+              name: name,
+              hasPhoto: user.hasAvatar,
+              size: 30,
+            ),
+            if (MediaQuery.sizeOf(context).width >= 1280) ...[
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+            const Icon(Icons.arrow_drop_down, size: 18),
+          ],
+        ),
+      ),
     );
   }
 }

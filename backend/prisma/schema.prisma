@@ -169,6 +169,19 @@ model User {
   lockedUntil      DateTime?
   lastLoginAt      DateTime?
 
+  /// The person's own photo, carried with the account.
+  ///
+  /// Bytes in the row - not base64 text, and not a path to a file on one
+  /// machine. This installation's backup story *is* the database: a full
+  /// dump, a company JSON file and a restore all carry what is in the tables.
+  /// A file beside the executable would be missing after a restore onto a new
+  /// machine, and the same person would lose their face when they sign in
+  /// somewhere else. `avatarMime` is set from the bytes themselves (magic
+  /// number), never from the uploaded filename.
+  avatarData      Bytes?
+  avatarMime      String?   @db.VarChar(40)
+  avatarUpdatedAt DateTime?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   createdBy String?

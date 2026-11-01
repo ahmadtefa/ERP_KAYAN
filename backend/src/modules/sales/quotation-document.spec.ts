@@ -479,6 +479,29 @@ describe('renderQuotationDocument on attached artwork', () => {
     expect(html).toContain('class="items"');
   });
 
+  it('prints no company letterhead data over the artwork, and no page digits', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false, {
+      widthMm: 210,
+      heightMm: 297,
+      marginMm: { top: 20, bottom: 18, left: 12, right: 12 },
+    });
+    // The letterhead is the artwork: repeating its name, address, tax number,
+    // phone or logo here would print the same details twice, slightly offset.
+    // The document title may name the company - that is the file's title, not
+    // ink on the sheet - so only the body is inspected.
+    const body = html.slice(html.indexOf('<body>'));
+    expect(body).not.toContain('كيان للحلول المتكاملة');
+    expect(body).not.toContain('KAYAN Integrated Solutions');
+    expect(body).not.toContain('مدينة نصر');
+    expect(body).not.toContain('TAX-999');
+    expect(body).not.toContain('CR-123');
+    expect(body).not.toContain('+20 2 1234 5678');
+    // The numbering is stamped once by the merge, on top of the artwork, so the
+    // overlay must not print a second set of digits.
+    expect(body).not.toContain('counter(page)');
+    expect(body).not.toContain('class="page-number"');
+  });
+
   it('leaves the drawn design untouched when no artwork is attached', () => {
     const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false);
     expect(html).toContain('@page { size: A4 portrait; margin: 0; }');

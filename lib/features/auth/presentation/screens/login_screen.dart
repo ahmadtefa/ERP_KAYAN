@@ -10,6 +10,7 @@ import '../../../../core/storage/credentials_store.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/error_messages.dart';
 import '../../../../shared/widgets/company_setup_form.dart';
+import '../../../../shared/widgets/kayan_logo.dart';
 import '../../../../shared/widgets/surface_card.dart';
 import '../providers/auth_providers.dart';
 
@@ -475,7 +476,7 @@ class _AuthBrandPanel extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const _AuthBrandMark(onDark: true),
+                const _AuthBrandMark(),
                 const Spacer(),
                 Text(
                   l10n.appTitle,
@@ -534,68 +535,28 @@ class _AuthBrandCompact extends StatelessWidget {
         horizontal: AppSpacing.xxl,
         vertical: AppSpacing.xxl,
       ),
-      child: const _AuthBrandMark(onDark: true),
+      child: const _AuthBrandMark(),
     );
   }
 }
 
-/// The KAYAN mark and wordmark.
+/// The KAYAN lockup as the company drew it.
+///
+/// This used to be a letter "K" in a coloured square with the product name
+/// typed beside it - a stand-in that read as a placeholder next to the real
+/// artwork. The owner's PNG is transparent and is used as-is: the same widget
+/// as the sidebar, so there is one logo in the program, not two.
 class _AuthBrandMark extends StatelessWidget {
-  const _AuthBrandMark({this.onDark = false, this.compact = false});
+  const _AuthBrandMark({this.compact = false});
 
-  final bool onDark;
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final l10n = context.l10n;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: compact ? 40 : 44,
-          height: compact ? 40 : 44,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: onDark ? AppColors.primary : AppColors.navy,
-            borderRadius: BorderRadius.circular(AppRadii.lg),
-          ),
-          child: Text(
-            'K',
-            style: theme.textTheme.titleLarge?.copyWith(
-              color: AppColors.onNavy,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ),
-        const SizedBox(width: AppSpacing.md),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              l10n.appTitle,
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: onDark
-                    ? AppColors.onNavy
-                    : theme.colorScheme.onSurface,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            Text(
-              'ERP',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: onDark
-                    ? AppColors.onNavyMuted
-                    : theme.colorScheme.onSurfaceVariant,
-                letterSpacing: 1.6,
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
+    // The artwork is blue-on-transparent, and it reads on the dark panel of
+    // this screen as well as on a white card, so nothing is tinted, boxed or
+    // given a backdrop. Only the height changes.
+    return KayanLogo(height: compact ? 26 : 34);
   }
 }
 

@@ -62,6 +62,31 @@ class QuotationBackgroundFile {
   }
 
   bool get isMultiPage => pageCount > 1;
+
+  /// A sentence when the artwork is not A4 or US Letter, and null when it is.
+  ///
+  /// Nothing is ever stretched: the offer is laid out on the artwork's own
+  /// page and scaled by one factor. But a letterhead drawn on an odd sheet
+  /// still surprises the person who prints it, so the choice is stated in the
+  /// library instead of discovered at the printer.
+  String? get sheetWarning {
+    final width = pageWidth * 25.4 / 72;
+    final height = pageHeight * 25.4 / 72;
+    // The four papers an office actually uses, with a millimetre of tolerance
+    // for the rounding every PDF writer applies.
+    const papers = <(double, double)>[
+      (210, 297), // A4 portrait
+      (297, 210), // A4 landscape
+      (215.9, 279.4), // US Letter portrait
+      (279.4, 215.9), // US Letter landscape
+    ];
+    for (final paper in papers) {
+      if ((width - paper.$1).abs() <= 1.5 && (height - paper.$2).abs() <= 1.5) {
+        return null;
+      }
+    }
+    return 'مقاس غير A4: $readableSheet — سيطبع العرض على هذا المقاس';
+  }
 }
 
 /// The artwork library: the PDFs a company may print its offers on.

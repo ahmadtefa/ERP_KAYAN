@@ -1294,10 +1294,19 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
 
   Future<void> _uploadBackground(StateSetter setDialogState) async {
     try {
-      final picked = await pickFile(extensions: const ['.pdf']);
+      // A letterhead is often a picture an office already has, so PNG and JPG
+      // are accepted beside PDF; the server embeds a picture into a one-page
+      // PDF and refuses anything whose bytes are not one of the three.
+      final picked = await pickFile(
+        extensions: const ['.pdf', '.png', '.jpg', '.jpeg'],
+      );
       if (picked == null) return;
-      if (!picked.name.toLowerCase().endsWith('.pdf')) {
-        if (mounted) showMessage(context, 'اختر ملف PDF فقط.', error: true);
+      final lower = picked.name.toLowerCase();
+      if (!const ['.pdf', '.png', '.jpg', '.jpeg']
+          .any((extension) => lower.endsWith(extension))) {
+        if (mounted) {
+          showMessage(context, 'اختر ملف PDF أو صورة PNG أو JPG.', error: true);
+        }
         return;
       }
       await ref.read(quotationBackgroundsDataSourceProvider).upload(picked);
@@ -1332,7 +1341,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                   Row(children: [
                     Expanded(
                       child: Text(
-                        'ملف PDF بحجم لا يزيد على 8 ميجابايت. يُفحص الملف من محتواه: النوع والصفحات والمقاس.',
+                        'ملف PDF أو صورة PNG/JPG بحجم لا يزيد على 8 ميجابايت. يُفحص الملف من محتواه: النوع والصفحات والمقاس، وتُحوَّل الصورة إلى صفحة A4.',
                         style: Theme.of(dialogContext).textTheme.bodySmall,
                       ),
                     ),
@@ -1352,7 +1361,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                   else if (files.isEmpty)
                     const Padding(
                       padding: EdgeInsets.all(16),
-                      child: Text('لا توجد خلفيات محفوظة بعد. ارفع ملف PDF ليظهر هنا.'),
+                      child: Text('لا توجد خلفيات محفوظة بعد. ارفع ملف PDF أو صورة ليظهر هنا.'),
                     )
                   else
                     Flexible(
@@ -1365,13 +1374,14 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                           final bound = file.id == _backgroundFileId;
                           return ListTile(
                             leading: Icon(
-                              Icons.picture_as_pdf_outlined,
+                              Icons.description_outlined,
                               color: bound ? Theme.of(context).colorScheme.primary : null,
                             ),
                             title: Text(file.name),
                             subtitle: Text(
                               '${file.pageCount} صفحة • ${file.readableSheet} • ${file.readableSize}'
-                              '${bound ? ' • مستخدمة في هذا العرض' : ''}',
+                              '${bound ? ' • مستخدمة في هذا العرض' : ''}'
+                              '${file.sheetWarning == null ? '' : '\n⚠ ${file.sheetWarning}'}',
                             ),
                             trailing: Wrap(spacing: 2, children: [
                               IconButton(

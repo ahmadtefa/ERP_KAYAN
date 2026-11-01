@@ -99,11 +99,15 @@ void main() {
     });
   }
 
+  // One entry per identity colour the owner named: customers (turquoise) and
+  // suppliers (violet) are two colours, not one "parties" colour, because a
+  // payment to a supplier must never look like one from a customer.
   const accents = <String, SectionAccent>{
     'overview': SectionAccents.overview,
     'accounting': SectionAccents.accounting,
     'cash': SectionAccents.cash,
-    'parties': SectionAccents.parties,
+    'customers': SectionAccents.customers,
+    'suppliers': SectionAccents.suppliers,
     'inventory': SectionAccents.inventory,
     'sales': SectionAccents.sales,
     'purchases': SectionAccents.purchases,
@@ -159,6 +163,63 @@ void main() {
             reason: '${entry.key} on a dark card',
           );
         }
+      }
+    });
+
+    // The brief asks for a distinct light background per section. A tint that
+    // makes the ordinary text on it harder to read is not a design, it is a
+    // regression, so both the body ink and the section's own ink are measured
+    // on the tinted canvas and on the tinted panel.
+    test('keep ordinary text readable on their tinted canvas', () {
+      for (final entry in accents.entries) {
+        final accent = entry.value;
+        for (final ink in <String, Color>{
+          'body ink': AppColors.textPrimary,
+          'secondary ink': AppColors.textSecondary,
+          'section ink': accent.base,
+        }.entries) {
+          expect(
+            contrast(ink.value, accent.pageTint),
+            greaterThanOrEqualTo(smallText),
+            reason: '${entry.key}: ${ink.key} on its page tint',
+          );
+          expect(
+            contrast(ink.value, accent.panelTint),
+            greaterThanOrEqualTo(smallText),
+            reason: '${entry.key}: ${ink.key} on its panel tint',
+          );
+        }
+      }
+    });
+
+    test('are visibly different from one another, not five shades of blue', () {
+      // Two sections that measure as the same colour on screen are two
+      // sections a person cannot tell apart at a glance, which is the whole
+      // point of the palette.
+      final entries = accents.entries.toList();
+      for (var i = 0; i < entries.length; i += 1) {
+        for (var j = i + 1; j < entries.length; j += 1) {
+          final a = entries[i].value.pageTint;
+          final b = entries[j].value.pageTint;
+          final delta = (a.r - b.r).abs() + (a.g - b.g).abs() + (a.b - b.b).abs();
+          expect(
+            delta,
+            greaterThan(0.01),
+            reason: '${entries[i].key} and ${entries[j].key} share a canvas',
+          );
+        }
+      }
+    });
+
+    test('the sidebar still reads at its own weights', () {
+      // The identity colours are also used as the selected item's marker on
+      // the navy sidebar; a marker nobody can see is not a marker.
+      for (final entry in accents.entries) {
+        expect(
+          contrast(entry.value.base, AppColors.navy),
+          greaterThanOrEqualTo(2.5),
+          reason: '${entry.key} marker on the sidebar',
+        );
       }
     });
   });

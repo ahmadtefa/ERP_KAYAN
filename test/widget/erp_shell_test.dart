@@ -301,23 +301,23 @@ void main() {
         ),
         findsOneWidget,
       );
-      // Customers is not active yet, so its rose stays out of its label.
+      // Customers is not active yet, so its turquoise stays out of its label.
       expect(
         titleColorOf('العملاء'),
-        isNot(SectionAccents.parties.base),
+        isNot(SectionAccents.sales.darkBase),
       );
 
-      // Move to customers & suppliers: the rose section identity takes
-      // over the label and the top bar, and sales goes back to neutral.
+      // Move to customers & suppliers: the turquoise identity takes over the
+      // label and the top bar, and sales goes back to neutral.
       router.go(AppRoutes.customers);
       await tester.pumpAndSettle();
-      expect(titleColorOf('العملاء'), SectionAccents.parties.darkBase);
+      expect(titleColorOf('العملاء'), SectionAccents.customers.darkBase);
       expect(
         find.byWidgetPredicate(
           (w) =>
               w is Text &&
               w.data == 'العملاء والموردون' &&
-              w.style?.color == SectionAccents.parties.base,
+              w.style?.color == SectionAccents.customers.base,
         ),
         findsOneWidget,
       );

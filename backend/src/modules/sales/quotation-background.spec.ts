@@ -5,10 +5,14 @@ import {
   rgb,
 } from 'pdf-lib';
 
+import { createHash } from 'crypto';
+import { deflateSync } from 'zlib';
+
 import {
   BACKGROUND_UPLOAD_MAX_BYTES,
   DEFAULT_BACKGROUND_SETTINGS,
   colourToHex,
+  inspectBackgroundUpload,
   inspectPdfUpload,
   mergeOfferOntoBackground,
   overlayPlacement,
@@ -57,6 +61,79 @@ function drawnText(document: PDFDocument, index: number): string {
   return raw.replace(/<([0-9a-fA-F]+)>\s*Tj/g, (_match, hex: string) =>
     Buffer.from(hex, 'hex').toString('latin1'),
   );
+}
+
+
+/// Builds a real PNG of the given pixel size, so a picture test measures a
+/// picture and not a byte pattern that only starts like one.
+function png(width: number, height: number): Buffer {
+  const chunk = (type: string, body: Buffer): Buffer => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(body.length);
+    const typed = Buffer.concat([Buffer.from(type, 'latin1'), body]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(typed) >>> 0);
+    return Buffer.concat([length, typed, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // truecolour
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y += 1) {
+    const row = y * (width * 3 + 1);
+    raw[row] = 0; // filter: none
+    for (let x = 0; x < width; x += 1) {
+      raw[row + 1 + x * 3] = 0x21;
+      raw[row + 2 + x * 3] = 0x6b;
+      raw[row + 3 + x * 3] = 0xd6;
+    }
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+let crcTable: number[] | null = null;
+function crc32(buffer: Buffer): number {
+  if (!crcTable) {
+    crcTable = [];
+    for (let n = 0; n < 256; n += 1) {
+      let c = n;
+      for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      crcTable[n] = c >>> 0;
+    }
+  }
+  let crc = 0xffffffff;
+  for (const byte of buffer) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/// A one-pixel JPEG, real enough for pdf-lib to embed.
+const TINY_JPEG = Buffer.from(
+  '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a' +
+    'HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAA' +
+    'AAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==',
+  'base64',
+);
+
+/// The drawing operations of one page, as text: enough to read where a picture
+/// was placed without trusting the function that placed it.
+function contentOf(document: PDFDocument, index: number): string {
+  const page = document.getPage(index);
+  const contents = page.node.Contents();
+  const references =
+    contents && 'asArray' in contents ? contents.asArray() : [contents];
+  const decoder = new TextDecoder('latin1');
+  return references
+    .map((reference) => document.context.lookup(reference))
+    .filter((stream): stream is PDFRawStream => stream instanceof PDFRawStream)
+    .map((stream) => decoder.decode(decodePDFRawStream(stream).decode()))
+    .join('\n');
 }
 
 describe('attached PDF background', () => {
@@ -130,6 +207,108 @@ describe('attached PDF background', () => {
     it('keeps a limit small enough for a database row', () => {
       expect(BACKGROUND_UPLOAD_MAX_BYTES).toBeGreaterThan(1024 * 1024);
       expect(BACKGROUND_UPLOAD_MAX_BYTES).toBeLessThanOrEqual(16 * 1024 * 1024);
+    });
+  });
+
+
+  describe('picture artwork (PNG and JPG)', () => {
+    it('embeds a PNG into one A4 page, and stores that PDF rather than the picture', async () => {
+      const info = await inspectBackgroundUpload({
+        buffer: png(1000, 250),
+        originalname: 'letterhead.png',
+        mimetype: 'image/png',
+      });
+      expect(info.sourceKind).toBe('png');
+      expect(info.mimeType).toBe('application/pdf');
+      expect(info.pageCount).toBe(1);
+      expect(info.pageWidth).toBeCloseTo(595.28, 1);
+      expect(info.pageHeight).toBeCloseTo(841.89, 1);
+      expect(info.data.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+      expect(info.byteSize).toBe(info.data.length);
+      expect(info.sha256).toBe(
+        createHash('sha256').update(info.data).digest('hex'),
+      );
+    });
+
+    it('accepts a JPG and measures the stored page, not the file', async () => {
+      const info = await inspectBackgroundUpload({
+        buffer: TINY_JPEG,
+        originalname: 'scan.jpeg',
+        mimetype: 'image/jpeg',
+      });
+      expect(info.sourceKind).toBe('jpeg');
+      expect(info.pageCount).toBe(1);
+      const stored = await PDFDocument.load(new Uint8Array(info.data));
+      const size = stored.getPage(0).getSize();
+      expect(size.width).toBeCloseTo(595.28, 1);
+      expect(size.height).toBeCloseTo(841.89, 1);
+    });
+
+    it('scales a wide picture by one factor, so nothing is stretched', async () => {
+      const info = await inspectBackgroundUpload({
+        buffer: png(1000, 250),
+        originalname: 'banner.png',
+      });
+      const stored = await PDFDocument.load(new Uint8Array(info.data));
+      // The picture's placement is the one with a real area: pdf-lib wraps
+      // each drawing in its own `cm`, and the wrapping ones are the identity.
+      const placements = [
+        ...contentOf(stored, 0).matchAll(
+          /([\d.]+) 0 0 ([\d.]+) ([\d.]+) ([\d.]+) cm/g,
+        ),
+      ];
+      expect(placements.length).toBeGreaterThan(0);
+      const placed = placements.reduce((best, next) =>
+        Number(next[1]) * Number(next[2]) > Number(best[1]) * Number(best[2])
+          ? next
+          : best,
+      );
+      const width = Number(placed[1]);
+      const height = Number(placed[2]);
+      // The picture's own 4:1 shape survives; a stretched one would be 1:1.4.
+      expect(width / height).toBeCloseTo(1000 / 250, 2);
+      // Fit inside the sheet, on both axes.
+      expect(width).toBeLessThanOrEqual(595.28 + 0.01);
+      expect(height).toBeLessThanOrEqual(841.89 + 0.01);
+    });
+
+    it('decides the kind from the bytes, not from the name', async () => {
+      const disguised = await inspectBackgroundUpload({
+        buffer: png(40, 40),
+        originalname: 'letterhead.pdf',
+        mimetype: 'application/pdf',
+      });
+      expect(disguised.sourceKind).toBe('png');
+
+      await expect(
+        inspectBackgroundUpload({
+          buffer: Buffer.from('this is not a picture at all'),
+          originalname: 'letterhead.png',
+          mimetype: 'image/png',
+        }),
+      ).rejects.toThrow(/not a PDF, PNG or JPG/i);
+    });
+
+    it('repeats the picture behind every page of a long offer, keeping A4', async () => {
+      const info = await inspectBackgroundUpload({
+        buffer: png(600, 600),
+        originalname: 'square.png',
+      });
+      const overlay = await pdf([A4, A4, A4]);
+      const merged = await mergeOfferOntoBackground({
+        background: info.data,
+        overlay,
+        settings: parseBackgroundSettings({ mode: 'REPEAT' }, 1),
+        pageNumber: { y: 18, size: 8 },
+      });
+      expect(merged.pages).toBe(3);
+      expect(merged.backgroundPages).toEqual([0, 0, 0]);
+      const result = await PDFDocument.load(new Uint8Array(merged.pdf));
+      for (let index = 0; index < 3; index += 1) {
+        const size = result.getPage(index).getSize();
+        expect(size.width).toBeCloseTo(595.28, 1);
+        expect(size.height).toBeCloseTo(841.89, 1);
+      }
     });
   });
 

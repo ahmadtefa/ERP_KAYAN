@@ -13,7 +13,9 @@ import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../../../../shared/widgets/user_avatar.dart';
 import '../providers/admin_providers.dart';
+import '../widgets/user_photo_dialog.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 
 /// Administration: the users, the roles, and what the audit trail recorded.
@@ -122,12 +124,19 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
     if (values == null || !mounted) return;
 
     setState(() => _busy = true);
+    // Whether the account already has a photo decides whether the dialog can
+    // offer to remove it, and whether it shows the face or the initial.
+    var savedHasPhoto = existing?['hasAvatar'] == true;
+    String? savedUserId = isEdit ? '${existing['id']}' : null;
     try {
       final client = ref.read(apiClientProvider);
       if (isEdit) {
         await client.patch('/admin/users/${existing['id']}', body: values);
       } else {
-        await client.post('/admin/users', body: values);
+        final created = await client.post('/admin/users', body: values);
+        // The new account's id, so the photo step below can address it.
+        savedUserId = '${created['id'] ?? ''}';
+        savedHasPhoto = false;
       }
       await ref.read(usersListProvider.notifier).reload();
       if (mounted) showMessage(context, l10n.createdSuccessfully);
@@ -136,6 +145,30 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+
+    // The photo is part of the account, so it is offered in the same flow
+    // rather than in a separate screen nobody finds: create a user and you are
+    // asked for a picture straight away, and you may skip it.
+    if (!mounted || savedUserId == null || savedUserId.isEmpty) return;
+    await showUserPhotoDialog(
+      context,
+      userId: savedUserId,
+      userName: '${values['fullNameAr'] ?? values['fullNameEn'] ?? ''}',
+      hasPhoto: savedHasPhoto,
+    );
+    if (mounted) await ref.read(usersListProvider.notifier).reload();
+  }
+
+  /// Changes or removes a colleague's photo, for an administrator.
+  Future<void> _editPhoto(Json row) async {
+    final name = '${text(row, 'fullNameAr').isEmpty ? text(row, 'fullNameEn') : text(row, 'fullNameAr')}';
+    await showUserPhotoDialog(
+      context,
+      userId: text(row, 'id'),
+      userName: name.isEmpty ? text(row, 'username') : name,
+      hasPhoto: row['hasAvatar'] == true,
+    );
+    if (mounted) await ref.read(usersListProvider.notifier).reload();
   }
 
   Future<void> _editExtraPermissions(Json row) async {
@@ -259,6 +292,17 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
               l10n.username,
               value: (r) => text(r, 'username'),
               emphasise: true,
+              // The face belongs beside the name it belongs to; a column of
+              // its own would be a column of empty circles for every account
+              // that has not set one.
+              leading: (r) => UserAvatar(
+                userId: text(r, 'id'),
+                name: text(r, 'fullNameAr').isEmpty
+                    ? text(r, 'fullNameEn')
+                    : text(r, 'fullNameAr'),
+                hasPhoto: flag(r, 'hasAvatar'),
+                size: 26,
+              ),
             ),
             ColumnSpec(l10n.fullNameEn, value: (r) => text(r, 'fullNameEn')),
             ColumnSpec(l10n.fullNameAr, value: (r) => text(r, 'fullNameAr')),
@@ -296,6 +340,11 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
               tooltip: l10n.edit,
               icon: const Icon(Icons.edit_outlined, size: 20),
               onPressed: _busy ? null : () => _edit(existing: row),
+            ),
+            IconButton(
+              tooltip: isArabic ? 'الصورة الشخصية' : 'Photo',
+              icon: const Icon(Icons.photo_camera_outlined, size: 20),
+              onPressed: _busy ? null : () => _editPhoto(row),
             ),
             IconButton(
               tooltip: l10n.changePassword,

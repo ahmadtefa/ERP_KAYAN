@@ -42,6 +42,12 @@ abstract final class AppTheme {
       useMaterial3: true,
       brightness: brightness,
       colorScheme: scheme,
+      // One bundled family for Arabic and English. It is shipped in the
+      // installer (see pubspec.yaml), so it is also the family a report or a
+      // PDF draws with on a machine that has never been online - the printed
+      // sheet and the screen finally agree.
+      fontFamily: AppTypography.latinFamily,
+      fontFamilyFallback: AppTypography.fallback,
       textTheme: textTheme,
       scaffoldBackgroundColor: canvas,
       canvasColor: canvas,

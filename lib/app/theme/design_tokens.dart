@@ -111,18 +111,36 @@ abstract final class AppGradients {
   );
 }
 
-/// One section's identity colour: the strong step for icons and selected
-/// text, the soft step for selected backgrounds, and a brighter step that
-/// stays legible on dark surfaces.
+/// One section's identity colour.
+///
+/// Five steps, because a section identity is used in five different jobs and
+/// the same hex cannot do all of them without failing somewhere:
+///
+///  * [base]      — the strong step: icons, the selected marker, headings.
+///  * [soft]      — the chip behind [base] (selected menu tile, tag).
+///  * [pageTint]  — the canvas of that section's screens: a wash of the
+///    section colour light enough to read body text on, strong enough that
+///    «المبيعات» and «المشتريات» are not the same white page.
+///  * [panelTint] — a slightly stronger wash for headers and grouped panels.
+///  * [darkBase]  — the same hue stepped up for the dark canvas.
+///
+/// Every pair in use is measured by `test/shared/design_contrast_test.dart`:
+/// [base] on [soft], on white and on [pageTint] clears 4.5:1, and the ordinary
+/// body/secondary inks clear 4.5:1 on [pageTint], so a tinted section is not a
+/// prettier way to make a screen hard to read.
 class SectionAccent {
   const SectionAccent({
     required this.base,
     required this.soft,
+    required this.pageTint,
+    required this.panelTint,
     required this.darkBase,
   });
 
   final Color base;
   final Color soft;
+  final Color pageTint;
+  final Color panelTint;
   final Color darkBase;
 
   Color of(Brightness brightness) =>
@@ -131,61 +149,157 @@ class SectionAccent {
   Color softOf(Brightness brightness) => brightness == Brightness.dark
       ? darkBase.withValues(alpha: 0.18)
       : soft;
+
+  /// The canvas this section's screens sit on. In the dark theme the tint is
+  /// the product's dark canvas: a washed-out blue behind dark cards would
+  /// destroy the figure/text contrast the dark theme exists to keep.
+  Color pageOf(Brightness brightness) =>
+      brightness == Brightness.dark ? AppColors.darkBackground : pageTint;
+
+  /// The band behind a section header or a grouped panel.
+  Color panelOf(Brightness brightness) => brightness == Brightness.dark
+      ? AppColors.darkSurfaceAlt
+      : panelTint;
 }
 
-/// The colour of each main section of the product. The navigation, the top
-/// bar and the dashboard figures all read from here, so «المبيعات» is green
-/// everywhere and «العملاء والموردون» keep their own rose identity instead
-/// of borrowing the accounting colour.
+/// The colour of each main section of the product.
+///
+/// The owner's brief names a colour per department, and this is that table
+/// implemented in one place: the navigation, the top bar, the page canvas and
+/// the dashboard figures all read from here, so «المشتريات» is orange on the
+/// menu, on its own screens and in the charts — not only in its icon.
+///
+/// The values are the brief's hues stepped until they pass contrast (see
+/// [SectionAccent]); a hue that reads nicely on a swatch can be 3.2:1 behind
+/// 13-pixel text, which is how a colourful menu becomes an unreadable one.
+///
+/// The identity follows the *job*, not the API module: banks and cashboxes are
+/// their own daily destination and carry the accounting emerald, while
+/// customers (turquoise) and suppliers (violet) are deliberately different
+/// colours so a payment to a supplier is never mistaken for one from a
+/// customer at a glance.
 abstract final class SectionAccents {
+  /// لوحة التحكم — calm blue.
   static const overview = SectionAccent(
-    base: Color(0xFF1D5CD6),
-    soft: Color(0xFFE9F0FD),
+    base: Color(0xFF2563EB),
+    soft: Color(0xFFEAF1FE),
+    pageTint: Color(0xFFF2F6FE),
+    panelTint: Color(0xFFE7EFFC),
     darkBase: Color(0xFF7FA9F5),
   );
+
+  /// المحاسبة والخزينة — emerald.
   static const accounting = SectionAccent(
-    base: Color(0xFF6D4FB0),
-    soft: Color(0xFFF0EBFA),
-    darkBase: Color(0xFFBFA7EC),
+    base: Color(0xFF046C4E),
+    soft: Color(0xFFE4F3EC),
+    pageTint: Color(0xFFEFF8F3),
+    panelTint: Color(0xFFDFF0E7),
+    darkBase: Color(0xFF5DD3A3),
   );
 
-  /// Banks & cashboxes live inside the accounting group but are their own
-  /// daily destination, so the cash entry carries this teal instead.
+  /// Banks & cashboxes sit inside accounting and share its emerald: cash is
+  /// where the accounting numbers are actually touched, not a different book.
   static const cash = SectionAccent(
-    base: Color(0xFF047A8C),
-    soft: Color(0xFFE2F2F5),
-    darkBase: Color(0xFF5FC7D4),
+    base: Color(0xFF046C4E),
+    soft: Color(0xFFE4F3EC),
+    pageTint: Color(0xFFEFF8F3),
+    panelTint: Color(0xFFDFF0E7),
+    darkBase: Color(0xFF5DD3A3),
   );
-  static const parties = SectionAccent(
-    base: Color(0xFFB03070),
-    soft: Color(0xFFFAE9F2),
-    darkBase: Color(0xFFEE8FBB),
+
+  /// العملاء — turquoise.
+  static const customers = SectionAccent(
+    base: Color(0xFF0B7A70),
+    soft: Color(0xFFE3F2F0),
+    pageTint: Color(0xFFEFF7F6),
+    panelTint: Color(0xFFDDEFEC),
+    darkBase: Color(0xFF4FD1C5),
   );
+
+  /// الموردون — violet.
+  static const suppliers = SectionAccent(
+    base: Color(0xFF6D28D9),
+    soft: Color(0xFFF1EBFD),
+    pageTint: Color(0xFFF6F2FE),
+    panelTint: Color(0xFFEDE4FB),
+    darkBase: Color(0xFFC4A7F7),
+  );
+
+  /// المخازن والأصناف — teal blue.
   static const inventory = SectionAccent(
-    base: Color(0xFF9A6B0F),
-    soft: Color(0xFFFAF1DC),
-    darkBase: Color(0xFFE3B95E),
+    base: Color(0xFF0E6F86),
+    soft: Color(0xFFE3F1F5),
+    pageTint: Color(0xFFF0F6F8),
+    panelTint: Color(0xFFDDEBF0),
+    darkBase: Color(0xFF6FD0E6),
   );
+
+  /// المبيعات وعروض الأسعار — royal blue.
   static const sales = SectionAccent(
-    base: Color(0xFF0E7A3E),
-    soft: Color(0xFFE6F4EC),
-    darkBase: Color(0xFF63C98C),
+    base: Color(0xFF1D4ED8),
+    soft: Color(0xFFE8EFFD),
+    pageTint: Color(0xFFF1F5FE),
+    panelTint: Color(0xFFE3EBFC),
+    darkBase: Color(0xFF8FB4FF),
   );
+
+  /// المشتريات — warm orange.
   static const purchases = SectionAccent(
-    base: Color(0xFFC24E0A),
-    soft: Color(0xFFFBEADD),
+    base: Color(0xFFB23E0A),
+    soft: Color(0xFFFCEDE3),
+    pageTint: Color(0xFFFDF4EE),
+    panelTint: Color(0xFFFAE4D5),
     darkBase: Color(0xFFF2A06B),
   );
+
+  /// التقارير — deep blue.
   static const insights = SectionAccent(
-    base: Color(0xFF4250B8),
-    soft: Color(0xFFE8EBFA),
-    darkBase: Color(0xFF96A2EC),
+    base: Color(0xFF1E3A8A),
+    soft: Color(0xFFE7EBF7),
+    pageTint: Color(0xFFF1F4FB),
+    panelTint: Color(0xFFE0E6F4),
+    darkBase: Color(0xFF9DB2FF),
   );
+
+  /// الإدارة والإعدادات — slate, because administration is not a business
+  /// department and should not compete with one.
   static const administration = SectionAccent(
-    base: Color(0xFF5B6B80),
+    base: Color(0xFF475569),
     soft: Color(0xFFEDF1F6),
-    darkBase: Color(0xFFAFC0D4),
+    pageTint: Color(0xFFF5F7FA),
+    panelTint: Color(0xFFE8EDF3),
+    darkBase: Color(0xFFB6C4D6),
   );
+}
+
+/// The product's typeface.
+///
+/// One family, bundled with the program: IBM Plex Sans Arabic, whose Latin is
+/// drawn to the same metrics as its Arabic, so a line that mixes «إجمالي 1,250
+/// EGP» does not change rhythm halfway. Weights 400/500/600/700 are registered
+/// in `pubspec.yaml`; the theme uses only those, because a synthesised bold is
+/// a smeared glyph, not a weight.
+///
+/// The fallbacks matter for one reason: if the bundled files were ever missing
+/// from a build, Arabic must still be Arabic (never tofu) rather than a
+/// Latin-only face that renders empty boxes.
+abstract final class AppTypography {
+  static const arabicFamily = 'IBMPlexSansArabic';
+  static const latinFamily = 'IBMPlexSansArabic';
+  static const fallback = <String>[
+    'Segoe UI',
+    'Tahoma',
+    'Noto Sans Arabic',
+    'Arial',
+  ];
+
+  /// Tabular figures for money columns.
+  ///
+  /// A column of prices has to line up on the decimal point; proportional
+  /// digits (where "1" is narrower than "8") make a figure column look ragged
+  /// and make a mis-keyed digit harder to spot. Money and quantity cells use
+  /// this, prose does not.
+  static const tnum = <FontFeature>[FontFeature.tabularFigures()];
 }
 
 /// A 4-point spacing scale. Nothing in the UI should invent its own gaps.

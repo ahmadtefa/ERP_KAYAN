@@ -243,7 +243,7 @@ class _SummarySections extends StatelessWidget {
         arabic ? 'مستحق من العملاء' : 'Owed by customers',
         Icons.groups_2_outlined,
         AppTone.warning,
-        SectionAccents.parties,
+        SectionAccents.customers,
       ),
       _PrimaryMetric(
         arabic ? 'الذمم الدائنة' : 'Payables',
@@ -251,7 +251,7 @@ class _SummarySections extends StatelessWidget {
         arabic ? 'مستحق للموردين' : 'Owed to suppliers',
         Icons.local_shipping_outlined,
         AppTone.danger,
-        SectionAccents.parties,
+        SectionAccents.suppliers,
       ),
     ];
 
@@ -936,8 +936,8 @@ class _ContextChip extends StatelessWidget {
 List<({IconData icon, String label, String path, SectionAccent accent})>
 _modules(AppLocalizations l10n) => [
   (icon: Icons.menu_book_outlined, label: l10n.journalEntries, path: AppRoutes.journalEntries, accent: SectionAccents.accounting),
-  (icon: Icons.people_outline, label: l10n.customers, path: AppRoutes.customers, accent: SectionAccents.parties),
-  (icon: Icons.local_shipping_outlined, label: l10n.suppliers, path: AppRoutes.suppliers, accent: SectionAccents.parties),
+  (icon: Icons.people_outline, label: l10n.customers, path: AppRoutes.customers, accent: SectionAccents.customers),
+  (icon: Icons.local_shipping_outlined, label: l10n.suppliers, path: AppRoutes.suppliers, accent: SectionAccents.suppliers),
   (icon: Icons.category_outlined, label: l10n.items, path: AppRoutes.items, accent: SectionAccents.inventory),
   (icon: Icons.inventory_2_outlined, label: l10n.stock, path: AppRoutes.stock, accent: SectionAccents.inventory),
   (
