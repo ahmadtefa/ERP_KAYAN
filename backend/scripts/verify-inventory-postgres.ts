@@ -1110,24 +1110,59 @@ async function main() {
       assert.ok(session.lines.every((line) => line.countedQuantity === null));
     });
 
-    const plainLine = session.lines.find((line) => line.itemId === plain.id);
-    if (!plainLine) throw new Error('the plain item is not on the count sheet');
+    // A shelf that is managed by lot freezes one line per lot, because that is
+    // what is physically there and what an expiry date belongs to. The count of
+    // the item is therefore the sum of its lines, not whichever line happens to
+    // come first.
+    const plainLines = session.lines.filter((line) => line.itemId === plain.id);
+    if (plainLines.length === 0) throw new Error('the plain item is not on the count sheet');
+    const frozenTotal = plainLines.reduce(
+      (sum: Prisma.Decimal, line: { systemQuantity: string }) =>
+        sum.plus(new Prisma.Decimal(line.systemQuantity)),
+      new Prisma.Decimal(0),
+    );
+
+    // Two are missing, and they are missing from the largest line: everything
+    // else is counted exactly as the system believes it.
+    const shortLine = [...plainLines].sort(
+      (left, right) => Number(right.systemQuantity) - Number(left.systemQuantity),
+    )[0];
+    const shortCount = new Prisma.Decimal(shortLine.systemQuantity).minus(2);
     await stockTakes.record(
       company.id,
       user.id,
       session.id,
-      { lines: [{ lineId: plainLine.id, countedQuantity: 12 }], finish: true },
+      {
+        lines: plainLines.map((line) => ({
+          lineId: line.id,
+          countedQuantity:
+            line.id === shortLine.id
+              ? Number(shortCount)
+              : Number(line.systemQuantity),
+        })),
+        finish: true,
+      },
       [branch.id],
     );
 
     await check('the difference is computed from the frozen figure, at the frozen cost', async () => {
       const reread = await stockTakes.findOne(company.id, session.id, [branch.id]);
-      const line = reread.lines.find((row) => row.itemId === plain.id);
-      assert.ok(line);
-      // 14 on the shelf, 12 counted.
-      assert.equal(line!.systemQuantity, '14.0000');
-      assert.equal(line!.varianceQuantity, '-2.0000');
-      assert.equal(line!.varianceValue, '-30.0000', 'two units at the 15 average');
+      const lines = reread.lines.filter((row) => row.itemId === plain.id);
+      assert.ok(lines.length > 0);
+      // 14 on the shelf in its lots, 12 counted.
+      assert.equal(frozenTotal.toFixed(4), '14.0000', 'the count froze the whole shelf');
+      const variance = lines.reduce(
+        (sum: Prisma.Decimal, line: { varianceQuantity: string }) =>
+          sum.plus(new Prisma.Decimal(line.varianceQuantity)),
+        new Prisma.Decimal(0),
+      );
+      assert.equal(variance.toFixed(4), '-2.0000');
+      // The shortfall is valued at the cost of the lot it is missing from, which
+      // is the figure the sheet froze for that line.
+      const shortfallLine = lines.find((row) => row.id === shortLine.id);
+      assert.ok(shortfallLine);
+      const expectedValue = new Prisma.Decimal(shortfallLine!.unitCost).mul(-2);
+      assert.equal(shortfallLine!.varianceValue, expectedValue.toFixed(4));
       assert.equal(reread.status, 'REVIEW');
     });
 
@@ -1169,6 +1204,27 @@ async function main() {
         stockTakes.post(company.id, approver.id, session.id, [branch.id]),
         /already been posted/,
       );
+    });
+
+    await check('the count took the shortfall out of the lot it was counted in', async () => {
+      // Posting the difference moves the shelf; it must move the lot too, or
+      // the lot card goes on claiming two units that a count found missing.
+      const lots: Array<{ remainingQuantity: Prisma.Decimal }> =
+        await prisma.itemBatch.findMany({
+          where: {
+            companyId: company.id,
+            warehouseId: warehouse.id,
+            itemId: plain.id,
+            deletedAt: null,
+            remainingQuantity: { gt: 0 },
+          },
+        });
+      const held = lots.reduce(
+        (sum: Prisma.Decimal, lot: { remainingQuantity: Prisma.Decimal }) =>
+          sum.plus(lot.remainingQuantity),
+        new Prisma.Decimal(0),
+      );
+      assert.equal(held.toFixed(4), '12.0000', 'the lots hold what the count left on the shelf');
     });
 
     // ══════════════════════════════════════════════════════════════════════

@@ -62,6 +62,12 @@ describe('a documentary write-off', () => {
         update: jest.fn(async () => ({})),
       },
       stockDocumentLine: { update: jest.fn(async () => ({})) },
+      itemBatch: {
+        updateMany: jest.fn(async () => ({ count: 1 })),
+        update: jest.fn(async () => ({})),
+        create: jest.fn(async () => ({ id: 'lot-new' })),
+      },
+      $executeRaw: jest.fn(async () => 1),
       $queryRaw: jest.fn(async () => []),
     };
     const prisma = {
@@ -244,6 +250,40 @@ describe('a documentary write-off', () => {
     ]);
     expect(entry.lines[0].credit.toFixed(4)).toBe('40.0000');
     expect(entry.lines[1].debit.toFixed(4)).toBe('40.0000');
+  });
+
+  it('takes the loss out of the lot the line names, and closes an emptied lot', async () => {
+    const { service, document, tx } = makeService();
+    document.approvedAt = new Date();
+    document.approvedBy = APPROVER;
+    document.lines[0].batchId = 'lot-1';
+    document.lines[0].unitCost = D('10');
+
+    await service.post(COMPANY, AUTHOR, 'doc-wo');
+
+    const claim = (tx.itemBatch.updateMany.mock.calls[0] as any[])[0];
+    expect(claim.where).toMatchObject({ id: 'lot-1' });
+    expect(claim.where.remainingQuantity.gte.toFixed(4)).toBe('4.0000');
+    expect(claim.data.remainingQuantity.decrement.toFixed(4)).toBe('4.0000');
+    // An emptied lot is closed, never deleted: its movements stay readable.
+    expect(tx.$executeRaw).toHaveBeenCalled();
+  });
+
+  it('puts a surplus found in a lot back into that lot', async () => {
+    const { service, document, tx } = makeService();
+    // A positive adjustment for goods found in a lot: the shelf gains them and
+    // so does the lot, or the lot card would deny stock the shelf shows.
+    document.kind = 'ADJUSTMENT';
+    document.lines[0].quantity = D('2');
+    document.lines[0].unitCost = D('10');
+    document.lines[0].batchId = 'lot-1';
+
+    await service.post(COMPANY, AUTHOR, 'doc-wo');
+
+    const claim = (tx.itemBatch.updateMany.mock.calls[0] as any[])[0];
+    expect(claim.data.remainingQuantity.increment.toFixed(4)).toBe('2.0000');
+    expect(claim.data.receivedQuantity.increment.toFixed(4)).toBe('2.0000');
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
   });
 
   it('writes the shelf average onto the document line it carried out', async () => {

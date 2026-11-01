@@ -830,30 +830,45 @@ export class StockDocumentsService {
           warehouseId: toWarehouseId,
         });
 
-        // A write-off that names a lot takes the goods out of that lot, not
-        // only out of the shelf: otherwise the lot card would keep claiming
-        // stock that has been destroyed.
-        if (document.kind === StockDocumentKind.WRITE_OFF && line.batchId) {
-          const claimed = await tx.itemBatch.updateMany({
-            where: {
-              id: line.batchId,
-              companyId,
-              remainingQuantity: { gte: absoluteQuantity },
-            },
-            data: { remainingQuantity: { decrement: absoluteQuantity } },
-          });
-          if (claimed.count !== 1) {
-            throw new BadRequestException(
-              'The lot does not hold enough to write off that quantity. / الدفعة لا تحمل الكمية المطلوبة.',
-            );
+        // A line that names a lot moves that lot, not only the shelf: a
+        // write-off must not leave the lot card claiming goods that have been
+        // destroyed, and a count that found two missing from a lot must take
+        // them out of that lot rather than out of the shelf's average. Both
+        // arrive here the same way - a document line with a batchId - so both
+        // are handled the same way.
+        if (line.batchId) {
+          if (direction === StockDirection.OUT) {
+            const claimed = await tx.itemBatch.updateMany({
+              where: {
+                id: line.batchId,
+                companyId,
+                remainingQuantity: { gte: absoluteQuantity },
+              },
+              data: { remainingQuantity: { decrement: absoluteQuantity } },
+            });
+            if (claimed.count !== 1) {
+              throw new BadRequestException(
+                'The lot does not hold enough for that quantity. / الدفعة لا تحمل الكمية المطلوبة.',
+              );
+            }
+            await tx.$executeRaw(Prisma.sql`
+              UPDATE "item_batches"
+                 SET "status" = 'CLOSED'
+               WHERE "id" = ${line.batchId}::uuid
+                 AND "remainingQuantity" = 0
+                 AND "status" <> 'WRITTEN_OFF'
+            `);
+          } else {
+            // Found in that lot: the lot holds more, and its received figure
+            // moves with it so the two never disagree.
+            await tx.itemBatch.updateMany({
+              where: { id: line.batchId, companyId },
+              data: {
+                remainingQuantity: { increment: absoluteQuantity },
+                receivedQuantity: { increment: absoluteQuantity },
+              },
+            });
           }
-          await tx.$executeRaw(Prisma.sql`
-            UPDATE "item_batches"
-               SET "status" = 'CLOSED'
-             WHERE "id" = ${line.batchId}::uuid
-               AND "remainingQuantity" = 0
-               AND "status" <> 'WRITTEN_OFF'
-          `);
         }
 
         valueChange = valueChange.plus(
