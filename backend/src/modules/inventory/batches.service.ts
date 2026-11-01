@@ -53,8 +53,8 @@ export interface ReceiveLotInput {
   productionDate?: string | null;
   expiryDate?: string | null;
   /** In base units, like every other stock figure in the program. */
-  quantity: string | number;
-  unitCost: string | number;
+  quantity: QuantityInput;
+  unitCost: QuantityInput;
   storageLocationId?: string | null;
   sourceType?: string | null;
   sourceId?: string | null;
@@ -69,7 +69,7 @@ export interface IssueInput {
   /// issues the way it did before warehouses existed.
   warehouseId: string | null;
   itemId: string;
-  quantity: string | number;
+  quantity: QuantityInput;
   /** Chosen lot. Omitted means FEFO chooses, which is the normal case. */
   batchId?: string | null;
   /** Overrides the item's policy for one issue, with the reason recorded. */
@@ -96,7 +96,7 @@ export interface WriteOffInput {
   warehouseId: string;
   itemId: string;
   batchId: string;
-  quantity: string | number;
+  quantity: QuantityInput;
   /** Required: a write-off without a reason is how stock disappears. */
   reason: string;
   documentDate?: string | null;
@@ -108,12 +108,14 @@ export interface TransferInput {
   toWarehouseId: string;
   itemId: string;
   batchId: string;
-  quantity: string | number;
+  quantity: QuantityInput;
   reason?: string | null;
   documentDate?: string | null;
 }
 
-const toDecimal = (value: string | number | Prisma.Decimal): Prisma.Decimal =>
+export type QuantityInput = string | number | Prisma.Decimal;
+
+const toDecimal = (value: QuantityInput): Prisma.Decimal =>
   value instanceof Prisma.Decimal ? value : new Prisma.Decimal(value);
 
 /// Lots: receiving them, issuing from them, moving them, and destroying them.
@@ -595,11 +597,23 @@ export class BatchesService {
         'الكمية يجب أن تكون أكبر من صفر. / The issued quantity must be greater than zero.',
       );
     }
+    if (!input.warehouseId) {
+      throw new BadRequestException(
+        'اسم المخزن مطلوب للصرف. / A warehouse is required to issue stock.',
+      );
+    }
     const warehouse = await this.requireWarehouse(companyId, input.warehouseId, scope);
     const item = await this.requireItem(companyId, input.itemId);
 
     return this.prisma.$transaction((tx) =>
-      this.issueTx(tx, companyId, userId, { warehouse, item }, input, quantity),
+      this.issueTx(
+        tx,
+        companyId,
+        userId,
+        { warehouse, branchId: warehouse.branchId, item },
+        input,
+        quantity,
+      ),
     );
   }
 
