@@ -5,6 +5,12 @@ import { PrismaModule } from '../../common/prisma/prisma.module';
 import { AccountingModule } from '../accounting/accounting.module';
 import { ExportModule } from '../export/export.module';
 import { BarcodeLabelsService } from './barcode-labels.service';
+import { BatchesController } from './batches.controller';
+import { BatchesService } from './batches.service';
+import { ItemWarehouseSettingsController } from './item-warehouse-settings.controller';
+import { ItemWarehouseSettingsService } from './item-warehouse-settings.service';
+import { StorageLocationsController } from './locations.controller';
+import { StorageLocationsService } from './storage-locations.service';
 import { InventoryPrintController } from './inventory-print.controller';
 import { InventoryReportsController } from './inventory-reports.controller';
 import { InventoryReportsService } from './inventory-reports.service';
@@ -25,6 +31,9 @@ import { WarehousesController } from './warehouses.controller';
     InventoryReportsController,
     InventoryPrintController,
     WarehousesController,
+    BatchesController,
+    StorageLocationsController,
+    ItemWarehouseSettingsController,
   ],
   providers: [
     ItemsService,
@@ -32,7 +41,17 @@ import { WarehousesController } from './warehouses.controller';
     StockDocumentsService,
     InventoryReportsService,
     BarcodeLabelsService,
+    BatchesService,
+    StorageLocationsService,
+    ItemWarehouseSettingsService,
   ],
-  exports: [StockService, StockDocumentsService, InventoryReportsService],
+  exports: [
+    StockService,
+    StockDocumentsService,
+    InventoryReportsService,
+    // Sales and purchases post through the lot engine, so it is exported
+    // rather than duplicated.
+    BatchesService,
+  ],
 })
 export class InventoryModule {}

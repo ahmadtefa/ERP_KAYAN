@@ -24,6 +24,8 @@ import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { attributedLines } from '../accounting/cost-center-attribution';
 import { PostingService } from '../accounting/posting.service';
+import { BatchesService } from '../inventory/batches.service';
+import { batchPolicyOf } from '../../common/warehouse/batch-policy';
 import {
   allocateDocumentDiscount,
   assertDiscountLimit,
@@ -71,6 +73,12 @@ interface PreparedLine {
   unitName: string | null;
   unitFactor: Prisma.Decimal | null;
   unitQuantity: Prisma.Decimal | null;
+  // The lot this line received. Null when the item keeps no lots and the
+  // person did not type one.
+  batchNumber: string | null;
+  batchProductionDate: Date | null;
+  batchExpiryDate: Date | null;
+  storageLocationId: string | null;
 }
 
 interface PreparedInvoice {
@@ -90,6 +98,9 @@ export class PurchaseInvoicesService {
     private readonly warehouses: WarehouseService,
     private readonly prices: PriceListsService,
     private readonly audit: AuditService,
+    /// A receipt is where a lot is born. The lot engine is shared with sales
+    /// so that FEFO, costing and the shelf all agree on what a lot is.
+    private readonly batches: BatchesService,
   ) {}
 
   async findAll(companyId: string, query: ListPurchaseInvoicesDto) {
@@ -270,6 +281,10 @@ export class PurchaseInvoicesService {
               unitName: l.unitName,
               unitFactor: l.unitFactor,
               unitQuantity: l.unitQuantity,
+              batchNumber: l.batchNumber,
+              batchProductionDate: l.batchProductionDate,
+              batchExpiryDate: l.batchExpiryDate,
+              storageLocationId: l.storageLocationId,
             })),
           },
         },
@@ -400,6 +415,10 @@ export class PurchaseInvoicesService {
               unitName: line.unitName,
               unitFactor: line.unitFactor,
               unitQuantity: line.unitQuantity,
+              batchNumber: line.batchNumber,
+              batchProductionDate: line.batchProductionDate,
+              batchExpiryDate: line.batchExpiryDate,
+              storageLocationId: line.storageLocationId,
             })),
           },
         },
@@ -483,7 +502,18 @@ export class PurchaseInvoicesService {
         }
         const item = await tx.item.findFirst({
           where: { id: line.itemId, companyId, deletedAt: null },
-          select: { id: true, code: true, unit: true, isStockTracked: true },
+          select: {
+            id: true,
+            code: true,
+            unit: true,
+            isStockTracked: true,
+            requiresBatch: true,
+            requiresProductionDate: true,
+            requiresExpiryDate: true,
+            useFefo: true,
+            allowExpiredIssue: true,
+            expiredIssueNeedsApproval: true,
+          },
         });
         if (!item) throw new BadRequestException('An invoice line references a missing item');
         if (!item.isStockTracked) {
@@ -544,6 +574,31 @@ export class PurchaseInvoicesService {
             value: { increment: costTotal },
           },
         });
+
+        // The goods are in stock; this records which goods they were. The
+        // lot is written after the movement so that a lot-controlled item
+        // whose dates are missing fails the whole posting - including the
+        // movement - rather than leaving stock nobody can trace.
+        const policy = batchPolicyOf(item);
+        if (policy.requiresBatch || line.batchNumber) {
+          await this.batches.recordLotInTx(tx, {
+            companyId,
+            userId,
+            warehouse: { id: warehouseId, branchId: invoice.branchId },
+            item,
+            batchNumber: line.batchNumber,
+            productionDate: line.batchProductionDate?.toISOString() ?? null,
+            expiryDate: line.batchExpiryDate?.toISOString() ?? null,
+            quantity: line.quantity,
+            // The lot is worth what the goods cost, landed cost included.
+            unitCost,
+            storageLocationId: line.storageLocationId,
+            sourceType: 'PURCHASE_INVOICE',
+            sourceId: invoice.id,
+            sourceNumber: invoice.invoiceNumber,
+            date: invoice.invoiceDate,
+          });
+        }
       }
 
       const journal = await this.posting.post(tx, {
@@ -960,6 +1015,10 @@ export class PurchaseInvoicesService {
         unitName: resolved.snapshot.unitName,
         unitFactor: resolved.snapshot.unitFactor,
         unitQuantity: resolved.snapshot.unitQuantity,
+        batchNumber: (raw.batchNumber ?? '').trim() || null,
+        batchProductionDate: raw.batchProductionDate ? new Date(raw.batchProductionDate) : null,
+        batchExpiryDate: raw.batchExpiryDate ? new Date(raw.batchExpiryDate) : null,
+        storageLocationId: raw.storageLocationId ?? null,
       });
     }
 

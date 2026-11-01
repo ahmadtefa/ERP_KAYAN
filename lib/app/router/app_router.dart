@@ -19,7 +19,9 @@ import '../../features/data/presentation/screens/import_screen.dart';
 import '../../features/inventory/presentation/screens/items_screen.dart';
 import '../../features/inventory/presentation/screens/stock_documents_screen.dart';
 import '../../features/inventory/presentation/screens/stock_screen.dart';
+import '../../features/inventory/presentation/screens/batches_screen.dart';
 import '../../features/inventory/presentation/screens/warehouses_screen.dart';
+import '../../features/notifications/presentation/screens/notification_center_screen.dart';
 import '../../features/invoicing/presentation/providers/invoice_providers.dart';
 import '../../features/licensing/presentation/screens/licence_screen.dart';
 import '../../features/invoicing/presentation/screens/invoice_list_screen.dart';
@@ -63,6 +65,8 @@ class AppRoutes {
   static const items = '/inventory/items';
   static const stock = '/inventory/stock';
   static const warehouses = '/inventory/warehouses';
+  static const batches = '/inventory/batches';
+  static const notifications = '/notifications';
   static const stockDocuments = '/inventory/documents';
   static const salesInvoices = '/sales/invoices';
   static const purchaseInvoices = '/purchases/invoices';
@@ -179,6 +183,11 @@ final routerProvider = Provider<GoRouter>((ref) {
               GoRoute(path: AppRoutes.items, builder: (c, s) => const ItemsScreen()),
               GoRoute(path: AppRoutes.stock, builder: (c, s) => const StockScreen()),
               GoRoute(path: AppRoutes.warehouses, builder: (c, s) => const WarehousesScreen()),
+              GoRoute(path: AppRoutes.batches, builder: (c, s) => const BatchesScreen()),
+              GoRoute(
+                path: AppRoutes.notifications,
+                builder: (c, s) => const NotificationCenterScreen(),
+              ),
               GoRoute(path: AppRoutes.stockDocuments, builder: (c, s) => const StockDocumentsScreen()),
             ],
           ),
