@@ -645,6 +645,31 @@ Future<void> _tryLoadSystemFonts() async {
   }
 }
 
+/// Waits for the pictures on the screen to be decoded, then repaints.
+///
+/// `pumpAndSettle` settles animations, not image decoding: the logo and a
+/// person's photo arrive on a real event loop, so a screenshot taken straight
+/// after the first frame shows the space where they will be - and shows it
+/// inconsistently, which is worse: one run had the sidebar logo and the next
+/// did not. Pre-caching inside `runAsync` is what a real frame does, so the
+/// pictures are actually in the picture.
+Future<void> _settlePictures(WidgetTester tester) async {
+  await tester.runAsync(() async {
+    final context = tester.element(find.byType(MaterialApp));
+    for (final asset in <String>['1.png']) {
+      try {
+        await precacheImage(AssetImage(asset), context);
+      } catch (_) {
+        // A missing asset is the app's business, not the screenshot's.
+      }
+    }
+    // The avatar's bytes are a future, and its image decodes off the test
+    // clock; one turn of the real event loop is enough for both.
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+  });
+  await tester.pumpAndSettle();
+}
+
 Future<void> _pumpShot(
   WidgetTester tester, {
   required String route,
@@ -699,6 +724,7 @@ Future<void> _pumpShot(
     ),
   );
   await tester.pumpAndSettle();
+  await _settlePictures(tester);
 }
 
 void main() {
