@@ -310,6 +310,7 @@ class _ItemUnitsEditorState extends State<ItemUnitsEditor> {
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
+                key: const ValueKey('item-units-base-unit'),
                 controller: _baseUnit,
                 decoration: InputDecoration(
                   labelText: _t('وحدة الأساس', 'Base unit'),
@@ -407,7 +408,8 @@ class _ItemUnitsEditorState extends State<ItemUnitsEditor> {
                 ],
               ),
               const Divider(height: 12),
-              for (final row in _rows) _buildRow(row, canBarcode, canCost),
+              for (var index = 0; index < _rows.length; index++)
+                _buildRow(index, _rows[index], canBarcode, canCost),
               const SizedBox(height: AppSpacing.sm),
               Align(
                 alignment: AlignmentDirectional.centerStart,
@@ -444,7 +446,7 @@ class _ItemUnitsEditorState extends State<ItemUnitsEditor> {
     );
   }
 
-  Widget _buildRow(_Row row, bool canBarcode, bool canCost) {
+  Widget _buildRow(int index, _Row row, bool canBarcode, bool canCost) {
     final preview = _previewFor(row);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -457,6 +459,7 @@ class _ItemUnitsEditorState extends State<ItemUnitsEditor> {
               Expanded(
                 flex: 3,
                 child: TextField(
+                  key: ValueKey('item-unit-$index-name'),
                   controller: row.unit,
                   enabled: !row.isBase,
                   decoration: InputDecoration(
@@ -474,6 +477,7 @@ class _ItemUnitsEditorState extends State<ItemUnitsEditor> {
               Expanded(
                 flex: 2,
                 child: TextField(
+                  key: ValueKey('item-unit-$index-factor'),
                   controller: row.factor,
                   enabled: !row.isBase,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -493,6 +497,7 @@ class _ItemUnitsEditorState extends State<ItemUnitsEditor> {
                 Expanded(
                   flex: 3,
                   child: TextField(
+                    key: ValueKey('item-unit-$index-barcode'),
                     controller: row.barcode,
                     decoration: const InputDecoration(
                       isDense: true,
@@ -505,6 +510,7 @@ class _ItemUnitsEditorState extends State<ItemUnitsEditor> {
               Expanded(
                 flex: 2,
                 child: TextField(
+                  key: ValueKey('item-unit-$index-sale-price'),
                   controller: row.salePrice,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
@@ -515,6 +521,7 @@ class _ItemUnitsEditorState extends State<ItemUnitsEditor> {
                 Expanded(
                   flex: 2,
                   child: TextField(
+                    key: ValueKey('item-unit-$index-purchase-price'),
                     controller: row.purchasePrice,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration:
@@ -530,6 +537,7 @@ class _ItemUnitsEditorState extends State<ItemUnitsEditor> {
                     'Off for a unit that cannot be split: half a carton is not a thing.',
                   ),
                   child: Checkbox(
+                    key: ValueKey('item-unit-$index-fraction'),
                     value: row.allowFraction,
                     onChanged: row.isBase
                         ? null
@@ -541,6 +549,7 @@ class _ItemUnitsEditorState extends State<ItemUnitsEditor> {
               SizedBox(
                 width: 40,
                 child: IconButton(
+                  key: ValueKey('item-unit-$index-remove'),
                   tooltip: row.isBase
                       ? _t('لا يمكن حذف الوحدة الأساسية', 'The base unit cannot be removed')
                       : _t('حذف', 'Remove'),

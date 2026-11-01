@@ -30,6 +30,8 @@ class _FakeApiClient extends ApiClient {
 
   String? postPath;
   Map<String, dynamic>? postBody;
+  String? patchPath;
+  Map<String, dynamic>? patchBody;
   final List<String> unitsRead = [];
 
   Map<String, dynamic> _units = {
@@ -93,6 +95,13 @@ class _FakeApiClient extends ApiClient {
   }
 
   @override
+  Future<Map<String, dynamic>> patch(String path, {Object? body}) async {
+    patchPath = path;
+    patchBody = body == null ? null : Map<String, dynamic>.from(body as Map);
+    return const {};
+  }
+
+  @override
   Future<Map<String, dynamic>> post(
     String path, {
     Object? body,
@@ -133,9 +142,12 @@ class _FakeApiClient extends ApiClient {
 
 /// The input carrying [label], found where Flutter actually renders it: the
 /// label lives inside the field, so its ancestor is the field.
+///
+/// A TextFormField renders a TextField, so matching on TextField finds both
+/// the declarative forms and the packing table's own rows.
 Finder _field(String label) => find.ancestor(
   of: find.text(label),
-  matching: find.byType(TextFormField),
+  matching: find.byType(TextField),
 );
 
 void main() {
@@ -218,11 +230,188 @@ void main() {
     expect(find.textContaining('كرتونة'), findsWidgets);
   });
 
-  testWidgets('the item form asks for the base unit by name', (tester) async {
-    // The items table is wider than a laptop: the row actions sit at the far
-    // end of a horizontally scrollable list, so the view has to be wide enough
-    // for the button to be on it (or the tap lands outside the render tree).
-    tester.view.physicalSize = const Size(2200, 1000);
+  testWidgets(
+    'a new item is saved with its base unit and its cartons in one request',
+    (tester) async {
+      // The items table is wider than a laptop: the row actions sit at the far
+      // end of a horizontally scrollable list, so the view has to be wide
+      // enough for the button to be on it (or the tap lands outside the
+      // render tree).
+      tester.view.physicalSize = const Size(2200, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final api = _FakeApiClient();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            apiClientProvider.overrideWithValue(api),
+            currentUserProvider.overrideWithValue(testUser),
+          ],
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: const Scaffold(body: ItemsScreen()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('New item'));
+      await tester.pumpAndSettle();
+
+      // The item's own fields first: a name in both languages is what makes
+      // the item findable, and the code is what documents quote.
+      await tester.enterText(_field('Code'), 'WATER-9');
+      await tester.enterText(_field('Name (English)'), 'Sparkling water');
+      await tester.enterText(_field('الاسم (عربي)'), 'مياه فوارة');
+      await tester.pump();
+
+      // The item form no longer asks for a "unit" of its own: the base unit
+      // is the first row of the packing table, so the two can never disagree.
+      // It is asked for by name in the editor that follows.
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+
+      // The packing table, titled for what it holds.
+      expect(find.text('Units, packing and conversion'), findsOneWidget);
+      expect(_field('Base unit'), findsOneWidget);
+      // And it says what a base unit is, rather than leaving the person to
+      // guess whether it is the carton or the bottle.
+      expect(
+        find.textContaining('The unit stock is counted in'),
+        findsOneWidget,
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey('item-units-base-unit')),
+        'عبوة',
+      );
+      await tester.pump();
+
+      // "+ Add unit" adds a row for the carton. Row 0 is the base unit, so the
+      // carton is row 1.
+      await tester.tap(find.byKey(const ValueKey('item-units-add-row')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey('item-unit-1-name')),
+        'كرتونة',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('item-unit-1-factor')),
+        '12',
+      );
+      await tester.pump();
+
+      // The arithmetic is shown while it is typed: five cartons of twelve.
+      expect(find.text('5 كرتونة × 12 = 60 عبوة'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('item-units-apply')));
+      await tester.pumpAndSettle();
+
+      // One request carried the item and its whole catalogue.
+      expect(api.postPath, '/inventory/items');
+      expect(api.postBody?['code'], 'WATER-9');
+      expect(api.postBody?['unit'], 'عبوة');
+
+      final units = (api.postBody?['units'] as List<dynamic>? ?? const []);
+      expect(units, hasLength(2));
+
+      final base = Map<String, dynamic>.from(units[0] as Map);
+      expect(base['unit'], 'عبوة');
+      // The base unit is what stock is counted in, so its factor is 1 - the
+      // server refuses anything else and this is the number it is sent.
+      expect(base['factor'], '1');
+
+      final carton = Map<String, dynamic>.from(units[1] as Map);
+      expect(carton['unit'], 'كرتونة');
+      expect(carton['factor'], '12');
+    },
+  );
+
+  testWidgets(
+    'editing an item shows its units, keeps them, and explains the base unit',
+    (tester) async {
+      tester.view.physicalSize = const Size(2200, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final api = _FakeApiClient();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            apiClientProvider.overrideWithValue(api),
+            currentUserProvider.overrideWithValue(testUser),
+          ],
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: const Scaffold(body: ItemsScreen()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The pencil on the item's row - the same edit a person uses every day.
+      final editButton = find.byIcon(Icons.edit_outlined).first;
+      await tester.ensureVisible(editButton);
+      await tester.pumpAndSettle();
+      await tester.tap(editButton);
+      await tester.pumpAndSettle();
+
+      // The form comes up filled in from the row: editing does not start from
+      // a blank page that would look like a new item.
+      expect(find.widgetWithText(FilledButton, 'Save'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+
+      // Its existing units were read from the API and are on screen: the base
+      // unit is row 0, named, and cannot be removed.
+      expect(api.unitsRead, contains('/inventory/items/item-water/units'));
+      expect(find.text('Units, packing and conversion'), findsOneWidget);
+
+      final baseField = tester.widget<TextField>(
+        find.byKey(const ValueKey('item-units-base-unit')),
+      );
+      expect(baseField.controller?.text, 'عبوة');
+
+      // Changing the base unit of an item that already has stock would
+      // reinterpret every balance already recorded, so the screen says what
+      // the server will answer instead of pretending it is a free edit.
+      expect(
+        find.textContaining(
+          'The base unit cannot be changed once stock is recorded',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('add another unit instead'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('item-units-apply')));
+      await tester.pumpAndSettle();
+
+      // Saving the edit resends the units it was shown - it does not drop the
+      // item's existing unit, and the base unit keeps factor 1.
+      expect(api.patchPath, '/inventory/items/item-water');
+      expect(api.patchBody?['unit'], 'عبوة');
+      final units = (api.patchBody?['units'] as List<dynamic>? ?? const []);
+      expect(units, hasLength(1));
+      final base = Map<String, dynamic>.from(units[0] as Map);
+      expect(base['unit'], 'عبوة');
+      expect(base['factor'], '1');
+      // A unit that was already saved keeps its id, so the server updates it
+      // instead of deleting it and making a new one.
+      expect(base['id'], 'unit-bottle');
+    },
+  );
+
+  testWidgets('cancelling the packing table saves nothing', (tester) async {
+    tester.view.physicalSize = const Size(2200, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -245,13 +434,19 @@ void main() {
 
     await tester.tap(find.text('New item'));
     await tester.pumpAndSettle();
+    await tester.enterText(_field('Code'), 'WATER-9');
+    await tester.enterText(_field('Name (English)'), 'Sparkling water');
+    await tester.enterText(_field('الاسم (عربي)'), 'مياه فوارة');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
 
-    // The first question after the item's names is the unit stock is counted
-    // in - not a generic "Unit" that could be anything.
-    expect(_field('Base unit'), findsOneWidget);
-    expect(
-      find.textContaining('The unit stock is counted in'),
-      findsOneWidget,
-    );
+    expect(find.text('Units, packing and conversion'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    // Abandoning the units abandons the item with it: an item without the
+    // base unit it was to be counted in is not a thing to keep.
+    expect(api.postPath, isNull);
   });
 }
