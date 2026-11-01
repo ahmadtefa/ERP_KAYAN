@@ -125,6 +125,8 @@ async function main() {
     },
   });
 
+  // Named so the clean-up below can be read as prose. Nothing else depends on
+  // these lists: deletion is by the identifiers this script created.
   const created = {
     movements: [] as string[],
     batches: [] as string[],
@@ -133,6 +135,7 @@ async function main() {
     notifications: [] as string[],
     journals: [] as string[],
   };
+  void created;
 
   try {
     console.log(`\nLot engine against real PostgreSQL (company ${company.code ?? company.id})`);
@@ -617,52 +620,71 @@ async function main() {
 
     console.log(`\n${passed} checks passed against real PostgreSQL.`);
   } finally {
-    // Clean up only what this script created, so the demo company is left
-    // exactly as it was found.
-    await prisma.notification.deleteMany({
-      where: { companyId: company.id, type: { startsWith: 'STOCK_' } },
+    // Clean-up only ever removes what this script created, and it never lets a
+    // tidy-up turn a passing run into a failing one: the database is
+    // disposable, and a leftover row is a smaller problem than a green test
+    // reported red. The audit trail is deliberately NOT deleted - the database
+    // refuses it without an audited purge, which is the point of that trigger,
+    // and a test has no business claiming otherwise.
+    const attempt = async (name: string, run: () => Promise<unknown>) => {
+      try {
+        await run();
+      } catch (error) {
+        console.warn(`  (clean-up left ${name} behind: ${(error as Error).message})`);
+      }
+    };
+    await attempt('notifications', () =>
+      prisma.notification.deleteMany({
+        where: { companyId: company.id, type: { startsWith: 'STOCK_' } },
+      }),
+    );
+    await attempt('journal entries', async () => {
+      const journals = await prisma.journalEntry.findMany({
+        where: {
+          companyId: company.id,
+          sourceType: { in: ['INVENTORY_WRITE_OFF', 'BATCH_TRANSFER'] },
+        },
+        select: { id: true },
+      });
+      await prisma.journalLine.deleteMany({
+        where: { journalEntryId: { in: journals.map((row) => row.id) } },
+      });
+      await prisma.journalEntry.deleteMany({
+        where: { id: { in: journals.map((row) => row.id) } },
+      });
     });
-    const movements = await prisma.stockMovement.findMany({
-      where: { companyId: company.id, itemId: item.id },
-      select: { id: true },
-    });
-    const journals = await prisma.journalEntry.findMany({
-      where: {
-        companyId: company.id,
-        sourceType: { in: ['INVENTORY_WRITE_OFF', 'BATCH_TRANSFER'] },
-      },
-      select: { id: true },
-    });
-    await prisma.auditLog.deleteMany({
-      where: {
-        companyId: company.id,
-        entity: { in: ['item_batches', 'storage_locations', 'stock_movements'] },
-      },
-    });
-    await prisma.journalLine.deleteMany({
-      where: { journalEntryId: { in: journals.map((row) => row.id) } },
-    });
-    await prisma.journalEntry.deleteMany({
-      where: { id: { in: journals.map((row) => row.id) } },
-    });
-    await prisma.stockMovement.deleteMany({ where: { id: { in: movements.map((row) => row.id) } } });
-    await prisma.itemCostHistory.deleteMany({
-      where: { companyId: company.id, itemId: item.id },
-    });
-    await prisma.stockBalance.deleteMany({
-      where: { companyId: company.id, branchId: branch.id, itemId: item.id },
-    });
-    await prisma.itemBatch.deleteMany({ where: { companyId: company.id, itemId: item.id } });
-    await prisma.itemWarehouseSetting.deleteMany({
-      where: { companyId: company.id, itemId: item.id },
-    });
-    await prisma.storageLocation.deleteMany({
-      where: { companyId: company.id, warehouseId: { in: [warehouse.id, warehouseB.id] } },
-    });
-    await prisma.warehouse.deleteMany({
-      where: { id: { in: [warehouse.id, warehouseB.id] } },
-    });
-    await prisma.item.deleteMany({ where: { id: item.id } });
+    await attempt('stock movements', () =>
+      prisma.stockMovement.deleteMany({
+        where: { companyId: company.id, itemId: item.id },
+      }),
+    );
+    await attempt('cost history', () =>
+      prisma.itemCostHistory.deleteMany({
+        where: { companyId: company.id, itemId: item.id },
+      }),
+    );
+    await attempt('balance', () =>
+      prisma.stockBalance.deleteMany({
+        where: { companyId: company.id, branchId: branch.id, itemId: item.id },
+      }),
+    );
+    await attempt('lots', () =>
+      prisma.itemBatch.deleteMany({ where: { companyId: company.id, itemId: item.id } }),
+    );
+    await attempt('thresholds', () =>
+      prisma.itemWarehouseSetting.deleteMany({
+        where: { companyId: company.id, itemId: item.id },
+      }),
+    );
+    await attempt('storage locations', () =>
+      prisma.storageLocation.deleteMany({
+        where: { companyId: company.id, warehouseId: { in: [warehouse.id, warehouseB.id] } },
+      }),
+    );
+    await attempt('warehouses', () =>
+      prisma.warehouse.deleteMany({ where: { id: { in: [warehouse.id, warehouseB.id] } } }),
+    );
+    await attempt('item', () => prisma.item.deleteMany({ where: { id: item.id } }));
     await prisma.$disconnect();
   }
 }
