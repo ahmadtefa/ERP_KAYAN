@@ -43,8 +43,12 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     'priceList',
     'priceListItem',
     'warehouse',
+    'storageLocation',
+    'userWarehouseAccess',
     'stockBalance',
     'stockMovement',
+    'itemBatch',
+    'warehouseStockBalance',
     'journalEntry',
     'journalLine',
     'journalLineAllocation',
@@ -56,6 +60,8 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     'salesInvoiceLine',
     'purchaseInvoice',
     'purchaseInvoiceLine',
+    'stockTakeSession',
+    'stockTakeLine',
     'stockDocument',
     'stockDocumentLine',
     'openingBalance',
@@ -73,6 +79,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     'quotationColumnTemplate',
     'quotationBackground',
     'documentSequence',
+    'notification',
     'auditLog',
   ];
 
@@ -679,6 +686,92 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     });
   });
 
+  describe('The warehouse in a company file', () => {
+    const COMPANY = {
+      id: COMPANY_ID,
+      code: 'KAYAN',
+      nameEn: 'Kayan Company',
+      nameAr: 'شركة كيان',
+      taxId: null,
+      commercialRegistration: null,
+      addressEn: null,
+      addressAr: null,
+      phone: null,
+      email: null,
+      address: null,
+      currency: 'EGP',
+      timezone: 'Africa/Cairo',
+      logoData: null,
+      logoMime: null,
+      logoPath: null,
+    };
+
+    test('carries the lots, the shelf book, the counts and who may work where', async () => {
+      prismaMock.company.findUnique.mockResolvedValueOnce(COMPANY);
+      const zone = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01';
+      const bin = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa02';
+      const batch = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb01';
+      // The child is listed first in the database's own order: the file still
+      // has to write the zone before the bin inside it, or the restore hits a
+      // foreign key the moment it inserts the second row.
+      prismaMock.storageLocation.findMany.mockResolvedValueOnce([
+        { id: bin, companyId: COMPANY_ID, parentId: zone, kind: 'BIN', code: 'A-01-1' },
+        { id: zone, companyId: COMPANY_ID, parentId: null, kind: 'ZONE', code: 'A' },
+      ]);
+      prismaMock.itemBatch.findMany.mockResolvedValueOnce([
+        { id: batch, companyId: COMPANY_ID, batchNumber: 'LOT-1', remainingQuantity: '4.0000' },
+      ]);
+      prismaMock.warehouseStockBalance.findMany.mockResolvedValueOnce([
+        {
+          companyId: COMPANY_ID,
+          branchId: 'cccccccc-cccc-4ccc-8ccc-cccccccccc01',
+          warehouseId: 'dddddddd-dddd-4ddd-8ddd-dddddddddd01',
+          itemId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeee01',
+          quantity: '4.0000',
+          value: '110.0000',
+        },
+      ]);
+      prismaMock.stockTakeSession.findMany.mockResolvedValueOnce([
+        { id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', companyId: COMPANY_ID, status: 'POSTED' },
+      ]);
+      prismaMock.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { id: '99999999-9999-4999-8999-999999999901', companyId: COMPANY_ID, canCount: true },
+      ]);
+      prismaMock.notification.findMany.mockResolvedValueOnce([
+        { id: '99999999-9999-4999-8999-999999999902', companyId: COMPANY_ID, type: 'STOCK_EXPIRED' },
+      ]);
+
+      const file = await service.create(COMPANY_ID);
+
+      expect(file.version).toBe(3);
+      // Every one of them is in the file, not silently left behind.
+      expect(file.tables.itemBatch).toHaveLength(1);
+      expect(file.tables.warehouseStockBalance[0]).toMatchObject({
+        quantity: '4.0000',
+        value: '110.0000',
+      });
+      expect(file.tables.stockTakeSession).toHaveLength(1);
+      expect(file.tables.userWarehouseAccess).toHaveLength(1);
+      expect(file.tables.notification).toHaveLength(1);
+
+      // The shelf tree travels whole, nesting included.
+      const locations = file.tables.storageLocation.map((row) => String(row.id));
+      expect(locations).toEqual(expect.arrayContaining([zone, bin]));
+
+      await service.restore(file, COMPANY_ID, { replace: true });
+
+      // And it comes back: a restore that dropped the shelf book would leave
+      // every warehouse empty while the branch totals said otherwise.
+      expect(txMock.warehouseStockBalance.createMany).toHaveBeenCalled();
+      expect(txMock.itemBatch.createMany).toHaveBeenCalled();
+      expect(txMock.userWarehouseAccess.createMany).toHaveBeenCalled();
+      const restoredLocations = txMock.storageLocation.createMany.mock.calls[0][0].data.map(
+        (row: Record<string, unknown>) => String(row.id),
+      );
+      expect(restoredLocations.indexOf(bin)).toBeGreaterThan(restoredLocations.indexOf(zone));
+    });
+  });
+
   describe('Access reconciliation after a restore', () => {
     const emptyBackup = (): BackupFile => ({
       format: 'kayan-backup',
@@ -1102,7 +1195,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       ]);
 
       const file = await service.create(COMPANY_ID);
-      expect(file.version).toBe(2);
+      expect(file.version).toBe(3);
       // JSON has no binary type: a map of offsets would restore as nothing.
       expect(file.tables.quotationBackground[0].data).toBe(
         `base64:${artwork.toString('base64')}`,

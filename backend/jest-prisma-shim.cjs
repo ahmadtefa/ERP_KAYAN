@@ -66,7 +66,13 @@ const OrderStatus = makeEnum([
 ]);
 const PeriodStatus = makeEnum(['OPEN', 'CLOSED']);
 const StockDirection = makeEnum(['IN', 'OUT']);
-const StockDocumentKind = makeEnum(['ADJUSTMENT', 'TRANSFER', 'COUNT', 'OPENING']);
+const StockDocumentKind = makeEnum([
+  'ADJUSTMENT',
+  'TRANSFER',
+  'COUNT',
+  'OPENING',
+  'WRITE_OFF',
+]);
 const QuotationStatus = makeEnum([
   'DRAFT',
   'SENT',

@@ -29,10 +29,12 @@ import {
 /// recognised by a later version of the program.
 export const BACKUP_FORMAT = 'kayan-backup';
 /// 2 added the company's print price policy, its budgets, its quotation
-/// templates and the attached letterhead artwork. Version 1 files still
-/// restore; they simply say nothing about those tables, and a restore never
-/// empties a table the file does not mention.
-export const BACKUP_VERSION = 2;
+/// templates and the attached letterhead artwork. 3 added what the warehouse
+/// gained afterwards: the shelf tree, the lots, the per-warehouse book, the
+/// count sessions and which warehouses each user may work in. Older files
+/// still restore; they simply say nothing about those tables, and a restore
+/// never empties a table the file does not mention.
+export const BACKUP_VERSION = 3;
 
 export interface BackupFile {
   format: typeof BACKUP_FORMAT;
@@ -230,6 +232,10 @@ const TABLES: TableSpec[] = [
   { model: 'userPermission', scope: 'child', parent: 'user', foreignKey: 'userId' },
   { model: 'userRole', scope: 'company' },
   { model: 'userBranch', scope: 'child', parent: 'user', foreignKey: 'userId' },
+  // Which warehouses a person may work in. Restoring the books without this
+  // would hand every user access to every store, which is a permission change
+  // nobody asked for.
+  { model: 'userWarehouseAccess', scope: 'company', addedIn: 3 },
   { model: 'fiscalPeriod', scope: 'company' },
   {
     model: 'account',
@@ -251,9 +257,23 @@ const TABLES: TableSpec[] = [
   { model: 'item', scope: 'company' },
   { model: 'itemUnit', scope: 'child', parent: 'item', foreignKey: 'itemId' },
   { model: 'warehouse', scope: 'company' },
+  // The shelf tree inside each warehouse. A location points at its parent, so
+  // its own rows come first and the nesting is restored in one pass.
+  {
+    model: 'storageLocation',
+    scope: 'company',
+    addedIn: 3,
+    selfReferencing: true,
+    selfReferenceField: 'parentId',
+  },
   { model: 'priceListItem', scope: 'child', parent: 'priceList', foreignKey: 'priceListId' },
   { model: 'stockBalance', scope: 'company' },
   { model: 'stockMovement', scope: 'company' },
+  // The lots stock is actually held in, and the per-warehouse book that the
+  // shelf reports read. Both are business data: a restore that dropped them
+  // would leave every warehouse empty while the branch totals said otherwise.
+  { model: 'itemBatch', scope: 'company', addedIn: 3 },
+  { model: 'warehouseStockBalance', scope: 'company', addedIn: 3 },
   {
     model: 'journalEntry',
     scope: 'company',
@@ -302,6 +322,10 @@ const TABLES: TableSpec[] = [
     selfReferencing: true,
     selfReferenceField: 'originalLineId',
   },
+  // A count session comes before the document it produced, and its lines
+  // before the documents that name the same lots.
+  { model: 'stockTakeSession', scope: 'company', addedIn: 3 },
+  { model: 'stockTakeLine', scope: 'child', parent: 'stockTakeSession', foreignKey: 'sessionId', addedIn: 3 },
   { model: 'stockDocument', scope: 'company' },
   { model: 'stockDocumentLine', scope: 'child', parent: 'stockDocument', foreignKey: 'documentId' },
   // The quotation library: the terms and column sets an offer is drafted
@@ -353,6 +377,8 @@ const TABLES: TableSpec[] = [
   { model: 'depreciationRun', scope: 'company' },
   { model: 'assetDepreciation', scope: 'company' },
   { model: 'documentSequence', scope: 'company' },
+  // The facts the centre told the user about their own goods.
+  { model: 'notification', scope: 'company', addedIn: 3 },
   { model: 'auditLog', scope: 'company' },
 ];
 

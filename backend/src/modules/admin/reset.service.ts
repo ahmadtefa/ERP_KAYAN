@@ -470,8 +470,56 @@ export class ResetService {
             });
             return count;
           });
+          await step('warehouseStockBalances', async () => {
+            const { count } = await tx.warehouseStockBalance.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
           await step('stockBalances', async () => {
             const { count } = await tx.stockBalance.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          // A count session points at its adjustment document; both go, and
+          // the session is removed before the stock documents below so the
+          // reference never dangles during the wipe.
+          await step('stockTakeLines', async () => {
+            const { count } = await tx.stockTakeLine.deleteMany({
+              where: { session: { companyId: me.companyId } },
+            });
+            return count;
+          });
+          await step('stockTakeSessions', async () => {
+            const { count } = await tx.stockTakeSession.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          // The lots and the shelf tree come after everything that names them -
+          // a count line points at a lot - and before the warehouses they sit
+          // in.
+          await step('itemBatches', async () => {
+            const { count } = await tx.itemBatch.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('storageLocations', async () => {
+            const { count } = await tx.storageLocation.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('notifications', async () => {
+            const { count } = await tx.notification.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('userWarehouseAccess', async () => {
+            const { count } = await tx.userWarehouseAccess.deleteMany({
               where: { companyId: me.companyId },
             });
             return count;

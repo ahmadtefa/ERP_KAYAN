@@ -90,6 +90,11 @@ function makeService(itemOverride: any = milkItem) {
   // The real lot engine, driven by the same mocked transaction. Sales no
   // longer writes its own OUT movement - it asks the engine - so the assertions
   // about movements must run against what the engine actually writes.
+  //
+  // The mocked shelf holds 50 base units worth 375, exactly what this suite's
+  // $queryRaw stands for. The same ledger serves the posting and a reversal,
+  // which restores the shelf through it.
+  const ledger = fakeLedger({ position: { quantity: 50, value: 375 } });
   const batches = new BatchesService(
     prisma as never,
     warehouses as never,
@@ -97,9 +102,7 @@ function makeService(itemOverride: any = milkItem) {
     {} as never,
     {} as never,
     audit as never,
-    // The mocked shelf holds 50 base units worth 375, exactly what this
-    // suite's $queryRaw stands for.
-    fakeLedger({ position: { quantity: 50, value: 375 } }) as any,
+    ledger as any,
   );
 
   const service = new SalesInvoicesService(
@@ -112,6 +115,7 @@ function makeService(itemOverride: any = milkItem) {
     prices as never,
     audit as never,
     batches,
+    ledger as any,
   );
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'invoice-1' } as never);
 

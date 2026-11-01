@@ -117,10 +117,29 @@ export class StockLedgerService {
   /// Moves one item's quantity and value on one shelf, and on the branch.
   ///
   /// Positive quantity adds, negative removes; `value` follows the same sign.
-  /// Removing more than the shelf holds is refused here rather than surfacing
-  /// as a negative balance nobody can explain - unless the company permits
-  /// negative stock, in which case the caller's policy decides and this method
-  /// simply records it.
+  ///
+  /// The order of the four steps below is the whole defence against a balance
+  /// that goes negative by accident, and it is deliberate:
+  ///
+  ///   1. create the row at zero if it does not exist (`ON CONFLICT DO
+  ///      NOTHING`), so a balance is never *inserted* with a negative figure;
+  ///   2. lock it (`FOR UPDATE`), so a second posting queues behind this one
+  ///      instead of reading the same balance and writing the same result;
+  ///   3. read it back inside the lock and compute the result in memory;
+  ///   4. write that result as an absolute value, never as "add this much".
+  ///
+  /// Step 4 matters as much as the lock: an increment applied twice - by a
+  /// retried request, or by a second writer in the same transaction - silently
+  /// doubles the movement. An absolute figure computed from a locked read
+  /// cannot be applied twice.
+  ///
+  /// The branch book is refused below zero unconditionally. It is the branch
+  /// total every report and reconciliation reads, and the database itself
+  /// enforces `stock_balances_quantity_nonnegative`; refusing here turns what
+  /// would be a 500 from the constraint into a readable refusal that names the
+  /// item, the figure held and the figure asked for. `allowNegative` therefore
+  /// governs the shelf only - a single warehouse may briefly go negative when
+  /// the company permits it, but a branch total never does.
   async post(
     tx: Prisma.TransactionClient,
     posting: LedgerPosting,
@@ -128,56 +147,15 @@ export class StockLedgerService {
   ): Promise<LedgerPosition> {
     const quantity = new Prisma.Decimal(posting.quantity).toDecimalPlaces(MONEY_SCALE);
     const value = new Prisma.Decimal(posting.value).toDecimalPlaces(MONEY_SCALE);
+    const allowNegative = options.allowNegative ?? false;
 
     if (!quantity.isZero() || !value.isZero()) {
-      await this.postBranch(tx, posting, quantity, value, options.allowNegative ?? false);
+      await this.applyBranch(tx, posting, quantity, value);
     }
     if (!posting.warehouseId) {
-      return this.position(tx, posting);
+      return this.branchPosition(tx, posting);
     }
-
-    const before = await this.position(tx, posting, { forUpdate: true });
-    const after = {
-      quantity: before.quantity.plus(quantity),
-      value: before.value.plus(value).toDecimalPlaces(MONEY_SCALE),
-    };
-    if (after.quantity.lessThan(0) && !(options.allowNegative ?? false)) {
-      throw new BadRequestException(
-        `Not enough stock in the selected warehouse: ${before.quantity.toFixed(MONEY_SCALE)} available, ` +
-          `${quantity.abs().toFixed(MONEY_SCALE)} requested.`,
-      );
-    }
-    // An emptied shelf is worth nothing: a rounded average must not leave a
-    // fils of valuation floating on a shelf that holds no stock.
-    if (after.quantity.isZero()) after.value = new Prisma.Decimal(0);
-
-    await tx.warehouseStockBalance.upsert({
-      where: {
-        companyId_branchId_warehouseId_itemId: {
-          companyId: posting.companyId,
-          branchId: posting.branchId,
-          warehouseId: posting.warehouseId,
-          itemId: posting.itemId,
-        },
-      },
-      create: {
-        companyId: posting.companyId,
-        branchId: posting.branchId,
-        warehouseId: posting.warehouseId,
-        itemId: posting.itemId,
-        quantity: after.quantity,
-        value: after.value,
-      },
-      update: { quantity: after.quantity, value: after.value },
-    });
-
-    return {
-      quantity: after.quantity,
-      value: after.value,
-      unitCost: after.quantity.isZero()
-        ? new Prisma.Decimal(0)
-        : after.value.div(after.quantity).toDecimalPlaces(COST_SCALE),
-    };
+    return this.applyShelf(tx, posting, quantity, value, allowNegative);
   }
 
   /// Receives into a shelf and reports the average it now carries.
@@ -193,33 +171,49 @@ export class StockLedgerService {
     return { unitCost: after.unitCost, position };
   }
 
-  /// The branch roll-up. Kept as its own method because a posting without a
-  /// warehouse has nothing else to write, and because every existing report
-  /// reads this table.
-  private async postBranch(
+  /// The branch roll-up: created at zero, locked, then written as a figure.
+  private async applyBranch(
     tx: Prisma.TransactionClient,
     posting: LedgerPosting,
     quantity: Prisma.Decimal,
     value: Prisma.Decimal,
-    allowNegative: boolean,
-  ) {
-    const before = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal }>>(Prisma.sql`
-      SELECT "quantity"
+  ): Promise<void> {
+    await tx.stockBalance.createMany({
+      data: [
+        {
+          companyId: posting.companyId,
+          branchId: posting.branchId,
+          itemId: posting.itemId,
+          quantity: new Prisma.Decimal(0),
+          value: new Prisma.Decimal(0),
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    const rows = await tx.$queryRaw<
+      Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
+    >(Prisma.sql`
+      SELECT "quantity", "value"
         FROM "stock_balances"
        WHERE "companyId" = ${posting.companyId}::uuid
          AND "branchId" = ${posting.branchId}::uuid
          AND "itemId" = ${posting.itemId}::uuid
        FOR UPDATE
     `);
-    const current = new Prisma.Decimal(before[0]?.quantity ?? 0);
-    if (current.plus(quantity).lessThan(0) && !allowNegative) {
+    const current = this.toPosition(rows[0]?.quantity ?? 0, rows[0]?.value ?? 0);
+    const nextQuantity = current.quantity.plus(quantity);
+    const nextValue = current.value.plus(value).toDecimalPlaces(MONEY_SCALE);
+
+    if (nextQuantity.lessThan(0)) {
       throw new BadRequestException(
-        `Not enough stock in this branch: ${current.toFixed(MONEY_SCALE)} available, ` +
-          `${quantity.abs().toFixed(MONEY_SCALE)} requested.`,
+        `Not enough stock in this branch: ${current.quantity.toFixed(MONEY_SCALE)} available, ` +
+          `${quantity.abs().toFixed(MONEY_SCALE)} requested. The branch total is never allowed ` +
+          'below zero, whatever a shelf is allowed to do. / رصيد الفرع لا يصبح سالبًا.',
       );
     }
 
-    await tx.stockBalance.upsert({
+    await tx.stockBalance.update({
       where: {
         companyId_branchId_itemId: {
           companyId: posting.companyId,
@@ -227,18 +221,122 @@ export class StockLedgerService {
           itemId: posting.itemId,
         },
       },
-      create: {
-        companyId: posting.companyId,
-        branchId: posting.branchId,
-        itemId: posting.itemId,
-        quantity,
-        value,
-      },
-      update: {
-        quantity: { increment: quantity },
-        value: { increment: value },
+      data: {
+        quantity: nextQuantity,
+        // A branch left holding nothing is worth nothing: a rounded average
+        // must not leave a fils of valuation behind on an empty balance.
+        value: nextQuantity.isZero() ? new Prisma.Decimal(0) : nextValue,
       },
     });
+  }
+
+  /// One shelf, on the same four steps as the branch.
+  private async applyShelf(
+    tx: Prisma.TransactionClient,
+    posting: LedgerPosting,
+    quantity: Prisma.Decimal,
+    value: Prisma.Decimal,
+    allowNegative: boolean,
+  ): Promise<LedgerPosition> {
+    const warehouseId = posting.warehouseId as string;
+    await tx.warehouseStockBalance.createMany({
+      data: [
+        {
+          companyId: posting.companyId,
+          branchId: posting.branchId,
+          warehouseId,
+          itemId: posting.itemId,
+          quantity: new Prisma.Decimal(0),
+          value: new Prisma.Decimal(0),
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    const before = await this.position(tx, posting, { forUpdate: true });
+    const after = {
+      quantity: before.quantity.plus(quantity),
+      value: before.value.plus(value).toDecimalPlaces(MONEY_SCALE),
+    };
+    if (after.quantity.lessThan(0) && !allowNegative) {
+      throw new BadRequestException(
+        `Not enough stock in the selected warehouse: ${before.quantity.toFixed(MONEY_SCALE)} available, ` +
+          `${quantity.abs().toFixed(MONEY_SCALE)} requested.`,
+      );
+    }
+    // An emptied shelf is worth nothing: a rounded average must not leave a
+    // fils of valuation floating on a shelf that holds no stock.
+    const shelfValue = after.quantity.isZero() ? new Prisma.Decimal(0) : after.value;
+
+    await tx.warehouseStockBalance.update({
+      where: {
+        companyId_branchId_warehouseId_itemId: {
+          companyId: posting.companyId,
+          branchId: posting.branchId,
+          warehouseId,
+          itemId: posting.itemId,
+        },
+      },
+      data: { quantity: after.quantity, value: shelfValue },
+    });
+
+    return {
+      quantity: after.quantity,
+      value: shelfValue,
+      unitCost: after.quantity.isZero()
+        ? new Prisma.Decimal(0)
+        : shelfValue.div(after.quantity).toDecimalPlaces(COST_SCALE),
+    };
+  }
+
+  /// The branch position, read without creating a row.
+  private async branchPosition(
+    tx: Prisma.TransactionClient,
+    target: LedgerTarget,
+  ): Promise<LedgerPosition> {
+    return this.position(tx, target);
+  }
+
+  /// What the branch holds next to what its shelves hold.
+  ///
+  /// By the system's rules the branch total is the sum of its shelves, plus
+  /// whatever was posted before warehouses existed (the migration moved that
+  /// residual onto each branch's default warehouse, so on a healthy company
+  /// the two figures are equal). A difference means a writer bypassed the
+  /// ledger, and this is how a person finds that out instead of discovering
+  /// it in a valuation report.
+  async reconcile(
+    tx: Prisma.TransactionClient,
+    target: LedgerTarget,
+  ): Promise<{
+    branch: Prisma.Decimal;
+    shelves: Prisma.Decimal;
+    difference: Prisma.Decimal;
+    branchValue: Prisma.Decimal;
+    shelvesValue: Prisma.Decimal;
+    valueDifference: Prisma.Decimal;
+  }> {
+    const branch = await this.position(tx, { ...target, warehouseId: null });
+    const rows = await tx.$queryRaw<
+      Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
+    >(Prisma.sql`
+      SELECT COALESCE(SUM("quantity"), 0) AS "quantity",
+             COALESCE(SUM("value"), 0) AS "value"
+        FROM "warehouse_stock_balances"
+       WHERE "companyId" = ${target.companyId}::uuid
+         AND "branchId" = ${target.branchId}::uuid
+         AND "itemId" = ${target.itemId}::uuid
+    `);
+    const shelves = new Prisma.Decimal(rows[0]?.quantity ?? 0);
+    const shelvesValue = new Prisma.Decimal(rows[0]?.value ?? 0);
+    return {
+      branch: branch.quantity,
+      shelves,
+      difference: branch.quantity.minus(shelves),
+      branchValue: branch.value,
+      shelvesValue,
+      valueDifference: branch.value.minus(shelvesValue),
+    };
   }
 
   /// Rebuilds one shelf from the movements that produced it. Used by the

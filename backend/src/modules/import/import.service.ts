@@ -1469,10 +1469,21 @@ export class ImportService {
     itemId: string,
   ): Promise<boolean> {
     const zero = new Prisma.Decimal(0);
-    const [movements, balance, stockLines, salesLines, purchaseLines] =
+    const [movements, balance, shelfBalance, stockLines, salesLines, purchaseLines] =
       await Promise.all([
         tx.stockMovement.count({ where: { companyId, itemId } }),
         tx.stockBalance.findFirst({
+          where: {
+            companyId,
+            itemId,
+            OR: [{ quantity: { not: zero } }, { value: { not: zero } }],
+          },
+          select: { quantity: true },
+        }),
+        // Stock is held on shelves. An item can have a branch total of zero
+        // and still be sitting in one warehouse and owed to another, so the
+        // shelf book has to be asked as well before the base unit is rewritten.
+        tx.warehouseStockBalance.findFirst({
           where: {
             companyId,
             itemId,
@@ -1487,6 +1498,7 @@ export class ImportService {
     return (
       movements > 0 ||
       balance !== null ||
+      shelfBalance !== null ||
       stockLines > 0 ||
       salesLines > 0 ||
       purchaseLines > 0

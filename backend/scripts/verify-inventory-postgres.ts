@@ -831,6 +831,63 @@ async function main() {
       assert.equal(roll.value.toFixed(4), '570.0000');
     });
 
+    await check('the branch book equals the sum of its shelves, to the fils', async () => {
+      // The rule the two books live by: a branch holds what its warehouses
+      // hold. A difference means a writer touched one book without the other,
+      // which is exactly how a balance ends up negative on one side only.
+      const reconciled = await ledger.reconcile(prisma as never, {
+        companyId: company.id,
+        branchId: branch.id,
+        itemId: plain.id,
+      });
+      assert.equal(reconciled.branch.toFixed(4), '26.0000');
+      assert.equal(reconciled.shelves.toFixed(4), '26.0000');
+      assert.equal(reconciled.difference.toFixed(4), '0.0000');
+      assert.equal(reconciled.branchValue.toFixed(4), '570.0000');
+      assert.equal(reconciled.valueDifference.toFixed(4), '0.0000');
+    });
+
+    await check('an issue with nothing behind it is refused in words, not by the database', async () => {
+      // The defect this guards: a posting into a balance that does not exist
+      // used to reach the database and surface as a constraint violation. It
+      // now stops before the write, with the figures in the message.
+      const empty = await prisma.item.create({
+        data: {
+          companyId: company.id,
+          code: `${TAG}-EMPTY`,
+          nameEn: `${TAG} never received`,
+          nameAr: `صنف ${TAG} لم يستلم`,
+          unit: 'piece',
+          salePrice: D(5),
+          purchasePrice: D(5),
+          isStockTracked: true,
+          requiresBatch: false,
+        },
+      });
+      await assert.rejects(
+        batches.issue(
+          company.id,
+          user.id,
+          {
+            branchId: branch.id,
+            warehouseId: warehouse.id,
+            itemId: empty.id,
+            quantity: 1,
+            referenceType: 'SALES_INVOICE',
+            referenceNumber: `${TAG}/SI-EMPTY`,
+          },
+          [branch.id],
+        ),
+        /Not enough stock|الرصيد غير كافٍ/,
+      );
+      // And it left no row behind at all: a refusal writes nothing.
+      const stray = await prisma.stockBalance.findMany({
+        where: { companyId: company.id, itemId: empty.id },
+      });
+      assert.equal(stray.length, 0, 'a refused issue creates no balance row');
+      // The clean-up removes it with the rest of this run's items.
+    });
+
     await check('the shelf book and the movement ledger agree, to the fils', async () => {
       const rows = await prisma.$queryRaw<
         Array<{ warehouseId: string; quantity: Prisma.Decimal; value: Prisma.Decimal }>

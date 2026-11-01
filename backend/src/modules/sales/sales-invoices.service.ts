@@ -27,6 +27,7 @@ import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { attributedLines } from '../accounting/cost-center-attribution';
 import { PostingService } from '../accounting/posting.service';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { BatchesService } from '../inventory/batches.service';
 import {
   CreateSalesInvoiceDto,
@@ -82,6 +83,9 @@ export class SalesInvoicesService {
     /// lives with the inventory module and is exported rather than copied, so
     /// there is one answer to "which lot left?".
     private readonly batches: BatchesService,
+    /// Reversing a sale puts the goods back on the shelf they left, not only
+    /// on the branch total: the two books are written in one place, always.
+    private readonly ledger: StockLedgerService,
   ) {}
 
   async findAll(companyId: string, query: ListInvoicesDto, mayReadCost = true) {
@@ -771,25 +775,18 @@ export class SalesInvoicesService {
           },
         });
 
-        await tx.stockBalance.upsert({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: invoice.branchId,
-              itemId: line.itemId,
-            },
-          },
-          create: {
-            companyId,
-            branchId: invoice.branchId,
-            itemId: line.itemId,
-            quantity: line.quantity,
-            value: line.costTotal,
-          },
-          update: {
-            quantity: { increment: line.quantity },
-            value: { increment: line.costTotal },
-          },
+        // The books are written by the ledger, shelf included. Writing the
+        // branch row alone - which is what this used to do - left the shelf
+        // permanently short by everything that was ever returned, and every
+        // later issue from that warehouse saw stock the branch claimed and the
+        // shelf did not hold.
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: invoice.branchId,
+          warehouseId,
+          itemId: line.itemId,
+          quantity: line.quantity,
+          value: line.costTotal,
         });
       }
 
