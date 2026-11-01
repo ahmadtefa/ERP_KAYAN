@@ -580,7 +580,13 @@ export class PurchaseInvoicesService {
         // whose dates are missing fails the whole posting - including the
         // movement - rather than leaving stock nobody can trace.
         const policy = batchPolicyOf(item);
-        if (policy.requiresBatch || line.batchNumber) {
+        if (policy.requiresBatch && !warehouseId) {
+          throw new BadRequestException(
+            `Item ${item.code} is lot-controlled, but this branch has no warehouse for the lot to ` +
+              'be received into. Create a warehouse first.',
+          );
+        }
+        if (warehouseId && (policy.requiresBatch || line.batchNumber)) {
           await this.batches.recordLotInTx(tx, {
             companyId,
             userId,

@@ -541,7 +541,11 @@ export class SalesInvoicesService {
           tx,
           companyId,
           userId,
-          { warehouse: { id: warehouseId, branchId: invoice.branchId }, item },
+          {
+            warehouse: warehouseId ? { id: warehouseId, branchId: invoice.branchId } : null,
+            branchId: invoice.branchId,
+            item,
+          },
           {
             branchId: invoice.branchId,
             warehouseId,

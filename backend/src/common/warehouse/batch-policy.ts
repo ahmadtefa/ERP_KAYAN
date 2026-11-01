@@ -287,7 +287,9 @@ export const DEFAULT_BATCH_POLICY: BatchPolicy = {
   expiredIssueNeedsApproval: false,
 };
 
-export function batchPolicyOf(item: Partial<BatchPolicy> | null | undefined): BatchPolicy {
+export function batchPolicyOf(
+  item: { [K in keyof BatchPolicy]?: boolean | null } | null | undefined,
+): BatchPolicy {
   return {
     requiresBatch: item?.requiresBatch ?? DEFAULT_BATCH_POLICY.requiresBatch,
     requiresProductionDate:

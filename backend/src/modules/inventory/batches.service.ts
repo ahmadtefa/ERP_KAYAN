@@ -65,7 +65,9 @@ export interface ReceiveLotInput {
 
 export interface IssueInput {
   branchId: string;
-  warehouseId: string;
+  /// Null only when the branch has no warehouse defined at all; the sale then
+  /// issues the way it did before warehouses existed.
+  warehouseId: string | null;
   itemId: string;
   quantity: string | number;
   /** Chosen lot. Omitted means FEFO chooses, which is the normal case. */
@@ -614,7 +616,8 @@ export class BatchesService {
     companyId: string,
     userId: string,
     resolved: {
-      warehouse: { id: string; branchId: string };
+      warehouse: { id: string; branchId: string } | null;
+      branchId: string;
       item: BatchPolicyItem;
     },
     input: IssueInput,
@@ -623,6 +626,26 @@ export class BatchesService {
     const { warehouse, item } = resolved;
     const policy = batchPolicyOf(item);
     const today = new Date();
+    if (!warehouse) {
+      // The branch has no shelf at all: there is nothing for a lot to belong
+      // to, so this is exactly the behaviour before warehouses existed.
+      if (policy.requiresBatch) {
+        throw new BadRequestException(
+          'هذا الصنف يتطلب دفعة ولا يوجد مخزن للفرع. / This item is lot-controlled, but the '
+            + 'branch has no warehouse, so a lot cannot be issued from a shelf.',
+        );
+      }
+      return this.issueUnbatched(
+        tx,
+        companyId,
+        userId,
+        { id: null, branchId: resolved.branchId },
+        item,
+        quantity,
+        input,
+        today,
+      );
+    }
     {
       // Lock the shelf before looking at its lots. Two simultaneous issues
       // that each read the lots first would both see the same quantity and
@@ -821,7 +844,7 @@ export class BatchesService {
     tx: Prisma.TransactionClient,
     companyId: string,
     userId: string,
-    warehouse: { id: string; branchId: string },
+    warehouse: { id: string | null; branchId: string },
     item: { id: string; code: string },
     quantity: Prisma.Decimal,
     input: IssueInput,
