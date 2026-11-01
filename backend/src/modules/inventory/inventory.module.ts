@@ -12,6 +12,8 @@ import { ItemWarehouseSettingsService } from './item-warehouse-settings.service'
 import { StorageLocationsController } from './locations.controller';
 import { StorageLocationsService } from './storage-locations.service';
 import { InventoryPrintController } from './inventory-print.controller';
+import { InventoryAnalysisController } from './inventory-analysis.controller';
+import { InventoryAnalysisService } from './inventory-analysis.service';
 import { InventoryReportsController } from './inventory-reports.controller';
 import { InventoryReportsService } from './inventory-reports.service';
 import { ItemsController } from './items.controller';
@@ -33,6 +35,7 @@ import { WarehousesController } from './warehouses.controller';
     StockController,
     StockDocumentsController,
     InventoryReportsController,
+    InventoryAnalysisController,
     InventoryPrintController,
     WarehousesController,
     BatchesController,
@@ -46,6 +49,7 @@ import { WarehousesController } from './warehouses.controller';
     StockService,
     StockDocumentsService,
     InventoryReportsService,
+    InventoryAnalysisService,
     BarcodeLabelsService,
     BatchesService,
     StorageLocationsService,

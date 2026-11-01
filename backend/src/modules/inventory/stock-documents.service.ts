@@ -630,16 +630,24 @@ export class StockDocumentsService {
 
           const fromBalance = await this.balance(tx, companyId, document.fromBranchId as string, line.itemId);
           const availableQty = fromBalance?.quantity ?? new Prisma.Decimal(0);
-          const availableValue = fromBalance?.value ?? new Prisma.Decimal(0);
           if (availableQty.lessThan(line.quantity) && !settings.allowNegativeStock) {
             throw new BadRequestException(
               `Not enough stock to transfer: ${availableQty.toFixed(MONEY_SCALE)} on hand, ` +
                 `${line.quantity.toFixed(MONEY_SCALE)} requested.`,
             );
           }
-          const unitCost = availableQty.isZero()
+          // What the goods are worth where they leave, not what the branch
+          // averages: a transfer carries the source shelf's cost to the
+          // destination, and the destination re-averages with it.
+          const sourceShelf = await this.ledger.position(tx, {
+            companyId,
+            branchId: document.fromBranchId as string,
+            warehouseId: fromWarehouseId,
+            itemId: line.itemId,
+          });
+          const unitCost = sourceShelf.quantity.isZero()
             ? line.unitCost
-            : availableValue.div(availableQty).toDecimalPlaces(MONEY_SCALE);
+            : sourceShelf.unitCost.toDecimalPlaces(MONEY_SCALE);
           const totalCost = unitCost.mul(line.quantity).toDecimalPlaces(MONEY_SCALE);
 
           await this.move(tx, {
