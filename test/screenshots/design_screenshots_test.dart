@@ -804,4 +804,56 @@ void main() {
       matchesGoldenFile('goldens/shell_avatar_ar.png'),
     );
   });
+
+  // A diagnostic picture, not a screen: the same words in the theme family,
+  // in a family that is not registered, and with no family at all. If the
+  // first line is letters and the others are squares, the renderer is honest;
+  // if all three are squares, a widget test on this machine cannot draw text
+  // and the screens must be captured some other way.
+  testWidgets('screenshot: what the renderer really draws (font probe)', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 260));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: ColoredBox(
+          color: const Color(0xFFFFFFFF),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              Text(
+                'IBMPlex 0123 KAYAN كيان',
+                style: TextStyle(
+                  fontSize: 34,
+                  fontFamily: 'IBMPlexSansArabic',
+                  color: Color(0xFF111827),
+                ),
+              ),
+              Text(
+                'default 0123 KAYAN كيان',
+                style: TextStyle(fontSize: 34, color: Color(0xFF111827)),
+              ),
+              Text(
+                'bold 0123 KAYAN كيان',
+                style: TextStyle(
+                  fontSize: 34,
+                  fontWeight: FontWeight.w700,
+                  fontFamily: 'IBMPlexSansArabic',
+                  color: Color(0xFF111827),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/font_probe.png'),
+    );
+  });
 }
