@@ -871,7 +871,7 @@ void main() {
   testWidgets('screenshot: what the renderer really draws (font probe)', (
     tester,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(900, 380));
+    await tester.binding.setSurfaceSize(const Size(900, 470));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     const ink = Color(0xFF111827);
     await tester.pumpWidget(
@@ -906,6 +906,19 @@ void main() {
                   const Text(
                     '4 no style 0123 كيان',
                     style: TextStyle(fontSize: 30, color: ink),
+                  ),
+                  // The two controls whose labels were boxes while every
+                  // other word was printed: a themed button and a chip.
+                  Row(
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: () {},
+                        icon: const Icon(Icons.business_outlined, size: 17),
+                        label: const Text('5 button 0123 كيان'),
+                      ),
+                      const SizedBox(width: 12),
+                      Chip(label: const Text('6 chip 0123 كيان')),
+                    ],
                   ),
                 ],
               );
