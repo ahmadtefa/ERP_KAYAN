@@ -448,6 +448,37 @@ Future<Uint8List?> _renderAvatarPng() async {
 /// coverage, register it so the screenshots stay readable. Absent fonts are
 /// fine — layout and colour still render.
 Future<void> _tryLoadSystemFonts() async {
+  // The application's own typeface first: a widget test does not pick up the
+  // fonts declared in `pubspec.yaml`, which is why a render without this draws
+  // every Arabic and Latin glyph as an empty box. The files are read from the
+  // package the test belongs to, so the screenshots show the app's real face.
+  const bundled = <String>[
+    'assets/fonts/IBMPlexSansArabic-Regular.ttf',
+    'assets/fonts/IBMPlexSansArabic-Medium.ttf',
+    'assets/fonts/IBMPlexSansArabic-SemiBold.ttf',
+    'assets/fonts/IBMPlexSansArabic-Bold.ttf',
+  ];
+  final appFont = FontLoader('IBMPlexSansArabic');
+  var added = 0;
+  for (final path in bundled) {
+    final file = File(path);
+    if (!await file.exists()) continue;
+    try {
+      final bytes = await file.readAsBytes();
+      appFont.addFont(Future.value(ByteData.view(bytes.buffer)));
+      added += 1;
+    } catch (_) {
+      // A font that will not load must not fail a screenshot.
+    }
+  }
+  if (added > 0) {
+    try {
+      await appFont.load();
+    } catch (_) {
+      // Same reasoning: the screen still renders, only less beautifully.
+    }
+  }
+
   const candidates = <String, List<String>>{
     'NotoNaskhArabic': [
       '/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf',
