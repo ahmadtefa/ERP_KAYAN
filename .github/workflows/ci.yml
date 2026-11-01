@@ -509,6 +509,18 @@ jobs:
             exit 1
           fi
 
+          # The custom letterhead, from the upload a person makes to the file a
+          # customer receives. The picture is checked to be on every page of a
+          # long Arabic offer, each page's own "n / N" is read back out of the
+          # PDF, and an offer with no letterhead must print none.
+          echo "Running the custom quotation background scenario..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/scenario-quotation-artwork.mjs http://127.0.0.1:3000/api/v1 | tee /tmp/kayan-artwork-scenario.log'; then
+            echo "::group::API logs after the artwork scenario failure"
+            cat /tmp/kayan-regressions-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
           echo "Running the packing-unit stock cycle (carton 12, roll 5, piece 1)..."
           if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/scenario-units-cycle.mjs http://127.0.0.1:3000/api/v1 | tee /tmp/kayan-units-scenario.log'; then
             echo "::group::API logs after the packing-unit scenario failure"
