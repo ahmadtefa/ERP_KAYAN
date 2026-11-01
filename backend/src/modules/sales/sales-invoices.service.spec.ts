@@ -32,6 +32,7 @@ function serviceWith(prisma: Record<string, any>, tx: Record<string, any>) {
     warehouses as never,
     {} as never,
     audit as never,
+    { issueTx: jest.fn() } as never,
   );
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: INVOICE_ID } as never);
   return { service, numbers, posting, warehouses, audit, tx };

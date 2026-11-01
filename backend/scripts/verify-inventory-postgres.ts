@@ -61,7 +61,7 @@ async function main() {
   const prisma = new PrismaService();
   const audit = new AuditService(prisma);
   const warehouses = new WarehouseService(prisma, audit);
-  const numbers = new DocumentNumberService(prisma);
+  const numbers = new DocumentNumberService();
   const periods = new FiscalPeriodsService(prisma, audit);
   const costCenters = new CostCentersService(prisma, audit);
   const posting = new PostingService(numbers, periods, costCenters);
@@ -114,7 +114,7 @@ async function main() {
       nameAr: `دواء ${TAG}`,
       unit: 'box',
       salePrice: D(40),
-      costPrice: D(15),
+      purchasePrice: D(15),
       isStockTracked: true,
       requiresBatch: true,
       requiresProductionDate: true,
@@ -294,6 +294,16 @@ async function main() {
     await check('the lot holds what arrived, not what was typed twice', () => {
       assert.equal(firstLotRow.remainingQuantity.toFixed(4), '12.0000');
       assert.equal(firstLotRow.receivedQuantity.toFixed(4), '12.0000');
+      // 10 at 10.00 plus 10 at 20.00 plus 2 at 10.00 = 22 units worth 320.00.
+      assert.equal(firstLotRow.unitCost.toFixed(4), '10.0000');
+    });
+
+    const shelf = await prisma.stockBalance.findFirstOrThrow({
+      where: { companyId: company.id, branchId: branch.id, itemId: item.id },
+    });
+    await check('a third delivery re-averages the shelf: 320 over 22', () => {
+      assert.equal(shelf.quantity.toFixed(4), '22.0000');
+      assert.equal(shelf.value.toFixed(4), '320.0000');
     });
 
     await check('a receipt that changes a lot\'s expiry date is refused', async () => {
@@ -358,9 +368,10 @@ async function main() {
       assert.equal(issue.lots[1].quantity, '1.0000');
     });
 
-    await check('the issue leaves at the shelf average of 15, not at either lot\'s own price', () => {
-      assert.equal(issue.unitCost, '15.0000');
-      assert.equal(issue.value, '195.0000');
+    await check('the issue leaves at the shelf average, not at either lot\'s own price', () => {
+      // 320.00 / 22 = 14.545454..., carried at four decimals for money.
+      assert.equal(issue.unitCost, '14.5455');
+      assert.equal(issue.value, '189.0915');
     });
 
     await check('the emptied lot is closed rather than deleted, and keeps its movements', async () => {
@@ -370,21 +381,21 @@ async function main() {
       const movements = await prisma.stockMovement.count({
         where: { companyId: company.id, batchId: firstLot.batchId },
       });
-      assert.equal(movements, 2, 'the receipt and the issue are both on the lot');
+      assert.equal(movements, 3, 'two receipts and the issue are all on the lot');
     });
 
-    await check('the balance is 7 at 105, and the history records the cost that moved', async () => {
+    await check('the balance is 9 at 130.9085, and the history records the cost that moved', async () => {
       const balance = await prisma.stockBalance.findFirstOrThrow({
         where: { companyId: company.id, branchId: branch.id, itemId: item.id },
       });
-      assert.equal(balance.quantity.toFixed(4), '7.0000');
-      assert.equal(balance.value.toFixed(4), '105.0000');
+      assert.equal(balance.quantity.toFixed(4), '9.0000');
+      assert.equal(balance.value.toFixed(4), '130.9085');
       const history = await prisma.itemCostHistory.findMany({
         where: { companyId: company.id, itemId: item.id },
         orderBy: { createdAt: 'asc' },
       });
-      assert.equal(history.length, 3, 'two receipts and one issue');
-      assert.equal(history[2].unitCostAfter.toFixed(4), '15.0000');
+      assert.equal(history.length, 4, 'three receipts and one issue');
+      assert.equal(history[3].unitCostAfter.toFixed(4), '14.5455');
       created.costHistory.push(...history.map((row) => row.id));
     });
 
@@ -498,7 +509,7 @@ async function main() {
       const balance = await prisma.stockBalance.findFirstOrThrow({
         where: { companyId: company.id, branchId: branch.id, itemId: item.id },
       });
-      assert.equal(balance.quantity.toFixed(4), '8.0000');
+      assert.equal(balance.quantity.toFixed(4), '10.0000');
     });
 
     // ── a lot moves without losing its identity ─────────────────────────────

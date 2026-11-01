@@ -114,6 +114,7 @@ function makeService() {
     warehouses as never,
     prices as never,
     audit as never,
+    { recordLotInTx: jest.fn() } as never,
   );
   return { service, prisma, tx, detail, numbers, audit };
 }
