@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/providers/auth_providers.dart';
+import '../../features/notifications/presentation/screens/notification_center_screen.dart';
 import '../../features/licensing/presentation/widgets/licence_gate.dart';
 import '../../features/search/presentation/search_dialog.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
@@ -323,6 +324,17 @@ class _ErpShellState extends ConsumerState<ErpShell> {
             ? 'إدارة المخازن'
             : 'Warehouses',
         permissions: const ['inventory.warehouses.read'],
+        group: _NavGroup.inventory,
+      ),
+      _NavItem(
+        AppRoutes.batches,
+        Icons.qr_code_2_rounded,
+        // Written here rather than regenerating the catalogue for one screen,
+        // the same way the warehouse label is.
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'الدفعات والصلاحية'
+            : 'Lots & expiry',
+        permissions: const ['inventory.batches.read'],
         group: _NavGroup.inventory,
       ),
       _NavItem(
@@ -979,6 +991,10 @@ class _TopBar extends StatelessWidget {
           ),
           _SearchTrigger(expanded: isExtended),
           const SizedBox(width: AppSpacing.xs),
+          // Before the language menu: an unread alert is more urgent than a
+          // translation, and the two must not be confused for each other.
+          const NotificationBell(),
+          const SizedBox(width: AppSpacing.xxs),
           const _LanguageMenu(),
           const SizedBox(width: AppSpacing.xxs),
           const _AccountMenu(),

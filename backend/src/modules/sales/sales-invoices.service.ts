@@ -27,6 +27,7 @@ import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { attributedLines } from '../accounting/cost-center-attribution';
 import { PostingService } from '../accounting/posting.service';
+import { BatchesService } from '../inventory/batches.service';
 import {
   CreateSalesInvoiceDto,
   ListInvoicesDto,
@@ -77,6 +78,10 @@ export class SalesInvoicesService {
     private readonly warehouses: WarehouseService,
     private readonly prices: PriceListsService,
     private readonly audit: AuditService,
+    /// Sales take their goods out of lots, soonest expiry first. The engine
+    /// lives with the inventory module and is exported rather than copied, so
+    /// there is one answer to "which lot left?".
+    private readonly batches: BatchesService,
   ) {}
 
   async findAll(companyId: string, query: ListInvoicesDto, mayReadCost = true) {
@@ -471,7 +476,21 @@ export class SalesInvoicesService {
 
         const item = await tx.item.findFirst({
           where: { id: line.itemId, companyId, deletedAt: null },
-          select: { id: true, code: true, nameEn: true, unit: true, isStockTracked: true },
+          select: {
+            id: true,
+            code: true,
+            nameEn: true,
+            unit: true,
+            isStockTracked: true,
+            // The lot policy travels with the item: whether this sale has to
+            // name a lot, and whether expired stock may leave at all.
+            requiresBatch: true,
+            requiresProductionDate: true,
+            requiresExpiryDate: true,
+            useFefo: true,
+            allowExpiredIssue: true,
+            expiredIssueNeedsApproval: true,
+          },
         });
         if (!item) throw new BadRequestException('An invoice line references a missing item');
         if (!item.isStockTracked) continue;
@@ -513,60 +532,43 @@ export class SalesInvoicesService {
           reference: invoice.invoiceNumber,
         });
 
-        const unitCost = qtyOnHand.isZero()
-          ? new Prisma.Decimal(0)
-          : valueOnHand.div(qtyOnHand).toDecimalPlaces(MONEY_SCALE);
-        const costTotal = unitCost.mul(line.quantity).toDecimalPlaces(MONEY_SCALE);
-
-        costOfGoods = costOfGoods.plus(costTotal);
-        costByLine.set(line.id, { unitCost, costTotal });
-
-        // The movement says how the line was typed, not just what it came to:
-        // "1 reel of 500 m" and "500 m" move the same goods but are different
-        // statements, and the stock card shows the first.
-        const movementUnits = movementUnitSnapshot({
-          enteredUnit: line.unitName,
-          enteredQuantity: line.unitQuantity,
-          unitFactor: line.unitFactor,
-          baseUnitName: item.unit,
-          baseQuantity: line.quantity,
-        });
-
-        await tx.stockMovement.create({
-          data: {
-            companyId,
+        // Which lot leaves, and what it costs, is decided in one place. When
+        // the item is lot-controlled the engine takes the soonest expiry first
+        // and writes one movement per lot; otherwise it issues from the plain
+        // balance exactly as before. Either way the sale is refused when the
+        // shelf does not hold the goods.
+        const issued = await this.batches.issueTx(
+          tx,
+          companyId,
+          userId,
+          { warehouse: { id: warehouseId, branchId: invoice.branchId }, item },
+          {
             branchId: invoice.branchId,
             warehouseId,
             itemId: item.id,
-            movementDate: invoice.invoiceDate,
-            direction: StockDirection.OUT,
             quantity: line.quantity,
-            ...movementUnits,
-            unitCost,
-            totalCost: costTotal,
             referenceType: 'SALES_INVOICE',
             referenceId: invoice.id,
             referenceNumber: invoice.invoiceNumber,
-            createdBy: userId,
-          },
-        });
-
-        // The balance was locked and verified above. Never upsert an OUT
-        // movement with a negative create quantity: PostgreSQL checks the
-        // nonnegative constraint before resolving ON CONFLICT.
-        await tx.stockBalance.update({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: invoice.branchId,
-              itemId: item.id,
+            documentDate: invoice.invoiceDate.toISOString().slice(0, 10),
+            // The movement says how the line was typed, not just what it came
+            // to: "1 reel of 500 m" and "500 m" move the same goods but are
+            // different statements, and the stock card shows the first.
+            movementUnits: {
+              enteredUnit: line.unitName,
+              enteredQuantity: line.unitQuantity,
+              unitFactor: line.unitFactor,
+              baseUnitName: item.unit,
             },
           },
-          data: {
-            quantity: { decrement: line.quantity },
-            value: { decrement: costTotal },
-          },
-        });
+          line.quantity,
+        );
+
+        const unitCost = new Prisma.Decimal(issued.unitCost);
+        const costTotal = new Prisma.Decimal(issued.value);
+
+        costOfGoods = costOfGoods.plus(costTotal);
+        costByLine.set(line.id, { unitCost, costTotal });
       }
 
       // The cost of each line is frozen onto the invoice, so the gross profit

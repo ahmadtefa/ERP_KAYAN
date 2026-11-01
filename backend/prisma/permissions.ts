@@ -116,6 +116,18 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   // editing the item's descriptive fields. Generating a code is a write too.
   ['inventory.barcodes.manage', 'Edit and generate barcodes', 'تعديل وتوليد أكواد الباركود', 'inventory'],
   ['inventory.stock.adjust', 'Adjust, transfer and count stock', 'تسويات وتحويلات وجرد المخزون', 'inventory'],
+  // Lots are a separate privilege from the stock card. Receiving a lot is
+  // recording what arrived; issuing one is selling or consuming it; destroying
+  // one is a decision about the company's money, so it stands alone.
+  ['inventory.batches.read', 'View lots, expiry dates and traceability', 'عرض الدفعات وتواريخ الصلاحية والتتبع', 'inventory'],
+  ['inventory.batches.receive', 'Receive lots and record their dates', 'استلام الدفعات وتسجيل تواريخها', 'inventory'],
+  ['inventory.batches.issue', 'Issue stock from lots', 'صرف المخزون من الدفعات', 'inventory'],
+  ['inventory.batches.writeoff', 'Write off and destroy lots', 'إعدام وإتلاف الدفعات', 'inventory'],
+  ['inventory.batches.transfer', 'Move lots between warehouses', 'تحويل الدفعات بين المخازن', 'inventory'],
+  // The notification centre is program-wide: these are not inventory codes,
+  // and a user who is told nothing needs no more than reading.
+  ['notifications.read', 'View notifications', 'عرض التنبيهات', 'notifications'],
+  ['notifications.manage', 'Configure notification rules', 'إعداد قواعد التنبيهات', 'notifications'],
   ['sales.invoices.export', 'Export sales documents', 'تصدير مستندات البيع', 'sales'],
   ['purchases.invoices.export', 'Export purchase documents', 'تصدير مستندات الشراء', 'purchases'],
   ['reports.export', 'Export reports', 'تصدير التقارير', 'reports']

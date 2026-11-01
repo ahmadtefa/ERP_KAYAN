@@ -26,6 +26,7 @@ import { ExportModule } from './modules/export/export.module';
 import { ImportModule } from './modules/import/import.module';
 import { HealthModule } from './modules/health/health.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PartiesModule } from './modules/parties/parties.module';
 import { PurchasesModule } from './modules/purchases/purchases.module';
 import { ReportsModule } from './modules/reports/reports.module';
@@ -57,6 +58,7 @@ import { SearchModule } from './modules/search/search.module';
     AdminModule,
     PartiesModule,
     InventoryModule,
+    NotificationsModule,
     SalesModule,
     PurchasesModule,
     ReportsModule,

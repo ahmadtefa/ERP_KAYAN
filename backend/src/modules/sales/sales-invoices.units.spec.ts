@@ -6,6 +6,7 @@ import {
   StockDirection,
 } from '@prisma/client';
 
+import { BatchesService } from '../inventory/batches.service';
 import { SalesInvoicesService } from './sales-invoices.service';
 
 const D = (v: string | number) => new Prisma.Decimal(v);
@@ -49,6 +50,10 @@ function makeService(itemOverride: any = milkItem) {
     item: { findFirst: itemFind },
     stockMovement: { create: jest.fn(async () => ({})) },
     stockBalance: { update: jest.fn(async () => ({})) },
+    // No lots: this suite covers the plain-shelf case, where the engine issues
+    // from the balance exactly as it did before lots existed.
+    itemBatch: { findMany: jest.fn(async () => []) },
+    itemCostHistory: { create: jest.fn(async () => ({})) },
     $queryRaw: jest.fn(async () => [{ quantity: D(50), value: D(375) }]),
   };
 
@@ -81,6 +86,18 @@ function makeService(itemOverride: any = milkItem) {
   const prices = { resolvePrice: jest.fn(async () => null) };
   const audit = { record: jest.fn(async () => undefined) };
 
+  // The real lot engine, driven by the same mocked transaction. Sales no
+  // longer writes its own OUT movement - it asks the engine - so the assertions
+  // about movements must run against what the engine actually writes.
+  const batches = new BatchesService(
+    prisma as never,
+    warehouses as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    audit as never,
+  );
+
   const service = new SalesInvoicesService(
     prisma as never,
     numbers as never,
@@ -90,6 +107,7 @@ function makeService(itemOverride: any = milkItem) {
     warehouses as never,
     prices as never,
     audit as never,
+    batches,
   );
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'invoice-1' } as never);
 

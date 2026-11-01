@@ -550,6 +550,61 @@ jobs:
           summary=$(grep -hE "checks passed|[0-9]+/[0-9]+ passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log /tmp/kayan-units-scenario.log /tmp/kayan-multiunit-scenario.log /tmp/kayan-artwork-scenario.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Regression scenario checks::${summary:-summary not captured}"
 
+  inventory:
+    name: Lot, shelf and alert engine (real PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: erp_kayan_inventory
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d erp_kayan_inventory"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_inventory?schema=public
+      JWT_ACCESS_SECRET: ci-only-access-secret-not-for-real-use-0123456789
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-real-use-9876543210
+      JWT_ACCESS_TTL: 900
+      JWT_REFRESH_TTL: 604800
+      KAYAN_ADMIN_USERNAME: ci-admin
+      KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
+      NODE_ENV: test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate
+      - name: Apply every migration to a freshly created database
+        env:
+          KAYAN_PRISMA_CLASSIC_MIGRATIONS: '1'
+        run: npx prisma migrate deploy
+      - name: Seed an isolated company and administrator
+        run: npx ts-node prisma/seed.ts
+      # The lot engine is arithmetic plus transactions. The arithmetic is unit
+      # tested; only a real database can prove FEFO ordering, the moving
+      # average, the write-off journal and a single row per alert fact.
+      - name: Exercise lots, FEFO, costing, write-off and alerts
+        run: python ../scripts/ci-diagnose.py npx ts-node scripts/verify-inventory-postgres.ts
+
   flutter:
     name: Flutter Web (analyze, test, build)
     runs-on: ubuntu-latest
