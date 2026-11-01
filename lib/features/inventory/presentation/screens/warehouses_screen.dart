@@ -6,7 +6,6 @@ import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
-import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 
 /// «إدارة المخازن» - the shelves inside each branch.
