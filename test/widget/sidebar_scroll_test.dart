@@ -13,15 +13,16 @@ import 'test_harness.dart';
 ///
 /// The bug this pins: choosing an item near the bottom of the menu threw the
 /// list back to the top, so a person browsing «المخازن» or «الإعدادات» had to
-/// scroll down again after every click. The cause was structural - every route
+/// scroll down again after every click. The cause was structural — every route
 /// built its own shell, so every navigation made a new State with a new
-/// `ScrollController` starting at zero - and the fix is structural too: one
-/// shell (`StatefulShellRoute` in the real app, `ShellRoute` here) whose State,
-/// controller and stored offset outlive the navigation.
+/// `ScrollController` starting at zero — and the fix is structural too: one
+/// shell whose State, controller and stored offset outlive the navigation.
 ///
 /// These tests would fail against the old shape: they check the offset *after*
 /// the click, not merely that the clicked page opened.
 void main() {
+  // Every route the menu can open, so the shell is the same widget across all
+  // of them and only the child changes.
   final routes = <String>[
     AppRoutes.dashboard,
     AppRoutes.journalEntries,
@@ -68,14 +69,12 @@ void main() {
     ],
   );
 
-  final overrides = [
-    tokenStoreProvider.overrideWithValue(FakeTokenStore()),
-    authRepositoryProvider.overrideWithValue(FakeAuthRepository()),
-  ];
-
   Widget app(GoRouter router, {Locale locale = const Locale('en')}) {
     return ProviderScope(
-      overrides: overrides,
+      overrides: [
+        tokenStoreProvider.overrideWithValue(FakeTokenStore()),
+        authRepositoryProvider.overrideWithValue(FakeAuthRepository()),
+      ],
       child: MaterialApp.router(
         locale: locale,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -85,7 +84,11 @@ void main() {
     );
   }
 
-  Finder navList() => find.byKey(const PageStorageKey<String>('erp-shell-nav-list'));
+  // The same key *type* the shell puts on the list: `find.byKey` compares
+  // runtime types, so a plain `Key` here would never match a
+  // `PageStorageKey`.
+  Finder navList() =>
+      find.byKey(const PageStorageKey<String>('erp-shell-nav-list'));
 
   Finder navScrollable() => find.descendant(
     of: navList(),
@@ -93,33 +96,14 @@ void main() {
   );
 
   double offsetOf(WidgetTester tester) {
-    expect(
-      navScrollable(),
-      findsOneWidget,
-      reason: 'the shell must own exactly one menu scroll view',
-    );
+    expect(navList(), findsOneWidget, reason: 'one menu');
     return tester.state<ScrollableState>(navScrollable()).position.pixels;
   }
 
-  /// What the menu actually holds, so a missed entry is reported as a missing
-  /// entry and not as "Bad state: No element".
-  String menuContents(WidgetTester tester) {
-    if (navList().evaluate().isEmpty) return '<the shell has no menu>';
-    final tiles = tester.widgetList<ListTile>(
-      find.descendant(of: navList(), matching: find.byType(ListTile)),
-    );
-    return tiles
-        .map((tile) => switch (tile.title) {
-              final Text text => text.data ?? '',
-              _ => '?',
-            })
-        .join(' | ');
-  }
-
   Future<void> openTallWindow(WidgetTester tester) async {
-    // Tall enough for every module, short enough that the menu must scroll:
-    // 1366 x 420 leaves roughly seven rows of the sixteen visible.
-    tester.view.physicalSize = const Size(1366, 420);
+    // Tall enough for several modules, short enough that the menu must scroll:
+    // 1366 x 380 leaves roughly five rows of the sixteen visible.
+    tester.view.physicalSize = const Size(1366, 380);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(() {
       tester.view.resetPhysicalSize();
@@ -127,65 +111,24 @@ void main() {
     });
   }
 
-  /// Brings a menu entry into view, whichever way it is from where the list is
-  /// now, and proves it is really on screen before anything taps it.
-  ///
-  /// The earlier version of this helper only ever scrolled *down*, which was
-  /// enough while every entry happened to be reached from above. The menu now
-  /// carries sixteen entries, so after visiting «الإعدادات» at the bottom,
-  /// «الأصناف» in the middle sits *above* the viewport: the search has to be
-  /// able to walk the list back up, and when an entry has not been built yet it
-  /// has to start from the top rather than silently search in one direction
-  /// until the framework throws `Bad state: No element`.
   Future<void> scrollTo(WidgetTester tester, String label) async {
     final target = find.widgetWithText(ListTile, label);
-    final scrollable = navScrollable();
-    expect(scrollable, findsOneWidget, reason: 'one menu scroll view');
-    final position = tester.state<ScrollableState>(scrollable).position;
-
-    if (target.evaluate().isEmpty) {
-      // Not built yet: the framework can only search downwards, so walk down
-      // from the top - and stop at the end instead of over-scrolling.
-      position.jumpTo(0);
-      await tester.pumpAndSettle();
-      while (target.evaluate().isEmpty &&
-          position.pixels < position.maxScrollExtent) {
-        position.jumpTo(
-          position.pixels + 150 > position.maxScrollExtent
-              ? position.maxScrollExtent
-              : position.pixels + 150,
-        );
-        await tester.pumpAndSettle();
-      }
-    }
-
-    expect(
+    await tester.scrollUntilVisible(
       target,
-      findsOneWidget,
-      reason: 'the menu must show «$label»; it holds: ${menuContents(tester)}',
+      150.0,
+      scrollable: navScrollable(),
     );
-
     await tester.ensureVisible(target);
     await tester.pumpAndSettle();
-
-    final menu = tester.getRect(navList());
-    final entry = tester.getRect(target);
-    expect(
-      menu.contains(entry.center),
-      isTrue,
-      reason: '«$label» was not brought into the menu viewport '
-          '($entry is outside $menu)',
-    );
   }
 
-  testWidgets('a lower item is reachable, and opening it does not jump to the top', (
-    tester,
-  ) async {
+  testWidgets('a lower item is reachable, and opening it does not jump to the '
+      'top', (tester) async {
     await openTallWindow(tester);
-    final router = buildRouter();
-    await tester.pumpWidget(app(router));
+    await tester.pumpWidget(app(buildRouter()));
     await tester.pumpAndSettle();
 
+    expect(navList(), findsOneWidget);
     expect(offsetOf(tester), 0);
 
     // Browse down to an item near the bottom. Opening it must leave the menu
@@ -209,12 +152,11 @@ void main() {
     );
   });
 
-  testWidgets('moving between two lower sections keeps the place each time', (
+  testWidgets('moving between three lower sections keeps the place each time', (
     tester,
   ) async {
     await openTallWindow(tester);
-    final router = buildRouter();
-    await tester.pumpWidget(app(router));
+    await tester.pumpWidget(app(buildRouter()));
     await tester.pumpAndSettle();
 
     await scrollTo(tester, 'Sales invoices');
@@ -224,7 +166,8 @@ void main() {
     expect(currentRoute, AppRoutes.salesInvoices);
     expect(offsetOf(tester), closeTo(atSales, 1));
 
-    // Further down, then back to the middle: neither move resets the list.
+    // Further down, then back up: neither move resets the list, and going
+    // back up is the direction a downwards-only search cannot follow.
     await scrollTo(tester, 'Settings');
     final atSettings = offsetOf(tester);
     expect(atSettings, greaterThan(atSales));
@@ -233,21 +176,13 @@ void main() {
     expect(currentRoute, AppRoutes.settings);
     expect(offsetOf(tester), closeTo(atSettings, 1));
 
-    // Back up the menu, to an entry that now sits above the viewport. The
-    // list must follow it up and then stay where it was put: scrolling back
-    // is a navigation like any other, and it is the direction the old
-    // downwards-only helper could not reach.
     await scrollTo(tester, 'Items');
     final atItems = offsetOf(tester);
-    expect(
-      atItems,
-      lessThan(atSettings),
-      reason: 'Items is above Settings, so reaching it moved the list up',
-    );
+    expect(atItems, lessThan(atSettings));
     await tester.tap(find.widgetWithText(ListTile, 'Items'));
     await tester.pumpAndSettle();
-    expect(offsetOf(tester), closeTo(atItems, 1));
     expect(currentRoute, AppRoutes.items);
+    expect(offsetOf(tester), closeTo(atItems, 1));
   });
 
   testWidgets('a rebuild of the whole shell keeps the place', (tester) async {

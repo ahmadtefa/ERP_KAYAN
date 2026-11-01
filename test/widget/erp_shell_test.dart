@@ -4,6 +4,7 @@ import 'package:erp_kayan/app/theme/design_tokens.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
+import 'package:erp_kayan/shared/widgets/user_avatar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -327,8 +328,103 @@ void main() {
       );
     },
   );
-}
 
+  testWidgets(
+    'the signed-in photo reaches the rail and the top bar, and a session '
+    'without one asks for nothing',
+    (tester) async {
+      tester.view.physicalSize = const Size(1366, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      Widget shellWith(AppUser user) => ProviderScope(
+        overrides: [
+          authControllerProvider.overrideWith(
+            () => _AvatarTestAuthController(user),
+          ),
+          tokenStoreProvider.overrideWithValue(FakeTokenStore()),
+          // The picture itself is fetched per user id. A test must never hit
+          // the network, and must never depend on the bytes to prove *that*
+          // the shell knows a photo exists.
+          avatarBytesProvider.overrideWith((ref, userId) async => null),
+        ],
+        child: MaterialApp(
+          locale: const Locale('en'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: ErpShell(
+            currentPath: AppRoutes.dashboard,
+            child: const SizedBox.expand(),
+          ),
+        ),
+      );
+
+      const withPhoto = AppUser(
+        id: 'u-photo',
+        username: 'amal',
+        fullName: 'Amal Hassan',
+        companyId: 'company-1',
+        branchId: 'branch-1',
+        hasAvatar: true,
+        avatarUrl: '/users/u-photo/avatar',
+      );
+      const withoutPhoto = AppUser(
+        id: 'u-plain',
+        username: 'amal',
+        fullName: 'Amal Hassan',
+        companyId: 'company-1',
+        branchId: 'branch-1',
+      );
+
+      await tester.pumpWidget(shellWith(withPhoto));
+      await tester.pumpAndSettle();
+
+      // Two places show the same person: the sidebar's account block and the
+      // top bar. Both must carry the session's answer, not a second guess.
+      final withFace = tester.widgetList<UserAvatar>(
+        find.byType(UserAvatar),
+      );
+      expect(
+        withFace.length,
+        greaterThanOrEqualTo(2),
+        reason: 'the sidebar and the top bar both show the signed-in person',
+      );
+      for (final avatar in withFace) {
+        expect(
+          avatar.hasPhoto,
+          isTrue,
+          reason: 'a session with a photo must draw the photo everywhere',
+        );
+        expect(avatar.userId, 'u-photo');
+        expect(avatar.name, 'Amal Hassan');
+      }
+
+      await tester.pumpWidget(shellWith(withoutPhoto));
+      await tester.pumpAndSettle();
+
+      final withoutFace = tester.widgetList<UserAvatar>(
+        find.byType(UserAvatar),
+      );
+      expect(withoutFace.length, greaterThanOrEqualTo(2));
+      for (final avatar in withoutFace) {
+        expect(
+          avatar.hasPhoto,
+          isFalse,
+          reason: 'no photo means the initial, and no request',
+        );
+      }
+
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: 'falling back to an initial must not raise',
+      );
+    },
+  );
+}
 
 class _PermissionTestAuthController extends AuthController {
   @override
@@ -358,4 +454,14 @@ class _UnpermittedAuthController extends AuthController {
         companyId: 'company-1',
         branchId: 'branch-1',
       );
+}
+
+/// A signed-in person whose session says whether a photo exists.
+class _AvatarTestAuthController extends AuthController {
+  _AvatarTestAuthController(this.user);
+
+  final AppUser user;
+
+  @override
+  Future<AppUser?> build() async => user;
 }
