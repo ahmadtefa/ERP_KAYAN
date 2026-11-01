@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:erp_kayan/app/router/app_router.dart';
@@ -437,7 +436,7 @@ Future<Uint8List?> _renderAvatarPng() async {
     );
     final image = await recorder.endRecording().toImage(128, 128);
     final data = await image.toByteData(format: ui.ImageByteFormat.png);
-    return data == null ? null : data.buffer.asUint8List();
+    return data?.buffer.asUint8List();
   } catch (_) {
     // No rasteriser: the screen still renders, with the initial instead.
     return null;
