@@ -74,20 +74,22 @@ function makeClient(applicationName) {
 async function main() {
   const prisma = makeClient('scenario-units-warehouses');
 
-  let company = await prisma.company.findFirst({ where: { isActive: true } });
-  if (!company) {
-    company = await prisma.company.create({
-      data: {
-        id: randomUUID(),
-        code: 'CUWS',
-        nameEn: 'Units and warehouses scenario',
-        nameAr: 'سيناريو الوحدات والمخازن',
-      },
-    });
-    console.log(`Seeded company ${company.code} on an empty database`);
-  }
-  const companyId = company.id;
+  // Its own company, always. The scenario runs in CI after the seeded tenant
+  // and after the HTTP scenarios, and a check that quietly wrote its stores
+  // and movements into the company those tests sign in to would be measuring
+  // them instead of itself. A tagged code keeps it unique on a database that
+  // already holds one.
   const tag = randomUUID().slice(0, 6);
+  const company = await prisma.company.create({
+    data: {
+      id: randomUUID(),
+      code: `CUWS-${tag}`,
+      nameEn: 'Units and warehouses scenario',
+      nameAr: 'سيناريو الوحدات والمخازن',
+    },
+  });
+  const companyId = company.id;
+  console.log(`Created throwaway company ${company.code}`);
 
   const user = await prisma.user.create({
     data: {
