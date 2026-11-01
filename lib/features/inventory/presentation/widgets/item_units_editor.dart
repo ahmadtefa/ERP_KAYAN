@@ -68,20 +68,18 @@ class ItemUnitsEditor extends StatefulWidget {
 class _Row {
   _Row({
     required this.isBase,
-    String? id,
+    this.id,
+    this.allowFraction = true,
     String unit = '',
     String factor = '1',
     String barcode = '',
     String salePrice = '',
     String purchasePrice = '',
-    bool allowFraction = true,
-  })  : id = id,
-        unit = TextEditingController(text: unit),
+  })  : unit = TextEditingController(text: unit),
         factor = TextEditingController(text: factor),
         barcode = TextEditingController(text: barcode),
         salePrice = TextEditingController(text: salePrice),
-        purchasePrice = TextEditingController(text: purchasePrice),
-        allowFraction = allowFraction;
+        purchasePrice = TextEditingController(text: purchasePrice);
 
   final bool isBase;
   final String? id;

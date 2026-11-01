@@ -692,13 +692,16 @@ class _WarehouseBalanceTabState extends ConsumerState<_WarehouseBalanceTab> {
   }
 
   Future<Json> _load() async {
-    return ref.read(apiClientProvider).getObject(
-      '/inventory/warehouses/balance',
-      query: {
-        if (_query.trim().isNotEmpty) 'q': _query.trim(),
-        if (_warehouseId != null) 'warehouseId': _warehouseId!,
-      },
-    );
+    // Built first, so a filter that is not set is simply absent rather than a
+    // null that has to be asserted away at the call site.
+    final query = <String, dynamic>{};
+    final search = _query.trim();
+    if (search.isNotEmpty) query['q'] = search;
+    final warehouseId = _warehouseId;
+    if (warehouseId != null) query['warehouseId'] = warehouseId;
+    return ref
+        .read(apiClientProvider)
+        .getObject('/inventory/warehouses/balance', query: query);
   }
 
   Future<void> _loadWarehouses() async {
