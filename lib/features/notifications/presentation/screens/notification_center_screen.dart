@@ -75,6 +75,7 @@ class _NotificationCenterScreenState
   Future<void> _markRead(Json row) async {
     try {
       await ref.read(apiClientProvider).post('/notifications/${row['id']}/read');
+      if (!mounted) return;
       _refresh();
     } catch (error) {
       _say('$error');
@@ -84,6 +85,7 @@ class _NotificationCenterScreenState
   Future<void> _archive(Json row) async {
     try {
       await ref.read(apiClientProvider).post('/notifications/${row['id']}/archive');
+      if (!mounted) return;
       _refresh();
     } catch (error) {
       _say('$error');
@@ -94,6 +96,7 @@ class _NotificationCenterScreenState
     setState(() => _busy = true);
     try {
       await ref.read(apiClientProvider).post('/notifications/read-all');
+      if (!mounted) return;
       _refresh();
     } catch (error) {
       _say('$error');

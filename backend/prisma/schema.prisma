@@ -148,6 +148,7 @@ model Branch {
   warehouses       Warehouse[]
   storageLocations StorageLocation[]
   itemBatches      ItemBatch[]
+  itemCostHistory  ItemCostHistory[]
   notifications    Notification[]
   purchaseOrders   PurchaseOrder[]
   salesOrders      SalesOrder[]
