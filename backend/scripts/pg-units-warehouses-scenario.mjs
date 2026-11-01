@@ -288,9 +288,14 @@ async function main() {
 
   // ================================================= S3  the warehouse report
   console.log('\n[S3] the per-warehouse balance report sums back to the branch');
+  // The report is as-of a date, and this scenario dated its documents in 2051
+  // so a closed period in the real company could never block them. Asking for
+  // today's report would therefore be asking about a day before the movements
+  // existed and honestly answer "nothing": the date is named here so the check
+  // is about the warehouses, not about the calendar.
   const report = await warehouses.balanceReport(
     companyId,
-    { itemId: item.id, includeZero: true },
+    { itemId: item.id, includeZero: true, asOf: '2051-12-31' },
     [branch.id],
     true,
   );
