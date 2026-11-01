@@ -74,22 +74,30 @@ function makeClient(applicationName) {
 async function main() {
   const prisma = makeClient('scenario-units-warehouses');
 
-  // Its own company, always. The scenario runs in CI after the seeded tenant
-  // and after the HTTP scenarios, and a check that quietly wrote its stores
-  // and movements into the company those tests sign in to would be measuring
-  // them instead of itself. A tagged code keeps it unique on a database that
-  // already holds one.
   const tag = randomUUID().slice(0, 6);
-  const company = await prisma.company.create({
-    data: {
-      id: randomUUID(),
-      code: `CUWS-${tag}`,
-      nameEn: 'Units and warehouses scenario',
-      nameAr: 'سيناريو الوحدات والمخازن',
-    },
-  });
+
+  // One active company per installation is a rule the database itself keeps
+  // (`enforce_single_active_company`: a partial unique index on the constant
+  // 1), so this scenario cannot invent a second tenant - and it must not
+  // deactivate the real one either. It therefore works inside the company that
+  // is already active, creating its own branch, stores, items and documents
+  // there, exactly as a company with a second branch would. On an empty
+  // database it creates that company first.
+  let company = await prisma.company.findFirst({ where: { isActive: true } });
+  if (company) {
+    console.log(`Running inside the active company ${company.code}`);
+  } else {
+    company = await prisma.company.create({
+      data: {
+        id: randomUUID(),
+        code: `CUWS-${tag}`,
+        nameEn: 'Units and warehouses scenario',
+        nameAr: 'سيناريو الوحدات والمخازن',
+      },
+    });
+    console.log(`Created company ${company.code} on an empty database`);
+  }
   const companyId = company.id;
-  console.log(`Created throwaway company ${company.code}`);
 
   const user = await prisma.user.create({
     data: {
