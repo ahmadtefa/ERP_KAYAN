@@ -800,7 +800,9 @@ export class ItemsService {
             itemId,
             OR: [{ quantity: { not: zero } }, { value: { not: zero } }],
           },
-          select: { id: true },
+          // stock_balances is keyed by (company, branch, item): there is no
+          // surrogate id, and finding the row at all is the answer.
+          select: { quantity: true },
         }),
         this.prisma.stockDocumentLine.count({ where: { itemId } }),
         this.prisma.salesInvoiceLine.count({ where: { itemId } }),

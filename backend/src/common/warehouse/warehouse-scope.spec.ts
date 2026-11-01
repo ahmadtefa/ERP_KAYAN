@@ -35,7 +35,7 @@ function service(state: {
 }) {
   const warehouses = state.warehouses ?? [];
   const calls: Array<{ model: string; args: any }> = [];
-  const prisma = {
+  const prisma: Record<string, any> = {
     warehouse: {
       findFirst: jest.fn(async (args: any) => {
         calls.push({ model: 'warehouse.findFirst', args });
@@ -73,14 +73,17 @@ function service(state: {
           : null,
       ),
     },
-    $transaction: jest.fn(async (callback: (client: unknown) => unknown) =>
-      callback(prisma),
-    ),
+
     itemUnit: {
       findMany: jest.fn(async () => state.units ?? []),
     },
     $queryRaw: jest.fn(async () => state.rows ?? []),
   };
+  // Assigned after the literal so the object does not reference itself inside
+  // its own initializer.
+  prisma.$transaction = jest.fn(
+    async (callback: (client: unknown) => unknown) => callback(prisma),
+  );
   const audit = { record: jest.fn(async () => undefined) };
   const instance = new WarehouseService(prisma as any, audit as any);
   return { instance, prisma, audit, calls };

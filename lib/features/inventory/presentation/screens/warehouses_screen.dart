@@ -649,7 +649,7 @@ class _WarehouseListTabState extends ConsumerState<_WarehouseListTab> {
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 2),
         decoration: BoxDecoration(
           color: color,
-          borderRadius: BorderRadius.circular(AppRadii.chip),
+          borderRadius: AppRadii.chip,
         ),
         child: Text(label, style: Theme.of(context).textTheme.labelSmall),
       );

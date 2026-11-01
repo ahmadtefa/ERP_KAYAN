@@ -1478,7 +1478,7 @@ export class ImportService {
             itemId,
             OR: [{ quantity: { not: zero } }, { value: { not: zero } }],
           },
-          select: { id: true },
+          select: { quantity: true },
         }),
         tx.stockDocumentLine.count({ where: { itemId } }),
         tx.salesInvoiceLine.count({ where: { itemId } }),

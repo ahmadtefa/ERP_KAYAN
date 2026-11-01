@@ -241,12 +241,15 @@ describe('ItemsService protecting a base unit that has history', () => {
     expect(prisma.item.update).not.toHaveBeenCalled();
     expect(tx.itemUnit.update).not.toHaveBeenCalled();
 
-    const error = await service
-      .update('company-1', 'user-1', 'item-1', { unit: 'علبة' })
-      .catch((caught) => caught as BadRequestException);
-    expect(error.message).toContain('لا يمكن تغيير وحدة الأساس');
-    expect(error.message).toContain('عبوة');
-    expect(error.message).toContain('علبة');
+    let message = '';
+    try {
+      await service.update('company-1', 'user-1', 'item-1', { unit: 'علبة' });
+    } catch (caught) {
+      message = (caught as BadRequestException).message;
+    }
+    expect(message).toContain('لا يمكن تغيير وحدة الأساس');
+    expect(message).toContain('عبوة');
+    expect(message).toContain('علبة');
   });
 
   it('refuses the rename when the form renames the base row inside the units table', async () => {
