@@ -1020,7 +1020,10 @@ async function main() {
 
     await check('a write-off gets its own series and starts as a draft', async () => {
       assert.match(draftWriteOff.documentNumber, /^WO-/);
-      assert.equal(draftWriteOff.status, 'DRAFT');
+      // The document view prints its status the way the screen compares it
+      // ('draft'/'posted'), while a count session keeps the stored value. Both
+      // are checked in their own shape rather than one being bent to match.
+      assert.equal(draftWriteOff.status, 'draft');
       assert.equal(draftWriteOff.approvedAt, null);
     });
 
