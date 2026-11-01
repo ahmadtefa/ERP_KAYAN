@@ -16,7 +16,9 @@ describe('the warehouse reports', () => {
 
   function makeService(rawRows: unknown[][] = []) {
     const queue = [...rawRows];
-    const prisma = {
+    // The fakes are deliberately untyped: what each report hands back differs,
+    // and the assertions below read the figure under test.
+    const prisma: any = {
       $queryRaw: jest.fn(async () => queue.shift() ?? []),
       itemWarehouseSetting: { findMany: jest.fn(async () => []) },
       warehouseStockBalance: { findMany: jest.fn(async () => []) },
@@ -81,7 +83,7 @@ describe('the warehouse reports', () => {
       ],
     ]);
 
-    const report = await service.run('reconciliation', COMPANY, {});
+    const report: any = await service.run('reconciliation', COMPANY, {});
 
     expect(report.rows[0]).toMatchObject({ difference: '0.0000', matched: true });
     expect(report.rows[1]).toMatchObject({ difference: '25.0000', matched: false });
@@ -96,7 +98,7 @@ describe('the warehouse reports', () => {
       [{ branchId: 'b-1', balance: D('9.9950') }],
     ]);
 
-    const report = await service.run('reconciliation', COMPANY, {});
+    const report: any = await service.run('reconciliation', COMPANY, {});
 
     expect(report.rows[0].difference).toBe('0.0050');
     expect(report.rows[0].matched).toBe(true);
@@ -142,7 +144,7 @@ describe('the warehouse reports', () => {
       { warehouseId: 'w-1', itemId: 'i-3', quantity: D('40') },
     ]);
 
-    const report = await service.run('below-minimum', COMPANY, {});
+    const report: any = await service.run('below-minimum', COMPANY, {});
 
     expect(report.rows.map((row: any) => row.itemCode)).toEqual(['SKU-1', 'SKU-2']);
     expect(report.rows[0]).toMatchObject({ onHand: '4.0000', minimum: '10.0000', shortage: '21.0000' });
@@ -176,7 +178,7 @@ describe('the warehouse reports', () => {
       { warehouseId: 'w-1', itemId: 'i-2', quantity: D('51') },
     ]);
 
-    const report = await service.run('above-maximum', COMPANY, {});
+    const report: any = await service.run('above-maximum', COMPANY, {});
 
     expect(report.rows.map((row: any) => row.itemCode)).toEqual(['SKU-2']);
   });
@@ -189,7 +191,7 @@ describe('the warehouse reports', () => {
     ]);
     prisma.stockBalance.findMany.mockResolvedValue([{ itemId: 'i-1' }]);
 
-    const report = await service.run('zero-stock', COMPANY, {});
+    const report: any = await service.run('zero-stock', COMPANY, {});
 
     expect(report.rows.map((row: any) => row.itemCode)).toEqual(['SKU-2']);
   });
@@ -218,7 +220,7 @@ describe('the warehouse reports', () => {
       ],
     ]);
 
-    const report = await service.run('valuation-by-warehouse', COMPANY, {});
+    const report: any = await service.run('valuation-by-warehouse', COMPANY, {});
 
     expect(report.rows[0]).toMatchObject({ itemCount: 2, quantity: '30.0000', value: '600.0000' });
     expect(report.totals.value).toBe('900.0000');
@@ -227,8 +229,8 @@ describe('the warehouse reports', () => {
   it('reads dead stock with a longer window than slow-moving by default', async () => {
     const { service, prisma } = makeService([[], []]);
 
-    const slow = await service.run('slow-moving', COMPANY, {});
-    const dead = await service.run('dead-stock', COMPANY, {});
+    const slow: any = await service.run('slow-moving', COMPANY, {});
+    const dead: any = await service.run('dead-stock', COMPANY, {});
 
     expect(slow.filters.days).toBe(90);
     expect(dead.filters.days).toBe(180);
@@ -239,7 +241,7 @@ describe('the warehouse reports', () => {
     );
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
     // A caller that names its own window keeps it.
-    const explicit = await service.run('dead-stock', COMPANY, { days: 30 });
+    const explicit: any = await service.run('dead-stock', COMPANY, { days: 30 });
     expect(explicit.filters.days).toBe(30);
   });
 });

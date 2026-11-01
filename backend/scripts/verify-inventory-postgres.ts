@@ -823,12 +823,16 @@ async function main() {
       assert.equal(b.quantity.toFixed(4), '12.0000');
       assert.equal(b.value.toFixed(4), '330.0000');
       assert.equal(b.unitCost.toFixed(4), '27.5000');
-      // The branch still holds 26 units worth 570.
+      // The branch still holds 26 units, and - this is the point of a transfer
+      // - still the same value: 14 units at 15 (210) plus 12 at 27.5 (330).
+      // A transfer between two shelves of one branch moves value, it does not
+      // create it. (An earlier version of this check added the destination's
+      // new worth without taking it off the source, and expected 570.)
       const roll = await prisma.stockBalance.findFirstOrThrow({
         where: { companyId: company.id, branchId: branch.id, itemId: plain.id },
       });
       assert.equal(roll.quantity.toFixed(4), '26.0000');
-      assert.equal(roll.value.toFixed(4), '570.0000');
+      assert.equal(roll.value.toFixed(4), '540.0000');
     });
 
     await check('the branch book equals the sum of its shelves, to the fils', async () => {
@@ -843,7 +847,7 @@ async function main() {
       assert.equal(reconciled.branch.toFixed(4), '26.0000');
       assert.equal(reconciled.shelves.toFixed(4), '26.0000');
       assert.equal(reconciled.difference.toFixed(4), '0.0000');
-      assert.equal(reconciled.branchValue.toFixed(4), '570.0000');
+      assert.equal(reconciled.branchValue.toFixed(4), '540.0000');
       assert.equal(reconciled.valueDifference.toFixed(4), '0.0000');
     });
 

@@ -25,7 +25,7 @@ describe('warehouse access', () => {
         create: jest.fn(async ({ data }: { data: unknown }) => data),
       },
     };
-    const prisma = {
+    const prisma: any = {
       user: {
         findFirst: jest.fn(async () =>
           options.user === null
@@ -54,10 +54,10 @@ describe('warehouse access', () => {
 
     expect(access.restricted).toBe(false);
     expect(access.grants).toEqual([]);
-    expect(access.warehouses.map((row) => row.code)).toEqual(['WH-A', 'WH-B']);
+    expect(access.warehouses.map((row: any) => row.code)).toEqual(['WH-A', 'WH-B']);
     // Reading another company's warehouses is not possible: the company is in
     // the filter, always.
-    expect(prisma.warehouse.findMany.mock.calls[0][0].where.companyId).toBe(COMPANY);
+    expect((prisma.warehouse.findMany.mock.calls[0] as any[])[0].where.companyId).toBe(COMPANY);
   });
 
   it('restricts the warehouse list to the branches the caller may see', async () => {
@@ -65,7 +65,7 @@ describe('warehouse access', () => {
 
     await service.forUser(COMPANY, USER, ['branch-1']);
 
-    expect(prisma.warehouse.findMany.mock.calls[0][0].where.branchId).toEqual({ in: ['branch-1'] });
+    expect((prisma.warehouse.findMany.mock.calls[0] as any[])[0].where.branchId).toEqual({ in: ['branch-1'] });
   });
 
   it('reports every flag of a grant, not just the fact that one exists', async () => {

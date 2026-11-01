@@ -168,7 +168,7 @@ describe('a documentary write-off', () => {
     const { service, prisma, document } = makeService();
 
     await service.approve(COMPANY, APPROVER, 'doc-wo');
-    const claim = prisma.stockDocument.updateMany.mock.calls[0][0] as any;
+    const claim = (prisma.stockDocument.updateMany.mock.calls[0] as any[])[0];
     expect(claim.where).toMatchObject({ id: 'doc-wo', approvedAt: null });
 
     document.approvedAt = new Date();
@@ -245,7 +245,7 @@ describe('a documentary write-off', () => {
 
     await service.post(COMPANY, AUTHOR, 'doc-wo');
 
-    const written = tx.stockDocumentLine.update.mock.calls[0][0] as any;
+    const written = (tx.stockDocumentLine.update.mock.calls[0] as any[])[0];
     expect(written.where).toEqual({ id: 'line-1' });
     expect(written.data.unitCost.toFixed(4)).toBe('10.0000');
     expect(written.data.totalCost.toFixed(4)).toBe('40.0000');
