@@ -38,6 +38,10 @@ export interface StockDocumentLineInput {
   /** Optional chosen unit; quantity/countedQuantity are expressed in it. */
   unitName?: string;
   unitId?: string;
+  /** The lot this line takes (a write-off names the goods it destroys). */
+  batchId?: string;
+  /** The shelf the goods sat on, when the document names one. */
+  storageLocationId?: string;
 }
 
 /**

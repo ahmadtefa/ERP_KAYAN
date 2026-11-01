@@ -214,7 +214,7 @@ describe('JwtAuthGuard account status and live authorization', () => {
   it('honors a permission revocation before the access token expires', async () => {
     const principal = {
       ...activePrincipal,
-      userRoles: [{ role: { rolePermissions: [] } }],
+      userRoles: [{ role: { code: 'viewer', rolePermissions: [] } }],
     };
     const { guard } = makeGuard({ principal });
     const { context, request } = makeContext();
