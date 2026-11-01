@@ -626,8 +626,21 @@ jobs:
           cache: true
       - name: Install Flutter dependencies
         run: flutter pub get
+      # The analyzer's own output is the only place that says what is wrong.
+      # On failure each line is lifted into an annotation, so a broken build is
+      # readable from the checks tab instead of from a log that may not be
+      # downloadable at all.
       - name: Analyze
-        run: python scripts/ci-diagnose.py flutter analyze
+        run: |
+          set +e
+          flutter analyze 2>&1 | tee /tmp/kayan-analyze.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            grep -E "^(error|warning|info)" /tmp/kayan-analyze.log | head -n 80 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit "$status"
+          fi
       # Renders real screens (shell + dashboard, customers, sales) to PNG so
       # a design change can be inspected visually from the run's artifacts.
       # These are screenshot generators: baselines are regenerated here, so
@@ -699,8 +712,21 @@ jobs:
         run: flutter config --enable-linux-desktop
       - name: Install Flutter dependencies
         run: flutter pub get
+      # The analyzer's own output is the only place that says what is wrong.
+      # On failure each line is lifted into an annotation, so a broken build is
+      # readable from the checks tab instead of from a log that may not be
+      # downloadable at all.
       - name: Analyze
-        run: python scripts/ci-diagnose.py flutter analyze
+        run: |
+          set +e
+          flutter analyze 2>&1 | tee /tmp/kayan-analyze.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            grep -E "^(error|warning|info)" /tmp/kayan-analyze.log | head -n 80 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit "$status"
+          fi
       # Same screenshot generation as the web job: baselines are produced in
       # this job's own workspace so the test run below has something to
       # compare against (the PNGs themselves are uploaded by the web job).
