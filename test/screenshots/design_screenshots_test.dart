@@ -504,10 +504,13 @@ Future<ByteData?> _readFontFile(String name) async {
 /// The test font draws every glyph as a square, so four characters measure
 /// exactly four times the size; the real face does not. The difference is what
 /// the notice reports.
-double _probeWidth(String text, String family) {
+double _probeWidth(String text, String? family, FontWeight weight) {
   final painter = TextPainter(
-    text: TextSpan(text: text, style: TextStyle(fontFamily: family, fontSize: 20)),
-    textDirection: TextDirection.rtl,
+    text: TextSpan(
+      text: text,
+      style: TextStyle(fontFamily: family, fontSize: 20, fontWeight: weight),
+    ),
+    textDirection: TextDirection.ltr,
   )..layout();
   return painter.width;
 }
@@ -550,15 +553,41 @@ Future<void> _tryLoadSystemFonts() async {
     }
   }
 
-  final width = _probeWidth('كيان', 'IBMPlexSansArabic');
-  // 80.00 is the box font at 20px: four glyphs, four squares. Anything else is
-  // a real typeface, and the screenshots are worth looking at.
+  // A font that is really there measures differently per family and per
+  // weight; Ahem - the box font a widget test falls back to - draws every
+  // glyph as a square, so a five-letter word measures exactly 5 x the size.
+  // The run prints these numbers, so "is the screen readable?" is answered by
+  // the run rather than guessed from a picture.
+  final probes = <String>[];
+  for (final family in <String?>[
+    'IBMPlexSansArabic',
+    'Ahem',
+    'Noto Sans Arabic',
+    'DejaVu Sans',
+    null,
+  ]) {
+    final latin = _probeWidth('KAYAN', family, FontWeight.w400);
+    final arabic = _probeWidth('كيان', family, FontWeight.w400);
+    final bold = _probeWidth('KAYAN', family, FontWeight.w700);
+    probes.add(
+      '${family ?? 'default'} L=$latin A=$arabic B=$bold',
+    );
+  }
   // ignore: avoid_print
   print(
-    '::notice title=Screen font::files=$added '
-    'width(كيان)=${width.toStringAsFixed(2)} '
-    '(80.00 would mean every glyph is a box)',
+    '::notice title=Screen font::files=$added | 5x20=100 and 4x20=80 mean '
+    'boxes | ${probes.join(' | ')}',
   );
+
+  // If the theme's own family still draws squares, the screens are not worth
+  // publishing: say so in the run rather than shipping pictures of nothing.
+  if (_probeWidth('KAYAN', 'IBMPlexSansArabic', FontWeight.w400) >= 99.5) {
+    // ignore: avoid_print
+    print(
+      '::warning title=Screen font::the theme family still draws boxes; '
+      'the rendered screens are not readable',
+    );
+  }
 }
 
 Future<void> _pumpShot(
