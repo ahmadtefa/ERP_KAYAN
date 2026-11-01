@@ -733,7 +733,14 @@ export class BatchesService {
       const cost = issueAtAverage({ quantity: onHand, value: onHandValue }, quantity);
 
       const movements: Array<{ batchId: string; quantity: string; expired: boolean }> = [];
-      for (const allocation of selection.allocations) {
+      // The value the shelf lost, split across the lots it left from. Each lot
+      // takes its proportional share and the last one takes the remainder, so
+      // the movements add up to the balance change to the last fils - a sale
+      // that posted 189.0910 of cost against 189.0909 of stock movement would
+      // be a rounding leak nobody would ever find on a report.
+      const totalValue = cost.value.toDecimalPlaces(MONEY_SCALE);
+      let allocatedValue = new Prisma.Decimal(0);
+      for (const [index, allocation] of selection.allocations.entries()) {
         const emptied = allocation.quantity.equals(
           lots.find((lot) => lot.id === allocation.batchId)?.remainingQuantity ??
             allocation.quantity,
@@ -758,6 +765,11 @@ export class BatchesService {
             'تغير رصيد الدفعة أثناء الصرف. أعد المحاولة. / The lot changed while it was being issued.',
           );
         }
+        const isLast = index === selection.allocations.length - 1;
+        const lineValue = isLast
+          ? totalValue.minus(allocatedValue)
+          : allocation.quantity.mul(cost.unitCost).toDecimalPlaces(MONEY_SCALE);
+        allocatedValue = allocatedValue.plus(lineValue);
         await tx.stockMovement.create({
           data: {
             companyId,
@@ -770,9 +782,7 @@ export class BatchesService {
             direction: StockDirection.OUT,
             quantity: allocation.quantity,
             unitCost: cost.unitCost.toDecimalPlaces(MONEY_SCALE),
-            totalCost: allocation.quantity
-              .mul(cost.unitCost)
-              .toDecimalPlaces(MONEY_SCALE),
+            totalCost: lineValue,
             ...(input.movementUnits
               ? movementUnitSnapshot({
                   enteredUnit: input.movementUnits.enteredUnit,
@@ -796,7 +806,6 @@ export class BatchesService {
         });
       }
 
-      const totalValue = cost.value.toDecimalPlaces(MONEY_SCALE);
       await tx.stockBalance.update({
         where: {
           companyId_branchId_itemId: {
