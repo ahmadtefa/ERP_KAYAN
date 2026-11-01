@@ -164,9 +164,32 @@ describe('stock takes', () => {
       warehouse: { findFirst: jest.fn(async () => null as Record<string, any> | null) },
     };
 
+    // A real transaction is invisible to a connection outside it. The fake says
+    // so: reading the session from its own prisma client while the transaction
+    // is still open is an error, which is how the "session not found on create"
+    // defect is caught here instead of only against PostgreSQL.
+    let open = 0;
     const prisma = {
       ...tx,
-      $transaction: jest.fn(async (work: (client: unknown) => unknown) => work(tx)),
+      stockTakeSession: {
+        ...tx.stockTakeSession,
+        findFirst: jest.fn(async (args: any) => {
+          if (open > 0) {
+            throw new Error(
+              'read inside the transaction cannot see a row it has not committed yet',
+            );
+          }
+          return tx.stockTakeSession.findFirst(args);
+        }),
+      },
+      $transaction: jest.fn(async (work: (client: unknown) => unknown) => {
+        open += 1;
+        try {
+          return await work(tx);
+        } finally {
+          open -= 1;
+        }
+      }),
     };
     const numbers = { next: jest.fn(async () => 'STK-2026-0001') };
     const documents = {
@@ -234,6 +257,20 @@ describe('stock takes', () => {
     // The freeze is a moment, recorded: without it nobody can tell later which
     // figure the person was counting against.
     expect(harness.state.sessions[0].frozenAt).toBeInstanceOf(Date);
+  });
+
+  it('answers with the session it created, read after the transaction commits', async () => {
+    const harness = withWarehouse(makeHarness(), { id: WAREHOUSE, branchId: BRANCH });
+
+    const created = await harness.service.start(COMPANY, COUNTER, { warehouseId: WAREHOUSE });
+
+    expect(created.id).toBe(harness.state.sessions[0].id);
+    expect(created.status).toBe('COUNTING');
+    // And the audit trail is written once the row exists, so a failure between
+    // the two cannot leave a log entry for a session that was rolled back.
+    expect(harness.audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'CREATE', entityId: created.id }),
+    );
   });
 
   it('refuses a partial count that names no items', async () => {

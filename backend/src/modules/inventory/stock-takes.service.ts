@@ -150,7 +150,11 @@ export class StockTakesService {
       throw new BadRequestException('A partial count must name the items it covers.');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    // The session is created inside the transaction and read back after it
+    // commits. Reading it from inside - which this used to do - asks a
+    // connection that cannot yet see the row, so the create answered "session
+    // not found" and rolled itself back: no count could ever be opened.
+    const sessionId = await this.prisma.$transaction(async (tx) => {
       const code = await this.numbers.next(tx, companyId, 'STOCK_TAKE', 'STK');
       const session = await tx.stockTakeSession.create({
         data: {
@@ -240,17 +244,23 @@ export class StockTakesService {
         }
       }
 
-      await this.audit.record({
-        companyId,
-        userId,
-        action: 'CREATE',
-        entity: 'stock_take_sessions',
-        entityId: session.id,
-        after: { code, warehouseId: warehouse.id, scope: partial ? 'PARTIAL' : 'FULL' },
-      });
-
-      return this.findOne(companyId, session.id, scope);
+      return { id: session.id, code };
     });
+
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'CREATE',
+      entity: 'stock_take_sessions',
+      entityId: sessionId.id,
+      after: {
+        code: sessionId.code,
+        warehouseId: warehouse.id,
+        scope: partial ? 'PARTIAL' : 'FULL',
+      },
+    });
+
+    return this.findOne(companyId, sessionId.id, scope);
   }
 
   /// Records what was actually found. Only the counted figure is accepted; the
