@@ -113,6 +113,16 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
       })),
     },
     stockMovement: { create: movementCreate },
+    // These cases carry no lots: the goods move as plain quantity, which is the
+    // path a warehouse without lot control takes.
+    itemBatch: {
+      findMany: jest.fn(async () => []),
+      findFirst: jest.fn(async () => null),
+      create: jest.fn(async () => ({ id: 'lot-new' })),
+      update: jest.fn(async () => ({})),
+      updateMany: jest.fn(async () => ({ count: 1 })),
+    },
+    $executeRaw: jest.fn(async () => 1),
     stockBalance: {
       update: jest.fn(async ({ data }: { data: { quantity?: { decrement: Prisma.Decimal } } }) => {
         const dec = data.quantity?.decrement ?? D(0);

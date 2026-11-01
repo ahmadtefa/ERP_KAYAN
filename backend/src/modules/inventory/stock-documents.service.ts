@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -12,6 +13,7 @@ import {
   movementUnitSnapshot,
   resolveUnitSelection,
 } from '../../common/units/unit-math';
+import { selectLotsFefo } from '../../common/warehouse/batch-policy';
 import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
@@ -708,6 +710,23 @@ export class StockDocumentsService {
             requireStock: false,
             warehouseId: toWarehouseId,
           });
+
+          // The lots travel with the goods. Without this the destination shelf
+          // held quantity no lot claimed - so a later issue of a lot-controlled
+          // item was refused for a shortfall on a shelf that showed stock - and
+          // the source lot kept claiming goods that had already left.
+          await this.moveLots(tx, {
+            companyId,
+            userId,
+            itemId: line.itemId,
+            fromWarehouseId: fromWarehouseId as string,
+            toWarehouseId,
+            toBranchId: document.branchId,
+            quantity: line.quantity,
+            batchId: line.batchId ?? null,
+            date: document.documentDate,
+            referenceNumber: document.documentNumber,
+          });
           continue;
         }
 
@@ -1140,6 +1159,125 @@ export class StockDocumentsService {
        FOR UPDATE
     `);
     return rows[0] ?? null;
+  }
+
+  /// Takes the same goods out of the source lots and puts them into the
+  /// destination's, soonest expiry first.
+  ///
+  /// Only what the lots actually hold is moved: a shelf that also carries
+  /// unbatched stock (received before lots existed, or moved in by an earlier
+  /// version of this document) transfers that part without a lot, exactly as it
+  /// arrived. Nothing is invented, and no lot appears at the destination with
+  /// more than left the source.
+  private async moveLots(
+    tx: Prisma.TransactionClient,
+    input: {
+      companyId: string;
+      userId: string;
+      itemId: string;
+      fromWarehouseId: string;
+      toWarehouseId: string;
+      toBranchId: string;
+      quantity: Prisma.Decimal;
+      batchId: string | null;
+      date: Date;
+      referenceNumber: string;
+    },
+  ): Promise<Prisma.Decimal> {
+    const lots = await tx.itemBatch.findMany({
+      where: {
+        companyId: input.companyId,
+        warehouseId: input.fromWarehouseId,
+        itemId: input.itemId,
+        deletedAt: null,
+        remainingQuantity: { gt: 0 },
+        ...(input.batchId ? { id: input.batchId } : {}),
+      },
+      orderBy: { expiryDate: 'asc' },
+    });
+    if (lots.length === 0) return new Prisma.Decimal(0);
+
+    // Expiry does not stop a transfer: the goods are already the company's and
+    // are not being sold. It only decides the order they are taken in.
+    const selection = selectLotsFefo(
+      lots.map((lot) => ({
+        batchId: lot.id,
+        batchNumber: lot.batchNumber,
+        expiryDate: lot.expiryDate,
+        productionDate: lot.productionDate,
+        unitCost: lot.unitCost,
+        remainingQuantity: lot.remainingQuantity,
+        status: lot.status,
+      })),
+      input.quantity,
+      { today: input.date, allowExpired: true },
+    );
+
+    let moved = new Prisma.Decimal(0);
+    for (const allocation of selection.allocations) {
+      const source = lots.find((lot) => lot.id === allocation.batchId);
+      if (!source) continue;
+      const claimed = await tx.itemBatch.updateMany({
+        where: { id: source.id, remainingQuantity: { gte: allocation.quantity } },
+        data: {
+          remainingQuantity: { decrement: allocation.quantity },
+          updatedBy: input.userId,
+        },
+      });
+      if (claimed.count !== 1) {
+        throw new ConflictException(
+          'تم تعديل الدفعة أثناء التحويل. أعد المحاولة. / The lot changed while the transfer was posted; try again.',
+        );
+      }
+      await tx.$executeRaw(Prisma.sql`
+        UPDATE "item_batches"
+           SET "status" = 'CLOSED'
+         WHERE "id" = ${source.id}::uuid
+           AND "remainingQuantity" = 0
+           AND "status" <> 'WRITTEN_OFF'
+      `);
+
+      const destination = await tx.itemBatch.findFirst({
+        where: {
+          companyId: input.companyId,
+          warehouseId: input.toWarehouseId,
+          itemId: input.itemId,
+          batchNumber: source.batchNumber,
+          deletedAt: null,
+        },
+      });
+      if (destination) {
+        await tx.itemBatch.update({
+          where: { id: destination.id },
+          data: {
+            receivedQuantity: { increment: allocation.quantity },
+            remainingQuantity: { increment: allocation.quantity },
+            updatedBy: input.userId,
+          },
+        });
+      } else {
+        await tx.itemBatch.create({
+          data: {
+            companyId: input.companyId,
+            branchId: input.toBranchId,
+            warehouseId: input.toWarehouseId,
+            itemId: input.itemId,
+            batchNumber: source.batchNumber,
+            productionDate: source.productionDate,
+            expiryDate: source.expiryDate,
+            receivedQuantity: allocation.quantity,
+            remainingQuantity: allocation.quantity,
+            unitCost: source.unitCost,
+            status: 'OPEN',
+            sourceType: 'BATCH_TRANSFER',
+            sourceNumber: input.referenceNumber,
+            createdBy: input.userId,
+          },
+        });
+      }
+      moved = moved.plus(allocation.quantity);
+    }
+    return moved;
   }
 
   private async move(

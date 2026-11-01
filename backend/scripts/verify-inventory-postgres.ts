@@ -916,6 +916,39 @@ async function main() {
       }
     });
 
+    await check('the lots travelled with the transfer: each shelf holds what its lots hold', async () => {
+      // A transfer that moves quantity without moving the lots leaves the
+      // destination holding stock no lot can account for - and a later issue is
+      // then refused for a shortfall on a shelf that visibly shows the goods -
+      // while the source lot goes on claiming goods that have already left.
+      for (const warehouseId of [warehouse.id, warehouseB.id]) {
+        const shelf = await ledger.position(prisma as never, {
+          companyId: company.id,
+          branchId: branch.id,
+          warehouseId,
+          itemId: plain.id,
+        });
+        const lots = await prisma.itemBatch.findMany({
+          where: {
+            companyId: company.id,
+            warehouseId,
+            itemId: plain.id,
+            deletedAt: null,
+            remainingQuantity: { gt: 0 },
+          },
+        });
+        const lotQuantity = lots.reduce(
+          (sum, lot) => sum.plus(lot.remainingQuantity),
+          new Prisma.Decimal(0),
+        );
+        assert.equal(
+          lotQuantity.toFixed(4),
+          shelf.quantity.toFixed(4),
+          `warehouse ${warehouseId}: lots hold ${lotQuantity.toFixed(4)}, the shelf holds ${shelf.quantity.toFixed(4)}`,
+        );
+      }
+    });
+
     await check('two simultaneous issues cannot both take the last three units', async () => {
       const before = await ledger.position(prisma as never, {
         companyId: company.id,
