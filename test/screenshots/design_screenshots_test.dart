@@ -443,67 +443,122 @@ Future<Uint8List?> _renderAvatarPng() async {
   }
 }
 
-/// The app ships no font of its own; a widget-test render would otherwise
-/// draw every glyph as a box. When the machine has a real font with Arabic
-/// coverage, register it so the screenshots stay readable. Absent fonts are
-/// fine — layout and colour still render.
-Future<void> _tryLoadSystemFonts() async {
-  // The application's own typeface first: a widget test does not pick up the
-  // fonts declared in `pubspec.yaml`, which is why a render without this draws
-  // every Arabic and Latin glyph as an empty box. The files are read from the
-  // package the test belongs to, so the screenshots show the app's real face.
-  const bundled = <String>[
+/// The application's own typeface, loaded before anything is rendered.
+///
+/// A widget test does not pick up the fonts declared in `pubspec.yaml`, and a
+/// test machine has no Arabic system font: without this every glyph - Arabic,
+/// Latin and icon alike - is an empty box, which is a picture of nothing. Two
+/// sources are tried, the package's asset bundle and the file beside the test,
+/// and the outcome is printed as a workflow notice so the run itself says
+/// whether the screens are readable instead of leaving that to be guessed from
+/// the pixels.
+Future<int> _loadScreenFonts() async {
+  const files = <String>[
     'assets/fonts/IBMPlexSansArabic-Regular.ttf',
     'assets/fonts/IBMPlexSansArabic-Medium.ttf',
     'assets/fonts/IBMPlexSansArabic-SemiBold.ttf',
     'assets/fonts/IBMPlexSansArabic-Bold.ttf',
   ];
-  final appFont = FontLoader('IBMPlexSansArabic');
+  final loader = FontLoader('IBMPlexSansArabic');
   var added = 0;
-  for (final path in bundled) {
-    final file = File(path);
+  for (final name in files) {
+    final data = await _readFontFile(name);
+    if (data == null) continue;
+    loader.addFont(Future.value(data));
+    added += 1;
+  }
+  if (added == 0) return 0;
+  try {
+    await loader.load();
+  } catch (_) {
+    return 0;
+  }
+  return added;
+}
+
+/// The bytes of a font, from the bundle first and from disk second.
+Future<ByteData?> _readFontFile(String name) async {
+  try {
+    return await rootBundle.load(name);
+  } catch (_) {
+    // Not in the bundle: the file beside the test is the other source.
+  }
+  for (final root in <String>[
+    Directory.current.path,
+    '${Directory.current.path}/..',
+  ]) {
+    final file = File('$root/$name');
     if (!await file.exists()) continue;
     try {
       final bytes = await file.readAsBytes();
-      appFont.addFont(Future.value(ByteData.view(bytes.buffer)));
-      added += 1;
+      return ByteData.view(bytes.buffer, bytes.offsetInBytes, bytes.lengthInBytes);
     } catch (_) {
-      // A font that will not load must not fail a screenshot.
+      return null;
     }
   }
-  if (added > 0) {
-    try {
-      await appFont.load();
-    } catch (_) {
-      // Same reasoning: the screen still renders, only less beautifully.
-    }
-  }
+  return null;
+}
 
-  const candidates = <String, List<String>>{
-    'NotoNaskhArabic': [
+/// How wide a short Arabic word is in the family the app asks for.
+///
+/// The test font draws every glyph as a square, so four characters measure
+/// exactly four times the size; the real face does not. The difference is what
+/// the notice reports.
+double _probeWidth(String text, String family) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: TextStyle(fontFamily: family, fontSize: 20)),
+    textDirection: TextDirection.rtl,
+  )..layout();
+  return painter.width;
+}
+
+Future<void> _tryLoadSystemFonts() async {
+  var added = await _loadScreenFonts();
+
+  if (added == 0) {
+    // No bundled file could be read: register a system Arabic face under the
+    // family the theme asks for, so the screens are still readable.
+    const systemFiles = <String>[
       '/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf',
       '/usr/share/fonts/truetype/fonts-noto-core/NotoNaskhArabic-Regular.ttf',
-    ],
-    'DejaVuSans': [
       '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
       '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-    ],
-  };
-  for (final entry in candidates.entries) {
-    for (final path in entry.value) {
+    ];
+    final loader = FontLoader('IBMPlexSansArabic');
+    for (final path in systemFiles) {
       final file = File(path);
       if (!await file.exists()) continue;
       try {
         final bytes = await file.readAsBytes();
-        final loader = FontLoader(entry.key)
-          ..addFont(Future.value(ByteData.view(bytes.buffer)));
-        await loader.load();
+        loader.addFont(
+          Future.value(
+            ByteData.view(bytes.buffer, bytes.offsetInBytes, bytes.lengthInBytes),
+          ),
+        );
       } catch (_) {
-        // A font that will not load must not fail a screenshot.
+        continue;
       }
+      added += 1;
       break;
     }
+    if (added > 0) {
+      try {
+        await loader.load();
+      } catch (_) {
+        added = 0;
+      }
+    }
   }
+
+  final width = _probeWidth('كيان', 'IBMPlexSansArabic');
+  // 80.00 is the box font at 20px: four glyphs, four squares. Anything else is
+  // a real typeface, and the screenshots are worth looking at.
+  // ignore: avoid_print
+  print(
+    '::notice title=Screen font::files=$added '
+    'width(كيان)=${width.toStringAsFixed(2)} '
+    '(80.00 would mean every glyph is a box)',
+  );
 }
 
 Future<void> _pumpShot(
