@@ -473,7 +473,62 @@ Future<int> _loadScreenFonts() async {
   } catch (_) {
     return 0;
   }
+
+  // The icon font as well. Widget tests do not bundle it, so every `Icons.*`
+  // in a render is a hollow square - markup where a toolbar button should be.
+  // It lives in the Flutter SDK's cache, which is why the SDK has to be found
+  // rather than assumed.
+  final icons = await _findFile(<String>[
+    for (final root in _flutterRoots())
+      '$root/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+  ]);
+  if (icons != null) {
+    try {
+      final bytes = await icons.readAsBytes();
+      final iconLoader = FontLoader('MaterialIcons')
+        ..addFont(
+          Future.value(
+            ByteData.view(bytes.buffer, bytes.offsetInBytes, bytes.lengthInBytes),
+          ),
+        );
+      await iconLoader.load();
+    } catch (_) {
+      // Icons are decoration; their absence must not fail a screenshot.
+    }
+  }
   return added;
+}
+
+/// Where the Flutter SDK is, as far as this machine can tell.
+List<String> _flutterRoots() {
+  final roots = <String>{
+    if (Platform.environment['FLUTTER_ROOT']?.isNotEmpty ?? false)
+      Platform.environment['FLUTTER_ROOT']!,
+  };
+  try {
+    final result = Process.runSync('which', ['flutter']);
+    final path = (result.stdout as String).trim();
+    if (path.endsWith('/flutter/bin/flutter')) {
+      roots.add(path.substring(0, path.length - '/bin/flutter'.length));
+    }
+  } catch (_) {
+    // No shell to ask; the guesses below are still worth trying.
+  }
+  roots.addAll(<String>[
+    '/opt/flutter',
+    '/usr/local/flutter',
+    '/usr/lib/flutter',
+    '${Platform.environment['HOME'] ?? ''}/flutter',
+  ]);
+  return roots.where((root) => root.isNotEmpty).toList();
+}
+
+Future<File?> _findFile(List<String> paths) async {
+  for (final path in paths) {
+    final file = File(path);
+    if (await file.exists()) return file;
+  }
+  return null;
 }
 
 /// The bytes of a font, from the bundle first and from disk second.
@@ -632,6 +687,9 @@ Future<void> _pumpShot(
         dashboardMonthlyProvider.overrideWith((ref) async => _monthly),
       ],
       child: MaterialApp.router(
+        // The red corner ribbon is a developer notice, not part of the
+        // product: a screenshot with it would misrepresent the screen.
+        debugShowCheckedModeBanner: false,
         locale: locale,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -818,6 +876,7 @@ void main() {
     const ink = Color(0xFF111827);
     await tester.pumpWidget(
       MaterialApp(
+        debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
         home: Scaffold(
           backgroundColor: const Color(0xFFFFFFFF),
