@@ -67,7 +67,10 @@ function document(overrides: Record<string, unknown> = {}) {
 function build(doc: Record<string, unknown> = document()) {
   const prisma = {
     stockDocument: {
-      findMany: jest.fn(async () => [doc]),
+      // The argument is named so `mock.calls[0][0]` is a tuple with an
+      // element: a zero-argument mock types `calls` as `[]` and indexing it
+      // is a compile error, not a test failure.
+      findMany: jest.fn(async (_args: { include?: Record<string, unknown> }) => [doc]),
       count: jest.fn(async () => 1),
       findFirst: jest.fn(async () => doc),
     },
@@ -125,8 +128,8 @@ describe('the stock document list names its warehouses and its people', () => {
     await service.findAll(COMPANY, {});
 
     const include = prisma.stockDocument.findMany.mock.calls[0][0].include;
-    expect(include.fromWarehouse).toBeDefined();
-    expect(include.toWarehouse).toBeDefined();
+    expect(include?.fromWarehouse).toBeDefined();
+    expect(include?.toWarehouse).toBeDefined();
   });
 
   it('keeps a document that names no warehouse readable', async () => {

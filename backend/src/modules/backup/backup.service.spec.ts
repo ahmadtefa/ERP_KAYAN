@@ -1377,7 +1377,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       );
 
     test('the units come back with their factors and their own rules', async () => {
-      await service.restore(companyFile(), COMPANY_ID, {});
+      await service.restore(companyFile(), COMPANY_ID, { replace: true });
 
       const units = written('itemUnit');
       expect(units).toHaveLength(3);
@@ -1397,7 +1397,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     });
 
     test('the warehouses come back bound to their branch, one of them default', async () => {
-      await service.restore(companyFile(), COMPANY_ID, {});
+      await service.restore(companyFile(), COMPANY_ID, { replace: true });
 
       const warehouses = written('warehouse');
       expect(warehouses).toHaveLength(2);
@@ -1410,7 +1410,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     });
 
     test('the movement log keeps the unit that was typed and the factor behind it', async () => {
-      await service.restore(companyFile(), COMPANY_ID, {});
+      await service.restore(companyFile(), COMPANY_ID, { replace: true });
 
       const movements = written('stockMovement');
       expect(movements).toHaveLength(3);
