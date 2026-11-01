@@ -363,7 +363,11 @@ class NotificationBell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final count = ref.watch(notificationCountProvider).valueOrNull ?? 0;
+    // Riverpod 3 does not expose `valueOrNull` on AsyncValue; reading the data
+    // case explicitly keeps the badge at zero while loading and after an error,
+    // which is the honest thing for a count nobody has received yet.
+    final async = ref.watch(notificationCountProvider);
+    final count = async is AsyncData<int> ? async.value : 0;
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
     return IconButton(
       tooltip: arabic ? 'التنبيهات' : 'Notifications',
