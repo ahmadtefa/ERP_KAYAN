@@ -111,6 +111,15 @@ jobs:
         # JavaScript engine, so this step runs exactly what the installer runs.
         run: npx prisma migrate deploy
 
+      # A migration that only ever meets an empty database has not been tested.
+      # This creates a throwaway database, applies every migration that came
+      # before the avatar one, fills it with a company, a branch and two
+      # accounts, then applies the avatar migration and compares every table's
+      # row count and the accounts themselves - the upgrade a customer
+      # installation performs.
+      - name: Prove the user-avatar migration on a populated database
+        run: node scripts/check-user-avatar-migration.mjs
+
       # Licensing is the one subsystem whose real behaviour cannot be shown
       # with a mocked database: the migration has to survive an installation
       # that already has accounts, seats have to be refused at the limit, two
@@ -450,6 +459,15 @@ jobs:
             done
             exit "$artwork_status"
           fi
+      # The proof's own PASS lines are the evidence that a finished sheet was
+      # rasterised and measured; the log host is not always readable, so the
+      # count is lifted into the run.
+      - name: Record the artwork PDF proof
+        if: always()
+        run: |
+          passed=$(grep -c "  PASS  " /tmp/kayan-artwork.log 2>/dev/null || true)
+          tail=$(grep -E "  PASS  |passed, .* failed" /tmp/kayan-artwork.log 2>/dev/null | tail -2 | tr '\n' ' ')
+          echo "::notice title=Quotation PDF proof::${passed:-0} checks passed — ${tail:-proof did not run}"
       - name: Serve the web client and run the regression scenario
         run: |
           mkdir -p /tmp/kayan-web-probe/build/web
