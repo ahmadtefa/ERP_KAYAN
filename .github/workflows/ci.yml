@@ -100,7 +100,7 @@ jobs:
       - name: Record the backend proof suites
         if: always()
         run: |
-          summary=$(grep -hE "^(PASS|FAIL)[[:space:]]+.*(auth\.controller|user-avatars|quotation-(background|document|pdf))\.spec\.ts" /tmp/kayan-jest.log 2>/dev/null \
+          summary=$(grep -hE "^(PASS|FAIL)[[:space:]]+.*(auth\.controller|user-avatars[^ ]*|quotation-(background|document|pdf))\.spec\.ts" /tmp/kayan-jest.log 2>/dev/null \
             | sed -E 's#.*/(src|test)/#\1/#' | tr '\n' ' | ')
           echo "::notice title=Backend proof suites::${summary:-summary not captured}"
       - name: Build API
