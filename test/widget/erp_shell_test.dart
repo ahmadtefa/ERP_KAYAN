@@ -340,7 +340,10 @@ void main() {
         tester.view.resetDevicePixelRatio();
       });
 
+      // A distinct key, so pumping the second session builds a fresh scope
+      // instead of keeping the first session's (correct) answer on screen.
       Widget shellWith(AppUser user) => ProviderScope(
+        key: ValueKey(user.id),
         overrides: [
           authControllerProvider.overrideWith(
             () => _AvatarTestAuthController(user),

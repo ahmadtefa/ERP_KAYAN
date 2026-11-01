@@ -111,12 +111,36 @@ void main() {
     });
   }
 
+  /// Brings a menu entry into view, whichever way it is from where the list is
+  /// now.
+  ///
+  /// `scrollUntilVisible` only ever drags in one direction, and it ends by
+  /// taking `.single` of a finder that may still be empty - which is how an
+  /// upward move (back to «الأصناف» after «الإعدادات» at the very bottom) used
+  /// to die with `Bad state: No element`. An entry that is not built yet can
+  /// only be found by walking the list from the top, so that is what this does;
+  /// once it is built, `ensureVisible` moves in whichever direction it is.
   Future<void> scrollTo(WidgetTester tester, String label) async {
     final target = find.widgetWithText(ListTile, label);
-    await tester.scrollUntilVisible(
+    final position = tester.state<ScrollableState>(navScrollable()).position;
+
+    if (target.evaluate().isEmpty) {
+      position.jumpTo(0);
+      await tester.pumpAndSettle();
+      while (target.evaluate().isEmpty &&
+          position.pixels < position.maxScrollExtent) {
+        final next = position.pixels + 150;
+        position.jumpTo(
+          next > position.maxScrollExtent ? position.maxScrollExtent : next,
+        );
+        await tester.pumpAndSettle();
+      }
+    }
+
+    expect(
       target,
-      150.0,
-      scrollable: navScrollable(),
+      findsWidgets,
+      reason: 'the menu must offer «$label»',
     );
     await tester.ensureVisible(target);
     await tester.pumpAndSettle();
