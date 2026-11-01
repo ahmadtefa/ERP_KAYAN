@@ -563,15 +563,17 @@ export class StockDocumentsService {
     // A loss is approved before it is posted, by somebody other than the person
     // who wrote it down. The document says who, so the trail survives a change
     // of staff.
+    //
+    // Approval is the separation; posting is the errand. The approver may post
+    // the document they signed, and so may the storekeeper who recorded it.
+    // Refusing the approver here - which this used to do, with the approval's
+    // own message - meant a write-off needed three different people to be
+    // booked: two to sign it and a third to press post. On a company with one
+    // manager that is a document that can never be posted.
     if (document.kind === StockDocumentKind.WRITE_OFF) {
       if (!document.approvedAt || !document.approvedBy) {
         throw new BadRequestException(
           'A write-off must be approved before it is posted. / يجب اعتماد مستند الإعدام قبل ترحيله.',
-        );
-      }
-      if (document.approvedBy === userId) {
-        throw new BadRequestException(
-          'The person who recorded a write-off cannot approve it. / لا يجوز أن يعتمد المستخدم المستند الذي أنشأه.',
         );
       }
     }

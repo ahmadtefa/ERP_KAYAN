@@ -195,14 +195,22 @@ describe('a documentary write-off', () => {
     );
   });
 
-  it('does not post a write-off its own approver recorded', async () => {
-    const { service, document } = makeService();
-    document.approvedAt = new Date();
-    document.approvedBy = APPROVER;
+  it('lets the approver post the loss they signed, and the recorder too', async () => {
+    // Approval is the separation of duties: the person who recorded the loss
+    // may not sign it. Posting is the errand that follows, and either of the
+    // two may run it - requiring a third person made a write-off impossible to
+    // book on a company with one manager.
+    const byApprover = makeService();
+    byApprover.document.approvedAt = new Date();
+    byApprover.document.approvedBy = APPROVER;
+    await byApprover.service.post(COMPANY, APPROVER, 'doc-wo');
+    expect(byApprover.prisma.stockDocument.findFirst).toHaveBeenCalled();
 
-    await expect(service.post(COMPANY, APPROVER, 'doc-wo')).rejects.toThrow(
-      /cannot approve it|cannot approve the document/i,
-    );
+    const byRecorder = makeService();
+    byRecorder.document.approvedAt = new Date();
+    byRecorder.document.approvedBy = APPROVER;
+    await byRecorder.service.post(COMPANY, AUTHOR, 'doc-wo');
+    expect(byRecorder.prisma.stockDocument.findFirst).toHaveBeenCalled();
   });
 
   it('posts the loss to the inventory-difference account, and says what it was', async () => {
