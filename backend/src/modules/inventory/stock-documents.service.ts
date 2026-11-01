@@ -113,7 +113,7 @@ export class StockDocumentsService {
     const userIds = [
       ...new Set(
         items
-          .flatMap((document) => [document.createdBy, document.postedBy])
+          .flatMap((document) => [document.createdBy, document.postedBy, document.approvedBy])
           .filter((id): id is string => typeof id === 'string' && id !== ''),
       ),
     ];
@@ -131,6 +131,9 @@ export class StockDocumentsService {
           ...document,
           createdByName: document.createdBy ? userName.get(document.createdBy) ?? null : null,
           postedByName: document.postedBy ? userName.get(document.postedBy) ?? null : null,
+          approvedByName: document.approvedBy
+            ? userName.get(document.approvedBy) ?? null
+            : null,
         }),
         lineCount: document.lines.length,
         totalQuantity: document.lines
@@ -161,7 +164,7 @@ export class StockDocumentsService {
 
     // The paper names who raised and who posted it, so the detail resolves the
     // two ids the same way the list does.
-    const userIds = [document.createdBy, document.postedBy].filter(
+    const userIds = [document.createdBy, document.postedBy, document.approvedBy].filter(
       (value): value is string => typeof value === 'string' && value !== '',
     );
     const users = userIds.length
@@ -177,6 +180,9 @@ export class StockDocumentsService {
         ...document,
         createdByName: document.createdBy ? userName.get(document.createdBy) ?? null : null,
         postedByName: document.postedBy ? userName.get(document.postedBy) ?? null : null,
+        approvedByName: document.approvedBy
+          ? userName.get(document.approvedBy) ?? null
+          : null,
       }),
       lines: document.lines.map((line) => ({
         id: line.id,
@@ -1246,6 +1252,9 @@ export class StockDocumentsService {
     toWarehouseId?: string | null;
     createdBy?: string | null;
     postedBy?: string | null;
+    approvedAt?: Date | null;
+    approvedBy?: string | null;
+    approvedByName?: string | null;
     fromWarehouse?: { id: string; code: string; nameEn: string; nameAr: string } | null;
     toWarehouse?: { id: string; code: string; nameEn: string; nameAr: string } | null;
     createdByName?: string | null;
@@ -1275,6 +1284,11 @@ export class StockDocumentsService {
       postedByName: document.postedByName ?? null,
       journalEntryId: document.journalEntryId,
       postedAt: document.postedAt?.toISOString() ?? null,
+      // Who signed the loss or the count, and when. A document that needs an
+      // approval says so on its own face rather than only in the audit log.
+      approvedAt: document.approvedAt?.toISOString() ?? null,
+      approvedById: document.approvedBy ?? null,
+      approvedByName: document.approvedByName ?? null,
       createdAt: document.createdAt.toISOString(),
     };
   }

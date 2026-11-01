@@ -1012,12 +1012,12 @@ async function main() {
     });
 
     const plainLine = session.lines.find((line) => line.itemId === plain.id);
-    assert.ok(plainLine, 'the plain item is on the count sheet');
+    if (!plainLine) throw new Error('the plain item is not on the count sheet');
     await stockTakes.record(
       company.id,
       user.id,
       session.id,
-      { lines: [{ lineId: plainLine!.id, countedQuantity: 12 }], finish: true },
+      { lines: [{ lineId: plainLine.id, countedQuantity: 12 }], finish: true },
       [branch.id],
     );
 
