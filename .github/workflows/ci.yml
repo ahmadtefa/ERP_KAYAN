@@ -596,29 +596,6 @@ jobs:
           path: test/screenshots/goldens/*.png
           if-no-files-found: warn
           retention-days: 30
-      # The rendered screens go into the repository as well as the artefact
-      # list, so the redesign can be reviewed from the branch. A push made
-      # with the run's own token does not start another run.
-      - name: Publish the design screenshots to the branch
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          BRANCH: ${{ github.head_ref }}
-        run: |
-          set -euo pipefail
-          target=docs/screens/redesign
-          mkdir -p "$target"
-          rm -f "$target"/*.png
-          cp test/screenshots/goldens/*.png "$target"/
-          git config user.name 'KAYAN screenshots'
-          git config user.email 'screenshots@kayan.invalid'
-          git add "$target"
-          if git diff --cached --quiet; then
-            echo "The screenshots are unchanged."
-            exit 0
-          fi
-          git commit -m 'chore(design): render the redesigned screens [skip ci]'
-          git push origin "HEAD:$BRANCH"
-          retention-days: 30
       - name: Run tests
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
       # The suites that carry the redesign are each run on their own and
@@ -648,6 +625,28 @@ jobs:
           path: build/web/
           if-no-files-found: error
           retention-days: 14
+      # The rendered screens go into the repository as well as the artefact
+      # list, so the redesign can be reviewed from the branch itself. A push
+      # made with the run's own token does not start another run.
+      - name: Publish the design screenshots to the branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          target=docs/screens/redesign
+          mkdir -p "$target"
+          rm -f "$target"/*.png
+          cp test/screenshots/goldens/*.png "$target"/
+          git config user.name 'KAYAN screenshots'
+          git config user.email 'screenshots@kayan.invalid'
+          git add "$target"
+          if git diff --cached --quiet; then
+            echo "The screenshots are unchanged."
+            exit 0
+          fi
+          git commit -m 'chore(design): render the redesigned screens [skip ci]'
+          git push origin "HEAD:$BRANCH"
 
   desktop:
     name: Linux Desktop (analyze, test, build)
