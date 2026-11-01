@@ -374,9 +374,23 @@ async function main() {
     });
 
     await check('the issue leaves at the shelf average, not at either lot\'s own price', () => {
-      // 320.00 / 22 = 14.545454..., carried at four decimals for money.
+      // 320.00 / 22 = 14.545455 per unit at six decimals, so 13 units leave
+      // 189.0909 of value - and the lot movements add up to exactly that.
       assert.equal(issue.unitCost, '14.5455');
-      assert.equal(issue.value, '189.0915');
+      assert.equal(issue.value, '189.0909');
+      const issuedMovements = await prisma.stockMovement.findMany({
+        where: {
+          companyId: company.id,
+          referenceType: 'SALES_INVOICE',
+          referenceNumber: `${TAG}/SI-1`,
+        },
+        select: { totalCost: true },
+      });
+      const movementTotal = issuedMovements.reduce(
+        (sum, row) => sum.plus(row.totalCost),
+        D(0),
+      );
+      assert.equal(movementTotal.toFixed(4), '189.0909', 'the movements equal the value taken');
     });
 
     await check('the emptied lot is closed rather than deleted, and keeps its movements', async () => {
@@ -389,18 +403,18 @@ async function main() {
       assert.equal(movements, 3, 'two receipts and the issue are all on the lot');
     });
 
-    await check('the balance is 9 at 130.9085, and the history records the cost that moved', async () => {
+    await check('the balance is 9 at 130.9091, and the history records the cost that moved', async () => {
       const balance = await prisma.stockBalance.findFirstOrThrow({
         where: { companyId: company.id, branchId: branch.id, itemId: item.id },
       });
       assert.equal(balance.quantity.toFixed(4), '9.0000');
-      assert.equal(balance.value.toFixed(4), '130.9085');
+      assert.equal(balance.value.toFixed(4), '130.9091');
       const history = await prisma.itemCostHistory.findMany({
         where: { companyId: company.id, itemId: item.id },
         orderBy: { createdAt: 'asc' },
       });
       assert.equal(history.length, 4, 'three receipts and one issue');
-      assert.equal(history[3].unitCostAfter.toFixed(4), '14.5455');
+      assert.equal(history[3].unitCostAfter.toFixed(4), '14.545455');
       created.costHistory.push(...history.map((row) => row.id));
     });
 
