@@ -161,7 +161,8 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
 
   /// Changes or removes a colleague's photo, for an administrator.
   Future<void> _editPhoto(Json row) async {
-    final name = '${text(row, 'fullNameAr').isEmpty ? text(row, 'fullNameEn') : text(row, 'fullNameAr')}';
+    final arabicName = text(row, 'fullNameAr');
+    final name = arabicName.isEmpty ? text(row, 'fullNameEn') : arabicName;
     await showUserPhotoDialog(
       context,
       userId: text(row, 'id'),

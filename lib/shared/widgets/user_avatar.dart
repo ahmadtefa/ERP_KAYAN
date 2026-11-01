@@ -71,7 +71,6 @@ class UserAvatar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
     final fallback = _InitialAvatar(name: name, size: size);
 
     if (!hasPhoto || userId.isEmpty) return _decorate(fallback);
