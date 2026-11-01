@@ -43,7 +43,7 @@ abstract final class AppColors {
 
   // Text — navy-tinted ink rather than neutral black.
   static const textPrimary = Color(0xFF16233A);
-  static const textSecondary = Color(0xFF5A6B84);
+  static const textSecondary = Color(0xFF4F6079);
   static const textDisabled = Color(0xFF9AA9BE);
   static const onNavy = Color(0xFFF7FAFF);
   static const onNavyMuted = Color(0xFFB7C6DA);
@@ -179,96 +179,114 @@ class SectionAccent {
 /// colours so a payment to a supplier is never mistaken for one from a
 /// customer at a glance.
 abstract final class SectionAccents {
-  /// لوحة التحكم — calm blue.
+  // Every identity colour in this table is held to two measurements at once:
+  // 5.8:1 or better on white (so it can headline a section and label a table
+  // column) and 2.8:1 or better on the navy sidebar (so the same colour is the
+  // selected entry's marker without being a lighter second colour). That band
+  // - luminance around 0.13 - is what makes one value usable in both places,
+  // and it is why "deep blue" here reads as indigo rather than as near-black.
+  //
+  // The canvas behind each section is a wash of the same hue: the page tint is
+  // the palest step, the panel tint one step deeper so a grouped area reads as
+  // a band rather than as a change of page. Every pair of page tints is a
+  // measurably different colour, because two sections a person cannot tell
+  // apart at a glance are two sections that may as well share a colour.
+
+  /// لوحة التحكم — azure.
   static const overview = SectionAccent(
-    base: Color(0xFF2563EB),
-    soft: Color(0xFFEAF1FE),
-    pageTint: Color(0xFFF2F6FE),
-    panelTint: Color(0xFFE7EFFC),
-    darkBase: Color(0xFF7FA9F5),
+    base: Color(0xFF1563BD),
+    soft: Color(0xFFE8EFF8),
+    pageTint: Color(0xFFF1F6FB),
+    panelTint: Color(0xFFE1EBF6),
+    darkBase: Color(0xFF569FF1),
   );
 
-  /// المحاسبة والخزينة — emerald.
+  /// المحاسبة — emerald.
   static const accounting = SectionAccent(
-    base: Color(0xFF046C4E),
-    soft: Color(0xFFE4F3EC),
-    pageTint: Color(0xFFEFF8F3),
-    panelTint: Color(0xFFDFF0E7),
-    darkBase: Color(0xFF5DD3A3),
+    base: Color(0xFF13724F),
+    soft: Color(0xFFE7F1ED),
+    pageTint: Color(0xFFF3F8F6),
+    panelTint: Color(0xFFE3EEEA),
+    darkBase: Color(0xFF17B57B),
   );
 
-  /// Banks & cashboxes sit inside accounting and share its emerald: cash is
+  /// Banks & cashboxes sit inside accounting and share its emerald — cash is
   /// where the accounting numbers are actually touched, not a different book.
+  /// Its canvas is a deeper wash of the same green, so «الخزينة» still looks
+  /// like its own desk rather than like a copy of the ledger.
   static const cash = SectionAccent(
-    base: Color(0xFF046C4E),
-    soft: Color(0xFFE4F3EC),
-    pageTint: Color(0xFFEFF8F3),
-    panelTint: Color(0xFFDFF0E7),
-    darkBase: Color(0xFF5DD3A3),
+    base: Color(0xFF13724F),
+    soft: Color(0xFFE7F1ED),
+    pageTint: Color(0xFFE9F2EE),
+    panelTint: Color(0xFFD9E8E2),
+    darkBase: Color(0xFF17B57B),
   );
 
   /// العملاء — turquoise.
   static const customers = SectionAccent(
-    base: Color(0xFF0B7A70),
-    soft: Color(0xFFE3F2F0),
-    pageTint: Color(0xFFEFF7F6),
-    panelTint: Color(0xFFDDEFEC),
-    darkBase: Color(0xFF4FD1C5),
+    base: Color(0xFF177067),
+    soft: Color(0xFFE8F1F0),
+    pageTint: Color(0xFFECF4F3),
+    panelTint: Color(0xFFDCEAE8),
+    darkBase: Color(0xFF1EAEA0),
   );
 
-  /// الموردون — violet.
+  /// الموردون — violet, kept well away from the customers' turquoise and the
+  /// reports' indigo so a payment to a supplier never looks like one from a
+  /// customer.
   static const suppliers = SectionAccent(
-    base: Color(0xFF6D28D9),
-    soft: Color(0xFFF1EBFD),
-    pageTint: Color(0xFFF6F2FE),
-    panelTint: Color(0xFFEDE4FB),
-    darkBase: Color(0xFFC4A7F7),
+    base: Color(0xFF8B33D8),
+    soft: Color(0xFFF3EBFB),
+    pageTint: Color(0xFFF8F3FD),
+    panelTint: Color(0xFFF0E4FA),
+    darkBase: Color(0xFFBB84EC),
   );
 
   /// المخازن والأصناف — teal blue.
   static const inventory = SectionAccent(
-    base: Color(0xFF0E6F86),
-    soft: Color(0xFFE3F1F5),
-    pageTint: Color(0xFFF0F6F8),
-    panelTint: Color(0xFFDDEBF0),
-    darkBase: Color(0xFF6FD0E6),
+    base: Color(0xFF166D87),
+    soft: Color(0xFFE8F0F3),
+    pageTint: Color(0xFFEFF5F7),
+    panelTint: Color(0xFFDEEBEE),
+    darkBase: Color(0xFF1BA8D2),
   );
 
   /// المبيعات وعروض الأسعار — royal blue.
   static const sales = SectionAccent(
-    base: Color(0xFF1D4ED8),
-    soft: Color(0xFFE8EFFD),
-    pageTint: Color(0xFFF1F5FE),
-    panelTint: Color(0xFFE3EBFC),
-    darkBase: Color(0xFF8FB4FF),
+    base: Color(0xFF3B52E9),
+    soft: Color(0xFFEBEEFD),
+    pageTint: Color(0xFFEDEFFD),
+    panelTint: Color(0xFFDEE2FB),
+    darkBase: Color(0xFF8695F5),
   );
 
   /// المشتريات — warm orange.
   static const purchases = SectionAccent(
-    base: Color(0xFFB23E0A),
-    soft: Color(0xFFFCEDE3),
-    pageTint: Color(0xFFFDF4EE),
-    panelTint: Color(0xFFFAE4D5),
-    darkBase: Color(0xFFF2A06B),
+    base: Color(0xFFAD420D),
+    soft: Color(0xFFF7ECE7),
+    pageTint: Color(0xFFFBF6F3),
+    panelTint: Color(0xFFF5E8E2),
+    darkBase: Color(0xFFF57738),
   );
 
-  /// التقارير — deep blue.
+  /// التقارير — indigo, deeper in hue than sales and further from the
+  /// customers' turquoise than a navy would be at this luminance.
   static const insights = SectionAccent(
-    base: Color(0xFF1E3A8A),
-    soft: Color(0xFFE7EBF7),
-    pageTint: Color(0xFFF1F4FB),
-    panelTint: Color(0xFFE0E6F4),
-    darkBase: Color(0xFF9DB2FF),
+    base: Color(0xFF684FCC),
+    soft: Color(0xFFF0EDFA),
+    pageTint: Color(0xFFF2F1FB),
+    panelTint: Color(0xFFE7E3F7),
+    darkBase: Color(0xFFA090E3),
   );
 
   /// الإدارة والإعدادات — slate, because administration is not a business
   /// department and should not compete with one.
   static const administration = SectionAccent(
-    base: Color(0xFF475569),
-    soft: Color(0xFFEDF1F6),
-    pageTint: Color(0xFFF5F7FA),
-    panelTint: Color(0xFFE8EDF3),
-    darkBase: Color(0xFFB6C4D6),
+    base: Color(0xFF56657B),
+    soft: Color(0xFFEEF0F2),
+    pageTint: Color(0xFFF1F3F4),
+    panelTint: Color(0xFFE6E8EB),
+    darkBase: Color(0xFF8A9DB6),
   );
 }
 

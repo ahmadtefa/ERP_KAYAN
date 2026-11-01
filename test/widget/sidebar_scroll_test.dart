@@ -87,12 +87,33 @@ void main() {
 
   Finder navList() => find.byKey(const PageStorageKey<String>('erp-shell-nav-list'));
 
+  Finder navScrollable() => find.descendant(
+    of: navList(),
+    matching: find.byType(Scrollable),
+  );
+
   double offsetOf(WidgetTester tester) {
-    final scrollable = find.descendant(
-      of: navList(),
-      matching: find.byType(Scrollable),
+    expect(
+      navScrollable(),
+      findsOneWidget,
+      reason: 'the shell must own exactly one menu scroll view',
     );
-    return tester.state<ScrollableState>(scrollable).position.pixels;
+    return tester.state<ScrollableState>(navScrollable()).position.pixels;
+  }
+
+  /// What the menu actually holds, so a missed entry is reported as a missing
+  /// entry and not as "Bad state: No element".
+  String menuContents(WidgetTester tester) {
+    if (navList().evaluate().isEmpty) return '<the shell has no menu>';
+    final tiles = tester.widgetList<ListTile>(
+      find.descendant(of: navList(), matching: find.byType(ListTile)),
+    );
+    return tiles
+        .map((tile) => switch (tile.title) {
+              final Text text => text.data ?? '',
+              _ => '?',
+            })
+        .join(' | ');
   }
 
   Future<void> openTallWindow(WidgetTester tester) async {
@@ -106,17 +127,55 @@ void main() {
     });
   }
 
+  /// Brings a menu entry into view, whichever way it is from where the list is
+  /// now, and proves it is really on screen before anything taps it.
+  ///
+  /// The earlier version of this helper only ever scrolled *down*, which was
+  /// enough while every entry happened to be reached from above. The menu now
+  /// carries sixteen entries, so after visiting «الإعدادات» at the bottom,
+  /// «الأصناف» in the middle sits *above* the viewport: the search has to be
+  /// able to walk the list back up, and when an entry has not been built yet it
+  /// has to start from the top rather than silently search in one direction
+  /// until the framework throws `Bad state: No element`.
   Future<void> scrollTo(WidgetTester tester, String label) async {
     final target = find.widgetWithText(ListTile, label);
-    await tester.scrollUntilVisible(
+    final scrollable = navScrollable();
+    expect(scrollable, findsOneWidget, reason: 'one menu scroll view');
+    final position = tester.state<ScrollableState>(scrollable).position;
+
+    if (target.evaluate().isEmpty) {
+      // Not built yet: the framework can only search downwards, so walk down
+      // from the top - and stop at the end instead of over-scrolling.
+      position.jumpTo(0);
+      await tester.pumpAndSettle();
+      while (target.evaluate().isEmpty &&
+          position.pixels < position.maxScrollExtent) {
+        position.jumpTo(
+          position.pixels + 150 > position.maxScrollExtent
+              ? position.maxScrollExtent
+              : position.pixels + 150,
+        );
+        await tester.pumpAndSettle();
+      }
+    }
+
+    expect(
       target,
-      150.0,
-      scrollable: find.descendant(
-        of: navList(),
-        matching: find.byType(Scrollable),
-      ),
+      findsOneWidget,
+      reason: 'the menu must show «$label»; it holds: ${menuContents(tester)}',
     );
+
+    await tester.ensureVisible(target);
     await tester.pumpAndSettle();
+
+    final menu = tester.getRect(navList());
+    final entry = tester.getRect(target);
+    expect(
+      menu.contains(entry.center),
+      isTrue,
+      reason: '«$label» was not brought into the menu viewport '
+          '($entry is outside $menu)',
+    );
   }
 
   testWidgets('a lower item is reachable, and opening it does not jump to the top', (
@@ -174,8 +233,17 @@ void main() {
     expect(currentRoute, AppRoutes.settings);
     expect(offsetOf(tester), closeTo(atSettings, 1));
 
+    // Back up the menu, to an entry that now sits above the viewport. The
+    // list must follow it up and then stay where it was put: scrolling back
+    // is a navigation like any other, and it is the direction the old
+    // downwards-only helper could not reach.
     await scrollTo(tester, 'Items');
     final atItems = offsetOf(tester);
+    expect(
+      atItems,
+      lessThan(atSettings),
+      reason: 'Items is above Settings, so reaching it moved the list up',
+    );
     await tester.tap(find.widgetWithText(ListTile, 'Items'));
     await tester.pumpAndSettle();
     expect(offsetOf(tester), closeTo(atItems, 1));

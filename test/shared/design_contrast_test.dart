@@ -192,6 +192,20 @@ void main() {
       }
     });
 
+    // The tint is the background and the panel is the band drawn on top of
+    // it: header, grouped area, summary strip. If the two are the same colour
+    // the band is invisible and the section's screens flatten into one white
+    // sheet with a coloured title.
+    test('give each section a band that stands off its own canvas', () {
+      for (final entry in accents.entries) {
+        expect(
+          contrast(entry.value.pageTint, entry.value.panelTint),
+          greaterThanOrEqualTo(1.05),
+          reason: '${entry.key}: its panel must stand off its canvas',
+        );
+      }
+    });
+
     test('are visibly different from one another, not five shades of blue', () {
       // Two sections that measure as the same colour on screen are two
       // sections a person cannot tell apart at a glance, which is the whole
