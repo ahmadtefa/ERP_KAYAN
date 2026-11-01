@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -490,12 +491,12 @@ class _Sidebar extends StatelessWidget {
               thumbVisibility: true,
               thickness: 6,
               child: ListView(
-                key: const Key('erp-shell-nav-list'),
-                // Two independent guarantees that the menu stays where it was:
-                // the controller lives in the shell's State (which the router
-                // no longer recreates), and the list remembers its offset in
-                // page storage even if it were.
-                pageStorageKey: const PageStorageKey<String>('erp-shell-nav'),
+                // A PageStorageKey, not a plain Key: a scroll view restores
+                // its offset from page storage only when it can identify
+                // itself, and this is the second guarantee (after the
+                // controller that now outlives navigation) that the menu stays
+                // where the person left it.
+                key: const PageStorageKey<String>('erp-shell-nav-list'),
                 controller: scrollController,
                 primary: false,
                 // Taps on the menu must not steal focus from the list and
@@ -505,7 +506,7 @@ class _Sidebar extends StatelessWidget {
                 // viewport: permission tests and keyboard users must be able to
                 // reach a module without scrolling first, and a scrollbar that
                 // is dragged quickly must not show blank rows.
-                cacheExtent: 4000,
+                scrollCacheExtent: const ScrollCacheExtent.pixels(4000),
                 padding: EdgeInsets.fromLTRB(
                   extended ? 10 : 8,
                   10,

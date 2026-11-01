@@ -79,7 +79,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final navListFinder = find.byKey(const Key('erp-shell-nav-list'));
+      final navListFinder = find.byKey(const PageStorageKey<String>('erp-shell-nav-list'));
       expect(navListFinder, findsOneWidget);
 
       // In Arabic RTL, the navigation sidebar sits on the right side of the screen.

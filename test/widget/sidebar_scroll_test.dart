@@ -85,7 +85,7 @@ void main() {
     );
   }
 
-  Finder navList() => find.byKey(const Key('erp-shell-nav-list'));
+  Finder navList() => find.byKey(const PageStorageKey<String>('erp-shell-nav-list'));
 
   double offsetOf(WidgetTester tester) {
     final scrollable = find.descendant(

@@ -119,7 +119,7 @@ class AuthController extends AsyncNotifier<AppUser?> {
   /// tokens, the tenant and the permissions are untouched - this must never be
   /// a way to silently widen a session.
   Future<void> refreshAvatarState() async {
-    final current = state.valueOrNull;
+    final current = state.asData?.value;
     if (current == null) return;
     try {
       final me = await ref.read(apiClientProvider).get('/auth/me');
