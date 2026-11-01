@@ -243,7 +243,7 @@ class _LotListTabState extends ConsumerState<_LotListTab> {
         ],
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed != true || !mounted) return;
 
     setState(() => _busy = true);
     try {
@@ -258,6 +258,7 @@ class _LotListTabState extends ConsumerState<_LotListTab> {
           'reason': reason.text.trim(),
         },
       );
+      if (!mounted) return;
       _say(
         _t(
           'تم الإعدام، والقيد ${text(result, 'journalEntryNumber')}',
