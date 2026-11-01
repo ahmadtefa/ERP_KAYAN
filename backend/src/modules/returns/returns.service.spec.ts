@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 import {
   InvoiceDocumentType,
   InvoiceStatus,
@@ -47,6 +48,7 @@ function dependencies(prisma: Record<string, any>, posting = { post: jest.fn(), 
     accounts as never,
     audit as never,
     warehouses as never,
+    fakeLedger() as any,
   );
   return { service, numbers, posting, accounts, audit, warehouses };
 }

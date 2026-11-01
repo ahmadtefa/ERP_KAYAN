@@ -3,6 +3,11 @@ import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import {
+  assertTransferAccess,
+  assertWarehouseAccess,
+  grantsOf,
+} from '../../common/warehouse/warehouse-access';
 import { warehouseScopeOf } from '../../common/warehouse/warehouse.service';
 import {
   BatchesService,
@@ -106,6 +111,9 @@ export class BatchesController {
         pageSize: query.pageSize ? Number(query.pageSize) : undefined,
       },
       warehouseScopeOf(user),
+      // A person with warehouse grants sees the lots of their own shelves and
+      // no others - in the list, the expiry report and the trace alike.
+      grantsOf(user),
     );
   }
 

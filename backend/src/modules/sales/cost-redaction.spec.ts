@@ -1,4 +1,5 @@
 import { InvoiceStatus, Prisma } from '@prisma/client';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 
 import { SalesInvoicesService } from './sales-invoices.service';
 import { ReturnsService } from '../returns/returns.service';
@@ -135,6 +136,7 @@ describe('cost redaction - sales returns', () => {
       {} as never,
       {} as never,
       {} as never,
+      fakeLedger() as any,
     );
     const redacted = (await service.findOne('c1', 'sales', 'cn-1', NO_COST)) as any;
     expect(redacted.lines[0].unitCost).toBeNull();

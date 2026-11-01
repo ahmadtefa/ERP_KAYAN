@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 
+import { StockLedgerService } from './stock-ledger.service';
 import { WarehouseService } from './warehouse.service';
 
 /**
@@ -9,7 +10,7 @@ import { WarehouseService } from './warehouse.service';
  */
 @Global()
 @Module({
-  providers: [WarehouseService],
-  exports: [WarehouseService],
+  providers: [WarehouseService, StockLedgerService],
+  exports: [WarehouseService, StockLedgerService],
 })
 export class WarehouseModule {}

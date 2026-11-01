@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 import { InvoiceStatus, Prisma } from '@prisma/client';
 
 import { OpeningBalancesService } from './opening-balances.service';
@@ -31,6 +32,7 @@ describe('OpeningBalancesService', () => {
       { resolve: jest.fn().mockResolvedValue({ inventory: 'inventory-id' }) } as never,
       { record: jest.fn() } as never,
       { resolve: jest.fn() } as never,
+      fakeLedger() as any,
     );
 
     await expect(service.create('company-id', 'branch-id', 'user-id', {
@@ -90,6 +92,7 @@ describe('OpeningBalancesService', () => {
       {} as never,
       audit as never,
       {} as never,
+      fakeLedger() as any,
     );
 
     await expect(service.post('company-id', 'user-id', 'opening-id')).rejects.toBeInstanceOf(
@@ -162,6 +165,7 @@ describe('OpeningBalancesService', () => {
       {} as never,
       audit as never,
       warehouses as never,
+      fakeLedger() as any,
     );
 
     await expect(service.reverse('company-id', 'user-id', 'opening-id')).rejects.toThrow(

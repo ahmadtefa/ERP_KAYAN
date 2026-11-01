@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 import { InvoiceDocumentType, InvoiceStatus, Prisma } from '@prisma/client';
 
 import { PurchaseInvoicesService } from './purchase-invoices.service';
@@ -115,6 +116,7 @@ function makeService() {
     prices as never,
     audit as never,
     { recordLotInTx: jest.fn() } as never,
+    fakeLedger() as any,
   );
   return { service, prisma, tx, detail, numbers, audit };
 }

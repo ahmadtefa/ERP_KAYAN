@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 import { Prisma, StockDocumentKind } from '@prisma/client';
 
 import { StockDocumentsService } from './stock-documents.service';
@@ -42,6 +43,7 @@ function makeService(item: any = milkItem) {
     { get: jest.fn() } as never,
     {} as never,
     { assertPostable: jest.fn() } as never,
+    fakeLedger() as any,
   );
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'doc-1' } as never);
   return { service, tx };

@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 
 import { BadRequestException } from '@nestjs/common';
 import {
@@ -208,6 +209,7 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
     settings as never,
     warehouses,
     { assertPostable: jest.fn() } as never,
+    fakeLedger() as any,
   );
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'doc-1' } as never);
 

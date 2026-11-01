@@ -16,6 +16,7 @@ import {
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { movementUnitSnapshot } from '../../common/units/unit-math';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
@@ -66,6 +67,7 @@ export class FixedAssetsService {
     private readonly accountMap: AccountMapService,
     private readonly audit: AuditService,
     private readonly warehouses: WarehouseService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   /**
@@ -567,19 +569,20 @@ export class FixedAssetsService {
           asset.branchId,
           linkedInvoice?.warehouseId ?? null,
         );
-        const locked = await tx.$queryRaw<
-          Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>
-        >(Prisma.sql`
-          SELECT "quantity", "value"
-            FROM "stock_balances"
-           WHERE "companyId" = ${companyId}::uuid
-             AND "branchId" = ${asset.branchId}::uuid
-             AND "itemId" = ${line.itemId}::uuid
-           FOR UPDATE
-        `);
-        const balance = locked[0] ?? null;
-        const qtyOnHand = balance?.quantity ?? new Prisma.Decimal(0);
-        const valueOnHand = balance?.value ?? new Prisma.Decimal(0);
+        // The shelf the goods are capitalised out of - not the branch total,
+        // which could be covered by a different warehouse entirely.
+        const shelf = await this.ledger.position(
+          tx,
+          {
+            companyId,
+            branchId: asset.branchId,
+            warehouseId,
+            itemId: line.itemId,
+          },
+          { forUpdate: true },
+        );
+        const qtyOnHand = shelf.quantity;
+        const valueOnHand = shelf.value;
         if (qtyOnHand.lessThan(quantity) || valueOnHand.lessThan(asset.cost)) {
           throw new BadRequestException(
             `Cannot capitalise from stock: ${money(qtyOnHand)} unit(s) worth ${money(valueOnHand)} ` +
@@ -614,18 +617,13 @@ export class FixedAssetsService {
             createdBy: userId,
           },
         });
-        await tx.stockBalance.update({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: asset.branchId,
-              itemId: line.itemId,
-            },
-          },
-          data: {
-            quantity: { decrement: quantity },
-            value: { decrement: asset.cost },
-          },
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: asset.branchId,
+          warehouseId,
+          itemId: line.itemId,
+          quantity: quantity.negated(),
+          value: asset.cost.negated(),
         });
       }
       return posted;

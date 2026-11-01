@@ -20,6 +20,10 @@ import { StockController } from './stock.controller';
 import { StockDocumentsController } from './stock-documents.controller';
 import { StockDocumentsService } from './stock-documents.service';
 import { StockService } from './stock.service';
+import { StockTakesController } from './stock-takes.controller';
+import { StockTakesService } from './stock-takes.service';
+import { WarehouseAccessController } from './warehouse-access.controller';
+import { WarehouseAccessService } from './warehouse-access.service';
 import { WarehousesController } from './warehouses.controller';
 
 @Module({
@@ -34,6 +38,8 @@ import { WarehousesController } from './warehouses.controller';
     BatchesController,
     StorageLocationsController,
     ItemWarehouseSettingsController,
+    StockTakesController,
+    WarehouseAccessController,
   ],
   providers: [
     ItemsService,
@@ -44,6 +50,8 @@ import { WarehousesController } from './warehouses.controller';
     BatchesService,
     StorageLocationsService,
     ItemWarehouseSettingsService,
+    StockTakesService,
+    WarehouseAccessService,
   ],
   exports: [
     StockService,
@@ -52,6 +60,7 @@ import { WarehousesController } from './warehouses.controller';
     // Sales and purchases post through the lot engine, so it is exported
     // rather than duplicated.
     BatchesService,
+    StockTakesService,
   ],
 })
 export class InventoryModule {}

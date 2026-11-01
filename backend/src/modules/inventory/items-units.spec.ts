@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 import { Prisma } from '@prisma/client';
 
 import { ItemsService } from './items.service';
@@ -103,6 +104,7 @@ function build(options: {
     { resolve: jest.fn().mockResolvedValue({}) } as any,
     { post: jest.fn().mockResolvedValue({ id: 'entry-1' }) } as any,
     { resolve: jest.fn().mockResolvedValue('warehouse-1') } as any,
+    fakeLedger() as any,
   );
   return { service, prisma, tx };
 }

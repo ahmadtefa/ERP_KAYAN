@@ -13,6 +13,7 @@ import {
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import {
   defaultUnitPrice,
@@ -101,6 +102,7 @@ export class PurchaseInvoicesService {
     /// A receipt is where a lot is born. The lot engine is shared with sales
     /// so that FEFO, costing and the shelf all agree on what a lot is.
     private readonly batches: BatchesService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   async findAll(companyId: string, query: ListPurchaseInvoicesDto) {
@@ -554,25 +556,16 @@ export class PurchaseInvoicesService {
           },
         });
 
-        await tx.stockBalance.upsert({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: invoice.branchId,
-              itemId: item.id,
-            },
-          },
-          create: {
-            companyId,
-            branchId: invoice.branchId,
-            itemId: item.id,
-            quantity: line.quantity,
-            value: costTotal,
-          },
-          update: {
-            quantity: { increment: line.quantity },
-            value: { increment: costTotal },
-          },
+        // The price paid re-averages the shelf that received it, not the
+        // branch. Two warehouses buying the same item at different prices
+        // must keep two different averages.
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: invoice.branchId,
+          warehouseId,
+          itemId: item.id,
+          quantity: line.quantity,
+          value: costTotal,
         });
 
         // The goods are in stock; this records which goods they were. The
@@ -788,19 +781,20 @@ export class PurchaseInvoicesService {
           },
         });
 
-        await tx.stockBalance.update({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: invoice.branchId,
-              itemId: line.itemId,
-            },
+        await this.ledger.post(
+          tx,
+          {
+            companyId,
+            branchId: invoice.branchId,
+            warehouseId,
+            itemId: line.itemId,
+            quantity: line.quantity.negated(),
+            value: inventoryCostTotal.negated(),
           },
-          data: {
-            quantity: { decrement: line.quantity },
-            value: { decrement: inventoryCostTotal },
-          },
-        });
+          // The goods were received once; undoing that receipt takes them out
+          // of the same shelf even when a later document emptied it.
+          { allowNegative: true },
+        );
       }
 
       // One reversal path for the whole system: it claims the original,

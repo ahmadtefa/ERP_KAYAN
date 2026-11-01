@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 import {
   InvoiceDocumentType,
   InvoiceStatus,
@@ -154,6 +155,7 @@ function makeService(itemOverrides: Record<string, any> = {}) {
     prices as never,
     audit as never,
     { recordLotInTx: jest.fn() } as never,
+    fakeLedger() as any,
   );
   return { service, prisma, tx, prices };
 }

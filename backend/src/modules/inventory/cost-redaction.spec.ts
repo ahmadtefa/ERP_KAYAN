@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 
 import { ItemsService } from './items.service';
 import { InventoryReportsService } from './inventory-reports.service';
@@ -78,6 +79,7 @@ describe('cost redaction - items and item units', () => {
       { resolve: jest.fn() } as never,
       { post: jest.fn() } as never,
       { resolve: jest.fn() } as never,
+      fakeLedger() as any,
     );
     return { service, prisma };
   }
@@ -126,6 +128,7 @@ describe('cost redaction - items and item units', () => {
       { resolve: jest.fn() } as never,
       { post: jest.fn() } as never,
       { resolve: jest.fn() } as never,
+      fakeLedger() as any,
     );
     const redacted = await service.findByBarcode(
       'company-1',
@@ -289,6 +292,7 @@ describe('cost redaction - stock and valuation reads', () => {
       {} as never,
       {} as never,
       {} as never,
+      fakeLedger() as any,
     );
     const redacted = await service.findOne('c1', 'doc-1', NO_COST);
     expect(redacted.lines[0].unitCost).toBeNull();

@@ -100,6 +100,10 @@ model Company {
   purchaseOrders PurchaseOrder[]
   salesOrders    SalesOrder[]
 
+  warehouseBalances   WarehouseStockBalance[]
+  stockTakeSessions   StockTakeSession[]
+  userWarehouseAccess UserWarehouseAccess[]
+
   @@map("companies")
 }
 
@@ -153,6 +157,8 @@ model Branch {
   purchaseOrders   PurchaseOrder[]
   salesOrders      SalesOrder[]
   quotations       Quotation[]
+  warehouseBalances WarehouseStockBalance[]
+  stockTakeSessions StockTakeSession[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -201,6 +207,7 @@ model User {
   company      Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
   userRoles    UserRole[]
   userPermissions UserPermission[]
+  warehouseAccess UserWarehouseAccess[]
   branches     UserBranch[]
   refreshToken RefreshToken[]
   auditLogs    AuditLog[]
@@ -1016,6 +1023,9 @@ enum StockDocumentKind {
   TRANSFER
   COUNT
   OPENING
+  /// Goods destroyed, spoiled, stolen or expired: a loss with its own number,
+  /// its own approval and its own journal, not a mystery adjustment.
+  WRITE_OFF
 }
 
 /// Stock changes that are not an invoice: a write-off, a transfer between
@@ -1052,6 +1062,23 @@ model StockDocument {
   postedAt       DateTime?
   postedBy       String?           @db.Uuid
 
+  /// Who approved the loss and when. A write-off is only posted after an
+  /// approval by somebody who may approve, and both names stay on the
+  /// document so the trail reads without joining the audit log.
+  approvedAt DateTime?
+  approvedBy String?   @db.Uuid
+
+  /// A duplicate submission of the same request must not become a second
+  /// write-off. The unique index on (companyId, idempotencyKey) is the guard:
+  /// a retry finds the first document instead of adding another.
+  idempotencyKey String? @db.VarChar(120)
+
+  attachmentName String? @db.VarChar(120)
+  attachmentPath String? @db.VarChar(240)
+
+  /// The stock-take this adjustment was born from, when it was.
+  stockTakeSessionId String? @db.Uuid
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   createdBy String?   @db.Uuid
@@ -1065,6 +1092,7 @@ model StockDocument {
   lines         StockDocumentLine[]
 
   @@unique([companyId, documentNumber])
+  @@unique([companyId, idempotencyKey])
   @@index([companyId, kind, documentDate])
   @@index([costCenterId])
   @@map("stock_documents")
@@ -1076,20 +1104,30 @@ model StockDocumentLine {
   itemId          String  @db.Uuid
   quantity        Decimal @db.Decimal(19, 4)
   unitCost        Decimal @default(0) @db.Decimal(19, 4)
+  /// quantity x unitCost, snapshotted so a line's share of the loss cannot
+  /// drift when the warehouse average moves afterwards.
+  totalCost       Decimal @default(0) @db.Decimal(19, 4)
   countedQuantity Decimal? @db.Decimal(19, 4)
   notes           String?
   lineNumber      Int
+
+  /// A write-off may name the lot it destroys, and the shelf it sat on.
+  batchId           String? @db.Uuid
+  storageLocationId String? @db.Uuid
 
   // ── Multi-unit snapshot (null on legacy rows). `quantity` stays in base units ──
   unitName     String?  @db.VarChar(40)
   unitFactor   Decimal? @db.Decimal(19, 6)
   unitQuantity Decimal? @db.Decimal(19, 4)
 
-  document StockDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  item     Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  document        StockDocument    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  item            Item             @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  batch           ItemBatch?       @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  storageLocation StorageLocation? @relation(fields: [storageLocationId], references: [id], onDelete: Restrict)
 
   @@unique([documentId, lineNumber])
   @@index([documentId])
+  @@index([batchId])
   @@map("stock_document_lines")
 }
 
@@ -1372,6 +1410,8 @@ model Item {
   batches        ItemBatch[]
   costHistory    ItemCostHistory[]
   warehouseSettings ItemWarehouseSetting[]
+  warehouseBalances WarehouseStockBalance[]
+  stockTakeLines    StockTakeLine[]
 
   @@unique([companyId, code])
   @@index([companyId, nameEn])
@@ -2164,6 +2204,9 @@ model Warehouse {
   costHistory          ItemCostHistory[]
   itemSettings         ItemWarehouseSetting[]
   notifications        Notification[]
+  balances             WarehouseStockBalance[]
+  stockTakeSessions    StockTakeSession[]
+  userAccess           UserWarehouseAccess[]
   salesInvoices        SalesInvoice[]
   purchaseInvoices     PurchaseInvoice[]
   stockDocumentsFrom   StockDocument[] @relation("StockDocumentFromWarehouse")
@@ -2629,6 +2672,7 @@ model StorageLocation {
   parent    StorageLocation?  @relation("LocationTree", fields: [parentId], references: [id], onDelete: Restrict)
   children  StorageLocation[] @relation("LocationTree")
   movements StockMovement[]
+  stockDocumentLines StockDocumentLine[]
 
   @@unique([warehouseId, code])
   @@index([companyId, warehouseId, kind])
@@ -2718,6 +2762,8 @@ model ItemBatch {
   warehouse Warehouse        @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
   item      Item             @relation(fields: [itemId], references: [id], onDelete: Restrict)
   movements StockMovement[]
+  stockDocumentLines StockDocumentLine[]
+  stockTakeLines     StockTakeLine[]
 
   @@unique([warehouseId, itemId, batchNumber])
   @@index([companyId, itemId, expiryDate])
@@ -2761,6 +2807,143 @@ model ItemCostHistory {
   @@map("item_cost_history")
 }
 
+// ══════════════════════════════════════════ the per-warehouse cost book
+
+/// The cost book: one row per item per warehouse.
+///
+/// `stock_balances` answers "what does this branch hold" and stays as the
+/// roll-up every existing report already reads. This table answers the
+/// question the costing rules are actually about - what does *this shelf*
+/// hold, what is it worth, and at what average did it get there - so a
+/// warehouse that bought at 30 is not priced at the average of a warehouse
+/// that bought at 15.
+model WarehouseStockBalance {
+  companyId   String @db.Uuid
+  branchId    String @db.Uuid
+  warehouseId String @db.Uuid
+  itemId      String @db.Uuid
+
+  quantity Decimal @default(0) @db.Decimal(19, 4)
+  value    Decimal @default(0) @db.Decimal(19, 4)
+
+  updatedAt DateTime @updatedAt
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  item      Item      @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@id([companyId, branchId, warehouseId, itemId])
+  @@index([companyId, warehouseId, itemId])
+  @@index([companyId, itemId])
+  @@map("warehouse_stock_balances")
+}
+
+/// What one person may do in one warehouse.
+///
+/// A branch is the accounting boundary; a warehouse is where the work happens.
+/// A storekeeper on the shop floor must not post a receipt into the main store
+/// merely because both belong to the same branch.
+model UserWarehouseAccess {
+  id          String @id @default(uuid()) @db.Uuid
+  companyId   String @db.Uuid
+  userId      String @db.Uuid
+  warehouseId String @db.Uuid
+
+  canView     Boolean @default(true)
+  canReceive  Boolean @default(false)
+  canIssue    Boolean @default(false)
+  canTransfer Boolean @default(false)
+  canCount    Boolean @default(false)
+  canApprove  Boolean @default(false)
+  canSeeCost  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  createdBy String?  @db.Uuid
+  updatedAt DateTime @updatedAt
+  updatedBy String?  @db.Uuid
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, warehouseId])
+  @@index([companyId, warehouseId])
+  @@map("user_warehouse_access")
+}
+
+// ════════════════════════════════════════════════════ counting sessions
+
+/// One counting session: what the system thought, what a person counted, and
+/// the single approval that turns the difference into an adjustment.
+model StockTakeSession {
+  id          String  @id @default(uuid()) @db.Uuid
+  companyId   String  @db.Uuid
+  branchId    String  @db.Uuid
+  warehouseId String? @db.Uuid
+  code        String  @db.VarChar(32)
+  /// FULL or PARTIAL. A partial count names the items it covers.
+  scope       String  @db.VarChar(16) @default("FULL")
+  /// DRAFT -> COUNTING -> REVIEW -> APPROVED -> POSTED, or CANCELLED.
+  status      String  @db.VarChar(16) @default("DRAFT")
+
+  /// Set the moment the session starts: the quantities it compares against are
+  /// frozen here, so counting for an hour does not shift the target.
+  frozenAt DateTime?
+  notes    String?
+
+  documentId     String? @db.Uuid
+  journalEntryId String? @db.Uuid
+
+  approvedAt  DateTime?
+  approvedBy  String?   @db.Uuid
+  postedAt    DateTime?
+  postedBy    String?   @db.Uuid
+  cancelledAt DateTime?
+  cancelledBy String?   @db.Uuid
+
+  createdAt DateTime @default(now())
+  createdBy String?  @db.Uuid
+  updatedAt DateTime @updatedAt
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  lines     StockTakeLine[]
+
+  @@unique([companyId, code])
+  @@index([companyId, status, createdAt])
+  @@index([warehouseId])
+  @@map("stock_take_sessions")
+}
+
+model StockTakeLine {
+  id        String  @id @default(uuid()) @db.Uuid
+  sessionId String  @db.Uuid
+  itemId    String  @db.Uuid
+  batchId   String? @db.Uuid
+
+  systemQuantity  Decimal  @default(0) @db.Decimal(19, 4)
+  countedQuantity Decimal? @db.Decimal(19, 4)
+  /// The warehouse average when the session froze it: the variance is valued at
+  /// the cost that was true at the moment it was counted.
+  unitCost        Decimal  @default(0) @db.Decimal(19, 4)
+  varianceQuantity Decimal @default(0) @db.Decimal(19, 4)
+  varianceValue    Decimal @default(0) @db.Decimal(19, 4)
+
+  countedAt DateTime?
+  countedBy String?   @db.Uuid
+  notes     String?
+
+  session StockTakeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  item    Item             @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  batch   ItemBatch?       @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@index([sessionId])
+  @@index([itemId])
+  @@map("stock_take_lines")
+}
+
 // ═════════════════════════════════════════════════ the notification centre
 
 /// One thing somebody should know about, in one table for the whole program.
@@ -2781,7 +2964,21 @@ model Notification {
   type     String @db.VarChar(48)
   /// INFO, WARNING or CRITICAL.
   severity String @default("INFO") @db.VarChar(16)
+  /// 1, 2 or 3. Ordering a text column alphabetically puts WARNING last, so
+  /// the rank is stored beside the word a person reads.
+  severityRank Int @default(1)
   status   String @default("OPEN") @db.VarChar(16)
+
+  /// Which roles the setting addressed. Empty means every role that holds the
+  /// permission. A list on the row, not a join, so an alert raised yesterday
+  /// does not change audience when somebody edits the setting today.
+  audienceRoles String[] @default([])
+
+  /// When the fact was last confirmed and how many times it has been raised,
+  /// so `repeatAfterHours` can turn a still-true fact into a fresh prompt
+  /// instead of a single row nobody looks at twice.
+  lastRaisedAt DateTime?
+  raisedCount  Int       @default(1)
 
   titleEn String
   titleAr String
@@ -2811,6 +3008,7 @@ model Notification {
   @@unique([companyId, dedupeKey])
   @@index([companyId, status, createdAt])
   @@index([companyId, type, status])
+  @@index([companyId, entityId])
   @@map("notifications")
 }
 

@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 import { Prisma } from '@prisma/client';
 
 import { ItemsService } from './items.service';
@@ -51,6 +52,7 @@ function build() {
     accounts as any,
     posting as any,
     warehouses as any,
+    fakeLedger() as any,
   );
   return { service, prisma, tx, accounts, posting, warehouses };
 }

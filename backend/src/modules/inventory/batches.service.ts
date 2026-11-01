@@ -21,6 +21,7 @@ import {
   selectLotsFefo,
 } from '../../common/warehouse/batch-policy';
 import { movementUnitSnapshot } from '../../common/units/unit-math';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseScope, WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
@@ -135,6 +136,9 @@ export class BatchesService {
     private readonly accounts: AccountMapService,
     private readonly numbers: DocumentNumberService,
     private readonly audit: AuditService,
+    /// The per-warehouse cost book. Appended, never inserted: the specs build
+    /// this service positionally.
+    private readonly ledger: StockLedgerService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────── reading
@@ -151,6 +155,7 @@ export class BatchesService {
       pageSize?: number;
     } = {},
     scope: WarehouseScope = null,
+    grants: Array<{ warehouseId: string; canView: boolean }> | null = null,
   ) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
@@ -168,6 +173,16 @@ export class BatchesService {
     }
     if (scope !== null) {
       where.warehouse = { branchId: { in: scope } };
+    }
+    // Configuration, not decoration: a user with warehouse grants is shown the
+    // lots of those warehouses and told nothing about the rest.
+    if (grants) {
+      const visible = grants.filter((grant) => grant.canView).map((grant) => grant.warehouseId);
+      where.warehouseId = query.warehouseId
+        ? visible.includes(query.warehouseId)
+          ? query.warehouseId
+          : '__none__'
+        : { in: visible };
     }
 
     const [rows, total] = await Promise.all([
@@ -485,9 +500,9 @@ export class BatchesService {
   ) {
     const { companyId, userId, warehouse, item, batchId, batchNumber, quantity, unitCost, date, input } =
       receipt;
-      const balance = await this.lockBalance(tx, companyId, warehouse.branchId, item.id);
-      const onHand = balance?.quantity ?? new Prisma.Decimal(0);
-      const onHandValue = balance?.value ?? new Prisma.Decimal(0);
+      const shelf = await this.shelf(tx, companyId, warehouse, item.id);
+      const onHand = shelf.quantity;
+      const onHandValue = shelf.value;
       const totalCost = quantity.mul(unitCost).toDecimalPlaces(MONEY_SCALE);
       const after = movingAverage(
         { quantity: onHand, value: onHandValue },
@@ -515,25 +530,15 @@ export class BatchesService {
         },
       });
 
-      await tx.stockBalance.upsert({
-        where: {
-          companyId_branchId_itemId: {
-            companyId,
-            branchId: warehouse.branchId,
-            itemId: item.id,
-          },
-        },
-        create: {
-          companyId,
-          branchId: warehouse.branchId,
-          itemId: item.id,
-          quantity,
-          value: totalCost,
-        },
-        update: {
-          quantity: { increment: quantity },
-          value: { increment: totalCost },
-        },
+      // The shelf re-averages on its own terms: a warehouse that bought at 30
+      // is not diluted by a different warehouse that bought at 15.
+      await this.ledger.post(tx, {
+        companyId,
+        branchId: warehouse.branchId,
+        warehouseId: warehouse.id,
+        itemId: item.id,
+        quantity,
+        value: totalCost,
       });
 
       await tx.itemCostHistory.create({
@@ -664,7 +669,7 @@ export class BatchesService {
       // Lock the shelf before looking at its lots. Two simultaneous issues
       // that each read the lots first would both see the same quantity and
       // both promise it away; taken in this order the second waits here.
-      const balance = await this.lockBalance(tx, companyId, warehouse.branchId, item.id);
+      const shelf = await this.shelf(tx, companyId, warehouse, item.id);
       const lots = await tx.itemBatch.findMany({
         where: {
           companyId,
@@ -728,9 +733,9 @@ export class BatchesService {
         );
       }
 
-      const onHand = balance?.quantity ?? new Prisma.Decimal(0);
-      const onHandValue = balance?.value ?? new Prisma.Decimal(0);
-      const cost = issueAtAverage({ quantity: onHand, value: onHandValue }, quantity);
+      // Priced at what *this shelf* averages, which is what makes two
+      // warehouses holding the same item two different costs.
+      const cost = issueAtAverage({ quantity: shelf.quantity, value: shelf.value }, quantity);
 
       const movements: Array<{ batchId: string; quantity: string; expired: boolean }> = [];
       // The value the shelf lost, split across the lots it left from. Each lot
@@ -806,18 +811,13 @@ export class BatchesService {
         });
       }
 
-      await tx.stockBalance.update({
-        where: {
-          companyId_branchId_itemId: {
-            companyId,
-            branchId: warehouse.branchId,
-            itemId: item.id,
-          },
-        },
-        data: {
-          quantity: { decrement: quantity },
-          value: { decrement: totalValue },
-        },
+      await this.ledger.post(tx, {
+        companyId,
+        branchId: warehouse.branchId,
+        warehouseId: warehouse.id,
+        itemId: item.id,
+        quantity: quantity.negated(),
+        value: totalValue.negated(),
       });
 
       await tx.itemCostHistory.create({
@@ -873,18 +873,15 @@ export class BatchesService {
     input: IssueInput,
     today: Date,
   ) {
-    const balance = await this.lockBalance(tx, companyId, warehouse.branchId, item.id);
-    const onHand = balance?.quantity ?? new Prisma.Decimal(0);
+    const shelf = await this.shelf(tx, companyId, warehouse, item.id);
+    const onHand = shelf.quantity;
     if (onHand.lessThan(quantity)) {
       throw new BadRequestException(
         `الرصيد غير كافٍ في هذا المخزن: ${onHand.toFixed(MONEY_SCALE)} متاح، ` +
           `${quantity.toFixed(MONEY_SCALE)} مطلوب. / Not enough stock in this warehouse.`,
       );
     }
-    const cost = issueAtAverage(
-      { quantity: onHand, value: balance?.value ?? new Prisma.Decimal(0) },
-      quantity,
-    );
+    const cost = issueAtAverage({ quantity: onHand, value: shelf.value }, quantity);
     await tx.stockMovement.create({
       data: {
         companyId,
@@ -911,18 +908,13 @@ export class BatchesService {
         createdBy: userId,
       },
     });
-    await tx.stockBalance.update({
-      where: {
-        companyId_branchId_itemId: {
-          companyId,
-          branchId: warehouse.branchId,
-          itemId: item.id,
-        },
-      },
-      data: {
-        quantity: { decrement: quantity },
-        value: { decrement: cost.value.toDecimalPlaces(MONEY_SCALE) },
-      },
+    await this.ledger.post(tx, {
+      companyId,
+      branchId: warehouse.branchId,
+      warehouseId: warehouse.id,
+      itemId: item.id,
+      quantity: quantity.negated(),
+      value: cost.value.toDecimalPlaces(MONEY_SCALE).negated(),
     });
     return {
       lots: [],
@@ -1027,15 +1019,13 @@ export class BatchesService {
         },
       });
 
-      await tx.stockBalance.update({
-        where: {
-          companyId_branchId_itemId: {
-            companyId,
-            branchId: warehouse.branchId,
-            itemId: batch.itemId,
-          },
-        },
-        data: { quantity: { decrement: quantity }, value: { decrement: value } },
+      await this.ledger.post(tx, {
+        companyId,
+        branchId: warehouse.branchId,
+        warehouseId: warehouse.id,
+        itemId: batch.itemId,
+        quantity: quantity.negated(),
+        value: value.negated(),
       });
 
       const accounts = await this.accounts.resolve(tx, companyId, [
@@ -1238,8 +1228,27 @@ export class BatchesService {
         });
       }
 
-      // Both branches of the movement are in the same branch here, so the
-      // branch balance nets to zero and only the value's home changes.
+      // Both sides are in the same branch, so the branch book nets to zero
+      // while each shelf's own average moves by exactly what the goods were
+      // worth when they left. The destination re-averages from the value it
+      // was handed, not from whatever its neighbour happened to pay.
+      await this.ledger.post(tx, {
+        companyId,
+        branchId: from.branchId,
+        warehouseId: from.id,
+        itemId: batch.itemId,
+        quantity: quantity.negated(),
+        value: value.negated(),
+      });
+      await this.ledger.post(tx, {
+        companyId,
+        branchId: to.branchId,
+        warehouseId: to.id,
+        itemId: batch.itemId,
+        quantity,
+        value,
+      });
+
       await this.audit.record({
         companyId,
         userId,
@@ -1435,23 +1444,26 @@ export class BatchesService {
     return location;
   }
 
-  /// The branch balance, locked for the rest of the transaction.
-  private async lockBalance(
+  /// One shelf's position, locked for the rest of the transaction.
+  ///
+  /// This is the number an issue is priced at and the number a receipt
+  /// re-averages, so it has to come from the warehouse's own book rather than
+  /// from a branch total that averages every shelf together.
+  private async shelf(
     tx: Prisma.TransactionClient,
     companyId: string,
-    branchId: string,
+    warehouse: { id: string | null; branchId: string },
     itemId: string,
   ) {
-    const rows = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal; value: Prisma.Decimal }>>(
-      Prisma.sql`
-        SELECT "quantity", "value"
-          FROM "stock_balances"
-         WHERE "companyId" = ${companyId}::uuid
-           AND "branchId" = ${branchId}::uuid
-           AND "itemId" = ${itemId}::uuid
-         FOR UPDATE
-      `,
+    return this.ledger.position(
+      tx,
+      {
+        companyId,
+        branchId: warehouse.branchId,
+        warehouseId: warehouse.id,
+        itemId,
+      },
+      { forUpdate: true },
     );
-    return rows[0] ?? null;
   }
 }

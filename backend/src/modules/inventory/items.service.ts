@@ -10,6 +10,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { movementUnitSnapshot } from '../../common/units/unit-math';
 import { parseUnitRows, planUnitChanges, ParsedUnitRow } from './unit-input';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { PostingService } from '../accounting/posting.service';
@@ -26,6 +27,7 @@ export class ItemsService {
     private readonly accounts: AccountMapService,
     private readonly posting: PostingService,
     private readonly warehouses: WarehouseService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   async findAll(
@@ -448,25 +450,13 @@ export class ItemsService {
             createdBy: userId,
           },
         });
-        await tx.stockBalance.upsert({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: branchId!,
-              itemId: item.id,
-            },
-          },
-          create: {
-            companyId,
-            branchId: branchId!,
-            itemId: item.id,
-            quantity: openingQuantity!,
-            value: total,
-          },
-          update: {
-            quantity: { increment: openingQuantity! },
-            value: { increment: total },
-          },
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: branchId!,
+          warehouseId,
+          itemId: item.id,
+          quantity: openingQuantity!,
+          value: total,
         });
 
         await this.posting.post(tx, {

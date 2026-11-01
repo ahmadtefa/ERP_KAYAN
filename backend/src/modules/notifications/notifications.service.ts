@@ -32,7 +32,15 @@ export interface NotificationUser {
   branchIds?: string[] | null;
   branchId?: string | null;
   isSuperAdmin?: boolean;
+  /// Role codes the person holds. A setting that names roles addresses only
+  /// those people; an alert raised yesterday keeps the audience it was raised
+  /// for, because the row stores the list it was addressed to.
+  roles?: string[] | null;
+  warehouseAccess?: Array<{ warehouseId: string; canView: boolean }> | null;
 }
+
+/// 1, 2, 3. Sorting the word alphabetically puts WARNING behind INFO.
+const RANK: Record<string, number> = { INFO: 1, WARNING: 2, CRITICAL: 3 };
 
 export interface RaiseInput {
   companyId: string;
@@ -103,8 +111,9 @@ export class NotificationsService {
     const [rows, total] = await Promise.all([
       this.prisma.notification.findMany({
         where: { ...where, ...this.visibleTo(user) },
-        // CRITICAL before WARNING before INFO, then the newest.
-        orderBy: [{ severity: 'asc' }, { createdAt: 'desc' }],
+        // CRITICAL before WARNING before INFO, then the newest. The rank is a
+        // number because sorting the word alphabetically puts WARNING last.
+        orderBy: [{ severityRank: 'desc' }, { createdAt: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -186,7 +195,25 @@ export class NotificationsService {
     const permission = user.permissions.length
       ? { OR: [{ permission: null }, { permission: { in: user.permissions } }] }
       : { permission: null };
-    return { AND: [branch, permission] };
+    // A row addressed to roles is invisible to everybody else; a row with no
+    // audience list is for whoever holds the permission.
+    const roles = (user.roles ?? []).filter(Boolean);
+    const audience: Prisma.NotificationWhereInput =
+      roles.length > 0
+        ? { OR: [{ audienceRoles: { isEmpty: true } }, { audienceRoles: { hasSome: roles } }] }
+        : { audienceRoles: { isEmpty: true } };
+    // A person restricted to certain shelves is not told about the others.
+    const grants = (user.warehouseAccess ?? []).filter((row) => row && row.canView);
+    const warehouse: Prisma.NotificationWhereInput =
+      grants.length > 0
+        ? {
+            OR: [
+              { warehouseId: null },
+              { warehouseId: { in: grants.map((row) => row.warehouseId) } },
+            ],
+          }
+        : {};
+    return { AND: [branch, permission, audience, warehouse] };
   }
 
   private maySee(user: NotificationUser, permission: string | null): boolean {
@@ -266,6 +293,7 @@ export class NotificationsService {
           severity: setting?.severity ?? kind.severity,
           isEnabled: setting?.isEnabled ?? true,
           warehouseIds: Array.isArray(setting?.warehouseIds) ? setting?.warehouseIds : [],
+          roles: Array.isArray(setting?.roles) ? setting?.roles : [],
           expiryDays:
             kind.type === STOCK_EXPIRY_SOON || kind.type === STOCK_EXPIRED
               ? normalizeExpiryDays(setting?.expiryDays)
@@ -287,6 +315,7 @@ export class NotificationsService {
       warehouseIds?: string[];
       expiryDays?: number[];
       repeatAfterHours?: number;
+      roles?: string[];
     },
   ) {
     const kind = assertKnownKind(type);
@@ -303,6 +332,9 @@ export class NotificationsService {
           ? normalizeExpiryDays(dto.expiryDays)
           : [],
       repeatAfterHours: Math.min(Math.max(dto.repeatAfterHours ?? 24, 1), 24 * 30),
+      roles: Array.isArray(dto.roles)
+        ? dto.roles.filter((role) => typeof role === 'string' && role.length > 0)
+        : [],
       updatedBy: userId,
     };
     await this.prisma.notificationSetting.upsert({
@@ -333,7 +365,8 @@ export class NotificationsService {
         severity: true,
         warehouseIds: true,
         repeatAfterHours: true,
-      },
+        roles: true,
+      } as never,
     })) as SettingRow | null;
 
     if (setting && setting.isEnabled === false) return null;
@@ -348,6 +381,23 @@ export class NotificationsService {
       | 'INFO'
       | 'WARNING'
       | 'CRITICAL';
+    const audienceRoles = Array.isArray(setting?.roles)
+      ? (setting?.roles as unknown[]).filter((role): role is string => typeof role === 'string')
+      : [];
+    const repeatAfterHours = Math.max(Number(setting?.repeatAfterHours ?? 24), 1);
+
+    // How long a still-true fact stays quiet. The row is not duplicated; it is
+    // re-opened once the setting's interval has passed, so a warning nobody
+    // acted on comes back instead of disappearing under newer news.
+    const existing = await this.prisma.notification.findUnique({
+      where: { companyId_dedupeKey: { companyId: input.companyId, dedupeKey: input.dedupe } },
+      select: { id: true, status: true, lastRaisedAt: true, raisedCount: true },
+    });
+    const dueForRepeat =
+      existing !== null &&
+      existing.status !== 'ARCHIVED' &&
+      (existing.lastRaisedAt === null ||
+        Date.now() - existing.lastRaisedAt.getTime() >= repeatAfterHours * 3_600_000);
 
     try {
       const row = await this.prisma.notification.upsert({
@@ -360,6 +410,10 @@ export class NotificationsService {
           warehouseId: input.warehouseId ?? null,
           type: input.type,
           severity,
+          severityRank: RANK[severity] ?? 1,
+          audienceRoles,
+          lastRaisedAt: new Date(),
+          raisedCount: 1,
           status: 'OPEN',
           titleEn: input.titleEn,
           titleAr: input.titleAr,
@@ -374,8 +428,29 @@ export class NotificationsService {
           dueAt: input.dueAt ?? null,
         },
         // The fact is unchanged; its wording may not be. Re-opening a row a
-        // person already read would be a lie about "new".
-        update: { titleEn: input.titleEn, titleAr: input.titleAr },
+        // person already read would be a lie about "new" - unless the setting
+        // says this alert repeats, in which case it is a fresh prompt on
+        // purpose and the count says how many times it has been asked.
+        update: dueForRepeat
+          ? {
+              titleEn: input.titleEn,
+              titleAr: input.titleAr,
+              bodyEn: input.bodyEn ?? null,
+              bodyAr: input.bodyAr ?? null,
+              severity,
+              severityRank: RANK[severity] ?? 1,
+              lastRaisedAt: new Date(),
+              raisedCount: (existing?.raisedCount ?? 0) + 1,
+              status: 'OPEN',
+              readAt: null,
+            }
+          : {
+              titleEn: input.titleEn,
+              titleAr: input.titleAr,
+              severity,
+              severityRank: RANK[severity] ?? 1,
+              lastRaisedAt: new Date(),
+            },
       });
       return { id: row.id };
     } catch (error) {
@@ -413,6 +488,17 @@ export class NotificationsService {
     const widest = Math.max(...expiryDays, 0);
 
     let raised = 0;
+    // Every key this pass decided is still true. Anything of the same kind that
+    // is open and not in these lists describes a fact that has stopped being
+    // true - a lot that expired yesterday, an item that has been replenished -
+    // and is closed below instead of staying in the centre next to the news
+    // that replaced it.
+    const keep = new Map<string, Set<string>>();
+    const stillTrue = (type: string, dedupe: string) => {
+      const set = keep.get(type) ?? new Set<string>();
+      set.add(dedupe);
+      keep.set(type, set);
+    };
 
     // ── lots: expiring, expired, and expired-but-still-on-the-shelf ──
     if (enabled(STOCK_EXPIRY_SOON) || enabled(STOCK_EXPIRED)) {
@@ -454,6 +540,9 @@ export class NotificationsService {
           dueAt: lot.expiryDate,
         };
 
+        if (days < 0) {
+          stillTrue(STOCK_EXPIRED, dedupeKey({ type: STOCK_EXPIRED, entityId: lot.id }));
+        }
         if (days < 0 && enabled(STOCK_EXPIRED)) {
           await this.raise({
             ...base,
@@ -471,6 +560,10 @@ export class NotificationsService {
           raised += 1;
 
           // The same fact, but for the person who can do something about it.
+          stillTrue(
+            STOCK_EXPIRED_WRITE_OFF_PENDING,
+            dedupeKey({ type: STOCK_EXPIRED_WRITE_OFF_PENDING, entityId: lot.id }),
+          );
           if (enabled(STOCK_EXPIRED_WRITE_OFF_PENDING)) {
             await this.raise({
               ...base,
@@ -486,6 +579,12 @@ export class NotificationsService {
           continue;
         }
 
+        if (days >= 0 && days <= widest) {
+          stillTrue(
+            STOCK_EXPIRY_SOON,
+            dedupeKey({ type: STOCK_EXPIRY_SOON, entityId: lot.id, suffix: band }),
+          );
+        }
         if (days >= 0 && days <= widest && enabled(STOCK_EXPIRY_SOON)) {
           await this.raise({
             ...base,
@@ -570,6 +669,12 @@ export class NotificationsService {
           actionPath: `/inventory/items?item=${row.item.id}`,
         };
 
+        if (onHandNow.isZero()) {
+          stillTrue(
+            STOCK_OUT_OF_STOCK,
+            dedupeKey({ type: STOCK_OUT_OF_STOCK, entityId: `${row.warehouseId}:${row.item.id}` }),
+          );
+        }
         if (onHandNow.isZero() && enabled(STOCK_OUT_OF_STOCK)) {
           await this.raise({
             ...base,
@@ -587,7 +692,20 @@ export class NotificationsService {
           continue;
         }
 
-        if (!onHandNow.isZero() && row.minQuantity.greaterThan(0) && onHandNow.lessThanOrEqualTo(row.minQuantity)) {
+        const belowMinimum =
+          !onHandNow.isZero() &&
+          row.minQuantity.greaterThan(0) &&
+          onHandNow.lessThanOrEqualTo(row.minQuantity);
+        if (belowMinimum) {
+          stillTrue(
+            STOCK_BELOW_MINIMUM,
+            dedupeKey({
+              type: STOCK_BELOW_MINIMUM,
+              entityId: `${row.warehouseId}:${row.item.id}`,
+            }),
+          );
+        }
+        if (belowMinimum) {
           if (enabled(STOCK_BELOW_MINIMUM)) {
             await this.raise({
               ...base,
@@ -605,11 +723,18 @@ export class NotificationsService {
           }
         }
 
-        if (
-          row.maxQuantity.greaterThan(0) &&
-          onHandNow.greaterThan(row.maxQuantity) &&
-          enabled(STOCK_ABOVE_MAXIMUM)
-        ) {
+        const aboveMaximum =
+          row.maxQuantity.greaterThan(0) && onHandNow.greaterThan(row.maxQuantity);
+        if (aboveMaximum) {
+          stillTrue(
+            STOCK_ABOVE_MAXIMUM,
+            dedupeKey({
+              type: STOCK_ABOVE_MAXIMUM,
+              entityId: `${row.warehouseId}:${row.item.id}`,
+            }),
+          );
+        }
+        if (aboveMaximum && enabled(STOCK_ABOVE_MAXIMUM)) {
           await this.raise({
             ...base,
             type: STOCK_ABOVE_MAXIMUM,
@@ -627,7 +752,28 @@ export class NotificationsService {
       }
     }
 
-    return { raised, types: NOTIFICATION_KINDS.length };
+    // Close what has stopped being true.
+    let closed = 0;
+    for (const [type, keys] of keep) {
+      const stale = await this.prisma.notification.findMany({
+        where: {
+          companyId,
+          type,
+          status: { in: ['OPEN', 'READ'] },
+          dedupeKey: { notIn: [...keys] },
+        },
+        select: { id: true },
+        take: 2000,
+      });
+      if (stale.length === 0) continue;
+      const result = await this.prisma.notification.updateMany({
+        where: { id: { in: stale.map((row) => row.id) } },
+        data: { status: 'CLOSED', archivedAt: new Date() },
+      });
+      closed += result.count;
+    }
+
+    return { raised, closed, types: NOTIFICATION_KINDS.length };
   }
 
   /// The policy a lot's item carries, for callers that show a shelf.

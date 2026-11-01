@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 import {
   InvoiceDocumentType,
   InvoiceStatus,
@@ -74,6 +75,7 @@ function makeService(originalLines: any[]) {
     {} as never,
     { record: jest.fn(async () => undefined) } as never,
     {} as never,
+    fakeLedger() as any,
   );
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'return-1' } as never);
   return { service, tx };

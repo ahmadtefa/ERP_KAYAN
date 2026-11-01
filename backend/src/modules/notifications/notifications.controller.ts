@@ -19,6 +19,9 @@ class UpdateNotificationSettingDto {
   @IsOptional() @IsArray() warehouseIds?: string[];
   @IsOptional() @IsArray() expiryDays?: number[];
   @IsOptional() @IsNumber() @Min(1) @Max(720) repeatAfterHours?: number;
+  /// Role codes this alert is addressed to. Empty means everybody who holds
+  /// the permission the kind carries.
+  @IsOptional() @IsArray() @IsString({ each: true }) roles?: string[];
 }
 
 /// The notification centre.
@@ -34,14 +37,14 @@ export class NotificationsController {
   @Get()
   @RequirePermissions('notifications.read')
   list(@CurrentUser() user: AuthUser, @Query() query: NotificationQueryDto) {
-    return this.service.list(user, query);
+    return this.service.list(this.principal(user), query);
   }
 
   /// The badge. Deliberately cheap and deliberately separate from the list.
   @Get('unread-count')
   @RequirePermissions('notifications.read')
   unread(@CurrentUser() user: AuthUser) {
-    return this.service.unreadCount(user);
+    return this.service.unreadCount(this.principal(user));
   }
 
   @Get('settings')
@@ -60,22 +63,40 @@ export class NotificationsController {
     return this.service.updateSetting(user.companyId, user.userId, type, dto);
   }
 
+  /// The signed-in person, in the shape the centre's visibility rules need.
+  ///
+  /// Roles and warehouse grants come from the same token the guards check, so
+  /// the list, the badge and the API's refusals all agree about who may see
+  /// what - a hidden button is not a permission.
+  private principal(user: AuthUser) {
+    return {
+      userId: user.userId,
+      companyId: user.companyId,
+      permissions: user.permissions,
+      branchIds: user.branchIds ?? null,
+      branchId: user.branchId ?? null,
+      isSuperAdmin: user.isSuperAdmin,
+      roles: user.roles ?? [],
+      warehouseAccess: user.warehouseAccess ?? null,
+    };
+  }
+
   @Post('read-all')
   @RequirePermissions('notifications.read')
   markAllRead(@CurrentUser() user: AuthUser) {
-    return this.service.markAllRead(user);
+    return this.service.markAllRead(this.principal(user));
   }
 
   @Post(':id/read')
   @RequirePermissions('notifications.read')
   read(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.markRead(user, id);
+    return this.service.markRead(this.principal(user), id);
   }
 
   @Post(':id/archive')
   @RequirePermissions('notifications.read')
   archive(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.archive(user, id);
+    return this.service.archive(this.principal(user), id);
   }
 
   /// Runs the stock scanner now instead of waiting for its interval.

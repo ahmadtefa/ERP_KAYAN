@@ -1,4 +1,5 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 import { Prisma } from '@prisma/client';
 
 import { ItemsService } from './items.service';
@@ -51,6 +52,7 @@ function build() {
     {} as any,
     {} as any,
     {} as any,
+    fakeLedger() as any,
   );
   return { service, prisma, audit };
 }

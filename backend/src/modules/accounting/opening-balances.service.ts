@@ -8,6 +8,7 @@ import { InvoiceStatus, Prisma, StockDirection } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { movementUnitSnapshot } from '../../common/units/unit-math';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from './account-map.service';
 import { DocumentNumberService } from './document-number.service';
@@ -50,6 +51,7 @@ export class OpeningBalancesService {
     private readonly accounts: AccountMapService,
     private readonly audit: AuditService,
     private readonly warehouses: WarehouseService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   async findAll(companyId: string) {
@@ -430,25 +432,13 @@ export class OpeningBalancesService {
           },
         });
 
-        await tx.stockBalance.upsert({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: document.branchId,
-              itemId: item.id,
-            },
-          },
-          create: {
-            companyId,
-            branchId: document.branchId,
-            itemId: item.id,
-            quantity: line.quantity,
-            value: line.debit,
-          },
-          update: {
-            quantity: { increment: line.quantity },
-            value: { increment: line.debit },
-          },
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: document.branchId,
+          warehouseId,
+          itemId: item.id,
+          quantity: line.quantity,
+          value: line.debit,
         });
       }
 
@@ -588,19 +578,18 @@ export class OpeningBalancesService {
             createdBy: userId,
           },
         });
-        await tx.stockBalance.update({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: document.branchId,
-              itemId: line.itemId,
-            },
+        await this.ledger.post(
+          tx,
+          {
+            companyId,
+            branchId: document.branchId,
+            warehouseId,
+            itemId: line.itemId,
+            quantity: line.quantity.negated(),
+            value: line.debit.negated(),
           },
-          data: {
-            quantity: { decrement: line.quantity },
-            value: { decrement: line.debit },
-          },
-        });
+          { allowNegative: true },
+        );
       }
 
       await tx.openingBalance.update({

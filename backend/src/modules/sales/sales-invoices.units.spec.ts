@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 import {
   InvoiceDocumentType,
   InvoiceStatus,
@@ -96,6 +97,9 @@ function makeService(itemOverride: any = milkItem) {
     {} as never,
     {} as never,
     audit as never,
+    // The mocked shelf holds 50 base units worth 375, exactly what this
+    // suite's $queryRaw stands for.
+    fakeLedger({ position: { quantity: 50, value: 375 } }) as any,
   );
 
   const service = new SalesInvoicesService(

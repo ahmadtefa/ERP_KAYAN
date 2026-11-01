@@ -14,6 +14,23 @@ export interface AuthUser {
   branchIds?: string[];
   isSuperAdmin: boolean;
   permissions: string[];
+  /// Role codes held by the account (owner, storekeeper, accountant...). Used
+  /// by the notification centre to address an alert to a role rather than to
+  /// every person who happens to hold the permission.
+  roles?: string[];
+  /// What this person may do on each shelf. Empty means "not configured",
+  /// which keeps every warehouse of their branches available, exactly as
+  /// before this table existed.
+  warehouseAccess?: Array<{
+    warehouseId: string;
+    canView: boolean;
+    canReceive: boolean;
+    canIssue: boolean;
+    canTransfer: boolean;
+    canCount: boolean;
+    canApprove: boolean;
+    canSeeCost: boolean;
+  }>;
 }
 
 export const CurrentUser = createParamDecorator(

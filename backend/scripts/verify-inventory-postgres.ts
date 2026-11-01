@@ -373,7 +373,7 @@ async function main() {
       assert.equal(issue.lots[1].quantity, '1.0000');
     });
 
-    await check('the issue leaves at the shelf average, not at either lot\'s own price', () => {
+    await check('the issue leaves at the shelf average, not at either lot\'s own price', async () => {
       // 320.00 / 22 = 14.545455 per unit at six decimals, so 13 units leave
       // 189.0909 of value - and the lot movements add up to exactly that.
       assert.equal(issue.unitCost, '14.5455');

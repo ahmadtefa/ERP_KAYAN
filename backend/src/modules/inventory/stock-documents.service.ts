@@ -12,6 +12,7 @@ import {
   movementUnitSnapshot,
   resolveUnitSelection,
 } from '../../common/units/unit-math';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { CostCentersService } from '../accounting/cost-centers.service';
@@ -61,6 +62,7 @@ export class StockDocumentsService {
     private readonly settings: CompanySettingsService,
     private readonly warehouses: WarehouseService,
     private readonly costCenters: CostCentersService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   async findAll(
@@ -220,11 +222,35 @@ export class StockDocumentsService {
       costCenterId?: string;
 
       lines: StockDocumentLineInput[];
+      /// Sent by the client so a retry after a dropped connection returns the
+      /// document that was already created instead of posting a second loss.
+      idempotencyKey?: string;
+      attachmentName?: string;
+      attachmentPath?: string;
     },
+    options: { idempotencyKey?: string } = {},
   ) {
+    const idempotencyKey =
+      String(options.idempotencyKey ?? dto.idempotencyKey ?? '').trim() || null;
+    if (idempotencyKey) {
+      const existing = await this.prisma.stockDocument.findFirst({
+        where: { companyId, idempotencyKey },
+        select: { id: true },
+      });
+      if (existing) return this.findOne(companyId, existing.id);
+    }
     const kind = String(dto.kind ?? '').toUpperCase() as StockDocumentKind;
     if (!Object.values(StockDocumentKind).includes(kind)) {
-      throw new BadRequestException('kind must be ADJUSTMENT, TRANSFER, COUNT or OPENING');
+      throw new BadRequestException(
+        'kind must be ADJUSTMENT, TRANSFER, COUNT, WRITE_OFF or OPENING',
+      );
+    }
+    // A write-off is a loss somebody has to own. The reason is not decoration:
+    // it is the sentence that explains the difference to an auditor.
+    if (kind === StockDocumentKind.WRITE_OFF && !String(dto.reason ?? '').trim()) {
+      throw new BadRequestException(
+        'A write-off needs a reason. / مستند الإعدام يتطلب سببًا.',
+      );
     }
     if (kind === StockDocumentKind.OPENING) {
       throw new BadRequestException(
@@ -274,6 +300,8 @@ export class StockDocumentsService {
       unitName: string | null;
       unitFactor: Prisma.Decimal | null;
       unitQuantity: Prisma.Decimal | null;
+      batchId: string | null;
+      storageLocationId: string | null;
     }> = [];
     for (const [index, raw] of dto.lines.entries()) {
       const item = await this.prisma.item.findFirst({
@@ -363,6 +391,43 @@ export class StockDocumentsService {
         throw new BadRequestException(`Line ${index + 1}: the unit cost cannot be negative`);
       }
 
+      // A line may name the lot it destroys and the shelf it sat on. The lot
+      // must belong to this company and this item, otherwise the write-off
+      // would decrement somebody else's goods.
+      let batchId: string | null = null;
+      if (raw.batchId) {
+        const lot = await this.prisma.itemBatch.findFirst({
+          where: {
+            id: String(raw.batchId),
+            companyId,
+            itemId: item.id,
+            deletedAt: null,
+          },
+          select: { id: true },
+        });
+        if (!lot) {
+          throw new BadRequestException(`Line ${index + 1}: the lot does not belong to this item`);
+        }
+        batchId = lot.id;
+      }
+      let storageLocationId: string | null = null;
+      if (raw.storageLocationId) {
+        const location = await this.prisma.storageLocation.findFirst({
+          where: {
+            id: String(raw.storageLocationId),
+            companyId,
+            warehouseId: dto.toWarehouseId ? String(dto.toWarehouseId) : undefined,
+          },
+          select: { id: true },
+        });
+        if (!location) {
+          throw new BadRequestException(
+            `Line ${index + 1}: the storage location is not in this warehouse`,
+          );
+        }
+        storageLocationId = location.id;
+      }
+
       lines.push({
         itemId: item.id,
         quantity,
@@ -372,6 +437,8 @@ export class StockDocumentsService {
         unitName,
         unitFactor,
         unitQuantity,
+        batchId,
+        storageLocationId,
       });
     }
 
@@ -404,12 +471,16 @@ export class StockDocumentsService {
     }
 
     const created = await this.prisma.$transaction(async (tx) => {
+      // A loss gets its own series. A write-off that shares numbers with
+      // adjustments cannot be counted, filed or argued about on its own.
       const prefix =
         kind === StockDocumentKind.TRANSFER
           ? 'ST'
           : kind === StockDocumentKind.COUNT
             ? 'SC'
-            : 'SA';
+            : kind === StockDocumentKind.WRITE_OFF
+              ? 'WO'
+              : 'SA';
       const documentNumber = await this.numbers.next(tx, companyId, `STOCK_${kind}`, prefix);
       return tx.stockDocument.create({
         data: {
@@ -427,17 +498,23 @@ export class StockDocumentsService {
           costCenterId,
           status: InvoiceStatus.DRAFT,
           createdBy: userId,
+          idempotencyKey: idempotencyKey ?? null,
+          attachmentName: dto.attachmentName?.trim() || null,
+          attachmentPath: dto.attachmentPath?.trim() || null,
           lines: {
             create: lines.map((line, index) => ({
               lineNumber: index + 1,
               itemId: line.itemId,
               quantity: line.quantity,
               unitCost: line.unitCost,
+              totalCost: line.quantity.mul(line.unitCost).toDecimalPlaces(MONEY_SCALE),
               countedQuantity: line.countedQuantity,
               notes: line.notes,
               unitName: line.unitName,
               unitFactor: line.unitFactor,
               unitQuantity: line.unitQuantity,
+              batchId: line.batchId,
+              storageLocationId: line.storageLocationId,
             })),
           },
         },
@@ -470,6 +547,21 @@ export class StockDocumentsService {
       throw new BadRequestException(
         `Only a draft stock document can be posted (current status: ${document.status})`,
       );
+    }
+    // A loss is approved before it is posted, by somebody other than the person
+    // who wrote it down. The document says who, so the trail survives a change
+    // of staff.
+    if (document.kind === StockDocumentKind.WRITE_OFF) {
+      if (!document.approvedAt || !document.approvedBy) {
+        throw new BadRequestException(
+          'A write-off must be approved before it is posted. / يجب اعتماد مستند الإعدام قبل ترحيله.',
+        );
+      }
+      if (document.approvedBy === userId) {
+        throw new BadRequestException(
+          'The person who recorded a write-off cannot approve it. / لا يجوز أن يعتمد المستخدم المستند الذي أنشأه.',
+        );
+      }
     }
 
     if (document.kind === StockDocumentKind.TRANSFER &&
@@ -599,7 +691,11 @@ export class StockDocumentsService {
         // For a write-off the direction and amount are already known. Take
         // the warehouse lock before the branch balance lock, as transfer and
         // reversal do; taking them in the opposite order can deadlock.
-        if (document.kind === StockDocumentKind.ADJUSTMENT && quantity.lessThan(0)) {
+        if (
+          (document.kind === StockDocumentKind.ADJUSTMENT ||
+            document.kind === StockDocumentKind.WRITE_OFF) &&
+          quantity.lessThan(0)
+        ) {
           await this.warehouses.assertWarehouseAvailable({
             tx,
             companyId,
@@ -668,13 +764,43 @@ export class StockDocumentsService {
           unitCost,
           totalCost,
           referenceType:
-            document.kind === StockDocumentKind.COUNT ? 'STOCK_COUNT' : 'STOCK_ADJUSTMENT',
+            document.kind === StockDocumentKind.COUNT
+              ? 'STOCK_COUNT'
+              : document.kind === StockDocumentKind.WRITE_OFF
+                ? 'STOCK_WRITE_OFF'
+                : 'STOCK_ADJUSTMENT',
           referenceId: document.id,
           referenceNumber: document.documentNumber,
           userId,
           requireStock: direction === StockDirection.OUT && !settings.allowNegativeStock,
           warehouseId: toWarehouseId,
         });
+
+        // A write-off that names a lot takes the goods out of that lot, not
+        // only out of the shelf: otherwise the lot card would keep claiming
+        // stock that has been destroyed.
+        if (document.kind === StockDocumentKind.WRITE_OFF && line.batchId) {
+          const claimed = await tx.itemBatch.updateMany({
+            where: {
+              id: line.batchId,
+              companyId,
+              remainingQuantity: { gte: absoluteQuantity },
+            },
+            data: { remainingQuantity: { decrement: absoluteQuantity } },
+          });
+          if (claimed.count !== 1) {
+            throw new BadRequestException(
+              'The lot does not hold enough to write off that quantity. / الدفعة لا تحمل الكمية المطلوبة.',
+            );
+          }
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE "item_batches"
+               SET "status" = 'CLOSED'
+             WHERE "id" = ${line.batchId}::uuid
+               AND "remainingQuantity" = 0
+               AND "status" <> 'WRITTEN_OFF'
+          `);
+        }
 
         valueChange = valueChange.plus(
           direction === StockDirection.IN ? totalCost : totalCost.negated(),
@@ -761,6 +887,64 @@ export class StockDocumentsService {
   }
 
   /** Reverses a posted document: opposite movements, and the entry mirror. */
+  /// Approves a write-off, once.
+  ///
+  /// The claim is a conditional update, not a read-then-write: two people
+  /// pressing approve at the same moment produce exactly one approval, and the
+  /// loser is told so instead of silently overwriting the first name.
+  async approve(companyId: string, userId: string, id: string) {
+    const document = await this.prisma.stockDocument.findFirst({
+      where: { id, companyId, deletedAt: null },
+      select: {
+        id: true,
+        kind: true,
+        status: true,
+        documentNumber: true,
+        createdBy: true,
+        approvedAt: true,
+        approvedBy: true,
+      },
+    });
+    if (!document) throw new NotFoundException('Stock document not found');
+    if (document.kind !== StockDocumentKind.WRITE_OFF) {
+      throw new BadRequestException(
+        'Only a write-off needs an approval. / الاعتماد مطلوب لمستند الإعدام فقط.',
+      );
+    }
+    if (document.approvedAt) {
+      throw new BadRequestException(
+        `This write-off was already approved. / تم اعتماد هذا المستند مسبقًا (${document.documentNumber}).`,
+      );
+    }
+    if (document.status !== InvoiceStatus.DRAFT) {
+      throw new BadRequestException('Only a draft write-off can be approved');
+    }
+    if (document.createdBy && document.createdBy === userId) {
+      throw new BadRequestException(
+        'The person who recorded a write-off cannot approve it. / لا يجوز أن يعتمد المستخدم المستند الذي أنشأه.',
+      );
+    }
+
+    const claimed = await this.prisma.stockDocument.updateMany({
+      where: { id: document.id, companyId, approvedAt: null, status: InvoiceStatus.DRAFT },
+      data: { approvedAt: new Date(), approvedBy: userId },
+    });
+    if (claimed.count !== 1) {
+      throw new BadRequestException('This write-off was approved by someone else a moment ago.');
+    }
+
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'APPROVE',
+      entity: 'stock_documents',
+      entityId: document.id,
+      after: { documentNumber: document.documentNumber, approvedBy: userId },
+    });
+
+    return this.findOne(companyId, document.id);
+  }
+
   async reverse(companyId: string, userId: string, id: string) {
     const document = await this.prisma.stockDocument.findFirst({
       where: { id, companyId, deletedAt: null },
@@ -900,6 +1084,12 @@ export class StockDocumentsService {
 
   // ------------------------------------------------------------------ helpers
 
+  /// The branch balance, locked for the rest of the transaction.
+  ///
+  /// The document engine keeps its own branch-level read: a transfer touches
+  /// two warehouses and the branch figure is what the posting arithmetic is
+  /// built on. The shelf's own book is written beside it by the ledger, so the
+  /// two can never disagree.
   private async balance(
     tx: Prisma.TransactionClient,
     companyId: string,
@@ -988,42 +1178,22 @@ export class StockDocumentsService {
       },
     });
 
-    const where = {
-      companyId_branchId_itemId: {
+    // Both books in one place: the shelf the document names, and the branch
+    // roll-up the reports read.
+    await this.ledger.post(
+      tx,
+      {
         companyId: input.companyId,
         branchId: input.branchId,
+        warehouseId: input.warehouseId ?? null,
         itemId: input.itemId,
+        quantity: input.direction === StockDirection.IN ? input.quantity : input.quantity.negated(),
+        value: input.direction === StockDirection.IN ? input.totalCost : input.totalCost.negated(),
       },
-    };
-    if (input.direction === StockDirection.IN) {
-      await tx.stockBalance.upsert({
-        where,
-        create: {
-          companyId: input.companyId,
-          branchId: input.branchId,
-          itemId: input.itemId,
-          quantity: input.quantity,
-          value: input.totalCost,
-        },
-        update: {
-          quantity: { increment: input.quantity },
-          value: { increment: input.totalCost },
-        },
-      });
-    } else {
-      if (!balance) {
-        throw new BadRequestException(
-          `No stock balance exists for ${input.referenceNumber}; an OUT movement cannot create negative stock.`,
-        );
-      }
-      await tx.stockBalance.update({
-        where,
-        data: {
-          quantity: { decrement: input.quantity },
-          value: { decrement: input.totalCost },
-        },
-      });
-    }
+      // The guard above already refused an OUT beyond what is held; a reversal
+      // path may still need to undo a movement whose shelf has been emptied.
+      { allowNegative: !input.requireStock },
+    );
   }
 
   // Unit resolution for stock lines lives in resolveUnitSelection

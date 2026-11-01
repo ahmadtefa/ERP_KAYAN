@@ -14,6 +14,7 @@ import {
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { movementUnitSnapshot } from '../../common/units/unit-math';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
@@ -62,6 +63,7 @@ export class ReturnsService {
     private readonly accounts: AccountMapService,
     private readonly audit: AuditService,
     private readonly warehouses: WarehouseService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   async findAll(
@@ -615,25 +617,16 @@ export class ReturnsService {
                 createdBy: userId,
               },
             });
-            await tx.stockBalance.upsert({
-              where: {
-                companyId_branchId_itemId: {
-                  companyId,
-                  branchId: document.branchId,
-                  itemId: item.id,
-                },
-              },
-              create: {
-                companyId,
-                branchId: document.branchId,
-                itemId: item.id,
-                quantity: line.quantity,
-                value: returnedCost,
-              },
-              update: {
-                quantity: { increment: line.quantity },
-                value: { increment: returnedCost },
-              },
+            // Back into the shelf it left from, at the cost frozen on the
+            // original sale. Re-averaging here would quietly hand the customer
+            // a different cost from the one the invoice charged them.
+            await this.ledger.post(tx, {
+              companyId,
+              branchId: document.branchId,
+              warehouseId,
+              itemId: item.id,
+              quantity: line.quantity,
+              value: returnedCost,
             });
             costTotal = costTotal.plus(returnedCost);
             costParts.push({ costCenterId: matching.costCenterId, amount: returnedCost });
@@ -1165,18 +1158,13 @@ export class ReturnsService {
               createdBy: userId,
             },
           });
-          await tx.stockBalance.update({
-            where: {
-              companyId_branchId_itemId: {
-                companyId,
-                branchId: document.branchId,
-                itemId: item.id,
-              },
-            },
-            data: {
-              quantity: { decrement: line.quantity },
-              value: { decrement: returnedCost },
-            },
+          await this.ledger.post(tx, {
+            companyId,
+            branchId: document.branchId,
+            warehouseId,
+            itemId: item.id,
+            quantity: line.quantity.negated(),
+            value: returnedCost.negated(),
           });
         }
       }
@@ -1355,19 +1343,20 @@ export class ReturnsService {
               createdBy: userId,
             },
           });
-          await tx.stockBalance.update({
-            where: {
-              companyId_branchId_itemId: {
-                companyId,
-                branchId: document.branchId,
-                itemId: line.itemId,
-              },
+          await this.ledger.post(
+            tx,
+            {
+              companyId,
+              branchId: document.branchId,
+              warehouseId,
+              itemId: line.itemId,
+              quantity: line.quantity.negated(),
+              value: line.costTotal.negated(),
             },
-            data: {
-              quantity: { decrement: line.quantity },
-              value: { decrement: line.costTotal },
-            },
-          });
+            // The return put it back once; undoing it takes it out again even
+            // if the shelf has been emptied since.
+            { allowNegative: true },
+          );
         }
 
         await this.posting.reverse(
@@ -1461,25 +1450,13 @@ export class ReturnsService {
             createdBy: userId,
           },
         });
-        await tx.stockBalance.upsert({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: document.branchId,
-              itemId: line.itemId,
-            },
-          },
-          create: {
-            companyId,
-            branchId: document.branchId,
-            itemId: line.itemId,
-            quantity: line.quantity,
-            value: totalCost,
-          },
-          update: {
-            quantity: { increment: line.quantity },
-            value: { increment: totalCost },
-          },
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: document.branchId,
+          warehouseId,
+          itemId: line.itemId,
+          quantity: line.quantity,
+          value: totalCost,
         });
       }
 

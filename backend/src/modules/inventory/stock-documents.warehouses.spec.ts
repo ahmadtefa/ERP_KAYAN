@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 
 import { StockDocumentsService } from './stock-documents.service';
 
@@ -93,6 +94,7 @@ function build(doc: Record<string, unknown> = document()) {
     {} as never,
     {} as never,
     {} as never,
+    fakeLedger() as any,
   );
   return { service, prisma };
 }
