@@ -719,7 +719,7 @@ export class StockDocumentsService {
             companyId,
             userId,
             itemId: line.itemId,
-            fromWarehouseId: fromWarehouseId as string,
+            fromWarehouseId: fromWarehouseId ?? null,
             toWarehouseId,
             toBranchId: document.branchId,
             quantity: line.quantity,
@@ -1175,8 +1175,10 @@ export class StockDocumentsService {
       companyId: string;
       userId: string;
       itemId: string;
-      fromWarehouseId: string;
-      toWarehouseId: string;
+      /// Null only for a branch that has no warehouse at all, where there is no
+      /// shelf for a lot to sit on and nothing to move.
+      fromWarehouseId: string | null;
+      toWarehouseId: string | null;
       toBranchId: string;
       quantity: Prisma.Decimal;
       batchId: string | null;
@@ -1184,6 +1186,8 @@ export class StockDocumentsService {
       referenceNumber: string;
     },
   ): Promise<Prisma.Decimal> {
+    if (!input.fromWarehouseId || !input.toWarehouseId) return new Prisma.Decimal(0);
+
     const lots = await tx.itemBatch.findMany({
       where: {
         companyId: input.companyId,
