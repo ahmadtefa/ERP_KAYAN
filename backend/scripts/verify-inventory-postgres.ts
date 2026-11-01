@@ -928,17 +928,19 @@ async function main() {
           warehouseId,
           itemId: plain.id,
         });
-        const lots = await prisma.itemBatch.findMany({
-          where: {
-            companyId: company.id,
-            warehouseId,
-            itemId: plain.id,
-            deletedAt: null,
-            remainingQuantity: { gt: 0 },
-          },
-        });
+        const lots: Array<{ remainingQuantity: Prisma.Decimal }> =
+          await prisma.itemBatch.findMany({
+            where: {
+              companyId: company.id,
+              warehouseId,
+              itemId: plain.id,
+              deletedAt: null,
+              remainingQuantity: { gt: 0 },
+            },
+          });
         const lotQuantity = lots.reduce(
-          (sum, lot) => sum.plus(lot.remainingQuantity),
+          (sum: Prisma.Decimal, lot: { remainingQuantity: Prisma.Decimal }) =>
+            sum.plus(lot.remainingQuantity),
           new Prisma.Decimal(0),
         );
         assert.equal(

@@ -127,7 +127,7 @@ describe('lots on a document transfer', () => {
 
     expect(moved.toFixed(4)).toBe('4.0000');
     expect(state.lots[0].remainingQuantity.toFixed(4)).toBe('6.0000');
-    const arrived = state.lots[1];
+    const arrived = state.lots[1] as Lot;
     expect(arrived).toMatchObject({
       companyId: COMPANY,
       branchId: BRANCH,
@@ -168,8 +168,8 @@ describe('lots on a document transfer', () => {
     const moved = await move(8);
 
     expect(moved.toFixed(4)).toBe('8.0000');
-    const sooner = state.lots.find((row) => row.id === 'lot-sooner');
-    const later = state.lots.find((row) => row.id === 'lot-later');
+    const sooner = state.lots.find((row) => row.id === 'lot-sooner') as Lot;
+    const later = state.lots.find((row) => row.id === 'lot-later') as Lot;
     expect(sooner.remainingQuantity.toFixed(4)).toBe('0.0000');
     expect(later.remainingQuantity.toFixed(4)).toBe('8.0000');
     const arrived = state.lots.filter((row) => row.warehouseId === TO);
@@ -192,7 +192,7 @@ describe('lots on a document transfer', () => {
     const moved = await move(5);
 
     expect(moved.toFixed(4)).toBe('3.0000');
-    const arrived = state.lots.find((row) => row.warehouseId === TO);
+    const arrived = state.lots.find((row) => row.warehouseId === TO) as Lot;
     expect(arrived.remainingQuantity.toFixed(4)).toBe('3.0000');
   });
 
@@ -205,8 +205,9 @@ describe('lots on a document transfer', () => {
     const moved = await move(4, 'lot-b');
 
     expect(moved.toFixed(4)).toBe('4.0000');
-    expect(state.lots.find((row) => row.id === 'lot-a').remainingQuantity.toFixed(4)).toBe('5.0000');
-    expect(state.lots.find((row) => row.warehouseId === TO).batchNumber).toBe('LOT-B');
+    const untouched = state.lots.find((row) => row.id === 'lot-a') as Lot;
+    expect(untouched.remainingQuantity.toFixed(4)).toBe('5.0000');
+    expect((state.lots.find((row) => row.warehouseId === TO) as Lot).batchNumber).toBe('LOT-B');
   });
 
   it('refuses rather than half-moving when the lot changed underneath it', async () => {
