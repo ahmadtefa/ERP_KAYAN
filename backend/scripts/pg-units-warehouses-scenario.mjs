@@ -25,6 +25,10 @@
  *
  * It needs `npm run build` first: it imports the compiled services, so it
  * exercises exactly what ships.
+ *
+ * CI runs it in the backend job, right after the migrations are applied to the
+ * ephemeral PostgreSQL - so it is executed on every push, not kept as a file
+ * nobody runs. A committed scenario that has never run is a claim, not a test.
  */
 import { randomUUID } from 'node:crypto';
 
@@ -233,12 +237,12 @@ async function main() {
   check(
     'S1 the movement kept what was entered: 10 كرتونة × 12 = 120',
     receiptMovement &&
-      receiptMovement.unitName === 'كرتونة' &&
-      Number(receiptMovement.unitQuantity) === 10 &&
+      receiptMovement.enteredUnit === 'كرتونة' &&
+      Number(receiptMovement.enteredQuantity) === 10 &&
       Number(receiptMovement.unitFactor) === 12 &&
       Number(receiptMovement.quantity) === 120,
     receiptMovement
-      ? `${receiptMovement.unitQuantity} ${receiptMovement.unitName} × ${receiptMovement.unitFactor} = ${receiptMovement.quantity}`
+      ? `${receiptMovement.enteredQuantity} ${receiptMovement.enteredUnit} × ${receiptMovement.unitFactor} = ${receiptMovement.quantity}`
       : 'no movement',
   );
 
@@ -272,13 +276,13 @@ async function main() {
     'S2 the log reads 3 كراتين = 36 عبوات on both legs',
     transferMoves.every(
       (move) =>
-        move.unitName === 'كرتونة' &&
-        Number(move.unitQuantity) === 3 &&
+        move.enteredUnit === 'كرتونة' &&
+        Number(move.enteredQuantity) === 3 &&
         Number(move.unitFactor) === 12 &&
         Number(move.quantity) === 36,
     ),
     transferMoves
-      .map((m) => `${m.direction}: ${m.unitQuantity} ${m.unitName} × ${m.unitFactor} = ${m.quantity}`)
+      .map((m) => `${m.direction}: ${m.enteredQuantity} ${m.enteredUnit} × ${m.unitFactor} = ${m.quantity}`)
       .join(' | '),
   );
 

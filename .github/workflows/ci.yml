@@ -128,6 +128,17 @@ jobs:
           PGPASSWORD: ci
         run: python ../scripts/ci-diagnose.py node scripts/verify-cost-center-upgrade.mjs
 
+      # The owner's own scenario, on the real database and through the
+      # compiled services: عبوة is the base unit, a carton is 12, ten cartons
+      # arrive (120), three are transferred 84/36, the branch still totals 120,
+      # the log reads "3 كرتونة × 12 = 36", a posted transfer is reversed
+      # rather than edited, a second reversal is refused, and the base unit of
+      # an item that already has stock cannot be renamed. The script recomputes
+      # every figure from `stock_movements` in SQL instead of trusting the
+      # service's own answer.
+      - name: Prove units, packing and warehouses on real PostgreSQL (the owner's scenario)
+        run: python ../scripts/ci-diagnose.py node scripts/pg-units-warehouses-scenario.mjs
+
       # The release guard decides whether a Windows build may overwrite a
       # published download; a wrong answer there is not recoverable.
       - name: Prove the release guard refuses a published release

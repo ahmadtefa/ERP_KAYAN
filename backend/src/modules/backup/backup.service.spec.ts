@@ -1234,4 +1234,206 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       expect(txMock.account.deleteMany).toHaveBeenCalled();
     });
   });
+
+  describe('The packing table, the warehouses and the movement log in a company file', () => {
+    const ITEM_ID = 'dddddddd-dddd-4ddd-8ddd-ddddddddddd1';
+    const BRANCH_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1';
+    const FRONT = 'ffffffff-ffff-4fff-8fff-fffffffffff1';
+    const BACK = 'ffffffff-ffff-4fff-8fff-fffffffffff2';
+
+    /// One company exactly as the scenario left it: an item counted in عبوات
+    /// with a carton and a pack, two stores in one branch, and the three
+    /// movements that took ten cartons in and three of them across.
+    const companyFile = (): BackupFile => ({
+      format: 'kayan-backup',
+      version: 1,
+      createdAt: new Date().toISOString(),
+      companyId: COMPANY_ID,
+      companyCode: 'KAYAN',
+      companyName: 'شركة كيان',
+      counts: { item: 1, itemUnit: 3, warehouse: 2, stockMovement: 3 },
+      tables: {
+        item: [
+          {
+            id: ITEM_ID,
+            companyId: COMPANY_ID,
+            code: 'WATER-1',
+            nameEn: 'Water bottle',
+            nameAr: 'مياه',
+            unit: 'عبوة',
+            isStockTracked: true,
+            isActive: true,
+          },
+        ],
+        itemUnit: [
+          {
+            id: 'a0000000-0000-4000-8000-000000000001',
+            itemId: ITEM_ID,
+            unit: 'عبوة',
+            factor: '1.000000',
+            barcode: null,
+            salePrice: '5.0000',
+            purchasePrice: null,
+            allowFraction: true,
+            usedInSales: true,
+            usedInPurchases: true,
+            sortOrder: 0,
+            isActive: true,
+          },
+          {
+            id: 'a0000000-0000-4000-8000-000000000002',
+            itemId: ITEM_ID,
+            unit: 'كرتونة',
+            factor: '12.000000',
+            barcode: '6221234567890',
+            salePrice: '55.0000',
+            purchasePrice: null,
+            // A carton is never half: the rule travels with the unit.
+            allowFraction: false,
+            usedInSales: true,
+            usedInPurchases: true,
+            sortOrder: 1,
+            isActive: true,
+          },
+          {
+            id: 'a0000000-0000-4000-8000-000000000003',
+            itemId: ITEM_ID,
+            unit: 'باكت',
+            factor: '6.000000',
+            barcode: null,
+            salePrice: null,
+            purchasePrice: null,
+            allowFraction: true,
+            usedInSales: false,
+            usedInPurchases: true,
+            sortOrder: 2,
+            isActive: true,
+          },
+        ],
+        warehouse: [
+          {
+            id: FRONT,
+            companyId: COMPANY_ID,
+            branchId: BRANCH_ID,
+            code: 'MAIN-1',
+            nameEn: 'Front store',
+            nameAr: 'المخزن الأمامي',
+            isDefault: true,
+            isActive: true,
+          },
+          {
+            id: BACK,
+            companyId: COMPANY_ID,
+            branchId: BRANCH_ID,
+            code: 'MAIN-2',
+            nameEn: 'Back store',
+            nameAr: 'المخزن الخلفي',
+            isDefault: false,
+            isActive: true,
+          },
+        ],
+        stockMovement: [
+          {
+            id: 'b0000000-0000-4000-8000-000000000001',
+            companyId: COMPANY_ID,
+            itemId: ITEM_ID,
+            warehouseId: FRONT,
+            direction: 'IN',
+            quantity: '120.0000',
+            enteredUnit: 'كرتونة',
+            enteredQuantity: '10.0000',
+            unitFactor: '12.000000',
+          },
+          {
+            id: 'b0000000-0000-4000-8000-000000000002',
+            companyId: COMPANY_ID,
+            itemId: ITEM_ID,
+            warehouseId: FRONT,
+            direction: 'OUT',
+            quantity: '36.0000',
+            enteredUnit: 'كرتونة',
+            enteredQuantity: '3.0000',
+            unitFactor: '12.000000',
+          },
+          {
+            id: 'b0000000-0000-4000-8000-000000000003',
+            companyId: COMPANY_ID,
+            itemId: ITEM_ID,
+            warehouseId: BACK,
+            direction: 'IN',
+            quantity: '36.0000',
+            enteredUnit: 'كرتونة',
+            enteredQuantity: '3.0000',
+            unitFactor: '12.000000',
+          },
+        ],
+      },
+    });
+
+    /// The rows a restore actually handed to the database, per model.
+    const written = (model: string): Array<Record<string, unknown>> =>
+      txMock[model].createMany.mock.calls.flatMap(
+        (call: any[]) => call[0]?.data ?? [],
+      );
+
+    test('the units come back with their factors and their own rules', async () => {
+      await service.restore(companyFile(), COMPANY_ID, {});
+
+      const units = written('itemUnit');
+      expect(units).toHaveLength(3);
+      const byUnit = new Map(units.map((row) => [row.unit, row]));
+      // A factor is what a movement meant. It is written back exactly as it
+      // was, not re-derived from anything.
+      expect(byUnit.get('عبوة')?.factor).toBe('1.000000');
+      expect(byUnit.get('كرتونة')?.factor).toBe('12.000000');
+      expect(byUnit.get('باكت')?.factor).toBe('6.000000');
+      // The rules that go with a unit survive too: half a carton stays
+      // impossible and a pack stays buy-only.
+      expect(byUnit.get('كرتونة')?.allowFraction).toBe(false);
+      expect(byUnit.get('باكت')?.usedInSales).toBe(false);
+      expect(byUnit.get('كرتونة')?.barcode).toBe('6221234567890');
+      // And they are still this item's units.
+      expect(units.every((row) => row.itemId === ITEM_ID)).toBe(true);
+    });
+
+    test('the warehouses come back bound to their branch, one of them default', async () => {
+      await service.restore(companyFile(), COMPANY_ID, {});
+
+      const warehouses = written('warehouse');
+      expect(warehouses).toHaveLength(2);
+      expect(warehouses.every((row) => row.branchId === BRANCH_ID)).toBe(true);
+      expect(warehouses.filter((row) => row.isDefault === true)).toHaveLength(1);
+      expect(warehouses.find((row) => row.code === 'MAIN-2')).toMatchObject({
+        nameAr: 'المخزن الخلفي',
+        isDefault: false,
+      });
+    });
+
+    test('the movement log keeps the unit that was typed and the factor behind it', async () => {
+      await service.restore(companyFile(), COMPANY_ID, {});
+
+      const movements = written('stockMovement');
+      expect(movements).toHaveLength(3);
+      // The three movements tell the same story as the stock: 120 in, 36 out,
+      // 36 into the other store - and every one of them says "كرتونة × 12".
+      expect(
+        movements
+          .filter((row) => row.direction === 'IN' && row.warehouseId === FRONT)
+          .map((row) => row.quantity),
+      ).toEqual(['120.0000']);
+      expect(
+        movements
+          .filter((row) => row.direction === 'OUT')
+          .map((row) => [row.enteredQuantity, row.enteredUnit, row.unitFactor]),
+      ).toEqual([['3.0000', 'كرتونة', '12.000000']]);
+
+      // The base quantity a restore writes is the one the file carried; it is
+      // never recomputed from today's factor, which may have changed since.
+      for (const row of movements) {
+        expect(row.quantity).toBeTruthy();
+        expect(row.unitFactor).toBe('12.000000');
+      }
+    });
+  });
+
 });
