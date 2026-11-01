@@ -143,6 +143,8 @@ describe('JwtAuthGuard account status and live authorization', () => {
       username: 'employee',
       companyId: payload.companyId,
       branchId: 'branch-current',
+      // The whole assignment, so warehouse screens can narrow to it.
+      branchIds: ['branch-current'],
       isSuperAdmin: false,
       permissions: ['inventory.items.read', 'reports.read'],
     });

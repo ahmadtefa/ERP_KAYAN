@@ -16,6 +16,7 @@ import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../widgets/barcode_labels_dialog.dart';
+import '../widgets/item_units_editor.dart';
 import 'stock_screen.dart' show stockListProvider;
 
 class ItemsController extends JsonListController {
@@ -50,15 +51,10 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         if (!isEdit) FieldSpec('code', l10n.accountCode, required: true),
         FieldSpec('nameEn', 'Name (English)', required: true),
         FieldSpec('nameAr', 'الاسم (عربي)', required: true),
-        // The unit every conversion is measured against. Calling it "unit"
-        // made it look optional, and an item without one fell back to a
-        // placeholder that then anchored all of its packs.
-        FieldSpec(
-          'unit',
-          l10n.itemBaseUnit,
-          required: !isEdit,
-          helper: isEdit ? l10n.itemBaseUnitEditHelper : l10n.itemBaseUnitHelper,
-        ),
+        // The base unit is not asked for here: it is the first row of the
+        // packing table, beside the cartons it anchors. Two fields for one
+        // answer is how an item ends up named one thing and counted in
+        // another.
         FieldSpec('barcode', 'Barcode'),
         FieldSpec('salePrice', l10n.salePrice, kind: FieldKind.decimal),
         FieldSpec(
@@ -92,11 +88,55 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     );
     if (values == null || !mounted) return;
 
+    // The packing table belongs to the same save as the item: it is opened
+    // from here, filled in beside the item's own fields, and sent with them.
+    // The server writes both in one transaction, so a refused unit leaves no
+    // half-made item behind.
+    final client = ref.read(apiClientProvider);
+    final user = ref.read(currentUserProvider);
+    final canBarcode = user?.can('inventory.barcodes.manage') ?? false;
+    final canSeeCost = user?.can('inventory.cost.read') ?? false;
+
+    // A non-null view of the row, so the reads below stay total without a
+    // null assertion the analyser would call unnecessary.
+    final current = existing ?? const <String, dynamic>{};
+    var existingUnits = const <Map<String, dynamic>>[];
+    if (isEdit) {
+      try {
+        final response = await client.getObject(
+          '/inventory/items/${current['id']}/units',
+        );
+        existingUnits = (response['items'] as List<dynamic>? ?? const [])
+            .whereType<Map>()
+            .map((value) => Map<String, dynamic>.from(value))
+            .toList(growable: false);
+      } on Failure catch (e) {
+        if (mounted) showMessage(context, e.message, error: true);
+        return;
+      }
+      if (!mounted) return;
+    }
+
+    final draft = await showItemUnitsEditor(
+      context,
+      baseUnit: '${values['unit'] ?? current['unit'] ?? ''}',
+      itemName: '${values['nameAr'] ?? values['nameEn'] ?? ''}',
+      initialUnits: existingUnits,
+      canManageBarcodes: canBarcode,
+      canSeeCost: canSeeCost,
+      isEdit: isEdit,
+    );
+    if (draft == null || !mounted) return;
+
+    // The base unit and its factor-1 row must agree; the editor is the one
+    // place that decides both, so the item field follows it.
+    values['unit'] = draft.baseUnit;
+    values['units'] = draft.rows;
+
     setState(() => _busy = true);
     try {
-      final client = ref.read(apiClientProvider);
       if (isEdit) {
-        await client.patch('/inventory/items/${existing['id']}', body: values);
+        await client.patch('/inventory/items/${current['id']}', body: values);
       } else {
         await client.post('/inventory/items', body: values);
       }

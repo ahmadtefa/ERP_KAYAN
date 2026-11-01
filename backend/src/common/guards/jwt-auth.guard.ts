@@ -168,6 +168,9 @@ export class JwtAuthGuard implements CanActivate {
       username: principal.username,
       companyId: principal.companyId,
       branchId,
+      // The full assignment list, so a screen can show every branch the
+      // person actually works in without a second round trip.
+      branchIds: principal.branches.map((branch) => branch.branchId),
       isSuperAdmin: principal.isSuperAdmin,
       permissions,
     };

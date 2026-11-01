@@ -236,17 +236,47 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                     '${canSeeCost ? '' : ' • ${_arabic ? 'بدون تكلفة' : 'no cost'}'}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
+                  // Which shelf the goods left and which one they reached. A
+                  // transfer inside one branch used to read as a branch-to-
+                  // branch move because only the branch name was shown.
+                  if (_routeOf(row) != null)
+                    Text(
+                      _routeOf(row)!,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  if (text(row, 'createdByName').isNotEmpty ||
+                      text(row, 'postedByName').isNotEmpty)
+                    Text(
+                      [
+                        if (text(row, 'createdByName').isNotEmpty)
+                          '${_arabic ? 'أنشأه' : 'Created by'}: ${text(row, 'createdByName')}',
+                        if (text(row, 'postedByName').isNotEmpty)
+                          '${_arabic ? 'رحّله' : 'Posted by'}: ${text(row, 'postedByName')}',
+                      ].join(' • '),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                 ],
               ),
             ),
             Wrap(
               spacing: 4,
               children: [
-                if (!posted)
+                if (!posted && status == 'draft')
                   TextButton.icon(
                     onPressed: canAdjust ? () => _postDocument(id) : null,
                     icon: const Icon(Icons.check, size: 18),
                     label: Text(_arabic ? 'ترحيل' : 'Post'),
+                  ),
+                // A posted document is never edited or deleted. It is
+                // reversed: a counter-movement, linked to the original, in
+                // the same transaction - so the ledger and the stock ledger
+                // still tell one story, and the original stays on file.
+                if (posted)
+                  TextButton.icon(
+                    key: ValueKey('stock-document-reverse-$id'),
+                    onPressed: canAdjust ? () => _reverseDocument(id) : null,
+                    icon: const Icon(Icons.undo, size: 18),
+                    label: Text(_arabic ? 'عكس' : 'Reverse'),
                   ),
                 IconButton(
                   tooltip: _arabic ? 'طباعة' : 'Print',
@@ -264,6 +294,90 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
         ),
       ),
     );
+  }
+
+  /// A warehouse as the operator reads it: the code, then the name in the
+  /// language of the screen. Line 305's `_routeOf` does the same for a row.
+  String _warehouseLabel(Json warehouse) {
+    final code = text(warehouse, 'code');
+    final ar = text(warehouse, 'nameAr');
+    final en = text(warehouse, 'nameEn');
+    final name = _arabic ? (ar.isEmpty ? en : ar) : (en.isEmpty ? ar : en);
+    if (name.isEmpty) return code;
+    return code.isEmpty ? name : '$code — $name';
+  }
+
+  /// "من MAIN-1 ← إلى MAIN-2", or nothing when the document names no
+  /// warehouse on either side (a plain adjustment in the branch default).
+  String? _routeOf(Json row) {
+    String name(Json? warehouse) {
+      if (warehouse == null) return '';
+      final ar = text(warehouse, 'nameAr');
+      final en = text(warehouse, 'nameEn');
+      final code = text(warehouse, 'code');
+      final label = _arabic ? (ar.isEmpty ? en : ar) : (en.isEmpty ? ar : en);
+      if (label.isEmpty) return code;
+      return code.isEmpty ? label : '$code — $label';
+    }
+
+    final from = row['fromWarehouse'];
+    final to = row['toWarehouse'];
+    final fromName = name(from is Map ? Map<String, dynamic>.from(from) : null);
+    final toName = name(to is Map ? Map<String, dynamic>.from(to) : null);
+    if (fromName.isEmpty && toName.isEmpty) return null;
+    if (fromName.isEmpty) return '${_arabic ? 'إلى مخزن' : 'To store'}: $toName';
+    if (toName.isEmpty) return '${_arabic ? 'من مخزن' : 'From store'}: $fromName';
+    return '${_arabic ? 'من' : 'From'} $fromName ${_arabic ? 'إلى' : '→'} $toName';
+  }
+
+  Future<void> _reverseDocument(String id) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(_arabic ? 'عكس المستند' : 'Reverse the document'),
+        content: Text(
+          _arabic
+              ? 'سيُنشأ حركة عكسية تُلغي أثر هذا المستند على المخزون والدفاتر. '
+                  'المستند الأصلي يبقى في السجلات كما هو، ولا يمكن عكسه مرتين.'
+              : 'A counter-movement will cancel this document\'s effect on stock and '
+                  'on the ledger. The original stays on file unchanged, and it cannot '
+                  'be reversed twice.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(context.l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(_arabic ? 'عكس' : 'Reverse'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await ref
+          .read(apiClientProvider)
+          .post('/inventory/stock-documents/$id/reverse');
+      if (!mounted) return;
+      showMessage(
+        context,
+        _arabic ? 'تم عكس المستند بحركة عكسية.' : 'The document was reversed.',
+      );
+      _refresh();
+    } on Failure catch (error) {
+      if (mounted) showMessage(context, error.message, error: true);
+    } catch (error) {
+      if (mounted) {
+        showMessage(
+          context,
+          '${_arabic ? 'تعذر عكس المستند' : 'Could not reverse'}: $error',
+          error: true,
+        );
+      }
+    }
   }
 
   Future<void> _postDocument(String id) async {
@@ -588,7 +702,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                             for (final warehouse in warehouses)
                               DropdownMenuItem(
                                 value: text(warehouse, 'id'),
-                                child: Text(text(warehouse, 'nameEn')),
+                                child: Text(_warehouseLabel(warehouse)),
                               ),
                           ],
                           onChanged: (value) => setDialogState(() => fromWarehouseId = value),
@@ -608,7 +722,7 @@ class _StockDocumentsScreenState extends ConsumerState<StockDocumentsScreen> {
                               for (final warehouse in warehouses)
                                 DropdownMenuItem(
                                   value: text(warehouse, 'id'),
-                                  child: Text(text(warehouse, 'nameEn')),
+                                  child: Text(_warehouseLabel(warehouse)),
                                 ),
                             ],
                             onChanged: (value) => setDialogState(() => toWarehouseId = value),

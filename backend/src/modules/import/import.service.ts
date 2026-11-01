@@ -73,6 +73,11 @@ export interface ImportReport {
   errors: RowError[];
   preview: RowOutcome[];
   unknownColumns: string[];
+  /// Things the file asked for that were deliberately not done, with the
+  /// reason. A unit rename under recorded stock lands here instead of being
+  /// quietly applied or quietly dropped. Absent for the accounting templates,
+  /// which have nothing of this kind to report.
+  notes?: string[];
   /// Rows that are fine and would be imported. Shown before anything is written.
   validRows: number;
   /// The opening-balance draft created by a committed workbook.
@@ -575,7 +580,10 @@ export class ImportService {
     const existing = await this.existingCodes(kind, companyId);
 
     const seenInFile = new Set<string>();
-    const writes: Array<(tx: Prisma.TransactionClient) => Promise<void>> = [];
+    const writes: Array<
+      (tx: Prisma.TransactionClient) => Promise<void | string>
+    > = [];
+    const notes: string[] = [];
 
     for (const row of sheet.rows) {
       const values: Record<string, string> = {};
@@ -679,7 +687,10 @@ export class ImportService {
     // than a failed one, because nobody can tell where it stopped.
     if (!options.dryRun && errors.length === 0 && writes.length > 0) {
       await this.prisma.$transaction(async (tx) => {
-        for (const write of writes) await write(tx);
+        for (const write of writes) {
+          const note = await write(tx);
+          if (typeof note === 'string' && note !== '') notes.push(note);
+        }
       });
 
       await this.audit.record({
@@ -718,6 +729,7 @@ export class ImportService {
       errors,
       preview: preview.slice(0, 50),
       unknownColumns,
+      notes,
       validRows: created + updated,
     };
   }
@@ -1447,6 +1459,40 @@ export class ImportService {
     return 'true';
   }
 
+  /**
+   * Whether anything has been recorded against this item, in which case its
+   * base unit is part of the record and cannot be rewritten by a file.
+   */
+  private async hasStockHistory(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    itemId: string,
+  ): Promise<boolean> {
+    const zero = new Prisma.Decimal(0);
+    const [movements, balance, stockLines, salesLines, purchaseLines] =
+      await Promise.all([
+        tx.stockMovement.count({ where: { companyId, itemId } }),
+        tx.stockBalance.findFirst({
+          where: {
+            companyId,
+            itemId,
+            OR: [{ quantity: { not: zero } }, { value: { not: zero } }],
+          },
+          select: { id: true },
+        }),
+        tx.stockDocumentLine.count({ where: { itemId } }),
+        tx.salesInvoiceLine.count({ where: { itemId } }),
+        tx.purchaseInvoiceLine.count({ where: { itemId } }),
+      ]);
+    return (
+      movements > 0 ||
+      balance !== null ||
+      stockLines > 0 ||
+      salesLines > 0 ||
+      purchaseLines > 0
+    );
+  }
+
   private async createOne(
     tx: Prisma.TransactionClient,
     kind: ImportKind,
@@ -1460,17 +1506,29 @@ export class ImportService {
     const englishName = values.nameen ?? values.namear ?? values.code;
 
     if (kind === 'items') {
-      await tx.item.create({
+      const unit = values.unit?.trim() || 'piece';
+      const item = await tx.item.create({
         data: {
           companyId,
           code: values.code,
           nameEn: values.nameen ?? values.namear ?? values.code,
           nameAr: arabicName,
-          unit: values.unit ?? 'piece',
+          unit,
           salePrice: this.decimal(values.saleprice) ?? new Prisma.Decimal(0),
           taxRate: this.decimal(values.taxrate) ?? new Prisma.Decimal(0),
           isStockTracked: this.boolean(values.isstocktracked) ?? true,
           notes: values.notes ?? null,
+        },
+      });
+      // The base unit column alone is not enough: conversions, price lookup
+      // and the unit dropdown all read `item_units`. Every imported item gets
+      // its factor-1 row here, exactly like one created on the screen.
+      await tx.itemUnit.create({
+        data: {
+          itemId: item.id,
+          unit,
+          factor: new Prisma.Decimal(1),
+          isActive: true,
         },
       });
       return;
@@ -1511,12 +1569,11 @@ export class ImportService {
     companyId: string,
     code: string,
     values: Record<string, string>,
-  ): Promise<void> {
+  ): Promise<void | string> {
     if (kind === 'items') {
       const data: Prisma.ItemUpdateManyMutationInput = {};
       if (values.nameen) data.nameEn = values.nameen;
       if (values.namear) data.nameAr = values.namear;
-      if (values.unit) data.unit = values.unit;
       if (values.saleprice !== undefined) {
         data.salePrice = this.decimal(values.saleprice);
       }
@@ -1525,8 +1582,55 @@ export class ImportService {
         data.isStockTracked = this.boolean(values.isstocktracked);
       }
       if (values.notes) data.notes = values.notes;
+
+      // A base unit is renamed only while nothing has been recorded against
+      // the item; otherwise the file would re-read old quantities in a new
+      // unit. The row still gets its factor-1 base either way, so an item
+      // imported before units existed is repaired by the same pass.
+      let note: string | undefined;
+      const wantedUnit = values.unit?.trim();
+      if (wantedUnit) {
+        const current = await tx.item.findFirst({
+          where: { companyId, code, deletedAt: null },
+          select: { id: true, unit: true },
+        });
+        if (current) {
+          const baseRow = await tx.itemUnit.findFirst({
+            where: { itemId: current.id, factor: new Prisma.Decimal(1) },
+            select: { id: true },
+          });
+          const renaming = wantedUnit !== current.unit;
+          if (renaming && (await this.hasStockHistory(tx, companyId, current.id))) {
+            note =
+              `الصنف ${code}: لم يتم تغيير وحدة الأساس من "${current.unit}" إلى "${wantedUnit}" ` +
+              'لوجود حركات مخزنية أو رصيد مسجّل عليه. / ' +
+              `Item ${code}: base unit left as "${current.unit}" because stock is already recorded against it.`;
+          } else {
+            if (renaming) data.unit = wantedUnit;
+            const unitName = renaming ? wantedUnit : current.unit;
+            if (baseRow) {
+              if (renaming) {
+                await tx.itemUnit.update({
+                  where: { id: baseRow.id },
+                  data: { unit: unitName },
+                });
+              }
+            } else {
+              await tx.itemUnit.create({
+                data: {
+                  itemId: current.id,
+                  unit: unitName,
+                  factor: new Prisma.Decimal(1),
+                  isActive: true,
+                },
+              });
+            }
+          }
+        }
+      }
+
       await tx.item.updateMany({ where: { companyId, code }, data });
-      return;
+      return note;
     }
 
     const table = kind === 'customers' ? 'customer' : 'supplier';

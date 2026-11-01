@@ -22,6 +22,13 @@ export interface StockDocumentView {
   branch?: { code?: string | null; nameEn?: string | null; nameAr?: string | null } | null;
   fromBranch?: { nameEn?: string | null; nameAr?: string | null } | null;
   toBranch?: { nameEn?: string | null; nameAr?: string | null } | null;
+  /// The two shelves inside the branch. A transfer between the front store and
+  /// the back store happens in one branch, so the branch name alone would not
+  /// say where the goods went.
+  fromWarehouse?: { code?: string | null; nameEn?: string | null; nameAr?: string | null } | null;
+  toWarehouse?: { code?: string | null; nameEn?: string | null; nameAr?: string | null } | null;
+  createdByName?: string | null;
+  postedByName?: string | null;
   notes?: string | null;
   lines: Array<{
     lineNumber?: number;
@@ -129,6 +136,34 @@ export function stockDocumentTable(document: StockDocumentView): ReportTable {
       labelEn: 'To',
       labelAr: 'إلى',
       value: document.toBranch?.nameEn || document.toBranch?.nameAr || '',
+    });
+  }
+  if (document.fromWarehouse || document.toWarehouse) {
+    const name = (row: { nameAr?: string | null; nameEn?: string | null; code?: string | null }) =>
+      row.nameAr || row.nameEn || row.code || '';
+    meta.push({
+      labelEn: 'From store',
+      labelAr: 'من مخزن',
+      value: document.fromWarehouse ? name(document.fromWarehouse) : '',
+    });
+    meta.push({
+      labelEn: 'To store',
+      labelAr: 'إلى مخزن',
+      value: document.toWarehouse ? name(document.toWarehouse) : '',
+    });
+  }
+  if (document.createdByName) {
+    meta.push({
+      labelEn: 'Created by',
+      labelAr: 'أنشأه',
+      value: document.createdByName,
+    });
+  }
+  if (document.postedByName) {
+    meta.push({
+      labelEn: 'Posted by',
+      labelAr: 'رحّله',
+      value: document.postedByName,
     });
   }
 

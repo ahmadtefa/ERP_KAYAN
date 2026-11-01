@@ -95,14 +95,37 @@ export class StockDocumentsService {
           lines: true,
           branch: { select: { code: true, nameEn: true, nameAr: true } },
           costCenter: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+          fromWarehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+          toWarehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
         },
       }),
       this.prisma.stockDocument.count({ where }),
     ]);
 
+    // Who raised and who posted each document. The columns are ids, so the
+    // names are read once for the page rather than asked for per row.
+    const userIds = [
+      ...new Set(
+        items
+          .flatMap((document) => [document.createdBy, document.postedBy])
+          .filter((id): id is string => typeof id === 'string' && id !== ''),
+      ),
+    ];
+    const users = userIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: userIds }, companyId },
+          select: { id: true, username: true },
+        })
+      : [];
+    const userName = new Map(users.map((user) => [user.id, user.username]));
+
     return {
       items: items.map((document) => ({
-        ...this.toSummary(document),
+        ...this.toSummary({
+          ...document,
+          createdByName: document.createdBy ? userName.get(document.createdBy) ?? null : null,
+          postedByName: document.postedBy ? userName.get(document.postedBy) ?? null : null,
+        }),
         lineCount: document.lines.length,
         totalQuantity: document.lines
           .reduce((sum, line) => sum.plus(line.quantity), new Prisma.Decimal(0))
@@ -120,6 +143,8 @@ export class StockDocumentsService {
       include: {
         branch: { select: { code: true, nameEn: true, nameAr: true } },
         costCenter: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+        fromWarehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+        toWarehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
         lines: {
           orderBy: { lineNumber: 'asc' },
           include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } },
@@ -128,8 +153,25 @@ export class StockDocumentsService {
     });
     if (!document) throw new NotFoundException('Stock document not found');
 
+    // The paper names who raised and who posted it, so the detail resolves the
+    // two ids the same way the list does.
+    const userIds = [document.createdBy, document.postedBy].filter(
+      (value): value is string => typeof value === 'string' && value !== '',
+    );
+    const users = userIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: userIds }, companyId },
+          select: { id: true, username: true },
+        })
+      : [];
+    const userName = new Map(users.map((user) => [user.id, user.username]));
+
     return {
-      ...this.toSummary(document),
+      ...this.toSummary({
+        ...document,
+        createdByName: document.createdBy ? userName.get(document.createdBy) ?? null : null,
+        postedByName: document.postedBy ? userName.get(document.postedBy) ?? null : null,
+      }),
       lines: document.lines.map((line) => ({
         id: line.id,
         lineNumber: line.lineNumber,
@@ -1018,6 +1060,14 @@ export class StockDocumentsService {
     branch?: { code: string; nameEn: string; nameAr: string };
     costCenterId?: string | null;
     costCenter?: { id: string; code: string; nameEn: string; nameAr: string } | null;
+    fromWarehouseId?: string | null;
+    toWarehouseId?: string | null;
+    createdBy?: string | null;
+    postedBy?: string | null;
+    fromWarehouse?: { id: string; code: string; nameEn: string; nameAr: string } | null;
+    toWarehouse?: { id: string; code: string; nameEn: string; nameAr: string } | null;
+    createdByName?: string | null;
+    postedByName?: string | null;
   }) {
     return {
       id: document.id,
@@ -1030,6 +1080,17 @@ export class StockDocumentsService {
       branch: document.branch,
       costCenterId: document.costCenterId ?? null,
       costCenter: document.costCenter ?? null,
+      // Where the goods left and where they arrived. Null means the branch
+      // default, which is what the posting used - so the screen names the
+      // default rather than showing an empty cell.
+      fromWarehouseId: document.fromWarehouseId ?? null,
+      toWarehouseId: document.toWarehouseId ?? null,
+      fromWarehouse: document.fromWarehouse ?? null,
+      toWarehouse: document.toWarehouse ?? null,
+      createdById: document.createdBy ?? null,
+      createdByName: document.createdByName ?? null,
+      postedById: document.postedBy ?? null,
+      postedByName: document.postedByName ?? null,
       journalEntryId: document.journalEntryId,
       postedAt: document.postedAt?.toISOString() ?? null,
       createdAt: document.createdAt.toISOString(),

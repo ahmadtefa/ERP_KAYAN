@@ -940,6 +940,12 @@ _modules(AppLocalizations l10n) => [
   (icon: Icons.local_shipping_outlined, label: l10n.suppliers, path: AppRoutes.suppliers, accent: SectionAccents.parties),
   (icon: Icons.category_outlined, label: l10n.items, path: AppRoutes.items, accent: SectionAccents.inventory),
   (icon: Icons.inventory_2_outlined, label: l10n.stock, path: AppRoutes.stock, accent: SectionAccents.inventory),
+  (
+    icon: Icons.warehouse_outlined,
+    label: l10n.localeName == 'ar' ? 'إدارة المخازن' : 'Warehouses',
+    path: AppRoutes.warehouses,
+    accent: SectionAccents.inventory,
+  ),
   (icon: Icons.point_of_sale_outlined, label: l10n.salesInvoices, path: AppRoutes.salesInvoices, accent: SectionAccents.sales),
   (icon: Icons.shopping_cart_outlined, label: l10n.purchaseInvoices, path: AppRoutes.purchaseInvoices, accent: SectionAccents.purchases),
   (icon: Icons.account_tree_outlined, label: l10n.chartOfAccounts, path: AppRoutes.chartOfAccounts, accent: SectionAccents.accounting),

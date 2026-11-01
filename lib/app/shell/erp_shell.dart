@@ -285,6 +285,17 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         group: _NavGroup.inventory,
       ),
       _NavItem(
+        AppRoutes.warehouses,
+        Icons.warehouse_outlined,
+        // Written here rather than regenerating the catalogue for one screen,
+        // the same way the stock-documents label is.
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'إدارة المخازن'
+            : 'Warehouses',
+        permissions: const ['inventory.warehouses.read'],
+        group: _NavGroup.inventory,
+      ),
+      _NavItem(
         AppRoutes.stockDocuments,
         Icons.assignment_outlined,
         // No catalogue key yet: the label is written where it is used rather

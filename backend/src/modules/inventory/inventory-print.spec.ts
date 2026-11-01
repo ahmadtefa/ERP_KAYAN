@@ -55,6 +55,24 @@ describe('the stock document sheet', () => {
     expect(table.titleEn).toBe('Stock transfer');
   });
 
+  it('names the two stores and the people who raised and posted it', () => {
+    const table = stockDocumentTable({
+      ...RECEIPT,
+      fromWarehouse: { code: 'WH1', nameEn: 'Front store', nameAr: 'المخزن الأمامي' },
+      toWarehouse: { code: 'WH2', nameEn: 'Back store', nameAr: 'المخزن الخلفي' },
+      createdByName: 'amal',
+      postedByName: 'tarek',
+    });
+
+    const labels = table.meta.map((row) => row.labelEn);
+    expect(labels).toEqual(
+      expect.arrayContaining(['From store', 'To store', 'Created by', 'Posted by']),
+    );
+    expect(table.meta.map((row) => row.value)).toEqual(
+      expect.arrayContaining(['المخزن الأمامي', 'المخزن الخلفي', 'amal', 'tarek']),
+    );
+  });
+
   it('adds the counted figure to a physical count and not to a transfer', () => {
     const count = stockDocumentTable({
       ...RECEIPT,
