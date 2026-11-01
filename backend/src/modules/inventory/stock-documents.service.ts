@@ -660,6 +660,14 @@ export class StockDocumentsService {
             : sourceShelf.unitCost.toDecimalPlaces(MONEY_SCALE);
           const totalCost = unitCost.mul(line.quantity).toDecimalPlaces(MONEY_SCALE);
 
+          // The line keeps the cost it moved at. Without this the document
+          // printed "2 units, 0.00" while the movements it produced carried 30,
+          // and the snapshot column promised exactly the figure it was missing.
+          await tx.stockDocumentLine.update({
+            where: { id: line.id },
+            data: { unitCost, totalCost },
+          });
+
           await this.move(tx, {
             companyId,
             branchId: document.fromBranchId as string,
@@ -765,6 +773,13 @@ export class StockDocumentsService {
         const direction = quantity.greaterThan(0) ? StockDirection.IN : StockDirection.OUT;
         const absoluteQuantity = quantity.abs();
         const totalCost = unitCost.mul(absoluteQuantity).toDecimalPlaces(MONEY_SCALE);
+
+        // A write-off that carried the shelf average because nobody typed a
+        // cost must say so on its own line: the paper is what an auditor reads.
+        await tx.stockDocumentLine.update({
+          where: { id: line.id },
+          data: { unitCost, totalCost },
+        });
 
         // COUNT remains a reconciliation to physically counted reality and
         // retains its existing branch-level-only posting policy.
