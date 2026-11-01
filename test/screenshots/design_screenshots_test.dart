@@ -1,12 +1,16 @@
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:erp_kayan/app/router/app_router.dart';
 import 'package:erp_kayan/app/shell/erp_shell.dart';
 import 'package:erp_kayan/app/theme/app_theme.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
+import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/json/json_utils.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/accounting/domain/entities/account.dart';
+import 'package:erp_kayan/features/admin/presentation/screens/admin_screen.dart';
 import 'package:erp_kayan/features/accounting/presentation/providers/chart_of_accounts_providers.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
@@ -48,8 +52,19 @@ class _FakeApiClient extends ApiClient {
       '/parties/customers' => _customers,
       '/sales/invoices' => _invoices,
       '/inventory/items' => _items,
+      '/admin/users' => _users,
       _ => const <Map<String, dynamic>>[],
     };
+  }
+
+  /// A face, so the picture path is drawn and not only the initial.
+  ///
+  /// The bytes are rendered by the test itself (see `_renderAvatarPng`), so a
+  /// screenshot never depends on a file being present or on the network.
+  @override
+  Future<Uint8List> getBytes(String path) async {
+    if (_avatarPng != null && path.startsWith('/users/')) return _avatarPng!;
+    throw const ServerFailure('no photo in these screenshots');
   }
 
   @override
@@ -341,6 +356,94 @@ final Json _monthly = <String, dynamic>{
   ],
 };
 
+/// The people the administration screen lists: one with a picture, two
+/// without, which is exactly the pair of states the avatar has to render.
+final _users = <Map<String, dynamic>>[
+  <String, dynamic>{
+    'id': 'user-admin',
+    'username': 'admin',
+    'fullNameEn': 'System Manager',
+    'fullNameAr': 'مدير النظام',
+    'hasAvatar': true,
+    'isActive': true,
+    'isSuperAdmin': true,
+    'roles': <Map<String, dynamic>>[
+      <String, dynamic>{'code': 'ADMIN', 'nameAr': 'مدير النظام'},
+    ],
+    'lastLoginAt': '2026-11-01T09:15:00.000Z',
+  },
+  <String, dynamic>{
+    'id': 'user-sales',
+    'username': 'sales',
+    'fullNameEn': 'Sales Clerk',
+    'fullNameAr': 'موظف مبيعات',
+    'hasAvatar': false,
+    'isActive': true,
+    'isSuperAdmin': false,
+    'roles': <Map<String, dynamic>>[
+      <String, dynamic>{'code': 'SALES', 'nameAr': 'مبيعات'},
+    ],
+    'lastLoginAt': '2026-10-30T13:40:00.000Z',
+  },
+  <String, dynamic>{
+    'id': 'user-store',
+    'username': 'store',
+    'fullNameEn': 'Store Keeper',
+    'fullNameAr': 'أمين المخزن',
+    'hasAvatar': false,
+    'isActive': false,
+    'isSuperAdmin': false,
+    'roles': <Map<String, dynamic>>[
+      <String, dynamic>{'code': 'STORE', 'nameAr': 'المخازن'},
+    ],
+  },
+];
+
+/// The same administrator, but with a photo, so the signed-in face can be
+/// seen in the top bar rather than only in the user list.
+const _adminWithPhoto = AppUser(
+  id: 'admin-1',
+  username: 'admin',
+  fullName: 'مدير النظام',
+  companyId: 'company-1',
+  branchId: 'branch-1',
+  roles: ['ADMIN'],
+  isSuperAdmin: true,
+  hasAvatar: true,
+  avatarUrl: '/users/admin-1/avatar',
+);
+
+/// A face drawn by the test: a warm head on a violet ground.
+Uint8List? _avatarPng;
+
+Future<Uint8List?> _renderAvatarPng() async {
+  try {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawCircle(
+      const Offset(64, 64),
+      64,
+      Paint()..color = const Color(0xFF6E58C8),
+    );
+    canvas.drawCircle(
+      const Offset(64, 50),
+      24,
+      Paint()..color = const Color(0xFFF3D2B3),
+    );
+    canvas.drawCircle(
+      const Offset(64, 116),
+      38,
+      Paint()..color = const Color(0xFFF3D2B3),
+    );
+    final image = await recorder.endRecording().toImage(128, 128);
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    return data == null ? null : data.buffer.asUint8List();
+  } catch (_) {
+    // No rasteriser: the screen still renders, with the initial instead.
+    return null;
+  }
+}
+
 /// The app ships no font of its own; a widget-test render would otherwise
 /// draw every glyph as a box. When the machine has a real font with Arabic
 /// coverage, register it so the screenshots stay readable. Absent fonts are
@@ -378,6 +481,8 @@ Future<void> _pumpShot(
   required String route,
   required Widget child,
   Size size = const Size(1440, 900),
+  Locale locale = const Locale('ar'),
+  AppUser user = _adminUser,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -403,7 +508,7 @@ Future<void> _pumpShot(
         tokenStoreProvider.overrideWithValue(FakeTokenStore()),
         authRepositoryProvider.overrideWithValue(FakeAuthRepository()),
         apiClientProvider.overrideWithValue(_FakeApiClient()),
-        currentUserProvider.overrideWithValue(_adminUser),
+        currentUserProvider.overrideWithValue(user),
         chartOfAccountsProvider.overrideWith(
           _FakeChartOfAccountsController.new,
         ),
@@ -413,7 +518,7 @@ Future<void> _pumpShot(
         dashboardMonthlyProvider.overrideWith((ref) async => _monthly),
       ],
       child: MaterialApp.router(
-        locale: const Locale('ar'),
+        locale: locale,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         theme: AppTheme.light(),
@@ -427,7 +532,10 @@ Future<void> _pumpShot(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUpAll(_tryLoadSystemFonts);
+  setUpAll(() async {
+    await _tryLoadSystemFonts();
+    _avatarPng = await _renderAvatarPng();
+  });
 
   testWidgets('screenshot: dashboard inside the shell (Arabic RTL)', (
     tester,
@@ -533,6 +641,53 @@ void main() {
     await expectLater(
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/invoice_carton_line_ar.png'),
+    );
+  });
+
+  // The same screen in English: the redesign has to read left-to-right as
+  // well as right-to-left, and a picture is the only honest way to say so.
+  testWidgets('screenshot: dashboard in English (LTR)', (tester) async {
+    await _pumpShot(
+      tester,
+      route: AppRoutes.dashboard,
+      locale: const Locale('en'),
+      child: const DashboardScreen(),
+    );
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/dashboard_en.png'),
+    );
+  });
+
+  // One account with a photo and two without, in the same table: that is the
+  // screen an administrator uses to see who has set one.
+  testWidgets('screenshot: administration, people with and without photos (Arabic RTL)', (
+    tester,
+  ) async {
+    await _pumpShot(
+      tester,
+      route: AppRoutes.administration,
+      child: const AdminScreen(),
+    );
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/admin_users_ar.png'),
+    );
+  });
+
+  // The signed-in person's own face in the top bar, from `/users/:id/avatar`.
+  testWidgets('screenshot: the signed-in person with their own photo (Arabic RTL)', (
+    tester,
+  ) async {
+    await _pumpShot(
+      tester,
+      route: AppRoutes.dashboard,
+      user: _adminWithPhoto,
+      child: const DashboardScreen(),
+    );
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/shell_avatar_ar.png'),
     );
   });
 }

@@ -553,9 +553,19 @@ jobs:
   flutter:
     name: Flutter Web (analyze, test, build)
     runs-on: ubuntu-latest
+    # The screenshots this job renders are published back to the branch, so a
+    # person can look at the redesigned screens without downloading an
+    # artefact from a host that may be unreachable.
+    permissions:
+      contents: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # The branch itself, not the PR merge commit: the commit that
+          # publishes the screenshots must fast-forward the branch, not add a
+          # merge of it.
+          ref: ${{ github.head_ref || github.ref }}
       - name: Set up Python for branded icons
         uses: actions/setup-python@v5
         with:
@@ -585,6 +595,29 @@ jobs:
           name: design-screenshots
           path: test/screenshots/goldens/*.png
           if-no-files-found: warn
+          retention-days: 30
+      # The rendered screens go into the repository as well as the artefact
+      # list, so the redesign can be reviewed from the branch. A push made
+      # with the run's own token does not start another run.
+      - name: Publish the design screenshots to the branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          target=docs/screens/redesign
+          mkdir -p "$target"
+          rm -f "$target"/*.png
+          cp test/screenshots/goldens/*.png "$target"/
+          git config user.name 'KAYAN screenshots'
+          git config user.email 'screenshots@kayan.invalid'
+          git add "$target"
+          if git diff --cached --quiet; then
+            echo "The screenshots are unchanged."
+            exit 0
+          fi
+          git commit -m 'chore(design): render the redesigned screens [skip ci]'
+          git push origin "HEAD:$BRANCH"
           retention-days: 30
       - name: Run tests
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
