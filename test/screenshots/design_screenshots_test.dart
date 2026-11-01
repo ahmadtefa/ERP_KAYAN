@@ -805,47 +805,52 @@ void main() {
     );
   });
 
-  // A diagnostic picture, not a screen: the same words in the theme family,
-  // in a family that is not registered, and with no family at all. If the
-  // first line is letters and the others are squares, the renderer is honest;
-  // if all three are squares, a widget test on this machine cannot draw text
-  // and the screens must be captured some other way.
+  // A diagnostic picture, not a screen: the same words drawn four ways, so
+  // "the screens show boxes" can be pinned to the path that loses the family
+  // instead of being guessed at. Line 3 is what the application itself does -
+  // a style read from `theme.textTheme` - and line 4 relies on the style a
+  // `Text` gets when it names none.
   testWidgets('screenshot: what the renderer really draws (font probe)', (
     tester,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(900, 260));
+    await tester.binding.setSurfaceSize(const Size(900, 380));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    const ink = Color(0xFF111827);
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light(),
-        home: ColoredBox(
-          color: const Color(0xFFFFFFFF),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
-              Text(
-                'IBMPlex 0123 KAYAN كيان',
-                style: TextStyle(
-                  fontSize: 34,
-                  fontFamily: 'IBMPlexSansArabic',
-                  color: Color(0xFF111827),
-                ),
-              ),
-              Text(
-                'default 0123 KAYAN كيان',
-                style: TextStyle(fontSize: 34, color: Color(0xFF111827)),
-              ),
-              Text(
-                'bold 0123 KAYAN كيان',
-                style: TextStyle(
-                  fontSize: 34,
-                  fontWeight: FontWeight.w700,
-                  fontFamily: 'IBMPlexSansArabic',
-                  color: Color(0xFF111827),
-                ),
-              ),
-            ],
+        home: Scaffold(
+          backgroundColor: const Color(0xFFFFFFFF),
+          body: Builder(
+            builder: (context) {
+              final theme = Theme.of(context);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    '1 named family 0123 كيان',
+                    style: TextStyle(
+                      fontSize: 30,
+                      fontFamily: 'IBMPlexSansArabic',
+                      color: ink,
+                    ),
+                  ),
+                  Text(
+                    '2 theme.bodyMedium 0123 كيان',
+                    style: theme.textTheme.bodyMedium?.copyWith(fontSize: 30, color: ink),
+                  ),
+                  Text(
+                    '3 theme.titleMedium 0123 كيان',
+                    style: theme.textTheme.titleMedium?.copyWith(fontSize: 30, color: ink),
+                  ),
+                  const Text(
+                    '4 no style 0123 كيان',
+                    style: TextStyle(fontSize: 30, color: ink),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),

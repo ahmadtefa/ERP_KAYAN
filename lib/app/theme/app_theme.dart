@@ -32,7 +32,16 @@ abstract final class AppTheme {
   static ThemeData _build(Brightness brightness, double textScale) {
     final isLight = brightness == Brightness.light;
     final scheme = isLight ? _lightScheme : _darkScheme;
-    final textTheme = _textTheme(scheme);
+    // The family is applied to the text theme itself, not only handed to
+    // `ThemeData`: a theme built from an explicit `textTheme` keeps the styles
+    // it was given, so a screen that reads `theme.textTheme.titleMedium` - and
+    // every control theme derived from it - would fall back to the system face.
+    // The screenshots caught exactly that: boxes where the bundled typeface
+    // should be, while a style that named the family rendered correctly.
+    final textTheme = _textTheme(scheme).apply(
+      fontFamily: AppTypography.latinFamily,
+      fontFamilyFallback: AppTypography.fallback,
+    );
     final border = isLight ? AppColors.border : AppColors.darkBorder;
     final surface = isLight ? AppColors.surface : AppColors.darkSurface;
     final surfaceAlt = isLight ? AppColors.surfaceMuted : AppColors.darkSurfaceAlt;
