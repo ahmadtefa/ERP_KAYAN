@@ -3,6 +3,13 @@
 import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, timingSafeEqual, verify } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
+// This check proves private-key possession and is restricted to operator
+// machines; never ask CI to receive even an ephemeral private signing key.
+if (process.env.CI || process.env.GITHUB_ACTIONS) {
+  console.error('Private-key pair verification is forbidden in CI.');
+  process.exit(1);
+}
+
 const expected = '9153e15e475ba2e2251a7e40d8eb58559006bbba2923ee8ba564d8d59cc602c4';
 try {
   const publicKey = createPublicKey(readFileSync('distribution/windows/public-key.pem'));

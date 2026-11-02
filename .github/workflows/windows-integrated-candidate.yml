@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   configured-key-compatibility:
-    name: Verify configured key pair in memory
+    name: Verify approved production public key
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -21,10 +21,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22.22.3'
-      - name: Verify approved key and random challenge without storing secrets
-        env:
-          KAYAN_LICENCE_PRIVATE_KEY: ${{ secrets.KAYAN_LICENCE_PRIVATE_KEY }}
-        run: node scripts/verify-configured-key-pair.mjs
+      # Pair ownership is verified only by an operator outside CI. This job
+      # checks the public identity; it does not claim to prove key possession.
+      - name: Verify approved production public key
+        run: node scripts/license-build-policy.mjs --mode product --public-key distribution/windows/public-key.pem
 
   windows-key-preflight:
     name: Test runtime key preflight on Windows PowerShell 5.1

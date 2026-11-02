@@ -104,14 +104,13 @@ test('all release paths fail closed; test artifacts have a distinct path and nam
   assert.match(workflow, /Product build refused: the approved licence public key is missing/);
   assert.match(workflow, /--mode product --public-key \$operatorKey/);
   assert.match(workflow, /-TestSignedBuild -LicencePublicKeyPath \$key/);
-  // The one approved use compares the configured key with the product public
-  // key in memory. It must not be exposed to the build or any other step.
-  const secretSteps = steps.filter(step => /secrets\.KAYAN_LICENCE_PRIVATE_KEY/.test(step));
-  assert.equal(secretSteps.length, 1);
-  assert.match(secretSteps[0], /^Verify configured product key pair in memory/);
-  assert.match(secretSteps[0], /run: node scripts\/verify-configured-key-pair\.mjs/);
-  assert.equal((workflow.match(/secrets\.KAYAN_LICENCE_PRIVATE_KEY/g) || []).length, 1);
+  // These two release workflows must not receive a product private key.
+  assert.doesNotMatch(workflow, /secrets\.KAYAN_LICENCE_PRIVATE_KEY/);
+  const integrated = readFileSync(new URL('../.github/workflows/windows-integrated-candidate.yml', import.meta.url), 'utf8');
+  assert.doesNotMatch(integrated, /secrets\.KAYAN_LICENCE_PRIVATE_KEY/);
+  assert.match(integrated, /license-build-policy\.mjs --mode product/);
   const verifier = readFileSync(new URL('./verify-configured-key-pair.mjs', import.meta.url), 'utf8');
+  assert.match(verifier, /process\.env\.CI \|\| process\.env\.GITHUB_ACTIONS/);
   assert.match(verifier, /randomBytes\(32\)/);
   assert.match(verifier, /timingSafeEqual\(derivedDer, publicDer\)/);
   assert.match(verifier, /verify\(null, challenge, publicKey, signature\)/);
@@ -187,4 +186,14 @@ test('Sandbox preparation does not start installers on the host', () => {
 test('diagnostic workflow does not receive the production signing secret', () => {
   const diagnostic = readFileSync(new URL('../.github/workflows/_licence-step-diagnose.yml', import.meta.url), 'utf8');
   assert.doesNotMatch(diagnostic, /secrets\.KAYAN_LICENCE_PRIVATE_KEY/);
+});
+
+
+test('private key pair verification fails closed in CI before reading a key', () => {
+  const result = spawnSync(process.execPath, ['scripts/verify-configured-key-pair.mjs'], {
+    cwd: root, encoding: 'utf8', env: { ...process.env, CI: 'true', KAYAN_LICENCE_PRIVATE_KEY: 'not-a-key' },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /forbidden in CI/);
+  assert.doesNotMatch(result.stderr, /not-a-key/);
 });
