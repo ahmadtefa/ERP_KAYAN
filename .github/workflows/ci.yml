@@ -837,7 +837,6 @@ jobs:
       KAYAN_ADMIN_USERNAME: ci-admin
       KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
       PORT: 3100
-      NODE_ENV: production
       LICENSE_MACHINE_ID: KM-CI-PROOF-MACHINE
       KAYAN_API: http://127.0.0.1:3100/api/v1
     steps:
@@ -879,6 +878,11 @@ jobs:
       - name: Mint an ephemeral signing key pair for this run
         run: node tools/license-generator/kayan-license.mjs init --home "$KAYAN_GENERATOR_HOME"
       - name: Start the licensed API
+        # NODE_ENV belongs here and not to the job: `npm ci` treats a
+        # production environment as "no devDependencies", and the build and the
+        # seed both need them.
+        env:
+          NODE_ENV: production
         run: |
           node backend/dist/src/main.js > /tmp/kayan-licensed-api.log 2>&1 &
           echo $! > /tmp/kayan-licensed-api.pid
