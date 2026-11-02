@@ -324,8 +324,13 @@ async function main() {
     toWarehouseId: store.id,
     lines: [{ itemId: item.id, quantity: -10, batchId: lot.batchId, storageLocationId: bin.id }],
   });
-  check('W4 it is a DRAFT with a WO number', draft.status === 'DRAFT' && /^WO-/.test(draft.documentNumber),
-    `${draft.status} ${draft.documentNumber}`);
+  // `status` crosses the API in lower case - it is what the screen and the
+  // Flutter model read (`stockDocumentStatus`), and the row in PostgreSQL is
+  // the upper-case enum. Both are checked, so neither can drift alone.
+  check('W4 it is a draft with a WO number', draft.status === 'draft' && draft.kind === 'write_off' &&
+    /^WO-/.test(draft.documentNumber), `${draft.status}/${draft.kind} ${draft.documentNumber}`);
+  const draftRow = await prisma.stockDocument.findUnique({ where: { id: draft.id }, select: { status: true } });
+  check('W4 the database row is the DRAFT enum', draftRow.status === 'DRAFT', draftRow.status);
   check('W4 the line carries the lot and the shelf',
     draft.lines[0].batchNumber === savedLot.batchNumber && draft.lines[0].storageLocationId === bin.id,
     `${draft.lines[0].batchNumber} / ${draft.lines[0].storageLocationId}`);
@@ -364,7 +369,9 @@ async function main() {
   // ============================================== W9  posting
   console.log('\n[W9] posting takes the goods out of the shelf, the lot and the books');
   const posted = await documents.post(companyId, maker.id, draft.id);
-  check('W9 the document is POSTED', posted.status === 'POSTED', posted.status);
+  check('W9 the document is posted', posted.status === 'posted', posted.status);
+  const postedRow = await prisma.stockDocument.findUnique({ where: { id: draft.id }, select: { status: true } });
+  check('W9 the database row is the POSTED enum', postedRow.status === 'POSTED', postedRow.status);
   check('W9 the shelf lost exactly 10', (await shelfQuantity(store.id, item.id)) === 90,
     String(await shelfQuantity(store.id, item.id)));
   const lotAfter = await prisma.itemBatch.findUnique({ where: { id: lot.batchId } });
@@ -372,14 +379,20 @@ async function main() {
   const writeOffMove = await prisma.stockMovement.findFirst({
     where: { companyId, referenceType: 'STOCK_WRITE_OFF', referenceId: draft.id },
   });
-  check('W9 the movement says OUT, 10, and where', writeOffMove?.direction === 'OUT' &&
-    Number(writeOffMove.quantity) === 10 && writeOffMove.storageLocationId === bin.id,
-    `${writeOffMove?.direction} ${writeOffMove?.quantity}`);
+  // The movement carries the lot and the shelf the paper named, which is what
+  // the shelf card and the lot card are read from.
+  check('W9 the movement says OUT, 10, in the right store', writeOffMove?.direction === 'OUT' &&
+    Number(writeOffMove.quantity) === 10 && writeOffMove.warehouseId === store.id,
+    `${writeOffMove?.direction} ${writeOffMove?.quantity} @ ${writeOffMove?.warehouseId}`);
+  check('W9 the movement names the lot it destroyed', writeOffMove?.batchId === lot.batchId,
+    String(writeOffMove?.batchId));
+  check('W9 the movement names the shelf it left', writeOffMove?.storageLocationId === bin.id,
+    String(writeOffMove?.storageLocationId));
   const journal = await prisma.stockDocument.findUnique({ where: { id: draft.id }, select: { journalEntryId: true } });
   check('W9 a journal entry was written', Boolean(journal?.journalEntryId));
   const lossLines = journal?.journalEntryId
     ? await prisma.journalLine.findMany({
-        where: { entryId: journal.journalEntryId, accountId: differenceAccount.id },
+        where: { journalEntryId: journal.journalEntryId, accountId: differenceAccount.id },
       })
     : [];
   const lossDebit = lossLines.reduce((sum, line) => sum + Number(line.debit), 0);
@@ -471,13 +484,24 @@ async function main() {
   check('T5 the session is POSTED', countPosted.status === 'POSTED', countPosted.status);
   check('T5 the shelf now holds 85', (await shelfQuantity(store.id, item.id)) === 85,
     String(await shelfQuantity(store.id, item.id)));
+  // A count posts one ADJUSTMENT linked back to the session - `COUNT` is the
+  // kind the stock-document route reserves for a document typed as a count,
+  // and the take uses the adjustment so the difference lands in 5107.
   const countDoc = await prisma.stockDocument.findFirst({
-    where: { companyId, kind: 'COUNT', stockTakeSessionId: session.id },
+    where: { companyId, stockTakeSessionId: session.id },
     include: { lines: true },
   });
   check('T5 the count produced one adjustment document with an entry',
-    Boolean(countDoc) && countDoc.status === 'POSTED' && Boolean(countDoc.journalEntryId),
-    countDoc?.documentNumber ?? 'missing');
+    Boolean(countDoc) && countDoc.kind === 'ADJUSTMENT' && countDoc.status === 'POSTED' &&
+      Boolean(countDoc.journalEntryId),
+    `${countDoc?.kind} ${countDoc?.status} ${countDoc?.documentNumber ?? 'missing'}`);
+  const sessionRow = await prisma.stockTakeSession.findUnique({
+    where: { id: session.id },
+    select: { documentId: true, journalEntryId: true },
+  });
+  check('T5 the session remembers the document and its entry',
+    sessionRow.documentId === countDoc?.id && sessionRow.journalEntryId === countDoc?.journalEntryId,
+    String(sessionRow.documentId));
   check('T5 the document line says -5', countDoc && Number(countDoc.lines[0].quantity) === -5,
     String(countDoc?.lines?.[0]?.quantity));
 

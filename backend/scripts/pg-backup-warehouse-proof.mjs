@@ -42,9 +42,16 @@ const PG_DUMP = process.env.PG_DUMP ?? 'pg_dump';
 const PG_RESTORE = process.env.PG_RESTORE ?? 'pg_restore';
 const PSQL = process.env.PSQL ?? 'psql';
 
+/// `psql`, `pg_dump` and `pg_restore` refuse Prisma's `?schema=public`: it is a
+/// Prisma option, not a libpq one, and the tools abort on it. The database is
+/// the same either way, so the option is stripped for the client tools only.
+function toolsUrl(url) {
+  return url.replace(/([?&])schema=[^&]*/g, '$1').replace(/[?&]$/, '');
+}
+
 function adminUrl() {
-  if (process.env.ADMIN_DATABASE_URL) return process.env.ADMIN_DATABASE_URL;
-  const url = new URL(DB_URL);
+  if (process.env.ADMIN_DATABASE_URL) return toolsUrl(process.env.ADMIN_DATABASE_URL);
+  const url = new URL(toolsUrl(DB_URL));
   url.pathname = '/postgres';
   return url.toString();
 }
@@ -96,7 +103,7 @@ async function main() {
   const tag = randomUUID().slice(0, 6);
   const scratchName = `kayan_wh_restore_${Date.now()}`;
   const scratchUrl = (() => {
-    const url = new URL(DB_URL);
+    const url = new URL(toolsUrl(DB_URL));
     url.pathname = `/${scratchName}`;
     return url.toString();
   })();
@@ -210,7 +217,8 @@ async function main() {
 
   try {
     console.log('\n[2] take a real dump of the whole database');
-    await run(PG_DUMP, ['--format=custom', '--no-owner', '--no-privileges', '--file', dumpFile, DB_URL]);
+    const sourceToolsUrl = toolsUrl(DB_URL);
+    await run(PG_DUMP, ['--format=custom', '--no-owner', '--no-privileges', '--file', dumpFile, sourceToolsUrl]);
     const dumpSize = Number((await run('stat', ['-c', '%s', dumpFile])).stdout.trim());
     check('the archive was written', dumpSize > 0, `${dumpSize} bytes`);
 
@@ -226,7 +234,7 @@ async function main() {
     // nobody has granted warehouse rights in yet: the restore still has to
     // reproduce it exactly, but "0 rows" is not an error there.
     const same = async (label, sqlText, { allowZero = false } = {}) => {
-      const before = await scalar(DB_URL, sqlText);
+      const before = await scalar(sourceToolsUrl, sqlText);
       const after = await scalar(scratchUrl, sqlText);
       check(label, before === after && (allowZero || before !== '0'), `${after} (was ${before})`);
     };
@@ -247,8 +255,24 @@ async function main() {
     await same('the roles keep the warehouse permissions they were granted',
       `select count(*) from role_permissions rp join permissions p on p.id = rp."permissionId" where p.code like 'inventory.warehouse%'`,
       { allowZero: true });
-    await same('every migration was recorded in the archive',
-      `select count(*) from _prisma_migrations where finished_at is not null`);
+    // The schema itself, name for name: a restore that silently dropped a
+    // table would keep every count above correct while losing a feature.
+    await same('the restored schema is the same table for table',
+      `select string_agg(table_name, ',' order by table_name) from information_schema.tables where table_schema='public'`);
+    // Prisma's own bookkeeping, when the database was migrated with the CLI.
+    // A database whose schema was applied from the migration SQL by
+    // `pg-apply-migrations.mjs` has no such table, and that is not a fault:
+    // the table list above has already proved the schema arrived.
+    const hasMigrationTable = Number(
+      await scalar(sourceToolsUrl,
+        `select count(*) from information_schema.tables where table_schema='public' and table_name='_prisma_migrations'`),
+    );
+    if (hasMigrationTable > 0) {
+      await same('every migration was recorded in the archive',
+        `select count(*) from _prisma_migrations where finished_at is not null`);
+    } else {
+      console.log('  SKIP  every migration was recorded in the archive — this database was built from the migration SQL, so Prisma keeps no bookkeeping table here');
+    }
 
     console.log('\n[5] the restored books still balance');
     const debit = async (url) =>
@@ -258,7 +282,7 @@ async function main() {
           `select coalesce(sum(debit),0) - coalesce(sum(credit),0) from journal_lines`,
         ),
       );
-    const sourceBalance = await debit(DB_URL);
+    const sourceBalance = await debit(sourceToolsUrl);
     const restoredBalance = await debit(scratchUrl);
     check('debits equal credits, before and after', sourceBalance === 0 && restoredBalance === 0,
       `${restoredBalance}`);

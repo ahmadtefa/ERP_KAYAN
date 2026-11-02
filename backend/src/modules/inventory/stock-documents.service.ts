@@ -854,6 +854,10 @@ export class StockDocumentsService {
           userId,
           requireStock: direction === StockDirection.OUT && !settings.allowNegativeStock,
           warehouseId: toWarehouseId,
+          // The lot and the shelf the paper names travel with the movement, so
+          // the shelf card, the lot card and the document cannot disagree.
+          batchId: line.batchId ?? null,
+          storageLocationId: line.storageLocationId ?? null,
         });
 
         // A line that names a lot moves that lot, not only the shelf: a
@@ -1353,6 +1357,13 @@ export class StockDocumentsService {
       enteredQuantity?: Prisma.Decimal | null;
       unitFactor?: Prisma.Decimal | null;
       baseUnitName?: string | null;
+      /// Which lot and which shelf the goods left or arrived on. A document
+      /// line already names both; carrying them onto the movement is what lets
+      /// the shelf card and the lot card say the same thing as the paper - a
+      /// write-off that dropped them left the bin still showing goods that had
+      /// been destroyed.
+      batchId?: string | null;
+      storageLocationId?: string | null;
     },
   ) {
     const balance = await this.balance(tx, input.companyId, input.branchId, input.itemId);
@@ -1389,6 +1400,8 @@ export class StockDocumentsService {
         }),
         unitCost: input.unitCost,
         totalCost: input.totalCost,
+        batchId: input.batchId ?? null,
+        storageLocationId: input.storageLocationId ?? null,
         referenceType: input.referenceType,
         referenceId: input.referenceId,
         referenceNumber: input.referenceNumber,

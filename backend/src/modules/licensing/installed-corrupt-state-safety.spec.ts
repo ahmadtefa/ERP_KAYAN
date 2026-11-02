@@ -11,6 +11,15 @@ import { activation, expectCode, harness, MACHINE, PUBLIC_PEM } from './licensin
 
 // Synthetic keys and FakeDb only. The installed directory below is a fresh
 // test directory, never a customer path or a real database.
+//
+// Every test here signs and verifies with real Ed25519 keys and writes a
+// directory of authenticated state files. That is milliseconds on a Linux
+// runner and seconds on the Windows runner that builds the installer, where
+// jest's five-second default killed the reconciliation test with "Exceeded
+// timeout of 5000 ms": a slow machine, not a defect. The limit is raised for
+// this file only; no assertion is relaxed and a wrong answer still fails.
+jest.setTimeout(30_000);
+
 describe('installed licence state corruption safety', () => {
   it.each(['unreadable-json', 'wrong-mac', 'null-state'])('recovers %s primary from the authenticated mirror without unblocking an untrusted state', async (kind) => {
     const h = harness();

@@ -317,6 +317,27 @@ describe('a documentary write-off', () => {
     expect(tx.$executeRaw).not.toHaveBeenCalled();
   });
 
+  it('writes the lot and the shelf onto the movement the loss produced', async () => {
+    // The document names the lot and the shelf; the stock movement is what the
+    // shelf card and the lot card are read from. A movement that dropped them
+    // left the bin still showing goods that had been destroyed.
+    const { service, document } = makeService();
+    document.approvedAt = new Date();
+    document.approvedBy = APPROVER;
+    document.lines[0].batchId = 'lot-1';
+    document.lines[0].storageLocationId = 'bin-shelf-1';
+    document.lines[0].unitCost = D('10');
+
+    await service.post(COMPANY, AUTHOR, 'doc-wo');
+
+    const moved = ((service as any).move as jest.Mock).mock.calls[0][1];
+    expect(moved.batchId).toBe('lot-1');
+    expect(moved.storageLocationId).toBe('bin-shelf-1');
+    expect(moved.direction).toBe('OUT');
+    expect(moved.quantity.toFixed(4)).toBe('4.0000');
+    expect(moved.warehouseId).toBe(WAREHOUSE);
+  });
+
   it('writes the shelf average onto the document line it carried out', async () => {
     const { service, document, tx } = makeService();
     document.approvedAt = new Date();
