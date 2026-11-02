@@ -356,6 +356,15 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         group: _NavGroup.inventory,
       ),
       _NavItem(
+        AppRoutes.stockTakes,
+        Icons.playlist_add_check_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'الجرد'
+            : 'Stock takes',
+        permissions: const ['inventory.stocktake.read'],
+        group: _NavGroup.inventory,
+      ),
+      _NavItem(
         AppRoutes.stockDocuments,
         Icons.assignment_outlined,
         // No catalogue key yet: the label is written where it is used rather

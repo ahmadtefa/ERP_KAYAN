@@ -698,7 +698,9 @@ class _LocationTreeTabState extends ConsumerState<_LocationTreeTab> {
                     'fromLocationId': text(from, 'id'),
                     'toLocationId': toId,
                     'itemId': itemId,
-                    if (batchId != null) 'batchId': batchId,
+                    // A null-aware entry: the lot travels only when one was
+                    // chosen, without a conditional that the analyzer flags.
+                    'batchId': ?batchId,
                     'quantity': quantityController.text.trim(),
                     if (reasonController.text.trim().isNotEmpty)
                       'reason': reasonController.text.trim(),

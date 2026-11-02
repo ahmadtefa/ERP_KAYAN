@@ -207,11 +207,16 @@ try {
 
   const permissionIds = new Map();
   for (const [code, nameEn, nameAr, module] of OLD_CATALOGUE) {
-    const row = await probe.query(
+    // Some of these codes were already inserted by an earlier migration on a
+    // real installation, so this is the catalogue as it stands rather than a
+    // fresh list: the row is created only where it is missing.
+    await probe.query(
       `INSERT INTO permissions (id, code, "nameEn", "nameAr", module)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4) RETURNING id`,
+       VALUES (gen_random_uuid(), $1, $2, $3, $4)
+       ON CONFLICT (code) DO NOTHING`,
       [code, nameEn, nameAr, module],
     );
+    const row = await probe.query(`SELECT id FROM permissions WHERE code = $1`, [code]);
     permissionIds.set(code, row.rows[0].id);
   }
 
@@ -249,6 +254,18 @@ try {
         order by 1, 2`,
     )
   ).rows;
+
+  // The premise of the whole check: this database really does predate the
+  // warehouse work. If a code were already here, the migration could not be
+  // shown to be what brings it.
+  const preExisting = (
+    await probe.query(`select code from permissions where code = any($1::text[])`, [NEW_CODES])
+  ).rows.map((row) => row.code);
+  check(
+    'the probe database predates the warehouse permissions',
+    preExisting.length === 0,
+    preExisting.join(', ') || 'none of the eighteen existed before the upgrade',
+  );
 
   // ── the upgrade ──
   await probe.query(sqlOf(grantFolder));

@@ -23,6 +23,7 @@ import '../../features/inventory/presentation/screens/batches_screen.dart';
 import '../../features/inventory/presentation/screens/warehouses_screen.dart';
 import '../../features/inventory/presentation/screens/storage_locations_screen.dart';
 import '../../features/inventory/presentation/screens/item_thresholds_screen.dart';
+import '../../features/inventory/presentation/screens/stock_takes_screen.dart';
 import '../../features/notifications/presentation/screens/notification_center_screen.dart';
 import '../../features/invoicing/presentation/providers/invoice_providers.dart';
 import '../../features/licensing/presentation/screens/licence_screen.dart';
@@ -70,6 +71,7 @@ class AppRoutes {
   static const batches = '/inventory/batches';
   static const storageLocations = '/inventory/locations';
   static const itemThresholds = '/inventory/thresholds';
+  static const stockTakes = '/inventory/stock-takes';
   static const notifications = '/notifications';
   static const stockDocuments = '/inventory/documents';
   static const salesInvoices = '/sales/invoices';
@@ -195,6 +197,10 @@ final routerProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: AppRoutes.itemThresholds,
                 builder: (c, s) => const ItemThresholdsScreen(),
+              ),
+              GoRoute(
+                path: AppRoutes.stockTakes,
+                builder: (c, s) => const StockTakesScreen(),
               ),
               GoRoute(
                 path: AppRoutes.notifications,

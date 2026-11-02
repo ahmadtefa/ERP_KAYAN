@@ -519,6 +519,7 @@ export class StockTakesService {
     scope: string;
     status: string;
     frozenAt: Date | null;
+    createdBy?: string | null;
     approvedAt: Date | null;
     approvedBy: string | null;
     postedAt: Date | null;
@@ -540,6 +541,10 @@ export class StockTakesService {
       scope: row.scope,
       status: row.status,
       frozenAt: row.frozenAt,
+      // Who opened the count. The approver must not be that person, so the
+      // screen has to be able to say so before somebody clicks approve and is
+      // told by an error message instead.
+      createdBy: row.createdBy ?? null,
       approvedAt: row.approvedAt,
       approvedBy: row.approvedBy,
       postedAt: row.postedAt,

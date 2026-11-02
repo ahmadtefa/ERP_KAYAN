@@ -62,7 +62,7 @@ class _ItemThresholdsScreenState extends ConsumerState<ItemThresholdsScreen> {
   Future<List<Json>> _load() {
     final client = ref.read(apiClientProvider);
     return client.getList('/inventory/item-thresholds', query: {
-      if (_warehouseId != null) 'warehouseId': _warehouseId,
+      'warehouseId': ?_warehouseId,
       if (_onlyBelowMinimum) 'belowMinimum': 'true',
     });
   }
