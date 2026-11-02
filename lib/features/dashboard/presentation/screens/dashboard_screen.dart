@@ -243,7 +243,7 @@ class _SummarySections extends StatelessWidget {
         arabic ? 'مستحق من العملاء' : 'Owed by customers',
         Icons.groups_2_outlined,
         AppTone.warning,
-        SectionAccents.parties,
+        SectionAccents.customers,
       ),
       _PrimaryMetric(
         arabic ? 'الذمم الدائنة' : 'Payables',
@@ -251,7 +251,7 @@ class _SummarySections extends StatelessWidget {
         arabic ? 'مستحق للموردين' : 'Owed to suppliers',
         Icons.local_shipping_outlined,
         AppTone.danger,
-        SectionAccents.parties,
+        SectionAccents.suppliers,
       ),
     ];
 
@@ -309,16 +309,23 @@ class _SummarySections extends StatelessWidget {
               vertical: AppSpacing.sm,
             ),
             decoration: BoxDecoration(
-              color: AppColors.infoSoft,
+              color: AppTone.info.backgroundOn(
+                theme.brightness,
+                surface: theme.colorScheme.surface,
+              ),
               borderRadius: AppRadii.card,
-              border: Border.all(color: AppColors.primary.withValues(alpha: 0.18)),
+              border: Border.all(
+                color: AppTone.info
+                    .foregroundOn(theme.brightness)
+                    .withValues(alpha: 0.24),
+              ),
             ),
             child: Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.info_outline_rounded,
                   size: 18,
-                  color: AppColors.primary,
+                  color: AppTone.info.foregroundOn(theme.brightness),
                 ),
                 const SizedBox(width: AppSpacing.sm),
                 Expanded(
@@ -327,7 +334,7 @@ class _SummarySections extends StatelessWidget {
                         ? 'لا توجد مستندات في هذه الفترة بعد. ابدأ بتسجيل أول فاتورة أو سند.'
                         : 'There are no documents in this period yet. Raise your first invoice or voucher.',
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: AppColors.textPrimary,
+                      color: AppTone.info.foregroundOn(theme.brightness),
                     ),
                   ),
                 ),
@@ -606,7 +613,10 @@ class _ComparisonStrip extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                  color: changeTone.background,
+                  color: changeTone.backgroundOn(
+                    scheme.brightness,
+                    surface: scheme.surface,
+                  ),
                   borderRadius: BorderRadius.circular(AppRadii.sm),
                 ),
                 child: Text(
@@ -615,7 +625,7 @@ class _ComparisonStrip extends StatelessWidget {
                       : '${change >= 0 ? '+' : ''}${change.toStringAsFixed(1)}%',
                   style: theme.textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: changeTone.foreground,
+                    color: changeTone.foregroundOn(scheme.brightness),
                   ),
                 ),
               ),
@@ -716,6 +726,8 @@ class _ErrorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final danger = AppTone.danger.foregroundOn(theme.brightness);
     return SurfaceCard(
       padding: const EdgeInsets.all(AppSpacing.xxl),
       child: Column(
@@ -725,14 +737,13 @@ class _ErrorCard extends StatelessWidget {
             height: 44,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: AppColors.errorSoft,
+              color: AppTone.danger.backgroundOn(
+                theme.brightness,
+                surface: theme.colorScheme.surface,
+              ),
               borderRadius: BorderRadius.circular(AppRadii.lg),
             ),
-            child: const Icon(
-              Icons.cloud_off_rounded,
-              size: 21,
-              color: AppColors.error,
-            ),
+            child: Icon(Icons.cloud_off_rounded, size: 21, color: danger),
           ),
           const SizedBox(height: AppSpacing.md),
           Text(
@@ -925,10 +936,16 @@ class _ContextChip extends StatelessWidget {
 List<({IconData icon, String label, String path, SectionAccent accent})>
 _modules(AppLocalizations l10n) => [
   (icon: Icons.menu_book_outlined, label: l10n.journalEntries, path: AppRoutes.journalEntries, accent: SectionAccents.accounting),
-  (icon: Icons.people_outline, label: l10n.customers, path: AppRoutes.customers, accent: SectionAccents.parties),
-  (icon: Icons.local_shipping_outlined, label: l10n.suppliers, path: AppRoutes.suppliers, accent: SectionAccents.parties),
+  (icon: Icons.people_outline, label: l10n.customers, path: AppRoutes.customers, accent: SectionAccents.customers),
+  (icon: Icons.local_shipping_outlined, label: l10n.suppliers, path: AppRoutes.suppliers, accent: SectionAccents.suppliers),
   (icon: Icons.category_outlined, label: l10n.items, path: AppRoutes.items, accent: SectionAccents.inventory),
   (icon: Icons.inventory_2_outlined, label: l10n.stock, path: AppRoutes.stock, accent: SectionAccents.inventory),
+  (
+    icon: Icons.warehouse_outlined,
+    label: l10n.localeName == 'ar' ? 'إدارة المخازن' : 'Warehouses',
+    path: AppRoutes.warehouses,
+    accent: SectionAccents.inventory,
+  ),
   (icon: Icons.point_of_sale_outlined, label: l10n.salesInvoices, path: AppRoutes.salesInvoices, accent: SectionAccents.sales),
   (icon: Icons.shopping_cart_outlined, label: l10n.purchaseInvoices, path: AppRoutes.purchaseInvoices, accent: SectionAccents.purchases),
   (icon: Icons.account_tree_outlined, label: l10n.chartOfAccounts, path: AppRoutes.chartOfAccounts, accent: SectionAccents.accounting),

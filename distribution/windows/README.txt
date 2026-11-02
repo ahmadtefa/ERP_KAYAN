@@ -1,4 +1,4 @@
-KAYAN ERP - Windows 64-bit
+﻿KAYAN ERP - Windows 64-bit
 ===========================
 
 Install KAYAN-ERP-Setup-<version>-x64.exe and choose whether to launch the
@@ -6,6 +6,26 @@ program. The package includes its Flutter client, local API runtime, Node.js,
 PostgreSQL 17, and Microsoft Visual C++ x64 runtime. No development tools,
 Docker, separate PostgreSQL installer, or browser are required.
 
+During setup a company page asks one question, in Arabic and English:
+
+  A new company (شركة جديدة)
+      An empty database and then the first-run screen, which asks for the
+      company details and the general manager. Nothing demo, nothing old.
+      If this computer already holds company data, setup stops and says so:
+      it never empties or replaces an existing company to satisfy this
+      choice.
+
+  An existing company (شركة موجودة)
+      Every record already on this computer is kept. Setup verifies that the
+      database really is this installation's KAYAN database - the bundled
+      cluster, version 17, owned by erp_app, with the KAYAN tables - takes a
+      pg_dump backup under %ProgramData%\KAYAN-ERP\backups, and only then
+      lets the program apply its migrations in place. If no such database is
+      found, setup stops with a clear message instead of creating an empty
+      one over it.
+
+The page defaults to whatever is already on the disk, so an unattended
+install does the safe thing; a customer still sees and confirms the choice.
 The first launch applies the checked-in Prisma migrations and asks you to
 create the first administrator. It does not insert a default account, reset a
 database, or seed sample records.
@@ -37,7 +57,8 @@ Company data is kept outside Program Files:
   Company logos and backend logs: %APPDATA%\KAYAN-ERP\
 
 An update may replace program files but leaves database data and user settings
-in place. Uninstall unregisters/stops the PostgreSQL service and removes the
+in place. Choose "An existing company" when updating; the before-upgrade
+backup is written to %ProgramData%\KAYAN-ERP\backups\before-upgrade-<date>. Uninstall unregisters/stops the PostgreSQL service and removes the
 application files, but intentionally preserves the database, settings, backups,
 and logs. Back up from the in-app Backup and Restore screen before moving or
 replacing the computer. To permanently erase records, uninstall first, verify

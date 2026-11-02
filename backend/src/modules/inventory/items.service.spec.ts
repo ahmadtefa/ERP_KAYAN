@@ -26,6 +26,8 @@ function build() {
   const tx = {
     openingBalance: { findFirst: jest.fn().mockResolvedValue(null) },
     item: { create: jest.fn().mockResolvedValue(item) },
+    // Every new item gets a factor-1 base unit row in the same transaction.
+    itemUnit: { create: jest.fn().mockResolvedValue({}) },
     stockMovement: { create: jest.fn().mockResolvedValue({}) },
     stockBalance: { upsert: jest.fn().mockResolvedValue({}) },
   };

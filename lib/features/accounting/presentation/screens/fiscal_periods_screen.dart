@@ -404,7 +404,9 @@ class _YearEndCloseDialogState extends ConsumerState<_YearEndCloseDialog> {
                           'Must be resolved before closing:',
                         ),
                         style: TextStyle(
-                          color: AppTone.danger.foreground,
+                          color: AppTone.danger.foregroundOn(
+                            Theme.of(context).brightness,
+                          ),
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -414,7 +416,9 @@ class _YearEndCloseDialogState extends ConsumerState<_YearEndCloseDialog> {
                           child: Text(
                             '• $b',
                             style: TextStyle(
-                              color: AppTone.danger.foreground,
+                              color: AppTone.danger.foregroundOn(
+                                Theme.of(context).brightness,
+                              ),
                             ),
                           ),
                         ),
@@ -428,7 +432,9 @@ class _YearEndCloseDialogState extends ConsumerState<_YearEndCloseDialog> {
                           'Worth a look before closing (not blocking):',
                         ),
                         style: TextStyle(
-                          color: AppTone.warning.foreground,
+                          color: AppTone.warning.foregroundOn(
+                            Theme.of(context).brightness,
+                          ),
                           fontWeight: FontWeight.w700,
                         ),
                       ),

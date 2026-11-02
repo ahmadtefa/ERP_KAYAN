@@ -32,4 +32,29 @@ flutter:
   uses-material-design: true
   generate: true
   assets:
+    # The owner's logo, used exactly as supplied (transparent PNG).
     - 1.png
+
+  # Typography, shipped inside the program.
+  #
+  # These are the real IBM Plex Sans Arabic files from the upstream open
+  # source release (SIL Open Font License 1.1, `assets/fonts/OFL-*.txt`),
+  # bundled rather than fetched: the product runs on machines with no
+  # internet, and a PDF or a report that silently falls back to a different
+  # face would change the look of a printed offer.
+  #
+  # One family is registered for four weights. IBM Plex Sans Arabic is the
+  # Arabic member of the Plex superfamily, whose Latin is drawn to the same
+  # metrics - so Arabic and English on one line share a baseline, an x-height
+  # and a figure width instead of looking like two documents stapled together.
+  fonts:
+    - family: IBMPlexSansArabic
+      fonts:
+        - asset: assets/fonts/IBMPlexSansArabic-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/IBMPlexSansArabic-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/IBMPlexSansArabic-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/IBMPlexSansArabic-Bold.ttf
+          weight: 700

@@ -7,6 +7,7 @@ import { InvoiceStatus, Prisma, StockDirection } from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { movementUnitSnapshot } from '../../common/units/unit-math';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from './account-map.service';
 import { DocumentNumberService } from './document-number.service';
@@ -367,7 +368,7 @@ export class OpeningBalancesService {
         if (!line.itemId) continue;
         const item = await tx.item.findFirst({
           where: { id: line.itemId, companyId, deletedAt: null },
-          select: { id: true, isStockTracked: true, code: true },
+          select: { id: true, isStockTracked: true, code: true, unit: true },
         });
         if (!item) throw new BadRequestException('An opening line references a missing item');
         if (!item.isStockTracked) continue;
@@ -413,6 +414,12 @@ export class OpeningBalancesService {
             movementDate: document.asOfDate,
             direction: StockDirection.IN,
             quantity: line.quantity,
+            // An opening quantity is counted in the item's own base unit; the
+            // snapshot says so instead of leaving the movement unlabelled.
+            ...movementUnitSnapshot({
+              baseUnitName: item.unit,
+              baseQuantity: line.quantity,
+            }),
             unitCost: line.unitCost,
             totalCost: line.debit,
             referenceType: 'OPENING_BALANCE',
@@ -517,6 +524,25 @@ export class OpeningBalancesService {
         document.branchId,
         document.warehouseId,
       );
+      // Base unit names, so a reversal movement is labelled in the same unit
+      // the opening document used instead of a placeholder.
+      const reverseItems = await tx.item.findMany({
+        where: {
+          companyId,
+          id: {
+            in: [
+              ...new Set(
+                document.lines
+                  .map((row) => row.itemId)
+                  .filter((itemId): itemId is string => Boolean(itemId)),
+              ),
+            ],
+          },
+        },
+        select: { id: true, unit: true },
+      });
+      const reverseBaseName = new Map(reverseItems.map((row) => [row.id, row.unit]));
+
       for (const line of document.lines) {
         if (!line.itemId || line.quantity === null || line.unitCost === null) continue;
         const lockedBalances = await tx.$queryRaw<
@@ -549,6 +575,10 @@ export class OpeningBalancesService {
             movementDate: new Date(),
             direction: StockDirection.OUT,
             quantity: line.quantity,
+            ...movementUnitSnapshot({
+              baseUnitName: reverseBaseName.get(line.itemId) ?? 'unit',
+              baseQuantity: line.quantity,
+            }),
             unitCost: line.unitCost,
             totalCost: line.debit,
             referenceType: 'OPENING_BALANCE_REVERSAL',

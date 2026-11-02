@@ -35,7 +35,7 @@ void main() {
   testWidgets('English lays the navigation out on the left', (tester) async {
     await pumpShell(tester, const Locale('en'));
 
-    final nav = find.byKey(const Key('erp-shell-nav-list'));
+    final nav = find.byKey(const PageStorageKey<String>('erp-shell-nav-list'));
     expect(nav, findsOneWidget);
     expect(tester.getRect(nav).left, closeTo(0.0, 1.0));
     expect(
@@ -48,7 +48,7 @@ void main() {
   testWidgets('Arabic lays the navigation out on the right', (tester) async {
     await pumpShell(tester, const Locale('ar'));
 
-    final nav = find.byKey(const Key('erp-shell-nav-list'));
+    final nav = find.byKey(const PageStorageKey<String>('erp-shell-nav-list'));
     expect(nav, findsOneWidget);
     expect(tester.getRect(nav).right, closeTo(1366.0, 1.0));
     expect(

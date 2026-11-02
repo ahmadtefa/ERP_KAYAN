@@ -9,7 +9,9 @@ import { ResetService } from './reset.service';
 import { RolesController } from './roles.controller';
 import { RolesService } from './roles.service';
 import { UsersController } from './users.controller';
+import { UserAvatarsController } from './user-avatars.controller';
 import { UsersService } from './users.service';
+import { UserAvatarsService } from './user-avatars.service';
 
 /// Users, roles and permissions — the answer to "who may do what" —
 /// plus a read-only window onto the audit trail, plus the one button that
@@ -18,16 +20,18 @@ import { UsersService } from './users.service';
   imports: [AuditModule, BackupModule],
   controllers: [
     UsersController,
+    UserAvatarsController,
     RolesController,
     AuditLogsController,
     ResetController,
   ],
   providers: [
     UsersService,
+    UserAvatarsService,
     RolesService,
     AuditLogsService,
     ResetService,
   ],
-  exports: [UsersService, RolesService, ResetService],
+  exports: [UsersService, UserAvatarsService, RolesService, ResetService],
 })
 export class AdminModule {}

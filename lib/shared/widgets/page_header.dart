@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/design_tokens.dart';
+import '../../app/theme/section_theme.dart';
 
 /// The header above a module screen.
 ///
@@ -33,6 +34,11 @@ class PageHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    // The page announces which department it belongs to, in that department's
+    // colour - the same hue as its selected menu entry - and sits on the
+    // section's panel band rather than on a plain white strip.
+    final accent = SectionTheme.of(context);
+    final accentInk = accent.of(theme.brightness);
     final hasSubtitle = subtitle != null && subtitle!.trim().isNotEmpty;
     final hasEyebrow = eyebrow != null && eyebrow!.trim().isNotEmpty;
 
@@ -54,7 +60,7 @@ class PageHeader extends StatelessWidget {
                   child: Text(
                     eyebrow!.toUpperCase(),
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
+                      color: accentInk,
                       letterSpacing: 1.1,
                       fontWeight: FontWeight.w700,
                     ),
@@ -101,7 +107,13 @@ class PageHeader extends StatelessWidget {
     );
 
     return Container(
-      color: scheme.surface,
+      decoration: BoxDecoration(
+        color: accent.panelOf(theme.brightness),
+        // A hairline in the section colour under the band: the header belongs
+        // to the department, and the line says so without a large block of
+        // saturated colour.
+        border: Border(bottom: BorderSide(color: accent.softOf(theme.brightness))),
+      ),
       padding: EdgeInsets.fromLTRB(
         AppSpacing.xxl,
         dense ? AppSpacing.md : AppSpacing.lg,

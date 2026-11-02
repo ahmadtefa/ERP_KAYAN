@@ -23,7 +23,13 @@ export class PurchaseInvoiceLineDto {
 
   @IsOptional() @IsString() @MaxLength(300) description?: string;
 
+  /// Quantity in the CHOSEN unit (e.g. 5 cartons). The server converts it into
+  /// the base-unit quantity that stock actually receives.
   @IsString() quantity!: string;
+
+  /// Chosen unit label or ItemUnit id. Omit for a legacy/base-unit line.
+  @IsOptional() @IsString() @MaxLength(40) unitName?: string;
+  @IsOptional() @IsUUID() unitId?: string;
 
   /// When omitted, the supplier's price list (or the item's own purchase
   /// price) decides.
@@ -33,6 +39,16 @@ export class PurchaseInvoiceLineDto {
 
   /// The department, administrative unit or project the cost was incurred for.
   @IsOptional() @IsUUID() costCenterId?: string;
+
+  /// The supplier's lot number for what arrived. Required by the server when
+  /// the item is lot-controlled; harmless and useful otherwise.
+  @IsOptional() @IsString() @MaxLength(60) batchNumber?: string;
+  /// Printed on the goods, and what FEFO sorts by. Enforced only for items
+  /// whose card requires them.
+  @IsOptional() @IsDateString() batchProductionDate?: string;
+  @IsOptional() @IsDateString() batchExpiryDate?: string;
+  /// Where the goods were put away inside the warehouse.
+  @IsOptional() @IsUUID() storageLocationId?: string;
 
   /// PERCENT or AMOUNT for this line's discount, applied before tax.
   @IsOptional() @IsIn(['PERCENT', 'AMOUNT']) discountType?: string;

@@ -78,6 +78,12 @@ class UserDto {
           json['isSuperAdmin'] as bool? ??
           json['is_super_admin'] as bool? ??
           false,
+      // The server says whether a photo exists; a session token and a `/me`
+      // answer both carry it, so the top bar is right on the first frame after
+      // a sign-in on a machine that has never seen this person.
+      hasAvatar:
+          json['hasAvatar'] as bool? ?? (str(['avatarUrl']) != null),
+      avatarUrl: str(['avatarUrl', 'avatar_url']),
     );
   }
 }

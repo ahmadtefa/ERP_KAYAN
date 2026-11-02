@@ -15,6 +15,7 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyService } from '../company/company.service';
 import { ExportQueryDto } from './dto/export-query.dto';
+import { PrintSettingsService } from '../../common/print/print-settings.module';
 import { ListTablesService } from './list-tables.service';
 import {
   EXPORTABLE_REPORTS,
@@ -23,6 +24,7 @@ import {
 } from './report-tables.service';
 import { DocumentsService } from './documents.service';
 import { PdfService } from './pdf.service';
+import { applyPriceVisibility } from './price-visibility';
 import { Lang, toCsv, toPrintHtml, toXlsx } from './writers';
 
 /// Downloadable files and a printable page for every report.
@@ -44,6 +46,7 @@ export class ExportController {
     private readonly lists: ListTablesService,
     private readonly company: CompanyService,
     private readonly documents: DocumentsService,
+    private readonly printSettings: PrintSettingsService,
   ) {}
 
   /// The company's name and logo for the file header. The logo is optional and
@@ -121,7 +124,12 @@ export class ExportController {
     const spec = this.documents.spec(kind);
     this.allowedExport(user, spec.readPermission, spec.exportPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.documents.build(spec.kind, user.companyId, id, lang);
+    // Spreadsheet downloads must obey the same server-side redaction as the
+    // PDF/print routes: a hand-crafted download link cannot restore costs.
+    const table = applyPriceVisibility(
+      await this.documents.build(spec.kind, user.companyId, id, lang),
+      await this.visibility(user, query, spec.kind),
+    );
     const header = await this.companyHeader(user.companyId, lang);
     const stamp = this.stamp();
     if (query.format === 'csv') {
@@ -148,7 +156,7 @@ export class ExportController {
     const spec = this.documents.spec(kind);
     this.allowedExport(user, spec.readPermission, spec.exportPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.documents.build(spec.kind, user.companyId, id, lang);
+    const table = applyPriceVisibility(await this.documents.build(spec.kind, user.companyId, id, lang), await this.visibility(user, query, spec.kind));
     const header = await this.companyHeader(user.companyId, lang);
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: false,
@@ -170,7 +178,7 @@ export class ExportController {
     const spec = this.documents.spec(kind);
     this.allowed(user, spec.readPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.documents.build(spec.kind, user.companyId, id, lang);
+    const table = applyPriceVisibility(await this.documents.build(spec.kind, user.companyId, id, lang), await this.visibility(user, query, spec.kind));
     const header = await this.companyHeader(user.companyId, lang);
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: query.auto === '1' || query.auto === 'true',
@@ -204,7 +212,12 @@ export class ExportController {
     this.allowed(user, spec.permission);
 
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.lists.build(list, user.companyId, query);
+    // Same redaction as the list's PDF/print routes, so an xlsx/csv download
+    // cannot carry a cost column the caller's role was never granted.
+    const table = applyPriceVisibility(
+      await this.lists.build(list, user.companyId, query),
+      await this.visibility(user, query, list),
+    );
     const header = await this.companyHeader(user.companyId, lang);
     const stamp = this.stamp();
 
@@ -244,7 +257,7 @@ export class ExportController {
     this.allowed(user, spec.permission);
 
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.lists.build(list, user.companyId, query);
+    const table = applyPriceVisibility(await this.lists.build(list, user.companyId, query), await this.visibility(user, query, list));
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
@@ -268,7 +281,7 @@ export class ExportController {
     this.allowed(user, spec.permission);
 
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.lists.build(list, user.companyId, query);
+    const table = applyPriceVisibility(await this.lists.build(list, user.companyId, query), await this.visibility(user, query, list));
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
@@ -279,6 +292,35 @@ export class ExportController {
     response.type('text/html; charset=utf-8');
     response.setHeader('Cache-Control', 'no-store');
     response.send(html);
+  }
+
+  /// What this caller is allowed to see, whatever the URL asks for.
+  ///
+  /// The dialog on screen decides what a person wants; this decides what they
+  /// may have. A missing `inventory.cost.read` forces costs off, so adding
+  /// `showCost=true` to a link, or calling the endpoint by hand, cannot bring
+  /// back a figure the role was never granted.
+  /// What this copy may show.
+  ///
+  /// The caller's permission is a floor, the request is an override, and the
+  /// company's saved setting for this print type - then its default - fills in
+  /// whatever was not chosen. One function, so a list, a report and a saved
+  /// invoice cannot answer the same question differently.
+  private async visibility(
+    user: AuthUser,
+    query: ExportQueryDto,
+    typeKey: string,
+  ) {
+    const resolved = await this.printSettings.resolve(
+      user.companyId,
+      user,
+      { showSalePrice: query.showSalePrice, showCost: query.showCost },
+      typeKey,
+    );
+    return {
+      showSalePrice: resolved.showSalePrice ? 'true' : 'false',
+      showCost: resolved.showCost ? 'true' : 'false',
+    } as const;
   }
 
   /// The permission a list needs is the one its own screen already requires.
@@ -314,7 +356,12 @@ export class ExportController {
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
     const wanted = (query as { format?: string }).format ?? 'xlsx';
 
-    const table = await this.tables.build(slug, user.companyId, query, lang);
+    // Reports as files get the same enforcement as reports as PDF/print:
+    // The resolved visibility forces showCost=false without inventory.cost.read.
+    const table = applyPriceVisibility(
+      await this.tables.build(slug, user.companyId, query, lang),
+      await this.visibility(user, query, slug),
+    );
     const header = await this.companyHeader(user.companyId, lang);
 
     if (wanted === 'csv') {
@@ -353,7 +400,7 @@ export class ExportController {
     this.allowedExport(user, 'reports.read', 'reports.export');
     const slug = this.known(report);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.tables.build(slug, user.companyId, query, lang);
+    const table = applyPriceVisibility(await this.tables.build(slug, user.companyId, query, lang), await this.visibility(user, query, slug));
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {
@@ -381,7 +428,7 @@ export class ExportController {
   ) {
     const slug = this.known(report);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = await this.tables.build(slug, user.companyId, query, lang);
+    const table = applyPriceVisibility(await this.tables.build(slug, user.companyId, query, lang), await this.visibility(user, query, slug));
     const header = await this.companyHeader(user.companyId, lang);
 
     const html = toPrintHtml(table, lang, header.name, {

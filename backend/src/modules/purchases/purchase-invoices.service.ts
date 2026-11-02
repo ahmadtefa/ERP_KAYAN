@@ -14,11 +14,18 @@ import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
+import {
+  defaultUnitPrice,
+  movementUnitSnapshot,
+  resolveUnitSelection,
+} from '../../common/units/unit-math';
 import { PriceListsService } from '../sales/price-lists.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { attributedLines } from '../accounting/cost-center-attribution';
 import { PostingService } from '../accounting/posting.service';
+import { BatchesService } from '../inventory/batches.service';
+import { batchPolicyOf } from '../../common/warehouse/batch-policy';
 import {
   allocateDocumentDiscount,
   assertDiscountLimit,
@@ -61,6 +68,17 @@ interface PreparedLine {
   landedCostAmount: Prisma.Decimal;
   inventoryCostTotal: Prisma.Decimal;
   costCenterId: string | null;
+  // Multi-unit snapshot. All null on a legacy/base-unit line; `quantity` is
+  // always the internal base-unit quantity stock actually receives.
+  unitName: string | null;
+  unitFactor: Prisma.Decimal | null;
+  unitQuantity: Prisma.Decimal | null;
+  // The lot this line received. Null when the item keeps no lots and the
+  // person did not type one.
+  batchNumber: string | null;
+  batchProductionDate: Date | null;
+  batchExpiryDate: Date | null;
+  storageLocationId: string | null;
 }
 
 interface PreparedInvoice {
@@ -80,6 +98,9 @@ export class PurchaseInvoicesService {
     private readonly warehouses: WarehouseService,
     private readonly prices: PriceListsService,
     private readonly audit: AuditService,
+    /// A receipt is where a lot is born. The lot engine is shared with sales
+    /// so that FEFO, costing and the shelf all agree on what a lot is.
+    private readonly batches: BatchesService,
   ) {}
 
   async findAll(companyId: string, query: ListPurchaseInvoicesDto) {
@@ -148,9 +169,16 @@ export class PurchaseInvoicesService {
         itemCode: l.item?.code ?? null,
         itemNameEn: l.item?.nameEn ?? null,
         itemNameAr: l.item?.nameAr ?? null,
-        unit: l.item?.unit ?? null,
+        // Chosen unit with legacy fallback to the item base unit.
+        unit: l.unitName ?? l.item?.unit ?? null,
+        unitName: l.unitName ?? null,
+        unitFactor: l.unitFactor === null || l.unitFactor === undefined ? null : l.unitFactor.toFixed(6),
+        // Entered quantity in the chosen unit; legacy rows fall back to stored.
+        unitQuantity: (l.unitQuantity ?? l.quantity).toFixed(MONEY_SCALE),
         description: l.description,
+        // Internal base-unit quantity received into stock.
         quantity: l.quantity.toFixed(MONEY_SCALE),
+        baseQuantity: l.quantity.toFixed(MONEY_SCALE),
         returnedQuantity: l.returnedQuantity.toFixed(MONEY_SCALE),
         unitPrice: l.unitPrice.toFixed(MONEY_SCALE),
         taxRate: l.taxRate.toFixed(RATE_SCALE),
@@ -250,6 +278,13 @@ export class PurchaseInvoicesService {
               landedCostAmount: l.landedCostAmount,
               inventoryCostTotal: l.inventoryCostTotal,
               costCenterId: l.costCenterId,
+              unitName: l.unitName,
+              unitFactor: l.unitFactor,
+              unitQuantity: l.unitQuantity,
+              batchNumber: l.batchNumber,
+              batchProductionDate: l.batchProductionDate,
+              batchExpiryDate: l.batchExpiryDate,
+              storageLocationId: l.storageLocationId,
             })),
           },
         },
@@ -377,6 +412,13 @@ export class PurchaseInvoicesService {
               landedCostAmount: line.landedCostAmount,
               inventoryCostTotal: line.inventoryCostTotal,
               costCenterId: line.costCenterId,
+              unitName: line.unitName,
+              unitFactor: line.unitFactor,
+              unitQuantity: line.unitQuantity,
+              batchNumber: line.batchNumber,
+              batchProductionDate: line.batchProductionDate,
+              batchExpiryDate: line.batchExpiryDate,
+              storageLocationId: line.storageLocationId,
             })),
           },
         },
@@ -460,7 +502,18 @@ export class PurchaseInvoicesService {
         }
         const item = await tx.item.findFirst({
           where: { id: line.itemId, companyId, deletedAt: null },
-          select: { id: true, code: true, isStockTracked: true },
+          select: {
+            id: true,
+            code: true,
+            unit: true,
+            isStockTracked: true,
+            requiresBatch: true,
+            requiresProductionDate: true,
+            requiresExpiryDate: true,
+            useFefo: true,
+            allowExpiredIssue: true,
+            expiredIssueNeedsApproval: true,
+          },
         });
         if (!item) throw new BadRequestException('An invoice line references a missing item');
         if (!item.isStockTracked) {
@@ -483,6 +536,15 @@ export class PurchaseInvoicesService {
             movementDate: invoice.invoiceDate,
             direction: StockDirection.IN,
             quantity: line.quantity,
+            // What was typed stays with the movement: ten cartons is how the
+            // supplier's invoice arrived, however many pieces that is.
+            ...movementUnitSnapshot({
+              enteredUnit: line.unitName,
+              enteredQuantity: line.unitQuantity,
+              unitFactor: line.unitFactor,
+              baseUnitName: item.unit,
+              baseQuantity: line.quantity,
+            }),
             unitCost,
             totalCost: costTotal,
             referenceType: 'PURCHASE_INVOICE',
@@ -512,6 +574,37 @@ export class PurchaseInvoicesService {
             value: { increment: costTotal },
           },
         });
+
+        // The goods are in stock; this records which goods they were. The
+        // lot is written after the movement so that a lot-controlled item
+        // whose dates are missing fails the whole posting - including the
+        // movement - rather than leaving stock nobody can trace.
+        const policy = batchPolicyOf(item);
+        if (policy.requiresBatch && !warehouseId) {
+          throw new BadRequestException(
+            `Item ${item.code} is lot-controlled, but this branch has no warehouse for the lot to ` +
+              'be received into. Create a warehouse first.',
+          );
+        }
+        if (warehouseId && (policy.requiresBatch || line.batchNumber)) {
+          await this.batches.recordLotInTx(tx, {
+            companyId,
+            userId,
+            warehouse: { id: warehouseId, branchId: invoice.branchId },
+            item,
+            batchNumber: line.batchNumber,
+            productionDate: line.batchProductionDate?.toISOString() ?? null,
+            expiryDate: line.batchExpiryDate?.toISOString() ?? null,
+            quantity: line.quantity,
+            // The lot is worth what the goods cost, landed cost included.
+            unitCost,
+            storageLocationId: line.storageLocationId,
+            sourceType: 'PURCHASE_INVOICE',
+            sourceId: invoice.id,
+            sourceNumber: invoice.invoiceNumber,
+            date: invoice.invoiceDate,
+          });
+        }
       }
 
       const journal = await this.posting.post(tx, {
@@ -632,6 +725,15 @@ export class PurchaseInvoicesService {
       // The journal claim itself happens inside PostingService.reverse,
       // below, in the same transaction as the stock going back out.
 
+      // The reversal movement says "1 carton" the way the invoice did, so the
+      // stock card reads the same in both directions. The base unit of each
+      // item is read once here rather than per line.
+      const reversalItems = await tx.item.findMany({
+        where: { companyId, id: { in: [...new Set(invoice.lines.map((row) => row.itemId).filter((id): id is string => Boolean(id)))] } },
+        select: { id: true, unit: true },
+      });
+      const reversalBaseName = new Map(reversalItems.map((row) => [row.id, row.unit]));
+
       for (const line of invoice.lines) {
         if (!line.itemId) {
           throw new BadRequestException(
@@ -669,6 +771,13 @@ export class PurchaseInvoicesService {
             movementDate: new Date(),
             direction: StockDirection.OUT,
             quantity: line.quantity,
+            ...movementUnitSnapshot({
+              enteredUnit: line.unitName,
+              enteredQuantity: line.unitQuantity,
+              unitFactor: line.unitFactor,
+              baseUnitName: reversalBaseName.get(line.itemId ?? '') ?? 'unit',
+              baseQuantity: line.quantity,
+            }),
             unitCost: inventoryCostTotal.div(line.quantity).toDecimalPlaces(MONEY_SCALE),
             totalCost: inventoryCostTotal,
             referenceType: 'PURCHASE_INVOICE_REVERSAL',
@@ -808,6 +917,7 @@ export class PurchaseInvoicesService {
           isActive: true,
           purchasePrice: true,
           unit: true,
+          units: true,
         },
       });
       if (!item) {
@@ -819,22 +929,37 @@ export class PurchaseInvoicesService {
 
       const quantity = this.positive(raw.quantity, `Line ${index + 1} quantity`);
 
-      // A price typed on the line is the cost. When nobody typed one, the
-      // supplier's agreed list speaks, and failing that the item's own
-      // purchase price - resolved once the item is known.
+      // Resolve the chosen unit. The entered quantity is expressed in it; the
+      // base quantity is what is received into stock and drives unit cost.
+      const resolved = resolveUnitSelection({
+        lineLabel: `Line ${index + 1}`,
+        requestedUnitId: raw.unitId,
+        requestedUnitName: raw.unitName,
+        enteredQuantity: quantity,
+        baseUnitName: item.unit,
+        units: (item as { units?: any[] }).units ?? [],
+      });
+      const enteredQuantity = resolved.snapshot.unitQuantity ?? quantity;
+
+      // A price typed on the line is the cost of one CHOSEN unit. When nobody
+      // typed one, the supplier's agreed list speaks (for the chosen unit),
+      // then the unit's own purchase price, then the item's purchase price.
       let unitPrice =
         raw.unitPrice === undefined || raw.unitPrice === null || raw.unitPrice === ''
           ? null
           : this.nonNegative(raw.unitPrice, `Line ${index + 1} unitPrice`);
       if (unitPrice === null) {
+        const chosenUnitName = resolved.snapshot.unitName ?? item.unit;
         const listed = await this.prices.resolvePrice(this.prisma, companyId, {
           partyId: supplierId ?? null,
           partyKind: 'SUPPLIER',
           itemId: raw.itemId,
-          unit: item.unit,
-          quantity,
+          unit: chosenUnitName,
+          quantity: enteredQuantity,
         });
-        unitPrice = listed?.price ?? item.purchasePrice;
+        unitPrice = listed
+          ? listed.price
+          : defaultUnitPrice('purchase', resolved.row, item.purchasePrice);
       }
 
       // Line, then item, then the company's own rate - an item with no rate
@@ -845,8 +970,10 @@ export class PurchaseInvoicesService {
           : (item.taxRate ?? new Prisma.Decimal(settings.taxRate));
 
       // The discount is taken from the goods value, before tax, and the tax
-      // is then charged on what is actually being paid for the goods.
-      const grossLineTotal = quantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
+      // is then charged on what is actually being paid for the goods. Money
+      // follows the entered quantity in the chosen unit; stock uses the base
+      // quantity computed above.
+      const grossLineTotal = enteredQuantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
       const lineDiscount = this.lineDiscount(
         grossLineTotal,
         raw,
@@ -877,7 +1004,8 @@ export class PurchaseInvoicesService {
         lineNumber: index + 1,
         itemId: raw.itemId,
         description: raw.description ?? `${item.code} ${item.nameEn}`,
-        quantity,
+        // Internal base-unit quantity received into stock.
+        quantity: resolved.baseQuantity,
         unitPrice,
         taxRate,
         taxAmount: new Prisma.Decimal(0),
@@ -890,6 +1018,13 @@ export class PurchaseInvoicesService {
         landedCostAmount: new Prisma.Decimal(0),
         inventoryCostTotal: lineDiscount.net,
         costCenterId,
+        unitName: resolved.snapshot.unitName,
+        unitFactor: resolved.snapshot.unitFactor,
+        unitQuantity: resolved.snapshot.unitQuantity,
+        batchNumber: (raw.batchNumber ?? '').trim() || null,
+        batchProductionDate: raw.batchProductionDate ? new Date(raw.batchProductionDate) : null,
+        batchExpiryDate: raw.batchExpiryDate ? new Date(raw.batchExpiryDate) : null,
+        storageLocationId: raw.storageLocationId ?? null,
       });
     }
 

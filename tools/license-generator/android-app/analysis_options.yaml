@@ -1,0 +1,11 @@
+# The same lint set the product uses. A few purely stylistic rules are off:
+# this is a tool, and a rule about constructor modifiers does not make a key
+# any safer.
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    prefer_const_constructors: false
+    prefer_const_literals_to_create_immutables: false
+    sort_child_properties_last: false
+    use_super_parameters: true

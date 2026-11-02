@@ -83,16 +83,53 @@ jobs:
         # `-o pipefail` a failing suite would leave this step green and the
         # whole job would pass. The log is kept because the summary step below
         # reads it.
-        run: python ../scripts/ci-diagnose.py bash -o pipefail -c 'npm test -- --runInBand 2>&1 | tee /tmp/kayan-jest.log'
+        # This older CLI integration suite creates a private signing key on disk.
+        # It is retained in source but is not run under the no-private-key-on-disk
+        # constraint. The source-level in-memory generator check is a separate job;
+        # neither that check nor this partial suite proves the packaged generator.
+        run: |
+          echo '::warning title=Generator tests not run::The file-backed generator suite is excluded; the packaged Windows generator is not verified by this job.'
+          python ../scripts/ci-diagnose.py bash -o pipefail -c 'npm test -- --runInBand --testPathIgnorePatterns=license-generator.spec.ts 2>&1 | tee /tmp/kayan-jest.log'
       - name: Record unit-test totals
         if: always()
         run: |
           summary=$(grep -hE "^(Test Suites|Tests):" /tmp/kayan-jest.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Unit tests::${summary:-summary not captured}"
+      # Same reason as the Flutter job: name the suites that carry this change,
+      # so their having run is visible in the run and not only in a log.
+      - name: Record the backend proof suites
+        if: always()
+        run: |
+          summary=$(grep -hE "^(PASS|FAIL)[[:space:]]+.*(auth\.controller|user-avatars[^ ]*|quotation-(background|document|pdf))\.spec\.ts" /tmp/kayan-jest.log 2>/dev/null \
+            | sed -E 's#.*/(src|test)/#\1/#' | tr '\n' ' | ')
+          echo "::notice title=Backend proof suites::${summary:-summary not captured}"
       - name: Build API
         run: npm run build
       - name: Apply migrations to ephemeral PostgreSQL
+        # prisma.config.ts selects Prisma 6's classic (native) schema engine
+        # unconditionally; there is no environment switch to the experimental
+        # JavaScript engine, so this step runs exactly what the installer runs.
         run: npx prisma migrate deploy
+
+      # A migration that only ever meets an empty database has not been tested.
+      # This creates a throwaway database, applies every migration that came
+      # before the avatar one, fills it with a company, a branch and two
+      # accounts, then applies the avatar migration and compares every table's
+      # row count and the accounts themselves - the upgrade a customer
+      # installation performs.
+      - name: Prove the user-avatar migration on a populated database
+        run: node scripts/check-user-avatar-migration.mjs
+
+      # Licensing is the one subsystem whose real behaviour cannot be shown
+      # with a mocked database: the migration has to survive an installation
+      # that already has accounts, seats have to be refused at the limit, two
+      # simultaneous creations must produce exactly one account, and an old
+      # backup must not hand seats back. The script creates throwaway
+      # databases on the same server and drives the compiled service.
+      - name: Prove licensing on real PostgreSQL (populated upgrade, seats, concurrency, restore)
+        env:
+          KAYAN_TEST_ADMIN_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
+        run: python ../scripts/ci-diagnose.py node scripts/verify-licensing-postgres.mjs
       - name: Prove the required-accounts chart upgrade (old, complete and renumbered companies; run twice)
         run: python ../scripts/ci-diagnose.py node scripts/check-chart-upgrade.mjs
 
@@ -130,13 +167,25 @@ jobs:
           npm run start:prod > /tmp/kayan-api.log 2>&1 &
           API_PID=$!
           trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+          # Wait for a *working* database, not merely for an answer. The
+          # health route answers 200 with `"database":"down"` while the
+          # connection is still being established, so a loop that stops at the
+          # first 200 would read a starting server as a broken one. It is also
+          # what made a raw-query failure look like a database outage.
+          health_ok=false
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json; then
-              break
+            if curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/kayan-health.json 2>/dev/null; then
+              if node -e 'const h=JSON.parse(require("fs").readFileSync("/tmp/kayan-health.json","utf8")); process.exit(h.status==="ok" && h.database==="up" ? 0 : 1)'; then
+                health_ok=true
+                break
+              fi
+              echo "health attempt ${attempt}: $(cat /tmp/kayan-health.json)"
             fi
             sleep 2
           done
-          if [ ! -s /tmp/kayan-health.json ]; then
+          if [ "$health_ok" != "true" ]; then
+            echo "::error::The API never reported a working database within 60 seconds."
+            cat /tmp/kayan-health.json 2>/dev/null || true
             cat /tmp/kayan-api.log
             exit 1
           fi
@@ -219,6 +268,47 @@ jobs:
           if [ "$FAIL" != "0" ]; then exit 1; fi
           echo "Isolated restore verified: $CHECKED non-volatile tables have identical row counts in source and restored databases."
 
+          # Last, because it deliberately recreates the shape old restored data
+          # can have: a receipt that reaches its partner only through the
+          # invoices it settled. That data is inconsistent by construction, so
+          # it must not be in place while the ageing/reconciliation checks run.
+          echo "Running the partner statement end to end: allocation-only vouchers, the card, exports, print and the ledger behind every figure..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-statement-export.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after statement scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          # The print policy and the attached artwork, through the real HTTP
+          # API: a saved setting, a role without inventory.cost.read, a
+          # letterhead that is uploaded and then really is the sheet, and a
+          # damaged file that must be refused rather than crash a screen.
+          echo "Running the print policy and artwork scenario: saved settings, the cost floor, artwork upload, print and detach..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py node scripts/scenario-print-features.mjs http://127.0.0.1:3000/api/v1; then
+            echo "::group::API logs after print/artwork scenario failure"
+            cat /tmp/kayan-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
+      # The owner's own scenario, on the real database and through the
+      # compiled services: عبوة is the base unit, a carton is 12, ten cartons
+      # arrive (120), three are transferred 84/36, the branch still totals 120,
+      # the log reads "3 كرتونة × 12 = 36", a posted transfer is reversed
+      # rather than edited, a second reversal is refused, and the base unit of
+      # an item that already has stock cannot be renamed. The script recomputes
+      # every figure from `stock_movements` in SQL instead of trusting the
+      # service's own answer.
+      #
+      # It runs after the seed and after the HTTP scenarios because it brings
+      # its own throwaway company, user, branch and stores: the seeded tenant
+      # is what the smoke test and the scenarios that follow sign in to, and a
+      # second company appearing before the seed would be a different database
+      # state than the one the installer ships into.
+      - name: Prove units, packing and warehouses on real PostgreSQL (the owner's scenario)
+        run: python ../scripts/ci-diagnose.py node scripts/pg-units-warehouses-scenario.mjs
+
       - name: Verify the PostgreSQL client tools used by the backup checks
         run: |
           pg_dump --version
@@ -247,7 +337,12 @@ jobs:
           summary=$(grep -h "checks passed" /tmp/kayan-smoke.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Scenario checks::${summary:-summary not captured}"
       - name: Audit production dependencies
-        run: npm audit --omit=dev
+        # Never weaker than `npm audit --omit=dev`, but precise: high and critical
+        # fail outright, and anything else must be a reviewed, expiring entry in
+        # backend/security/audit-allowlist.json with the reason it is unreachable.
+        # A stale entry - or an entry that no longer matches a live advisory -
+        # fails the step, so the list cannot become a blanket suppression.
+        run: node scripts/audit-gate.mjs
 
   regressions:
     name: Regression scenario (reported issues 1-9)
@@ -294,6 +389,8 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
       - name: Apply migrations to a freshly created database
+        env:
+          KAYAN_PRISMA_CLASSIC_MIGRATIONS: '1'
         run: npx prisma migrate deploy
       - name: Seed an isolated company and administrator
         run: npx ts-node prisma/seed.ts
@@ -330,6 +427,47 @@ jobs:
           NODE
       - name: Build API
         run: npm run build
+      # The unit tests prove the merge arithmetic. Only a browser and a
+      # rasteriser can prove the finished sheet: that the artwork is really
+      # underneath the text, that the overlay stayed transparent, and that
+      # "n / N" sits above the artwork. GitHub's Ubuntu image already carries
+      # Chrome; poppler supplies pdftoppm.
+      - name: Prove the attached artwork prints on a real sheet
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends poppler-utils
+          if [ -z "${KAYAN_PDF_BROWSER:-}" ]; then
+            for candidate in /opt/google/chrome/chrome /usr/bin/google-chrome /usr/bin/chromium /usr/bin/chromium-browser; do
+              if [ -x "$candidate" ]; then export KAYAN_PDF_BROWSER="$candidate"; break; fi
+            done
+          fi
+          if [ -z "${KAYAN_PDF_BROWSER:-}" ]; then
+            echo "::error::No Chrome/Chromium on this runner, so the finished PDF cannot be proven here."
+            exit 1
+          fi
+          echo "Using $KAYAN_PDF_BROWSER"
+          # A rasterised-sheet check either passes or has something to say, and
+          # its own output is the only place that says it. On failure the tail
+          # is lifted into annotations, so the reason is visible without
+          # downloading a log.
+          set +e
+          node scripts/verify-artwork-pdf.mjs 2>&1 | tee /tmp/kayan-artwork.log
+          artwork_status=${PIPESTATUS[0]}
+          if [ "$artwork_status" -ne 0 ]; then
+            tail -n 60 /tmp/kayan-artwork.log | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit "$artwork_status"
+          fi
+      # The proof's own PASS lines are the evidence that a finished sheet was
+      # rasterised and measured; the log host is not always readable, so the
+      # count is lifted into the run.
+      - name: Record the artwork PDF proof
+        if: always()
+        run: |
+          passed=$(grep -c "  PASS  " /tmp/kayan-artwork.log 2>/dev/null || true)
+          tail=$(grep -E "  PASS  |passed, .* failed" /tmp/kayan-artwork.log 2>/dev/null | tail -2 | tr '\n' ' ')
+          echo "::notice title=Quotation PDF proof::${passed:-0} checks passed — ${tail:-proof did not run}"
       - name: Serve the web client and run the regression scenario
         run: |
           mkdir -p /tmp/kayan-web-probe/build/web
@@ -370,6 +508,38 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
+
+          # The custom letterhead, from the upload a person makes to the file a
+          # customer receives. The picture is checked to be on every page of a
+          # long Arabic offer, each page's own "n / N" is read back out of the
+          # PDF, and an offer with no letterhead must print none.
+          echo "Running the custom quotation background scenario..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/scenario-quotation-artwork.mjs http://127.0.0.1:3000/api/v1 | tee /tmp/kayan-artwork-scenario.log'; then
+            echo "::group::API logs after the artwork scenario failure"
+            cat /tmp/kayan-regressions-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          echo "Running the packing-unit stock cycle (carton 12, roll 5, piece 1)..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/scenario-units-cycle.mjs http://127.0.0.1:3000/api/v1 | tee /tmp/kayan-units-scenario.log'; then
+            echo "::group::API logs after the packing-unit scenario failure"
+            cat /tmp/kayan-regressions-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          # The worked example the multi-unit feature is judged by: reels of
+          # 500 metres, cartons of 24, prices that follow the factor, a factor
+          # change that must not restate history, and a refusal of half a
+          # carton. Every figure is read back from PostgreSQL as well.
+          echo "Running the cable-and-carton multi-unit scenario..."
+          if ! ADMIN_USERNAME=ci-admin ADMIN_PASSWORD=CI-only-Admin-Password-12345 python ../scripts/ci-diagnose.py bash -o pipefail -c 'node scripts/scenario-multiunit-cable-carton.mjs http://127.0.0.1:3000/api/v1 | tee /tmp/kayan-multiunit-scenario.log'; then
+            echo "::group::API logs after the multi-unit scenario failure"
+            cat /tmp/kayan-regressions-api.log
+            echo "::endgroup::"
+            exit 1
+          fi
       # Same reason as the backend job: the per-scenario totals are the
       # evidence a run can be read without the log host.
       - name: Record scenario totals
@@ -377,8 +547,63 @@ jobs:
         run: |
           # The two scenarios word their summary differently ("checks passed"
           # and "passed"), so both shapes are looked for.
-          summary=$(grep -hE "checks passed|[0-9]+/[0-9]+ passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log 2>/dev/null | tr '\n' ' | ')
+          summary=$(grep -hE "checks passed|[0-9]+/[0-9]+ passed" /tmp/kayan-regressions-scenario.log /tmp/kayan-quotations-scenario.log /tmp/kayan-units-scenario.log /tmp/kayan-multiunit-scenario.log /tmp/kayan-artwork-scenario.log 2>/dev/null | tr '\n' ' | ')
           echo "::notice title=Regression scenario checks::${summary:-summary not captured}"
+
+  inventory:
+    name: Lot, shelf and alert engine (real PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: erp_kayan_inventory
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d erp_kayan_inventory"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan_inventory?schema=public
+      JWT_ACCESS_SECRET: ci-only-access-secret-not-for-real-use-0123456789
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-real-use-9876543210
+      JWT_ACCESS_TTL: 900
+      JWT_REFRESH_TTL: 604800
+      KAYAN_ADMIN_USERNAME: ci-admin
+      KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
+      NODE_ENV: test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate
+      - name: Apply every migration to a freshly created database
+        env:
+          KAYAN_PRISMA_CLASSIC_MIGRATIONS: '1'
+        run: npx prisma migrate deploy
+      - name: Seed an isolated company and administrator
+        run: npx ts-node prisma/seed.ts
+      # The lot engine is arithmetic plus transactions. The arithmetic is unit
+      # tested; only a real database can prove FEFO ordering, the moving
+      # average, the write-off journal and a single row per alert fact.
+      - name: Exercise lots, FEFO, costing, write-off and alerts
+        run: python ../scripts/ci-diagnose.py npx ts-node scripts/verify-inventory-postgres.ts
 
   flutter:
     name: Flutter Web (analyze, test, build)
@@ -401,8 +626,21 @@ jobs:
           cache: true
       - name: Install Flutter dependencies
         run: flutter pub get
+      # The analyzer's own output is the only place that says what is wrong.
+      # On failure each line is lifted into an annotation, so a broken build is
+      # readable from the checks tab instead of from a log that may not be
+      # downloadable at all.
       - name: Analyze
-        run: python scripts/ci-diagnose.py flutter analyze
+        run: |
+          set +e
+          flutter analyze 2>&1 | tee /tmp/kayan-analyze.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            grep -E "(error|warning|info) •" /tmp/kayan-analyze.log | head -n 80 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit "$status"
+          fi
       # Renders real screens (shell + dashboard, customers, sales) to PNG so
       # a design change can be inspected visually from the run's artifacts.
       # These are screenshot generators: baselines are regenerated here, so
@@ -418,6 +656,18 @@ jobs:
           retention-days: 30
       - name: Run tests
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
+      # The suites that carry the redesign are each run on their own and
+      # recorded as a notice, so "the menu test ran, and passed" is something
+      # the run itself states rather than something a commit message claims.
+      - name: Record the design proof suites
+        run: |
+          python scripts/ci-proof-tests.py \
+            test/shared/logo_transparency_test.dart \
+            test/shared/design_contrast_test.dart \
+            test/widget/sidebar_scroll_test.dart \
+            test/widget/user_avatar_test.dart \
+            test/widget/erp_shell_test.dart \
+            test/widget/rtl_ltr_test.dart
       # A failing test's own message sits in the middle of a long log, and the
       # log host is not always reachable. Re-running the one file leaves that
       # message inside the annotated tail.
@@ -462,8 +712,21 @@ jobs:
         run: flutter config --enable-linux-desktop
       - name: Install Flutter dependencies
         run: flutter pub get
+      # The analyzer's own output is the only place that says what is wrong.
+      # On failure each line is lifted into an annotation, so a broken build is
+      # readable from the checks tab instead of from a log that may not be
+      # downloadable at all.
       - name: Analyze
-        run: python scripts/ci-diagnose.py flutter analyze
+        run: |
+          set +e
+          flutter analyze 2>&1 | tee /tmp/kayan-analyze.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            grep -E "(error|warning|info) •" /tmp/kayan-analyze.log | head -n 80 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit "$status"
+          fi
       # Same screenshot generation as the web job: baselines are produced in
       # this job's own workspace so the test run below has something to
       # compare against (the PNGs themselves are uploaded by the web job).

@@ -15,6 +15,7 @@ import {
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { movementUnitSnapshot } from '../../common/units/unit-math';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
@@ -553,7 +554,7 @@ export class FixedAssetsService {
         }
         const line = await tx.purchaseInvoiceLine.findFirst({
           where: { id: asset.purchaseInvoiceLineId },
-          select: { itemId: true },
+          select: { itemId: true, unitName: true, unitQuantity: true, unitFactor: true },
         });
         if (!line?.itemId) {
           throw new BadRequestException(
@@ -595,6 +596,15 @@ export class FixedAssetsService {
             movementDate: entryDate,
             direction: StockDirection.OUT,
             quantity,
+            // The purchase line already knows how the goods were bought; the
+            // capitalisation movement repeats it rather than inventing one.
+            ...movementUnitSnapshot({
+              enteredUnit: line.unitName,
+              enteredQuantity: line.unitQuantity,
+              unitFactor: line.unitFactor,
+              baseUnitName: 'unit',
+              baseQuantity: quantity,
+            }),
             unitCost: asset.cost.div(quantity).toDecimalPlaces(MONEY_SCALE),
             totalCost: asset.cost,
             referenceType: 'FIXED_ASSET_ACTIVATION',

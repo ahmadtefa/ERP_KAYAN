@@ -5,7 +5,10 @@ import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { validateEnvironment } from './common/config/validate-environment';
 import { CompanySettingsModule } from './common/settings/company-settings.module';
+import { PrintSettingsModule } from './common/print/print-settings.module';
 import { AuditModule } from './common/audit/audit.module';
+import { LicensingModule } from './modules/licensing/licensing.module';
+import { LicenseGuard } from './modules/licensing/license.guard';
 import { MaintenanceModule } from './common/maintenance/maintenance.module';
 import { WarehouseModule } from './common/warehouse/warehouse.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -23,6 +26,7 @@ import { ExportModule } from './modules/export/export.module';
 import { ImportModule } from './modules/import/import.module';
 import { HealthModule } from './modules/health/health.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PartiesModule } from './modules/parties/parties.module';
 import { PurchasesModule } from './modules/purchases/purchases.module';
 import { ReportsModule } from './modules/reports/reports.module';
@@ -36,8 +40,12 @@ import { SearchModule } from './modules/search/search.module';
     // Global so the authentication guard can inject JwtService anywhere.
     JwtModule.register({ global: true }),
     PrismaModule,
+    LicensingModule,
     // Global: every posting path reads the company's policies from here.
     CompanySettingsModule,
+    // Global: every PDF and print route asks what this company allows a copy
+    // to show, so the rule lives in one place instead of fourteen.
+    PrintSettingsModule,
     // Global: every module that moves goods asks which warehouse it moved in.
     WarehouseModule,
     AuditModule,
@@ -50,6 +58,7 @@ import { SearchModule } from './modules/search/search.module';
     AdminModule,
     PartiesModule,
     InventoryModule,
+    NotificationsModule,
     SalesModule,
     PurchasesModule,
     ReportsModule,
@@ -71,6 +80,9 @@ import { SearchModule } from './modules/search/search.module';
     // is a rule about every route, so it must not depend on which modules
     // happen to be imported. (It used to ride in with AccountingModule.)
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    // Last: an expired or suspended licence stops business routes, while the
+    // licence screen, sign-in and the backup routes stay open (see the guard).
+    { provide: APP_GUARD, useClass: LicenseGuard },
   ],
 })
 export class AppModule {}

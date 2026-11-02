@@ -1,0 +1,152 @@
+name: Windows installer candidate offline runtime smoke (pinned candidate)
+
+on:
+  push:
+    branches: ['fix/windows-installer-inspection-20261029']
+    paths:
+      - 'scripts/smoke-test-installed-windows.ps1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    name: Re-inspect the exact built candidate with Inno Setup 6.7 support
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+      - name: Test extracted-payload verifier policy
+        run: node --test scripts/verify-extracted-windows-installer.test.mjs
+      - name: Install isolated extractor build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ git libboost-all-dev liblzma-dev zlib1g-dev libbz2-dev libssl-dev python3 unzip curl
+      - name: Build and test the pinned Inno Setup-compatible extractor and fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir="$RUNNER_TEMP/innoextract-src"
+          git clone --no-checkout https://github.com/mplabsorg/innoextract.git "$source_dir"
+          git -C "$source_dir" fetch --depth=1 origin refs/heads/support-inno-7.1
+          git -C "$source_dir" checkout --detach FETCH_HEAD
+          actual="$(git -C "$source_dir" rev-parse HEAD)"
+          test "$actual" = "34f65747e4a57d5de2582bb1ad3d540f440a3983"
+          cmake -S "$source_dir" -B "$source_dir/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
+          cmake --build "$source_dir/build" --parallel 2
+          ctest --test-dir "$source_dir/build" --output-on-failure
+          extractor="$(find "$source_dir/build" -type f -name innoextract -perm -111 -print -quit)"
+          test -n "$extractor"
+          "$extractor" --version
+          echo "KAYAN_INNOEXTRACT=$extractor" >> "$GITHUB_ENV"
+          fixture_zip="$RUNNER_TEMP/innoextract-format-fixtures.zip"
+          curl -fsSL "https://github.com/mplabsorg/innoextract/releases/download/format-fixtures-v1/innoextract-format-fixtures.zip" -o "$fixture_zip"
+          echo "d77d2c447dd46edaeab6b4ea5d7102000b0b8cd66970f18cea2b1eb20f21aa52  $fixture_zip" | sha256sum -c -
+          unzip -q "$fixture_zip" -d "$RUNNER_TEMP"
+          python3 "$source_dir/tests/check-fixtures.py" --extractor "$extractor" --fixtures "$RUNNER_TEMP/format-fixtures" --output "$RUNNER_TEMP/format-fixture-results"
+      - name: Download the internal candidate from the exact build run
+        uses: actions/download-artifact@v4
+        with:
+          name: kayan-windows-inno-payload-e5a57cf94656298b72f2c68386892b4e9cc73b38
+          path: candidate
+          run-id: 40865827930
+          github-token: ${{ github.token }}
+      - name: List and checksum-test the final Inno payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p extracted-payload
+          "$KAYAN_INNOEXTRACT" --list --silent --exclude-temp --no-extract-unknown -- candidate/KAYAN-ERP-Setup.exe > candidate/inno-payload-list.txt
+          test -s candidate/inno-payload-list.txt
+          "$KAYAN_INNOEXTRACT" --extract --test --exclude-temp --no-extract-unknown --output-dir extracted-payload -- candidate/KAYAN-ERP-Setup.exe
+      - name: Verify runtime manifest, dependencies, key fingerprint and absence of private-key material
+        run: node scripts/verify-extracted-windows-installer.mjs --artifact candidate/KAYAN-ERP-Setup.exe --root extracted-payload --source-commit e5a57cf94656298b72f2c68386892b4e9cc73b38 --report candidate/payload-verification.json
+      - name: Upload payload-verified candidate (not install-tested yet)
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAYAN-ERP-Windows-x64-PAYLOAD-VERIFIED-NOT-RELEASE
+          path: |
+            candidate/KAYAN-ERP-Setup.exe
+            candidate/payload-verification.json
+            candidate/inno-payload-list.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  smoke:
+    name: Install and test with outbound Internet blocked
+    needs: inspect
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Download the payload-verified candidate from this workflow run
+        uses: actions/download-artifact@v4
+        with:
+          name: KAYAN-ERP-Windows-x64-PAYLOAD-VERIFIED-NOT-RELEASE
+          path: candidate
+      - name: Verify exact candidate provenance and parse the PowerShell smoke script
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = 'e5a57cf94656298b72f2c68386892b4e9cc73b38'
+          $report = Get-Content -LiteralPath 'candidate/payload-verification.json' -Raw | ConvertFrom-Json
+          $actualHash = (Get-FileHash -LiteralPath 'candidate/KAYAN-ERP-Setup.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($report.sourceCommit -ne $expected) { throw "Candidate source commit mismatch: $($report.sourceCommit)" }
+          if ($report.installer.sha256 -ne $actualHash) { throw "Candidate EXE SHA-256 mismatch: report=$($report.installer.sha256) actual=$actualHash" }
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'scripts/smoke-test-installed-windows.ps1').Path, [ref]$tokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -gt 0) { $parseErrors | Format-List | Out-String | Write-Host; throw 'PowerShell installer smoke script has parse errors.' }
+          Write-Host "PASS: candidate SHA-256 $actualHash, source $expected, and PowerShell syntax verified."
+      - name: Run fresh-install runtime smoke without Internet
+        shell: pwsh
+        run: |
+          & pwsh -NoLogo -NoProfile -File scripts/smoke-test-installed-windows.ps1 -SetupPath "$PWD\candidate\KAYAN-ERP-Setup.exe" -RuntimeOnly -ExpectedSourceCommit 'e5a57cf94656298b72f2c68386892b4e9cc73b38'
+          if ($LASTEXITCODE -ne 0) { throw "Installed-runtime smoke failed with exit code $LASTEXITCODE" }
+      - name: Write install-smoke evidence
+        shell: pwsh
+        run: |
+          $report = Get-Content -LiteralPath 'candidate/payload-verification.json' -Raw | ConvertFrom-Json
+          $hash = (Get-FileHash -LiteralPath 'candidate/KAYAN-ERP-Setup.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          $evidence = [ordered]@{
+            result = 'install-smoke-passed'
+            sourceCommit = $report.sourceCommit
+            installerSha256 = $hash
+            networkIsolation = 'Outbound Internet blocked for Setup.exe, Windows PowerShell and installed runtime executables by Windows Firewall; loopback retained.'
+            verified = @(
+              'Fresh install on a disposable Windows runner',
+              'Bundled PostgreSQL service and Prisma migrations',
+              'Local API startup and administrator login',
+              'Full PostgreSQL backup archive and restore with SQL sentinel preservation',
+              'Corrupt license-state file fails closed without killing local health/API startup',
+              'Restoring license-state bytes recovers status',
+              'Missing public key is detected; restoring the original public key recovers product enforcement',
+              'Upgrade/reinstall, Repair, and safe-reset database preservation'
+            )
+            notTested = @(
+              'Licensed business routes requiring a signed production license',
+              'Quotation PDF content under an activated license'
+            )
+          }
+          $evidence | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath 'candidate/installation-smoke.json' -Encoding utf8
+          Write-Host "PASS: install-smoke evidence written for $hash."
+      - name: Upload offline-install-tested candidate (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAYAN-ERP-Windows-x64-INSTALL-SMOKE-PASSED-NOT-RELEASE
+          path: |
+            candidate/KAYAN-ERP-Setup.exe
+            candidate/payload-verification.json
+            candidate/inno-payload-list.txt
+            candidate/installation-smoke.json
+          if-no-files-found: error
+          retention-days: 7

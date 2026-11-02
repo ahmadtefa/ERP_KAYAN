@@ -14,6 +14,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
@@ -154,6 +155,13 @@ export class CreateQuotationDto {
   /// Per-element styling (font size, weight, color, alignment) stored with
   /// the offer and applied when printing or previewing.
   @IsOptional() @Type(() => Object) design?: Record<string, unknown>;
+
+  /// The attached PDF this offer prints on, and how its pages are used.
+  /// Omitted keeps the drawn design; null removes the binding.
+  @IsOptional() @ValidateIf((_, value) => value !== null) @IsUUID()
+  backgroundFileId?: string | null;
+
+  @IsOptional() @Type(() => Object) background?: Record<string, unknown> | null;
 
   @IsArray()
   @ArrayMinSize(1)

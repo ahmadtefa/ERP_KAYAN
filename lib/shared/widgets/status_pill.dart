@@ -23,13 +23,17 @@ class StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final brightness = theme.brightness;
     return Container(
       padding: EdgeInsets.symmetric(
         horizontal: dense ? 6 : 8,
         vertical: dense ? 1 : 3,
       ),
       decoration: BoxDecoration(
-        color: tone.background,
+        color: tone.backgroundOn(
+          brightness,
+          surface: theme.colorScheme.surface,
+        ),
         borderRadius: BorderRadius.circular(AppRadii.pill),
       ),
       child: Row(
@@ -40,7 +44,7 @@ class StatusPill extends StatelessWidget {
               width: 5,
               height: 5,
               decoration: BoxDecoration(
-                color: tone.foreground,
+                color: tone.foregroundOn(brightness),
                 shape: BoxShape.circle,
               ),
             ),
@@ -51,7 +55,7 @@ class StatusPill extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelSmall?.copyWith(
-              color: tone.foreground,
+              color: tone.foregroundOn(brightness),
               fontWeight: FontWeight.w600,
               fontSize: dense ? 10.5 : 11,
               height: 1.3,

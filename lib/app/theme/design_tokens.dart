@@ -43,7 +43,7 @@ abstract final class AppColors {
 
   // Text — navy-tinted ink rather than neutral black.
   static const textPrimary = Color(0xFF16233A);
-  static const textSecondary = Color(0xFF5A6B84);
+  static const textSecondary = Color(0xFF4F6079);
   static const textDisabled = Color(0xFF9AA9BE);
   static const onNavy = Color(0xFFF7FAFF);
   static const onNavyMuted = Color(0xFFB7C6DA);
@@ -60,6 +60,22 @@ abstract final class AppColors {
   static const error = Color(0xFFD92D20);
   static const errorSoft = Color(0xFFFBEAEA);
   static const infoSoft = Color(0xFFE9F0FD);
+
+  // The steps used for *words* on the soft chips above. The drawing steps are
+  // fine for a dot, a rule or a 20-pixel icon, but at 10.5 pixels a label in
+  // #12805C on #E6F4EE measures 4.34:1 and a red one 4.15:1 - under the 4.5:1
+  // that small text needs. These are the same hues, stepped down until each
+  // pair measures at least 5:1; the strong steps keep drawing icons.
+  static const successText = Color(0xFF0C6146);
+  static const warningText = Color(0xFF825603);
+  static const errorText = Color(0xFFB71C14);
+
+  // And the same meanings on the dark canvas, where a deep green or the brand
+  // blue measures 2.8-3.4:1 against #111E33: unreadable at any size.
+  static const successTextDark = Color(0xFF4CC79A);
+  static const warningTextDark = Color(0xFFE3B25E);
+  static const errorTextDark = Color(0xFFF19A93);
+  static const infoTextDark = Color(0xFF7FA9F5);
 
   // Dashboard chart series. Sales follow the brand primary and the result
   // line the success green; purchases keep a warm gold so the two bar
@@ -95,18 +111,36 @@ abstract final class AppGradients {
   );
 }
 
-/// One section's identity colour: the strong step for icons and selected
-/// text, the soft step for selected backgrounds, and a brighter step that
-/// stays legible on dark surfaces.
+/// One section's identity colour.
+///
+/// Five steps, because a section identity is used in five different jobs and
+/// the same hex cannot do all of them without failing somewhere:
+///
+///  * [base]      — the strong step: icons, the selected marker, headings.
+///  * [soft]      — the chip behind [base] (selected menu tile, tag).
+///  * [pageTint]  — the canvas of that section's screens: a wash of the
+///    section colour light enough to read body text on, strong enough that
+///    «المبيعات» and «المشتريات» are not the same white page.
+///  * [panelTint] — a slightly stronger wash for headers and grouped panels.
+///  * [darkBase]  — the same hue stepped up for the dark canvas.
+///
+/// Every pair in use is measured by `test/shared/design_contrast_test.dart`:
+/// [base] on [soft], on white and on [pageTint] clears 4.5:1, and the ordinary
+/// body/secondary inks clear 4.5:1 on [pageTint], so a tinted section is not a
+/// prettier way to make a screen hard to read.
 class SectionAccent {
   const SectionAccent({
     required this.base,
     required this.soft,
+    required this.pageTint,
+    required this.panelTint,
     required this.darkBase,
   });
 
   final Color base;
   final Color soft;
+  final Color pageTint;
+  final Color panelTint;
   final Color darkBase;
 
   Color of(Brightness brightness) =>
@@ -115,61 +149,175 @@ class SectionAccent {
   Color softOf(Brightness brightness) => brightness == Brightness.dark
       ? darkBase.withValues(alpha: 0.18)
       : soft;
+
+  /// The canvas this section's screens sit on. In the dark theme the tint is
+  /// the product's dark canvas: a washed-out blue behind dark cards would
+  /// destroy the figure/text contrast the dark theme exists to keep.
+  Color pageOf(Brightness brightness) =>
+      brightness == Brightness.dark ? AppColors.darkBackground : pageTint;
+
+  /// The band behind a section header or a grouped panel.
+  Color panelOf(Brightness brightness) => brightness == Brightness.dark
+      ? AppColors.darkSurfaceAlt
+      : panelTint;
 }
 
-/// The colour of each main section of the product. The navigation, the top
-/// bar and the dashboard figures all read from here, so «المبيعات» is green
-/// everywhere and «العملاء والموردون» keep their own rose identity instead
-/// of borrowing the accounting colour.
+/// The colour of each main section of the product.
+///
+/// The owner's brief names a colour per department, and this is that table
+/// implemented in one place: the navigation, the top bar, the page canvas and
+/// the dashboard figures all read from here, so «المشتريات» is orange on the
+/// menu, on its own screens and in the charts — not only in its icon.
+///
+/// The values are the brief's hues stepped until they pass contrast (see
+/// [SectionAccent]); a hue that reads nicely on a swatch can be 3.2:1 behind
+/// 13-pixel text, which is how a colourful menu becomes an unreadable one.
+///
+/// The identity follows the *job*, not the API module: banks and cashboxes are
+/// their own daily destination and carry the accounting emerald, while
+/// customers (turquoise) and suppliers (violet) are deliberately different
+/// colours so a payment to a supplier is never mistaken for one from a
+/// customer at a glance.
 abstract final class SectionAccents {
+  // Every identity colour in this table is held to two measurements at once:
+  // 5.8:1 or better on white (so it can headline a section and label a table
+  // column) and 2.8:1 or better on the navy sidebar (so the same colour is the
+  // selected entry's marker without being a lighter second colour). That band
+  // - luminance around 0.13 - is what makes one value usable in both places,
+  // and it is why "deep blue" here reads as indigo rather than as near-black.
+  //
+  // The canvas behind each section is a wash of the same hue: the page tint is
+  // the palest step, the panel tint one step deeper so a grouped area reads as
+  // a band rather than as a change of page. Every pair of page tints is a
+  // measurably different colour, because two sections a person cannot tell
+  // apart at a glance are two sections that may as well share a colour.
+
+  /// لوحة التحكم — azure.
   static const overview = SectionAccent(
-    base: Color(0xFF1D5CD6),
-    soft: Color(0xFFE9F0FD),
-    darkBase: Color(0xFF7FA9F5),
-  );
-  static const accounting = SectionAccent(
-    base: Color(0xFF6D4FB0),
-    soft: Color(0xFFF0EBFA),
-    darkBase: Color(0xFFBFA7EC),
+    base: Color(0xFF1563BD),
+    soft: Color(0xFFE8EFF8),
+    pageTint: Color(0xFFF1F6FB),
+    panelTint: Color(0xFFE1EBF6),
+    darkBase: Color(0xFF569FF1),
   );
 
-  /// Banks & cashboxes live inside the accounting group but are their own
-  /// daily destination, so the cash entry carries this teal instead.
+  /// المحاسبة — emerald.
+  static const accounting = SectionAccent(
+    base: Color(0xFF13724F),
+    soft: Color(0xFFE7F1ED),
+    pageTint: Color(0xFFF3F8F6),
+    panelTint: Color(0xFFE3EEEA),
+    darkBase: Color(0xFF17B57B),
+  );
+
+  /// Banks & cashboxes sit inside accounting and share its emerald — cash is
+  /// where the accounting numbers are actually touched, not a different book.
+  /// Its canvas is a deeper wash of the same green, so «الخزينة» still looks
+  /// like its own desk rather than like a copy of the ledger.
   static const cash = SectionAccent(
-    base: Color(0xFF047A8C),
-    soft: Color(0xFFE2F2F5),
-    darkBase: Color(0xFF5FC7D4),
+    base: Color(0xFF13724F),
+    soft: Color(0xFFE7F1ED),
+    pageTint: Color(0xFFE9F2EE),
+    panelTint: Color(0xFFD9E8E2),
+    darkBase: Color(0xFF17B57B),
   );
-  static const parties = SectionAccent(
-    base: Color(0xFFB03070),
-    soft: Color(0xFFFAE9F2),
-    darkBase: Color(0xFFEE8FBB),
+
+  /// العملاء — turquoise.
+  static const customers = SectionAccent(
+    base: Color(0xFF177067),
+    soft: Color(0xFFE8F1F0),
+    pageTint: Color(0xFFECF4F3),
+    panelTint: Color(0xFFDCEAE8),
+    darkBase: Color(0xFF1EAEA0),
   );
+
+  /// الموردون — violet, kept well away from the customers' turquoise and the
+  /// reports' indigo so a payment to a supplier never looks like one from a
+  /// customer.
+  static const suppliers = SectionAccent(
+    base: Color(0xFF8B33D8),
+    soft: Color(0xFFF3EBFB),
+    pageTint: Color(0xFFF8F3FD),
+    panelTint: Color(0xFFF0E4FA),
+    darkBase: Color(0xFFBB84EC),
+  );
+
+  /// المخازن والأصناف — teal blue.
   static const inventory = SectionAccent(
-    base: Color(0xFF9A6B0F),
-    soft: Color(0xFFFAF1DC),
-    darkBase: Color(0xFFE3B95E),
+    base: Color(0xFF166D87),
+    soft: Color(0xFFE8F0F3),
+    pageTint: Color(0xFFEFF5F7),
+    panelTint: Color(0xFFDEEBEE),
+    darkBase: Color(0xFF1BA8D2),
   );
+
+  /// المبيعات وعروض الأسعار — royal blue.
   static const sales = SectionAccent(
-    base: Color(0xFF0E7A3E),
-    soft: Color(0xFFE6F4EC),
-    darkBase: Color(0xFF63C98C),
+    base: Color(0xFF3B52E9),
+    soft: Color(0xFFEBEEFD),
+    pageTint: Color(0xFFEDEFFD),
+    panelTint: Color(0xFFDEE2FB),
+    darkBase: Color(0xFF8695F5),
   );
+
+  /// المشتريات — warm orange.
   static const purchases = SectionAccent(
-    base: Color(0xFFC24E0A),
-    soft: Color(0xFFFBEADD),
-    darkBase: Color(0xFFF2A06B),
+    base: Color(0xFFAD420D),
+    soft: Color(0xFFF7ECE7),
+    pageTint: Color(0xFFFBF6F3),
+    panelTint: Color(0xFFF5E8E2),
+    darkBase: Color(0xFFF57738),
   );
+
+  /// التقارير — indigo, deeper in hue than sales and further from the
+  /// customers' turquoise than a navy would be at this luminance.
   static const insights = SectionAccent(
-    base: Color(0xFF4250B8),
-    soft: Color(0xFFE8EBFA),
-    darkBase: Color(0xFF96A2EC),
+    base: Color(0xFF684FCC),
+    soft: Color(0xFFF0EDFA),
+    pageTint: Color(0xFFF2F1FB),
+    panelTint: Color(0xFFE7E3F7),
+    darkBase: Color(0xFFA090E3),
   );
+
+  /// الإدارة والإعدادات — slate, because administration is not a business
+  /// department and should not compete with one.
   static const administration = SectionAccent(
-    base: Color(0xFF5B6B80),
-    soft: Color(0xFFEDF1F6),
-    darkBase: Color(0xFFAFC0D4),
+    base: Color(0xFF56657B),
+    soft: Color(0xFFEEF0F2),
+    pageTint: Color(0xFFF1F3F4),
+    panelTint: Color(0xFFE6E8EB),
+    darkBase: Color(0xFF8A9DB6),
   );
+}
+
+/// The product's typeface.
+///
+/// One family, bundled with the program: IBM Plex Sans Arabic, whose Latin is
+/// drawn to the same metrics as its Arabic, so a line that mixes «إجمالي 1,250
+/// EGP» does not change rhythm halfway. Weights 400/500/600/700 are registered
+/// in `pubspec.yaml`; the theme uses only those, because a synthesised bold is
+/// a smeared glyph, not a weight.
+///
+/// The fallbacks matter for one reason: if the bundled files were ever missing
+/// from a build, Arabic must still be Arabic (never tofu) rather than a
+/// Latin-only face that renders empty boxes.
+abstract final class AppTypography {
+  static const arabicFamily = 'IBMPlexSansArabic';
+  static const latinFamily = 'IBMPlexSansArabic';
+  static const fallback = <String>[
+    'Segoe UI',
+    'Tahoma',
+    'Noto Sans Arabic',
+    'Arial',
+  ];
+
+  /// Tabular figures for money columns.
+  ///
+  /// A column of prices has to line up on the decimal point; proportional
+  /// digits (where "1" is narrower than "8") make a figure column look ragged
+  /// and make a mis-keyed digit harder to spot. Money and quantity cells use
+  /// this, prose does not.
+  static const tnum = <FontFeature>[FontFeature.tabularFigures()];
 }
 
 /// A 4-point spacing scale. Nothing in the UI should invent its own gaps.
@@ -240,14 +388,16 @@ abstract final class AppShadows {
 enum AppTone { neutral, info, success, warning, danger }
 
 extension AppToneColors on AppTone {
+  /// The light-theme ink for this meaning, measured on [background].
   Color get foreground => switch (this) {
     AppTone.neutral => AppColors.textSecondary,
     AppTone.info => AppColors.primary,
-    AppTone.success => AppColors.success,
-    AppTone.warning => const Color(0xFF9A6508),
-    AppTone.danger => AppColors.error,
+    AppTone.success => AppColors.successText,
+    AppTone.warning => AppColors.warningText,
+    AppTone.danger => AppColors.errorText,
   };
 
+  /// The light-theme chip behind [foreground].
   Color get background => switch (this) {
     AppTone.neutral => AppColors.surfaceSunken,
     AppTone.info => AppColors.infoSoft,
@@ -255,4 +405,35 @@ extension AppToneColors on AppTone {
     AppTone.warning => AppColors.warningSoft,
     AppTone.danger => AppColors.errorSoft,
   };
+
+  /// The same meaning, drawn on whichever canvas the person is looking at.
+  ///
+  /// A tone is not a colour: on the dark canvas the success green has to be
+  /// the bright step or the words disappear, and the chip behind it has to be
+  /// a tint of that step rather than a pale patch from the light theme. Both
+  /// answers are pinned by `test/theme/contrast_test.dart`.
+  Color foregroundOn(Brightness brightness) {
+    if (brightness != Brightness.dark) return foreground;
+    return switch (this) {
+      AppTone.neutral => AppColors.darkTextMuted,
+      AppTone.info => AppColors.infoTextDark,
+      AppTone.success => AppColors.successTextDark,
+      AppTone.warning => AppColors.warningTextDark,
+      AppTone.danger => AppColors.errorTextDark,
+    };
+  }
+
+  /// [foregroundOn], laid on [surface] as a tint so the chip belongs to the
+  /// card it sits on - [AppColors.darkSurface] by default, since that is what
+  /// a card inside the dark canvas is painted with.
+  Color backgroundOn(
+    Brightness brightness, {
+    Color? surface,
+  }) {
+    if (brightness != Brightness.dark) return background;
+    return Color.alphaBlend(
+      foregroundOn(brightness).withValues(alpha: 0.14),
+      surface ?? AppColors.darkSurface,
+    );
+  }
 }

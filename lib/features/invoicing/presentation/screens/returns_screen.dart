@@ -15,6 +15,31 @@ import '../../../common/presentation/screens/module_scaffold.dart';
 import '../invoice_status.dart';
 import '../providers/invoice_providers.dart';
 
+/// Opens one return document, wherever it is asked for: the returns list, or
+/// a partner's statement of account. The dialog is the same one in both
+/// places - a second copy of the figures would be a second set of figures.
+Future<void> showReturnDetail(
+  BuildContext context,
+  WidgetRef ref, {
+  required InvoiceKind kind,
+  required String id,
+}) async {
+  try {
+    final detail =
+        await ref.read(apiClientProvider).getObject('${kind.returnsPath}/$id');
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => _ReturnDetailDialog(
+        kind: kind,
+        invoice: detail,
+      ),
+    );
+  } on Failure catch (error) {
+    if (context.mounted) showMessage(context, error.message, error: true);
+  }
+}
+
 /// Sales credit notes and purchase debit notes, kept apart from ordinary
 /// invoices so every row on these screens is genuinely a return.
 class ReturnsScreen extends ConsumerStatefulWidget {
@@ -86,21 +111,12 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
   }
 
   Future<void> _showDetails(Json summary) async {
-    try {
-      final detail = await ref
-          .read(apiClientProvider)
-          .getObject('${widget.kind.returnsPath}/${text(summary, 'id')}');
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => _ReturnDetailDialog(
-          kind: widget.kind,
-          invoice: detail,
-        ),
-      );
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
-    }
+    await showReturnDetail(
+      context,
+      ref,
+      kind: widget.kind,
+      id: text(summary, 'id'),
+    );
   }
 
   List<Json> _filter(List<Json> rows) {

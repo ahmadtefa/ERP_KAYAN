@@ -5,9 +5,16 @@ import {
   PDFName,
   PDFRawStream,
   decodePDFRawStream,
+  rgb,
 } from 'pdf-lib';
 import { PdfService } from '../export/pdf.service';
 import {
+  ARTWORK_OVERLAY_RENDER,
+  DEFAULT_BACKGROUND_SETTINGS,
+  mergeOfferOntoBackground,
+} from './quotation-background';
+import {
+  QUOTATION_ARTWORK_PAGE_NUMBER,
   QUOTATION_PAGE_NUMBER,
   QuotationSnapshot,
   quotationPageNumberInk,
@@ -329,6 +336,67 @@ describeWithBrowser('quotation PDF through the real browser renderer', () => {
       // And the cells the user typed, not the empty space of an unknown column.
       expect(html).toContain('14 days');
       expect(html).toContain('12.5');
+    },
+    240_000,
+  );
+
+  // The artwork path prints the offer as an overlay, merges it onto the
+  // letterhead, and numbers the finished page. The overlay must therefore
+  // arrive unnumbered: when it was numbered too, every page carried two
+  // numbers four points apart - the grey one from the renderer and the
+  // artwork's own - which is what this counts.
+  it(
+    'numbers a page once when the offer is laid on artwork',
+    async () => {
+      const content = snapshot(20, 4);
+      const html = renderQuotationDocument(
+        content,
+        { logoData: LOGO, logoMime: 'image/png' },
+        'en',
+        false,
+      );
+      const overlay = await browser.render(html, ARTWORK_OVERLAY_RENDER);
+
+      // A two-page letterhead, drawn here so the test needs no upload. Each
+      // page is painted, because a PDF page with no content stream is exactly
+      // what the merge refuses to lay an offer on.
+      const artwork = await PDFDocument.create();
+      for (const shade of [0.97, 0.92]) {
+        const sheet = artwork.addPage([595.28, 841.89]);
+        sheet.drawRectangle({
+          x: 0,
+          y: 0,
+          width: 595.28,
+          height: 841.89,
+          color: rgb(shade, shade, 1),
+        });
+      }
+
+      const merged = await mergeOfferOntoBackground({
+        background: Buffer.from(await artwork.save()),
+        overlay,
+        settings: { ...DEFAULT_BACKGROUND_SETTINGS, mode: 'SEQUENCE' },
+        pageNumber: {
+          y: QUOTATION_ARTWORK_PAGE_NUMBER.y,
+          size: QUOTATION_ARTWORK_PAGE_NUMBER.size,
+        },
+      });
+
+      expect(merged.pages).toBeGreaterThanOrEqual(3);
+      const drawing = await pageDrawing(merged.pdf);
+      expect(drawing.length).toBe(merged.pages);
+      drawing.forEach((page, index) => {
+        const labels = [...page.matchAll(/<([0-9A-F]+)> Tj/g)].map((match) =>
+          Buffer.from(match[1], 'hex').toString('latin1'),
+        );
+        const numbers = labels.filter((label) => /^\d+ \/ \d+$/.test(label));
+        expect(numbers).toEqual([`${index + 1} / ${merged.pages}`]);
+      });
+
+      // The artwork sits behind: its first page, then its second, repeated
+      // once its pages run out. The numbers are zero-based page indexes, the
+      // same shape the merge has always returned.
+      expect(merged.backgroundPages.slice(0, 3)).toEqual([0, 1, 1]);
     },
     240_000,
   );

@@ -1,0 +1,176 @@
+name: Prisma native migrations
+
+# Proves KAYAN's migration path with Prisma 6's classic (native) schema engine
+# against real PostgreSQL: the official engine binary is downloaded and run, the
+# whole migration history is replayed, a populated database is upgraded, a broken
+# migration is shown to roll back and to block the next run, PostgreSQL's
+# char/name catalog types (OID 18 and 19) are read back through the shipped
+# client, and shadow databases are proven to stay on a separate server.
+#
+# Nothing here is stubbed. If the engine cannot be downloaded the job fails
+# instead of falling back to a fake or a type-check.
+
+on:
+  pull_request:
+    branches: [main, 'arena/**']
+  push:
+    branches: [main, 'arena/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prisma-native-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  native-migrations:
+    name: Native engine (deploy, upgrade, failure and retry)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: erp_kayan
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d erp_kayan"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan?schema=public
+      # No engine may be substituted from outside: the point of this job is the
+      # official Prisma engine that the CLI downloads and verifies itself.
+      PRISMA_SCHEMA_ENGINE_BINARY: ''
+      PRISMA_QUERY_ENGINE_LIBRARY: ''
+      PRISMA_MIGRATE_ENGINE_BINARY: ''
+      PRISMA_CLI_QUERY_ENGINE_TYPE: ''
+      KAYAN_PRISMA_SHADOW_DATABASE_URL: ''
+      KAYAN_PRISMA_SHADOW_VERIFIED: ''
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install locked dependencies (downloads the official Prisma engines)
+        run: npm ci
+
+      - name: Prove the official Prisma engines are present and unmodified
+        run: |
+          set -euo pipefail
+          # A missing or stubbed engine must fail here, not silently later.
+          npx prisma -v
+          test -d node_modules/@prisma/engines || { echo '::error::@prisma/engines is missing'; exit 1; }
+          # The schema engine is the binary that applies migrations.
+          find node_modules/@prisma/engines node_modules/prisma -maxdepth 3 -name '*schema-engine*' | head -5
+          if ! find node_modules/@prisma/engines node_modules/prisma -maxdepth 3 -name '*schema-engine*' | grep -q .; then
+            echo '::error title=No schema engine::The native schema engine binary was not downloaded; migrations cannot be proven.'
+            exit 1
+          fi
+          echo '::notice title=Engines::The official schema engine binary is present in node_modules.'
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Validate the schema
+        run: npx prisma validate
+
+      - name: Deploy the real migration history to the service database
+        run: npx prisma migrate deploy
+
+      - name: Architecture gates (classic engine only, guarded shadow, no casts)
+        run: |
+          python ../scripts/ci-diagnose.py node --test scripts/prisma-architecture.test.mjs
+          python ../scripts/ci-diagnose.py node --test scripts/prisma-shadow-guard.test.mjs
+
+      - name: Fresh deploy, history, idempotency, failure/retry, populated upgrade
+        run: python ../scripts/ci-diagnose.py node scripts/prisma-native-migration-suite.mjs
+
+      - name: OID 18 (char) and OID 19 (name) through the shipped client
+        run: python ../scripts/ci-diagnose.py node scripts/prisma-catalog-types.mjs
+
+      - name: Confirm the migration path still uses the native engine after the run
+        if: always()
+        run: |
+          set -euo pipefail
+          npx prisma migrate status --schema prisma/schema.prisma | tee /tmp/prisma-status.log
+          grep -qiE 'database schema is up to date|no pending migrations' /tmp/prisma-status.log \
+            || { echo '::error title=Migration status::The database is not reported up to date.'; exit 1; }
+
+  shadow-isolation:
+    name: Shadow database isolation (two independent servers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres-live:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: erp_kayan
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d erp_kayan"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      postgres-second:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: shadow
+          POSTGRES_PASSWORD: shadow
+          POSTGRES_DB: shadow_admin
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U shadow -d shadow_admin"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      KAYAN_LIVE_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan?schema=public
+      KAYAN_SECOND_DATABASE_URL: postgresql://shadow:shadow@127.0.0.1:5433/shadow_admin?schema=public
+      PRISMA_SCHEMA_ENGINE_BINARY: ''
+      PRISMA_QUERY_ENGINE_LIBRARY: ''
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Shadow isolation is enforced by the real guard and the real engine
+        run: python ../scripts/ci-diagnose.py node scripts/prisma-shadow-isolation.mjs
+
+      - name: The company database is untouched afterwards
+        if: always()
+        run: |
+          set -euo pipefail
+          psql "postgresql://ci:ci@127.0.0.1:5432/erp_kayan" -tAc \
+            "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'"
+          echo '::notice title=Shadow isolation::The live server was read after the shadow tests; no shadow database exists on it.'

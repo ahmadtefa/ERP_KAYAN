@@ -1,0 +1,27 @@
+{
+  "$comment": [
+    "Reviewed exceptions for `npm audit --omit=dev` (see scripts/audit-gate.mjs).",
+    "",
+    "Rules, enforced by the gate itself:",
+    "  * high and critical advisories are NEVER allowed here - the gate fails on them;",
+    "  * every entry names one advisory id, the package, why it cannot be fixed today,",
+    "    and what makes it unreachable in this product;",
+    "  * every entry expires; the gate fails once the expiry date has passed;",
+    "  * an entry that no longer matches a real advisory fails the gate, so the list",
+    "    cannot rot into a blanket suppression."
+  ],
+  "expiresOn": "2026-12-31",
+  "allowed": [
+    {
+      "advisory": "GHSA-g3hv-75wg-m249",
+      "package": "minimatch",
+      "severity": "moderate",
+      "title": "minimatch has potential denial of service via globparts amplification",
+      "reason": "Reachable only through exceljs -> archiver -> readdir-glob / archiver-utils -> glob -> minimatch. Every published glob and archiver release today still resolves minimatch below 11.0.1, and the versions exceljs pins call minimatch as a bare function, so an override to 11.x would break the export writers.",
+      "unreachableBecause": "The vulnerable code is archive.glob()'s pattern matching. This product only ever writes workbooks in memory (new ExcelJS Workbook(), worksheet.addRow, workbook.xlsx.writeBuffer) and never creates an archiver or calls glob; no source file imports archiver or calls .glob().",
+      "evidence": "backend/src/modules/export/writers.ts, backend/src/modules/import/tabular.ts, backend/src/modules/import/import.service.ts use only the workbook API; grep for 'archiver' and '.glob(' in src/ returns nothing.",
+      "reviewedOn": "2026-10-31",
+      "recheck": "Remove this entry when exceljs publishes a release whose archiver chain resolves minimatch >= 11.0.1, or when the export writers stop using exceljs."
+    }
+  ]
+}

@@ -18,13 +18,29 @@ class _ReturnLineDraft {
   final Json source;
   final TextEditingController quantity;
 
+  /// A return must use the same unit the original invoice line used. Legacy
+  /// lines have no snapshot and fall back to the item's base unit with a
+  /// factor of one, so the arithmetic is unchanged for old documents.
+  String get unitName => text(source, 'unitName').isEmpty
+      ? text(source, 'unit')
+      : text(source, 'unitName');
+
+  Decimal get _factor =>
+      Decimal.tryParse(text(source, 'unitFactor', fallback: '1')) ??
+      Decimal.one;
+
+  /// Still returnable, expressed in the original unit. The stock figures are
+  /// base units, so the base remainder is converted back through the factor.
   Decimal get remaining {
-    final quantityValue = Decimal.tryParse(text(source, 'quantity')) ?? Decimal.zero;
+    final quantityValue =
+        Decimal.tryParse(text(source, 'quantity')) ?? Decimal.zero;
     final alreadyReturned =
         Decimal.tryParse(text(source, 'returnedQuantity', fallback: '0')) ??
         Decimal.zero;
-    final result = quantityValue - alreadyReturned;
-    return result < Decimal.zero ? Decimal.zero : result;
+    final baseRemaining = quantityValue - alreadyReturned;
+    final clamped =
+        baseRemaining < Decimal.zero ? Decimal.zero : baseRemaining;
+    return (clamped / _factor).toDecimal(scaleOnInfinitePrecision: 10);
   }
 
   void dispose() => quantity.dispose();
@@ -153,6 +169,9 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
       lines.add({
         'originalLineId': text(draft.source, 'id'),
         'quantity': raw,
+        // Echo the original unit; the server rejects any mismatch.
+        if (text(draft.source, 'unitName').isNotEmpty)
+          'unitName': text(draft.source, 'unitName'),
       });
     }
     if (lines.isEmpty) {
@@ -324,7 +343,8 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
                   Text(code.isEmpty ? name : '$code · $name'),
                   const SizedBox(height: 4),
                   Text(
-                    '${l10n.remainingToReturn}: ${line.remaining.toString()}',
+                    '${l10n.remainingToReturn}: ${line.remaining.toString()} '
+                    '${line.unitName}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -342,6 +362,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
                 ],
                 decoration: InputDecoration(
                   labelText: l10n.quantityToReturn,
+                  helperText: line.unitName,
                   isDense: true,
                 ),
               ),
