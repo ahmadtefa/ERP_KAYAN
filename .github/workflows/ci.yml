@@ -806,3 +806,104 @@ jobs:
         run: python scripts/ci-diagnose.py flutter test --reporter expanded
       - name: Build Linux desktop
         run: flutter build linux --release
+
+  # The one proof that needs a licensed program: an ephemeral Ed25519 key pair is
+  # generated in this job, the API is started with its public key and a machine
+  # id, and scripts/prove-installed-warehouse-and-licence.mjs signs an activation
+  # key with the matching private key. Nothing here is a mock: the server
+  # enforces the licence it was given, and the same process then runs the whole
+  # warehouse cycle. The private key lives in $RUNNER_TEMP and is never uploaded;
+  # only the machine-readable proof report is kept.
+  licence-and-warehouse:
+    name: Licence and warehouse on an installed-style program
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: erp_kayan
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d erp_kayan"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan?schema=public
+      JWT_ACCESS_SECRET: ci-only-access-secret-not-for-real-use-0123456789
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-real-use-9876543210
+      KAYAN_ADMIN_USERNAME: ci-admin
+      KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
+      PORT: 3100
+      NODE_ENV: production
+      LICENSE_STATE_DIR: ${{ runner.temp }}/kayan-licence-state
+      LICENSE_PUBLIC_KEY_FILE: ${{ runner.temp }}/kayan-licence-keys/public-key.pem
+      LICENSE_MACHINE_ID: KM-CI-PROOF-MACHINE
+      KAYAN_API: http://127.0.0.1:3100/api/v1
+      KAYAN_GENERATOR_HOME: ${{ runner.temp }}/kayan-licence-keys
+      KAYAN_PROOF_REPORT: ${{ runner.temp }}/installed-licence-warehouse-proof.json
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+        working-directory: backend
+      - name: Generate Prisma Client
+        run: npx prisma generate
+        working-directory: backend
+      - name: Build API
+        run: npm run build
+        working-directory: backend
+      - name: Apply migrations to ephemeral PostgreSQL
+        run: npx prisma migrate deploy
+        working-directory: backend
+      - name: Seed the first company and administrator
+        run: npx ts-node prisma/seed.ts
+        working-directory: backend
+      - name: Mint an ephemeral signing key pair for this run
+        run: |
+          mkdir -p "$KAYAN_GENERATOR_HOME" "$LICENSE_STATE_DIR"
+          node tools/license-generator/kayan-license.mjs init --home "$KAYAN_GENERATOR_HOME"
+      - name: Start the licensed API
+        run: |
+          node backend/dist/src/main.js > /tmp/kayan-licensed-api.log 2>&1 &
+          echo $! > /tmp/kayan-licensed-api.pid
+          for attempt in $(seq 1 40); do
+            if curl -fsS "$KAYAN_API/health" > /tmp/kayan-licensed-health.json 2>/dev/null; then
+              if node -e 'const h=JSON.parse(require("fs").readFileSync("/tmp/kayan-licensed-health.json","utf8")); process.exit(h.status==="ok"&&h.database==="up"?0:1)'; then
+                echo "API is healthy: $(cat /tmp/kayan-licensed-health.json)"
+                exit 0
+              fi
+            fi
+            sleep 2
+          done
+          echo "::error::The licensed API did not become healthy in time."
+          cat /tmp/kayan-licensed-api.log || true
+          exit 1
+      - name: Prove the licence and the whole warehouse cycle
+        env:
+          KAYAN_GENERATOR: ${{ github.workspace }}/tools/license-generator/kayan-license.mjs
+        run: node scripts/prove-installed-warehouse-and-licence.mjs
+      - name: Stop the API and keep its log
+        if: always()
+        run: |
+          if [ -f /tmp/kayan-licensed-api.pid ]; then kill "$(cat /tmp/kayan-licensed-api.pid)" 2>/dev/null || true; fi
+          cp /tmp/kayan-licensed-api.log "$RUNNER_TEMP/kayan-licensed-api.log" 2>/dev/null || true
+      - name: Upload the proof report and the API log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installed-licence-warehouse-proof-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/installed-licence-warehouse-proof.json
+            ${{ runner.temp }}/kayan-licensed-api.log
+          if-no-files-found: warn
+          retention-days: 14
