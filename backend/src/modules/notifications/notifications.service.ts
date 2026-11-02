@@ -499,9 +499,20 @@ export class NotificationsService {
       set.add(dedupe);
       keep.set(type, set);
     };
+    /// A kind this pass looked at, whether or not it found anything.
+    ///
+    /// The close loop at the end only visits the kinds it is given, so a kind
+    /// that matched nothing at all has to be registered before the walk, not
+    /// during it. Without this, yesterday's "expires in 5 days" warning stood
+    /// in the centre for ever once the lot expired, because the day it went
+    /// stale was exactly the day nothing of that kind was found.
+    const evaluated = (...types: string[]) => {
+      for (const type of types) if (!keep.has(type)) keep.set(type, new Set<string>());
+    };
 
     // ── lots: expiring, expired, and expired-but-still-on-the-shelf ──
     if (enabled(STOCK_EXPIRY_SOON) || enabled(STOCK_EXPIRED)) {
+      evaluated(STOCK_EXPIRY_SOON, STOCK_EXPIRED, STOCK_EXPIRED_WRITE_OFF_PENDING);
       const horizon = new Date(dayOnly(today).getTime() + (widest + 1) * 86_400_000);
       const lots = await this.prisma.itemBatch.findMany({
         where: {
@@ -608,6 +619,7 @@ export class NotificationsService {
 
     // ── thresholds, per warehouse, for items that have a policy ──
     if (enabled(STOCK_BELOW_MINIMUM) || enabled(STOCK_OUT_OF_STOCK) || enabled(STOCK_ABOVE_MAXIMUM)) {
+      evaluated(STOCK_BELOW_MINIMUM, STOCK_OUT_OF_STOCK, STOCK_ABOVE_MAXIMUM);
       const thresholds = await this.prisma.itemWarehouseSetting.findMany({
         where: {
           companyId,

@@ -120,6 +120,14 @@ jobs:
       - name: Prove the user-avatar migration on a populated database
         run: node scripts/check-user-avatar-migration.mjs
 
+      # An installation that already exists must receive the warehouse
+      # permissions when it upgrades, or every new screen answers "permission
+      # required" to the owner. This runs the real migration files against a
+      # populated, pre-upgrade database and checks the policy role by role -
+      # including that approval is not handed to whoever merely moves goods.
+      - name: Prove existing roles receive the warehouse permissions on upgrade
+        run: python ../scripts/ci-diagnose.py node scripts/check-warehouse-permission-grant.mjs
+
       # Licensing is the one subsystem whose real behaviour cannot be shown
       # with a mocked database: the migration has to survive an installation
       # that already has accounts, seats have to be refused at the limit, two
@@ -603,7 +611,18 @@ jobs:
       # tested; only a real database can prove FEFO ordering, the moving
       # average, the write-off journal and a single row per alert fact.
       - name: Exercise lots, FEFO, costing, write-off and alerts
-        run: python ../scripts/ci-diagnose.py npx ts-node scripts/verify-inventory-postgres.ts
+        run: |
+          exec > >(tee /tmp/kayan-inventory.log) 2>&1
+          python ../scripts/ci-diagnose.py npx ts-node scripts/verify-inventory-postgres.ts
+      # The pass count is the evidence. A run that stopped early, or that
+      # skipped a check, would not print this line, and the number is recorded
+      # in the run itself rather than in somebody's memory of the console.
+      - name: Record how many lot-engine checks passed
+        if: always()
+        run: |
+          summary=$(grep -h "checks passed against real PostgreSQL" /tmp/kayan-inventory.log 2>/dev/null | tail -1)
+          echo "::notice title=Lot engine checks::${summary:-no summary captured - the suite did not reach the end}"
+          test -n "$summary"
 
   flutter:
     name: Flutter Web (analyze, test, build)

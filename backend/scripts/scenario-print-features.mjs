@@ -747,10 +747,13 @@ async function main() {
     'kayan-backup-newer.json',
   );
   const newer = await api('/backup/inspect', { method: 'POST', body: newerForm });
+  // The API answers in problem-details form, so the sentence a person sees is
+  // `detail`, not `message`.
+  const newerDetail = String(newer.data?.detail ?? newer.data?.message ?? '');
   check(
     'a file claiming a newer format than this program knows is refused, not half-read',
-    newer.status === 400 && /newer version/i.test(String(newer.data?.message ?? '')),
-    `status ${newer.status}: ${String(newer.data?.message ?? '').slice(0, 120)}`,
+    newer.status === 400 && /newer version/i.test(newerDetail),
+    `status ${newer.status}: ${newerDetail.slice(0, 120)}`,
   );
 
   return true;
