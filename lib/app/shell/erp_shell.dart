@@ -365,6 +365,15 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         group: _NavGroup.inventory,
       ),
       _NavItem(
+        AppRoutes.writeOffs,
+        Icons.delete_sweep_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'مستندات الإعدام'
+            : 'Write-offs',
+        permissions: const ['inventory.stock.read'],
+        group: _NavGroup.inventory,
+      ),
+      _NavItem(
         AppRoutes.stockDocuments,
         Icons.assignment_outlined,
         // No catalogue key yet: the label is written where it is used rather

@@ -25,6 +25,13 @@ const line = {
   itemId: 'item-1',
   quantity: new Prisma.Decimal(36),
   unitCost: new Prisma.Decimal(4.5),
+  // quantity x unitCost, snapshotted on the line. A write-off prints the lot
+  // and the shelf too, so the row carries the relations it names.
+  totalCost: new Prisma.Decimal(162),
+  batchId: null,
+  batch: null,
+  storageLocationId: null,
+  storageLocation: null,
   countedQuantity: null,
   notes: null,
   lineNumber: 1,

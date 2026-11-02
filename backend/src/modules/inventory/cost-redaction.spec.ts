@@ -277,6 +277,13 @@ describe('cost redaction - stock and valuation reads', () => {
           unitQuantity: null,
           quantity: D('2'),
           unitCost: D('11'),
+          // The row the database really returns: the line snapshots its own
+          // total, and names a lot and a shelf even when it names neither.
+          totalCost: D('22'),
+          batchId: null,
+          batch: null,
+          storageLocationId: null,
+          storageLocation: null,
           countedQuantity: null,
           notes: null,
         },
@@ -296,9 +303,13 @@ describe('cost redaction - stock and valuation reads', () => {
     );
     const redacted = await service.findOne('c1', 'doc-1', NO_COST);
     expect(redacted.lines[0].unitCost).toBeNull();
+    // The total is cost times quantity, so it leaks the same figure the unit
+    // cost was withheld for. Redacting one and not the other is no redaction.
+    expect(redacted.lines[0].totalCost).toBeNull();
     expect(redacted.lines[0].quantity).toBe('2.0000');
     const allowed = await service.findOne('c1', 'doc-1', WITH_COST);
     expect(allowed.lines[0].unitCost).toBe('11.0000');
+    expect(allowed.lines[0].totalCost).toBe('22.0000');
   });
 });
 

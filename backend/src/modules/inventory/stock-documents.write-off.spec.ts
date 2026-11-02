@@ -71,6 +71,18 @@ describe('a documentary write-off', () => {
       $queryRaw: jest.fn(async () => []),
     };
     const prisma = {
+      // The line loop reads the item before it validates anything about it: a
+      // stock document names goods, and the goods decide which unit a
+      // quantity is written in.
+      item: {
+        findFirst: jest.fn(async () => ({
+          id: ITEM,
+          isStockTracked: true,
+          code: 'RICE',
+          unit: 'sack',
+          units: [],
+        })),
+      },
       stockDocument: {
         findFirst: jest.fn(async () => document),
         create: jest.fn(async ({ data }: any) => ({ id: 'doc-wo', ...data })),
@@ -125,6 +137,25 @@ describe('a documentary write-off', () => {
         lines: [{ itemId: ITEM, quantity: -1 }],
       } as never),
     ).rejects.toThrow(/needs a reason/i);
+    expect(prisma.stockDocument.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a write-off whose line would RECEIVE the goods it claims to destroy', async () => {
+    const { service, prisma } = makeService();
+
+    // The sign of the line is the direction of the movement. A positive line
+    // on a write-off would have booked stock IN under a document that says the
+    // goods were thrown away.
+    await expect(
+      service.create(COMPANY, BRANCH, AUTHOR, {
+        kind: 'WRITE_OFF',
+        branchId: BRANCH,
+        toWarehouseId: WAREHOUSE,
+        documentDate: '2026-11-01',
+        reason: 'sacks torn by water',
+        lines: [{ itemId: ITEM, quantity: 5 }],
+      } as never),
+    ).rejects.toThrow(/negative/i);
     expect(prisma.stockDocument.create).not.toHaveBeenCalled();
   });
 

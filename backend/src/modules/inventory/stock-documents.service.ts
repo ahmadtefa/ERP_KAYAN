@@ -158,7 +158,15 @@ export class StockDocumentsService {
         toWarehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
         lines: {
           orderBy: { lineNumber: 'asc' },
-          include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } },
+          include: {
+            item: { select: { code: true, nameEn: true, nameAr: true, unit: true } },
+            // A write-off names the goods it destroys and the shelf they sat
+            // on. Printing only the item left the reader unable to tell two
+            // lots of the same product apart - which is the whole point of
+            // destroying one of them.
+            batch: { select: { id: true, batchNumber: true, expiryDate: true } },
+            storageLocation: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+          },
         },
       },
     });
@@ -205,8 +213,16 @@ export class StockDocumentsService {
         // Unit cost is a cost figure: withheld when the caller lacks cost.read;
         // the document and its quantities remain fully readable.
         unitCost: mayReadCost ? line.unitCost.toFixed(MONEY_SCALE) : null,
+        totalCost: mayReadCost ? line.totalCost.toFixed(MONEY_SCALE) : null,
         countedQuantity: line.countedQuantity?.toFixed(MONEY_SCALE) ?? null,
         notes: line.notes,
+        batchId: line.batchId ?? null,
+        batchNumber: line.batch?.batchNumber ?? null,
+        expiryDate: line.batch?.expiryDate?.toISOString().slice(0, 10) ?? null,
+        storageLocationId: line.storageLocationId ?? null,
+        storageLocationCode: line.storageLocation?.code ?? null,
+        storageLocationNameEn: line.storageLocation?.nameEn ?? null,
+        storageLocationNameAr: line.storageLocation?.nameAr ?? null,
       })),
     };
   }
@@ -393,6 +409,16 @@ export class StockDocumentsService {
       }
       if (kind === StockDocumentKind.TRANSFER && quantity.isNegative()) {
         throw new BadRequestException(`Line ${index + 1}: transfer quantity must be positive`);
+      }
+      // A write-off is goods leaving. Its quantity is the signed change, so a
+      // positive one would quietly RECEIVE the goods the paper says were
+      // destroyed - the worst kind of mistake, because the document, the
+      // movement and the ledger would all agree on a lie.
+      if (kind === StockDocumentKind.WRITE_OFF && quantity.greaterThan(0)) {
+        throw new BadRequestException(
+          `Line ${index + 1}: a write-off removes stock, so its quantity is negative. / ` +
+            'الإعدام يُخرج البضاعة من المخزن، فكميته سالبة.',
+        );
       }
       if (kind === StockDocumentKind.COUNT && (!countedQuantity || countedQuantity.isNegative())) {
         throw new BadRequestException(
