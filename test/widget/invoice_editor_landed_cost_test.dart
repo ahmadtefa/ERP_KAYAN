@@ -105,15 +105,17 @@ void main() {
     await tester.tap(find.text('Open editor'));
     await tester.pumpAndSettle();
 
-    final dropdowns = find.byType(DropdownButtonFormField<String>);
-    expect(dropdowns, findsNWidgets(3));
+    // The receipt names the supplier, the warehouse it arrived at, the item
+    // and its unit; each is found by its own key rather than by counting.
+    expect(find.byKey(const ValueKey('invoice-party')), findsOneWidget);
+    expect(find.byKey(const ValueKey('invoice-warehouse')), findsOneWidget);
     expect(find.byKey(const ValueKey('line-unit-0')), findsOneWidget);
-    await tester.tap(dropdowns.at(0));
+    await tester.tap(find.byKey(const ValueKey('invoice-party')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('SUP-1 — Test supplier').last);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byType(DropdownButtonFormField<String>).at(1));
+    await tester.tap(find.byKey(const ValueKey('item-choice-null')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('ITEM-1 — Tracked item').last);
     await tester.pumpAndSettle();

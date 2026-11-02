@@ -979,7 +979,11 @@ class _Header extends StatelessWidget {
                 const SizedBox(width: 16),
                 Expanded(
                   child: DropdownButtonFormField<String>(
+                    // Named so a test - and a person reading the widget tree -
+                    // can say which control they mean without counting.
+                    key: const ValueKey('invoice-party'),
                     initialValue: partyId,
+                    isExpanded: true,
                     decoration: InputDecoration(
                       labelText: kind.isSales
                           ? l10n.selectCustomer
@@ -1199,6 +1203,7 @@ class _LinesTable extends StatelessWidget {
                       Expanded(
                         flex: 3,
                         child: DropdownButtonFormField<String>(
+                          key: ValueKey('line-cost-center-$index'),
                           initialValue: _costCenterChoice(
                             costCenters,
                             lines[index].costCenterId,

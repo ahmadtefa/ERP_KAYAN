@@ -128,22 +128,25 @@ void main() {
       await tester.tap(find.text('Open editor'));
       await tester.pumpAndSettle();
 
-      // Supplier, item, cost center, and the line's unit selector.
-      final dropdowns = find.byType(DropdownButtonFormField<String>);
-      expect(dropdowns, findsNWidgets(4));
+      // Supplier, the receiving warehouse, the item, the cost centre and the
+      // line's unit: each found by its own key, so a control added later does
+      // not silently point this test at the wrong drop-down.
+      expect(find.byKey(const ValueKey('invoice-party')), findsOneWidget);
+      expect(find.byKey(const ValueKey('invoice-warehouse')), findsOneWidget);
       expect(find.byKey(const ValueKey('line-unit-0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('line-cost-center-0')), findsOneWidget);
 
-      await tester.tap(dropdowns.at(0));
+      await tester.tap(find.byKey(const ValueKey('invoice-party')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('SUP-1 — Test supplier').last);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byType(DropdownButtonFormField<String>).at(1));
+      await tester.tap(find.byKey(const ValueKey('item-choice-null')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('ITEM-1 — Tracked item').last);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byType(DropdownButtonFormField<String>).at(2));
+      await tester.tap(find.byKey(const ValueKey('line-cost-center-0')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('CC-1 — Project one').last);
       await tester.pumpAndSettle();
@@ -183,9 +186,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Party, item and unit only: a company that does not use the dimension
-    // is not asked about it.
-    expect(find.byType(DropdownButtonFormField<String>), findsNWidgets(3));
+    // Party, the receiving warehouse, item and unit only: a company that does
+    // not use the dimension is not asked about it.
+    expect(find.byKey(const ValueKey('line-cost-center-0')), findsNothing);
+    expect(find.byType(DropdownButtonFormField<String>), findsNWidgets(4));
     expect(find.byKey(const ValueKey('line-unit-0')), findsOneWidget);
     expect(find.text('No allocation'), findsNothing);
   });
