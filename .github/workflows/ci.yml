@@ -317,6 +317,15 @@ jobs:
       - name: Prove units, packing and warehouses on real PostgreSQL (the owner's scenario)
         run: python ../scripts/ci-diagnose.py node scripts/pg-units-warehouses-scenario.mjs
 
+      # The newest screens answer through documents, not through a single
+      # button: a write-off that needs a reason, an approval by somebody else
+      # and a posting after it, and a count that is opened, frozen, counted,
+      # approved and only then posted. The unit tests pin the policy; only a
+      # real database can prove the shelf, the lot and the 5107 loss agree
+      # afterwards - and that the same idempotency key books one loss, not two.
+      - name: Prove the write-off and the stock take on real PostgreSQL
+        run: python ../scripts/ci-diagnose.py node scripts/pg-writeoff-stocktake-scenario.mjs
+
       - name: Verify the PostgreSQL client tools used by the backup checks
         run: |
           pg_dump --version
@@ -331,6 +340,16 @@ jobs:
           OUT_DIR: /tmp/kayan-demo-backup-build
         run: python ../scripts/ci-diagnose.py node scripts/build-demo-backup.mjs
         working-directory: backend
+      # A backup nobody restored is a hope. This one is taken with pg_dump from
+      # the seeded database, put into a database that has never been migrated,
+      # and then compared row for row on the warehouse's own tables - the
+      # shelves, the lots and their remainders, the per-user warehouse grants
+      # and the warehouse permissions the roles were given.
+      - name: Prove a full backup and restore carries the warehouses, lots and grants
+        env:
+          ADMIN_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
+        run: python ../scripts/ci-diagnose.py node scripts/pg-backup-warehouse-proof.mjs
+
       - name: Report backend smoke-test diagnostics
         if: failure()
         run: |
