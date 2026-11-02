@@ -24,6 +24,8 @@ import '../../features/inventory/presentation/screens/warehouses_screen.dart';
 import '../../features/inventory/presentation/screens/storage_locations_screen.dart';
 import '../../features/inventory/presentation/screens/item_thresholds_screen.dart';
 import '../../features/inventory/presentation/screens/stock_takes_screen.dart';
+import '../../features/inventory/presentation/screens/inventory_reports_screen.dart';
+import '../../features/inventory/presentation/screens/warehouse_access_screen.dart';
 import '../../features/inventory/presentation/screens/write_offs_screen.dart';
 import '../../features/notifications/presentation/screens/notification_center_screen.dart';
 import '../../features/invoicing/presentation/providers/invoice_providers.dart';
@@ -74,6 +76,8 @@ class AppRoutes {
   static const itemThresholds = '/inventory/thresholds';
   static const stockTakes = '/inventory/stock-takes';
   static const writeOffs = '/inventory/write-offs';
+  static const warehouseAccess = '/inventory/warehouse-access';
+  static const inventoryReports = '/inventory/reports';
   static const notifications = '/notifications';
   static const stockDocuments = '/inventory/documents';
   static const salesInvoices = '/sales/invoices';
@@ -207,6 +211,14 @@ final routerProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: AppRoutes.writeOffs,
                 builder: (c, s) => const WriteOffsScreen(),
+              ),
+              GoRoute(
+                path: AppRoutes.warehouseAccess,
+                builder: (c, s) => const WarehouseAccessScreen(),
+              ),
+              GoRoute(
+                path: AppRoutes.inventoryReports,
+                builder: (c, s) => const InventoryReportsScreen(),
               ),
               GoRoute(
                 path: AppRoutes.notifications,

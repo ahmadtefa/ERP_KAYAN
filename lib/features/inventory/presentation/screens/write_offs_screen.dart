@@ -275,11 +275,17 @@ class _WriteOffBodyState extends ConsumerState<_WriteOffBody> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) {
+          // A dialog asks for room it may not have: on a 1366-wide desktop it
+          // is comfortable, on a small window or a phone it must shrink rather
+          // than overflow. The numbers are a wish, the screen decides.
+          final media = MediaQuery.sizeOf(dialogContext);
+          final dialogWidth = math.min(media.width - 96, 760.0);
+          final dialogHeight = math.min(media.height - 200, 560.0);
           return AlertDialog(
             title: Text(_t('مستند إعدام جديد', 'New write-off')),
             content: SizedBox(
-              width: 760,
-              height: 560,
+              width: dialogWidth < 320 ? 320 : dialogWidth,
+              height: dialogHeight < 260 ? 260 : dialogHeight,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -291,6 +297,9 @@ class _WriteOffBodyState extends ConsumerState<_WriteOffBody> {
                         width: 260,
                         child: DropdownButtonFormField<String>(
                           initialValue: warehouseId,
+                          // A store name is longer than the field on purpose:
+                          // the menu expands to the field, never past it.
+                          isExpanded: true,
                           decoration: InputDecoration(
                             labelText: _t('المخزن', 'Warehouse'),
                             border: const OutlineInputBorder(),
@@ -370,6 +379,7 @@ class _WriteOffBodyState extends ConsumerState<_WriteOffBody> {
                                       child: DropdownButtonFormField<String>(
                                         initialValue:
                                             line.itemId.isEmpty ? null : line.itemId,
+                                        isExpanded: true,
                                         decoration: InputDecoration(
                                           labelText: _t('الصنف', 'Item'),
                                           border: const OutlineInputBorder(),
@@ -416,6 +426,7 @@ class _WriteOffBodyState extends ConsumerState<_WriteOffBody> {
                                       width: 220,
                                       child: DropdownButtonFormField<String>(
                                         initialValue: line.batchId,
+                                        isExpanded: true,
                                         decoration: InputDecoration(
                                           labelText: _t('الدفعة', 'Lot'),
                                           border: const OutlineInputBorder(),
@@ -449,6 +460,7 @@ class _WriteOffBodyState extends ConsumerState<_WriteOffBody> {
                                       width: 220,
                                       child: DropdownButtonFormField<String>(
                                         initialValue: line.storageLocationId,
+                                        isExpanded: true,
                                         decoration: InputDecoration(
                                           labelText: _t('الموقع', 'Location'),
                                           border: const OutlineInputBorder(),

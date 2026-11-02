@@ -365,6 +365,24 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         group: _NavGroup.inventory,
       ),
       _NavItem(
+        AppRoutes.inventoryReports,
+        Icons.assessment_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'تقارير المخزون'
+            : 'Inventory reports',
+        permissions: const ['inventory.stock.read'],
+        group: _NavGroup.inventory,
+      ),
+      _NavItem(
+        AppRoutes.warehouseAccess,
+        Icons.admin_panel_settings_outlined,
+        Localizations.localeOf(context).languageCode == 'ar'
+            ? 'صلاحيات المخازن'
+            : 'Warehouse permissions',
+        permissions: const ['inventory.warehouse.access.read'],
+        group: _NavGroup.inventory,
+      ),
+      _NavItem(
         AppRoutes.writeOffs,
         Icons.delete_sweep_outlined,
         Localizations.localeOf(context).languageCode == 'ar'

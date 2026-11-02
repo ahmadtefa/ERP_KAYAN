@@ -367,6 +367,26 @@ class ReportLinkBuilder {
     );
   }
 
+  /// Any one of the twenty analytical inventory reports as a spreadsheet.
+  ///
+  /// One route serves them all: the server renders the same rows the JSON
+  /// endpoint would have returned, so a report added later is exportable
+  /// without a new export format to get wrong.
+  Future<DownloadRequest> inventoryReportCsv({
+    required String slug,
+    required String language,
+    Map<String, String> filters = const {},
+  }) async {
+    final query = <String, String>{
+      'lang': language,
+      ...filters,
+      'ticket': await _downloadTicket(),
+    };
+    return DownloadRequest(
+      url: '$_base/inventory/reports/$slug/export?${_encode(query)}',
+    );
+  }
+
   /// One letterhead PDF, for the preview in the design screen.
   ///
   /// Opened in a new tab like every other browser-facing file, so it carries a

@@ -124,6 +124,15 @@ class _LineUnitHint extends StatelessWidget {
   }
 }
 
+/// A bilingual label for the lot fields.
+///
+/// The translation files are the product's voice, but a lot is a receipt-time
+/// fact and the packing of it is not worth a schema change in twelve locales:
+/// both languages are written here, so nothing appears in English to an Arabic
+/// user.
+String _lotText(BuildContext context, String ar, String en) =>
+    Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
+
 /// One editable invoice line.
 class _LineDraft {
   _LineDraft({
@@ -146,6 +155,16 @@ class _LineDraft {
   /// Optional cost centre for the line. Left null on a balance-sheet-only
   /// line; the server checks that the centre is one this company may use.
   String? costCenterId;
+
+  /// The lot this line receives: the supplier's number and the dates printed
+  /// on the goods. One line is one lot, so receiving the same product as two
+  /// deliveries is two lines - which is exactly what a purchase receipt is.
+  final TextEditingController batchNumber = TextEditingController();
+  final TextEditingController productionDate = TextEditingController();
+  final TextEditingController expiryDate = TextEditingController();
+
+  /// The shelf the goods were put away on, inside the invoice's warehouse.
+  String? storageLocationId;
   final TextEditingController quantity;
   final TextEditingController unitPrice;
   final TextEditingController taxRate;
@@ -181,6 +200,9 @@ class _LineDraft {
     unitPrice.dispose();
     taxRate.dispose();
     discountValue.dispose();
+    batchNumber.dispose();
+    productionDate.dispose();
+    expiryDate.dispose();
   }
 }
 
@@ -221,6 +243,14 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   late String _invoiceDate;
   final _landedCosts = <_LandedCostDraft>[];
   final _documentDiscount = TextEditingController();
+
+  /// Where a purchase's goods physically arrive. The invoice may name one
+  /// warehouse; each line then says which lot it brought and which shelf it
+  /// put it on inside that warehouse.
+  List<Json> _warehouses = const [];
+  List<Json> _locations = const [];
+  String? _warehouseId;
+  String? _lotError;
   DiscountKind _documentDiscountKind = DiscountKind.none;
   bool _saving = false;
   bool _loadingExisting = false;
@@ -234,9 +264,57 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
     _lines.add(_LineDraft());
+    if (!widget.kind.isSales) _loadWarehouses();
     if (widget.invoiceId != null) {
       _loadingExisting = true;
       _loadExisting();
+    }
+  }
+
+  /// The stores this user may receive into, and the shelves of the chosen one.
+  ///
+  /// A purchase can still be drafted without them - the server falls back to
+  /// the branch's default warehouse - but then no lot is recorded, because a
+  /// lot belongs to a place.
+  Future<void> _loadWarehouses() async {
+    try {
+      final rows = await ref
+          .read(apiClientProvider)
+          .getList('/inventory/warehouses');
+      if (!mounted) return;
+      setState(() {
+        _warehouses = rows;
+        _warehouseId = rows.isEmpty ? null : text(rows.first, 'id');
+      });
+      await _loadLocations();
+    } on Failure {
+      // Nothing to receive into has been configured: the line simply has no
+      // place to name, and the save still works.
+    }
+  }
+
+  Future<void> _loadLocations() async {
+    final warehouseId = _warehouseId;
+    if (warehouseId == null) {
+      if (mounted) setState(() => _locations = const []);
+      return;
+    }
+    try {
+      final tree = await ref
+          .read(apiClientProvider)
+          .getObject('/inventory/locations/tree/$warehouseId');
+      final flat = <Json>[];
+      void walk(List<Json> rows, int depth) {
+        for (final row in rows) {
+          flat.add({...row, 'depth': depth});
+          walk(listOf(row['children']), depth + 1);
+        }
+      }
+
+      walk(listOf(tree['items']), 0);
+      if (mounted) setState(() => _locations = flat);
+    } on Failure {
+      if (mounted) setState(() => _locations = const []);
     }
   }
 
@@ -304,6 +382,14 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           if (line.discountValue.text == '0.0000') line.discountValue.text = '';
         }
         line.discountKind = discountKind;
+        // Reopening a receipt shows the lot it already names, so editing a
+        // draft cannot silently lose the number the goods were received under.
+        line.batchNumber.text = text(row, 'batchNumber');
+        line.productionDate.text = text(row, 'batchProductionDate');
+        line.expiryDate.text = text(row, 'batchExpiryDate');
+        line.storageLocationId = text(row, 'storageLocationId').isEmpty
+            ? null
+            : text(row, 'storageLocationId');
         _lines.add(line);
       }
       if (_lines.isEmpty) _lines.add(_LineDraft());
@@ -323,6 +409,9 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
             : text(invoice, 'supplierReference');
         _notes = text(invoice, 'notes').isEmpty ? null : text(invoice, 'notes');
         _invoiceDate = text(invoice, 'invoiceDate', fallback: _invoiceDate);
+        if (!widget.kind.isSales && text(invoice, 'warehouseId').isNotEmpty) {
+          _warehouseId = text(invoice, 'warehouseId');
+        }
         _loadingExisting = false;
       });
     } on Failure catch (error) {
@@ -501,10 +590,43 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         return;
       }
       final discountText = line.discountValue.text.trim();
+      // A purchase receipt names the lot it brought. The dates are ISO days
+      // or nothing: a half-typed date is refused here rather than stored as a
+      // made-up day the expiry report would then believe.
+      if (!widget.kind.isSales) {
+        for (final entry in {
+          'batchProductionDate': line.productionDate.text.trim(),
+          'batchExpiryDate': line.expiryDate.text.trim(),
+        }.entries) {
+          if (entry.value.isEmpty) continue;
+          if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(entry.value)) {
+            setState(
+              () => _lotError = _lotText(
+                context,
+                'التاريخ بصيغة YYYY-MM-DD',
+                'Use YYYY-MM-DD for the lot dates',
+              ),
+            );
+            return;
+          }
+        }
+      }
+
       lines.add({
         if (line.itemId != null) 'itemId': line.itemId,
         if (line.unitName != null && line.unitName!.trim().isNotEmpty)
           'unitName': line.unitName!.trim(),
+        if (!widget.kind.isSales) ...{
+          if (line.batchNumber.text.trim().isNotEmpty)
+            'batchNumber': line.batchNumber.text.trim(),
+          if (line.productionDate.text.trim().isNotEmpty)
+            'batchProductionDate': line.productionDate.text.trim(),
+          if (line.expiryDate.text.trim().isNotEmpty)
+            'batchExpiryDate': line.expiryDate.text.trim(),
+          if (line.storageLocationId != null &&
+              line.storageLocationId!.isNotEmpty)
+            'storageLocationId': line.storageLocationId,
+        },
         'quantity': quantity,
         'unitPrice': price,
         if (line.taxRate.text.trim().isNotEmpty) 'taxRate': line.taxRate.text.trim(),
@@ -522,10 +644,17 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       return;
     }
 
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _lotError = null;
+    });
     try {
       final body = <String, dynamic>{
         'invoiceDate': _invoiceDate,
+        // Where the goods arrived. One warehouse per receipt; the lines say
+        // which lot and which shelf inside it.
+        if (!widget.kind.isSales && _warehouseId != null)
+          'warehouseId': _warehouseId,
         if (widget.kind.isSales) 'customerId': _partyId,
         if (!widget.kind.isSales) 'supplierId': _partyId,
         if (!widget.kind.isSales) 'landedCostAmount': landedCost.toString(),
@@ -621,6 +750,67 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           ),
           if (!widget.kind.isSales) ...[
             const SizedBox(height: 12),
+            // Where the goods arrive, and therefore where their lots live.
+            // The server falls back to the branch's default warehouse when a
+            // receipt names none, but a lot cannot be recorded without a place.
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.warehouse_outlined, size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        key: const ValueKey('invoice-warehouse'),
+                        initialValue: _warehouseId,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          labelText: _lotText(
+                            context,
+                            'المخزن المستلِم',
+                            'Receiving warehouse',
+                          ),
+                          helperText: _lotText(
+                            context,
+                            'الدفعة تُسجَّل داخل مخزن، فاختيار المخزن يحدد أين تُحفظ البضاعة.',
+                            'A lot lives in a warehouse: choosing one decides where the goods are kept.',
+                          ),
+                          border: const OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: [
+                          for (final warehouse in _warehouses)
+                            DropdownMenuItem(
+                              value: text(warehouse, 'id'),
+                              child: Text(
+                                '${text(warehouse, 'code')} — '
+                                '${_lotText(context, text(warehouse, 'nameAr'), text(warehouse, 'nameEn'))}',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: _warehouses.isEmpty
+                            ? null
+                            : (value) async {
+                                setState(() {
+                                  _warehouseId = value;
+                                  // A shelf belongs to one warehouse: keeping a
+                                  // shelf id from the old one would put the
+                                  // goods in another building.
+                                  for (final line in _lines) {
+                                    line.storageLocationId = null;
+                                  }
+                                });
+                                await _loadLocations();
+                              },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(child: Text(l10n.landedCosts, style: Theme.of(context).textTheme.titleMedium)),
@@ -686,10 +876,19 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
             ],
           ),
           const SizedBox(height: 8),
+          if (_lotError != null)
+            Padding(
+              padding: const EdgeInsetsDirectional.only(bottom: 8),
+              child: Text(
+                _lotError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
           _LinesTable(
             kind: widget.kind,
             lines: _lines,
             items: itemsAsync.value ?? const [],
+            locations: _locations,
             costCenters: costCenters,
             language: language,
             onChanged: () => setState(() {}),
@@ -897,6 +1096,7 @@ class _LinesTable extends StatelessWidget {
     required this.kind,
     required this.lines,
     required this.items,
+    required this.locations,
     required this.costCenters,
     required this.language,
     required this.onChanged,
@@ -908,6 +1108,10 @@ class _LinesTable extends StatelessWidget {
   final InvoiceKind kind;
   final List<_LineDraft> lines;
   final List<Json> items;
+
+  /// Every shelf of the warehouse this receipt is being written for, flattened
+  /// with its depth so the picker reads like the tree it came from.
+  final List<Json> locations;
   final List<Json> costCenters;
   final String language;
   final VoidCallback onChanged;
@@ -1270,6 +1474,18 @@ class _LinesTable extends StatelessWidget {
                     ],
                   ),
                 ),
+                // A receipt says which goods arrived: the supplier's lot
+                // number, the two dates printed on the carton, and the shelf
+                // they were put on. The same product delivered twice is two
+                // lines, one lot each - that is how two batches arrive on one
+                // invoice without either losing its identity.
+                if (!kind.isSales && lines[index].itemId != null)
+                  _LotStrip(
+                    index: index,
+                    line: lines[index],
+                    locations: locations,
+                    onChanged: onChanged,
+                  ),
               ],
             ),
           ),
@@ -1278,6 +1494,123 @@ class _LinesTable extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The lot fields of one received line: number, production, expiry, shelf.
+///
+/// Optional on every item, because most items keep no lots; required by the
+/// server for a lot-controlled one, which refuses the posting with a sentence
+/// rather than recording stock nobody can trace.
+class _LotStrip extends StatelessWidget {
+  const _LotStrip({
+    required this.index,
+    required this.line,
+    required this.locations,
+    required this.onChanged,
+  });
+
+  final int index;
+  final _LineDraft line;
+  final List<Json> locations;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(start: 12, top: 4),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          const Icon(Icons.qr_code_2_outlined, size: 18),
+          SizedBox(
+            width: 190,
+            child: TextFormField(
+              key: ValueKey('line-batch-$index'),
+              controller: line.batchNumber,
+              decoration: InputDecoration(
+                labelText: _lotText(context, 'رقم الدفعة', 'Batch number'),
+                isDense: true,
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (_) => onChanged(),
+            ),
+          ),
+          SizedBox(
+            width: 165,
+            child: TextFormField(
+              key: ValueKey('line-production-date-$index'),
+              controller: line.productionDate,
+              decoration: InputDecoration(
+                labelText: _lotText(context, 'الإنتاج', 'Produced'),
+                hintText: 'YYYY-MM-DD',
+                isDense: true,
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (_) => onChanged(),
+            ),
+          ),
+          SizedBox(
+            width: 165,
+            child: TextFormField(
+              key: ValueKey('line-expiry-date-$index'),
+              controller: line.expiryDate,
+              decoration: InputDecoration(
+                labelText: _lotText(context, 'الانتهاء', 'Expires'),
+                hintText: 'YYYY-MM-DD',
+                isDense: true,
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (_) => onChanged(),
+            ),
+          ),
+          SizedBox(
+            width: 230,
+            child: DropdownButtonFormField<String>(
+              key: ValueKey('line-location-$index'),
+              initialValue: line.storageLocationId ?? '',
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: _lotText(context, 'الموقع داخل المخزن', 'Shelf'),
+                isDense: true,
+                border: const OutlineInputBorder(),
+              ),
+              items: [
+                DropdownMenuItem(
+                  value: '',
+                  child: Text(
+                    _lotText(context, 'بدون موقع', 'No shelf'),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                for (final location in locations)
+                  DropdownMenuItem(
+                    value: text(location, 'id'),
+                    child: Text(
+                      _lotIndent(location),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (value) {
+                line.storageLocationId = (value == null || value.isEmpty) ? null : value;
+                onChanged();
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A shelf's code, pushed right by its depth in the tree. Dart has no string
+/// repetition, so the spaces are built.
+String _lotIndent(Json location) {
+  final depth = asNum(location['depth'])?.toInt() ?? 0;
+  final indent = depth <= 0 ? '' : List.filled(depth, '  ').join();
+  return '$indent${text(location, 'code')}';
 }
 
 class _LineTotal extends StatelessWidget {

@@ -159,6 +159,9 @@ export class PurchaseInvoicesService {
     return {
       ...this.toSummary(invoice),
       branch: invoice.branch,
+      // The store the goods arrived at. A receipt edited before it is posted
+      // must reopen on the warehouse it was written for, not on the default.
+      warehouseId: invoice.warehouseId ?? null,
       notes: invoice.notes,
       supplierReference: invoice.supplierReference,
       landedCostAmount: invoice.landedCostAmount.toFixed(MONEY_SCALE),
@@ -195,6 +198,15 @@ export class PurchaseInvoicesService {
         inventoryCostTotal: l.inventoryCostTotal.toFixed(MONEY_SCALE),
         costCenterId: l.costCenterId ?? null,
         returnedCostTotal: l.returnedCostTotal.toFixed(MONEY_SCALE),
+        // The lot this line receives: the number on the carton and the two
+        // dates printed beside it. Read back so reopening a draft shows what
+        // the goods were received under instead of a blank row that would be
+        // saved back as "no lot".
+        batchNumber: l.batchNumber ?? null,
+        batchProductionDate:
+          l.batchProductionDate?.toISOString().slice(0, 10) ?? null,
+        batchExpiryDate: l.batchExpiryDate?.toISOString().slice(0, 10) ?? null,
+        storageLocationId: l.storageLocationId ?? null,
       })),
     };
   }
