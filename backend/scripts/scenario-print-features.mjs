@@ -697,10 +697,60 @@ async function main() {
     ) === true,
     `${parsed?.tables?.printPriceSetting?.length ?? 0} rows`,
   );
+  // The version number is the program's own contract, not a figure this script
+  // is allowed to decide. What a person relies on is the behaviour behind it:
+  // the file names a format, this program opens that file, and a program older
+  // than the file refuses it with a message instead of half-loading it. So the
+  // number is checked against the file's own contents - a file that declares a
+  // format must carry the tables that format introduced - and against the
+  // running program, which has to accept its own file and reject a newer one.
+  const fileVersion = parsed?.version;
+  const tablesAddedInVersion3 = [
+    'storageLocation',
+    'itemBatch',
+    'warehouseStockBalance',
+    'stockTakeSession',
+    'stockTakeLine',
+    'notification',
+    'userWarehouseAccess',
+  ];
+  const missingTables = tablesAddedInVersion3.filter(
+    (name) => !Object.prototype.hasOwnProperty.call(parsed?.tables ?? {}, name),
+  );
   check(
-    'the company file says which format it is, so an older program refuses it clearly',
-    parsed?.version === 2,
-    `version ${parsed?.version}`,
+    'the company file says which format it is, and carries the tables that format introduced',
+    Number.isInteger(fileVersion) && fileVersion >= 2 && missingTables.length === 0,
+    `version ${fileVersion}, missing ${missingTables.join(',') || 'none'}`,
+  );
+
+  const inspectForm = new FormData();
+  inspectForm.append(
+    'file',
+    new Blob([JSON.stringify(parsed)], { type: 'application/json' }),
+    'kayan-backup.json',
+  );
+  const inspected = await api('/backup/inspect', { method: 'POST', body: inspectForm });
+  check(
+    'this program reads its own file back and names the same format',
+    inspected.status < 300 && inspected.data?.version === fileVersion,
+    `status ${inspected.status}, version ${inspected.data?.version}`,
+  );
+
+  // The other half of the promise: a file from a newer program must be refused
+  // outright, because a program that does not know a table cannot restore it.
+  const newerForm = new FormData();
+  newerForm.append(
+    'file',
+    new Blob([JSON.stringify({ ...parsed, version: Number(fileVersion) + 1 })], {
+      type: 'application/json',
+    }),
+    'kayan-backup-newer.json',
+  );
+  const newer = await api('/backup/inspect', { method: 'POST', body: newerForm });
+  check(
+    'a file claiming a newer format than this program knows is refused, not half-read',
+    newer.status === 400 && /newer version/i.test(String(newer.data?.message ?? '')),
+    `status ${newer.status}: ${String(newer.data?.message ?? '').slice(0, 120)}`,
   );
 
   return true;

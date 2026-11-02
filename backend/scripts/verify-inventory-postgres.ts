@@ -432,7 +432,11 @@ async function main() {
         orderBy: { createdAt: 'asc' },
       });
       assert.equal(history.length, 4, 'three receipts and one issue');
-      assert.equal(history[3].unitCostAfter.toFixed(4), '14.545455');
+      // The column is Decimal(19, 6) because 130.9091 over 9 does not divide
+      // evenly - it is 14.54545555... carried at six places. Reading it back
+      // at four places can never equal a six-place figure, so the comparison
+      // is made at the scale the database actually stores.
+      assert.equal(history[3].unitCostAfter.toFixed(6), '14.545455');
       created.costHistory.push(...history.map((row) => row.id));
     });
 
