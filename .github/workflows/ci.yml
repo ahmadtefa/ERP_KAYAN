@@ -838,15 +838,23 @@ jobs:
       KAYAN_ADMIN_PASSWORD: CI-only-Admin-Password-12345
       PORT: 3100
       NODE_ENV: production
-      LICENSE_STATE_DIR: ${{ runner.temp }}/kayan-licence-state
-      LICENSE_PUBLIC_KEY_FILE: ${{ runner.temp }}/kayan-licence-keys/public-key.pem
       LICENSE_MACHINE_ID: KM-CI-PROOF-MACHINE
       KAYAN_API: http://127.0.0.1:3100/api/v1
-      KAYAN_GENERATOR_HOME: ${{ runner.temp }}/kayan-licence-keys
-      KAYAN_PROOF_REPORT: ${{ runner.temp }}/installed-licence-warehouse-proof.json
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+      # Paths that contain the runner's temporary directory are set here rather
+      # than in the job's env block: the `runner` context is not available to a
+      # job-level environment, and a workflow that asks for it never starts.
+      - name: Choose the temporary key and licence-state paths
+        run: |
+          mkdir -p "$RUNNER_TEMP/kayan-licence-keys" "$RUNNER_TEMP/kayan-licence-state"
+          {
+            echo "LICENSE_STATE_DIR=$RUNNER_TEMP/kayan-licence-state"
+            echo "LICENSE_PUBLIC_KEY_FILE=$RUNNER_TEMP/kayan-licence-keys/public-key.pem"
+            echo "KAYAN_GENERATOR_HOME=$RUNNER_TEMP/kayan-licence-keys"
+            echo "KAYAN_PROOF_REPORT=$RUNNER_TEMP/installed-licence-warehouse-proof.json"
+          } >> "$GITHUB_ENV"
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -869,9 +877,7 @@ jobs:
         run: npx ts-node prisma/seed.ts
         working-directory: backend
       - name: Mint an ephemeral signing key pair for this run
-        run: |
-          mkdir -p "$KAYAN_GENERATOR_HOME" "$LICENSE_STATE_DIR"
-          node tools/license-generator/kayan-license.mjs init --home "$KAYAN_GENERATOR_HOME"
+        run: node tools/license-generator/kayan-license.mjs init --home "$KAYAN_GENERATOR_HOME"
       - name: Start the licensed API
         run: |
           node backend/dist/src/main.js > /tmp/kayan-licensed-api.log 2>&1 &
