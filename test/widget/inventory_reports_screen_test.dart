@@ -112,7 +112,13 @@ class _FakeApiClient extends ApiClient {
   }
 }
 
+/// The catalogue is a long list; a 600-pixel test window would put the last
+/// report under the fold, where a tap cannot reach it.
 Future<void> _pump(WidgetTester tester, _FakeApiClient api) async {
+  tester.view.physicalSize = const Size(1400, 1600);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
@@ -127,6 +133,17 @@ Future<void> _pump(WidgetTester tester, _FakeApiClient api) async {
       ),
     ),
   );
+  await tester.pumpAndSettle();
+}
+
+
+/// Taps a catalogue entry, scrolling it into view first: the list is taller
+/// than any window and the last report must still be reachable by hand.
+Future<void> _openReport(WidgetTester tester, String slug) async {
+  final chip = find.byKey(ValueKey('inventory-report-$slug'));
+  await tester.ensureVisible(chip);
+  await tester.pumpAndSettle();
+  await tester.tap(chip);
   await tester.pumpAndSettle();
 }
 
@@ -153,8 +170,7 @@ void main() {
     final api = _FakeApiClient();
     await _pump(tester, api);
 
-    await tester.tap(find.byKey(const ValueKey('inventory-report-item-card')));
-    await tester.pumpAndSettle();
+    await _openReport(tester, 'item-card');
 
     // The filters the catalogue declared are the filters offered.
     expect(find.byKey(const ValueKey('inventory-report-from')), findsOneWidget);
@@ -179,15 +195,15 @@ void main() {
     final api = _FakeApiClient();
     await _pump(tester, api);
 
-    await tester.tap(find.byKey(const ValueKey('inventory-report-slow-moving')));
-    await tester.pumpAndSettle();
+    await _openReport(tester, 'slow-moving');
     expect(find.byKey(const ValueKey('inventory-report-print')), findsOneWidget);
     expect(find.byKey(const ValueKey('inventory-report-pdf')), findsOneWidget);
 
+    await tester.ensureVisible(find.text('All reports'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('All reports'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('inventory-report-audit-trail')));
-    await tester.pumpAndSettle();
+    await _openReport(tester, 'audit-trail');
     expect(find.byKey(const ValueKey('inventory-report-print')), findsNothing);
     // CSV is offered for every report, because one export route serves them.
     expect(find.byKey(const ValueKey('inventory-report-csv')), findsOneWidget);
