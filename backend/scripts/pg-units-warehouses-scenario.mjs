@@ -38,6 +38,7 @@ import { BadRequestException } from '@nestjs/common';
 
 import { AuditService } from '../dist/src/common/audit/audit.service.js';
 import { CompanySettingsService } from '../dist/src/common/settings/company-settings.module.js';
+import { StockLedgerService } from '../dist/src/common/warehouse/stock-ledger.service.js';
 import { WarehouseService } from '../dist/src/common/warehouse/warehouse.service.js';
 import { AccountMapService } from '../dist/src/modules/accounting/account-map.service.js';
 import { CostCentersService } from '../dist/src/modules/accounting/cost-centers.service.js';
@@ -149,7 +150,14 @@ async function main() {
   const posting = new PostingService(numbers, periods, costCenters);
   const settings = new CompanySettingsService(prisma, audit);
   const warehouses = new WarehouseService(prisma, audit);
-  const items = new ItemsService(prisma, audit, accounts, posting, warehouses);
+  // The ledger is the ninth dependency: every movement writes the shelf book
+  // and the branch roll-up through it. A stale argument list here made the
+  // first receipt in this scenario die on `undefined.post` - the script was
+  // wrong, not the document.
+  const ledger = new StockLedgerService();
+  // ItemsService takes the same ledger: an item created with opening stock
+  // writes the shelf book too.
+  const items = new ItemsService(prisma, audit, accounts, posting, warehouses, ledger);
   const stock = new StockDocumentsService(
     prisma,
     numbers,
@@ -159,6 +167,7 @@ async function main() {
     settings,
     warehouses,
     costCenters,
+    ledger,
   );
 
   /**
