@@ -30,12 +30,94 @@ function Protect-Secret([string]$Text) {
   return $protected
 }
 
-function Write-RepairMarker([string]$Message) {
-  try {
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $bootstrapLog) | Out-Null
-    Add-Content -LiteralPath $bootstrapLog -Value ("{0:u} {1}" -f (Get-Date),(Protect-Secret $Message)) -Encoding UTF8
-  } catch { }
+# Where a repair records what it did, in two places.
+#
+# installer.log is the log a customer and the smoke test already read, but the
+# program's own server is often started with its output redirected into that
+# same file, and a redirected handle does not share write access: an append
+# from here then fails with a sharing violation. That is a real Windows
+# behaviour, and swallowing it made a successful repair look like one that had
+# recorded nothing.
+#
+# So every marker goes to installer.log (best effort) *and* to a file only this
+# script writes. The repair is only reported successful if at least one of them
+# really received the text - a marker nobody can read is not evidence.
+$script:markerSink = Join-Path (Split-Path -Parent $bootstrapLog) 'repair-result.txt'
+
+function Add-MarkerLine([string]$Path, [string]$Line) {
+  for ($attempt = 0; $attempt -lt 5; $attempt++) {
+    try {
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+      $stream = [System.IO.File]::Open(
+        $Path,
+        [System.IO.FileMode]::Append,
+        [System.IO.FileAccess]::Write,
+        [System.IO.FileShare]::ReadWrite
+      )
+      try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Line + [Environment]::NewLine)
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush()
+      } finally {
+        $stream.Dispose()
+      }
+      return $true
+    } catch {
+      Start-Sleep -Milliseconds 200
+    }
+  }
+  return $false
 }
+
+function Write-RepairMarker([string]$Message) {
+  $line = ("{0:u} {1}" -f (Get-Date),(Protect-Secret $Message))
+  $written = @(
+    (Add-MarkerLine $script:markerSink $line),
+    (Add-MarkerLine $bootstrapLog $line)
+  )
+  if ($written -contains $false -and ($written -notcontains $true)) {
+    # Nothing could be recorded. Say so instead of continuing: the rest of the
+    # repair cannot be shown to have happened if its own record is missing.
+    throw ("The repair could not write its log to " + $script:markerSink + " or " + $bootstrapLog + ". Check that the KAYAN-ERP folder under ProgramData is writable by an administrator.")
+  }
+}
+
+# The settings this installation had before the repair. A file that cannot be
+# read is an empty answer, not a reason to stop: the repair exists to make an
+# unreadable file readable again, and the checks below only compare what could
+# really be read.
+function Read-SettingsValues([string]$Path) {
+  $values = @{}
+  if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return $values }
+  try {
+    foreach ($line in @(Get-Content -LiteralPath $Path -ErrorAction Stop)) {
+      if ($line -match '^\s*([A-Z_]+)="?(.*?)"?\s*$') { $values[$matches[1]] = $matches[2].Trim('"') }
+    }
+  } catch { }
+  return $values
+}
+
+function Get-SettingsGeneration([hashtable]$Values) {
+  $parsed = [int64]0
+  if ($Values['KAYAN_SETTINGS_GENERATION'] -and [int64]::TryParse([string]$Values['KAYAN_SETTINGS_GENERATION'], [ref]$parsed)) {
+    return $parsed
+  }
+  return [int64]0
+}
+
+function Get-DatabaseNameFromUrl([string]$Url) {
+  if (-not $Url) { return '' }
+  $match = [regex]::Match($Url, '^postgresql://[^/]+/([^?]+)')
+  if (-not $match.Success) { return '' }
+  return [Uri]::UnescapeDataString($match.Groups[1].Value)
+}
+
+# First line of record: if a repair is ever again reported as "started but
+# never finished", this says whether the script itself ever ran.
+try {
+  $script:markerSink = Join-Path (Split-Path -Parent $bootstrapLog) 'repair-result.txt'
+  Write-RepairMarker 'KAYAN-REPAIR-ENTRY'
+} catch { }
 
 try {
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -57,19 +139,90 @@ try {
   }
 
   Write-RepairMarker 'KAYAN-REPAIR-START'
+  Write-RepairMarker 'KAYAN-REPAIR-ADMIN'
   Get-Process -Name 'erp_kayan' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Write-RepairMarker 'KAYAN-REPAIR-CLIENT-STOPPED'
+
+  # What the installation looked like before repair touched anything. Repair
+  # must never move the program to another company database, and must never
+  # make the settings generation go backwards - that stamp is how the desktop
+  # shell decides which of its two settings files is the newer one, and a
+  # repair that lowered it could make the program open the previous company.
+  $machineSettingsPath = Join-Path $ProgramDataRoot 'kayan.env'
+  $settingsBefore = Read-SettingsValues $machineSettingsPath
+  $userSettingsBefore = Read-SettingsValues $UserSettingsPath
+  $generationBefore = [Math]::Max((Get-SettingsGeneration $settingsBefore), (Get-SettingsGeneration $userSettingsBefore))
+  $databaseBefore = Get-DatabaseNameFromUrl $settingsBefore['DATABASE_URL']
+  if (-not $databaseBefore) { $databaseBefore = Get-DatabaseNameFromUrl $userSettingsBefore['DATABASE_URL'] }
+  $licenceDirectory = Join-Path $ProgramDataRoot 'license'
+  $requiresLicence = (Test-Path -LiteralPath (Join-Path $licenceDirectory 'enforcement.required')) -or (Test-Path -LiteralPath (Join-Path $licenceDirectory 'public-key.pem'))
 
   $installRuntime = Join-Path $PSScriptRoot 'install-runtime.ps1'
   if (-not (Test-Path -LiteralPath $installRuntime)) {
     throw "Bundled runtime setup script is missing: $installRuntime"
   }
 
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installRuntime -UserSettingsPath $UserSettingsPath -ProgramDataRoot $ProgramDataRoot
-  if ($LASTEXITCODE -ne 0) {
-    throw "Runtime repair step failed with exit code $LASTEXITCODE."
+  # Bounded, and with its console captured. An unbounded call let a repair that
+  # never returned look exactly like one still working: no exit code, no
+  # message, nothing in any log. The time limit names the step that stalled,
+  # and the captured output says why the runtime setup refused.
+  Write-RepairMarker 'KAYAN-REPAIR-RUNTIME-STARTING'
+  # Started as a real .NET process instead of through Start-Process: the object
+  # Start-Process returns does not reliably carry ExitCode, and an empty exit
+  # code is not "zero" - it read as a failure and turned a repair that had
+  # actually succeeded into "failed with exit code ." with no message at all.
+  $runtimeStart = New-Object System.Diagnostics.ProcessStartInfo
+  $runtimeStart.FileName = 'powershell.exe'
+  $runtimeStart.Arguments = @(
+    '-NoProfile', '-ExecutionPolicy', 'Bypass',
+    '-File', ('"' + $installRuntime + '"'),
+    '-UserSettingsPath', ('"' + $UserSettingsPath + '"'),
+    '-ProgramDataRoot', ('"' + $ProgramDataRoot + '"')
+  ) -join ' '
+  $runtimeStart.WorkingDirectory = $PSScriptRoot
+  $runtimeStart.UseShellExecute = $false
+  $runtimeStart.CreateNoWindow = $true
+  $runtimeStart.RedirectStandardOutput = $true
+  $runtimeStart.RedirectStandardError = $true
+  $runtimeProcess = New-Object System.Diagnostics.Process
+  $runtimeProcess.StartInfo = $runtimeStart
+  if (-not $runtimeProcess.Start()) {
+    throw "The runtime repair step could not be started: $installRuntime"
+  }
+  # Read both streams while the child runs, so a child that writes a lot cannot
+  # block on a full pipe and look like a hang.
+  $runtimeOutTask = $runtimeProcess.StandardOutput.ReadToEndAsync()
+  $runtimeErrTask = $runtimeProcess.StandardError.ReadToEndAsync()
+  if (-not $runtimeProcess.WaitForExit(900000)) {
+    try { & taskkill.exe /PID $runtimeProcess.Id /T /F 2>&1 | Out-Null } catch { }
+    try { $runtimeProcess.Kill() } catch { }
+    throw "The runtime repair step did not finish within 15 minutes and was stopped. It was still inside install-runtime.ps1; see $bootstrapLog."
+  }
+  $runtimeProcess.WaitForExit()
+  $runtimeExit = $runtimeProcess.ExitCode
+  $runtimeDetails = ((([string]$runtimeOutTask.Result) + "`n" + ([string]$runtimeErrTask.Result)) | Out-String).Trim()
+  Write-RepairMarker ("KAYAN-REPAIR-RUNTIME-EXIT " + $runtimeExit)
+  if ($null -eq $runtimeExit) {
+    throw ("The runtime repair step finished but reported no exit code, so its result cannot be trusted. Output: " + (Protect-Secret $runtimeDetails))
+  }
+  if ($runtimeExit -ne 0) {
+    if ($runtimeDetails.Length -gt 1200) { $runtimeDetails = $runtimeDetails.Substring($runtimeDetails.Length - 1200) }
+    throw ("Runtime repair step failed with exit code " + $runtimeExit + ". " + (Protect-Secret $runtimeDetails))
   }
 
   $machineSettings = Join-Path $ProgramDataRoot 'kayan.env'
+  $settingsAfter = Read-SettingsValues $machineSettings
+  $userSettingsAfter = Read-SettingsValues $UserSettingsPath
+  $generationAfter = [Math]::Max((Get-SettingsGeneration $settingsAfter), (Get-SettingsGeneration $userSettingsAfter))
+  if ($generationBefore -gt 0 -and $generationAfter -gt 0 -and $generationAfter -lt $generationBefore) {
+    throw ("Repair would lower the settings generation from " + $generationBefore + " to " + $generationAfter + ", which could make the program read an older file and open the previous company. Repair stopped instead.")
+  }
+  $databaseAfter = Get-DatabaseNameFromUrl $settingsAfter['DATABASE_URL']
+  if (-not $databaseAfter) { $databaseAfter = Get-DatabaseNameFromUrl $userSettingsAfter['DATABASE_URL'] }
+  if ($databaseBefore -and $databaseAfter -and $databaseBefore -ne $databaseAfter) {
+    throw ("Repair would switch the program from database '" + $databaseBefore + "' to '" + $databaseAfter + "'. Repair never changes which company the program opens; it stopped instead. See " + $bootstrapLog)
+  }
+  Write-RepairMarker ("KAYAN-REPAIR-SETTINGS-KEPT database=" + $databaseAfter + " generation=" + $generationAfter)
   $settingsFile = if (Test-Path -LiteralPath $machineSettings) { $machineSettings } elseif (Test-Path -LiteralPath $UserSettingsPath) { $UserSettingsPath } else { $null }
   if (-not $settingsFile) {
     throw 'Runtime settings file (kayan.env) was not found after runtime repair.'
@@ -89,7 +242,18 @@ try {
   $backendDir = Join-Path $PSScriptRoot 'backend'
   $nodeExe = Join-Path $backendDir 'node\node.exe'
   $prepareScript = Join-Path $backendDir 'scripts\prepare-database.mjs'
-  if ((Test-Path -LiteralPath $nodeExe) -and (Test-Path -LiteralPath $prepareScript)) {
+  if (-not (Test-Path -LiteralPath $nodeExe -PathType Leaf)) {
+    throw "The bundled Node.js runtime is missing: $nodeExe. Reinstall the same KAYAN Setup over the existing installation; ProgramData company data is kept."
+  }
+  if (-not (Test-Path -LiteralPath $prepareScript -PathType Leaf)) {
+    throw "The bundled database preparation script is missing: $prepareScript. Reinstall the same KAYAN Setup over the existing installation; ProgramData company data is kept."
+  }
+  $nodeVersionOutput = @(& $nodeExe --version 2>&1)
+  $nodeVersionExit = $LASTEXITCODE
+  if ($nodeVersionExit -ne 0 -or (($nodeVersionOutput -join ' ').Trim() -notmatch '^v\d+\.')) {
+    throw ("The bundled Node.js runtime cannot execute (exit " + $nodeVersionExit + "): " + (Protect-Secret (($nodeVersionOutput -join ' ').Trim())) + ". Check the Microsoft Visual C++ runtime; reinstall Setup if the bundled node.exe is damaged.")
+  }
+  if ($true) {
     $prepOut = Join-Path $env:TEMP ('kayan-repair-prep-out-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.log')
     $prepErr = Join-Path $env:TEMP ('kayan-repair-prep-err-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.log')
     try {
@@ -112,7 +276,10 @@ try {
   # the runtime, the database and the server all work, and first-run
   # setup belongs to the program window, not to this script.
   $mainJs = Join-Path $backendDir 'dist\src\main.js'
-  if ((Test-Path -LiteralPath $nodeExe) -and (Test-Path -LiteralPath $mainJs)) {
+  if (-not (Test-Path -LiteralPath $mainJs -PathType Leaf)) {
+    throw "The bundled backend entry point is missing: $mainJs. Reinstall the same KAYAN Setup over the existing installation; ProgramData company data is kept."
+  }
+  if ($true) {
     $probePort = $null
     foreach ($candidate in @(3000, 3001, 3002, 3003, 3010, 3020)) {
       $listener = $null
@@ -151,6 +318,26 @@ try {
       if (-not $health) {
         $details = ((Get-Content -LiteralPath $probeOut -Raw -ErrorAction SilentlyContinue) + "`n" + (Get-Content -LiteralPath $probeErr -Raw -ErrorAction SilentlyContinue)).Trim()
         throw ("The repaired server did not answer on 127.0.0.1:$probePort within 90 seconds: " + (Protect-Secret $details))
+      }
+      # A repair must not be able to switch licence enforcement off. The
+      # installation's own protected folder says whether it must enforce; if
+      # it does, the repaired server has to say so, with its verification key
+      # in place. This is checked on the running server, not on the settings
+      # file, because the server is what decides.
+      if ($requiresLicence) {
+        if ($null -eq $health.license) {
+          throw 'This installation enforces licences, but the repaired server did not report its licence mode, so the repair cannot prove that enforcement survived.'
+        }
+        if ($health.license.enforcement -ne 'enforce') {
+          throw ("This installation enforces licences, but the repaired server reported '" + $health.license.enforcement + "'. Repair would have weakened it, so it is not reported as successful. See " + $bootstrapLog)
+        }
+        if ($health.license.stateError -eq 'LICENSE_STATE_DAMAGED') {
+          throw ('The protected licence state is damaged. Repair preserved the original file and did not create or grant a replacement licence. Restore a trusted licence-state backup from this same installation before opening KAYAN ERP. Company data and licence enforcement were preserved.')
+        }
+        if ($health.license.configured -ne $true) {
+          throw ('This installation enforces licences, but its verification key is not readable by the repaired server. Run Repair again, or restore ' + (Join-Path $licenceDirectory 'public-key.pem') + ' from the Setup package.')
+        }
+        Write-RepairMarker 'KAYAN-REPAIR-LICENCE-ENFORCED'
       }
       if ($health.needsSetup -eq $true) {
         Write-RepairMarker 'KAYAN-REPAIR-VERIFIED server answers; first-run setup still pending'

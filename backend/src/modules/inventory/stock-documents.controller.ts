@@ -1,6 +1,8 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { canReadCost } from '../../common/auth/cost-visibility';
+import { assertTransferAccess, assertWarehouseAccess } from '../../common/warehouse/warehouse-access';
 import { StockDocumentsService } from './stock-documents.service';
 
 /// Adjustments, transfers and physical counts. Separate permissions for
@@ -26,18 +28,76 @@ export class StockDocumentsController {
   @Get(':id')
   @RequirePermissions('inventory.stock.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id);
+    return this.service.findOne(user.companyId, id, canReadCost(user));
   }
 
   @Post()
   @RequirePermissions('inventory.stock.adjust')
-  create(@CurrentUser() user: AuthUser, @Body() body: Record<string, unknown>) {
-    return this.service.create(user.companyId, user.branchId, user.userId, body as never);
+  create(
+    @CurrentUser() user: AuthUser,
+    @Body() body: Record<string, unknown>,
+    // A retry after a dropped connection carries the same key and gets the
+    // same document back, instead of booking a second loss.
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    const kind = String(body.kind ?? '').toUpperCase();
+    if (kind === 'WRITE_OFF') {
+      assertWarehouseAccess(user, body.toWarehouseId as string, 'transfer');
+    }
+    // A transfer leaves one shelf and arrives at another, so it is checked on
+    // both ends: being trusted with only the source is not a transfer.
+    if (kind === 'TRANSFER') {
+      assertTransferAccess(
+        user,
+        body.fromWarehouseId as string,
+        body.toWarehouseId as string,
+      );
+    }
+    return this.service.create(user.companyId, user.branchId, user.userId, body as never, {
+      idempotencyKey: idempotencyKey?.trim() || undefined,
+    });
+  }
+
+  /// The warehouse a document touches, so approving or posting it is checked
+  /// against the same grant that creating it was. Recording a loss and
+  /// accepting it are two people's jobs, but both of them have to be trusted
+  /// with the shelf it happens on - otherwise the access screen would only
+  /// decide who may *start* the paperwork.
+  private async assertDocumentAccess(user: AuthUser, id: string, action: 'approve' | 'post') {
+    const document = (await this.service.findOne(user.companyId, id)) as unknown as {
+      kind?: string;
+      fromWarehouseId?: string | null;
+      toWarehouseId?: string | null;
+    };
+    const kind = String(document?.kind ?? '').toUpperCase();
+    if (kind === 'TRANSFER') {
+      assertTransferAccess(user, document.fromWarehouseId ?? '', document.toWarehouseId ?? '');
+      return;
+    }
+    const warehouseId = document?.toWarehouseId ?? document?.fromWarehouseId ?? '';
+    assertWarehouseAccess(user, warehouseId, action === 'approve' ? 'approve' : 'transfer');
+  }
+
+  /// Approves a write-off. Its own permission: recording a loss and accepting
+  /// it are two different people's jobs.
+  @Post(':id/approve')
+  @RequirePermissions('inventory.writeoff.approve')
+  async approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    await this.assertDocumentAccess(user, id, 'approve');
+    return this.service.approve(user.companyId, user.userId, id);
   }
 
   @Post(':id/post')
   @RequirePermissions('inventory.stock.adjust')
-  post(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async post(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    await this.assertDocumentAccess(user, id, 'post');
+    return this.service.post(user.companyId, user.userId, id);
+  }
+
+  @Post(':id/write-off/post')
+  @RequirePermissions('inventory.writeoff.post')
+  async postWriteOff(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    await this.assertDocumentAccess(user, id, 'post');
     return this.service.post(user.companyId, user.userId, id);
   }
 

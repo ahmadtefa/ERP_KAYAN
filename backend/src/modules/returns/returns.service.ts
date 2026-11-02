@@ -13,6 +13,8 @@ import {
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { movementUnitSnapshot } from '../../common/units/unit-math';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
@@ -23,9 +25,16 @@ const MONEY_SCALE = 4;
 
 export interface ReturnLineInput {
   originalLineId: string;
+  /** Quantity in the ORIGINAL document's unit for that line. */
   quantity: string | number;
   /** Optional: defaults to the price on the original line. */
   unitPrice?: string | number;
+  /**
+   * Optional confirmation of the unit being returned. A return follows the
+   * original invoice, so this must match the unit stored on its line.
+   */
+  unitName?: string;
+  unitId?: string;
 }
 
 /**
@@ -54,12 +63,14 @@ export class ReturnsService {
     private readonly accounts: AccountMapService,
     private readonly audit: AuditService,
     private readonly warehouses: WarehouseService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   async findAll(
     companyId: string,
     side: 'sales' | 'purchases',
     query: { from?: string; to?: string; page?: number; pageSize?: number } = {},
+    mayReadCost = true,
   ) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
@@ -92,7 +103,7 @@ export class ReturnsService {
         this.prisma.salesInvoice.count({ where }),
       ]);
       return {
-        items: items.map((invoice) => this.toSummary(invoice)),
+        items: items.map((invoice) => this.toSummary(invoice, mayReadCost)),
         total,
         page,
         pageSize,
@@ -118,10 +129,15 @@ export class ReturnsService {
       }),
       this.prisma.purchaseInvoice.count({ where }),
     ]);
-    return { items: items.map((invoice) => this.toSummary(invoice)), total, page, pageSize };
+    return { items: items.map((invoice) => this.toSummary(invoice, mayReadCost)), total, page, pageSize };
   }
 
-  async findOne(companyId: string, side: 'sales' | 'purchases', id: string) {
+  async findOne(
+    companyId: string,
+    side: 'sales' | 'purchases',
+    id: string,
+    mayReadCost = true,
+  ) {
     if (side === 'sales') {
       const invoice = await this.prisma.salesInvoice.findFirst({
         where: { id, companyId, deletedAt: null, documentType: InvoiceDocumentType.CREDIT_NOTE },
@@ -133,7 +149,7 @@ export class ReturnsService {
       });
       if (!invoice) throw new NotFoundException('Return document not found');
       return {
-        ...this.toSummary(invoice),
+        ...this.toSummary(invoice, mayReadCost),
         journalEntryId: invoice.journalEntryId,
         postedAt: invoice.postedAt?.toISOString() ?? null,
         lines: invoice.lines.map((line) => ({
@@ -143,15 +159,24 @@ export class ReturnsService {
           itemCode: line.item?.code ?? null,
           itemNameEn: line.item?.nameEn ?? null,
           itemNameAr: line.item?.nameAr ?? null,
-          unit: line.item?.unit ?? null,
+          unit: line.unitName ?? line.item?.unit ?? null,
+          unitName: line.unitName ?? null,
+          unitFactor:
+            line.unitFactor === null || line.unitFactor === undefined
+              ? null
+              : line.unitFactor.toFixed(6),
+          unitQuantity: (line.unitQuantity ?? line.quantity).toFixed(MONEY_SCALE),
           description: line.description,
           quantity: line.quantity.toFixed(MONEY_SCALE),
+          baseQuantity: line.quantity.toFixed(MONEY_SCALE),
           unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
           taxRate: line.taxRate.toFixed(MONEY_SCALE),
           taxAmount: line.taxAmount.toFixed(MONEY_SCALE),
           lineTotal: line.lineTotal.toFixed(MONEY_SCALE),
-          unitCost: line.unitCost.toFixed(MONEY_SCALE),
-          costTotal: line.costTotal.toFixed(MONEY_SCALE),
+          // Cost snapshots are gated by inventory.cost.read, exactly as on
+          // the sales invoice these goods came from.
+          unitCost: mayReadCost ? line.unitCost.toFixed(MONEY_SCALE) : null,
+          costTotal: mayReadCost ? line.costTotal.toFixed(MONEY_SCALE) : null,
           costCenterId: line.costCenterId ?? null,
         })),
       };
@@ -167,7 +192,7 @@ export class ReturnsService {
     });
     if (!invoice) throw new NotFoundException('Return document not found');
     return {
-      ...this.toSummary(invoice),
+      ...this.toSummary(invoice, mayReadCost),
       journalEntryId: invoice.journalEntryId,
       postedAt: invoice.postedAt?.toISOString() ?? null,
       lines: invoice.lines.map((line) => ({
@@ -176,19 +201,32 @@ export class ReturnsService {
         itemId: line.itemId,
         itemCode: line.item?.code ?? null,
         itemNameEn: line.item?.nameEn ?? null,
-        itemNameAr: line.item?.nameAr ?? null,
-        unit: line.item?.unit ?? null,
-        description: line.description,
-        quantity: line.quantity.toFixed(MONEY_SCALE),
-        unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
-        netUnitPrice: line.quantity.isZero()
-          ? line.unitPrice.toFixed(MONEY_SCALE)
-          : line.lineTotal.div(line.quantity).toDecimalPlaces(MONEY_SCALE).toFixed(MONEY_SCALE),
+          itemNameAr: line.item?.nameAr ?? null,
+          unit: line.unitName ?? line.item?.unit ?? null,
+          unitName: line.unitName ?? null,
+          unitFactor:
+            line.unitFactor === null || line.unitFactor === undefined
+              ? null
+              : line.unitFactor.toFixed(6),
+          unitQuantity: (line.unitQuantity ?? line.quantity).toFixed(MONEY_SCALE),
+          description: line.description,
+          quantity: line.quantity.toFixed(MONEY_SCALE),
+          baseQuantity: line.quantity.toFixed(MONEY_SCALE),
+          unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
+          netUnitPrice: line.quantity.isZero()
+            ? line.unitPrice.toFixed(MONEY_SCALE)
+            : line.lineTotal.div(line.quantity).toDecimalPlaces(MONEY_SCALE).toFixed(MONEY_SCALE),
         taxRate: line.taxRate.toFixed(MONEY_SCALE),
         taxAmount: line.taxAmount.toFixed(MONEY_SCALE),
         lineTotal: line.lineTotal.toFixed(MONEY_SCALE),
-        landedCostAmount: line.landedCostAmount.toFixed(MONEY_SCALE),
-        inventoryCostTotal: line.inventoryCostTotal.toFixed(MONEY_SCALE),
+        // Landed/inventory cost components are cost-side figures. The line's
+        // own unit price (the document's transaction amount) stays visible.
+        landedCostAmount: mayReadCost
+          ? line.landedCostAmount.toFixed(MONEY_SCALE)
+          : null,
+        inventoryCostTotal: mayReadCost
+          ? line.inventoryCostTotal.toFixed(MONEY_SCALE)
+          : null,
       })),
     };
   }
@@ -248,6 +286,9 @@ export class ReturnsService {
       lineTotal: Prisma.Decimal;
       unitCost?: Prisma.Decimal;
       costTotal?: Prisma.Decimal;
+      unitName: string | null;
+      unitFactor: Prisma.Decimal | null;
+      unitQuantity: Prisma.Decimal | null;
     }> = [];
     const seenOriginalLineIds = new Set<string>();
     for (const [index, raw] of dto.lines.entries()) {
@@ -263,8 +304,12 @@ export class ReturnsService {
         throw new BadRequestException(`Line ${index + 1}: an invoice line may appear only once in a return`);
       }
       seenOriginalLineIds.add(originalLine.id);
+      // The return follows the original document's unit. The entered quantity
+      // is converted into the base quantity the existing return/limit math and
+      // the stock ledger already work in.
+      const unit = this.resolveReturnUnit(`Line ${index + 1}`, originalLine, raw);
       const remaining = originalLine.quantity.minus(originalLine.returnedQuantity);
-      const quantity = this.positive(raw.quantity, `Line ${index + 1} quantity`);
+      const quantity = unit.baseQuantity;
       if (quantity.greaterThan(remaining)) {
         throw new BadRequestException(
           `Line ${index + 1}: ${remaining.toFixed(MONEY_SCALE)} of ${originalLine.description} ` +
@@ -331,6 +376,9 @@ export class ReturnsService {
         // the rounding remainder under the original-line lock.
         unitCost: costTotal.div(quantity).toDecimalPlaces(MONEY_SCALE),
         costTotal,
+        unitName: unit.unitName,
+        unitFactor: unit.unitFactor,
+        unitQuantity: unit.unitQuantity,
       });
     }
 
@@ -374,6 +422,9 @@ export class ReturnsService {
               lineTotal: line.lineTotal,
               unitCost: line.unitCost ?? new Prisma.Decimal(0),
               costTotal: line.costTotal ?? new Prisma.Decimal(0),
+              unitName: line.unitName,
+              unitFactor: line.unitFactor,
+              unitQuantity: line.unitQuantity,
             })),
           },
         },
@@ -534,7 +585,7 @@ export class ReturnsService {
         if (line.itemId) {
           const item = await tx.item.findFirst({
             where: { id: line.itemId, companyId, deletedAt: null },
-            select: { id: true, isStockTracked: true },
+            select: { id: true, isStockTracked: true, unit: true },
           });
           if (!item) throw new BadRequestException('A sales-return item no longer exists');
           if (!item.isStockTracked && !returnedCost.isZero()) {
@@ -550,6 +601,13 @@ export class ReturnsService {
                 movementDate: document.invoiceDate,
                 direction: StockDirection.IN,
                 quantity: line.quantity,
+                ...movementUnitSnapshot({
+                  enteredUnit: line.unitName,
+                  enteredQuantity: line.unitQuantity,
+                  unitFactor: line.unitFactor,
+                  baseUnitName: item.unit,
+                  baseQuantity: line.quantity,
+                }),
                 unitCost,
                 totalCost: returnedCost,
                 referenceType: 'SALES_RETURN',
@@ -559,25 +617,16 @@ export class ReturnsService {
                 createdBy: userId,
               },
             });
-            await tx.stockBalance.upsert({
-              where: {
-                companyId_branchId_itemId: {
-                  companyId,
-                  branchId: document.branchId,
-                  itemId: item.id,
-                },
-              },
-              create: {
-                companyId,
-                branchId: document.branchId,
-                itemId: item.id,
-                quantity: line.quantity,
-                value: returnedCost,
-              },
-              update: {
-                quantity: { increment: line.quantity },
-                value: { increment: returnedCost },
-              },
+            // Back into the shelf it left from, at the cost frozen on the
+            // original sale. Re-averaging here would quietly hand the customer
+            // a different cost from the one the invoice charged them.
+            await this.ledger.post(tx, {
+              companyId,
+              branchId: document.branchId,
+              warehouseId,
+              itemId: item.id,
+              quantity: line.quantity,
+              value: returnedCost,
             });
             costTotal = costTotal.plus(returnedCost);
             costParts.push({ costCenterId: matching.costCenterId, amount: returnedCost });
@@ -736,6 +785,9 @@ export class ReturnsService {
       lineTotal: Prisma.Decimal;
       landedCostAmount: Prisma.Decimal;
       inventoryCostTotal: Prisma.Decimal;
+      unitName: string | null;
+      unitFactor: Prisma.Decimal | null;
+      unitQuantity: Prisma.Decimal | null;
     }> = [];
     const seenOriginalLineIds = new Set<string>();
     for (const [index, raw] of dto.lines.entries()) {
@@ -751,8 +803,11 @@ export class ReturnsService {
         throw new BadRequestException(`Line ${index + 1}: an invoice line may appear only once in a return`);
       }
       seenOriginalLineIds.add(originalLine.id);
+      // Follow the original document's unit; convert the entered quantity into
+      // the base quantity every existing return/limit calculation already uses.
+      const unit = this.resolveReturnUnit(`Line ${index + 1}`, originalLine, raw);
       const remaining = originalLine.quantity.minus(originalLine.returnedQuantity);
-      const quantity = this.positive(raw.quantity, `Line ${index + 1} quantity`);
+      const quantity = unit.baseQuantity;
       if (quantity.greaterThan(remaining)) {
         throw new BadRequestException(
           `Line ${index + 1}: ${remaining.toFixed(MONEY_SCALE)} of ${originalLine.description} ` +
@@ -820,6 +875,9 @@ export class ReturnsService {
         lineTotal,
         landedCostAmount,
         inventoryCostTotal,
+        unitName: unit.unitName,
+        unitFactor: unit.unitFactor,
+        unitQuantity: unit.unitQuantity,
       });
     }
 
@@ -861,6 +919,9 @@ export class ReturnsService {
               lineTotal: line.lineTotal,
               landedCostAmount: line.landedCostAmount,
               inventoryCostTotal: line.inventoryCostTotal,
+              unitName: line.unitName,
+              unitFactor: line.unitFactor,
+              unitQuantity: line.unitQuantity,
             })),
           },
         },
@@ -1028,7 +1089,7 @@ export class ReturnsService {
         if (line.itemId) {
           const item = await tx.item.findFirst({
             where: { id: line.itemId, companyId, deletedAt: null },
-            select: { id: true, isStockTracked: true },
+            select: { id: true, isStockTracked: true, unit: true },
           });
           if (!item || !item.isStockTracked) {
             throw new BadRequestException('A purchase-return item is no longer tracked in stock');
@@ -1059,6 +1120,19 @@ export class ReturnsService {
             );
           }
 
+          // Same warehouse-level rule as sales: returning goods to a supplier
+          // drains one named warehouse, which must actually hold them even
+          // when the branch total would be enough. Returns never go negative.
+          await this.warehouses.assertWarehouseAvailable({
+            tx,
+            companyId,
+            warehouseId,
+            itemId: item.id,
+            quantity: line.quantity,
+            allowNegative: false,
+            reference: document.invoiceNumber,
+          });
+
           await tx.stockMovement.create({
             data: {
               companyId,
@@ -1068,6 +1142,13 @@ export class ReturnsService {
               movementDate: document.invoiceDate,
               direction: StockDirection.OUT,
               quantity: line.quantity,
+              ...movementUnitSnapshot({
+                enteredUnit: line.unitName,
+                enteredQuantity: line.unitQuantity,
+                unitFactor: line.unitFactor,
+                baseUnitName: item.unit,
+                baseQuantity: line.quantity,
+              }),
               unitCost,
               totalCost: returnedCost,
               referenceType: 'PURCHASE_RETURN',
@@ -1077,18 +1158,13 @@ export class ReturnsService {
               createdBy: userId,
             },
           });
-          await tx.stockBalance.update({
-            where: {
-              companyId_branchId_itemId: {
-                companyId,
-                branchId: document.branchId,
-                itemId: item.id,
-              },
-            },
-            data: {
-              quantity: { decrement: line.quantity },
-              value: { decrement: returnedCost },
-            },
+          await this.ledger.post(tx, {
+            companyId,
+            branchId: document.branchId,
+            warehouseId,
+            itemId: item.id,
+            quantity: line.quantity.negated(),
+            value: returnedCost.negated(),
           });
         }
       }
@@ -1250,6 +1326,15 @@ export class ReturnsService {
               movementDate: new Date(),
               direction: StockDirection.OUT,
               quantity: line.quantity,
+              ...movementUnitSnapshot({
+                enteredUnit: line.unitName,
+                enteredQuantity: line.unitQuantity,
+                unitFactor: line.unitFactor,
+                // The line already names its unit; the base name is only a
+                // fallback for a row saved before units were snapshotted.
+                baseUnitName: line.unitName ?? 'unit',
+                baseQuantity: line.quantity,
+              }),
               unitCost: line.unitCost,
               totalCost: line.costTotal,
               referenceType: 'SALES_RETURN_REVERSAL',
@@ -1258,19 +1343,20 @@ export class ReturnsService {
               createdBy: userId,
             },
           });
-          await tx.stockBalance.update({
-            where: {
-              companyId_branchId_itemId: {
-                companyId,
-                branchId: document.branchId,
-                itemId: line.itemId,
-              },
+          await this.ledger.post(
+            tx,
+            {
+              companyId,
+              branchId: document.branchId,
+              warehouseId,
+              itemId: line.itemId,
+              quantity: line.quantity.negated(),
+              value: line.costTotal.negated(),
             },
-            data: {
-              quantity: { decrement: line.quantity },
-              value: { decrement: line.costTotal },
-            },
-          });
+            // The return put it back once; undoing it takes it out again even
+            // if the shelf has been emptied since.
+            { allowNegative: true },
+          );
         }
 
         await this.posting.reverse(
@@ -1349,6 +1435,13 @@ export class ReturnsService {
             movementDate: new Date(),
             direction: StockDirection.IN,
             quantity: line.quantity,
+            ...movementUnitSnapshot({
+              enteredUnit: line.unitName,
+              enteredQuantity: line.unitQuantity,
+              unitFactor: line.unitFactor,
+              baseUnitName: line.unitName ?? 'unit',
+              baseQuantity: line.quantity,
+            }),
             unitCost,
             totalCost,
             referenceType: 'PURCHASE_RETURN_REVERSAL',
@@ -1357,25 +1450,13 @@ export class ReturnsService {
             createdBy: userId,
           },
         });
-        await tx.stockBalance.upsert({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: document.branchId,
-              itemId: line.itemId,
-            },
-          },
-          create: {
-            companyId,
-            branchId: document.branchId,
-            itemId: line.itemId,
-            quantity: line.quantity,
-            value: totalCost,
-          },
-          update: {
-            quantity: { increment: line.quantity },
-            value: { increment: totalCost },
-          },
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: document.branchId,
+          warehouseId,
+          itemId: line.itemId,
+          quantity: line.quantity,
+          value: totalCost,
         });
       }
 
@@ -1532,6 +1613,53 @@ export class ReturnsService {
     return id;
   }
 
+  /**
+   * A return always follows the unit of its original invoice line. The entered
+   * quantity is expressed in that unit and converted into the base quantity
+   * the existing return limits, cost allocation and stock ledger all operate
+   * in. Legacy lines without a snapshot behave exactly as before (factor 1).
+   */
+  private resolveReturnUnit(
+    field: string,
+    originalLine: {
+      unitName?: string | null;
+      unitFactor?: Prisma.Decimal | null;
+    },
+    raw: ReturnLineInput,
+  ): {
+    baseQuantity: Prisma.Decimal;
+    unitName: string | null;
+    unitFactor: Prisma.Decimal | null;
+    unitQuantity: Prisma.Decimal | null;
+  } {
+    const entered = this.positive(raw.quantity, `${field} quantity`);
+    const hasSnapshot =
+      originalLine.unitFactor !== null && originalLine.unitFactor !== undefined;
+
+    if (!hasSnapshot) {
+      return { baseQuantity: entered, unitName: null, unitFactor: null, unitQuantity: null };
+    }
+
+    if (raw.unitName && originalLine.unitName) {
+      const asked = String(raw.unitName).trim().toLowerCase();
+      const stored = String(originalLine.unitName).trim().toLowerCase();
+      if (asked !== stored) {
+        throw new BadRequestException(
+          `${field}: a return must use the original document's unit (${originalLine.unitName})`,
+        );
+      }
+    }
+
+    const factor = new Prisma.Decimal(originalLine.unitFactor as Prisma.Decimal);
+    const baseQuantity = entered.mul(factor).toDecimalPlaces(MONEY_SCALE);
+    return {
+      baseQuantity,
+      unitName: originalLine.unitName ?? null,
+      unitFactor: factor,
+      unitQuantity: entered,
+    };
+  }
+
   private positive(value: unknown, field: string): Prisma.Decimal {
     let decimal: Prisma.Decimal;
     try {
@@ -1564,7 +1692,8 @@ export class ReturnsService {
     return parsed;
   }
 
-  private toSummary(invoice: {
+  private toSummary(
+    invoice: {
     id: string;
     invoiceNumber: string;
     invoiceDate: Date;
@@ -1581,7 +1710,9 @@ export class ReturnsService {
     customer?: { code: string; nameEn: string; nameAr: string } | null;
     supplier?: { code: string; nameEn: string; nameAr: string } | null;
     originalInvoice?: { invoiceNumber: string } | null;
-  }) {
+    },
+    mayReadCost = true,
+  ) {
     return {
       id: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
@@ -1592,7 +1723,9 @@ export class ReturnsService {
       subTotal: invoice.subTotal.toFixed(MONEY_SCALE),
       taxAmount: invoice.taxAmount.toFixed(MONEY_SCALE),
       totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE),
-      landedCostAmount: invoice.landedCostAmount?.toFixed(MONEY_SCALE) ?? '0.0000',
+      landedCostAmount: mayReadCost
+        ? invoice.landedCostAmount?.toFixed(MONEY_SCALE) ?? '0.0000'
+        : null,
       paidAmount: invoice.paidAmount.toFixed(MONEY_SCALE),
       balanceDue: invoice.totalAmount.minus(invoice.paidAmount).toFixed(MONEY_SCALE),
       returnReason: invoice.returnReason ?? null,

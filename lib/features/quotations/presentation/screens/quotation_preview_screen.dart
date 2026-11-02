@@ -8,6 +8,7 @@ import '../../../../features/settings/presentation/providers/text_scale_provider
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../../../data/presentation/providers/data_providers.dart';
+import '../../../data/presentation/widgets/print_visibility_prompt.dart';
 import '../../../settings/presentation/providers/company_providers.dart';
 import '../document/quotation_document.dart';
 import '../widgets/quotation_document_view.dart';
@@ -60,6 +61,47 @@ class QuotationPreviewScreen extends ConsumerWidget {
     final logoUrl = companyLogoUrl(appConfig.apiBaseUrl, profile);
     final textScale = ref.watch(effectiveTextScaleProvider);
     final links = ref.read(reportLinkProvider);
+
+    /// Printing an offer asks the same question every other print asks: what
+    /// may this copy show? The dialog starts at the company's saved policy for
+    /// quotations, and only a deliberate change overrides it - for this copy.
+    Future<void> printQuotation() async {
+      final visibility = await promptPriceVisibility(
+        context,
+        ref,
+        typeKey: 'sales-quotation',
+        arabic: language == 'ar',
+      );
+      if (visibility == null || !context.mounted) return;
+      await runPrint(
+        context,
+        links.quotationPrint(
+          id: id,
+          language: language,
+          showSalePrice: visibility.showSalePrice,
+          showCost: visibility.showCost,
+        ),
+      );
+    }
+
+    Future<void> pdfQuotation() async {
+      final visibility = await promptPriceVisibility(
+        context,
+        ref,
+        typeKey: 'sales-quotation',
+        arabic: language == 'ar',
+      );
+      if (visibility == null || !context.mounted) return;
+      await runDownload(
+        context,
+        links.quotationPdf(
+          id: id,
+          language: language,
+          showSalePrice: visibility.showSalePrice,
+          showCost: visibility.showCost,
+        ),
+      );
+    }
     final document = QuotationDocument.fromJson(
       quotation,
       company: profile,
@@ -78,20 +120,14 @@ class QuotationPreviewScreen extends ConsumerWidget {
         actions: [
           if (!compact && id.isNotEmpty) ...[
             TextButton.icon(
-              onPressed: () => runPrint(
-                context,
-                links.quotationPrint(id: id, language: language),
-              ),
+              onPressed: printQuotation,
               icon: const Icon(Icons.print_outlined, size: 18),
               label: Text(l10n.print),
             ),
             Padding(
               padding: const EdgeInsetsDirectional.only(end: AppSpacing.sm),
               child: FilledButton.icon(
-                onPressed: () => runDownload(
-                  context,
-                  links.quotationPdf(id: id, language: language),
-                ),
+                onPressed: pdfQuotation,
                 icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
                 label: Text(l10n.downloadPdf),
               ),
@@ -112,13 +148,7 @@ class QuotationPreviewScreen extends ConsumerWidget {
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: () => runPrint(
-                            context,
-                            links.quotationPrint(
-                              id: id,
-                              language: language,
-                            ),
-                          ),
+                          onPressed: printQuotation,
                           icon: const Icon(Icons.print_outlined, size: 18),
                           label: Text(l10n.print),
                         ),
@@ -126,13 +156,7 @@ class QuotationPreviewScreen extends ConsumerWidget {
                       const SizedBox(width: AppSpacing.sm),
                       Expanded(
                         child: FilledButton.icon(
-                          onPressed: () => runDownload(
-                            context,
-                            links.quotationPdf(
-                              id: id,
-                              language: language,
-                            ),
-                          ),
+                          onPressed: pdfQuotation,
                           icon: const Icon(
                             Icons.picture_as_pdf_outlined,
                             size: 18,

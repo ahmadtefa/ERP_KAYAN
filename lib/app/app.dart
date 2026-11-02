@@ -5,6 +5,7 @@ import '../features/settings/presentation/providers/locale_provider.dart';
 import '../features/settings/presentation/providers/text_scale_provider.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../shared/extensions/l10n_extension.dart';
+import '../shared/widgets/phone_browser_notice.dart';
 import 'router/app_router.dart';
 import 'theme/app_theme.dart';
 import 'theme/text_scale.dart';
@@ -33,7 +34,14 @@ class ErpApp extends ConsumerWidget {
       locale: locale,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
-      builder: (context, child) => applyTextScale(context, child, textScale),
+      builder: (context, child) => applyTextScale(
+        context,
+        // A phone browser is answered by the web build, but the screens were
+        // laid out for a desktop; the banner says so instead of letting the
+        // person believe the cramped invoice is the program failing.
+        PhoneBrowserNotice(child: child ?? const SizedBox.shrink()),
+        textScale,
+      ),
     );
   }
 }

@@ -1,12 +1,15 @@
 import { Module } from '@nestjs/common';
 import { AccountingModule } from '../accounting/accounting.module';
 import { ExportModule } from '../export/export.module';
+import { InventoryModule } from '../inventory/inventory.module';
 import { PriceListsController } from './price-lists.controller';
 import { PriceListsService } from './price-lists.service';
 import { SalesInvoicesController } from './sales-invoices.controller';
 import { SalesInvoicesService } from './sales-invoices.service';
 import { SalesOrdersController } from './sales-orders.controller';
 import { SalesOrdersService } from './sales-orders.service';
+import { QuotationBackgroundsController } from './quotation-backgrounds.controller';
+import { QuotationBackgroundsService } from './quotation-backgrounds.service';
 import { QuotationColumnTemplatesController } from './quotation-column-templates.controller';
 import { QuotationColumnTemplatesService } from './quotation-column-templates.service';
 import { QuotationDesignTemplatesController } from './quotation-design-templates.controller';
@@ -17,7 +20,7 @@ import { QuotationsController } from './quotations.controller';
 import { QuotationsService } from './quotations.service';
 
 @Module({
-  imports: [AccountingModule, ExportModule],
+  imports: [AccountingModule, ExportModule, InventoryModule],
   controllers: [
     SalesInvoicesController,
     SalesOrdersController,
@@ -26,6 +29,7 @@ import { QuotationsService } from './quotations.service';
     QuotationTermsController,
     QuotationColumnTemplatesController,
     QuotationDesignTemplatesController,
+    QuotationBackgroundsController,
   ],
   providers: [
     SalesInvoicesService,
@@ -35,7 +39,14 @@ import { QuotationsService } from './quotations.service';
     QuotationTermsService,
     QuotationColumnTemplatesService,
     QuotationDesignTemplatesService,
+    QuotationBackgroundsService,
   ],
-  exports: [SalesInvoicesService, SalesOrdersService, PriceListsService, QuotationsService],
+  exports: [
+    SalesInvoicesService,
+    SalesOrdersService,
+    PriceListsService,
+    QuotationsService,
+    QuotationBackgroundsService,
+  ],
 })
 export class SalesModule {}

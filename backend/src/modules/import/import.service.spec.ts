@@ -78,6 +78,67 @@ describe('ImportService', () => {
     }
   });
 
+  /// A committed items file must leave every item with a factor-1 unit row.
+  /// Without it the item has a `unit` column and no catalogue, so a carton
+  /// could never be converted and the unit dropdown would come up empty.
+  it('gives every imported item its factor-1 base unit row', async () => {
+    const created: Array<Record<string, unknown>> = [];
+    const units: Array<Record<string, unknown>> = [];
+    const client: Record<string, any> = {
+        customer: { findMany: async () => [], create: async () => ({}) },
+        supplier: { findMany: async () => [], create: async () => ({}) },
+        item: {
+          findMany: async () => [],
+          create: async (args: { data: Record<string, unknown> }) => {
+            created.push(args.data);
+            return { id: `item-${created.length}`, ...args.data };
+          },
+        },
+        itemUnit: {
+          create: async (args: { data: Record<string, unknown> }) => {
+            units.push(args.data);
+            return {};
+          },
+          findFirst: async () => null,
+          update: async () => ({}),
+        },
+        stockMovement: { count: async () => 0 },
+        stockBalance: { findFirst: async () => null },
+        stockDocumentLine: { count: async () => 0 },
+        salesInvoiceLine: { count: async () => 0 },
+        purchaseInvoiceLine: { count: async () => 0 },
+        openingBalance: { findFirst: async () => null },
+        branch: { findFirst: async () => ({ id: BRANCH, code: 'HQ', isActive: true }) },
+        warehouse: { findFirst: async () => null },
+        account: { findMany: async () => [], findFirst: async () => null, create: async () => ({}) },
+    };
+    // The importer writes through the transaction client it is handed, so the
+    // double must hand back the same tables rather than nothing.
+    client.$transaction = async (work: unknown) =>
+      typeof work === 'function' ? (work as (tx: unknown) => unknown)(client) : work;
+    const importer = new ImportService(
+      client as never,
+      { record: async () => {} } as never,
+      openingBalances() as never,
+    );
+
+    const csv = 'Code,Name (English),Name (Arabic),Unit\nWATER-1,Water,مياه,كرتونة\n';
+    const report = await importer.run(
+      'items',
+      COMPANY,
+      USER,
+      { originalname: 'items.csv', buffer: Buffer.from(csv, 'utf8') },
+      { dryRun: false, mode: 'insert' },
+    );
+
+    expect(report.errors).toEqual([]);
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({ code: 'WATER-1', unit: 'كرتونة' });
+    expect(units).toHaveLength(1);
+    expect(units[0]).toMatchObject({ itemId: 'item-1', unit: 'كرتونة' });
+    expect(String(units[0]!.factor)).toBe('1');
+  });
+
   it('keeps the notes where a person can read them and the importer cannot trip over them', async () => {
     const importer = service();
     const buffer = await importer.template('customers');

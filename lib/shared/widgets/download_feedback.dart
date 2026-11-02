@@ -42,9 +42,10 @@ Future<void> runDownload(
 
 /// Opens a print page in a new tab, and says so.
 ///
-/// A popup blocker can refuse the tab. There is no way to detect that from
-/// here - `window.open` simply answers null - so the message names what to
-/// do about it rather than pretending the page is on its way.
+/// It says so only after the page has actually been handed to a browser. On a
+/// desktop with no browser installed, or where policy forbids starting one,
+/// [openInNewTab] fails and the reason is shown here instead of a success
+/// note for something that never happened.
 Future<void> runPrint(
   BuildContext context,
   Future<String> link, {
@@ -54,8 +55,8 @@ Future<void> runPrint(
   onStart?.call();
   try {
     final url = await link;
+    await openInNewTab(url);
     if (!context.mounted) return;
-    openInNewTab(url);
     _say(context, context.l10n.printOpened, isError: false);
   } catch (error) {
     if (!context.mounted) return;

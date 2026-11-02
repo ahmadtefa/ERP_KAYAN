@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/image/company_logo_image.dart';
+import '../../../../core/image/company_logo_url.dart';
 import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -241,9 +242,12 @@ class _CompanyManagementPanelState
     }
     final base = ref.watch(appConfigProvider).apiBaseUrl;
     final user = ref.watch(currentUserProvider);
-    final logoUrl = user == null
-        ? null
-        : '${base.replaceFirst(RegExp(r'/+$'), '')}/companies/logo/${user.companyId}';
+    // Use the same API-prefix-aware, versioned URL as every other company mark.
+    final savedLogoUrl = companyLogoUrl(base, {
+      ...?_company,
+      if (_company?['id'] == null && user != null) 'id': user.companyId,
+      'hasLogo': _company?['hasLogo'] == true || _company?['logoUrl'] != null,
+    });
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -294,10 +298,11 @@ class _CompanyManagementPanelState
                         height: 76,
                         child: _logo != null
                             ? Image.memory(_logo!.bytes, fit: BoxFit.contain)
-                            : (logoUrl == null
+                            : (savedLogoUrl == null
                                   ? const Icon(Icons.business, size: 48)
                                   : Image.network(
-                                      '$logoUrl?v=${_company?['updatedAt'] ?? ''}',
+                                      savedLogoUrl,
+                                      key: ValueKey(savedLogoUrl),
                                       fit: BoxFit.contain,
                                       errorBuilder: (_, _, _) =>
                                           const Icon(Icons.business, size: 48),

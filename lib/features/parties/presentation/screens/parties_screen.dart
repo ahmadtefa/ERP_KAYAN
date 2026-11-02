@@ -15,35 +15,10 @@ import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../../presentation/widgets/party_statement_dialog.dart';
+import '../providers/party_providers.dart';
 
 /// Which of the two party lists a screen is showing.
 enum PartyKind { customer, supplier }
-
-class CustomersController extends JsonListController {
-  @override
-  String get resourcePath => '/parties/customers';
-
-  @override
-  Map<String, dynamic> get resourceQuery => const {'includeInactive': 'true'};
-}
-
-class SuppliersController extends JsonListController {
-  @override
-  String get resourcePath => '/parties/suppliers';
-
-  @override
-  Map<String, dynamic> get resourceQuery => const {'includeInactive': 'true'};
-}
-
-final customersListProvider =
-    AsyncNotifierProvider<JsonListController, List<Json>>(
-      CustomersController.new,
-    );
-
-final suppliersListProvider =
-    AsyncNotifierProvider<JsonListController, List<Json>>(
-      SuppliersController.new,
-    );
 
 /// Customers and suppliers, which differ only in the label and in whether a
 /// credit limit applies.

@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/config/app_config.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/result/result.dart';
 import '../../../../core/storage/token_store.dart';
@@ -108,6 +109,44 @@ class AuthController extends AsyncNotifier<AppUser?> {
     }
     state = AsyncValue.data(result.valueOrNull);
     return result;
+  }
+
+  /// Re-reads whether the signed-in person has a photo.
+  ///
+  /// Called after a photo is uploaded or removed, so the session object the
+  /// whole app watches stops advertising an image that no longer exists (or
+  /// starts showing one that now does). Only the two avatar fields change; the
+  /// tokens, the tenant and the permissions are untouched - this must never be
+  /// a way to silently widen a session.
+  Future<void> refreshAvatarState() async {
+    final current = state.asData?.value;
+    if (current == null) return;
+    try {
+      final me = await ref.read(apiClientProvider).get('/auth/me');
+      final user = me['user'];
+      if (user is! Map) return;
+      final hasAvatar = user['hasAvatar'] == true;
+      final avatarUrl = user['avatarUrl'];
+      state = AsyncValue.data(
+        AppUser(
+          id: current.id,
+          username: current.username,
+          fullName: current.fullName,
+          companyId: current.companyId,
+          branchId: current.branchId,
+          roles: current.roles,
+          permissions: current.permissions,
+          isActive: current.isActive,
+          isSuperAdmin: current.isSuperAdmin,
+          hasAvatar: hasAvatar,
+          avatarUrl: avatarUrl is String ? avatarUrl : null,
+        ),
+      );
+    } on Failure {
+      // Not being able to re-read the session must not sign anyone out; the
+      // avatar widget falls back to the initial and the next screen refresh
+      // corrects it.
+    }
   }
 
   Future<void> signOut() async {

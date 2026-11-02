@@ -108,7 +108,41 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['cash.reconcile', 'Reconcile bank statements', 'تسوية كشوف البنك', 'cash'],
 
   ['inventory.items.delete', 'Deactivate items', 'إيقاف الأصناف', 'inventory'],
+  // Reading a cost is its own privilege: a warehouse clerk may price a sale
+  // without ever seeing what the goods cost the company, and the print/PDF
+  // options can only hide what the API is willing to send.
+  ['inventory.cost.read', 'View cost and purchase prices', 'عرض التكلفة وأسعار الشراء', 'inventory'],
+  // A barcode is an identifier, so changing one is guarded separately from
+  // editing the item's descriptive fields. Generating a code is a write too.
+  ['inventory.barcodes.manage', 'Edit and generate barcodes', 'تعديل وتوليد أكواد الباركود', 'inventory'],
   ['inventory.stock.adjust', 'Adjust, transfer and count stock', 'تسويات وتحويلات وجرد المخزون', 'inventory'],
+  // Lots are a separate privilege from the stock card. Receiving a lot is
+  // recording what arrived; issuing one is selling or consuming it; destroying
+  // one is a decision about the company's money, so it stands alone.
+  ['inventory.batches.read', 'View lots, expiry dates and traceability', 'عرض الدفعات وتواريخ الصلاحية والتتبع', 'inventory'],
+  ['inventory.batches.receive', 'Receive lots and record their dates', 'استلام الدفعات وتسجيل تواريخها', 'inventory'],
+  ['inventory.batches.issue', 'Issue stock from lots', 'صرف المخزون من الدفعات', 'inventory'],
+  ['inventory.batches.writeoff', 'Write off and destroy lots', 'إعدام وإتلاف الدفعات', 'inventory'],
+  ['inventory.batches.transfer', 'Move lots between warehouses', 'تحويل الدفعات بين المخازن', 'inventory'],
+  // Counting is four separate acts: opening a session, walking it, approving
+  // the difference and booking it. A storekeeper counts; a manager approves.
+  ['inventory.stocktake.read', 'View stock-take sessions', 'عرض جلسات الجرد', 'inventory'],
+  ['inventory.stocktake.create', 'Open and cancel stock-take sessions', 'فتح وإلغاء جلسات الجرد', 'inventory'],
+  ['inventory.stocktake.count', 'Record counted quantities', 'تسجيل الكميات الفعلية', 'inventory'],
+  ['inventory.stocktake.approve', 'Approve stock-take differences', 'اعتماد فروق الجرد', 'inventory'],
+  ['inventory.stocktake.post', 'Post the adjustment of an approved count', 'ترحيل تسوية الجرد المعتمد', 'inventory'],
+  // A write-off is a loss with a document, an approver and a number of its own.
+  ['inventory.writeoff.read', 'View write-off documents', 'عرض مستندات الإعدام', 'inventory'],
+  ['inventory.writeoff.create', 'Record a write-off', 'تسجيل مستند إعدام', 'inventory'],
+  ['inventory.writeoff.approve', 'Approve a write-off', 'اعتماد مستند الإعدام', 'inventory'],
+  ['inventory.writeoff.post', 'Post and reverse a write-off', 'ترحيل وعكس مستند الإعدام', 'inventory'],
+  // Which warehouses a person may work in, and what they may do there.
+  ['inventory.warehouse.access.read', 'View per-user warehouse access', 'عرض صلاحيات المخازن للمستخدمين', 'inventory'],
+  ['inventory.warehouse.access.manage', 'Grant and revoke warehouse access', 'منح وسحب صلاحيات المخازن', 'inventory'],
+  // The notification centre is program-wide: these are not inventory codes,
+  // and a user who is told nothing needs no more than reading.
+  ['notifications.read', 'View notifications', 'عرض التنبيهات', 'notifications'],
+  ['notifications.manage', 'Configure notification rules', 'إعداد قواعد التنبيهات', 'notifications'],
   ['sales.invoices.export', 'Export sales documents', 'تصدير مستندات البيع', 'sales'],
   ['purchases.invoices.export', 'Export purchase documents', 'تصدير مستندات الشراء', 'purchases'],
   ['reports.export', 'Export reports', 'تصدير التقارير', 'reports']

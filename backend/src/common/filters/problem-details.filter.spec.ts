@@ -89,4 +89,28 @@ describe('ProblemDetailsFilter', () => {
     expect(body.detail).not.toContain('8b0e2c1c');
     expect(body.detail).not.toContain('23514');
   });
+
+  it('turns the voucher-claim database backstop into a readable 409', () => {
+    const response = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn(),
+    };
+    const host = {
+      switchToHttp: () => ({ getResponse: () => response }),
+    } as any;
+    const error = new Prisma.PrismaClientUnknownRequestError(
+      'Raw query failed. Code: `23P01`. Message: `cash voucher PV-0042 is already ' +
+        'matched to reconciliation 8b0e2c1c-0000-4000-8000-000000000000`',
+      { clientVersion: 'test' },
+    );
+
+    new ProblemDetailsFilter().catch(error, host);
+
+    expect(response.status).toHaveBeenCalledWith(HttpStatus.CONFLICT);
+    const body = response.json.mock.calls[0][0];
+    expect(body.status).toBe(HttpStatus.CONFLICT);
+    expect(body.detail).toContain('already matched');
+    expect(body.detail).not.toContain('8b0e2c1c');
+    expect(body.detail).not.toContain('23P01');
+  });
 });

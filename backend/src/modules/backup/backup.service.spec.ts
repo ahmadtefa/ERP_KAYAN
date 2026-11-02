@@ -1,8 +1,14 @@
+import { createHash } from 'node:crypto';
+
 import { BadRequestException } from '@nestjs/common';
 
 import { AUDIT_PURGE_SETTING, AuditPurgeService } from '../../common/audit/audit-purge.service';
 import { BackupController } from './backup.controller';
 import { BackupFile, BackupService } from './backup.service';
+
+// The seat reservation is the only licensing call these specs reach;
+// its own behaviour is covered by licensing.service.spec.ts.
+const licensingStub = { reserveSeat: jest.fn().mockResolvedValue({ reserved: true }), reconcile: jest.fn().mockResolvedValue(undefined) } as any;
 
 describe('BackupService & BackupController (Company JSON Backup)', () => {
   const COMPANY_ID = '11111111-1111-4111-8111-111111111111';
@@ -37,8 +43,12 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     'priceList',
     'priceListItem',
     'warehouse',
+    'storageLocation',
+    'userWarehouseAccess',
     'stockBalance',
     'stockMovement',
+    'itemBatch',
+    'warehouseStockBalance',
     'journalEntry',
     'journalLine',
     'journalLineAllocation',
@@ -50,6 +60,8 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     'salesInvoiceLine',
     'purchaseInvoice',
     'purchaseInvoiceLine',
+    'stockTakeSession',
+    'stockTakeLine',
     'stockDocument',
     'stockDocumentLine',
     'openingBalance',
@@ -61,7 +73,13 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     'cashVoucherAllocation',
     'companySetting',
     'costCenter',
+    'budget',
+    'printPriceSetting',
+    'quotationTermTemplate',
+    'quotationColumnTemplate',
+    'quotationBackground',
     'documentSequence',
+    'notification',
     'auditLog',
   ];
 
@@ -139,7 +157,7 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     };
 
     purge = new AuditPurgeService();
-    service = new BackupService(prismaMock, auditMock, purge);
+    service = new BackupService(prismaMock, auditMock, purge, licensingStub);
     controller = new BackupController(service, auditMock);
   });
 
@@ -668,6 +686,92 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
     });
   });
 
+  describe('The warehouse in a company file', () => {
+    const COMPANY = {
+      id: COMPANY_ID,
+      code: 'KAYAN',
+      nameEn: 'Kayan Company',
+      nameAr: 'شركة كيان',
+      taxId: null,
+      commercialRegistration: null,
+      addressEn: null,
+      addressAr: null,
+      phone: null,
+      email: null,
+      address: null,
+      currency: 'EGP',
+      timezone: 'Africa/Cairo',
+      logoData: null,
+      logoMime: null,
+      logoPath: null,
+    };
+
+    test('carries the lots, the shelf book, the counts and who may work where', async () => {
+      prismaMock.company.findUnique.mockResolvedValueOnce(COMPANY);
+      const zone = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01';
+      const bin = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa02';
+      const batch = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb01';
+      // The child is listed first in the database's own order: the file still
+      // has to write the zone before the bin inside it, or the restore hits a
+      // foreign key the moment it inserts the second row.
+      prismaMock.storageLocation.findMany.mockResolvedValueOnce([
+        { id: bin, companyId: COMPANY_ID, parentId: zone, kind: 'BIN', code: 'A-01-1' },
+        { id: zone, companyId: COMPANY_ID, parentId: null, kind: 'ZONE', code: 'A' },
+      ]);
+      prismaMock.itemBatch.findMany.mockResolvedValueOnce([
+        { id: batch, companyId: COMPANY_ID, batchNumber: 'LOT-1', remainingQuantity: '4.0000' },
+      ]);
+      prismaMock.warehouseStockBalance.findMany.mockResolvedValueOnce([
+        {
+          companyId: COMPANY_ID,
+          branchId: 'cccccccc-cccc-4ccc-8ccc-cccccccccc01',
+          warehouseId: 'dddddddd-dddd-4ddd-8ddd-dddddddddd01',
+          itemId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeee01',
+          quantity: '4.0000',
+          value: '110.0000',
+        },
+      ]);
+      prismaMock.stockTakeSession.findMany.mockResolvedValueOnce([
+        { id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', companyId: COMPANY_ID, status: 'POSTED' },
+      ]);
+      prismaMock.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { id: '99999999-9999-4999-8999-999999999901', companyId: COMPANY_ID, canCount: true },
+      ]);
+      prismaMock.notification.findMany.mockResolvedValueOnce([
+        { id: '99999999-9999-4999-8999-999999999902', companyId: COMPANY_ID, type: 'STOCK_EXPIRED' },
+      ]);
+
+      const file = await service.create(COMPANY_ID);
+
+      expect(file.version).toBe(3);
+      // Every one of them is in the file, not silently left behind.
+      expect(file.tables.itemBatch).toHaveLength(1);
+      expect(file.tables.warehouseStockBalance[0]).toMatchObject({
+        quantity: '4.0000',
+        value: '110.0000',
+      });
+      expect(file.tables.stockTakeSession).toHaveLength(1);
+      expect(file.tables.userWarehouseAccess).toHaveLength(1);
+      expect(file.tables.notification).toHaveLength(1);
+
+      // The shelf tree travels whole, nesting included.
+      const locations = file.tables.storageLocation.map((row) => String(row.id));
+      expect(locations).toEqual(expect.arrayContaining([zone, bin]));
+
+      await service.restore(file, COMPANY_ID, { replace: true });
+
+      // And it comes back: a restore that dropped the shelf book would leave
+      // every warehouse empty while the branch totals said otherwise.
+      expect(txMock.warehouseStockBalance.createMany).toHaveBeenCalled();
+      expect(txMock.itemBatch.createMany).toHaveBeenCalled();
+      expect(txMock.userWarehouseAccess.createMany).toHaveBeenCalled();
+      const restoredLocations = txMock.storageLocation.createMany.mock.calls[0][0].data.map(
+        (row: Record<string, unknown>) => String(row.id),
+      );
+      expect(restoredLocations.indexOf(bin)).toBeGreaterThan(restoredLocations.indexOf(zone));
+    });
+  });
+
   describe('Access reconciliation after a restore', () => {
     const emptyBackup = (): BackupFile => ({
       format: 'kayan-backup',
@@ -1045,4 +1149,384 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       });
     });
   });
+
+  describe('Letterhead artwork, print policy and budgets in a company file', () => {
+    const artwork = Buffer.from('%PDF-1.4\nletterhead\n%%EOF', 'latin1');
+
+    test('writes byte columns as base64 and reads them back as bytes', async () => {
+      // A company backup carries the portable profile, so the company this
+      // file is taken from has to be a complete one.
+      prismaMock.company.findUnique.mockResolvedValueOnce({
+        id: COMPANY_ID,
+        code: 'KAYAN',
+        nameEn: 'Kayan Company',
+        nameAr: 'شركة كيان',
+        taxId: null,
+        commercialRegistration: null,
+        addressEn: null,
+        addressAr: null,
+        phone: null,
+        email: null,
+        address: null,
+        currency: 'EGP',
+        timezone: 'Africa/Cairo',
+        logoData: null,
+        logoMime: null,
+        logoPath: null,
+      });
+      prismaMock.quotationBackground.findMany.mockResolvedValueOnce([
+        {
+          id: 'dddddddd-dddd-4ddd-8ddd-dddddddddd01',
+          companyId: COMPANY_ID,
+          name: 'ورق الشركة',
+          byteSize: artwork.length,
+          sha256: createHash('sha256').update(artwork).digest('hex'),
+          data: new Uint8Array(artwork),
+        },
+      ]);
+      prismaMock.printPriceSetting.findMany.mockResolvedValueOnce([
+        {
+          id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeee01',
+          companyId: COMPANY_ID,
+          documentType: 'stock',
+          showSalePrice: false,
+          showCost: false,
+        },
+      ]);
+
+      const file = await service.create(COMPANY_ID);
+      expect(file.version).toBe(3);
+      // JSON has no binary type: a map of offsets would restore as nothing.
+      expect(file.tables.quotationBackground[0].data).toBe(
+        `base64:${artwork.toString('base64')}`,
+      );
+      expect(file.tables.printPriceSetting).toHaveLength(1);
+
+      await service.restore(file, COMPANY_ID, { replace: true });
+
+      const written = txMock.quotationBackground.createMany.mock.calls[0][0].data[0];
+      expect(Buffer.from(written.data)).toEqual(artwork);
+      const policy = txMock.printPriceSetting.createMany.mock.calls[0][0].data[0];
+      expect(policy).toMatchObject({
+        documentType: 'stock',
+        showCost: false,
+        showSalePrice: false,
+        companyId: COMPANY_ID,
+      });
+      // The artwork is written before the offers that point at it: an offer's
+      // background is a foreign key, so the order in the file is the order the
+      // restore has to use.
+      const keys = Object.keys(file.tables);
+      expect(keys.indexOf('quotationBackground')).toBeLessThan(keys.indexOf('quotation'));
+    });
+
+    test('refuses a byte column that lost its marker instead of writing garbage', async () => {
+      const file: BackupFile = {
+        format: 'kayan-backup',
+        version: 2,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'Test',
+        counts: {},
+        tables: {
+          quotationBackground: [
+            { id: 'dddddddd-dddd-4ddd-8ddd-dddddddddd02', data: { 0: 37, 1: 80 } },
+          ],
+        },
+      };
+      await expect(service.restore(file, COMPANY_ID, { replace: true })).rejects.toThrow(
+        /missing its base64 marker/i,
+      );
+      expect(txMock.quotationBackground.createMany).not.toHaveBeenCalled();
+    });
+
+    test('refuses artwork whose bytes no longer match the digest recorded with it', async () => {
+      // Base64 is forgiving: one changed character still decodes, into other
+      // bytes. Writing those would give the company a letterhead it cannot
+      // print, and every backup taken afterwards would carry the damage.
+      const artwork = Buffer.from('%PDF-1.4\nletterhead\n%%EOF', 'latin1');
+      const digest = createHash('sha256').update(artwork).digest('hex');
+      const file: BackupFile = {
+        format: 'kayan-backup',
+        version: 2,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'Test',
+        counts: {},
+        tables: {
+          quotationBackground: [
+            {
+              id: 'dddddddd-dddd-4ddd-8ddd-dddddddddd03',
+              name: 'ورق الشركة',
+              byteSize: artwork.length,
+              sha256: digest,
+              data: `base64:${Buffer.from('%PDF-1.4\nletterheae\n%%EOF', 'latin1').toString('base64')}`,
+            },
+          ],
+        },
+      };
+
+      await expect(service.restore(file, COMPANY_ID, { replace: true })).rejects.toThrow(
+        /does not match the digest/i,
+      );
+      expect(txMock.quotationBackground.createMany).not.toHaveBeenCalled();
+    });
+
+    test('refuses artwork whose byte count is not the one the row records', async () => {
+      const artwork = Buffer.from('%PDF-1.4\nletterhead\n%%EOF', 'latin1');
+      const file: BackupFile = {
+        format: 'kayan-backup',
+        version: 2,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'Test',
+        counts: {},
+        tables: {
+          quotationBackground: [
+            {
+              id: 'dddddddd-dddd-4ddd-8ddd-dddddddddd04',
+              name: 'ورق الشركة',
+              byteSize: artwork.length + 10,
+              data: `base64:${artwork.toString('base64')}`,
+            },
+          ],
+        },
+      };
+
+      await expect(service.restore(file, COMPANY_ID, { replace: true })).rejects.toThrow(
+        /but the row says/,
+      );
+      expect(txMock.quotationBackground.createMany).not.toHaveBeenCalled();
+    });
+
+    test('a version-1 file does not empty tables its format never carried', async () => {
+      const oldFile: BackupFile = {
+        format: 'kayan-backup',
+        version: 1,
+        createdAt: new Date().toISOString(),
+        companyId: COMPANY_ID,
+        companyCode: 'KAYAN',
+        companyName: 'Test',
+        counts: {},
+        tables: { account: [{ id: 'a1', code: '1000' }] },
+      };
+      // This company already holds a print policy and artwork. The old file
+      // says nothing about either, which is not the same as "it had none":
+      // clearing them would delete what the restore cannot put back.
+      prismaMock.printPriceSetting.findMany.mockResolvedValueOnce([{ id: 'p1' }]);
+      prismaMock.quotationBackground.findMany.mockResolvedValueOnce([{ id: 'b1' }]);
+
+      await service.restore(oldFile, COMPANY_ID, { replace: true });
+
+      expect(txMock.printPriceSetting.deleteMany).not.toHaveBeenCalled();
+      expect(txMock.quotationBackground.deleteMany).not.toHaveBeenCalled();
+      // And the live rows are not treated as a gap in the file.
+      expect(txMock.account.deleteMany).toHaveBeenCalled();
+    });
+  });
+
+  describe('The packing table, the warehouses and the movement log in a company file', () => {
+    const ITEM_ID = 'dddddddd-dddd-4ddd-8ddd-ddddddddddd1';
+    const BRANCH_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1';
+    const FRONT = 'ffffffff-ffff-4fff-8fff-fffffffffff1';
+    const BACK = 'ffffffff-ffff-4fff-8fff-fffffffffff2';
+
+    /// One company exactly as the scenario left it: an item counted in عبوات
+    /// with a carton and a pack, two stores in one branch, and the three
+    /// movements that took ten cartons in and three of them across.
+    const companyFile = (): BackupFile => ({
+      format: 'kayan-backup',
+      version: 1,
+      createdAt: new Date().toISOString(),
+      companyId: COMPANY_ID,
+      companyCode: 'KAYAN',
+      companyName: 'شركة كيان',
+      counts: { item: 1, itemUnit: 3, warehouse: 2, stockMovement: 3 },
+      tables: {
+        item: [
+          {
+            id: ITEM_ID,
+            companyId: COMPANY_ID,
+            code: 'WATER-1',
+            nameEn: 'Water bottle',
+            nameAr: 'مياه',
+            unit: 'عبوة',
+            isStockTracked: true,
+            isActive: true,
+          },
+        ],
+        itemUnit: [
+          {
+            id: 'a0000000-0000-4000-8000-000000000001',
+            itemId: ITEM_ID,
+            unit: 'عبوة',
+            factor: '1.000000',
+            barcode: null,
+            salePrice: '5.0000',
+            purchasePrice: null,
+            allowFraction: true,
+            usedInSales: true,
+            usedInPurchases: true,
+            sortOrder: 0,
+            isActive: true,
+          },
+          {
+            id: 'a0000000-0000-4000-8000-000000000002',
+            itemId: ITEM_ID,
+            unit: 'كرتونة',
+            factor: '12.000000',
+            barcode: '6221234567890',
+            salePrice: '55.0000',
+            purchasePrice: null,
+            // A carton is never half: the rule travels with the unit.
+            allowFraction: false,
+            usedInSales: true,
+            usedInPurchases: true,
+            sortOrder: 1,
+            isActive: true,
+          },
+          {
+            id: 'a0000000-0000-4000-8000-000000000003',
+            itemId: ITEM_ID,
+            unit: 'باكت',
+            factor: '6.000000',
+            barcode: null,
+            salePrice: null,
+            purchasePrice: null,
+            allowFraction: true,
+            usedInSales: false,
+            usedInPurchases: true,
+            sortOrder: 2,
+            isActive: true,
+          },
+        ],
+        warehouse: [
+          {
+            id: FRONT,
+            companyId: COMPANY_ID,
+            branchId: BRANCH_ID,
+            code: 'MAIN-1',
+            nameEn: 'Front store',
+            nameAr: 'المخزن الأمامي',
+            isDefault: true,
+            isActive: true,
+          },
+          {
+            id: BACK,
+            companyId: COMPANY_ID,
+            branchId: BRANCH_ID,
+            code: 'MAIN-2',
+            nameEn: 'Back store',
+            nameAr: 'المخزن الخلفي',
+            isDefault: false,
+            isActive: true,
+          },
+        ],
+        stockMovement: [
+          {
+            id: 'b0000000-0000-4000-8000-000000000001',
+            companyId: COMPANY_ID,
+            itemId: ITEM_ID,
+            warehouseId: FRONT,
+            direction: 'IN',
+            quantity: '120.0000',
+            enteredUnit: 'كرتونة',
+            enteredQuantity: '10.0000',
+            unitFactor: '12.000000',
+          },
+          {
+            id: 'b0000000-0000-4000-8000-000000000002',
+            companyId: COMPANY_ID,
+            itemId: ITEM_ID,
+            warehouseId: FRONT,
+            direction: 'OUT',
+            quantity: '36.0000',
+            enteredUnit: 'كرتونة',
+            enteredQuantity: '3.0000',
+            unitFactor: '12.000000',
+          },
+          {
+            id: 'b0000000-0000-4000-8000-000000000003',
+            companyId: COMPANY_ID,
+            itemId: ITEM_ID,
+            warehouseId: BACK,
+            direction: 'IN',
+            quantity: '36.0000',
+            enteredUnit: 'كرتونة',
+            enteredQuantity: '3.0000',
+            unitFactor: '12.000000',
+          },
+        ],
+      },
+    });
+
+    /// The rows a restore actually handed to the database, per model.
+    const written = (model: string): Array<Record<string, unknown>> =>
+      txMock[model].createMany.mock.calls.flatMap(
+        (call: any[]) => call[0]?.data ?? [],
+      );
+
+    test('the units come back with their factors and their own rules', async () => {
+      await service.restore(companyFile(), COMPANY_ID, { replace: true });
+
+      const units = written('itemUnit');
+      expect(units).toHaveLength(3);
+      const byUnit = new Map(units.map((row) => [row.unit, row]));
+      // A factor is what a movement meant. It is written back exactly as it
+      // was, not re-derived from anything.
+      expect(byUnit.get('عبوة')?.factor).toBe('1.000000');
+      expect(byUnit.get('كرتونة')?.factor).toBe('12.000000');
+      expect(byUnit.get('باكت')?.factor).toBe('6.000000');
+      // The rules that go with a unit survive too: half a carton stays
+      // impossible and a pack stays buy-only.
+      expect(byUnit.get('كرتونة')?.allowFraction).toBe(false);
+      expect(byUnit.get('باكت')?.usedInSales).toBe(false);
+      expect(byUnit.get('كرتونة')?.barcode).toBe('6221234567890');
+      // And they are still this item's units.
+      expect(units.every((row) => row.itemId === ITEM_ID)).toBe(true);
+    });
+
+    test('the warehouses come back bound to their branch, one of them default', async () => {
+      await service.restore(companyFile(), COMPANY_ID, { replace: true });
+
+      const warehouses = written('warehouse');
+      expect(warehouses).toHaveLength(2);
+      expect(warehouses.every((row) => row.branchId === BRANCH_ID)).toBe(true);
+      expect(warehouses.filter((row) => row.isDefault === true)).toHaveLength(1);
+      expect(warehouses.find((row) => row.code === 'MAIN-2')).toMatchObject({
+        nameAr: 'المخزن الخلفي',
+        isDefault: false,
+      });
+    });
+
+    test('the movement log keeps the unit that was typed and the factor behind it', async () => {
+      await service.restore(companyFile(), COMPANY_ID, { replace: true });
+
+      const movements = written('stockMovement');
+      expect(movements).toHaveLength(3);
+      // The three movements tell the same story as the stock: 120 in, 36 out,
+      // 36 into the other store - and every one of them says "كرتونة × 12".
+      expect(
+        movements
+          .filter((row) => row.direction === 'IN' && row.warehouseId === FRONT)
+          .map((row) => row.quantity),
+      ).toEqual(['120.0000']);
+      expect(
+        movements
+          .filter((row) => row.direction === 'OUT')
+          .map((row) => [row.enteredQuantity, row.enteredUnit, row.unitFactor]),
+      ).toEqual([['3.0000', 'كرتونة', '12.000000']]);
+
+      // The base quantity a restore writes is the one the file carried; it is
+      // never recomputed from today's factor, which may have changed since.
+      for (const row of movements) {
+        expect(row.quantity).toBeTruthy();
+        expect(row.unitFactor).toBe('12.000000');
+      }
+    });
+  });
+
 });

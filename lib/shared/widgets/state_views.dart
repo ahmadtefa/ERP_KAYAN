@@ -71,13 +71,19 @@ class ErrorView extends StatelessWidget {
                 height: 44,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: AppColors.errorSoft,
+                  // A pale patch from the light theme is a bright square in
+                  // the middle of a dark error screen; the tone answers for
+                  // whichever canvas it is drawn on.
+                  color: AppTone.danger.backgroundOn(
+                    theme.brightness,
+                    surface: theme.colorScheme.surface,
+                  ),
                   borderRadius: BorderRadius.circular(AppRadii.lg),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.error_outline,
                   size: 22,
-                  color: AppColors.error,
+                  color: AppTone.danger.foregroundOn(theme.brightness),
                 ),
               ),
               const SizedBox(height: AppSpacing.md),

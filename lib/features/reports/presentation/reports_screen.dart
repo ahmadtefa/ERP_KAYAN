@@ -1258,7 +1258,11 @@ class _ReconciliationSectionCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Icon(icon, size: 20, color: tone.foreground),
+                  Icon(
+                    icon,
+                    size: 20,
+                    color: tone.foregroundOn(Theme.of(context).brightness),
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -1284,13 +1288,16 @@ class _ReconciliationSectionCard extends StatelessWidget {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: tone.background,
+                    color: tone.backgroundOn(
+                      Theme.of(context).brightness,
+                      surface: Theme.of(context).colorScheme.surface,
+                    ),
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
                     statusLabel,
                     style: TextStyle(
-                      color: tone.foreground,
+                      color: tone.foregroundOn(Theme.of(context).brightness),
                       fontWeight: FontWeight.w600,
                     ),
                   ),

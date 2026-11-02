@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/json/amount_format.dart';
+import '../../../../core/units/item_units.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/json/discount_math.dart';
 import '../../../../core/error/failure.dart';
@@ -14,6 +15,123 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/invoice_providers.dart';
+
+// The unit rules themselves live in core/units/item_units.dart: the invoice
+// editor, the stock documents screen and the stock card must agree about what
+// a carton converts to, and they can only agree by calling the same function.
+// They are re-exported here so the screens and tests that already import this
+// file keep working unchanged.
+export '../../../../core/units/item_units.dart'
+    show
+        baseUnitNameOf,
+        lineUnitOf,
+        lineUnitsOf,
+        quantityAllowedInUnit,
+        unitConversionOf,
+        unitFactorText,
+        unitListPrice;
+
+/// The line's quantity said in the unit stock is kept in.
+///
+/// "10 كرتونة = 120 عبوة" appears under the line the moment a non-base unit is
+/// chosen, so the person sees what the warehouse will record before saving.
+/// It says nothing for a base-unit line, where the typed number is already the
+/// stored number.
+class _LineUnitHint extends StatelessWidget {
+  const _LineUnitHint({required this.items, required this.line});
+
+  final List<Json> items;
+  final _LineDraft line;
+
+  @override
+  Widget build(BuildContext context) {
+    Json? item;
+    for (final candidate in items) {
+      if (text(candidate, 'id') == line.itemId) {
+        item = candidate;
+        break;
+      }
+    }
+    final chosenUnit = lineUnitOf(item, line.unitName);
+    final l10n = context.l10n;
+    // A unit sold as a sealed pack says so the moment a fraction is typed:
+    // the number is on the field, not discovered after Save.
+    if (!quantityAllowedInUnit(chosenUnit, line.quantity.text)) {
+      return Padding(
+        padding: const EdgeInsetsDirectional.only(start: 4, end: 12),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 14,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                l10n.unitTakesWholeNumbers(text(chosenUnit!, 'unit')),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    final conversion = unitConversionOf(
+      item,
+      line.unitName,
+      line.quantity.text,
+    );
+    if (conversion == null) return const SizedBox.shrink();
+    final entered = formatQuantity(line.quantity.text, decimals: 4);
+    final unitName = line.unitName == null || line.unitName!.isEmpty
+        ? baseUnitNameOf(item)
+        : line.unitName!;
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(start: 4, end: 12),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.sync_alt,
+            size: 14,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              // Positional arguments follow the generated signature, which
+              // orders the message's placeholders alphabetically.
+              l10n.unitConversionHint(
+                conversion.quantity,
+                conversion.unit,
+                entered,
+                unitName,
+              ),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A bilingual label for the lot fields.
+///
+/// The translation files are the product's voice, but a lot is a receipt-time
+/// fact and the packing of it is not worth a schema change in twelve locales:
+/// both languages are written here, so nothing appears in English to an Arabic
+/// user.
+String _lotText(BuildContext context, String ar, String en) =>
+    Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
 
 /// One editable invoice line.
 class _LineDraft {
@@ -29,12 +147,33 @@ class _LineDraft {
 
   String? itemId;
 
+  /// The measurement unit the quantity is expressed in. Null on a free line
+  /// without an item; the server treats a missing unit as the item's base unit
+  /// and keeps legacy documents untouched.
+  String? unitName;
+
   /// Optional cost centre for the line. Left null on a balance-sheet-only
   /// line; the server checks that the centre is one this company may use.
   String? costCenterId;
+
+  /// The lot this line receives: the supplier's number and the dates printed
+  /// on the goods. One line is one lot, so receiving the same product as two
+  /// deliveries is two lines - which is exactly what a purchase receipt is.
+  final TextEditingController batchNumber = TextEditingController();
+  final TextEditingController productionDate = TextEditingController();
+  final TextEditingController expiryDate = TextEditingController();
+
+  /// The shelf the goods were put away on, inside the invoice's warehouse.
+  String? storageLocationId;
   final TextEditingController quantity;
   final TextEditingController unitPrice;
   final TextEditingController taxRate;
+
+  /// Whether [unitPrice] still holds a figure the screen put there rather than
+  /// one the person typed. Switching from a bottle to a carton of twelve has
+  /// to re-state the price (5 a bottle is 60 a carton); a price somebody typed
+  /// on purpose is theirs and is never overwritten.
+  bool priceAutoFilled = true;
 
   /// A line discount: a percentage or a fixed amount of money. The server
   /// resolves the other representation and stores both.
@@ -61,6 +200,9 @@ class _LineDraft {
     unitPrice.dispose();
     taxRate.dispose();
     discountValue.dispose();
+    batchNumber.dispose();
+    productionDate.dispose();
+    expiryDate.dispose();
   }
 }
 
@@ -101,6 +243,14 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   late String _invoiceDate;
   final _landedCosts = <_LandedCostDraft>[];
   final _documentDiscount = TextEditingController();
+
+  /// Where a purchase's goods physically arrive. The invoice may name one
+  /// warehouse; each line then says which lot it brought and which shelf it
+  /// put it on inside that warehouse.
+  List<Json> _warehouses = const [];
+  List<Json> _locations = const [];
+  String? _warehouseId;
+  String? _lotError;
   DiscountKind _documentDiscountKind = DiscountKind.none;
   bool _saving = false;
   bool _loadingExisting = false;
@@ -114,9 +264,57 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
     _lines.add(_LineDraft());
+    if (!widget.kind.isSales) _loadWarehouses();
     if (widget.invoiceId != null) {
       _loadingExisting = true;
       _loadExisting();
+    }
+  }
+
+  /// The stores this user may receive into, and the shelves of the chosen one.
+  ///
+  /// A purchase can still be drafted without them - the server falls back to
+  /// the branch's default warehouse - but then no lot is recorded, because a
+  /// lot belongs to a place.
+  Future<void> _loadWarehouses() async {
+    try {
+      final rows = await ref
+          .read(apiClientProvider)
+          .getList('/inventory/warehouses');
+      if (!mounted) return;
+      setState(() {
+        _warehouses = rows;
+        _warehouseId = rows.isEmpty ? null : text(rows.first, 'id');
+      });
+      await _loadLocations();
+    } on Failure {
+      // Nothing to receive into has been configured: the line simply has no
+      // place to name, and the save still works.
+    }
+  }
+
+  Future<void> _loadLocations() async {
+    final warehouseId = _warehouseId;
+    if (warehouseId == null) {
+      if (mounted) setState(() => _locations = const []);
+      return;
+    }
+    try {
+      final tree = await ref
+          .read(apiClientProvider)
+          .getObject('/inventory/locations/tree/$warehouseId');
+      final flat = <Json>[];
+      void walk(List<Json> rows, int depth) {
+        for (final row in rows) {
+          flat.add({...row, 'depth': depth});
+          walk(listOf(row['children']), depth + 1);
+        }
+      }
+
+      walk(listOf(tree['items']), 0);
+      if (mounted) setState(() => _locations = flat);
+    } on Failure {
+      if (mounted) setState(() => _locations = const []);
     }
   }
 
@@ -153,15 +351,28 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         ));
       }
       for (final row in listOf(invoice['lines'])) {
+        // Reopen shows exactly what the user entered. A multi-unit line keeps
+        // the entered quantity and its unit; a legacy row has no snapshot, so
+        // it falls back to the stored base quantity with no unit selected.
         final line = _LineDraft(
-          quantity: text(row, 'quantity', fallback: '1'),
+          quantity: text(
+            row,
+            'unitQuantity',
+            fallback: text(row, 'quantity', fallback: '1'),
+          ),
           unitPrice: text(row, 'unitPrice', fallback: '0'),
           taxRate: text(row, 'taxRate', fallback: '0'),
         )
           ..itemId = text(row, 'itemId').isEmpty ? null : text(row, 'itemId')
+          ..unitName =
+              text(row, 'unitName').isEmpty ? null : text(row, 'unitName')
           ..costCenterId = text(row, 'costCenterId').isEmpty
               ? null
-              : text(row, 'costCenterId');
+              : text(row, 'costCenterId')
+          // The price of a saved draft is the price it was agreed at; changing
+          // the unit while editing must not re-derive it from today's list
+          // price.
+          ..priceAutoFilled = false;
         final discountKind = discountKindOf(text(row, 'discountType'));
         if (discountKind == DiscountKind.percent) {
           line.discountValue.text = text(row, 'discountPercent', fallback: '');
@@ -171,6 +382,14 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           if (line.discountValue.text == '0.0000') line.discountValue.text = '';
         }
         line.discountKind = discountKind;
+        // Reopening a receipt shows the lot it already names, so editing a
+        // draft cannot silently lose the number the goods were received under.
+        line.batchNumber.text = text(row, 'batchNumber');
+        line.productionDate.text = text(row, 'batchProductionDate');
+        line.expiryDate.text = text(row, 'batchExpiryDate');
+        line.storageLocationId = text(row, 'storageLocationId').isEmpty
+            ? null
+            : text(row, 'storageLocationId');
         _lines.add(line);
       }
       if (_lines.isEmpty) _lines.add(_LineDraft());
@@ -190,6 +409,9 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
             : text(invoice, 'supplierReference');
         _notes = text(invoice, 'notes').isEmpty ? null : text(invoice, 'notes');
         _invoiceDate = text(invoice, 'invoiceDate', fallback: _invoiceDate);
+        if (!widget.kind.isSales && text(invoice, 'warehouseId').isNotEmpty) {
+          _warehouseId = text(invoice, 'warehouseId');
+        }
         _loadingExisting = false;
       });
     } on Failure catch (error) {
@@ -277,13 +499,23 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     if (line.taxRate.text.trim().isEmpty || line.taxRate.text.trim() == '0') {
       line.taxRate.text = formatQuantity(asString(item['taxRate']), decimals: 2);
     }
-    if (widget.kind.isSales &&
-        (line.unitPrice.text.trim().isEmpty ||
-            line.unitPrice.text.trim() == '0')) {
-      line.unitPrice.text = formatQuantity(
-        asString(item['salePrice']),
-        decimals: 2,
+    final units = lineUnitsOf(item);
+    // Default to the smallest (base) unit the first time an item is picked;
+    // a reopened line keeps the unit its snapshot recorded.
+    if ((line.unitName == null || line.unitName!.isEmpty) && units.isNotEmpty) {
+      line.unitName = text(units.first, 'unit');
+    }
+    if (line.unitPrice.text.trim().isEmpty ||
+        line.unitPrice.text.trim() == '0') {
+      final price = unitListPrice(
+        item,
+        line.unitName ?? text(item, 'unit'),
+        isSales: widget.kind.isSales,
       );
+      if (price.isNotEmpty) {
+        line.unitPrice.text = formatQuantity(price, decimals: 2);
+        line.priceAutoFilled = true;
+      }
     }
   }
 
@@ -336,9 +568,65 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         showMessage(context, l10n.mustBePositive, error: true);
         return;
       }
+      // Half a sealed carton is not stock anyone can hand over. The server
+      // refuses it too; refusing it here keeps the typed invoice on screen
+      // instead of losing it to a failed save.
+      Json? itemOfLine;
+      for (final candidate in ref.read(activeItemsProvider).value ?? const <Json>[]) {
+        if (text(candidate, 'id') == line.itemId) {
+          itemOfLine = candidate;
+          break;
+        }
+      }
+      final lineUnit = lineUnitOf(itemOfLine, line.unitName);
+      if (!quantityAllowedInUnit(lineUnit, quantity)) {
+        showMessage(
+          context,
+          l10n.unitTakesWholeNumbers(
+            text(lineUnit ?? const <String, dynamic>{}, 'unit'),
+          ),
+          error: true,
+        );
+        return;
+      }
       final discountText = line.discountValue.text.trim();
+      // A purchase receipt names the lot it brought. The dates are ISO days
+      // or nothing: a half-typed date is refused here rather than stored as a
+      // made-up day the expiry report would then believe.
+      if (!widget.kind.isSales) {
+        for (final entry in {
+          'batchProductionDate': line.productionDate.text.trim(),
+          'batchExpiryDate': line.expiryDate.text.trim(),
+        }.entries) {
+          if (entry.value.isEmpty) continue;
+          if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(entry.value)) {
+            setState(
+              () => _lotError = _lotText(
+                context,
+                'التاريخ بصيغة YYYY-MM-DD',
+                'Use YYYY-MM-DD for the lot dates',
+              ),
+            );
+            return;
+          }
+        }
+      }
+
       lines.add({
         if (line.itemId != null) 'itemId': line.itemId,
+        if (line.unitName != null && line.unitName!.trim().isNotEmpty)
+          'unitName': line.unitName!.trim(),
+        if (!widget.kind.isSales) ...{
+          if (line.batchNumber.text.trim().isNotEmpty)
+            'batchNumber': line.batchNumber.text.trim(),
+          if (line.productionDate.text.trim().isNotEmpty)
+            'batchProductionDate': line.productionDate.text.trim(),
+          if (line.expiryDate.text.trim().isNotEmpty)
+            'batchExpiryDate': line.expiryDate.text.trim(),
+          if (line.storageLocationId != null &&
+              line.storageLocationId!.isNotEmpty)
+            'storageLocationId': line.storageLocationId,
+        },
         'quantity': quantity,
         'unitPrice': price,
         if (line.taxRate.text.trim().isNotEmpty) 'taxRate': line.taxRate.text.trim(),
@@ -356,10 +644,17 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       return;
     }
 
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _lotError = null;
+    });
     try {
       final body = <String, dynamic>{
         'invoiceDate': _invoiceDate,
+        // Where the goods arrived. One warehouse per receipt; the lines say
+        // which lot and which shelf inside it.
+        if (!widget.kind.isSales && _warehouseId != null)
+          'warehouseId': _warehouseId,
         if (widget.kind.isSales) 'customerId': _partyId,
         if (!widget.kind.isSales) 'supplierId': _partyId,
         if (!widget.kind.isSales) 'landedCostAmount': landedCost.toString(),
@@ -455,6 +750,67 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           ),
           if (!widget.kind.isSales) ...[
             const SizedBox(height: 12),
+            // Where the goods arrive, and therefore where their lots live.
+            // The server falls back to the branch's default warehouse when a
+            // receipt names none, but a lot cannot be recorded without a place.
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.warehouse_outlined, size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        key: const ValueKey('invoice-warehouse'),
+                        initialValue: _warehouseId,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          labelText: _lotText(
+                            context,
+                            'المخزن المستلِم',
+                            'Receiving warehouse',
+                          ),
+                          helperText: _lotText(
+                            context,
+                            'الدفعة تُسجَّل داخل مخزن، فاختيار المخزن يحدد أين تُحفظ البضاعة.',
+                            'A lot lives in a warehouse: choosing one decides where the goods are kept.',
+                          ),
+                          border: const OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: [
+                          for (final warehouse in _warehouses)
+                            DropdownMenuItem(
+                              value: text(warehouse, 'id'),
+                              child: Text(
+                                '${text(warehouse, 'code')} — '
+                                '${_lotText(context, text(warehouse, 'nameAr'), text(warehouse, 'nameEn'))}',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: _warehouses.isEmpty
+                            ? null
+                            : (value) async {
+                                setState(() {
+                                  _warehouseId = value;
+                                  // A shelf belongs to one warehouse: keeping a
+                                  // shelf id from the old one would put the
+                                  // goods in another building.
+                                  for (final line in _lines) {
+                                    line.storageLocationId = null;
+                                  }
+                                });
+                                await _loadLocations();
+                              },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(child: Text(l10n.landedCosts, style: Theme.of(context).textTheme.titleMedium)),
@@ -520,10 +876,19 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
             ],
           ),
           const SizedBox(height: 8),
+          if (_lotError != null)
+            Padding(
+              padding: const EdgeInsetsDirectional.only(bottom: 8),
+              child: Text(
+                _lotError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
           _LinesTable(
             kind: widget.kind,
             lines: _lines,
             items: itemsAsync.value ?? const [],
+            locations: _locations,
             costCenters: costCenters,
             language: language,
             onChanged: () => setState(() {}),
@@ -614,7 +979,11 @@ class _Header extends StatelessWidget {
                 const SizedBox(width: 16),
                 Expanded(
                   child: DropdownButtonFormField<String>(
+                    // Named so a test - and a person reading the widget tree -
+                    // can say which control they mean without counting.
+                    key: const ValueKey('invoice-party'),
                     initialValue: partyId,
+                    isExpanded: true,
                     decoration: InputDecoration(
                       labelText: kind.isSales
                           ? l10n.selectCustomer
@@ -731,6 +1100,7 @@ class _LinesTable extends StatelessWidget {
     required this.kind,
     required this.lines,
     required this.items,
+    required this.locations,
     required this.costCenters,
     required this.language,
     required this.onChanged,
@@ -742,6 +1112,10 @@ class _LinesTable extends StatelessWidget {
   final InvoiceKind kind;
   final List<_LineDraft> lines;
   final List<Json> items;
+
+  /// Every shelf of the warehouse this receipt is being written for, flattened
+  /// with its depth so the picker reads like the tree it came from.
+  final List<Json> locations;
   final List<Json> costCenters;
   final String language;
   final VoidCallback onChanged;
@@ -829,6 +1203,7 @@ class _LinesTable extends StatelessWidget {
                       Expanded(
                         flex: 3,
                         child: DropdownButtonFormField<String>(
+                          key: ValueKey('line-cost-center-$index'),
                           initialValue: _costCenterChoice(
                             costCenters,
                             lines[index].costCenterId,
@@ -870,6 +1245,84 @@ class _LinesTable extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       flex: 2,
+                      child: Builder(
+                        builder: (context) {
+                          Json? selected;
+                          for (final candidate in items) {
+                            if (text(candidate, 'id') == lines[index].itemId) {
+                              selected = candidate;
+                              break;
+                            }
+                          }
+                          final units = lineUnitsOf(
+                            selected,
+                            forSales: kind.isSales,
+                          );
+                          final names = units
+                              .map((unit) => text(unit, 'unit'))
+                              .toList();
+                          final chosen = names.contains(lines[index].unitName)
+                              ? lines[index].unitName
+                              : (names.isNotEmpty ? names.first : null);
+                          return DropdownButtonFormField<String>(
+                            key: ValueKey('line-unit-$index'),
+                            initialValue: chosen,
+                            isExpanded: true,
+                            isDense: true,
+                            decoration: InputDecoration(
+                              labelText: l10n.unit,
+                              isDense: true,
+                              border: const OutlineInputBorder(),
+                            ),
+                            items: [
+                              for (final unit in units)
+                                DropdownMenuItem<String>(
+                                  value: text(unit, 'unit'),
+                                  child: Text(
+                                    flag(unit, 'isBase', fallback: false)
+                                        ? text(unit, 'unit')
+                                        : '${text(unit, 'unit')} '
+                                              '×${formatQuantity(asString(unit['factor']), decimals: 0)}',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: units.isEmpty
+                                ? null
+                                : (value) {
+                                    if (value == null) return;
+                                    lines[index].unitName = value;
+                                    final current =
+                                        lines[index].unitPrice.text.trim();
+                                    // The price follows the unit only while it
+                                    // is still the screen's own figure. Ten
+                                    // cartons at the bottle price would be a
+                                    // silent 92 % discount.
+                                    if (current.isEmpty ||
+                                        current == '0' ||
+                                        lines[index].priceAutoFilled) {
+                                      final price = selected == null
+                                          ? ''
+                                          : unitListPrice(
+                                              selected,
+                                              value,
+                                              isSales: kind.isSales,
+                                            );
+                                      if (price.isNotEmpty) {
+                                        lines[index].unitPrice.text =
+                                            formatQuantity(price, decimals: 2);
+                                        lines[index].priceAutoFilled = true;
+                                      }
+                                    }
+                                    onChanged();
+                                  },
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 2,
                       child: TextFormField(
                         key: ValueKey('line-quantity-$index'),
                         controller: lines[index].quantity,
@@ -881,6 +1334,28 @@ class _LinesTable extends StatelessWidget {
                           isDense: true,
                           border: const OutlineInputBorder(),
                         ),
+                        // A unit that takes whole units only says so before
+                        // the document is saved, not after it is refused.
+                        validator: (value) {
+                          Json? itemOfLine;
+                          for (final candidate in items) {
+                            if (text(candidate, 'id') ==
+                                lines[index].itemId) {
+                              itemOfLine = candidate;
+                              break;
+                            }
+                          }
+                          final chosenUnit = lineUnitOf(
+                            itemOfLine,
+                            lines[index].unitName,
+                          );
+                          if (quantityAllowedInUnit(chosenUnit, value ?? '')) {
+                            return null;
+                          }
+                          return l10n.unitTakesWholeNumbers(
+                            text(chosenUnit ?? const <String, dynamic>{}, 'unit'),
+                          );
+                        },
                         onChanged: (_) => onChanged(),
                       ),
                     ),
@@ -898,7 +1373,10 @@ class _LinesTable extends StatelessWidget {
                           isDense: true,
                           border: const OutlineInputBorder(),
                         ),
-                        onChanged: (_) => onChanged(),
+                        onChanged: (_) {
+                          lines[index].priceAutoFilled = false;
+                          onChanged();
+                        },
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -933,6 +1411,9 @@ class _LinesTable extends StatelessWidget {
                   padding: const EdgeInsetsDirectional.only(start: 12, top: 4),
                   child: Row(
                     children: [
+                      // What the warehouse will record, before Save.
+                      _LineUnitHint(items: items, line: lines[index]),
+                      const SizedBox(width: 12),
                       SizedBox(
                         width: 170,
                         child: DropdownButtonFormField<DiscountKind>(
@@ -998,6 +1479,18 @@ class _LinesTable extends StatelessWidget {
                     ],
                   ),
                 ),
+                // A receipt says which goods arrived: the supplier's lot
+                // number, the two dates printed on the carton, and the shelf
+                // they were put on. The same product delivered twice is two
+                // lines, one lot each - that is how two batches arrive on one
+                // invoice without either losing its identity.
+                if (!kind.isSales && lines[index].itemId != null)
+                  _LotStrip(
+                    index: index,
+                    line: lines[index],
+                    locations: locations,
+                    onChanged: onChanged,
+                  ),
               ],
             ),
           ),
@@ -1006,6 +1499,123 @@ class _LinesTable extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The lot fields of one received line: number, production, expiry, shelf.
+///
+/// Optional on every item, because most items keep no lots; required by the
+/// server for a lot-controlled one, which refuses the posting with a sentence
+/// rather than recording stock nobody can trace.
+class _LotStrip extends StatelessWidget {
+  const _LotStrip({
+    required this.index,
+    required this.line,
+    required this.locations,
+    required this.onChanged,
+  });
+
+  final int index;
+  final _LineDraft line;
+  final List<Json> locations;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(start: 12, top: 4),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          const Icon(Icons.qr_code_2_outlined, size: 18),
+          SizedBox(
+            width: 190,
+            child: TextFormField(
+              key: ValueKey('line-batch-$index'),
+              controller: line.batchNumber,
+              decoration: InputDecoration(
+                labelText: _lotText(context, 'رقم الدفعة', 'Batch number'),
+                isDense: true,
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (_) => onChanged(),
+            ),
+          ),
+          SizedBox(
+            width: 165,
+            child: TextFormField(
+              key: ValueKey('line-production-date-$index'),
+              controller: line.productionDate,
+              decoration: InputDecoration(
+                labelText: _lotText(context, 'الإنتاج', 'Produced'),
+                hintText: 'YYYY-MM-DD',
+                isDense: true,
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (_) => onChanged(),
+            ),
+          ),
+          SizedBox(
+            width: 165,
+            child: TextFormField(
+              key: ValueKey('line-expiry-date-$index'),
+              controller: line.expiryDate,
+              decoration: InputDecoration(
+                labelText: _lotText(context, 'الانتهاء', 'Expires'),
+                hintText: 'YYYY-MM-DD',
+                isDense: true,
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (_) => onChanged(),
+            ),
+          ),
+          SizedBox(
+            width: 230,
+            child: DropdownButtonFormField<String>(
+              key: ValueKey('line-location-$index'),
+              initialValue: line.storageLocationId ?? '',
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: _lotText(context, 'الموقع داخل المخزن', 'Shelf'),
+                isDense: true,
+                border: const OutlineInputBorder(),
+              ),
+              items: [
+                DropdownMenuItem(
+                  value: '',
+                  child: Text(
+                    _lotText(context, 'بدون موقع', 'No shelf'),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                for (final location in locations)
+                  DropdownMenuItem(
+                    value: text(location, 'id'),
+                    child: Text(
+                      _lotIndent(location),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (value) {
+                line.storageLocationId = (value == null || value.isEmpty) ? null : value;
+                onChanged();
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A shelf's code, pushed right by its depth in the tree. Dart has no string
+/// repetition, so the spaces are built.
+String _lotIndent(Json location) {
+  final depth = asNum(location['depth'])?.toInt() ?? 0;
+  final indent = depth <= 0 ? '' : List.filled(depth, '  ').join();
+  return '$indent${text(location, 'code')}';
 }
 
 class _LineTotal extends StatelessWidget {

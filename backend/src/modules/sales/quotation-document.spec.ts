@@ -180,11 +180,14 @@ describe('quotation document template', () => {
       html.indexOf('<section class="summary">'),
       html.indexOf('</section>', html.indexOf('<section class="summary">')),
     );
-    // two section rows, the summary header and the four total rows
-    expect(summary.match(/<tr[\s>]/g)).toHaveLength(7);
+    // Header, two table rows, gross subtotal, offer discount and final total.
+    expect(summary.match(/<tr[\s>]/g)).toHaveLength(6);
     expect(summary).toContain('Hardware');
     expect(summary).toContain('Software');
+    expect(summary).toContain('قبل الخصم');
+    expect(summary).toContain('الإجمالي قبل الخصم');
     expect(summary).toContain('− 50.00 EGP');
+    expect(summary).toContain('− 30.00 EGP');
   });
 
   it('keeps the arithmetic of the stored totals and shows every discount once', () => {
@@ -414,5 +417,95 @@ describe('quotation document template', () => {
     expect(html).not.toContain('الضريبة المضافة');
     expect(html).not.toContain('Tax (VAT)');
     expect(html.split('1,420.00 EGP').length - 1).toBe(1);
+  });
+});
+
+/// The attached-artwork sheet.
+///
+/// These pin the part of the feature a person would notice if it broke: the
+/// page is the artwork's own size (never A4 stretched over a letterhead), the
+/// drawn design is not painted on top of the company's letterhead, and the
+/// offer's own text still starts inside the margins the template asked for.
+describe('renderQuotationDocument on attached artwork', () => {
+  it('uses the artwork page box as the sheet, and paints no drawn design', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false, {
+      widthMm: 210,
+      heightMm: 297,
+      marginMm: { top: 20, bottom: 18, left: 12, right: 12 },
+    });
+
+    expect(html).toContain('@page { size: 210mm 297mm; margin: 0; }');
+    expect(html).not.toContain('A4 portrait');
+    // No drawn letterhead: no bands, no watermark, no inlined logo image.
+    expect(html).not.toContain('class="page-bg"');
+    expect(html).not.toContain('class="watermark"');
+    expect(html).not.toContain('data:image/png;base64');
+    expect(html).toContain('body { background: transparent; }');
+  });
+
+  it('keeps a landscape artwork landscape instead of forcing A4 portrait', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'en', false, {
+      widthMm: 297,
+      heightMm: 210,
+      marginMm: { top: 15, bottom: 15, left: 10, right: 10 },
+    });
+    expect(html).toContain('@page { size: 297mm 210mm; margin: 0; }');
+  });
+
+  it('reserves the template margins for the artwork header and footer', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false, {
+      widthMm: 210,
+      heightMm: 297,
+      marginMm: { top: 32, bottom: 26, left: 18, right: 18 },
+    });
+    expect(html).toContain('width: 174mm');
+    expect(html).toContain('height: 32mm');
+    expect(html).toContain('height: 26mm');
+    expect(html).toContain('margin-inline-start: 18mm');
+    expect(html).toContain('margin-inline-end: 18mm');
+  });
+
+  it('still prints the customer, the lines, the totals and the Arabic', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false, {
+      widthMm: 210,
+      heightMm: 297,
+      marginMm: { top: 20, bottom: 18, left: 12, right: 12 },
+    });
+    expect(html).toContain('dir="rtl"');
+    expect(html).toContain('lang="ar"');
+    expect(html).toContain('دلتا للهندسة');
+    expect(html).toContain('QT-2026-0007');
+    expect(html).toContain('1,420.00 EGP');
+    expect(html).toContain('class="items"');
+  });
+
+  it('prints no company letterhead data over the artwork, and no page digits', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false, {
+      widthMm: 210,
+      heightMm: 297,
+      marginMm: { top: 20, bottom: 18, left: 12, right: 12 },
+    });
+    // The letterhead is the artwork: repeating its name, address, tax number,
+    // phone or logo here would print the same details twice, slightly offset.
+    // The document title may name the company - that is the file's title, not
+    // ink on the sheet - so only the body is inspected.
+    const body = html.slice(html.indexOf('<body>'));
+    expect(body).not.toContain('كيان للحلول المتكاملة');
+    expect(body).not.toContain('KAYAN Integrated Solutions');
+    expect(body).not.toContain('مدينة نصر');
+    expect(body).not.toContain('TAX-999');
+    expect(body).not.toContain('CR-123');
+    expect(body).not.toContain('+20 2 1234 5678');
+    // The numbering is stamped once by the merge, on top of the artwork, so the
+    // overlay must not print a second set of digits.
+    expect(body).not.toContain('counter(page)');
+    expect(body).not.toContain('class="page-number"');
+  });
+
+  it('leaves the drawn design untouched when no artwork is attached', () => {
+    const html = renderQuotationDocument(snapshot(), COMPANY, 'ar', false);
+    expect(html).toContain('@page { size: A4 portrait; margin: 0; }');
+    expect(html).toContain('class="page-bg"');
+    expect(html).toContain('class="watermark"');
   });
 });

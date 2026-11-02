@@ -9,6 +9,7 @@ import * as argon2 from 'argon2';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { LicensingService } from '../licensing/licensing.service';
 import { Prisma } from '@prisma/client';
 import { CreateUserDto, ListUsersDto, UpdateUserDto } from './dto/user.dto';
 
@@ -20,6 +21,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly licensing: LicensingService,
   ) {}
 
   async list(companyId: string, query: ListUsersDto) {
@@ -36,6 +38,9 @@ export class UsersService {
     const users = await this.prisma.user.findMany({
       where,
       orderBy: { username: 'asc' },
+      // The photo bytes are deliberately left in the database: `include`
+      // would otherwise carry every face in the company into a list response.
+      omit: { avatarData: true },
       include: {
         userRoles: {
           include: { role: { select: { id: true, code: true, nameEn: true } } },
@@ -46,12 +51,28 @@ export class UsersService {
         },
       },
     });
-    return { items: users.map((u) => this.toResponse(u)) };
+    const ids = users.map((u) => u.id);
+    const withPhoto = new Set(
+      ids.length === 0
+        ? []
+        : (
+            await this.prisma.user.findMany({
+              where: { id: { in: ids }, avatarData: { not: null } },
+              select: { id: true },
+            })
+          ).map((row) => row.id),
+    );
+    return {
+      items: users.map((u) =>
+        this.toResponse(u, withPhoto.has(u.id)),
+      ),
+    };
   }
 
   async findOne(companyId: string, id: string) {
     const user = await this.prisma.user.findFirst({
       where: { id, companyId, deletedAt: null },
+      omit: { avatarData: true },
       include: {
         userRoles: {
           include: { role: { select: { id: true, code: true, nameEn: true } } },
@@ -63,7 +84,11 @@ export class UsersService {
       },
     });
     if (!user) throw new NotFoundException('User not found');
-    return this.toResponse(user);
+    const photo = await this.prisma.user.findFirst({
+      where: { id, companyId, avatarData: { not: null } },
+      select: { avatarUpdatedAt: true },
+    });
+    return this.toResponse(user, photo !== null, photo?.avatarUpdatedAt ?? null);
   }
 
   async create(
@@ -72,6 +97,7 @@ export class UsersService {
     dto: CreateUserDto,
     actorPermissions: string[],
     isSuperAdmin: boolean,
+    idempotencyKey?: string,
   ) {
     const username = dto.username.trim().toLowerCase();
     if (username === SYSTEM_USERNAME) {
@@ -108,6 +134,16 @@ export class UsersService {
           isSuperAdmin: false,
           createdBy: actorId,
         },
+      });
+      // The licence seat is reserved inside the same transaction as the
+      // account: a refusal rolls the account back, and a failure anywhere
+      // after this point gives the seat back with it. See LicensingService
+      // for the lock that makes simultaneous creations safe.
+      await this.licensing.reserveSeat(tx, {
+        userId: user.id,
+        username,
+        reason: 'USER_CREATE',
+        idempotencyKey: idempotencyKey ?? `user:${companyId}:${username}`,
       });
       await this.replaceRoles(tx, companyId, user.id, dto.roleIds);
       await this.replaceBranches(tx, user.id, dto.branchIds);
@@ -424,7 +460,7 @@ export class UsersService {
   }
 
   /// Deliberately never returns the password hash or the failed-login counter.
-  private toResponse(user: any) {
+  private toResponse(user: any, hasAvatar = false, avatarUpdatedAt?: Date | null) {
     return {
       id: user.id,
       companyId: user.companyId,
@@ -450,6 +486,14 @@ export class UsersService {
         code: ub.branch.code,
         nameEn: ub.branch.nameEn,
       })),
+      /// Whether a photo exists, and when it last changed. Never the bytes:
+      /// a screen that needs them asks `/users/:id/avatar`, which caches
+      /// separately and streams an image instead of a JSON string.
+      hasAvatar,
+      avatarUpdatedAt:
+        (avatarUpdatedAt ?? user.avatarUpdatedAt)?.toISOString() ?? null,
+      /// The path, so a client does not have to build one itself.
+      avatarUrl: hasAvatar ? `/users/${user.id}/avatar` : null,
       createdAt: user.createdAt.toISOString(),
     };
   }

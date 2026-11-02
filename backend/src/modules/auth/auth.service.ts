@@ -27,6 +27,15 @@ export interface SessionUser {
   permissions: string[];
   isActive: boolean;
   isSuperAdmin: boolean;
+  /// Whether this account has a photo, and where to fetch it.
+  ///
+  /// A session carries this so the top bar shows the signed-in person's face
+  /// immediately after a sign-in on any machine - the bytes are then fetched
+  /// once from `avatarUrl`. The photo is never part of the token: a token
+  /// lives in storage and is replayed, and an image in it would be stale the
+  /// moment someone changed their picture.
+  hasAvatar: boolean;
+  avatarUrl: string | null;
 }
 
 @Injectable()
@@ -47,6 +56,9 @@ export class AuthService {
   ) {
     const user = await this.prisma.user.findUnique({
       where: { username },
+      // The photo lives in this row. A sign-in needs to know that it exists
+      // (`avatarUpdatedAt`), never to carry the bytes through the auth path.
+      omit: { avatarData: true },
       include: {
         userRoles: {
           include: {
@@ -379,11 +391,14 @@ export class AuthService {
       companyId: string;
       isActive: boolean;
       isSuperAdmin: boolean;
+      avatarUpdatedAt?: Date | null;
     },
     roles: string[],
     permissions: string[],
     branchId: string | null,
+    hasAvatar = false,
   ): SessionUser {
+    const photo = hasAvatar || user.avatarUpdatedAt != null;
     return {
       id: user.id,
       username: user.username,
@@ -394,6 +409,8 @@ export class AuthService {
       permissions,
       isActive: user.isActive,
       isSuperAdmin: user.isSuperAdmin,
+      hasAvatar: photo,
+      avatarUrl: photo ? `/users/${user.id}/avatar` : null,
     };
   }
 }

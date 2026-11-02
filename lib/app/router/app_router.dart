@@ -17,8 +17,19 @@ import '../../features/dashboard/presentation/screens/dashboard_screen.dart';
 import '../../features/data/presentation/screens/backup_screen.dart';
 import '../../features/data/presentation/screens/import_screen.dart';
 import '../../features/inventory/presentation/screens/items_screen.dart';
+import '../../features/inventory/presentation/screens/stock_documents_screen.dart';
 import '../../features/inventory/presentation/screens/stock_screen.dart';
+import '../../features/inventory/presentation/screens/batches_screen.dart';
+import '../../features/inventory/presentation/screens/warehouses_screen.dart';
+import '../../features/inventory/presentation/screens/storage_locations_screen.dart';
+import '../../features/inventory/presentation/screens/item_thresholds_screen.dart';
+import '../../features/inventory/presentation/screens/stock_takes_screen.dart';
+import '../../features/inventory/presentation/screens/inventory_reports_screen.dart';
+import '../../features/inventory/presentation/screens/warehouse_access_screen.dart';
+import '../../features/inventory/presentation/screens/write_offs_screen.dart';
+import '../../features/notifications/presentation/screens/notification_center_screen.dart';
 import '../../features/invoicing/presentation/providers/invoice_providers.dart';
+import '../../features/licensing/presentation/screens/licence_screen.dart';
 import '../../features/invoicing/presentation/screens/invoice_list_screen.dart';
 import '../../features/invoicing/presentation/screens/return_editor_screen.dart';
 import '../../features/invoicing/presentation/screens/returns_screen.dart';
@@ -27,6 +38,7 @@ import '../../features/quotations/presentation/screens/quotation_editor_screen.d
 import '../../features/quotations/presentation/screens/quotation_list_screen.dart';
 import '../../features/reports/presentation/reports_screen.dart';
 import '../../features/settings/presentation/screens/company_settings_screen.dart';
+import '../../features/settings/presentation/screens/print_settings_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
 import '../shell/erp_shell.dart';
 
@@ -58,6 +70,16 @@ class AppRoutes {
   static const suppliers = '/parties/suppliers';
   static const items = '/inventory/items';
   static const stock = '/inventory/stock';
+  static const warehouses = '/inventory/warehouses';
+  static const batches = '/inventory/batches';
+  static const storageLocations = '/inventory/locations';
+  static const itemThresholds = '/inventory/thresholds';
+  static const stockTakes = '/inventory/stock-takes';
+  static const writeOffs = '/inventory/write-offs';
+  static const warehouseAccess = '/inventory/warehouse-access';
+  static const inventoryReports = '/inventory/reports';
+  static const notifications = '/notifications';
+  static const stockDocuments = '/inventory/documents';
   static const salesInvoices = '/sales/invoices';
   static const purchaseInvoices = '/purchases/invoices';
   static const quotations = '/sales/quotations';
@@ -72,6 +94,8 @@ class AppRoutes {
   static const administration = '/administration';
   static const companySettings = '/settings/company';
   static const settings = '/settings';
+  static const licence = '/settings/licence';
+  static const printSettings = '/settings/print';
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -100,97 +124,174 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.login,
         builder: (context, state) => const LoginScreen(),
       ),
-      GoRoute(
-        path: AppRoutes.salesReturnNew,
-        builder: (context, state) => ErpShell(
-          currentPath: AppRoutes.salesReturns,
-          child: const ReturnEditorScreen(kind: InvoiceKind.sales),
+      // ---------------------------------------------------------------------
+      // One shell for the whole session.
+      //
+      // Every authenticated route used to build its own `ErpShell`, so moving
+      // from one screen to another destroyed the navigation column and built a
+      // new one - with a brand-new ScrollController at offset 0. That is the
+      // reported defect: pick anything from the bottom of the menu and the menu
+      // jumps back to its first item, because the list it was pointing at no
+      // longer exists.
+      //
+      // The shell is now a single `StatefulShellRoute` at the root: its widget
+      // (and therefore `_ErpShellState`, the ScrollController, and the pixels
+      // the user has scrolled) is created once and survives every navigation
+      // inside the session. It also gives each branch its own `Navigator`, so a
+      // screen keeps its state (a half-typed invoice) when the menu is used to
+      // look at another module and come back.
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) => ErpShell(
+          currentPath: state.uri.path,
+          navigationShell: navigationShell,
         ),
-      ),
-      GoRoute(
-        path: AppRoutes.purchaseReturnNew,
-        builder: (context, state) => ErpShell(
-          currentPath: AppRoutes.purchaseReturns,
-          child: const ReturnEditorScreen(kind: InvoiceKind.purchase),
-        ),
-      ),
-      GoRoute(
-        path: AppRoutes.quotationNew,
-        builder: (context, state) => const ErpShell(
-          currentPath: AppRoutes.quotations,
-          child: QuotationEditorScreen(),
-        ),
-      ),
-      GoRoute(
-        path: '${AppRoutes.quotations}/:id/edit',
-        builder: (context, state) => ErpShell(
-          currentPath: AppRoutes.quotations,
-          child: QuotationEditorScreen(
-            quotationId: state.pathParameters['id'],
+        branches: [
+          // A branch is a whole module family: opening a quotation editor keeps
+          // you inside the sales branch, so "back" and the branch's own stack
+          // behave the way the operator expects.
+          StatefulShellBranch(
+            navigatorKey: _rootNavigatorKey,
+            routes: [
+              GoRoute(path: AppRoutes.dashboard, builder: (c, s) => const DashboardScreen()),
+            ],
           ),
-        ),
-      ),
-      GoRoute(
-        path: '${AppRoutes.openingBalances}/:id',
-        builder: (context, state) => ErpShell(
-          currentPath: AppRoutes.openingBalances,
-          child: OpeningBalancesScreen(
-            documentId: state.pathParameters['id'],
+          StatefulShellBranch(
+            routes: [
+              GoRoute(path: AppRoutes.cash, builder: (c, s) => const CashScreen()),
+              GoRoute(path: AppRoutes.journalEntries, builder: (c, s) => const JournalEntriesScreen()),
+              GoRoute(path: AppRoutes.fiscalPeriods, builder: (c, s) => const FiscalPeriodsScreen()),
+              GoRoute(path: AppRoutes.fixedAssets, builder: (c, s) => const FixedAssetsScreen()),
+              GoRoute(
+                path: AppRoutes.openingBalances,
+                builder: (c, s) => const OpeningBalancesScreen(),
+                routes: [
+                  GoRoute(
+                    path: ':id',
+                    builder: (c, s) => OpeningBalancesScreen(
+                      documentId: s.pathParameters['id'],
+                    ),
+                  ),
+                ],
+              ),
+              GoRoute(path: AppRoutes.chartOfAccounts, builder: (c, s) => const ChartOfAccountsScreen()),
+              GoRoute(path: AppRoutes.costCenters, builder: (c, s) => const CostCentersScreen()),
+              GoRoute(path: AppRoutes.budgets, builder: (c, s) => const BudgetsScreen()),
+            ],
           ),
-        ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.customers,
+                builder: (c, s) => const PartiesScreen(kind: PartyKind.customer),
+              ),
+              GoRoute(
+                path: AppRoutes.suppliers,
+                builder: (c, s) => const PartiesScreen(kind: PartyKind.supplier),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(path: AppRoutes.items, builder: (c, s) => const ItemsScreen()),
+              GoRoute(path: AppRoutes.stock, builder: (c, s) => const StockScreen()),
+              GoRoute(path: AppRoutes.warehouses, builder: (c, s) => const WarehousesScreen()),
+              GoRoute(path: AppRoutes.batches, builder: (c, s) => const BatchesScreen()),
+              GoRoute(
+                path: AppRoutes.storageLocations,
+                builder: (c, s) => const StorageLocationsScreen(),
+              ),
+              GoRoute(
+                path: AppRoutes.itemThresholds,
+                builder: (c, s) => const ItemThresholdsScreen(),
+              ),
+              GoRoute(
+                path: AppRoutes.stockTakes,
+                builder: (c, s) => const StockTakesScreen(),
+              ),
+              GoRoute(
+                path: AppRoutes.writeOffs,
+                builder: (c, s) => const WriteOffsScreen(),
+              ),
+              GoRoute(
+                path: AppRoutes.warehouseAccess,
+                builder: (c, s) => const WarehouseAccessScreen(),
+              ),
+              GoRoute(
+                path: AppRoutes.inventoryReports,
+                builder: (c, s) => const InventoryReportsScreen(),
+              ),
+              GoRoute(
+                path: AppRoutes.notifications,
+                builder: (c, s) => const NotificationCenterScreen(),
+              ),
+              GoRoute(path: AppRoutes.stockDocuments, builder: (c, s) => const StockDocumentsScreen()),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.salesInvoices,
+                builder: (c, s) => const InvoiceListScreen(kind: InvoiceKind.sales),
+              ),
+              GoRoute(path: AppRoutes.quotations, builder: (c, s) => const QuotationListScreen()),
+              GoRoute(
+                path: AppRoutes.quotationNew,
+                builder: (c, s) => const QuotationEditorScreen(),
+              ),
+              GoRoute(
+                path: '${AppRoutes.quotations}/:id/edit',
+                builder: (c, s) => QuotationEditorScreen(
+                  quotationId: s.pathParameters['id'],
+                ),
+              ),
+              GoRoute(
+                path: AppRoutes.salesReturns,
+                builder: (c, s) => const ReturnsScreen(kind: InvoiceKind.sales),
+              ),
+              GoRoute(
+                path: AppRoutes.salesReturnNew,
+                builder: (c, s) => const ReturnEditorScreen(kind: InvoiceKind.sales),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.purchaseInvoices,
+                builder: (c, s) => const InvoiceListScreen(kind: InvoiceKind.purchase),
+              ),
+              GoRoute(
+                path: AppRoutes.purchaseReturns,
+                builder: (c, s) => const ReturnsScreen(kind: InvoiceKind.purchase),
+              ),
+              GoRoute(
+                path: AppRoutes.purchaseReturnNew,
+                builder: (c, s) => const ReturnEditorScreen(kind: InvoiceKind.purchase),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(path: AppRoutes.reports, builder: (c, s) => const ReportsScreen()),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(path: AppRoutes.importData, builder: (c, s) => const ImportScreen()),
+              GoRoute(path: AppRoutes.backup, builder: (c, s) => const BackupScreen()),
+              GoRoute(path: AppRoutes.administration, builder: (c, s) => const AdminScreen()),
+              GoRoute(path: AppRoutes.companySettings, builder: (c, s) => const CompanySettingsScreen()),
+              GoRoute(path: AppRoutes.settings, builder: (c, s) => const SettingsScreen()),
+              GoRoute(path: AppRoutes.licence, builder: (c, s) => const LicenceScreen()),
+              GoRoute(path: AppRoutes.printSettings, builder: (c, s) => const PrintSettingsScreen()),
+            ],
+          ),
+        ],
       ),
-      for (final route in _shellRoutes)
-        GoRoute(
-          path: route.path,
-          builder: (context, state) =>
-              ErpShell(currentPath: route.path, child: route.child),
-        ),
     ],
   );
 });
 
-/// Every authenticated screen, in the order the navigation shows them.
-const _shellRoutes = <({String path, Widget child})>[
-  (path: AppRoutes.dashboard, child: DashboardScreen()),
-  (path: AppRoutes.cash, child: CashScreen()),
-  (path: AppRoutes.journalEntries, child: JournalEntriesScreen()),
-  (path: AppRoutes.fiscalPeriods, child: FiscalPeriodsScreen()),
-  (path: AppRoutes.fixedAssets, child: FixedAssetsScreen()),
-  (path: AppRoutes.openingBalances, child: OpeningBalancesScreen()),
-  (
-    path: AppRoutes.customers,
-    child: PartiesScreen(kind: PartyKind.customer),
-  ),
-  (
-    path: AppRoutes.suppliers,
-    child: PartiesScreen(kind: PartyKind.supplier),
-  ),
-  (path: AppRoutes.items, child: ItemsScreen()),
-  (path: AppRoutes.stock, child: StockScreen()),
-  (
-    path: AppRoutes.salesInvoices,
-    child: InvoiceListScreen(kind: InvoiceKind.sales),
-  ),
-  (
-    path: AppRoutes.purchaseInvoices,
-    child: InvoiceListScreen(kind: InvoiceKind.purchase),
-  ),
-  (path: AppRoutes.quotations, child: QuotationListScreen()),
-  (
-    path: AppRoutes.salesReturns,
-    child: ReturnsScreen(kind: InvoiceKind.sales),
-  ),
-  (
-    path: AppRoutes.purchaseReturns,
-    child: ReturnsScreen(kind: InvoiceKind.purchase),
-  ),
-  (path: AppRoutes.chartOfAccounts, child: ChartOfAccountsScreen()),
-  (path: AppRoutes.costCenters, child: CostCentersScreen()),
-  (path: AppRoutes.budgets, child: BudgetsScreen()),
-  (path: AppRoutes.reports, child: ReportsScreen()),
-  (path: AppRoutes.importData, child: ImportScreen()),
-  (path: AppRoutes.backup, child: BackupScreen()),
-  (path: AppRoutes.administration, child: AdminScreen()),
-  (path: AppRoutes.companySettings, child: CompanySettingsScreen()),
-  (path: AppRoutes.settings, child: SettingsScreen()),
-];
+/// The root navigator key, so a screen can push above the shell when it
+/// genuinely has to (a full-screen editor) instead of replacing it.
+final _rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'kayan-root');

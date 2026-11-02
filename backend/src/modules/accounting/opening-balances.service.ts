@@ -7,6 +7,8 @@ import { InvoiceStatus, Prisma, StockDirection } from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { movementUnitSnapshot } from '../../common/units/unit-math';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from './account-map.service';
 import { DocumentNumberService } from './document-number.service';
@@ -49,6 +51,7 @@ export class OpeningBalancesService {
     private readonly accounts: AccountMapService,
     private readonly audit: AuditService,
     private readonly warehouses: WarehouseService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   async findAll(companyId: string) {
@@ -367,7 +370,7 @@ export class OpeningBalancesService {
         if (!line.itemId) continue;
         const item = await tx.item.findFirst({
           where: { id: line.itemId, companyId, deletedAt: null },
-          select: { id: true, isStockTracked: true, code: true },
+          select: { id: true, isStockTracked: true, code: true, unit: true },
         });
         if (!item) throw new BadRequestException('An opening line references a missing item');
         if (!item.isStockTracked) continue;
@@ -413,6 +416,12 @@ export class OpeningBalancesService {
             movementDate: document.asOfDate,
             direction: StockDirection.IN,
             quantity: line.quantity,
+            // An opening quantity is counted in the item's own base unit; the
+            // snapshot says so instead of leaving the movement unlabelled.
+            ...movementUnitSnapshot({
+              baseUnitName: item.unit,
+              baseQuantity: line.quantity,
+            }),
             unitCost: line.unitCost,
             totalCost: line.debit,
             referenceType: 'OPENING_BALANCE',
@@ -423,25 +432,13 @@ export class OpeningBalancesService {
           },
         });
 
-        await tx.stockBalance.upsert({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: document.branchId,
-              itemId: item.id,
-            },
-          },
-          create: {
-            companyId,
-            branchId: document.branchId,
-            itemId: item.id,
-            quantity: line.quantity,
-            value: line.debit,
-          },
-          update: {
-            quantity: { increment: line.quantity },
-            value: { increment: line.debit },
-          },
+        await this.ledger.post(tx, {
+          companyId,
+          branchId: document.branchId,
+          warehouseId,
+          itemId: item.id,
+          quantity: line.quantity,
+          value: line.debit,
         });
       }
 
@@ -517,6 +514,25 @@ export class OpeningBalancesService {
         document.branchId,
         document.warehouseId,
       );
+      // Base unit names, so a reversal movement is labelled in the same unit
+      // the opening document used instead of a placeholder.
+      const reverseItems = await tx.item.findMany({
+        where: {
+          companyId,
+          id: {
+            in: [
+              ...new Set(
+                document.lines
+                  .map((row) => row.itemId)
+                  .filter((itemId): itemId is string => Boolean(itemId)),
+              ),
+            ],
+          },
+        },
+        select: { id: true, unit: true },
+      });
+      const reverseBaseName = new Map(reverseItems.map((row) => [row.id, row.unit]));
+
       for (const line of document.lines) {
         if (!line.itemId || line.quantity === null || line.unitCost === null) continue;
         const lockedBalances = await tx.$queryRaw<
@@ -549,6 +565,10 @@ export class OpeningBalancesService {
             movementDate: new Date(),
             direction: StockDirection.OUT,
             quantity: line.quantity,
+            ...movementUnitSnapshot({
+              baseUnitName: reverseBaseName.get(line.itemId) ?? 'unit',
+              baseQuantity: line.quantity,
+            }),
             unitCost: line.unitCost,
             totalCost: line.debit,
             referenceType: 'OPENING_BALANCE_REVERSAL',
@@ -558,19 +578,18 @@ export class OpeningBalancesService {
             createdBy: userId,
           },
         });
-        await tx.stockBalance.update({
-          where: {
-            companyId_branchId_itemId: {
-              companyId,
-              branchId: document.branchId,
-              itemId: line.itemId,
-            },
+        await this.ledger.post(
+          tx,
+          {
+            companyId,
+            branchId: document.branchId,
+            warehouseId,
+            itemId: line.itemId,
+            quantity: line.quantity.negated(),
+            value: line.debit.negated(),
           },
-          data: {
-            quantity: { decrement: line.quantity },
-            value: { decrement: line.debit },
-          },
-        });
+          { allowNegative: true },
+        );
       }
 
       await tx.openingBalance.update({

@@ -14,6 +14,7 @@ class ColumnSpec {
     this.flex = 1,
     this.emphasise = false,
     this.tone,
+    this.leading,
   });
 
   final String label;
@@ -28,6 +29,14 @@ class ColumnSpec {
   /// text is still the same label the column already produced, so nothing is
   /// renamed by the presentation.
   final AppTone Function(Json row)? tone;
+
+  /// A small widget drawn before the value in a plain (non-pill) cell - a
+  /// person's photo before their name, for instance.
+  ///
+  /// The text stays the column's own [value]: the row is still searchable,
+  /// copyable and readable by a screen reader, and the widget is decoration
+  /// beside it rather than a replacement for it.
+  final Widget? Function(Json row)? leading;
 }
 
 /// A record list that stays readable on a phone and on a desktop.
@@ -143,9 +152,21 @@ class RecordsTable extends StatelessWidget {
                                         minWidth: 110,
                                         maxWidth: 300,
                                       ),
-                                      child: Text(
-                                        column.value(row) ?? '—',
-                                        style: _cellStyle(theme, column),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (column.leading?.call(row)
+                                              case final Widget leading) ...[
+                                            leading,
+                                            const SizedBox(width: 8),
+                                          ],
+                                          Flexible(
+                                            child: Text(
+                                              column.value(row) ?? '—',
+                                              style: _cellStyle(theme, column),
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     )
                             : Align(
@@ -198,6 +219,11 @@ class RecordsTable extends StatelessWidget {
         final headline = columns.isEmpty
             ? ''
             : columns.first.value(row) ?? '—';
+        // A decoration on the identifier line (a person's photo before their
+        // name), built once here rather than inside the widget list.
+        final leading = columns.isEmpty
+            ? null
+            : columns.first.leading?.call(row);
         return Material(
           color: scheme.surface,
           borderRadius: AppRadii.control,
@@ -215,11 +241,24 @@ class RecordsTable extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    headline,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                  // The identifier line keeps its decoration - a person's
+                  // photo beside their name - so the narrow layout is the same
+                  // information as the wide table, not a poorer version.
+                  Row(
+                    children: [
+                      if (leading != null) ...[
+                        leading,
+                        const SizedBox(width: AppSpacing.sm),
+                      ],
+                      Expanded(
+                        child: Text(
+                          headline,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   if (columns.length > 1) const SizedBox(height: AppSpacing.sm),
                   // Label above, value below at full card width. Side by

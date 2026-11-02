@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,6 +9,12 @@ import { InvoiceStatus, Prisma, StockDirection, StockDocumentKind } from '@prism
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import {
+  movementUnitSnapshot,
+  resolveUnitSelection,
+} from '../../common/units/unit-math';
+import { selectLotsFefo } from '../../common/warehouse/batch-policy';
+import { StockLedgerService } from '../../common/warehouse/stock-ledger.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { CostCentersService } from '../accounting/cost-centers.service';
@@ -21,8 +28,22 @@ export interface StockDocumentLineInput {
   /** Adjustment: signed change. Count: ignored (countedQuantity is used). */
   quantity?: string | number;
   countedQuantity?: string | number;
+  /**
+   * The unit the person counted in, e.g. "carton" for a stock count entered as
+   * "3 cartons". The saved conversion factor of that unit turns the figure
+   * into base units, which is what stock and value are kept in. Omitted means
+   * the item's base unit.
+   */
+  unit?: string;
   unitCost?: string | number;
   notes?: string;
+  /** Optional chosen unit; quantity/countedQuantity are expressed in it. */
+  unitName?: string;
+  unitId?: string;
+  /** The lot this line takes (a write-off names the goods it destroys). */
+  batchId?: string;
+  /** The shelf the goods sat on, when the document names one. */
+  storageLocationId?: string;
 }
 
 /**
@@ -47,6 +68,7 @@ export class StockDocumentsService {
     private readonly settings: CompanySettingsService,
     private readonly warehouses: WarehouseService,
     private readonly costCenters: CostCentersService,
+    private readonly ledger: StockLedgerService,
   ) {}
 
   async findAll(
@@ -81,14 +103,40 @@ export class StockDocumentsService {
           lines: true,
           branch: { select: { code: true, nameEn: true, nameAr: true } },
           costCenter: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+          fromWarehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+          toWarehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
         },
       }),
       this.prisma.stockDocument.count({ where }),
     ]);
 
+    // Who raised and who posted each document. The columns are ids, so the
+    // names are read once for the page rather than asked for per row.
+    const userIds = [
+      ...new Set(
+        items
+          .flatMap((document) => [document.createdBy, document.postedBy, document.approvedBy])
+          .filter((id): id is string => typeof id === 'string' && id !== ''),
+      ),
+    ];
+    const users = userIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: userIds }, companyId },
+          select: { id: true, username: true },
+        })
+      : [];
+    const userName = new Map(users.map((user) => [user.id, user.username]));
+
     return {
       items: items.map((document) => ({
-        ...this.toSummary(document),
+        ...this.toSummary({
+          ...document,
+          createdByName: document.createdBy ? userName.get(document.createdBy) ?? null : null,
+          postedByName: document.postedBy ? userName.get(document.postedBy) ?? null : null,
+          approvedByName: document.approvedBy
+            ? userName.get(document.approvedBy) ?? null
+            : null,
+        }),
         lineCount: document.lines.length,
         totalQuantity: document.lines
           .reduce((sum, line) => sum.plus(line.quantity), new Prisma.Decimal(0))
@@ -100,22 +148,52 @@ export class StockDocumentsService {
     };
   }
 
-  async findOne(companyId: string, id: string) {
+  async findOne(companyId: string, id: string, mayReadCost = true) {
     const document = await this.prisma.stockDocument.findFirst({
       where: { id, companyId, deletedAt: null },
       include: {
         branch: { select: { code: true, nameEn: true, nameAr: true } },
         costCenter: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+        fromWarehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+        toWarehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
         lines: {
           orderBy: { lineNumber: 'asc' },
-          include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } },
+          include: {
+            item: { select: { code: true, nameEn: true, nameAr: true, unit: true } },
+            // A write-off names the goods it destroys and the shelf they sat
+            // on. Printing only the item left the reader unable to tell two
+            // lots of the same product apart - which is the whole point of
+            // destroying one of them.
+            batch: { select: { id: true, batchNumber: true, expiryDate: true } },
+            storageLocation: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+          },
         },
       },
     });
     if (!document) throw new NotFoundException('Stock document not found');
 
+    // The paper names who raised and who posted it, so the detail resolves the
+    // two ids the same way the list does.
+    const userIds = [document.createdBy, document.postedBy, document.approvedBy].filter(
+      (value): value is string => typeof value === 'string' && value !== '',
+    );
+    const users = userIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: userIds }, companyId },
+          select: { id: true, username: true },
+        })
+      : [];
+    const userName = new Map(users.map((user) => [user.id, user.username]));
+
     return {
-      ...this.toSummary(document),
+      ...this.toSummary({
+        ...document,
+        createdByName: document.createdBy ? userName.get(document.createdBy) ?? null : null,
+        postedByName: document.postedBy ? userName.get(document.postedBy) ?? null : null,
+        approvedByName: document.approvedBy
+          ? userName.get(document.approvedBy) ?? null
+          : null,
+      }),
       lines: document.lines.map((line) => ({
         id: line.id,
         lineNumber: line.lineNumber,
@@ -123,11 +201,28 @@ export class StockDocumentsService {
         itemCode: line.item.code,
         itemNameEn: line.item.nameEn,
         itemNameAr: line.item.nameAr,
-        unit: line.item.unit,
+        unit: line.unitName ?? line.item.unit,
+        unitName: line.unitName ?? null,
+        unitFactor:
+          line.unitFactor === null || line.unitFactor === undefined
+            ? null
+            : line.unitFactor.toFixed(6),
+        unitQuantity: (line.unitQuantity ?? line.quantity).toFixed(MONEY_SCALE),
         quantity: line.quantity.toFixed(MONEY_SCALE),
-        unitCost: line.unitCost.toFixed(MONEY_SCALE),
+        baseQuantity: line.quantity.toFixed(MONEY_SCALE),
+        // Unit cost is a cost figure: withheld when the caller lacks cost.read;
+        // the document and its quantities remain fully readable.
+        unitCost: mayReadCost ? line.unitCost.toFixed(MONEY_SCALE) : null,
+        totalCost: mayReadCost ? line.totalCost.toFixed(MONEY_SCALE) : null,
         countedQuantity: line.countedQuantity?.toFixed(MONEY_SCALE) ?? null,
         notes: line.notes,
+        batchId: line.batchId ?? null,
+        batchNumber: line.batch?.batchNumber ?? null,
+        expiryDate: line.batch?.expiryDate?.toISOString().slice(0, 10) ?? null,
+        storageLocationId: line.storageLocationId ?? null,
+        storageLocationCode: line.storageLocation?.code ?? null,
+        storageLocationNameEn: line.storageLocation?.nameEn ?? null,
+        storageLocationNameAr: line.storageLocation?.nameAr ?? null,
       })),
     };
   }
@@ -155,11 +250,35 @@ export class StockDocumentsService {
       costCenterId?: string;
 
       lines: StockDocumentLineInput[];
+      /// Sent by the client so a retry after a dropped connection returns the
+      /// document that was already created instead of posting a second loss.
+      idempotencyKey?: string;
+      attachmentName?: string;
+      attachmentPath?: string;
     },
+    options: { idempotencyKey?: string } = {},
   ) {
+    const idempotencyKey =
+      String(options.idempotencyKey ?? dto.idempotencyKey ?? '').trim() || null;
+    if (idempotencyKey) {
+      const existing = await this.prisma.stockDocument.findFirst({
+        where: { companyId, idempotencyKey },
+        select: { id: true },
+      });
+      if (existing) return this.findOne(companyId, existing.id);
+    }
     const kind = String(dto.kind ?? '').toUpperCase() as StockDocumentKind;
     if (!Object.values(StockDocumentKind).includes(kind)) {
-      throw new BadRequestException('kind must be ADJUSTMENT, TRANSFER, COUNT or OPENING');
+      throw new BadRequestException(
+        'kind must be ADJUSTMENT, TRANSFER, COUNT, WRITE_OFF or OPENING',
+      );
+    }
+    // A write-off is a loss somebody has to own. The reason is not decoration:
+    // it is the sentence that explains the difference to an auditor.
+    if (kind === StockDocumentKind.WRITE_OFF && !String(dto.reason ?? '').trim()) {
+      throw new BadRequestException(
+        'A write-off needs a reason. / مستند الإعدام يتطلب سببًا.',
+      );
     }
     if (kind === StockDocumentKind.OPENING) {
       throw new BadRequestException(
@@ -206,22 +325,33 @@ export class StockDocumentsService {
       countedQuantity: Prisma.Decimal | null;
       unitCost: Prisma.Decimal;
       notes: string | null;
+      unitName: string | null;
+      unitFactor: Prisma.Decimal | null;
+      unitQuantity: Prisma.Decimal | null;
+      batchId: string | null;
+      storageLocationId: string | null;
     }> = [];
     for (const [index, raw] of dto.lines.entries()) {
       const item = await this.prisma.item.findFirst({
         where: { id: raw.itemId, companyId, deletedAt: null },
-        select: { id: true, isStockTracked: true, code: true },
+        select: { id: true, isStockTracked: true, code: true, unit: true, units: true },
       });
       if (!item) throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
       if (!item.isStockTracked) {
         throw new BadRequestException(`Line ${index + 1}: item ${item.code} is not stock-tracked`);
       }
 
-      const quantity =
+      // One conversion path for both the stock-document `unit` field and the
+      // document-line `unitName/unitId` fields. The entered quantity stays in
+      // the chosen unit until resolveUnitSelection turns it into base units;
+      // that helper also refuses unknown/inactive units and freezes the
+      // factor in the display snapshot.
+      const requestedUnitName = raw.unitName ?? raw.unit;
+      let quantity =
         raw.quantity === undefined
           ? new Prisma.Decimal(0)
           : this.decimal(raw.quantity, `Line ${index + 1} quantity`);
-      const countedQuantity =
+      let countedQuantity =
         raw.countedQuantity === undefined
           ? null
           : this.decimal(raw.countedQuantity, `Line ${index + 1} counted quantity`);
@@ -230,8 +360,65 @@ export class StockDocumentsService {
           ? new Prisma.Decimal(0)
           : this.decimal(raw.unitCost, `Line ${index + 1} unit cost`);
 
+      // Multi-unit: convert the entered values into base-unit quantities the
+      // posting logic already understands, keeping a frozen display snapshot.
+      let unitName: string | null = null;
+      let unitFactor: Prisma.Decimal | null = null;
+      let unitQuantity: Prisma.Decimal | null = null;
+      if (requestedUnitName || raw.unitId) {
+        const units = (item as { units?: any[] }).units ?? [];
+        if (!quantity.isZero()) {
+          // Adjustments may be negative (write-off): convert the
+          // magnitude and restore the sign on the base quantity.
+          const sign = quantity.isNegative() ? new Prisma.Decimal(-1) : new Prisma.Decimal(1);
+          const resolved = resolveUnitSelection({
+            lineLabel: `Line ${index + 1}`,
+            requestedUnitId: raw.unitId,
+            requestedUnitName: requestedUnitName,
+            enteredQuantity: quantity.abs(),
+            baseUnitName: item.unit,
+            units,
+            // Stock movements are neither a sale nor a purchase: a unit that is
+            // only enabled for one of them is still usable to count goods.
+            purpose: 'stock',
+          });
+          unitName = resolved.snapshot.unitName;
+          unitFactor = resolved.snapshot.unitFactor;
+          unitQuantity = quantity;
+          quantity = resolved.baseQuantity.mul(sign);
+        }
+        if (countedQuantity && !countedQuantity.isZero()) {
+          const resolvedCount = resolveUnitSelection({
+            lineLabel: `Line ${index + 1}`,
+            requestedUnitId: raw.unitId,
+            requestedUnitName: requestedUnitName,
+            enteredQuantity: countedQuantity,
+            baseUnitName: item.unit,
+            units,
+            purpose: 'stock',
+          });
+          unitName = resolvedCount.snapshot.unitName;
+          unitFactor = resolvedCount.snapshot.unitFactor;
+          unitQuantity = countedQuantity;
+          countedQuantity = resolvedCount.baseQuantity;
+        }
+      }
+
       if (kind !== StockDocumentKind.COUNT && quantity.isZero()) {
         throw new BadRequestException(`Line ${index + 1}: a quantity is required`);
+      }
+      if (kind === StockDocumentKind.TRANSFER && quantity.isNegative()) {
+        throw new BadRequestException(`Line ${index + 1}: transfer quantity must be positive`);
+      }
+      // A write-off is goods leaving. Its quantity is the signed change, so a
+      // positive one would quietly RECEIVE the goods the paper says were
+      // destroyed - the worst kind of mistake, because the document, the
+      // movement and the ledger would all agree on a lie.
+      if (kind === StockDocumentKind.WRITE_OFF && quantity.greaterThan(0)) {
+        throw new BadRequestException(
+          `Line ${index + 1}: a write-off removes stock, so its quantity is negative. / ` +
+            'الإعدام يُخرج البضاعة من المخزن، فكميته سالبة.',
+        );
       }
       if (kind === StockDocumentKind.COUNT && (!countedQuantity || countedQuantity.isNegative())) {
         throw new BadRequestException(
@@ -242,12 +429,54 @@ export class StockDocumentsService {
         throw new BadRequestException(`Line ${index + 1}: the unit cost cannot be negative`);
       }
 
+      // A line may name the lot it destroys and the shelf it sat on. The lot
+      // must belong to this company and this item, otherwise the write-off
+      // would decrement somebody else's goods.
+      let batchId: string | null = null;
+      if (raw.batchId) {
+        const lot = await this.prisma.itemBatch.findFirst({
+          where: {
+            id: String(raw.batchId),
+            companyId,
+            itemId: item.id,
+            deletedAt: null,
+          },
+          select: { id: true },
+        });
+        if (!lot) {
+          throw new BadRequestException(`Line ${index + 1}: the lot does not belong to this item`);
+        }
+        batchId = lot.id;
+      }
+      let storageLocationId: string | null = null;
+      if (raw.storageLocationId) {
+        const location = await this.prisma.storageLocation.findFirst({
+          where: {
+            id: String(raw.storageLocationId),
+            companyId,
+            warehouseId: dto.toWarehouseId ? String(dto.toWarehouseId) : undefined,
+          },
+          select: { id: true },
+        });
+        if (!location) {
+          throw new BadRequestException(
+            `Line ${index + 1}: the storage location is not in this warehouse`,
+          );
+        }
+        storageLocationId = location.id;
+      }
+
       lines.push({
         itemId: item.id,
         quantity,
         countedQuantity,
         unitCost,
         notes: raw.notes ?? null,
+        unitName,
+        unitFactor,
+        unitQuantity,
+        batchId,
+        storageLocationId,
       });
     }
 
@@ -280,12 +509,16 @@ export class StockDocumentsService {
     }
 
     const created = await this.prisma.$transaction(async (tx) => {
+      // A loss gets its own series. A write-off that shares numbers with
+      // adjustments cannot be counted, filed or argued about on its own.
       const prefix =
         kind === StockDocumentKind.TRANSFER
           ? 'ST'
           : kind === StockDocumentKind.COUNT
             ? 'SC'
-            : 'SA';
+            : kind === StockDocumentKind.WRITE_OFF
+              ? 'WO'
+              : 'SA';
       const documentNumber = await this.numbers.next(tx, companyId, `STOCK_${kind}`, prefix);
       return tx.stockDocument.create({
         data: {
@@ -303,14 +536,23 @@ export class StockDocumentsService {
           costCenterId,
           status: InvoiceStatus.DRAFT,
           createdBy: userId,
+          idempotencyKey: idempotencyKey ?? null,
+          attachmentName: dto.attachmentName?.trim() || null,
+          attachmentPath: dto.attachmentPath?.trim() || null,
           lines: {
             create: lines.map((line, index) => ({
               lineNumber: index + 1,
               itemId: line.itemId,
               quantity: line.quantity,
               unitCost: line.unitCost,
+              totalCost: line.quantity.mul(line.unitCost).toDecimalPlaces(MONEY_SCALE),
               countedQuantity: line.countedQuantity,
               notes: line.notes,
+              unitName: line.unitName,
+              unitFactor: line.unitFactor,
+              unitQuantity: line.unitQuantity,
+              batchId: line.batchId,
+              storageLocationId: line.storageLocationId,
             })),
           },
         },
@@ -344,7 +586,28 @@ export class StockDocumentsService {
         `Only a draft stock document can be posted (current status: ${document.status})`,
       );
     }
+    // A loss is approved before it is posted, by somebody other than the person
+    // who wrote it down. The document says who, so the trail survives a change
+    // of staff.
+    //
+    // Approval is the separation; posting is the errand. The approver may post
+    // the document they signed, and so may the storekeeper who recorded it.
+    // Refusing the approver here - which this used to do, with the approval's
+    // own message - meant a write-off needed three different people to be
+    // booked: two to sign it and a third to press post. On a company with one
+    // manager that is a document that can never be posted.
+    if (document.kind === StockDocumentKind.WRITE_OFF) {
+      if (!document.approvedAt || !document.approvedBy) {
+        throw new BadRequestException(
+          'A write-off must be approved before it is posted. / يجب اعتماد مستند الإعدام قبل ترحيله.',
+        );
+      }
+    }
 
+    if (document.kind === StockDocumentKind.TRANSFER &&
+        document.lines.some((line) => !line.quantity.greaterThan(0))) {
+      throw new BadRequestException('Transfer quantities must be positive before posting');
+    }
     const settings = await this.settings.get(companyId);
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -388,19 +651,52 @@ export class StockDocumentsService {
           // Out of the source branch, into the destination, at the cost the
           // stock actually carries. No value is created or destroyed, so no
           // journal entry is needed: it is the same company's inventory.
+
+          // Warehouse-level rule first: the branch total may cover the line
+          // while this specific source warehouse does not. stock_balances is
+          // branch-granular, so without this check the warehouse's derived
+          // card could be driven below zero (observed defect). The guard
+          // locks the warehouse row, which also serialises concurrent
+          // transfers draining the same pile.
+          await this.warehouses.assertWarehouseAvailable({
+            tx,
+            companyId,
+            warehouseId: fromWarehouseId,
+            itemId: line.itemId,
+            quantity: line.quantity,
+            allowNegative: settings.allowNegativeStock,
+            reference: document.documentNumber,
+          });
+
           const fromBalance = await this.balance(tx, companyId, document.fromBranchId as string, line.itemId);
           const availableQty = fromBalance?.quantity ?? new Prisma.Decimal(0);
-          const availableValue = fromBalance?.value ?? new Prisma.Decimal(0);
           if (availableQty.lessThan(line.quantity) && !settings.allowNegativeStock) {
             throw new BadRequestException(
               `Not enough stock to transfer: ${availableQty.toFixed(MONEY_SCALE)} on hand, ` +
                 `${line.quantity.toFixed(MONEY_SCALE)} requested.`,
             );
           }
-          const unitCost = availableQty.isZero()
+          // What the goods are worth where they leave, not what the branch
+          // averages: a transfer carries the source shelf's cost to the
+          // destination, and the destination re-averages with it.
+          const sourceShelf = await this.ledger.position(tx, {
+            companyId,
+            branchId: document.fromBranchId as string,
+            warehouseId: fromWarehouseId,
+            itemId: line.itemId,
+          });
+          const unitCost = sourceShelf.quantity.isZero()
             ? line.unitCost
-            : availableValue.div(availableQty).toDecimalPlaces(MONEY_SCALE);
+            : sourceShelf.unitCost.toDecimalPlaces(MONEY_SCALE);
           const totalCost = unitCost.mul(line.quantity).toDecimalPlaces(MONEY_SCALE);
+
+          // The line keeps the cost it moved at. Without this the document
+          // printed "2 units, 0.00" while the movements it produced carried 30,
+          // and the snapshot column promised exactly the figure it was missing.
+          await tx.stockDocumentLine.update({
+            where: { id: line.id },
+            data: { unitCost, totalCost },
+          });
 
           await this.move(tx, {
             companyId,
@@ -409,6 +705,10 @@ export class StockDocumentsService {
             date: document.documentDate,
             direction: StockDirection.OUT,
             quantity: line.quantity,
+            enteredUnit: line.unitName,
+            enteredQuantity: line.unitQuantity,
+            unitFactor: line.unitFactor,
+            baseUnitName: line.unitName ?? 'unit',
             unitCost,
             totalCost,
             referenceType: 'STOCK_TRANSFER_OUT',
@@ -425,6 +725,10 @@ export class StockDocumentsService {
             date: document.documentDate,
             direction: StockDirection.IN,
             quantity: line.quantity,
+            enteredUnit: line.unitName,
+            enteredQuantity: line.unitQuantity,
+            unitFactor: line.unitFactor,
+            baseUnitName: line.unitName ?? 'unit',
             unitCost,
             totalCost,
             referenceType: 'STOCK_TRANSFER_IN',
@@ -434,12 +738,47 @@ export class StockDocumentsService {
             requireStock: false,
             warehouseId: toWarehouseId,
           });
+
+          // The lots travel with the goods. Without this the destination shelf
+          // held quantity no lot claimed - so a later issue of a lot-controlled
+          // item was refused for a shortfall on a shelf that showed stock - and
+          // the source lot kept claiming goods that had already left.
+          await this.moveLots(tx, {
+            companyId,
+            userId,
+            itemId: line.itemId,
+            fromWarehouseId: fromWarehouseId ?? null,
+            toWarehouseId,
+            toBranchId: document.branchId,
+            quantity: line.quantity,
+            batchId: line.batchId ?? null,
+            date: document.documentDate,
+            referenceNumber: document.documentNumber,
+          });
           continue;
         }
 
         // ADJUSTMENT and COUNT both come down to "this many units move".
         let quantity = line.quantity;
         let unitCost = line.unitCost;
+        // For a write-off the direction and amount are already known. Take
+        // the warehouse lock before the branch balance lock, as transfer and
+        // reversal do; taking them in the opposite order can deadlock.
+        if (
+          (document.kind === StockDocumentKind.ADJUSTMENT ||
+            document.kind === StockDocumentKind.WRITE_OFF) &&
+          quantity.lessThan(0)
+        ) {
+          await this.warehouses.assertWarehouseAvailable({
+            tx,
+            companyId,
+            warehouseId: toWarehouseId,
+            itemId: line.itemId,
+            quantity: quantity.abs(),
+            allowNegative: settings.allowNegativeStock,
+            reference: document.documentNumber,
+          });
+        }
         const balance = await this.balance(tx, companyId, document.branchId, line.itemId);
         const onHand = balance?.quantity ?? new Prisma.Decimal(0);
         const onHandValue = balance?.value ?? new Prisma.Decimal(0);
@@ -448,8 +787,23 @@ export class StockDocumentsService {
           : onHandValue.div(onHand).toDecimalPlaces(MONEY_SCALE);
 
         if (document.kind === StockDocumentKind.COUNT) {
+          // A count is of a place, not of a company. When it names a
+          // warehouse, the book figure it is compared with is that warehouse's
+          // own card - the same figure the difference report calls the system
+          // quantity. Measuring it against the branch total made counting one
+          // store while another held goods post the whole difference here,
+          // which moved stock that had never been counted.
+          const bookQuantity =
+            document.kind === StockDocumentKind.COUNT && toWarehouseId
+              ? await this.warehouses.availableQuantity(
+                  tx,
+                  companyId,
+                  toWarehouseId,
+                  line.itemId,
+                )
+              : onHand;
           const counted = line.countedQuantity ?? new Prisma.Decimal(0);
-          quantity = counted.minus(onHand);
+          quantity = counted.minus(bookQuantity);
           if (unitCost.isZero()) unitCost = averageCost;
           await tx.stockDocumentLine.update({
             where: { id: line.id },
@@ -467,6 +821,15 @@ export class StockDocumentsService {
         const absoluteQuantity = quantity.abs();
         const totalCost = unitCost.mul(absoluteQuantity).toDecimalPlaces(MONEY_SCALE);
 
+        // A write-off that carried the shelf average because nobody typed a
+        // cost must say so on its own line: the paper is what an auditor reads.
+        await tx.stockDocumentLine.update({
+          where: { id: line.id },
+          data: { unitCost, totalCost },
+        });
+
+        // COUNT remains a reconciliation to physically counted reality and
+        // retains its existing branch-level-only posting policy.
         await this.move(tx, {
           companyId,
           branchId: document.branchId,
@@ -474,16 +837,69 @@ export class StockDocumentsService {
           date: document.documentDate,
           direction,
           quantity: absoluteQuantity,
+          enteredUnit: line.unitName,
+          enteredQuantity: line.unitQuantity,
+          unitFactor: line.unitFactor,
+          baseUnitName: line.unitName ?? 'unit',
           unitCost,
           totalCost,
           referenceType:
-            document.kind === StockDocumentKind.COUNT ? 'STOCK_COUNT' : 'STOCK_ADJUSTMENT',
+            document.kind === StockDocumentKind.COUNT
+              ? 'STOCK_COUNT'
+              : document.kind === StockDocumentKind.WRITE_OFF
+                ? 'STOCK_WRITE_OFF'
+                : 'STOCK_ADJUSTMENT',
           referenceId: document.id,
           referenceNumber: document.documentNumber,
           userId,
           requireStock: direction === StockDirection.OUT && !settings.allowNegativeStock,
           warehouseId: toWarehouseId,
+          // The lot and the shelf the paper names travel with the movement, so
+          // the shelf card, the lot card and the document cannot disagree.
+          batchId: line.batchId ?? null,
+          storageLocationId: line.storageLocationId ?? null,
         });
+
+        // A line that names a lot moves that lot, not only the shelf: a
+        // write-off must not leave the lot card claiming goods that have been
+        // destroyed, and a count that found two missing from a lot must take
+        // them out of that lot rather than out of the shelf's average. Both
+        // arrive here the same way - a document line with a batchId - so both
+        // are handled the same way.
+        if (line.batchId) {
+          if (direction === StockDirection.OUT) {
+            const claimed = await tx.itemBatch.updateMany({
+              where: {
+                id: line.batchId,
+                companyId,
+                remainingQuantity: { gte: absoluteQuantity },
+              },
+              data: { remainingQuantity: { decrement: absoluteQuantity } },
+            });
+            if (claimed.count !== 1) {
+              throw new BadRequestException(
+                'The lot does not hold enough for that quantity. / الدفعة لا تحمل الكمية المطلوبة.',
+              );
+            }
+            await tx.$executeRaw(Prisma.sql`
+              UPDATE "item_batches"
+                 SET "status" = 'CLOSED'
+               WHERE "id" = ${line.batchId}::uuid
+                 AND "remainingQuantity" = 0
+                 AND "status" <> 'WRITTEN_OFF'
+            `);
+          } else {
+            // Found in that lot: the lot holds more, and its received figure
+            // moves with it so the two never disagree.
+            await tx.itemBatch.updateMany({
+              where: { id: line.batchId, companyId },
+              data: {
+                remainingQuantity: { increment: absoluteQuantity },
+                receivedQuantity: { increment: absoluteQuantity },
+              },
+            });
+          }
+        }
 
         valueChange = valueChange.plus(
           direction === StockDirection.IN ? totalCost : totalCost.negated(),
@@ -570,6 +986,64 @@ export class StockDocumentsService {
   }
 
   /** Reverses a posted document: opposite movements, and the entry mirror. */
+  /// Approves a write-off, once.
+  ///
+  /// The claim is a conditional update, not a read-then-write: two people
+  /// pressing approve at the same moment produce exactly one approval, and the
+  /// loser is told so instead of silently overwriting the first name.
+  async approve(companyId: string, userId: string, id: string) {
+    const document = await this.prisma.stockDocument.findFirst({
+      where: { id, companyId, deletedAt: null },
+      select: {
+        id: true,
+        kind: true,
+        status: true,
+        documentNumber: true,
+        createdBy: true,
+        approvedAt: true,
+        approvedBy: true,
+      },
+    });
+    if (!document) throw new NotFoundException('Stock document not found');
+    if (document.kind !== StockDocumentKind.WRITE_OFF) {
+      throw new BadRequestException(
+        'Only a write-off needs an approval. / الاعتماد مطلوب لمستند الإعدام فقط.',
+      );
+    }
+    if (document.approvedAt) {
+      throw new BadRequestException(
+        `This write-off was already approved. / تم اعتماد هذا المستند مسبقًا (${document.documentNumber}).`,
+      );
+    }
+    if (document.status !== InvoiceStatus.DRAFT) {
+      throw new BadRequestException('Only a draft write-off can be approved');
+    }
+    if (document.createdBy && document.createdBy === userId) {
+      throw new BadRequestException(
+        'The person who recorded a write-off cannot approve it. / لا يجوز أن يعتمد المستخدم المستند الذي أنشأه.',
+      );
+    }
+
+    const claimed = await this.prisma.stockDocument.updateMany({
+      where: { id: document.id, companyId, approvedAt: null, status: InvoiceStatus.DRAFT },
+      data: { approvedAt: new Date(), approvedBy: userId },
+    });
+    if (claimed.count !== 1) {
+      throw new BadRequestException('This write-off was approved by someone else a moment ago.');
+    }
+
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'APPROVE',
+      entity: 'stock_documents',
+      entityId: document.id,
+      after: { documentNumber: document.documentNumber, approvedBy: userId },
+    });
+
+    return this.findOne(companyId, document.id);
+  }
+
   async reverse(companyId: string, userId: string, id: string) {
     const document = await this.prisma.stockDocument.findFirst({
       where: { id, companyId, deletedAt: null },
@@ -580,6 +1054,11 @@ export class StockDocumentsService {
       throw new BadRequestException('Only a posted stock document can be reversed');
     }
 
+    if (document.kind === StockDocumentKind.TRANSFER &&
+        document.lines.some((line) => line.quantity.isNegative())) {
+      throw new BadRequestException('Cannot automatically reverse a transfer with negative quantities; contact support');
+    }
+    const settings = await this.settings.get(companyId);
     await this.prisma.$transaction(async (tx) => {
       const claimed = await tx.stockDocument.updateMany({
         where: { id, status: InvoiceStatus.POSTED },
@@ -603,6 +1082,42 @@ export class StockDocumentsService {
             document.fromWarehouseId,
           )
         : reversalToWarehouseId;
+
+      // Check every pile that the reversal will take stock from before any
+      // branch balance is locked or movement is written. Aggregate repeated
+      // items: checking each line against the same starting balance would let
+      // several individually affordable lines overdraw the warehouse.
+      const outgoing = new Map<string, { warehouseId: string; itemId: string; quantity: Prisma.Decimal }>();
+      for (const line of document.lines) {
+        const warehouseId = reversalToWarehouseId;
+        const isOutgoing = document.kind === StockDocumentKind.TRANSFER
+          ? !line.quantity.isZero()
+          : line.quantity.greaterThan(0);
+        if (!warehouseId || !isOutgoing) continue;
+        const key = `${warehouseId}:${line.itemId}`;
+        const previous = outgoing.get(key);
+        outgoing.set(key, {
+          warehouseId,
+          itemId: line.itemId,
+          quantity: (previous?.quantity ?? new Prisma.Decimal(0)).plus(line.quantity.abs()),
+        });
+      }
+      // Consistent warehouse ordering avoids taking warehouse locks in line
+      // order; other posting paths still need real-Postgres concurrency tests.
+      const checks = [...outgoing.values()].sort((a, b) =>
+        a.warehouseId.localeCompare(b.warehouseId) || a.itemId.localeCompare(b.itemId),
+      );
+      for (const check of checks) {
+        await this.warehouses.assertWarehouseAvailable({
+          tx,
+          companyId,
+          warehouseId: check.warehouseId,
+          itemId: check.itemId,
+          quantity: check.quantity,
+          allowNegative: settings.allowNegativeStock,
+          reference: document.documentNumber,
+        });
+      }
 
       for (const line of document.lines) {
         const targets =
@@ -628,6 +1143,10 @@ export class StockDocumentsService {
             date: new Date(),
             direction: wasOut ? StockDirection.IN : StockDirection.OUT,
             quantity: line.quantity.abs(),
+            enteredUnit: line.unitName,
+            enteredQuantity: line.unitQuantity,
+            unitFactor: line.unitFactor,
+            baseUnitName: line.unitName ?? 'unit',
             unitCost: line.unitCost,
             totalCost: line.unitCost.mul(line.quantity.abs()).toDecimalPlaces(MONEY_SCALE),
             referenceType: 'STOCK_DOCUMENT_REVERSAL',
@@ -664,6 +1183,12 @@ export class StockDocumentsService {
 
   // ------------------------------------------------------------------ helpers
 
+  /// The branch balance, locked for the rest of the transaction.
+  ///
+  /// The document engine keeps its own branch-level read: a transfer touches
+  /// two warehouses and the branch figure is what the posting arithmetic is
+  /// built on. The shelf's own book is written beside it by the ledger, so the
+  /// two can never disagree.
   private async balance(
     tx: Prisma.TransactionClient,
     companyId: string,
@@ -681,6 +1206,129 @@ export class StockDocumentsService {
        FOR UPDATE
     `);
     return rows[0] ?? null;
+  }
+
+  /// Takes the same goods out of the source lots and puts them into the
+  /// destination's, soonest expiry first.
+  ///
+  /// Only what the lots actually hold is moved: a shelf that also carries
+  /// unbatched stock (received before lots existed, or moved in by an earlier
+  /// version of this document) transfers that part without a lot, exactly as it
+  /// arrived. Nothing is invented, and no lot appears at the destination with
+  /// more than left the source.
+  private async moveLots(
+    tx: Prisma.TransactionClient,
+    input: {
+      companyId: string;
+      userId: string;
+      itemId: string;
+      /// Null only for a branch that has no warehouse at all, where there is no
+      /// shelf for a lot to sit on and nothing to move.
+      fromWarehouseId: string | null;
+      toWarehouseId: string | null;
+      toBranchId: string;
+      quantity: Prisma.Decimal;
+      batchId: string | null;
+      date: Date;
+      referenceNumber: string;
+    },
+  ): Promise<Prisma.Decimal> {
+    if (!input.fromWarehouseId || !input.toWarehouseId) return new Prisma.Decimal(0);
+
+    const lots = await tx.itemBatch.findMany({
+      where: {
+        companyId: input.companyId,
+        warehouseId: input.fromWarehouseId,
+        itemId: input.itemId,
+        deletedAt: null,
+        remainingQuantity: { gt: 0 },
+        ...(input.batchId ? { id: input.batchId } : {}),
+      },
+      orderBy: { expiryDate: 'asc' },
+    });
+    if (lots.length === 0) return new Prisma.Decimal(0);
+
+    // Expiry does not stop a transfer: the goods are already the company's and
+    // are not being sold. It only decides the order they are taken in.
+    const selection = selectLotsFefo(
+      lots.map((lot) => ({
+        batchId: lot.id,
+        batchNumber: lot.batchNumber,
+        expiryDate: lot.expiryDate,
+        productionDate: lot.productionDate,
+        unitCost: lot.unitCost,
+        remainingQuantity: lot.remainingQuantity,
+        status: lot.status,
+      })),
+      input.quantity,
+      { today: input.date, allowExpired: true },
+    );
+
+    let moved = new Prisma.Decimal(0);
+    for (const allocation of selection.allocations) {
+      const source = lots.find((lot) => lot.id === allocation.batchId);
+      if (!source) continue;
+      const claimed = await tx.itemBatch.updateMany({
+        where: { id: source.id, remainingQuantity: { gte: allocation.quantity } },
+        data: {
+          remainingQuantity: { decrement: allocation.quantity },
+          updatedBy: input.userId,
+        },
+      });
+      if (claimed.count !== 1) {
+        throw new ConflictException(
+          'تم تعديل الدفعة أثناء التحويل. أعد المحاولة. / The lot changed while the transfer was posted; try again.',
+        );
+      }
+      await tx.$executeRaw(Prisma.sql`
+        UPDATE "item_batches"
+           SET "status" = 'CLOSED'
+         WHERE "id" = ${source.id}::uuid
+           AND "remainingQuantity" = 0
+           AND "status" <> 'WRITTEN_OFF'
+      `);
+
+      const destination = await tx.itemBatch.findFirst({
+        where: {
+          companyId: input.companyId,
+          warehouseId: input.toWarehouseId,
+          itemId: input.itemId,
+          batchNumber: source.batchNumber,
+          deletedAt: null,
+        },
+      });
+      if (destination) {
+        await tx.itemBatch.update({
+          where: { id: destination.id },
+          data: {
+            receivedQuantity: { increment: allocation.quantity },
+            remainingQuantity: { increment: allocation.quantity },
+            updatedBy: input.userId,
+          },
+        });
+      } else {
+        await tx.itemBatch.create({
+          data: {
+            companyId: input.companyId,
+            branchId: input.toBranchId,
+            warehouseId: input.toWarehouseId,
+            itemId: input.itemId,
+            batchNumber: source.batchNumber,
+            productionDate: source.productionDate,
+            expiryDate: source.expiryDate,
+            receivedQuantity: allocation.quantity,
+            remainingQuantity: allocation.quantity,
+            unitCost: source.unitCost,
+            status: 'OPEN',
+            sourceType: 'BATCH_TRANSFER',
+            sourceNumber: input.referenceNumber,
+            createdBy: input.userId,
+          },
+        });
+      }
+      moved = moved.plus(allocation.quantity);
+    }
+    return moved;
   }
 
   private async move(
@@ -702,6 +1350,20 @@ export class StockDocumentsService {
       /// Which pile the goods sat in, or moved to. Null only when the company
       /// has no warehouse for the branch at all.
       warehouseId?: string | null;
+      /// How the line was typed. The document line already froze these three
+      /// values; the movement carries them so the stock card can say "1 reel"
+      /// as readily as "500 m" long after the document is closed.
+      enteredUnit?: string | null;
+      enteredQuantity?: Prisma.Decimal | null;
+      unitFactor?: Prisma.Decimal | null;
+      baseUnitName?: string | null;
+      /// Which lot and which shelf the goods left or arrived on. A document
+      /// line already names both; carrying them onto the movement is what lets
+      /// the shelf card and the lot card say the same thing as the paper - a
+      /// write-off that dropped them left the bin still showing goods that had
+      /// been destroyed.
+      batchId?: string | null;
+      storageLocationId?: string | null;
     },
   ) {
     const balance = await this.balance(tx, input.companyId, input.branchId, input.itemId);
@@ -729,8 +1391,17 @@ export class StockDocumentsService {
         movementDate: input.date,
         direction: input.direction,
         quantity: input.quantity,
+        ...movementUnitSnapshot({
+          enteredUnit: input.enteredUnit,
+          enteredQuantity: input.enteredQuantity,
+          unitFactor: input.unitFactor,
+          baseUnitName: input.baseUnitName ?? 'unit',
+          baseQuantity: input.quantity,
+        }),
         unitCost: input.unitCost,
         totalCost: input.totalCost,
+        batchId: input.batchId ?? null,
+        storageLocationId: input.storageLocationId ?? null,
         referenceType: input.referenceType,
         referenceId: input.referenceId,
         referenceNumber: input.referenceNumber,
@@ -738,43 +1409,29 @@ export class StockDocumentsService {
       },
     });
 
-    const where = {
-      companyId_branchId_itemId: {
+    // Both books in one place: the shelf the document names, and the branch
+    // roll-up the reports read.
+    await this.ledger.post(
+      tx,
+      {
         companyId: input.companyId,
         branchId: input.branchId,
+        warehouseId: input.warehouseId ?? null,
         itemId: input.itemId,
+        quantity: input.direction === StockDirection.IN ? input.quantity : input.quantity.negated(),
+        value: input.direction === StockDirection.IN ? input.totalCost : input.totalCost.negated(),
       },
-    };
-    if (input.direction === StockDirection.IN) {
-      await tx.stockBalance.upsert({
-        where,
-        create: {
-          companyId: input.companyId,
-          branchId: input.branchId,
-          itemId: input.itemId,
-          quantity: input.quantity,
-          value: input.totalCost,
-        },
-        update: {
-          quantity: { increment: input.quantity },
-          value: { increment: input.totalCost },
-        },
-      });
-    } else {
-      if (!balance) {
-        throw new BadRequestException(
-          `No stock balance exists for ${input.referenceNumber}; an OUT movement cannot create negative stock.`,
-        );
-      }
-      await tx.stockBalance.update({
-        where,
-        data: {
-          quantity: { decrement: input.quantity },
-          value: { decrement: input.totalCost },
-        },
-      });
-    }
+      // The guard above already refused an OUT beyond what is held; a reversal
+      // path may still need to undo a movement whose shelf has been emptied.
+      { allowNegative: !input.requireStock },
+    );
   }
+
+  // Unit resolution for stock lines lives in resolveUnitSelection
+  // (common/units/unit-math): it refuses unknown and inactive units, converts
+  // the entered quantity into base units and builds the frozen snapshot. The
+  // previous private unitFactor() helper is fully subsumed by that path, which
+  // also honours the stock-document `unit` field via requestedUnitName.
 
   private decimal(value: unknown, field: string): Prisma.Decimal {
     try {
@@ -804,6 +1461,17 @@ export class StockDocumentsService {
     branch?: { code: string; nameEn: string; nameAr: string };
     costCenterId?: string | null;
     costCenter?: { id: string; code: string; nameEn: string; nameAr: string } | null;
+    fromWarehouseId?: string | null;
+    toWarehouseId?: string | null;
+    createdBy?: string | null;
+    postedBy?: string | null;
+    approvedAt?: Date | null;
+    approvedBy?: string | null;
+    approvedByName?: string | null;
+    fromWarehouse?: { id: string; code: string; nameEn: string; nameAr: string } | null;
+    toWarehouse?: { id: string; code: string; nameEn: string; nameAr: string } | null;
+    createdByName?: string | null;
+    postedByName?: string | null;
   }) {
     return {
       id: document.id,
@@ -816,8 +1484,24 @@ export class StockDocumentsService {
       branch: document.branch,
       costCenterId: document.costCenterId ?? null,
       costCenter: document.costCenter ?? null,
+      // Where the goods left and where they arrived. Null means the branch
+      // default, which is what the posting used - so the screen names the
+      // default rather than showing an empty cell.
+      fromWarehouseId: document.fromWarehouseId ?? null,
+      toWarehouseId: document.toWarehouseId ?? null,
+      fromWarehouse: document.fromWarehouse ?? null,
+      toWarehouse: document.toWarehouse ?? null,
+      createdById: document.createdBy ?? null,
+      createdByName: document.createdByName ?? null,
+      postedById: document.postedBy ?? null,
+      postedByName: document.postedByName ?? null,
       journalEntryId: document.journalEntryId,
       postedAt: document.postedAt?.toISOString() ?? null,
+      // Who signed the loss or the count, and when. A document that needs an
+      // approval says so on its own face rather than only in the audit log.
+      approvedAt: document.approvedAt?.toISOString() ?? null,
+      approvedById: document.approvedBy ?? null,
+      approvedByName: document.approvedByName ?? null,
       createdAt: document.createdAt.toISOString(),
     };
   }

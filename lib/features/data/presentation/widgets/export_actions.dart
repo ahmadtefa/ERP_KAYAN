@@ -5,6 +5,7 @@ import '../../../../core/platform/browser_actions.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../providers/data_providers.dart';
+import 'print_visibility_prompt.dart';
 
 /// The ways out of a report: a spreadsheet, a plain file, a PDF, or paper.
 ///
@@ -52,7 +53,43 @@ class ReportExportActions extends ConsumerWidget {
     Future<void> download(Future<DownloadRequest> link) =>
         runDownload(context, link);
 
-    Future<void> showPage(Future<String> link) => runPrint(context, link);
+    Future<void> downloadPdf() async {
+      final visibility = await promptPriceVisibility(
+        context,
+        ref,
+        typeKey: report,
+        arabic: language == 'ar',
+      );
+      if (visibility == null || !context.mounted) return;
+      await download(links.pdf(
+        report: report,
+        language: language,
+        from: from,
+        to: to,
+        accountId: accountId,
+        showSalePrice: visibility.showSalePrice,
+        showCost: visibility.showCost,
+      ));
+    }
+
+    Future<void> showPage() async {
+      final visibility = await promptPriceVisibility(
+        context,
+        ref,
+        typeKey: report,
+        arabic: language == 'ar',
+      );
+      if (visibility == null || !context.mounted) return;
+      await runPrint(context, links.print(
+        report: report,
+        language: language,
+        from: from,
+        to: to,
+        accountId: accountId,
+        showSalePrice: visibility.showSalePrice,
+        showCost: visibility.showCost,
+      ));
+    }
 
     return Wrap(
       spacing: 8,
@@ -93,17 +130,7 @@ class ReportExportActions extends ConsumerWidget {
         ),
         if (pdfReady)
           FilledButton.tonalIcon(
-            onPressed: ready
-                ? () => download(
-                      links.pdf(
-                        report: report,
-                        language: language,
-                        from: from,
-                        to: to,
-                        accountId: accountId,
-                      ),
-                    )
-                : null,
+            onPressed: ready ? downloadPdf : null,
             icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
             label: Text(l10n.exportPdf),
           ),
@@ -112,17 +139,7 @@ class ReportExportActions extends ConsumerWidget {
           // one, so the tooltip says which dialogue option saves the file.
           message: pdfReady ? l10n.printPdfHint : l10n.printHintWhenNoPdf,
           child: OutlinedButton.icon(
-            onPressed: ready
-                ? () => showPage(
-                      links.print(
-                        report: report,
-                        language: language,
-                        from: from,
-                        to: to,
-                        accountId: accountId,
-                      ),
-                    )
-                : null,
+            onPressed: ready ? showPage : null,
             icon: const Icon(Icons.print_outlined, size: 18),
             label: Text(l10n.print),
           ),

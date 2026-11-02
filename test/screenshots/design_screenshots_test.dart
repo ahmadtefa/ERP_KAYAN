@@ -1,17 +1,22 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:erp_kayan/app/router/app_router.dart';
 import 'package:erp_kayan/app/shell/erp_shell.dart';
 import 'package:erp_kayan/app/theme/app_theme.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
+import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/json/json_utils.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/accounting/domain/entities/account.dart';
+import 'package:erp_kayan/features/admin/presentation/screens/admin_screen.dart';
 import 'package:erp_kayan/features/accounting/presentation/providers/chart_of_accounts_providers.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/dashboard/presentation/providers/dashboard_providers.dart';
 import 'package:erp_kayan/features/dashboard/presentation/screens/dashboard_screen.dart';
+import 'package:erp_kayan/features/inventory/presentation/screens/items_screen.dart';
+import 'package:erp_kayan/features/invoicing/presentation/screens/invoice_editor_screen.dart';
 import 'package:erp_kayan/features/invoicing/presentation/providers/invoice_providers.dart';
 import 'package:erp_kayan/features/invoicing/presentation/screens/invoice_list_screen.dart';
 import 'package:erp_kayan/features/parties/presentation/screens/parties_screen.dart';
@@ -45,16 +50,126 @@ class _FakeApiClient extends ApiClient {
     return switch (path) {
       '/parties/customers' => _customers,
       '/sales/invoices' => _invoices,
+      '/inventory/items' => _items,
+      '/admin/users' => _users,
       _ => const <Map<String, dynamic>>[],
     };
+  }
+
+  /// A face, so the picture path is drawn and not only the initial.
+  ///
+  /// The bytes are rendered by the test itself (see `_renderAvatarPng`), so a
+  /// screenshot never depends on a file being present or on the network.
+  @override
+  Future<Uint8List> getBytes(String path) async {
+    if (_avatarPng != null && path.startsWith('/users/')) return _avatarPng!;
+    throw const ServerFailure('no photo in these screenshots');
   }
 
   @override
   Future<Map<String, dynamic>> getObject(
     String path, {
     Map<String, dynamic>? query,
-  }) async => const <String, dynamic>{};
+  }) async {
+    if (path == '/inventory/items/item-water/units') {
+      return <String, dynamic>{
+        'item': <String, dynamic>{
+          'id': 'item-water',
+          'code': 'WATER-1',
+          'unit': 'عبوة',
+        },
+        'items': _waterUnits,
+      };
+    }
+    return const <String, dynamic>{};
+  }
 }
+
+/// Mineral water: a bottle is the base unit, a carton is twelve of them. The
+/// screens shown here are the ones a shopkeeper uses to say so and to sell
+/// by it.
+const _waterUnits = <Map<String, dynamic>>[
+  <String, dynamic>{
+    'id': 'unit-bottle',
+    'unit': 'عبوة',
+    'factor': '1.000000',
+    'barcode': '6221000000011',
+    'salePrice': null,
+    'purchasePrice': null,
+    'isBase': true,
+    'isActive': true,
+    'allowFraction': true,
+    'usedInSales': true,
+    'usedInPurchases': true,
+    'sortOrder': 0,
+    'abbreviation': 'عبوة',
+    'perBaseSalePrice': '5.0000',
+    'salePriceAgrees': true,
+  },
+  <String, dynamic>{
+    'id': 'unit-carton',
+    'unit': 'كرتونة',
+    'factor': '12.000000',
+    'barcode': '6221000000028',
+    'salePrice': null,
+    'purchasePrice': null,
+    'isBase': false,
+    'isActive': true,
+    'allowFraction': true,
+    'usedInSales': true,
+    'usedInPurchases': true,
+    'sortOrder': 1,
+    'abbreviation': 'كرت',
+    'perBaseSalePrice': '5.0000',
+    'salePriceAgrees': true,
+  },
+];
+
+final _items = <Map<String, dynamic>>[
+  <String, dynamic>{
+    'id': 'item-water',
+    'code': 'WATER-1',
+    'nameEn': 'Mineral water',
+    'nameAr': 'مياه معدنية',
+    'unit': 'عبوة',
+    'barcode': '6221000000011',
+    'salePrice': '5.0000',
+    'purchasePrice': '4.0000',
+    'taxRate': '0.0000',
+    'isActive': true,
+    'isStockTracked': true,
+    'units': _waterUnits,
+  },
+  <String, dynamic>{
+    'id': 'item-cable',
+    'code': 'CAB-500',
+    'nameEn': 'Cable reel 500 m',
+    'nameAr': 'لفة كابل ٥٠٠ متر',
+    'unit': 'متر',
+    'barcode': null,
+    'salePrice': '10.0000',
+    'purchasePrice': '8.0000',
+    'taxRate': '0.0000',
+    'isActive': true,
+    'isStockTracked': true,
+    'units': <Map<String, dynamic>>[
+      <String, dynamic>{
+        'id': 'unit-metre',
+        'unit': 'متر',
+        'factor': '1.000000',
+        'isBase': true,
+        'isActive': true,
+      },
+      <String, dynamic>{
+        'id': 'unit-reel',
+        'unit': 'لفة',
+        'factor': '500.000000',
+        'isBase': false,
+        'isActive': true,
+      },
+    ],
+  },
+];
 
 const _customers = <Map<String, dynamic>>[
   {
@@ -240,44 +355,330 @@ final Json _monthly = <String, dynamic>{
   ],
 };
 
-/// The app ships no font of its own; a widget-test render would otherwise
-/// draw every glyph as a box. When the machine has a real font with Arabic
-/// coverage, register it so the screenshots stay readable. Absent fonts are
-/// fine — layout and colour still render.
+/// The people the administration screen lists: one with a picture, two
+/// without, which is exactly the pair of states the avatar has to render.
+final _users = <Map<String, dynamic>>[
+  <String, dynamic>{
+    'id': 'user-admin',
+    'username': 'admin',
+    'fullNameEn': 'System Manager',
+    'fullNameAr': 'مدير النظام',
+    'hasAvatar': true,
+    'isActive': true,
+    'isSuperAdmin': true,
+    'roles': <Map<String, dynamic>>[
+      <String, dynamic>{'code': 'ADMIN', 'nameAr': 'مدير النظام'},
+    ],
+    'lastLoginAt': '2026-11-01T09:15:00.000Z',
+  },
+  <String, dynamic>{
+    'id': 'user-sales',
+    'username': 'sales',
+    'fullNameEn': 'Sales Clerk',
+    'fullNameAr': 'موظف مبيعات',
+    'hasAvatar': false,
+    'isActive': true,
+    'isSuperAdmin': false,
+    'roles': <Map<String, dynamic>>[
+      <String, dynamic>{'code': 'SALES', 'nameAr': 'مبيعات'},
+    ],
+    'lastLoginAt': '2026-10-30T13:40:00.000Z',
+  },
+  <String, dynamic>{
+    'id': 'user-store',
+    'username': 'store',
+    'fullNameEn': 'Store Keeper',
+    'fullNameAr': 'أمين المخزن',
+    'hasAvatar': false,
+    'isActive': false,
+    'isSuperAdmin': false,
+    'roles': <Map<String, dynamic>>[
+      <String, dynamic>{'code': 'STORE', 'nameAr': 'المخازن'},
+    ],
+  },
+];
+
+/// The same administrator, but with a photo, so the signed-in face can be
+/// seen in the top bar rather than only in the user list.
+const _adminWithPhoto = AppUser(
+  id: 'admin-1',
+  username: 'admin',
+  fullName: 'مدير النظام',
+  companyId: 'company-1',
+  branchId: 'branch-1',
+  roles: ['ADMIN'],
+  isSuperAdmin: true,
+  hasAvatar: true,
+  avatarUrl: '/users/admin-1/avatar',
+);
+
+/// A face drawn by the test: a warm head on a violet ground.
+Uint8List? _avatarPng;
+
+Future<Uint8List?> _renderAvatarPng() async {
+  try {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawCircle(
+      const Offset(64, 64),
+      64,
+      Paint()..color = const Color(0xFF6E58C8),
+    );
+    canvas.drawCircle(
+      const Offset(64, 50),
+      24,
+      Paint()..color = const Color(0xFFF3D2B3),
+    );
+    canvas.drawCircle(
+      const Offset(64, 116),
+      38,
+      Paint()..color = const Color(0xFFF3D2B3),
+    );
+    final image = await recorder.endRecording().toImage(128, 128);
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    return data?.buffer.asUint8List();
+  } catch (_) {
+    // No rasteriser: the screen still renders, with the initial instead.
+    return null;
+  }
+}
+
+/// The application's own typeface, loaded before anything is rendered.
+///
+/// A widget test does not pick up the fonts declared in `pubspec.yaml`, and a
+/// test machine has no Arabic system font: without this every glyph - Arabic,
+/// Latin and icon alike - is an empty box, which is a picture of nothing. Two
+/// sources are tried, the package's asset bundle and the file beside the test,
+/// and the outcome is printed as a workflow notice so the run itself says
+/// whether the screens are readable instead of leaving that to be guessed from
+/// the pixels.
+Future<int> _loadScreenFonts() async {
+  const files = <String>[
+    'assets/fonts/IBMPlexSansArabic-Regular.ttf',
+    'assets/fonts/IBMPlexSansArabic-Medium.ttf',
+    'assets/fonts/IBMPlexSansArabic-SemiBold.ttf',
+    'assets/fonts/IBMPlexSansArabic-Bold.ttf',
+  ];
+  final loader = FontLoader('IBMPlexSansArabic');
+  var added = 0;
+  for (final name in files) {
+    final data = await _readFontFile(name);
+    if (data == null) continue;
+    loader.addFont(Future.value(data));
+    added += 1;
+  }
+  if (added == 0) return 0;
+  try {
+    await loader.load();
+  } catch (_) {
+    return 0;
+  }
+
+  // The icon font as well. Widget tests do not bundle it, so every `Icons.*`
+  // in a render is a hollow square - markup where a toolbar button should be.
+  // It lives in the Flutter SDK's cache, which is why the SDK has to be found
+  // rather than assumed.
+  final icons = await _findFile(<String>[
+    for (final root in _flutterRoots())
+      '$root/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+  ]);
+  if (icons != null) {
+    try {
+      final bytes = await icons.readAsBytes();
+      final iconLoader = FontLoader('MaterialIcons')
+        ..addFont(
+          Future.value(
+            ByteData.view(bytes.buffer, bytes.offsetInBytes, bytes.lengthInBytes),
+          ),
+        );
+      await iconLoader.load();
+    } catch (_) {
+      // Icons are decoration; their absence must not fail a screenshot.
+    }
+  }
+  return added;
+}
+
+/// Where the Flutter SDK is, as far as this machine can tell.
+List<String> _flutterRoots() {
+  final roots = <String>{
+    if (Platform.environment['FLUTTER_ROOT']?.isNotEmpty ?? false)
+      Platform.environment['FLUTTER_ROOT']!,
+  };
+  try {
+    final result = Process.runSync('which', ['flutter']);
+    final path = (result.stdout as String).trim();
+    if (path.endsWith('/flutter/bin/flutter')) {
+      roots.add(path.substring(0, path.length - '/bin/flutter'.length));
+    }
+  } catch (_) {
+    // No shell to ask; the guesses below are still worth trying.
+  }
+  roots.addAll(<String>[
+    '/opt/flutter',
+    '/usr/local/flutter',
+    '/usr/lib/flutter',
+    '${Platform.environment['HOME'] ?? ''}/flutter',
+  ]);
+  return roots.where((root) => root.isNotEmpty).toList();
+}
+
+Future<File?> _findFile(List<String> paths) async {
+  for (final path in paths) {
+    final file = File(path);
+    if (await file.exists()) return file;
+  }
+  return null;
+}
+
+/// The bytes of a font, from the bundle first and from disk second.
+Future<ByteData?> _readFontFile(String name) async {
+  try {
+    return await rootBundle.load(name);
+  } catch (_) {
+    // Not in the bundle: the file beside the test is the other source.
+  }
+  for (final root in <String>[
+    Directory.current.path,
+    '${Directory.current.path}/..',
+  ]) {
+    final file = File('$root/$name');
+    if (!await file.exists()) continue;
+    try {
+      final bytes = await file.readAsBytes();
+      return ByteData.view(bytes.buffer, bytes.offsetInBytes, bytes.lengthInBytes);
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
+}
+
+/// How wide a short Arabic word is in the family the app asks for.
+///
+/// The test font draws every glyph as a square, so four characters measure
+/// exactly four times the size; the real face does not. The difference is what
+/// the notice reports.
+double _probeWidth(String text, String? family, FontWeight weight) {
+  final painter = TextPainter(
+    text: TextSpan(
+      text: text,
+      style: TextStyle(fontFamily: family, fontSize: 20, fontWeight: weight),
+    ),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  return painter.width;
+}
+
 Future<void> _tryLoadSystemFonts() async {
-  const candidates = <String, List<String>>{
-    'NotoNaskhArabic': [
+  var added = await _loadScreenFonts();
+
+  if (added == 0) {
+    // No bundled file could be read: register a system Arabic face under the
+    // family the theme asks for, so the screens are still readable.
+    const systemFiles = <String>[
       '/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf',
       '/usr/share/fonts/truetype/fonts-noto-core/NotoNaskhArabic-Regular.ttf',
-    ],
-    'DejaVuSans': [
       '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
       '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-    ],
-  };
-  for (final entry in candidates.entries) {
-    for (final path in entry.value) {
+    ];
+    final loader = FontLoader('IBMPlexSansArabic');
+    for (final path in systemFiles) {
       final file = File(path);
       if (!await file.exists()) continue;
       try {
         final bytes = await file.readAsBytes();
-        final loader = FontLoader(entry.key)
-          ..addFont(Future.value(ByteData.view(bytes.buffer)));
-        await loader.load();
+        loader.addFont(
+          Future.value(
+            ByteData.view(bytes.buffer, bytes.offsetInBytes, bytes.lengthInBytes),
+          ),
+        );
       } catch (_) {
-        // A font that will not load must not fail a screenshot.
+        continue;
       }
+      added += 1;
       break;
     }
+    if (added > 0) {
+      try {
+        await loader.load();
+      } catch (_) {
+        added = 0;
+      }
+    }
   }
+
+  // A font that is really there measures differently per family and per
+  // weight; Ahem - the box font a widget test falls back to - draws every
+  // glyph as a square, so a five-letter word measures exactly 5 x the size.
+  // The run prints these numbers, so "is the screen readable?" is answered by
+  // the run rather than guessed from a picture.
+  final probes = <String>[];
+  for (final family in <String?>[
+    'IBMPlexSansArabic',
+    'Ahem',
+    'Noto Sans Arabic',
+    'DejaVu Sans',
+    null,
+  ]) {
+    final latin = _probeWidth('KAYAN', family, FontWeight.w400);
+    final arabic = _probeWidth('كيان', family, FontWeight.w400);
+    final bold = _probeWidth('KAYAN', family, FontWeight.w700);
+    probes.add(
+      '${family ?? 'default'} L=$latin A=$arabic B=$bold',
+    );
+  }
+  // ignore: avoid_print
+  print(
+    '::notice title=Screen font::files=$added | 5x20=100 and 4x20=80 mean '
+    'boxes | ${probes.join(' | ')}',
+  );
+
+  // If the theme's own family still draws squares, the screens are not worth
+  // publishing: say so in the run rather than shipping pictures of nothing.
+  if (_probeWidth('KAYAN', 'IBMPlexSansArabic', FontWeight.w400) >= 99.5) {
+    // ignore: avoid_print
+    print(
+      '::warning title=Screen font::the theme family still draws boxes; '
+      'the rendered screens are not readable',
+    );
+  }
+}
+
+/// Waits for the pictures on the screen to be decoded, then repaints.
+///
+/// `pumpAndSettle` settles animations, not image decoding: the logo and a
+/// person's photo arrive on a real event loop, so a screenshot taken straight
+/// after the first frame shows the space where they will be - and shows it
+/// inconsistently, which is worse: one run had the sidebar logo and the next
+/// did not. Pre-caching inside `runAsync` is what a real frame does, so the
+/// pictures are actually in the picture.
+Future<void> _settlePictures(WidgetTester tester) async {
+  await tester.runAsync(() async {
+    final context = tester.element(find.byType(MaterialApp));
+    for (final asset in <String>['1.png']) {
+      try {
+        await precacheImage(AssetImage(asset), context);
+      } catch (_) {
+        // A missing asset is the app's business, not the screenshot's.
+      }
+    }
+    // The avatar's bytes are a future, and its image decodes off the test
+    // clock; one turn of the real event loop is enough for both.
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+  });
+  await tester.pumpAndSettle();
 }
 
 Future<void> _pumpShot(
   WidgetTester tester, {
   required String route,
   required Widget child,
+  Size size = const Size(1440, 900),
+  Locale locale = const Locale('ar'),
+  AppUser user = _adminUser,
 }) async {
-  tester.view.physicalSize = const Size(1440, 900);
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(() {
     tester.view.resetPhysicalSize();
@@ -301,7 +702,7 @@ Future<void> _pumpShot(
         tokenStoreProvider.overrideWithValue(FakeTokenStore()),
         authRepositoryProvider.overrideWithValue(FakeAuthRepository()),
         apiClientProvider.overrideWithValue(_FakeApiClient()),
-        currentUserProvider.overrideWithValue(_adminUser),
+        currentUserProvider.overrideWithValue(user),
         chartOfAccountsProvider.overrideWith(
           _FakeChartOfAccountsController.new,
         ),
@@ -311,7 +712,10 @@ Future<void> _pumpShot(
         dashboardMonthlyProvider.overrideWith((ref) async => _monthly),
       ],
       child: MaterialApp.router(
-        locale: const Locale('ar'),
+        // The red corner ribbon is a developer notice, not part of the
+        // product: a screenshot with it would misrepresent the screen.
+        debugShowCheckedModeBanner: false,
+        locale: locale,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         theme: AppTheme.light(),
@@ -320,12 +724,16 @@ Future<void> _pumpShot(
     ),
   );
   await tester.pumpAndSettle();
+  await _settlePictures(tester);
 }
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUpAll(_tryLoadSystemFonts);
+  setUpAll(() async {
+    await _tryLoadSystemFonts();
+    _avatarPng = await _renderAvatarPng();
+  });
 
   testWidgets('screenshot: dashboard inside the shell (Arabic RTL)', (
     tester,
@@ -366,6 +774,189 @@ void main() {
     await expectLater(
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/sales_invoices_ar.png'),
+    );
+  });
+
+  // The two pictures that answer "where do I type 12, and what does the
+  // invoice say afterwards": the item's units with the carton already defined,
+  // and a sales line that reads ten cartons, one hundred and twenty bottles.
+  testWidgets('screenshot: the units of an item, carton of twelve (Arabic)', (
+    tester,
+  ) async {
+    await _pumpShot(
+      tester,
+      route: AppRoutes.items,
+      // Wide enough for the row actions, which sit at the far end of a
+      // horizontally scrollable table.
+      size: const Size(2000, 1000),
+      child: const ItemsScreen(),
+    );
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/items_packing_units_ar.png'),
+    );
+
+    // The row action that opens the units of this item.
+    final unitsButton = find.byIcon(Icons.qr_code_2_outlined).first;
+    await tester.ensureVisible(unitsButton);
+    await tester.pumpAndSettle();
+    await tester.tap(unitsButton);
+    await tester.pumpAndSettle();
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/item_units_dialog_ar.png'),
+    );
+  });
+
+  testWidgets('screenshot: ten cartons on a sales line (Arabic)', (
+    tester,
+  ) async {
+    await _pumpShot(
+      tester,
+      route: AppRoutes.salesInvoices,
+      size: const Size(1600, 1000),
+      child: const InvoiceEditorScreen(kind: InvoiceKind.sales),
+    );
+
+    await tester.tap(find.byType(DropdownButtonFormField<String>).at(0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('CUS-001 — Noor Trading').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('item-choice-null')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('WATER-1 — Mineral water').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('line-unit-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('كرتونة ×12').last);
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const ValueKey('line-quantity-0')), '10');
+    await tester.pumpAndSettle();
+
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/invoice_carton_line_ar.png'),
+    );
+  });
+
+  // The same screen in English: the redesign has to read left-to-right as
+  // well as right-to-left, and a picture is the only honest way to say so.
+  testWidgets('screenshot: dashboard in English (LTR)', (tester) async {
+    await _pumpShot(
+      tester,
+      route: AppRoutes.dashboard,
+      locale: const Locale('en'),
+      child: const DashboardScreen(),
+    );
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/dashboard_en.png'),
+    );
+  });
+
+  // One account with a photo and two without, in the same table: that is the
+  // screen an administrator uses to see who has set one.
+  testWidgets('screenshot: administration, people with and without photos (Arabic RTL)', (
+    tester,
+  ) async {
+    await _pumpShot(
+      tester,
+      route: AppRoutes.administration,
+      child: const AdminScreen(),
+    );
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/admin_users_ar.png'),
+    );
+  });
+
+  // The signed-in person's own face in the top bar, from `/users/:id/avatar`.
+  testWidgets('screenshot: the signed-in person with their own photo (Arabic RTL)', (
+    tester,
+  ) async {
+    await _pumpShot(
+      tester,
+      route: AppRoutes.dashboard,
+      user: _adminWithPhoto,
+      child: const DashboardScreen(),
+    );
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/shell_avatar_ar.png'),
+    );
+  });
+
+  // A diagnostic picture, not a screen: the same words drawn four ways, so
+  // "the screens show boxes" can be pinned to the path that loses the family
+  // instead of being guessed at. Line 3 is what the application itself does -
+  // a style read from `theme.textTheme` - and line 4 relies on the style a
+  // `Text` gets when it names none.
+  testWidgets('screenshot: what the renderer really draws (font probe)', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 470));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const ink = Color(0xFF111827);
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light(),
+        home: Scaffold(
+          backgroundColor: const Color(0xFFFFFFFF),
+          body: Builder(
+            builder: (context) {
+              final theme = Theme.of(context);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    '1 named family 0123 كيان',
+                    style: TextStyle(
+                      fontSize: 30,
+                      fontFamily: 'IBMPlexSansArabic',
+                      color: ink,
+                    ),
+                  ),
+                  Text(
+                    '2 theme.bodyMedium 0123 كيان',
+                    style: theme.textTheme.bodyMedium?.copyWith(fontSize: 30, color: ink),
+                  ),
+                  Text(
+                    '3 theme.titleMedium 0123 كيان',
+                    style: theme.textTheme.titleMedium?.copyWith(fontSize: 30, color: ink),
+                  ),
+                  const Text(
+                    '4 no style 0123 كيان',
+                    style: TextStyle(fontSize: 30, color: ink),
+                  ),
+                  // The two controls whose labels were boxes while every
+                  // other word was printed: a themed button and a chip.
+                  Row(
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: () {},
+                        icon: const Icon(Icons.business_outlined, size: 17),
+                        label: const Text('5 button 0123 كيان'),
+                      ),
+                      const SizedBox(width: 12),
+                      Chip(label: const Text('6 chip 0123 كيان')),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/font_probe.png'),
     );
   });
 }

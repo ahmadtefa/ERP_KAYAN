@@ -32,6 +32,8 @@ describe('SalesInvoicesService.updateDraft', () => {
       {} as never,
       {} as never,
       audit as never,
+      { issueTx: jest.fn() } as never,
+      {} as never,
     );
     jest.spyOn(service, 'findOne').mockResolvedValue({ id: INVOICE_ID } as never);
     jest.spyOn(service as any, 'dueDateFromTerms').mockResolvedValue(null);

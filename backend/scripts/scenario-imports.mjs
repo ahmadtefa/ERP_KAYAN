@@ -78,6 +78,92 @@ async function main() {
       String(openingTemplate.data).length > 100,
     `HTTP ${openingTemplate.status}, ${String(openingTemplate.data).length} bytes of response text`);
 
+  // ──────────────────────────────────────────────── template permissions
+  // The blank sheet writes nothing, so it follows the read grant; the upload
+  // that posts figures keeps the manage grant. A granted reader who asks for a
+  // sheet they may not have must be refused with a message, not a blank file.
+  const observerRole = await api('/admin/roles', {
+    method: 'POST',
+    json: {
+      code: `OBSERVER_${stamp}`,
+      nameEn: 'Scenario opening-balance reader',
+      nameAr: 'مراجع أرصدة افتتاحية',
+      permissions: ['accounting.openingbalances.read'],
+    },
+  });
+  const observerRoleId = observerRole.data?.id ?? '';
+  check('a role holding only the opening-balance read grant can be created',
+    observerRole.status === 201 && Boolean(observerRoleId),
+    observerRole.data?.detail ?? `HTTP ${observerRole.status}`);
+
+  let readerToken = '';
+  if (observerRoleId) {
+    const reader = await api('/admin/users', {
+      method: 'POST',
+      json: {
+        username: `scenario_reader_${stamp}`,
+        password: 'Scenario-Reader-12345',
+        fullNameEn: 'Scenario Reader',
+        fullNameAr: 'مراجع اختبار',
+        roleIds: [observerRoleId],
+      },
+    });
+    check('an opening-balance reader can be created with that role',
+      reader.status === 201 && Boolean(reader.data?.id),
+      reader.data?.detail ?? `HTTP ${reader.status}`);
+
+    if (reader.data?.id) {
+      const readerLogin = await api('/auth/login', {
+        method: 'POST',
+        noAuth: true,
+        json: { username: `scenario_reader_${stamp}`, password: 'Scenario-Reader-12345' },
+      });
+      readerToken = readerLogin.data?.accessToken ?? '';
+      check('the opening-balance reader can sign in',
+        readerLogin.status === 201 && Boolean(readerToken),
+        `HTTP ${readerLogin.status}`);
+    }
+  }
+
+  if (readerToken) {
+    const asReader = (path, options = {}) => api(path, {
+      ...options,
+      noAuth: true,
+      headers: { ...(options.headers ?? {}), Authorization: `Bearer ${readerToken}` },
+    });
+
+    const readerSheet = await asReader('/import/templates/opening-balances');
+    check('a reader may download the opening-balance sheet without the manage grant',
+      readerSheet.status === 200 &&
+        String(readerSheet.headers.get('content-type')).includes('spreadsheetml'),
+      `HTTP ${readerSheet.status}`);
+
+    const readerUpload = await asReader('/import/opening-balances?dryRun=true&mode=insert', {
+      method: 'POST',
+      body: (() => {
+        const form = new FormData();
+        form.append('file', new Blob([
+          'As-of date,Branch code,Warehouse code,Account code,Debit,Credit,Item code,Opening quantity,Unit cost\n' +
+          '2026-01-01,,,1101,1,0,,,\n2026-01-01,,,3103,0,1,,,\n',
+        ], { type: 'text/csv' }), 'reader-opening.csv');
+        return form;
+      })(),
+    });
+    check('the same reader cannot upload opening balances',
+      readerUpload.status === 403,
+      `HTTP ${readerUpload.status}`);
+
+    const refusedSheet = await asReader('/import/templates/customers');
+    check('a reader without the customer grant cannot download the customer sheet',
+      refusedSheet.status === 403,
+      `HTTP ${refusedSheet.status}`);
+
+    const anonymousSheet = await api('/import/templates/opening-balances', { noAuth: true });
+    check('the opening-balance sheet cannot be downloaded without signing in',
+      anonymousSheet.status === 401,
+      `HTTP ${anonymousSheet.status}`);
+  }
+
   const parentCode = `E2E-${stamp}`;
   const childCode = `${parentCode}-01`;
   const accountCsv = [

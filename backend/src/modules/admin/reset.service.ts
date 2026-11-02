@@ -108,6 +108,8 @@ export class ResetService {
       items,
       salesInvoices,
       purchaseInvoices,
+      quotations,
+      cashVouchers,
       stockMovements,
       fiscalPeriods,
       branches,
@@ -120,6 +122,11 @@ export class ResetService {
       this.prisma.item.count({ where: { companyId } }),
       this.prisma.salesInvoice.count({ where: { companyId } }),
       this.prisma.purchaseInvoice.count({ where: { companyId } }),
+      // The offers go too (they hold restrictive links to the invoices they
+      // became), and so does every receipt and payment. A confirmation screen
+      // that does not name them undersells what the button does.
+      this.prisma.quotation.count({ where: { companyId } }),
+      this.prisma.cashVoucher.count({ where: { companyId } }),
       this.prisma.stockMovement.count({ where: { companyId } }),
       this.prisma.fiscalPeriod.count({ where: { companyId } }),
       this.prisma.branch.count({ where: { companyId } }),
@@ -139,6 +146,8 @@ export class ResetService {
         items,
         salesInvoices,
         purchaseInvoices,
+        quotations,
+        cashVouchers,
         stockMovements,
         fiscalPeriods,
         branches,
@@ -311,6 +320,48 @@ export class ResetService {
             data: { originalInvoiceId: null },
           });
 
+          // Offers point at the invoice they became, at their customer, at
+          // their items and at each other, every one of them with a
+          // restrictive constraint. A company that ever wrote an offer could
+          // therefore not be reset at all: the transaction died on
+          // `quotations_convertedInvoiceId_fkey` (or on the customer, or on
+          // the item) and the reset was refused with a 500. Break the two
+          // self-links, then remove the offers before the invoices and the
+          // parties they name. Tables, lines and events follow by cascade.
+          await tx.quotation.updateMany({
+            where: { companyId: me.companyId },
+            data: { convertedInvoiceId: null, revisionOfId: null },
+          });
+          await step('quotations', async () => {
+            const { count } = await tx.quotation.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          // The artwork the offers printed on lives in the database, so a
+          // reset that promises to remove the company's documents must remove
+          // it too - once the offers that named it are gone.
+          await step('quotationBackgrounds', async () => {
+            const { count } = await tx.quotationBackground.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          // Rows written before the offers were rebuilt live in two tables no
+          // model knows about any more, but the same restrictive constraints
+          // still apply to them. They belong to the company being cleared.
+          await step('legacyQuotationLines', async () =>
+            tx.$executeRaw`
+              DELETE FROM quotation_lines_legacy
+               WHERE "quotationId" IN (
+                 SELECT id FROM quotations_legacy WHERE "companyId" = ${me.companyId}::uuid
+               )`,
+          );
+          await step('legacyQuotations', async () =>
+            tx.$executeRaw`
+              DELETE FROM quotations_legacy WHERE "companyId" = ${me.companyId}::uuid`,
+          );
+
           // Cash vouchers/transfers and reconciliations all hold restrictive
           // references to cash accounts and other business masters.
           await step('cashVouchers', async () => {
@@ -419,8 +470,56 @@ export class ResetService {
             });
             return count;
           });
+          await step('warehouseStockBalances', async () => {
+            const { count } = await tx.warehouseStockBalance.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
           await step('stockBalances', async () => {
             const { count } = await tx.stockBalance.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          // A count session points at its adjustment document; both go, and
+          // the session is removed before the stock documents below so the
+          // reference never dangles during the wipe.
+          await step('stockTakeLines', async () => {
+            const { count } = await tx.stockTakeLine.deleteMany({
+              where: { session: { companyId: me.companyId } },
+            });
+            return count;
+          });
+          await step('stockTakeSessions', async () => {
+            const { count } = await tx.stockTakeSession.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          // The lots and the shelf tree come after everything that names them -
+          // a count line points at a lot - and before the warehouses they sit
+          // in.
+          await step('itemBatches', async () => {
+            const { count } = await tx.itemBatch.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('storageLocations', async () => {
+            const { count } = await tx.storageLocation.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('notifications', async () => {
+            const { count } = await tx.notification.deleteMany({
+              where: { companyId: me.companyId },
+            });
+            return count;
+          });
+          await step('userWarehouseAccess', async () => {
+            const { count } = await tx.userWarehouseAccess.deleteMany({
               where: { companyId: me.companyId },
             });
             return count;

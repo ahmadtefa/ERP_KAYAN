@@ -1,9 +1,13 @@
 import { SetupService } from './setup.service';
 
+// The seat reservation is the only licensing call these specs reach;
+// its own behaviour is covered by licensing.service.spec.ts.
+const licensingStub = { reserveSeat: jest.fn().mockResolvedValue({ reserved: true }), reconcile: jest.fn().mockResolvedValue(undefined) } as any;
+
 describe('SetupService seedRoles', () => {
   it('seeds the company profile permission needed by profile-management routes', async () => {
     const permissionUpsert = jest.fn().mockResolvedValue({});
-    const service = new SetupService({} as any, {} as any);
+    const service = new SetupService({} as any, {} as any, licensingStub);
 
     await (service as any).seedPermissions({
       permission: { upsert: permissionUpsert },
@@ -27,7 +31,7 @@ describe('SetupService seedRoles', () => {
 
   it('creates the current open fiscal year during first-run setup', async () => {
     const upsert = jest.fn().mockResolvedValue({});
-    const service = new SetupService({} as any, {} as any);
+    const service = new SetupService({} as any, {} as any, licensingStub);
     const year = new Date().getUTCFullYear();
 
     await (service as any).seedFiscalPeriod(
@@ -71,7 +75,7 @@ describe('SetupService seedRoles', () => {
       permission: { findMany: jest.fn().mockResolvedValue(permissions) },
       rolePermission: { upsert: rolePermissionUpsert },
     };
-    const service = new SetupService({} as any, {} as any);
+    const service = new SetupService({} as any, {} as any, licensingStub);
 
     await expect((service as any).seedRoles(tx, 'company-1')).resolves.toEqual({
       admin: 'admin-role',

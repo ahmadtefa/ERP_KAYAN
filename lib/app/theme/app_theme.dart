@@ -32,7 +32,16 @@ abstract final class AppTheme {
   static ThemeData _build(Brightness brightness, double textScale) {
     final isLight = brightness == Brightness.light;
     final scheme = isLight ? _lightScheme : _darkScheme;
-    final textTheme = _textTheme(scheme);
+    // The family is applied to the text theme itself, not only handed to
+    // `ThemeData`: a theme built from an explicit `textTheme` keeps the styles
+    // it was given, so a screen that reads `theme.textTheme.titleMedium` - and
+    // every control theme derived from it - would fall back to the system face.
+    // The screenshots caught exactly that: boxes where the bundled typeface
+    // should be, while a style that named the family rendered correctly.
+    final textTheme = _textTheme(scheme).apply(
+      fontFamily: AppTypography.latinFamily,
+      fontFamilyFallback: AppTypography.fallback,
+    );
     final border = isLight ? AppColors.border : AppColors.darkBorder;
     final surface = isLight ? AppColors.surface : AppColors.darkSurface;
     final surfaceAlt = isLight ? AppColors.surfaceMuted : AppColors.darkSurfaceAlt;
@@ -42,6 +51,12 @@ abstract final class AppTheme {
       useMaterial3: true,
       brightness: brightness,
       colorScheme: scheme,
+      // One bundled family for Arabic and English. It is shipped in the
+      // installer (see pubspec.yaml), so it is also the family a report or a
+      // PDF draws with on a machine that has never been online - the printed
+      // sheet and the screen finally agree.
+      fontFamily: AppTypography.latinFamily,
+      fontFamilyFallback: AppTypography.fallback,
       textTheme: textTheme,
       scaffoldBackgroundColor: canvas,
       canvasColor: canvas,
@@ -79,12 +94,12 @@ abstract final class AppTheme {
         ),
         selectedIconTheme: IconThemeData(color: scheme.primary),
         unselectedIconTheme: IconThemeData(color: scheme.onSurfaceVariant),
-        selectedLabelTextStyle: TextStyle(
+        selectedLabelTextStyle: _ink(
           color: scheme.primary,
           fontWeight: FontWeight.w700,
           fontSize: 12,
         ),
-        unselectedLabelTextStyle: TextStyle(
+        unselectedLabelTextStyle: _ink(
           color: scheme.onSurfaceVariant,
           fontWeight: FontWeight.w500,
           fontSize: 12,
@@ -126,8 +141,8 @@ abstract final class AppTheme {
         indicatorSize: TabBarIndicatorSize.label,
         dividerColor: border,
         indicatorColor: scheme.primary,
-        labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-        unselectedLabelStyle: const TextStyle(
+        labelStyle: _ink(fontSize: 13, fontWeight: FontWeight.w700),
+        unselectedLabelStyle: _ink(
           fontSize: 13,
           fontWeight: FontWeight.w500,
         ),
@@ -140,12 +155,12 @@ abstract final class AppTheme {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.sm),
         ),
-        labelStyle: TextStyle(
+        labelStyle: _ink(
           color: scheme.onSurface,
           fontWeight: FontWeight.w600,
           fontSize: 12,
         ),
-        secondaryLabelStyle: TextStyle(color: scheme.onPrimaryContainer),
+        secondaryLabelStyle: _ink(color: scheme.onPrimaryContainer),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       ),
 
@@ -267,7 +282,7 @@ abstract final class AppTheme {
             RoundedRectangleBorder(borderRadius: AppRadii.control),
           ),
           textStyle: WidgetStatePropertyAll(
-            TextStyle(fontSize: 13 * textScale, fontWeight: FontWeight.w600),
+            _ink(fontSize: 13 * textScale, fontWeight: FontWeight.w600),
           ),
           elevation: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.disabled)) return 0;
@@ -313,7 +328,7 @@ abstract final class AppTheme {
             RoundedRectangleBorder(borderRadius: AppRadii.control),
           ),
           textStyle: WidgetStatePropertyAll(
-            TextStyle(fontSize: 13 * textScale, fontWeight: FontWeight.w600),
+            _ink(fontSize: 13 * textScale, fontWeight: FontWeight.w600),
           ),
           elevation: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.pressed)) return 0;
@@ -349,7 +364,7 @@ abstract final class AppTheme {
             RoundedRectangleBorder(borderRadius: AppRadii.control),
           ),
           textStyle: WidgetStatePropertyAll(
-            TextStyle(fontSize: 13 * textScale, fontWeight: FontWeight.w600),
+            _ink(fontSize: 13 * textScale, fontWeight: FontWeight.w600),
           ),
           foregroundColor: WidgetStatePropertyAll(scheme.primary),
         ),
@@ -412,7 +427,7 @@ abstract final class AppTheme {
           color: AppColors.navy,
           borderRadius: BorderRadius.circular(AppRadii.sm),
         ),
-        textStyle: const TextStyle(
+        textStyle: _ink(
           color: Colors.white,
           fontSize: 11.5,
           fontWeight: FontWeight.w500,
@@ -423,7 +438,7 @@ abstract final class AppTheme {
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: AppColors.navy,
-        contentTextStyle: const TextStyle(color: Colors.white, fontSize: 13),
+        contentTextStyle: _ink(color: Colors.white, fontSize: 13),
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.md),
@@ -553,6 +568,29 @@ abstract final class AppTheme {
   /// A compact, high-legibility type scale. Financial screens need many
   /// labels and few headings, so the steps between sizes are small and the
   /// weights carry the hierarchy instead.
+  /// A text style that carries the product's typeface.
+  ///
+  /// A control theme that builds a bare `TextStyle` - a button label, a tab, a
+  /// chip - replaces the family with none, and the control then draws in
+  /// whatever face the machine has, or in the test font's boxes. On the
+  /// customer's Windows machine the bundled IBM Plex Arabic has to win, so
+  /// every style this file constructs names it.
+  static TextStyle _ink({
+    double? fontSize,
+    FontWeight? fontWeight,
+    Color? color,
+    double? letterSpacing,
+    double? height,
+  }) => TextStyle(
+    fontFamily: AppTypography.latinFamily,
+    fontFamilyFallback: AppTypography.fallback,
+    fontSize: fontSize,
+    fontWeight: fontWeight,
+    color: color,
+    letterSpacing: letterSpacing,
+    height: height,
+  );
+
   static TextTheme _textTheme(ColorScheme scheme) {
     final base = Typography.material2021(colorScheme: scheme);
     final t = scheme.brightness == Brightness.light ? base.black : base.white;

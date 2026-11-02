@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { fakeLedger } from '../../testing/stock-ledger.fake';
 import { InvoiceStatus, Prisma } from '@prisma/client';
 
 import { OpeningBalancesService } from './opening-balances.service';
@@ -31,6 +32,7 @@ describe('OpeningBalancesService', () => {
       { resolve: jest.fn().mockResolvedValue({ inventory: 'inventory-id' }) } as never,
       { record: jest.fn() } as never,
       { resolve: jest.fn() } as never,
+      fakeLedger() as any,
     );
 
     await expect(service.create('company-id', 'branch-id', 'user-id', {
@@ -90,6 +92,7 @@ describe('OpeningBalancesService', () => {
       {} as never,
       audit as never,
       {} as never,
+      fakeLedger() as any,
     );
 
     await expect(service.post('company-id', 'user-id', 'opening-id')).rejects.toBeInstanceOf(
@@ -140,6 +143,10 @@ describe('OpeningBalancesService', () => {
       $queryRaw: jest.fn().mockResolvedValue([
         { quantity: new Prisma.Decimal(5), value: new Prisma.Decimal(100) },
       ]),
+      // The real client exposes the item delegate; the reversal reads the base
+      // unit names it needs for the movement it writes. It is answered here so
+      // the fake stays a plausible client instead of failing on a missing key.
+      item: { findMany: jest.fn().mockResolvedValue([]) },
       stockMovement: { create: jest.fn() },
       stockBalance: { update: jest.fn() },
       openingBalance: { update: jest.fn() },
@@ -158,6 +165,7 @@ describe('OpeningBalancesService', () => {
       {} as never,
       audit as never,
       warehouses as never,
+      fakeLedger() as any,
     );
 
     await expect(service.reverse('company-id', 'user-id', 'opening-id')).rejects.toThrow(

@@ -1,0 +1,125 @@
+name: Key Generator (Windows x64)
+
+# The supplier's key generator is an internal operator tool, not part of the
+# customer's ERP installer. This workflow builds it on a real Windows runner,
+# runs the packaged executable (not the source), and hands the result back as a
+# workflow artifact. It deliberately has no release step: an artifact is a test
+# deliverable, and publishing anything needs a decision made outside this file.
+#
+# No signing key is involved anywhere: the smoke test generates a throwaway
+# test key in a temporary folder and deletes it.
+
+on:
+  pull_request:
+    branches: [main, 'arena/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: key-generator-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Build and test native KAYAN-Key-Generator.exe
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      # `prisma generate` reads the datasource block; no database is contacted.
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/erp_kayan?schema=public
+      PRISMA_GENERATE_SKIP_AUTOINSTALL: 'true'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The generator itself has no dependencies. The product's build supplies
+      # the verification code the smoke test uses, so a key is checked by the
+      # code the customer's program runs, not by a second copy of the format.
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Generate Prisma Client
+        working-directory: backend
+        run: npx prisma generate
+
+      - name: Build the product
+        working-directory: backend
+        run: npm run build
+
+      - name: Prove the generator against the product (generator spec)
+        working-directory: backend
+        run: npx jest src/modules/licensing/license-generator.spec.ts --runInBand
+
+      - name: Install the build-time packaging tools
+        working-directory: tools/license-generator/sea
+        run: npm ci
+
+      - name: Package KAYAN-Key-Generator.exe
+        working-directory: tools/license-generator/sea
+        run: node build.mjs --target win32-x64 --out "$env:GITHUB_WORKSPACE\dist\key-generator"
+
+      # The script writes its own log. A pipeline through Tee-Object hides the
+      # real exit code and the reason for a failure, so nothing is piped here:
+      # the step fails on the executable's own exit code, and the log is
+      # published in the next step whatever happens.
+      - name: Smoke-test the packaged executable
+        run: >-
+          node tools/license-generator/sea/smoke.mjs
+          --exe "dist/key-generator/KAYAN-Key-Generator.exe"
+          --log "dist/key-generator/SMOKE-TEST.txt"
+
+      - name: Publish the smoke-test log
+        if: always()
+        shell: pwsh
+        run: |
+          $log = 'dist/key-generator/SMOKE-TEST.txt'
+          if (-not (Test-Path -LiteralPath $log)) {
+            Write-Host '::warning::the smoke test wrote no log'
+            exit 0
+          }
+          Get-Content -LiteralPath $log | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          $lines = Get-Content -LiteralPath $log
+          $fails = @($lines | Where-Object { $_ -match '^FAIL' })
+          foreach ($line in ($fails | Select-Object -First 10)) {
+            Write-Host "::error title=Key generator smoke test::$line"
+          }
+          $summary = @($lines | Where-Object { $_ -match '^\d+ passed' })
+          if ($summary.Count -gt 0) { Write-Host "::notice title=Key generator smoke test::$($summary[-1])" }
+
+      - name: Report what is in the package
+        shell: powershell
+        run: |
+          $folder = 'dist\key-generator'
+          Get-ChildItem $folder | ForEach-Object {
+            "{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB) | Write-Host
+          }
+          $exe = Join-Path $folder 'KAYAN-Key-Generator.exe'
+          if (-not (Test-Path -LiteralPath $exe)) { throw 'the executable is missing' }
+          $server = Join-Path $folder 'KAYAN-Key-Generator-Server.exe'
+          if (-not (Test-Path -LiteralPath $server)) { throw 'the bundled local service is missing' }
+          $version = & $server version
+          Write-Host "server version line: $version"
+          if ($version -notmatch '^kayan-license \d') { throw 'the bundled local service did not report its version' }
+          $info = Get-Content -Raw (Join-Path $folder 'BUILD-INFO.txt')
+          "::notice title=Key generator package::$(($info -split "`n") -join ' | ')"
+
+      - name: Collect the smoke-test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAYAN-Key-Generator-Windows-x64
+          path: |
+            dist/key-generator/KAYAN-Key-Generator.exe
+            dist/key-generator/KAYAN-Key-Generator-Server.exe
+            dist/key-generator/BUILD-INFO.txt
+            dist/key-generator/SMOKE-TEST.txt
+          if-no-files-found: error
+          retention-days: 30

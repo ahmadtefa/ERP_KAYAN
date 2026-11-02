@@ -173,6 +173,10 @@ export class PdfService {
       // for. One that fell back to the command line printer has no design at
       // all, so it gets the plain grey number in the white margin instead of
       // white-on-white.
+      // A caller that stamps the number later says so, and gets the page back
+      // exactly as the browser printed it.
+      if (options.pageNumbers === false) return pdf;
+
       return await stampPageNumbers(
         pdf,
         options.fullBleed && !fullBleed
@@ -285,6 +289,13 @@ export interface PdfRenderOptions {
   /// Points from the bottom edge; defaults to {@link PAGE_NUMBER_GEOMETRY}.
   pageNumberY?: number;
   pageNumberSize?: number;
+  /// Whether this render should write "n / N" itself. True for every finished
+  /// document, and false for an overlay that will be laid on artwork: the
+  /// merge stamps the number once, in the artwork's own ink and at its own
+  /// height, so stamping here as well would print two numbers a few points
+  /// apart. Defaults to true, which is what every caller meant before the
+  /// artwork path existed.
+  pageNumbers?: boolean;
 }
 
 /// Adds "n / total" in the horizontal centre of every page.

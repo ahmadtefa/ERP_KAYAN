@@ -23,6 +23,9 @@ function serviceWith(prisma: Record<string, any>, tx: Record<string, any>) {
   };
   const warehouses = { resolveForReversal: jest.fn().mockResolvedValue(WAREHOUSE_ID) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
+  // The reversal restores the shelf through the ledger, so the spec watches
+  // the ledger's own call rather than a balance row written by hand.
+  const ledger = { post: jest.fn().mockResolvedValue({}) };
   const service = new SalesInvoicesService(
     prisma as never,
     numbers as never,
@@ -32,9 +35,11 @@ function serviceWith(prisma: Record<string, any>, tx: Record<string, any>) {
     warehouses as never,
     {} as never,
     audit as never,
+    { issueTx: jest.fn() } as never,
+    ledger as never,
   );
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: INVOICE_ID } as never);
-  return { service, numbers, posting, warehouses, audit, tx };
+  return { service, numbers, posting, warehouses, audit, tx, ledger };
 }
 
 describe('SalesInvoicesService.reverse', () => {
@@ -131,7 +136,7 @@ describe('SalesInvoicesService.reverse', () => {
       journalEntry: { findFirst: jest.fn().mockResolvedValue(originalJournal) },
       $transaction: jest.fn(async (work: (client: unknown) => unknown) => work(tx)),
     };
-    const { service, numbers, posting, warehouses, audit } = serviceWith(prisma, tx);
+    const { service, numbers, posting, warehouses, audit, ledger } = serviceWith(prisma, tx);
 
     await service.reverse(COMPANY_ID, USER_ID, INVOICE_ID);
 
@@ -155,7 +160,18 @@ describe('SalesInvoicesService.reverse', () => {
         referenceType: 'SALES_INVOICE_REVERSAL',
       }),
     });
-    expect(tx.stockBalance.upsert).toHaveBeenCalledTimes(1);
+    // The books - branch and shelf - are written by the ledger, in one call.
+    expect(ledger.post).toHaveBeenCalledTimes(1);
+    expect(ledger.post).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        branchId: BRANCH_ID,
+        warehouseId: WAREHOUSE_ID,
+        itemId: TRACKED_ITEM_ID,
+        quantity: new Prisma.Decimal(2),
+      }),
+    );
+    expect(tx.stockBalance.upsert).not.toHaveBeenCalled();
     // The mirror goes through the one central reversal path — the
     // invoice no longer claims/creates journal rows itself.
     expect(posting.reverse).toHaveBeenCalledWith(

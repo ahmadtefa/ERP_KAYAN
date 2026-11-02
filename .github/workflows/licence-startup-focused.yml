@@ -1,0 +1,60 @@
+name: Licence startup and payload focused checks
+
+on:
+  push:
+    branches: ['arena/2d794f08-erp-kayan']
+    paths:
+      - '.github/workflows/licence-startup-focused.yml'
+      - 'lib/core/backend/local_backend_io.dart'
+      - 'test/core/backend/local_backend_io_test.dart'
+      - 'scripts/verify-extracted-windows-installer.mjs'
+      - 'scripts/verify-extracted-windows-installer.test.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  payload-scanner:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+      - run: node --test scripts/verify-extracted-windows-installer.test.mjs
+  desktop-startup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - name: Analyze each changed file separately
+        shell: bash
+        run: |
+          for path in lib/core/backend/local_backend_io.dart test/core/backend/local_backend_io_test.dart; do
+            log="$RUNNER_TEMP/licence-startup-analyze.log"
+            if ! flutter analyze --no-pub --machine "$path" > "$log" 2>&1; then
+              python3 -c 'import sys; s=open(sys.argv[1],encoding="utf-8").read()[-12000:]; print("::error title=Focused desktop analysis::"+s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))' "$log"
+              exit 1
+            fi
+          done
+      - name: Test desktop startup decisions
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/licence-startup-test.jsonl"
+          if ! flutter test --no-pub --reporter json test/core/backend/local_backend_io_test.dart > "$log" 2>&1; then
+            node scripts/report-flutter-test-failures.mjs "$log"
+            exit 1
+          fi
