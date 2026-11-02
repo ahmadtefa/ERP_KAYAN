@@ -75,14 +75,35 @@ jobs:
           $file = Get-Item -LiteralPath 'build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe'
           $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Output "::notice title=Built test-signed Setup::SHA256=$hash bytes=$($file.Length) source=$env:GITHUB_SHA"
+      - name: Check the proof script's PowerShell syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'scripts/prove-installed-windows-e2e.ps1').Path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            foreach ($error in $errors) {
+              Write-Output ("::error title=PowerShell syntax::" + $error.Message + " (line " + $error.Extent.StartLineNumber + ")")
+            }
+            throw 'The installed-copy proof script does not parse.'
+          }
+          Write-Output 'The installed-copy proof script parses.'
       - name: Install, license, and work the whole warehouse on the installed copy
         timeout-minutes: 45
         shell: pwsh
         run: |
+          $log = Join-Path $env:RUNNER_TEMP 'installed-e2e-step.log'
           & pwsh -NoLogo -NoProfile -File scripts/prove-installed-windows-e2e.ps1 `
             -SetupPath 'build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe' `
-            -ExpectedSourceCommit $env:GITHUB_SHA
-          if ($LASTEXITCODE -ne 0) { throw 'The installed-copy proof failed.' }
+            -ExpectedSourceCommit $env:GITHUB_SHA *> $log
+          $code = $LASTEXITCODE
+          # The raw job log is not always downloadable, so the tail of the proof's
+          # own output is lifted into annotations where it can be read.
+          Get-Content -LiteralPath $log -Tail 120 -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Output ("::notice title=Installed E2E output::" + ($_ -replace '%', '%25')) }
+          Copy-Item -LiteralPath $log -Destination (Join-Path $env:RUNNER_TEMP 'installed-e2e') -ErrorAction SilentlyContinue
+          if ($code -ne 0) { throw "The installed-copy proof failed (exit code $code)." }
       - name: Keep the test-signed Setup for a re-run without a rebuild
         if: always()
         uses: actions/upload-artifact@v4

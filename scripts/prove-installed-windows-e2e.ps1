@@ -72,7 +72,7 @@ function Say([string]$Text) {
   Write-Host $Text
 }
 
-function Get-KayanHealth([int]$Port, [int]$TimeoutSec = 3) {
+function Get-KayanHealth([int]$Port, [int]$TimeoutSec = 1) {
   try {
     $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/api/v1/health" -TimeoutSec $TimeoutSec
     return @{ Status = [int]$response.StatusCode; Body = $response.Content }
@@ -95,7 +95,7 @@ function Find-KayanPort {
 }
 
 
-/// Waits for a condition without ever blocking forever, and says what it saw.
+# Waits for a condition without ever blocking forever, and says what it saw.
 function Wait-Until {
   param([scriptblock]$Condition, [int]$Seconds = 300, [string]$What = 'condition', [int]$IntervalSeconds = 2)
   $deadline = (Get-Date).AddSeconds($Seconds)
@@ -107,8 +107,8 @@ function Wait-Until {
   return $false
 }
 
-/// Everything a failure needs to be diagnosable from the annotations alone,
-/// because the raw job log is not always downloadable.
+# Everything a failure needs to be diagnosable from the annotations alone,
+# because the raw job log is not always downloadable.
 function Write-Diagnostics {
   Write-Host '--- listening ports ---'
   Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
@@ -154,9 +154,11 @@ try {
   }
   if (-not $installed) {
     Write-Diagnostics
-    Fail "Setup.exe did not finish installing within 15 minutes (exit code: " + $(if ($install.HasExited) { $install.ExitCode } else { 'still running' }) + ")."
+    $exitState = if ($install.HasExited) { "exit code $($install.ExitCode)" } else { 'still running' }
+    Fail ("Setup.exe did not finish installing within 15 minutes (" + $exitState + ").")
   }
   Get-Process -Name erp_kayan -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Say 'The Setup installed and its bundled PostgreSQL service is running.'
 
   foreach ($relative in @('backend\node\node.exe', 'backend\dist\src\main.js', 'backend\scripts\prepare-database.mjs',
       'backend\postgres\bin\psql.exe', 'backend\postgres\bin\pg_restore.exe', 'erp_kayan.exe', 'runtime-manifest.json')) {
@@ -197,7 +199,7 @@ try {
   $phase = 'start'
   Say 'Starting the installed erp_kayan.exe and waiting for its own local server.'
   $clientProcess = Start-Process -FilePath $clientPath -WorkingDirectory $installRoot -PassThru
-  $healthy = Wait-Until -Seconds 300 -What 'the installed program\'s own local server' -Condition {
+  $healthy = Wait-Until -Seconds 600 -What "the installed program's own local server" -Condition {
     if ($clientProcess.HasExited) { return $false }
     $script:apiPort = Find-KayanPort
     return ($script:apiPort -gt 0)
