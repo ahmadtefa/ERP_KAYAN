@@ -127,8 +127,11 @@ const EXPECTED = {
     'inventory.writeoff.create',
   ],
   ACCOUNTANT: [...READ_SET, ...APPROVAL_SET],
-  CASHIER: [...READ_SET, 'inventory.batches.issue'],
-  RECEIVER: [...READ_SET, 'inventory.batches.receive'],
+  // A cashier sells, so they issue from lots; they do not read purchase
+  // invoices, so the migration does not give them the reading set. The same
+  // reasoning applies to a receiver, in the other direction.
+  CASHIER: ['inventory.batches.issue'],
+  RECEIVER: ['inventory.batches.receive'],
   ADMIN: [...READ_SET, 'notifications.manage', 'inventory.warehouse.access.manage'],
   WATCHER: [],
   GONE: [],
@@ -189,12 +192,17 @@ try {
   console.log(`applied ${before.length} migrations that predate the warehouse grant`);
 
   // A company and a branch, because roles may belong to one.
+  // Two statements rather than one: a parameterised query is a single
+  // statement to PostgreSQL, and sending two is refused outright.
   await probe.query(
     `INSERT INTO companies (id, code, "nameEn", "nameAr", "updatedAt")
-     VALUES ($1, 'GRANT-PROBE', 'Grant probe', 'فحص الصلاحيات', now());
-     INSERT INTO branches (id, "companyId", code, "nameEn", "nameAr", "updatedAt")
-     VALUES ($2, $1, 'B1', 'Main', 'الرئيسي', now());`,
-    [COMPANY, BRANCH],
+     VALUES ($1, 'GRANT-PROBE', 'Grant probe', 'فحص الصلاحيات', now())`,
+    [COMPANY],
+  );
+  await probe.query(
+    `INSERT INTO branches (id, "companyId", code, "nameEn", "nameAr", "updatedAt")
+     VALUES ($1, $2, 'B1', 'Main', 'الرئيسي', now())`,
+    [BRANCH, COMPANY],
   );
 
   const permissionIds = new Map();

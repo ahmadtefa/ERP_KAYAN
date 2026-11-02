@@ -7,6 +7,7 @@ import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../widgets/notification_settings_panel.dart';
 
 /// The unread count, as the badge in the top bar reads it.
 ///
@@ -159,6 +160,31 @@ class _NotificationCenterScreenState
     }
   }
 
+  /// The rules behind the list: what is raised, how loud, for whom, and how
+  /// often the same fact may be repeated. Opened from here rather than living
+  /// on a separate screen because a rule only makes sense next to the alerts
+  /// it produced.
+  Future<void> _openRules() async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(_t('قواعد التنبيهات', 'Alert rules')),
+        content: SizedBox(
+          width: 900,
+          height: 600,
+          child: NotificationSettingsPanel(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(_t('إغلاق', 'Close')),
+          ),
+        ],
+      ),
+    );
+    if (mounted) _refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -170,6 +196,13 @@ class _NotificationCenterScreenState
             'and what needs a decision.',
       ),
       actions: [
+        if (ref.read(currentUserProvider)?.can('notifications.manage') ?? false)
+          TextButton.icon(
+            key: const ValueKey('notification-rules'),
+            onPressed: _openRules,
+            icon: const Icon(Icons.tune_rounded, size: 18),
+            label: Text(_t('قواعد التنبيهات', 'Alert rules')),
+          ),
         TextButton.icon(
           onPressed: _busy ? null : _markAllRead,
           icon: const Icon(Icons.done_all_rounded, size: 18),

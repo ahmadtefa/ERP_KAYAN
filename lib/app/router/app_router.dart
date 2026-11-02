@@ -21,6 +21,8 @@ import '../../features/inventory/presentation/screens/stock_documents_screen.dar
 import '../../features/inventory/presentation/screens/stock_screen.dart';
 import '../../features/inventory/presentation/screens/batches_screen.dart';
 import '../../features/inventory/presentation/screens/warehouses_screen.dart';
+import '../../features/inventory/presentation/screens/storage_locations_screen.dart';
+import '../../features/inventory/presentation/screens/item_thresholds_screen.dart';
 import '../../features/notifications/presentation/screens/notification_center_screen.dart';
 import '../../features/invoicing/presentation/providers/invoice_providers.dart';
 import '../../features/licensing/presentation/screens/licence_screen.dart';
@@ -66,6 +68,8 @@ class AppRoutes {
   static const stock = '/inventory/stock';
   static const warehouses = '/inventory/warehouses';
   static const batches = '/inventory/batches';
+  static const storageLocations = '/inventory/locations';
+  static const itemThresholds = '/inventory/thresholds';
   static const notifications = '/notifications';
   static const stockDocuments = '/inventory/documents';
   static const salesInvoices = '/sales/invoices';
@@ -184,6 +188,14 @@ final routerProvider = Provider<GoRouter>((ref) {
               GoRoute(path: AppRoutes.stock, builder: (c, s) => const StockScreen()),
               GoRoute(path: AppRoutes.warehouses, builder: (c, s) => const WarehousesScreen()),
               GoRoute(path: AppRoutes.batches, builder: (c, s) => const BatchesScreen()),
+              GoRoute(
+                path: AppRoutes.storageLocations,
+                builder: (c, s) => const StorageLocationsScreen(),
+              ),
+              GoRoute(
+                path: AppRoutes.itemThresholds,
+                builder: (c, s) => const ItemThresholdsScreen(),
+              ),
               GoRoute(
                 path: AppRoutes.notifications,
                 builder: (c, s) => const NotificationCenterScreen(),
