@@ -16,6 +16,7 @@ import { CompanySettingsService } from '../../common/settings/company-settings.m
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import {
   defaultUnitPrice,
+  parseDocumentQuantity,
   resolveUnitSelection,
 } from '../../common/units/unit-math';
 import { PriceListsService } from '../sales/price-lists.service';
@@ -840,7 +841,8 @@ export class PurchaseInvoicesService {
         throw new BadRequestException(`Line ${index + 1}: the item is inactive`);
       }
 
-      const quantity = this.positive(raw.quantity, `Line ${index + 1} quantity`);
+      const quantity = parseDocumentQuantity(raw.quantity, `Line ${index + 1} quantity`);
+      if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException(`Line ${index + 1} quantity must be greater than zero`);
 
       // Resolve the chosen unit. The entered quantity is expressed in it; the
       // base quantity is what is received into stock and drives unit cost.

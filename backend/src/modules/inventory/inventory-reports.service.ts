@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import { parseFactor } from '../../common/units/unit-math';
 import { isValidEan13, randomInternalBarcode } from './barcode';
 
 const MONEY_SCALE = 4;
@@ -370,16 +371,7 @@ export class InventoryReportsService {
   }
 
   private parseFactor(value: unknown): Prisma.Decimal {
-    let factor: Prisma.Decimal;
-    try {
-      factor = new Prisma.Decimal(String(value ?? '0')).toDecimalPlaces(6);
-    } catch {
-      throw new BadRequestException('factor is not a valid number');
-    }
-    if (factor.lessThanOrEqualTo(0)) {
-      throw new BadRequestException('factor must be greater than zero');
-    }
-    return factor;
+    return parseFactor(value ?? '0');
   }
 
   private async barcodeTaken(
@@ -452,15 +444,7 @@ export class InventoryReportsService {
     const unit = String(dto.unit ?? '').trim();
     if (!unit) throw new BadRequestException('unit is required');
 
-    let factor: Prisma.Decimal;
-    try {
-      factor = new Prisma.Decimal(String(dto.factor ?? '0')).toDecimalPlaces(6);
-    } catch {
-      throw new BadRequestException('factor is not a valid number');
-    }
-    if (factor.lessThanOrEqualTo(0)) {
-      throw new BadRequestException('factor must be greater than zero');
-    }
+    const factor = this.parseFactor(dto.factor);
     if (unit === item.unit && !factor.equals(1)) {
       throw new BadRequestException(
         `factor must be 1 for the base unit of ${item.code}`,

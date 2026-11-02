@@ -103,6 +103,14 @@ describe('InventoryReportsService multi-unit lifecycle', () => {
     expect(prisma.itemUnit.update).not.toHaveBeenCalled();
   });
 
+  it('rejects excess precision for both new and updated factors', async () => {
+    const { service, prisma } = build();
+    await expect(service.addUnit('company-1', 'user-1', 'item-1', { unit: 'box', factor: '1.2345678' })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.updateUnit('company-1', 'user-1', 'item-1', 'unit-carton', { factor: '1.2345678' })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.itemUnit.create).not.toHaveBeenCalled();
+    expect(prisma.itemUnit.update).not.toHaveBeenCalled();
+  });
+
   it('creates new units explicitly active', async () => {
     const { service, prisma } = build();
 

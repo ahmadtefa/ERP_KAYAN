@@ -19,6 +19,7 @@ import { CompanySettingsService } from '../../common/settings/company-settings.m
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import {
   defaultUnitPrice,
+  parseDocumentQuantity,
   resolveUnitSelection,
 } from '../../common/units/unit-math';
 import { PriceListsService } from './price-lists.service';
@@ -824,7 +825,8 @@ export class SalesInvoicesService {
     const settings = await this.settings.get(companyId);
 
     for (const [index, raw] of input.entries()) {
-      const quantity = this.positive(raw.quantity, `Line ${index + 1} quantity`);
+      const quantity = parseDocumentQuantity(raw.quantity, `Line ${index + 1} quantity`);
+      if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException(`Line ${index + 1} quantity must be greater than zero`);
 
       // A price typed on the line is what was charged. When nobody typed one,
       // the customer's agreed list speaks, and failing that the item's own

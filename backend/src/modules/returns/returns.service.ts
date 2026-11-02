@@ -14,6 +14,7 @@ import {
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
+import { exactBaseQuantity, parseDocumentQuantity } from '../../common/units/unit-math';
 import { AccountMapService } from '../accounting/account-map.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { attributedLines } from '../accounting/cost-center-attribution';
@@ -251,7 +252,7 @@ export class ReturnsService {
     const originalInvoiceId = this.requiredId(dto.originalInvoiceId, 'originalInvoiceId');
     const original = await this.prisma.salesInvoice.findFirst({
       where: { id: originalInvoiceId, companyId, deletedAt: null },
-      include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      include: { lines: { orderBy: { lineNumber: 'asc' }, include: { item: { select: { unit: true } } } } },
     });
     if (!original) throw new BadRequestException('The original sales invoice does not exist');
     if (original.status !== InvoiceStatus.POSTED) {
@@ -752,7 +753,7 @@ export class ReturnsService {
     const originalInvoiceId = this.requiredId(dto.originalInvoiceId, 'originalInvoiceId');
     const original = await this.prisma.purchaseInvoice.findFirst({
       where: { id: originalInvoiceId, companyId, deletedAt: null },
-      include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      include: { lines: { orderBy: { lineNumber: 'asc' }, include: { item: { select: { unit: true } } } } },
     });
     if (!original) throw new BadRequestException('The original purchase invoice does not exist');
     if (original.status !== InvoiceStatus.POSTED) {
@@ -1616,6 +1617,7 @@ export class ReturnsService {
     originalLine: {
       unitName?: string | null;
       unitFactor?: Prisma.Decimal | null;
+      item?: { unit: string } | null;
     },
     raw: ReturnLineInput,
   ): {
@@ -1624,17 +1626,26 @@ export class ReturnsService {
     unitFactor: Prisma.Decimal | null;
     unitQuantity: Prisma.Decimal | null;
   } {
-    const entered = this.positive(raw.quantity, `${field} quantity`);
+    const entered = parseDocumentQuantity(raw.quantity, `${field} quantity`);
+    if (entered.lessThanOrEqualTo(0)) throw new BadRequestException(`${field} quantity must be greater than zero`);
+    // Unit ids are not frozen on historical invoice lines; they cannot be
+    // trusted as evidence of the original conversion factor.
+    if (raw.unitId) throw new BadRequestException(`${field}: unit id cannot be verified against the original invoice`);
     const hasSnapshot =
       originalLine.unitFactor !== null && originalLine.unitFactor !== undefined;
 
     if (!hasSnapshot) {
+      const requested = String(raw.unitName ?? '').trim().toLowerCase();
+      const base = String(originalLine.item?.unit ?? '').trim().toLowerCase();
+      if (requested && (!base || requested !== base)) {
+        throw new BadRequestException(`${field}: legacy invoice has no trusted conversion for the requested unit`);
+      }
       return { baseQuantity: entered, unitName: null, unitFactor: null, unitQuantity: null };
     }
 
-    if (raw.unitName && originalLine.unitName) {
+    if (raw.unitName) {
       const asked = String(raw.unitName).trim().toLowerCase();
-      const stored = String(originalLine.unitName).trim().toLowerCase();
+      const stored = String(originalLine.unitName ?? '').trim().toLowerCase();
       if (asked !== stored) {
         throw new BadRequestException(
           `${field}: a return must use the original document's unit (${originalLine.unitName})`,
@@ -1643,7 +1654,7 @@ export class ReturnsService {
     }
 
     const factor = new Prisma.Decimal(originalLine.unitFactor as Prisma.Decimal);
-    const baseQuantity = entered.mul(factor).toDecimalPlaces(MONEY_SCALE);
+    const baseQuantity = exactBaseQuantity(entered, factor);
     return {
       baseQuantity,
       unitName: originalLine.unitName ?? null,

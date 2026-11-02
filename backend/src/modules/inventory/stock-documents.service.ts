@@ -8,7 +8,7 @@ import { InvoiceStatus, Prisma, StockDirection, StockDocumentKind } from '@prism
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
-import { resolveUnitSelection } from '../../common/units/unit-math';
+import { parseDocumentQuantity, resolveUnitSelection } from '../../common/units/unit-math';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { CostCentersService } from '../accounting/cost-centers.service';
@@ -249,11 +249,11 @@ export class StockDocumentsService {
       let quantity =
         raw.quantity === undefined
           ? new Prisma.Decimal(0)
-          : this.decimal(raw.quantity, `Line ${index + 1} quantity`);
+          : parseDocumentQuantity(raw.quantity, `Line ${index + 1} quantity`);
       let countedQuantity =
         raw.countedQuantity === undefined
           ? null
-          : this.decimal(raw.countedQuantity, `Line ${index + 1} counted quantity`);
+          : parseDocumentQuantity(raw.countedQuantity, `Line ${index + 1} counted quantity`);
       const unitCost =
         raw.unitCost === undefined
           ? new Prisma.Decimal(0)

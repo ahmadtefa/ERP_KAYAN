@@ -11,7 +11,8 @@ import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { defaultUnitPrice } from '../../common/units/unit-math';
 import { AccountMapService } from '../accounting/account-map.service';
 import { PostingService } from '../accounting/posting.service';
-import { isValidEan13, randomInternalBarcode, toBaseQuantity } from './barcode';
+import { isValidEan13, randomInternalBarcode } from './barcode';
+import { exactBaseQuantity } from '../../common/units/unit-math';
 
 const MONEY_SCALE = 4;
 const RATE_SCALE = 4;
@@ -118,7 +119,7 @@ export class ItemsService {
       factor: unit.factor.toFixed(6),
       // A scan of a unit barcode is one of that unit, expressed in the base
       // unit the stock ledger keeps.
-      quantityPerScan: toBaseQuantity(1, unit.factor).toFixed(MONEY_SCALE),
+      quantityPerScan: exactBaseQuantity(new Prisma.Decimal(1), unit.factor).toFixed(MONEY_SCALE),
       salePrice: defaultUnitPrice('sale', unit, owner.salePrice).toFixed(MONEY_SCALE),
       purchasePrice: mayReadCost
         ? defaultUnitPrice('purchase', unit, owner.purchasePrice).toFixed(MONEY_SCALE)
@@ -483,6 +484,16 @@ export class ItemsService {
     });
     if (!before) throw new NotFoundException('Item not found');
 
+    // The stock ledger and legacy documents use the original base unit.
+    // Renaming it would reinterpret existing quantities, even if another
+    // transaction posts concurrently. A future conversion needs a migration.
+    if (dto.unit !== undefined) {
+      if (typeof dto.unit !== 'string' || dto.unit.trim() !== before.unit.trim()) {
+        throw new BadRequestException('The base unit cannot be changed after item creation');
+      }
+      dto.unit = before.unit;
+    }
+
     if (dto.barcode !== undefined) {
       const barcode = String(dto.barcode ?? '').trim() || null;
       if (barcode) {
@@ -521,21 +532,6 @@ export class ItemsService {
 
     const updated = await this.prisma.item.update({ where: { id }, data });
 
-    // Keep the factor-1 base row's label aligned with the item base unit.
-    if (dto.unit !== undefined && String(dto.unit).trim() && dto.unit !== before.unit) {
-      const baseRow = await this.prisma.itemUnit.findFirst({
-        where: { itemId: id, factor: 1 },
-        select: { id: true, unit: true },
-      });
-      if (baseRow && baseRow.unit !== dto.unit) {
-        await this.prisma.itemUnit.update({
-          where: { id: baseRow.id },
-          data: { unit: String(dto.unit).trim() },
-        });
-      } else if (!baseRow) {
-        await this.ensureBaseUnit({ id, unit: String(dto.unit).trim() });
-      }
-    }
 
     await this.audit.record({
       companyId,

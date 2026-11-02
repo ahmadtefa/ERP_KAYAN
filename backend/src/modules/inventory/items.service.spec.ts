@@ -191,3 +191,14 @@ describe('ItemsService opening stock', () => {
     expect(tx.item.create).not.toHaveBeenCalled();
   });
 });
+
+
+describe('base unit preservation', () => {
+  it('rejects changing a base unit before any item or stock write', async () => {
+    const { service, prisma } = build();
+    prisma.item.findFirst.mockResolvedValue(item as never);
+    await expect(service.update('company-1', 'user-1', 'item-1', { unit: 'carton' }))
+      .rejects.toThrow(/base unit cannot be changed/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+});

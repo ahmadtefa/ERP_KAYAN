@@ -137,6 +137,36 @@ describe('Sales returns with multiple units', () => {
     ).rejects.toThrow(/original document's unit/);
   });
 
+  it('rejects an untrusted named unit on a legacy line without a snapshot', async () => {
+    const legacy = originalCartonLine({ unitName: null, unitFactor: null, unitQuantity: null });
+    const { service, tx } = makeService([legacy]);
+    await expect(service.createSalesReturn(COMPANY, BRANCH, 'user-1', {
+      ...baseReturnDto, lines: [{ originalLineId: 'line-1', quantity: '1', unitName: 'carton' }],
+    } as any)).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.salesInvoice.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts the base unit on a legacy line but rejects an unverifiable unit id', async () => {
+    const legacy = originalCartonLine({ unitName: null, unitFactor: null, unitQuantity: null, item: { unit: 'piece' } });
+    const { service, tx } = makeService([legacy]);
+    await service.createSalesReturn(COMPANY, BRANCH, 'user-1', {
+      ...baseReturnDto, lines: [{ originalLineId: 'line-1', quantity: '1', unitName: 'piece' }],
+    } as any);
+    expect(tx.salesInvoice.create.mock.calls[0][0].data.lines.create[0].quantity.toFixed(4)).toBe('1.0000');
+    await expect(service.createSalesReturn(COMPANY, BRANCH, 'user-1', {
+      ...baseReturnDto, lines: [{ originalLineId: 'line-1', quantity: '1', unitId: 'unknown' }],
+    } as any)).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects unrepresentable converted quantities on returns using the frozen factor', async () => {
+    const original = originalCartonLine({ unitFactor: D('1.234567') });
+    const { service, tx } = makeService([original]);
+    await expect(service.createSalesReturn(COMPANY, BRANCH, 'user-1', {
+      ...baseReturnDto, lines: [{ originalLineId: 'line-1', quantity: '0.0001', unitName: 'كرتونة' }],
+    } as any)).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.salesInvoice.create).not.toHaveBeenCalled();
+  });
+
   it('keeps a legacy original line (no snapshot) working with factor 1 and a null snapshot', async () => {
     const legacy = originalCartonLine({
       unitName: null,

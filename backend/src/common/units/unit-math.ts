@@ -54,12 +54,20 @@ export interface ResolvedUnit {
 export function parseFactor(value: unknown, field = 'factor'): Prisma.Decimal {
   let factor: Prisma.Decimal;
   try {
-    factor = new Prisma.Decimal(String(value)).toDecimalPlaces(FACTOR_SCALE);
+    factor = new Prisma.Decimal(String(value));
   } catch {
     throw new BadRequestException(`${field} is not a valid number`);
   }
-  if (factor.isNegative() || factor.isZero()) {
-    throw new BadRequestException(`${field} must be greater than zero`);
+  if (!factor.isFinite() || factor.isNegative() || factor.isZero() || factor.greaterThanOrEqualTo('1e13')) {
+    throw new BadRequestException(`${field} must be greater than zero and fit Decimal(19,6)`);
+  }
+  // Reject over-precise textual inputs even if their extra digits are zero.
+  // Persisted Prisma.Decimal values stringify without artificial zero padding.
+  const raw = String(value).trim();
+  const match = raw.match(/^[+-]?(?:\d+(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/);
+  const inputScale = match ? (match[1]?.length ?? match[2]?.length ?? 0) - Number(match[3] ?? 0) : 0;
+  if (inputScale > FACTOR_SCALE || !factor.equals(factor.toDecimalPlaces(FACTOR_SCALE))) {
+    throw new BadRequestException(`${field} supports at most ${FACTOR_SCALE} decimal places`);
   }
   return factor;
 }
@@ -75,6 +83,34 @@ export function toBaseQuantity(
   factor: Prisma.Decimal,
 ): Prisma.Decimal {
   return unitQuantity.mul(factor).toDecimalPlaces(QUANTITY_SCALE);
+}
+
+/** Validate a new document quantity without silently changing it. */
+export function parseDocumentQuantity(value: unknown, field: string): Prisma.Decimal {
+  let quantity: Prisma.Decimal;
+  try { quantity = new Prisma.Decimal(String(value)); }
+  catch { throw new BadRequestException(`${field} is not a valid number`); }
+  if (!quantity.isFinite() || quantity.abs().greaterThanOrEqualTo('1e15') || !quantity.equals(quantity.toDecimalPlaces(QUANTITY_SCALE))) {
+    throw new BadRequestException(`${field} must be finite and have at most ${QUANTITY_SCALE} decimal places`);
+  }
+  return quantity;
+}
+
+/** New stock-changing documents must never round a converted quantity. */
+export function exactBaseQuantity(quantity: Prisma.Decimal, factor: Prisma.Decimal): Prisma.Decimal {
+  // Decimal's default precision is 20 significant digits, but a 19-digit
+  // quantity times a 19-digit factor can need up to 38. Use an isolated
+  // high-precision constructor so multiplication itself cannot round first.
+  if (!quantity.isFinite() || quantity.abs().greaterThanOrEqualTo('1e15') ||
+      !factor.isFinite() || factor.lessThanOrEqualTo(0) || factor.greaterThanOrEqualTo('1e13')) {
+    throw new BadRequestException('Quantity or factor exceeds the supported storage range');
+  }
+  const ExactDecimal = Prisma.Decimal.clone({ precision: 80 });
+  const exact = new ExactDecimal(quantity.toString()).mul(factor.toString());
+  if (!exact.isFinite() || exact.abs().greaterThanOrEqualTo('1e15') || !exact.equals(exact.toDecimalPlaces(QUANTITY_SCALE))) {
+    throw new BadRequestException(`Converted quantity cannot be represented at ${QUANTITY_SCALE} decimal places`);
+  }
+  return new Prisma.Decimal(exact.toFixed());
 }
 
 function normaliseLabel(value: string | null | undefined): string {
@@ -148,7 +184,7 @@ export function resolveUnitSelection(input: {
   }
 
   const factor = parseFactor(row.factor, `${lineLabel} unit factor`);
-  const baseQuantity = toBaseQuantity(enteredQuantity, factor);
+  const baseQuantity = exactBaseQuantity(enteredQuantity, factor);
   if (baseQuantity.isZero()) {
     throw new BadRequestException(
       `${lineLabel}: the converted quantity is zero; check the unit factor and quantity`,

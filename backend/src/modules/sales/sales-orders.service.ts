@@ -10,6 +10,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import {
   defaultUnitPrice,
+  parseDocumentQuantity,
   resolveUnitSelection,
 } from '../../common/units/unit-math';
 import { DocumentNumberService } from '../accounting/document-number.service';
@@ -333,7 +334,9 @@ export class SalesOrdersService {
         const lineId = String(raw.orderLineId ?? '');
         const line = order.lines.find((candidate) => candidate.id === lineId);
         if (!line) throw new BadRequestException(`Order line ${lineId} does not belong to this order`);
-        requested.set(lineId, this.positive(raw.quantity, 'quantity'));
+        const requestedQuantity = parseDocumentQuantity(raw.quantity, 'quantity');
+        if (requestedQuantity.lessThanOrEqualTo(0)) throw new BadRequestException('quantity must be greater than zero');
+        requested.set(lineId, requestedQuantity);
       }
     }
 
@@ -452,7 +455,8 @@ export class SalesOrdersService {
       if (!item) throw new BadRequestException(`Line ${index + 1}: the item does not exist`);
       if (!item.isActive) throw new BadRequestException(`Line ${index + 1}: item ${item.code} is inactive`);
 
-      const enteredQuantity = this.positive(raw.quantity, `Line ${index + 1} quantity`);
+      const enteredQuantity = parseDocumentQuantity(raw.quantity, `Line ${index + 1} quantity`);
+      if (enteredQuantity.lessThanOrEqualTo(0)) throw new BadRequestException(`Line ${index + 1} quantity must be greater than zero`);
       const resolved = resolveUnitSelection({
         lineLabel: `Line ${index + 1}`,
         requestedUnitId: raw.unitId,

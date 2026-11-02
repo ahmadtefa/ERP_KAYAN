@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 
 import {
   defaultUnitPrice,
+  exactBaseQuantity,
   displayQuantity,
   displayUnitName,
   parseFactor,
@@ -37,6 +38,30 @@ describe('unit conversion arithmetic', () => {
   it('supports fractional quantities when the precision allows it', () => {
     // Half a reel = 50 metres
     expect(toBaseQuantity(D('0.5'), D(100)).toFixed(4)).toBe('50.0000');
+  });
+
+  it('rejects an over-precise or non-finite conversion factor', () => {
+    expect(parseFactor('1.234567').toFixed(6)).toBe('1.234567');
+    expect(() => parseFactor('1.2345678')).toThrow(BadRequestException);
+    expect(() => parseFactor('1.2345670')).toThrow(BadRequestException);
+    expect(() => parseFactor('.1234560')).toThrow(BadRequestException);
+    expect(() => parseFactor('1e13')).toThrow(BadRequestException);
+    expect(() => parseFactor('1e-7')).toThrow(BadRequestException);
+    expect(() => parseFactor('NaN')).toThrow(BadRequestException);
+    expect(() => parseFactor('Infinity')).toThrow(BadRequestException);
+  });
+
+  it('rejects new conversions that cannot be represented in base units', () => {
+    const input = { lineLabel: 'line', enteredQuantity: D('0.0001'), baseUnitName: 'kg',
+      requestedUnitName: 'case', units: [{ id: 'u', unit: 'case', factor: D('1.234567'), isActive: true }] };
+    expect(() => resolveUnitSelection(input)).toThrow(BadRequestException);
+  });
+
+  it('does not round away low digits during high-magnitude multiplication', () => {
+    expect(() => exactBaseQuantity(D('999999999999999.9999'), D('1.000001'))).toThrow(BadRequestException);
+    expect(() => exactBaseQuantity(D('1e80'), D('1'))).toThrow(BadRequestException);
+    expect(() => exactBaseQuantity(D('999999999999999'), D('2'))).toThrow(BadRequestException);
+    expect(exactBaseQuantity(D('999999999999999.9999'), D('1')).toFixed(4)).toBe('999999999999999.9999');
   });
 
   it('rejects a zero or negative factor', () => {
