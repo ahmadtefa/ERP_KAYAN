@@ -124,6 +124,8 @@ void main() {
 
     await tester.enterText(find.byKey(const ValueKey('line-quantity-0')), '2');
     await tester.enterText(find.byKey(const ValueKey('line-price-0')), '100');
+    // An explicitly cleared tax field must be sent as zero, not omitted.
+    await tester.enterText(find.byKey(const ValueKey('line-tax-rate-0')), '');
     await tester.pump();
 
     // Line discount: 10 %.
@@ -153,6 +155,7 @@ void main() {
 
     expect(api.postPath, '/sales/invoices');
     final lines = (api.postBody?['lines'] as List).cast<Map>();
+    expect(lines.single['taxRate'], '0');
     expect(lines.single['discountType'], 'PERCENT');
     expect(lines.single['discountPercent'], '10');
     expect(api.postBody?['discountType'], 'AMOUNT');

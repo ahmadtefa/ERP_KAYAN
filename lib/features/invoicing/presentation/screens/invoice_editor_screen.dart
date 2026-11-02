@@ -430,7 +430,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           'unitName': line.unitName!.trim(),
         'quantity': quantity,
         'unitPrice': price,
-        if (line.taxRate.text.trim().isNotEmpty) 'taxRate': line.taxRate.text.trim(),
+        'taxRate': line.taxRate.text.trim().isEmpty ? '0' : line.taxRate.text.trim(),
         if (line.costCenterId != null) 'costCenterId': line.costCenterId,
         if (line.discountKind != DiscountKind.none)
           'discountType': discountTypeOf(line.discountKind),
@@ -1073,6 +1073,7 @@ class _LinesTable extends StatelessWidget {
                     Expanded(
                       flex: 2,
                       child: TextFormField(
+                        key: ValueKey('line-tax-rate-$index'),
                         controller: lines[index].taxRate,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,

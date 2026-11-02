@@ -881,7 +881,9 @@ export class PurchaseInvoicesService {
       // of its own follows the company rather than silently becoming exempt.
       const taxRate: Prisma.Decimal =
         raw.taxRate !== undefined
-          ? this.rate(raw.taxRate, `Line ${index + 1} taxRate`)
+          ? (raw.taxRate === null || raw.taxRate.trim() === ''
+              ? new Prisma.Decimal(0)
+              : this.rate(raw.taxRate, `Line ${index + 1} taxRate`))
           : (item.taxRate ?? new Prisma.Decimal(settings.taxRate));
 
       // The discount is taken from the goods value, before tax, and the tax

@@ -158,6 +158,15 @@ function makeService(itemOverrides: Record<string, any> = {}) {
 }
 
 describe('Purchase multi-unit — milk scenario', () => {
+  it('treats an explicit blank tax as zero while retaining an omitted item rate', async () => {
+    const { service, tx } = makeService({ [MILK]: { ...milkItem, taxRate: D(14) } });
+    await service.create(COMPANY, BRANCH, 'user-1', { invoiceDate: '2026-10-27', supplierId: SUPPLIER,
+      lines: [{ itemId: MILK, quantity: '1', taxRate: '' }, { itemId: MILK, quantity: '1' }] } as any);
+    const lines = tx.purchaseInvoice.create.mock.calls[0][0].data.lines.create;
+    expect(lines[0].taxRate.toFixed(4)).toBe('0.0000');
+    expect(lines[1].taxRate.toFixed(4)).toBe('14.0000');
+  });
+
   it('derives a carton price from base cost once when no unit price exists', async () => {
     const item = {
       ...milkItem,

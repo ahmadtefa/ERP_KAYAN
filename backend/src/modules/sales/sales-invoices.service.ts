@@ -928,7 +928,9 @@ export class SalesInvoicesService {
       // exempt, which is a different thing.
       const taxRate: Prisma.Decimal =
         raw.taxRate !== undefined
-          ? this.rate(raw.taxRate, `Line ${index + 1} taxRate`)
+          ? (raw.taxRate === null || raw.taxRate.trim() === ''
+              ? new Prisma.Decimal(0)
+              : this.rate(raw.taxRate, `Line ${index + 1} taxRate`))
           : (item?.taxRate ?? new Prisma.Decimal(settings.taxRate));
 
       // What the person typed is the price of the goods, unless the company
