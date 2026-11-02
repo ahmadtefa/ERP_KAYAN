@@ -1,0 +1,97 @@
+name: Installed program E2E (licence, warehouse, backup, restore)
+
+# The proof that the shipped program works, not just the library behind it.
+#
+# A test-signed Setup is built in this job with an EPHEMERAL Ed25519 public key,
+# installed on a disposable Windows runner, licensed with a key signed for that
+# machine by the matching private key, and then put through the whole warehouse
+# from the installed copy: two lots on one receipt, the average cost, a transfer,
+# an issue, a full stock take with a difference approved by somebody else, a
+# write-off, warehouse grants and the refusals they cause, alerts, the twenty
+# reports, CSV, the printed sheet, the application's own backup, and a restore of
+# that backup into a clean database that is then worked in again.
+#
+# Why test-signed: a product build only accepts the company's production public
+# key (scripts/license-build-policy.mjs), and its private key must never exist in
+# CI. The `-TestSignedBuild` mode exists exactly for this and names its artifact
+# `KAYAN-ERP-TEST-ONLY-Setup.exe`, so a test build can never be mistaken for a
+# release. The production Setup keeps its own installer workflow unchanged.
+on:
+  push:
+    branches: ['arena/7b5dfd31-erp-kayan']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installed-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installed-e2e:
+    name: Install the Setup, license it, and work the warehouse
+    runs-on: windows-latest
+    timeout-minutes: 150
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install Inno Setup 6
+        shell: powershell
+        run: |
+          choco install innosetup --no-progress -y
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found: $iscc" }
+          $global:LASTEXITCODE = 0
+      - name: Mint an ephemeral signing key pair for this run
+        shell: pwsh
+        run: |
+          $home_dir = Join-Path $env:RUNNER_TEMP 'licence-keys'
+          New-Item -ItemType Directory -Force -Path $home_dir | Out-Null
+          node tools/license-generator/kayan-license.mjs init --home $home_dir
+          if (-not (Test-Path (Join-Path $home_dir 'public-key.pem'))) { throw 'The generator wrote no public key.' }
+          "KAYAN_GENERATOR_HOME=$home_dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build a test-signed Setup with that public key
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\distribution\windows\build-installer.ps1 -DisposableSource -TestSignedBuild -LicencePublicKeyPath (Join-Path $env:KAYAN_GENERATOR_HOME 'public-key.pem')
+          if ($LASTEXITCODE -ne 0) { throw 'The test-signed Setup build failed.' }
+          $file = Get-Item -LiteralPath 'build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe'
+          $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Output "::notice title=Built test-signed Setup::SHA256=$hash bytes=$($file.Length) source=$env:GITHUB_SHA"
+      - name: Install, license, and work the whole warehouse on the installed copy
+        shell: pwsh
+        run: |
+          & pwsh -NoLogo -NoProfile -File scripts/prove-installed-windows-e2e.ps1 `
+            -SetupPath 'build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe' `
+            -ExpectedSourceCommit $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'The installed-copy proof failed.' }
+      - name: Upload the proof reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installed-e2e-${{ github.sha }}
+          path: ${{ runner.temp }}/installed-e2e/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Say what was and was not proven
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Output '::notice title=Installed E2E scope::The operations ran against the installed program''s own server and installed PostgreSQL. They were driven by the program''s API, not by clicking its windows: this repository has no Flutter desktop UI automation, so a click-through proof is NOT part of this job.'

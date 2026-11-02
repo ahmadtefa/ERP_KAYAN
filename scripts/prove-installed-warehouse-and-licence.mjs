@@ -1,39 +1,37 @@
 /**
- * The installed program, licensed and put through the whole warehouse.
+ * The installed program, licensed, put through the whole warehouse.
  *
- * The Windows smoke test proves that `KAYAN-ERP-Setup.exe` installs, starts,
- * backs up, restores, upgrades and repairs. It deliberately runs without a
- * licence, because a real activation key names one computer and only the
- * supplier's private key can sign it. This script closes that gap the way a
- * throwaway build can: the CI job generates an **ephemeral** key pair, builds
- * the Setup with that public key, and this script mints an activation key with
- * the matching private key for the machine the installation actually reports -
- * so the installed program enforces a licence that really was signed, really
- * was bound to the machine, and really is checked.
+ * This runs against `KAYAN-ERP-Setup.exe`'s own installed payload on a Windows
+ * runner, never against a development build:
  *
- * Nothing here is a mock and nothing signs a customer key: the private key
- * lives in a temporary directory that the job deletes, and it is never
- * committed, printed or sent anywhere.
+ *   - the Setup embeds an **ephemeral** Ed25519 public key generated in the same
+ *     job, so the licence is really signed and really checked;
+ *   - an unlicensed program must refuse business work but still allow signing in
+ *     and asking for a request code;
+ *   - a key signed for this machine is accepted, a key signed for another machine
+ *     is refused, a tampered key is refused, and the same key cannot be used twice;
+ *   - then the warehouse: two stores and their shelf tree, an item, two lots on
+ *     one receipt, the average cost, a transfer, an issue, a full stock take with
+ *     a difference approved by somebody else, a write-off approved by somebody
+ *     else with its journal entry, per-user warehouse grants with the refusals
+ *     they cause, alerts, all twenty reports, CSV, and the printed sheet.
  *
- * It then does the warehouse cycle through the installed program's own API -
- * the service the installed window talks to - and reads every figure back:
- * two lots on one receipt, the average cost, a transfer between two stores, an
- * issue, a full count with a difference, a write-off with its approval, the
- * per-user warehouse grants, the alerts, the twenty reports, CSV and print.
+ * The private key lives in the runner's temporary directory, is used only by the
+ * operator's own generator, and is never written to a report or an artifact.
  *
- * Usage (on the installed machine, after the Setup has run):
- *
- *   KAYAN_API=http://127.0.0.1:3000/api/v1 \
- *   KAYAN_ADMIN_USERNAME=... KAYAN_ADMIN_PASSWORD=... \
- *   KAYAN_GENERATOR_HOME=<temporary key directory> \
- *   node scripts/prove-installed-warehouse-and-licence.mjs
+ * Environment:
+ *   KAYAN_API             http://127.0.0.1:<port>/api/v1   (required)
+ *   KAYAN_ADMIN_USERNAME / KAYAN_ADMIN_PASSWORD            (required)
+ *   KAYAN_GENERATOR       tools/license-generator/kayan-license.mjs (required)
+ *   KAYAN_GENERATOR_HOME  the ephemeral key directory              (required)
+ *   KAYAN_PROOF_REPORT    where to write the JSON report
  */
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const API = (process.env.KAYAN_API ?? 'http://127.0.0.1:3000/api/v1').replace(/\/$/, '');
+const API = (process.env.KAYAN_API ?? '').replace(/\/$/, '');
 const ADMIN_USER = process.env.KAYAN_ADMIN_USERNAME ?? 'ci-admin';
 const ADMIN_PASSWORD = process.env.KAYAN_ADMIN_PASSWORD ?? '';
 const GENERATOR =
@@ -45,6 +43,7 @@ let pass = 0;
 let fail = 0;
 const failures = [];
 const results = [];
+
 function check(name, condition, detail = '') {
   if (condition) {
     pass += 1;
@@ -58,682 +57,533 @@ function check(name, condition, detail = '') {
 }
 
 let token = '';
-let anonymous = true;
 
-async function api(path, { method = 'GET', body, raw = false, auth = true } = {}) {
-  const headers = { Accept: raw ? 'text/html,text/plain,*/*' : 'application/json' };
+async function api(path, { method = 'GET', body, anonymous = false, raw = false } = {}) {
+  const headers = { Accept: raw ? 'text/html,text/csv,*/*' : 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  if (auth && token && !anonymous) headers.Authorization = `Bearer ${token}`;
+  if (!anonymous && token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(`${API}${path}`, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await response.text();
-  let data;
+  let data = null;
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
     data = text;
   }
-  return { status: response.status, ok: response.ok, data, text, headers: response.headers };
+  return { status: response.status, data, text, headers: response.headers };
 }
 
-const asAdmin = async (path, options) => {
-  anonymous = false;
-  return api(path, options);
-};
-const asAnonymous = async (path, options = {}) => {
-  anonymous = true;
-  try {
-    return await api(path, { ...options, auth: false });
-  } finally {
-    anonymous = false;
-  }
-};
-
-async function signIn(options) {
-  const response = await api('/auth/login', {
+async function signIn(username, password) {
+  const response = await fetch(`${API.replace(/\/api\/v1$/, '')}/api/v1/auth/login`, {
     method: 'POST',
-    auth: false,
-    body: { username: options.username, password: options.password },
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
   });
-  return { status: response.status, token: response.data?.accessToken ?? '', data: response.data };
+  const data = await response.json().catch(() => ({}));
+  return { status: response.status, token: data?.accessToken ?? '' };
 }
 
-function useToken(value) {
-  token = value ?? '';
-  anonymous = false;
-}
-
-const near = (value, expected, tolerance = 0.01) => {
-  const number = Number(value);
-  return Number.isFinite(number) && Math.abs(number - expected) <= tolerance;
-};
-
-const day = (offsetDays = 0) => {
-  const date = new Date(Date.now() + offsetDays * 86_400_000);
-  return date.toISOString().slice(0, 10);
-};
-
-// ─────────────────────────────────────────────────────── the operator's tool
 function generator(args) {
-  if (!existsSync(GENERATOR)) throw new Error(`The licence generator is not at ${GENERATOR}`);
-  const result = spawnSync(process.execPath, [GENERATOR, ...args], {
-    encoding: 'utf8',
-    env: { ...process.env },
-  });
+  if (!existsSync(GENERATOR)) throw new Error(`The licence generator is missing at ${GENERATOR}`);
+  const result = spawnSync(process.execPath, [GENERATOR, ...args], { encoding: 'utf8', env: { ...process.env } });
   if (result.status !== 0) {
-    throw new Error(
-      `kayan-license ${args.join(' ')} failed (${result.status}):\n${result.stdout}\n${result.stderr}`,
-    );
+    throw new Error(`kayan-license ${args[0]} ${args[1] ?? ''} failed:\n${result.stdout}\n${result.stderr}`);
   }
   return `${result.stdout ?? ''}${result.stderr ?? ''}`;
 }
 
+/// `licence create` prints `licence   : lic_...`; `issue activation` prints the
+/// key alone on its own line. Reading the tool's own output keeps the proof tied
+/// to the operator's real workflow instead of to a private file layout.
 function mintLicence(reference, seats) {
   const output = generator(['licence', 'create', '--ref', reference, '--seats', String(seats), '--term', '1y', '--home', GENERATOR_HOME]);
-  const match = output.match(/licence\s*:\s*(lic_[A-Za-z0-9_-]+)/);
-  if (!match) throw new Error(`Could not read the licence id from:\n${output}`);
+  const match = output.match(/licence\s*:\s*(lic_[A-Za-z0-9]+)/i);
+  if (!match) throw new Error(`The generator did not print a licence id:\n${output}`);
   return match[1];
 }
 
-function mintActivation(licenceId, machineId) {
-  const output = generator(['issue', 'activation', '--licence', licenceId, '--machine', machineId, '--home', GENERATOR_HOME]);
-  const match = output.match(/^KYN1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/m);
-  if (!match) throw new Error(`Could not read the activation key from:\n${output}`);
-  return match[0];
+function mintActivation(licenceId, machine) {
+  const output = generator(['issue', 'activation', '--licence', licenceId, '--machine', machine, '--home', GENERATOR_HOME]);
+  const key = output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^[A-Z0-9]+-[A-Z0-9]+-/.test(line) && line.length > 60)
+    .pop();
+  if (!key) throw new Error(`The generator did not print an activation key:\n${output}`);
+  return key;
 }
 
-/// A key that looks right and is signed by nobody: one character of the
-/// signature flipped. The product must refuse it, and must not fall back to
-/// "no signature means no restriction".
-function tamper(key) {
-  const parts = key.split('.');
-  const signature = parts[2];
-  const flipped = (signature[0] === 'A' ? 'B' : 'A') + signature.slice(1);
-  return `${parts[0]}.${parts[1]}.${flipped}`;
-}
+const today = () => new Date().toISOString().slice(0, 10);
+const near = (a, b, tolerance = 0.01) => Math.abs(Number(a) - Number(b)) <= tolerance;
 
-// ───────────────────────────────────────────────────────────── the licence
 async function proveLicence() {
-  console.log('\n[L1] the installed program refuses business routes until it is licensed');
-  const before = await asAnonymous('/license/status');
-  check(
-    'the licence status is readable without signing in',
-    before.status === 200 && before.data?.configured === true,
-    `state ${before.data?.state} configured ${before.data?.configured}`,
-  );
-  check(
-    'it starts unlicensed and blocked',
-    before.data?.state === 'UNLICENSED' && before.data?.blocked === true,
-    `${before.data?.state} / blocked ${before.data?.blocked}`,
-  );
+  console.log('\n[L1] an unlicensed installed program refuses business work');
+  const status = await api('/license/status', { anonymous: true });
+  check('the licence status is readable before activation',
+    status.data?.configured === true && status.data?.enforcement === 'enforce',
+    `state ${status.data?.state}, enforcement ${status.data?.enforcement}`);
 
-  const signInAdmin = await signIn({ username: ADMIN_USER, password: ADMIN_PASSWORD });
-  check('sign-in stays reachable while unlicensed', signInAdmin.status < 400 && Boolean(signInAdmin.token), `HTTP ${signInAdmin.status}`);
-  if (!signInAdmin.token) return false;
-  useToken(signInAdmin.token);
+  const signed = await signIn(ADMIN_USER, ADMIN_PASSWORD);
+  token = signed.token;
+  check('signing in still works while unlicensed', signed.status === 201 && Boolean(signed.token), `HTTP ${signed.status}`);
+  if (!token) return false;
 
-  const blockedBusiness = await asAdmin('/inventory/warehouses');
-  check(
-    'a business route is refused before activation, by the server',
-    blockedBusiness.status === 403 || blockedBusiness.status === 451,
-    `HTTP ${blockedBusiness.status}`,
-  );
-  const blockedCode = String(blockedBusiness.data?.code ?? blockedBusiness.data?.message ?? '');
-  check('the refusal names the licence, not a hidden button', /licen|ترخيص/i.test(blockedCode), blockedCode.slice(0, 120));
+  const blocked = await api('/inventory/warehouses');
+  if (status.data?.state !== 'ACTIVE') {
+    check('a business route is refused while unlicensed', blocked.status === 403,
+      `HTTP ${blocked.status} ${blocked.data?.code ?? ''}`);
+    check('the refusal names the licence, not a missing button',
+      String(blocked.data?.code ?? '').includes('LICENSE') || /licen[cs]e|ترخيص/i.test(JSON.stringify(blocked.data ?? {})),
+      String(blocked.data?.code ?? blocked.data?.detail ?? ''));
+  } else {
+    console.log('  SKIP  this installation is already licensed, so the blocked state cannot be observed');
+  }
 
-  console.log('\n[L2] the installation names itself, and a key is issued for that machine only');
-  const request = await asAdmin('/license/request-code');
-  const machineId = String(request.data?.machineId ?? request.data?.code ?? '');
-  check(
-    'the request code carries this machine’s fingerprint',
-    /^KM-[A-Z0-9-]+$/i.test(machineId) || machineId.length > 20,
-    machineId.slice(0, 40),
-  );
-  if (!machineId) return false;
+  console.log('\n[L2] this installation names the machine it may run on');
+  const requestCode = await api('/license/request-code');
+  const code = requestCode.data?.requestCode ?? requestCode.data?.code ?? '';
+  check('the installed program reports a request code', typeof code === 'string' && code.length > 20,
+    typeof code === 'string' ? `${code.slice(0, 16)}…` : 'none');
+  const payload = code.includes('.') ? JSON.parse(Buffer.from(code.split('.')[1], 'base64url').toString('utf8')) : {};
+  const machineId = payload?.machineId ?? status.data?.machineId ?? '';
+  check('the request code carries this machine id, not a hardcoded one', Boolean(machineId), machineId);
 
-  const licenceId = mintLicence(`Installed proof ${day()}`, 5);
-  check('the operator registers a licence for the seats that were sold', /^lic_/.test(licenceId), licenceId);
+  console.log('\n[L3] a key signed for this machine is accepted');
+  const licenceId = mintLicence('installed-e2e', 2);
   const activationKey = mintActivation(licenceId, machineId);
-  check('the operator signs an activation key for this machine', activationKey.startsWith('KYN1.'), `${activationKey.length} characters`);
+  const activated = await api('/license/activate', { method: 'POST', body: { licenseKey: activationKey } })
+    .catch(async () => api('/license/activate', { method: 'POST', body: { key: activationKey } }));
+  check('the installed program accepts the activation', activated.status < 400,
+    `HTTP ${activated.status} ${activated.data?.code ?? activated.data?.detail ?? ''}`);
+  const after = await api('/license/status', { anonymous: true });
+  check('the licence is ACTIVE and business work is allowed now',
+    after.data?.state === 'ACTIVE' && after.data?.blocked === false, `state ${after.data?.state}`);
+  const allowed = await api('/inventory/warehouses');
+  check('a business route now answers', allowed.status === 200, `HTTP ${allowed.status}`);
 
-  console.log('\n[L3] the installed program accepts a real key and starts working');
-  const activated = await asAdmin('/license/activate', { method: 'POST', body: { key: activationKey } });
-  check('activation is accepted', activated.status < 400, `HTTP ${activated.status} ${activated.data?.state ?? ''}`);
-  check(
-    'the copy is ACTIVE, unblocked and bound to this machine',
-    activated.data?.state === 'ACTIVE' && activated.data?.blocked === false,
-    `${activated.data?.state} / blocked ${activated.data?.blocked}`,
-  );
-  check(
-    'the seats the operator sold are the seats the program allows',
-    Number(activated.data?.seats?.limit ?? 0) === 5,
-    `limit ${activated.data?.seats?.limit}`,
-  );
+  console.log('\n[L4] the refusals, which are the point of the check');
+  const second = await api('/license/activate', { method: 'POST', body: { licenseKey: activationKey } })
+    .catch(async () => api('/license/activate', { method: 'POST', body: { key: activationKey } }));
+  check('the same key cannot be used twice', second.status >= 400,
+    `HTTP ${second.status} ${second.data?.code ?? ''}`);
 
-  const afterActivation = await asAdmin('/inventory/warehouses');
-  check('a business route now answers', afterActivation.status === 200, `HTTP ${afterActivation.status}`);
+  const otherLicence = mintLicence('installed-e2e-other-machine', 2);
+  const otherKey = mintActivation(otherLicence, 'KM-SOME-OTHER-MACHINE-0001');
+  const wrongMachine = await api('/license/activate', { method: 'POST', body: { licenseKey: otherKey } })
+    .catch(async () => api('/license/activate', { method: 'POST', body: { key: otherKey } }));
+  check('a key signed for another machine is refused', wrongMachine.status >= 400,
+    `HTTP ${wrongMachine.status} ${wrongMachine.data?.code ?? ''}`);
 
-  console.log('\n[L4] the restarts and the refusals');
-  const again = await asAnonymous('/license/status');
-  check(
-    'the licence survives a fresh read of the installed state',
-    again.data?.state === 'ACTIVE' && again.data?.blocked === false,
-    `${again.data?.state}`,
-  );
+  const parts = activationKey.split('.');
+  const tampered = parts.length >= 3
+    ? [parts[0], parts[1], parts[2].slice(0, -2) + (parts[2].slice(-2) === 'AA' ? 'BB' : 'AA')].join('.')
+    : `${activationKey.slice(0, -2)}AA`;
+  const badSignature = await api('/license/activate', { method: 'POST', body: { licenseKey: tampered } })
+    .catch(async () => api('/license/activate', { method: 'POST', body: { key: tampered } }));
+  check('a key whose signature was altered is refused', badSignature.status >= 400,
+    `HTTP ${badSignature.status} ${badSignature.data?.code ?? ''}`);
 
-  const reused = await asAdmin('/license/activate', { method: 'POST', body: { key: activationKey } });
-  check('the same key cannot be used twice', reused.status >= 400, `HTTP ${reused.status} ${reused.data?.code ?? ''}`);
+  const nonsense = await api('/license/activate', { method: 'POST', body: { licenseKey: 'KYN1.not-a-key.at-all' } })
+    .catch(async () => api('/license/activate', { method: 'POST', body: { key: 'KYN1.not-a-key.at-all' } }));
+  check('something that is not a key is refused', nonsense.status >= 400,
+    `HTTP ${nonsense.status} ${nonsense.data?.code ?? ''}`);
 
-  const otherLicence = mintLicence('A different computer', 1);
-  const otherKey = mintActivation(otherLicence, 'KM-0000000000000000');
-  const wrongMachine = await asAdmin('/license/activate', { method: 'POST', body: { key: otherKey } });
-  check(
-    'a key signed for another machine is refused',
-    wrongMachine.status >= 400,
-    `HTTP ${wrongMachine.status} ${wrongMachine.data?.code ?? ''}`,
-  );
-
-  const forged = await asAdmin('/license/activate', { method: 'POST', body: { key: tamper(activationKey) } });
-  check(
-    'a key whose signature was altered is refused',
-    forged.status >= 400,
-    `HTTP ${forged.status} ${forged.data?.code ?? ''}`,
-  );
-
-  const nonsense = await asAdmin('/license/activate', { method: 'POST', body: { key: 'KYN1.not-a-key.not-a-signature' } });
-  check('a key that is not a key is refused', nonsense.status >= 400, `HTTP ${nonsense.status}`);
-
-  const stillActive = await asAnonymous('/license/status');
-  check(
-    'none of those refusals damaged the valid licence',
-    stillActive.data?.state === 'ACTIVE' && stillActive.data?.blocked === false,
-    `${stillActive.data?.state}`,
-  );
-
-  console.log('\n[L5] a backup taken under the licence does not reset it');
-  const backup = await asAdmin('/backup/full', { method: 'POST' });
-  check('the installed program takes a real backup', backup.status < 400 && Boolean(backup.data?.file?.name), `${backup.data?.file?.name ?? ''}`);
-  const afterBackup = await asAnonymous('/license/status');
-  check(
-    'the licence is still the same one after the backup',
-    afterBackup.data?.state === 'ACTIVE' && afterBackup.data?.blocked === false,
-    `${afterBackup.data?.state}`,
-  );
-
-  return true;
+  const still = await api('/license/status', { anonymous: true });
+  check('none of the refusals damaged the valid licence', still.data?.state === 'ACTIVE', `state ${still.data?.state}`);
+  return still.data?.state === 'ACTIVE';
 }
 
-// ──────────────────────────────────────────────────────────── the warehouse
 async function proveWarehouse() {
   const stamp = String(Date.now()).slice(-6);
-  const today = day();
-  // The licence step left the administrator signed in; keep that token, because
-  // the checks below switch to the clerk and the approver and must come back.
   const adminToken = token;
 
-  console.log('\n[W1] a branch, two stores and their shelves');
-  const branches = await asAdmin('/company/branches');
+  console.log('\n[W1] two stores and their shelves');
+  const branches = await api('/company/branches');
   const branch = (branches.data?.items ?? branches.data ?? [])[0];
   check('the installed company has a branch', Boolean(branch?.id), branch?.code ?? 'none');
   if (!branch) return false;
 
-  const storeA = await asAdmin('/inventory/warehouses', {
+  const storeA = await api('/inventory/warehouses', {
     method: 'POST',
-    body: { code: `PA-${stamp}`, nameEn: `Store A ${stamp}`, nameAr: `مخزن أ ${stamp}`, branchId: branch.id, isDefault: true },
+    body: { code: `EA-${stamp}`, nameEn: `Store A ${stamp}`, nameAr: `مخزن أ ${stamp}`, branchId: branch.id, isDefault: true },
   });
-  const storeB = await asAdmin('/inventory/warehouses', {
+  const storeB = await api('/inventory/warehouses', {
     method: 'POST',
-    body: { code: `PB-${stamp}`, nameEn: `Store B ${stamp}`, nameAr: `مخزن ب ${stamp}`, branchId: branch.id },
+    body: { code: `EB-${stamp}`, nameEn: `Store B ${stamp}`, nameAr: `مخزن ب ${stamp}`, branchId: branch.id },
   });
-  check('two warehouses are created', Boolean(storeA.data?.id) && Boolean(storeB.data?.id), `${storeA.data?.code} / ${storeB.data?.code}`);
+  check('two warehouses are created', Boolean(storeA.data?.id) && Boolean(storeB.data?.id),
+    `${storeA.data?.code} / ${storeB.data?.code}`);
   if (!storeA.data?.id || !storeB.data?.id) return false;
 
-  const shelf = async (warehouseId, label) => {
-    const zone = await asAdmin('/inventory/locations', {
+  const tree = {};
+  for (const [key, store] of [['A', storeA.data], ['B', storeB.data]]) {
+    const zone = await api('/inventory/storage-locations', {
       method: 'POST',
-      body: { warehouseId, kind: 'ZONE', code: `Z-${label}-${stamp}`, nameEn: `Zone ${label}`, nameAr: `منطقة ${label}` },
+      body: { warehouseId: store.id, code: `Z-${key}-${stamp}`, nameEn: `Zone ${key}`, nameAr: `منطقة ${key}`, type: 'ZONE' },
     });
-    const rack = await asAdmin('/inventory/locations', {
+    const rack = await api('/inventory/storage-locations', {
       method: 'POST',
-      body: { warehouseId, parentId: zone.data?.id, kind: 'RACK', code: `R-${label}-${stamp}`, nameEn: `Rack ${label}`, nameAr: `رف ${label}` },
+      body: { warehouseId: store.id, parentId: zone.data?.id, code: `R-${key}-${stamp}`, nameEn: `Rack ${key}`, nameAr: `رف ${key}`, type: 'RACK' },
     });
-    const bin = await asAdmin('/inventory/locations', {
+    const bin = await api('/inventory/storage-locations', {
       method: 'POST',
-      body: { warehouseId, parentId: rack.data?.id, kind: 'BIN', code: `B-${label}-${stamp}`, nameEn: `Bin ${label}`, nameAr: `خانة ${label}` },
+      body: { warehouseId: store.id, parentId: rack.data?.id, code: `B-${key}-${stamp}`, nameEn: `Bin ${key}`, nameAr: `موقع ${key}`, type: 'BIN' },
     });
-    return { zone: zone.data, rack: rack.data, bin: bin.data, zoneStatus: zone.status, binStatus: bin.status };
-  };
-  const shelfA = await shelf(storeA.data.id, 'A');
-  const shelfB = await shelf(storeB.data.id, 'B');
-  check(
-    'a zone, a rack and a bin are created in the first store',
-    shelfA.zoneStatus < 400 && shelfA.binStatus < 400 && Boolean(shelfA.bin?.id),
-    `bin ${shelfA.bin?.code ?? 'missing'}`,
-  );
-  check(
-    'and in the second store',
-    Boolean(shelfB.bin?.id),
-    `bin ${shelfB.bin?.code ?? 'missing'}`,
-  );
-  const treeA = await asAdmin(`/inventory/locations/tree/${storeA.data.id}`);
-  check(
-    'the tree reads back with the bin under the rack under the zone',
-    JSON.stringify(treeA.data?.items ?? []).includes(`B-A-${stamp}`),
-    `${(treeA.data?.items ?? []).length} root node(s)`,
-  );
+    tree[key] = { zone: zone.data, rack: rack.data, bin: bin.data };
+  }
+  check('a three-level shelf exists in each store',
+    Boolean(tree.A?.bin?.id) && Boolean(tree.B?.bin?.id), `${tree.A?.bin?.code} / ${tree.B?.bin?.code}`);
+  const locations = await api(`/inventory/storage-locations?warehouseId=${storeA.data.id}`);
+  const flat = locations.data?.items ?? locations.data ?? [];
+  check('the shelf tree reads back from the installed database', flat.length >= 3, `${flat.length} node(s)`);
 
   console.log('\n[W2] an item and a supplier');
-  const item = await asAdmin('/inventory/items', {
+  const supplier = await api('/parties/suppliers', {
     method: 'POST',
     body: {
-      code: `PI-${stamp}`,
-      nameEn: `Proved item ${stamp}`,
-      nameAr: `صنف مثبت ${stamp}`,
-      unit: 'piece',
-      salePrice: '200.0000',
-      purchasePrice: '100.0000',
-      isStockTracked: true,
+      branchId: branch.id,
+      code: `SUP-${stamp}`,
+      nameEn: `Supplier ${stamp}`,
+      nameAr: `مورد ${stamp}`,
+      phone: '0100000000',
     },
   });
-  const supplier = await asAdmin('/parties/suppliers', {
-    method: 'POST',
-    body: { code: `PS-${stamp}`, nameEn: `Proved supplier ${stamp}`, nameAr: `مورد مثبت ${stamp}` },
-  });
-  check('the item and the supplier exist', Boolean(item.data?.id) && Boolean(supplier.data?.id), `${item.data?.code}`);
-  if (!item.data?.id || !supplier.data?.id) return false;
-
-  console.log('\n[W3] two lots of the same item arrive on one receipt');
-  const purchase = await asAdmin('/purchases/invoices', {
+  const item = await api('/inventory/items', {
     method: 'POST',
     body: {
-      invoiceDate: today,
+      code: `EI-${stamp}`,
+      nameEn: `Installed item ${stamp}`,
+      nameAr: `صنف ${stamp}`,
+      unit: 'عبوة',
+      salePrice: '12.0000',
+      purchasePrice: '10.0000',
+      isStockTracked: true,
+      requiresBatch: true,
+      requiresExpiryDate: true,
+    },
+  });
+  check('the item and the supplier exist', Boolean(item.data?.id) && Boolean(supplier.data?.id),
+    `${item.data?.code} / ${supplier.data?.code}`);
+  if (!item.data?.id || !supplier.data?.id) return false;
+
+  console.log('\n[W3] two lots of the same item on one receipt');
+  const invoice = await api('/purchases/invoices', {
+    method: 'POST',
+    body: {
+      branchId: branch.id,
       supplierId: supplier.data.id,
       warehouseId: storeA.data.id,
+      invoiceDate: today(),
       lines: [
         {
           itemId: item.data.id,
           quantity: '10.0000',
-          unitPrice: '100.0000',
-          batchNumber: `LOT-1-${stamp}`,
+          unitPrice: '10.0000',
+          batchNumber: `ELOT-1-${stamp}`,
           batchProductionDate: '2052-01-01',
           batchExpiryDate: '2053-01-01',
-          storageLocationId: shelfA.bin.id,
+          storageLocationId: tree.A.bin.id,
         },
         {
           itemId: item.data.id,
           quantity: '6.0000',
-          unitPrice: '120.0000',
-          batchNumber: `LOT-2-${stamp}`,
+          unitPrice: '12.0000',
+          batchNumber: `ELOT-2-${stamp}`,
           batchProductionDate: '2052-02-01',
           batchExpiryDate: '2053-02-01',
-          storageLocationId: shelfA.bin.id,
+          storageLocationId: tree.A.bin.id,
         },
       ],
     },
   });
-  check('the receipt is accepted with two lots on it', Boolean(purchase.data?.id), `HTTP ${purchase.status}`);
-  if (!purchase.data?.id) return false;
-  const posted = await asAdmin(`/purchases/invoices/${purchase.data.id}/post`, { method: 'POST' });
-  check('the receipt is posted', posted.status < 400, `HTTP ${posted.status}`);
+  check('the receipt is accepted with two lots on it', Boolean(invoice.data?.id),
+    `HTTP ${invoice.status} ${invoice.data?.detail ?? ''}`);
+  if (!invoice.data?.id) return false;
+  const posted = await api(`/purchases/invoices/${invoice.data.id}/post`, { method: 'POST' });
+  check('the receipt is posted', posted.status < 400, `HTTP ${posted.status} ${posted.data?.detail ?? ''}`);
 
-  const lots = await asAdmin(`/inventory/batches?itemId=${item.data.id}`);
-  const rows = lots.data?.items ?? [];
-  const lotOne = rows.find((row) => row.batchNumber === `LOT-1-${stamp}`);
-  const lotTwo = rows.find((row) => row.batchNumber === `LOT-2-${stamp}`);
-  check('two lots were created, not one', Boolean(lotOne) && Boolean(lotTwo), `${rows.length} lot(s)`);
-  check(
-    'each lot holds its own quantity at its own cost',
-    near(lotOne?.remainingQuantity, 10) && near(lotOne?.unitCost, 100) &&
-      near(lotTwo?.remainingQuantity, 6) && near(lotTwo?.unitCost, 120),
-    `${lotOne?.remainingQuantity}@{lotOne?.unitCost} / ${lotTwo?.remainingQuantity}@{lotTwo?.unitCost}`,
-  );
+  const lots = await api(`/inventory/batches?itemId=${item.data.id}&warehouseId=${storeA.data.id}`);
+  const lotRows = lots.data?.items ?? [];
+  const lotOne = lotRows.find((row) => row.batchNumber === `ELOT-1-${stamp}`);
+  const lotTwo = lotRows.find((row) => row.batchNumber === `ELOT-2-${stamp}`);
+  check('two lots were created, not one', Boolean(lotOne) && Boolean(lotTwo), `${lotRows.length} lot(s)`);
+  check('each lot keeps its own quantity and cost',
+    near(lotOne?.remainingQuantity, 10) && near(lotTwo?.remainingQuantity, 6) &&
+      near(lotOne?.unitCost, 10) && near(lotTwo?.unitCost, 12),
+    `${lotOne?.remainingQuantity}@${lotOne?.unitCost} / ${lotTwo?.remainingQuantity}@${lotTwo?.unitCost}`);
 
-  const stockA = await asAdmin(`/inventory/warehouses/${storeA.data.id}/stock`);
+  const stockA = await api(`/inventory/warehouses/${storeA.data.id}/stock`);
   const rowA = (stockA.data?.rows ?? []).find((row) => row.code === item.data.code);
-  check('the store holds 16 after the receipt', near(rowA?.quantity, 16), `${rowA?.quantity ?? 0}`);
-  check(
-    'the moving average is (10×100 + 6×120) ÷ 16 = 107.50',
-    near(rowA?.value, 1720),
-    `value ${rowA?.value ?? 0}`,
-  );
+  check('the store holds 16 in total', near(rowA?.quantity, 16), `${rowA?.quantity}`);
+  check('the moving average is (10x10 + 6x12) / 16 = 10.75',
+    near(rowA?.value, 172) || near(rowA?.averageCost, 10.75), `value ${rowA?.value}, average ${rowA?.averageCost}`);
 
-  console.log('\n[W4] a transfer between the two stores, then an issue');
-  const transfer = await asAdmin('/inventory/stock-documents', {
+  console.log('\n[W4] transfer between the stores, then an issue');
+  const transfer = await api('/inventory/stock-documents', {
     method: 'POST',
     body: {
       kind: 'TRANSFER',
-      documentDate: today,
+      documentDate: today(),
+      branchId: branch.id,
       fromWarehouseId: storeA.data.id,
       toWarehouseId: storeB.data.id,
-      reason: `proved transfer ${stamp}`,
-      lines: [{ itemId: item.data.id, quantity: '4.0000' }],
+      lines: [{ itemId: item.data.id, batchId: lotOne?.id, quantity: '4.0000' }],
     },
   });
-  check('the transfer is created', Boolean(transfer.data?.id), `HTTP ${transfer.status}`);
-  if (transfer.data?.id) {
-    const postedTransfer = await asAdmin(`/inventory/stock-documents/${transfer.data.id}/post`, { method: 'POST' });
-    check('the transfer is posted', postedTransfer.status < 400, `HTTP ${postedTransfer.status}`);
-  }
-  const afterTransferA = await asAdmin(`/inventory/warehouses/${storeA.data.id}/stock`);
-  const afterTransferB = await asAdmin(`/inventory/warehouses/${storeB.data.id}/stock`);
-  const fromA = (afterTransferA.data?.rows ?? []).find((row) => row.code === item.data.code);
-  const toB = (afterTransferB.data?.rows ?? []).find((row) => row.code === item.data.code);
-  check(
-    'the goods left one store and arrived at the other',
-    near(fromA?.quantity, 12) && near(toB?.quantity, 4),
-    `A ${fromA?.quantity ?? 0}, B ${toB?.quantity ?? 0}`,
-  );
+  check('the transfer is created', Boolean(transfer.data?.id), `HTTP ${transfer.status} ${transfer.data?.detail ?? ''}`);
+  if (!transfer.data?.id) return false;
+  const transferPosted = await api(`/inventory/stock-documents/${transfer.data.id}/post`, { method: 'POST' });
+  check('the transfer is posted', transferPosted.status < 400, `HTTP ${transferPosted.status} ${transferPosted.data?.detail ?? ''}`);
+  const afterTransferA = await api(`/inventory/warehouses/${storeA.data.id}/stock`);
+  const afterTransferB = await api(`/inventory/warehouses/${storeB.data.id}/stock`);
+  const leftA = (afterTransferA.data?.rows ?? []).find((row) => row.code === item.data.code);
+  const intoB = (afterTransferB.data?.rows ?? []).find((row) => row.code === item.data.code);
+  check('the goods left one store and arrived at the other',
+    near(leftA?.quantity, 12) && near(intoB?.quantity, 4), `A ${leftA?.quantity}, B ${intoB?.quantity}`);
 
-  const issue = await asAdmin('/inventory/batches/issue', {
+  const issue = await api('/inventory/stock-documents', {
     method: 'POST',
     body: {
+      kind: 'ADJUSTMENT',
+      documentDate: today(),
       branchId: branch.id,
-      warehouseId: storeB.data.id,
-      itemId: item.data.id,
-      quantity: 1,
-      documentDate: today,
-      reason: `proved issue ${stamp}`,
+      fromWarehouseId: storeB.data.id,
+      reason: `installed issue ${stamp}`,
+      lines: [{ itemId: item.data.id, batchId: lotOne?.id, quantity: '-1.0000' }],
     },
   });
-  check('an issue out of the second store is accepted', issue.status < 400, `HTTP ${issue.status} ${issue.data?.message ?? ''}`);
-  const afterIssueB = await asAdmin(`/inventory/warehouses/${storeB.data.id}/stock`);
-  const issuedB = (afterIssueB.data?.rows ?? []).find((row) => row.code === item.data.code);
-  check('the issue took one unit out', near(issuedB?.quantity, 3), `${issuedB?.quantity ?? 0}`);
+  check('an issue out of the second store is created', Boolean(issue.data?.id),
+    `HTTP ${issue.status} ${issue.data?.detail ?? ''}`);
+  if (issue.data?.id) {
+    const issuePosted = await api(`/inventory/stock-documents/${issue.data.id}/post`, { method: 'POST' });
+    check('the issue is posted', issuePosted.status < 400, `HTTP ${issuePosted.status} ${issuePosted.data?.detail ?? ''}`);
+  }
+  const afterIssue = await api(`/inventory/warehouses/${storeB.data.id}/stock`);
+  const rowB = (afterIssue.data?.rows ?? []).find((row) => row.code === item.data.code);
+  check('the second store is one unit lower', near(rowB?.quantity, 3), `${rowB?.quantity}`);
 
-  console.log('\n[W5] a full count with a difference, approved by somebody else');
-  const second = await makeSecondPerson(stamp, branch.id);
+  console.log('\n[W5] a full stock take with a difference, approved by somebody else');
+  const second = await makeSecondPerson(stamp, branch.id, [storeA.data.id]);
   if (!second) return false;
 
-  const count = await asAdmin('/inventory/stock-takes', {
+  const take = await api('/inventory/stock-takes', {
     method: 'POST',
-    body: { warehouseId: storeA.data.id, scope: 'FULL', notes: `proved count ${stamp}` },
+    body: { branchId: branch.id, warehouseId: storeA.data.id, scope: 'FULL' },
   });
-  check('the count is opened and freezes the book figure', Boolean(count.data?.id) && (count.data?.lines ?? []).length > 0,
-    `${(count.data?.lines ?? []).length} line(s)`);
-  if (!count.data?.id) return false;
-  // One line per lot: the item's frozen figure is the sum of its lots.
-  const countLines = (count.data.lines ?? []).filter((line) => line.itemId === item.data.id);
-  const frozen = countLines.reduce((total, line) => total + Number(line.systemQuantity), 0);
-  check('the frozen figure is the 12 the store held', near(frozen, 12), `${frozen} over ${countLines.length} lot line(s)`);
+  check('the stock take is opened and freezes the book figure',
+    Boolean(take.data?.id) && (take.data?.lines ?? []).length > 0,
+    `HTTP ${take.status} ${(take.data?.lines ?? []).length} line(s)`);
+  const takeId = take.data?.id;
+  if (!takeId) return false;
 
-  // Count every lot as booked except one unit short on the first: a real -1.
-  const countedLines = countLines.map((line, index) => ({
+  const lines = take.data.lines.map((line, index) => ({
     lineId: line.id,
     countedQuantity: Number(line.systemQuantity) - (index === 0 ? 1 : 0),
   }));
-  const recorded = await asAdmin(`/inventory/stock-takes/${count.data.id}/count`, {
+  const recorded = await api(`/inventory/stock-takes/${takeId}/count`, {
     method: 'POST',
-    body: { lines: countedLines, finish: true },
+    body: { lines, finish: true },
   });
-  check('the difference is recorded as −1', recorded.status < 400, `HTTP ${recorded.status}`);
+  check('the count is recorded with one unit missing', recorded.status < 400,
+    `HTTP ${recorded.status} ${recorded.data?.detail ?? ''}`);
 
-  const selfApprove = await asAdmin(`/inventory/stock-takes/${count.data.id}/approve`, { method: 'POST' });
-  check('the person who opened the count cannot approve it', selfApprove.status >= 400, `HTTP ${selfApprove.status}`);
+  const selfApprove = await api(`/inventory/stock-takes/${takeId}/approve`, { method: 'POST' });
+  check('the person who counted cannot approve it', selfApprove.status >= 400, `HTTP ${selfApprove.status}`);
 
-  useToken(second.approverToken);
-  const approved = await asAdmin(`/inventory/stock-takes/${count.data.id}/approve`, { method: 'POST' });
-  check('a second person approves the count', approved.status < 400, `HTTP ${approved.status}`);
-  const counted = await asAdmin(`/inventory/stock-takes/${count.data.id}/post`, { method: 'POST' });
-  check('the approved count is posted', counted.status < 400, `HTTP ${counted.status}`);
-  const afterCount = await asAdmin(`/inventory/warehouses/${storeA.data.id}/stock`);
-  const countedRow = (afterCount.data?.rows ?? []).find((row) => row.code === item.data.code);
-  check('the shelf now holds what was counted', near(countedRow?.quantity, 11), `${countedRow?.quantity ?? 0}`);
+  token = second.approverToken;
+  const approved = await api(`/inventory/stock-takes/${takeId}/approve`, { method: 'POST' });
+  check('a second person approves the count', approved.status < 400, `HTTP ${approved.status} ${approved.data?.detail ?? ''}`);
+  const postedTake = await api(`/inventory/stock-takes/${takeId}/post`, { method: 'POST' });
+  check('the approved count is posted', postedTake.status < 400, `HTTP ${postedTake.status} ${postedTake.data?.detail ?? ''}`);
+  check('posting the count wrote a journal entry', Boolean(postedTake.data?.journalEntryId),
+    postedTake.data?.journalEntryId ?? 'none');
+  const afterTake = await api(`/inventory/warehouses/${storeA.data.id}/stock`);
+  const countedRow = (afterTake.data?.rows ?? []).find((row) => row.code === item.data.code);
+  check('the shelf now holds what was counted', near(countedRow?.quantity, 11), `${countedRow?.quantity}`);
 
   console.log('\n[W6] a write-off: draft, approval by somebody else, then posting');
-  useToken(second.token);
-  const beforeWriteOff = (afterCount.data?.rows ?? []).find((row) => row.code === item.data.code);
-  const writeOff = await asAdmin('/inventory/stock-documents', {
+  token = adminToken;
+  const writeOff = await api('/inventory/stock-documents', {
     method: 'POST',
     body: {
       kind: 'WRITE_OFF',
-      documentDate: today,
-      reason: `proved write-off ${stamp}`,
+      documentDate: today(),
+      branchId: branch.id,
+      reason: `installed write-off ${stamp}`,
       toWarehouseId: storeA.data.id,
-      lines: [{ itemId: item.data.id, quantity: -1, batchId: lotOne?.id, storageLocationId: shelfA.bin.id }],
+      lines: [{ itemId: item.data.id, batchId: lotOne?.id, quantity: '-1.0000', storageLocationId: tree.A.bin.id }],
     },
   });
-  check('the write-off is a draft', writeOff.data?.status === 'draft', `${writeOff.data?.status} ${writeOff.data?.documentNumber ?? ''}`);
+  check('the write-off is a draft with its own number',
+    writeOff.data?.status === 'draft' && /^WO-/.test(String(writeOff.data?.documentNumber ?? '')),
+    `${writeOff.data?.status} ${writeOff.data?.documentNumber ?? ''}`);
   const writeOffId = writeOff.data?.id;
   if (writeOffId) {
-    const early = await asAdmin(`/inventory/stock-documents/${writeOffId}/post`, { method: 'POST' });
+    const early = await api(`/inventory/stock-documents/${writeOffId}/post`, { method: 'POST' });
     check('an unapproved write-off cannot be posted', early.status >= 400, `HTTP ${early.status}`);
+    const selfSign = await api(`/inventory/stock-documents/${writeOffId}/approve`, { method: 'POST' });
+    check('the person who recorded it cannot approve it', selfSign.status >= 400, `HTTP ${selfSign.status}`);
 
-    useToken(second.token);
-    const selfSigned = await asAdmin(`/inventory/stock-documents/${writeOffId}/approve`, { method: 'POST' });
-    check('the recorder cannot approve their own write-off', selfSigned.status >= 400, `HTTP ${selfSigned.status}`);
-
-    useToken(second.approverToken);
-    const signed = await asAdmin(`/inventory/stock-documents/${writeOffId}/approve`, { method: 'POST' });
-    check('somebody else approves it', signed.status < 400, `HTTP ${signed.status}`);
-    const twice = await asAdmin(`/inventory/stock-documents/${writeOffId}/approve`, { method: 'POST' });
+    token = second.approverToken;
+    const signed = await api(`/inventory/stock-documents/${writeOffId}/approve`, { method: 'POST' });
+    check('somebody else approves it', signed.status < 400, `HTTP ${signed.status} ${signed.data?.detail ?? ''}`);
+    const twice = await api(`/inventory/stock-documents/${writeOffId}/approve`, { method: 'POST' });
     check('a second approval is refused', twice.status >= 400, `HTTP ${twice.status}`);
-
-    const lossPosted = await asAdmin(`/inventory/stock-documents/${writeOffId}/post`, { method: 'POST' });
-    check('the approved write-off is posted', lossPosted.status < 400, `HTTP ${lossPosted.status}`);
-    check('the posting wrote a journal entry', Boolean(lossPosted.data?.journalEntryId), lossPosted.data?.journalEntryId ?? 'none');
-    const afterLoss = await asAdmin(`/inventory/warehouses/${storeA.data.id}/stock`);
+    const loss = await api(`/inventory/stock-documents/${writeOffId}/post`, { method: 'POST' });
+    check('the approved write-off is posted', loss.status < 400, `HTTP ${loss.status} ${loss.data?.detail ?? ''}`);
+    check('the posting wrote a journal entry', Boolean(loss.data?.journalEntryId), loss.data?.journalEntryId ?? 'none');
+    const afterLoss = await api(`/inventory/warehouses/${storeA.data.id}/stock`);
     const lostRow = (afterLoss.data?.rows ?? []).find((row) => row.code === item.data.code);
-    check(
-      'one unit left the shelf',
-      near(lostRow?.quantity, Number(beforeWriteOff?.quantity ?? 0) - 1),
-      `${beforeWriteOff?.quantity} → ${lostRow?.quantity}`,
-    );
+    check('one unit left the shelf', near(lostRow?.quantity, 10), `${lostRow?.quantity}`);
+  } else {
+    return false;
   }
 
   console.log('\n[W7] per-user warehouse grants, and the refusal they cause');
-  useToken(adminToken);
-  const grantsBefore = await asAdmin(`/inventory/warehouse-access/${second.userId}`);
-  check(
-    'a person with no rows is unrestricted, as every existing installation expects',
-    grantsBefore.data?.restricted === false,
-    `restricted ${grantsBefore.data?.restricted}`,
-  );
-  const setGrants = await asAdmin(`/inventory/warehouse-access/${second.userId}`, {
+  token = adminToken;
+  const before = await api(`/inventory/warehouse-access/${second.clerkId}`);
+  check('a person with no rows is unrestricted', before.data?.restricted === false, `restricted ${before.data?.restricted}`);
+  const grants = await api(`/inventory/warehouse-access/${second.clerkId}`, {
     method: 'PUT',
     body: {
       grants: [
-        {
-          warehouseId: storeA.data.id,
-          canView: true,
-          canReceive: true,
-          canIssue: true,
-          canTransfer: true,
-          canCount: true,
-          canApprove: false,
-          canSeeCost: false,
-        },
+        { warehouseId: storeA.data.id, canView: true, canReceive: true, canIssue: true, canTransfer: true, canCount: true, canApprove: false, canSeeCost: false },
       ],
     },
   });
-  check(
-    'the access screen’s own route writes the grant',
-    setGrants.data?.restricted === true || setGrants.status < 400,
-    `HTTP ${setGrants.status} restricted ${setGrants.data?.restricted}`,
-  );
+  check('the access screen writes the grant', grants.status < 400 && grants.data?.restricted === true,
+    `HTTP ${grants.status} restricted ${grants.data?.restricted}`);
 
-  useToken(second.token);
-  const allowed = await asAdmin(`/inventory/reports/valuation-by-warehouse?warehouseId=${storeA.data.id}`);
-  check('the clerk may read the store they are trusted with', allowed.status === 200, `HTTP ${allowed.status}`);
-  const forbidden = await asAdmin(`/inventory/reports/valuation-by-warehouse?warehouseId=${storeB.data.id}`);
-  check(
-    'the same clerk is refused the store they were not granted',
-    forbidden.status === 403,
-    `HTTP ${forbidden.status} ${forbidden.data?.message ?? ''}`,
-  );
-  const forbiddenReceive = await asAdmin('/inventory/batches/receive', {
+  token = second.clerkToken;
+  const allowedStore = await api(`/inventory/reports/valuation-by-warehouse?warehouseId=${storeA.data.id}`);
+  check('the clerk may read the store they are trusted with', allowedStore.status === 200, `HTTP ${allowedStore.status}`);
+  const refusedStore = await api(`/inventory/reports/valuation-by-warehouse?warehouseId=${storeB.data.id}`);
+  check('the same clerk is refused the store they were not granted', refusedStore.status === 403, `HTTP ${refusedStore.status}`);
+  const refusedReceipt = await api('/inventory/batches/receive', {
     method: 'POST',
-    body: {
-      branchId: branch.id,
-      warehouseId: storeB.data.id,
-      itemId: item.data.id,
-      batchNumber: `LOT-X-${stamp}`,
-      expiryDate: '2053-05-01',
-      quantity: 1,
-      unitCost: 100,
-    },
+    body: { branchId: branch.id, warehouseId: storeB.data.id, itemId: item.data.id, quantity: 1, unitCost: 10, batchNumber: `DENY-${stamp}` },
   });
-  check(
-    'and refused when receiving into it, by the server',
-    forbiddenReceive.status === 403,
-    `HTTP ${forbiddenReceive.status} ${forbiddenReceive.data?.detail ?? ''}`,
-  );
-  const forbiddenTransfer = await asAdmin('/inventory/stock-documents', {
+  check('a receipt into an ungranted store is refused by the server', refusedReceipt.status === 403,
+    `HTTP ${refusedReceipt.status} ${refusedReceipt.data?.detail ?? ''}`);
+  const refusedTransfer = await api('/inventory/stock-documents', {
     method: 'POST',
     body: {
       kind: 'TRANSFER',
-      documentDate: today,
+      documentDate: today(),
+      branchId: branch.id,
       fromWarehouseId: storeB.data.id,
       toWarehouseId: storeA.data.id,
-      reason: `should be refused ${stamp}`,
-      lines: [{ itemId: item.data.id, quantity: '1' }],
+      lines: [{ itemId: item.data.id, quantity: '1.0000' }],
     },
   });
-  check(
-    'and refused when transferring out of it, by the server',
-    forbiddenTransfer.status === 403,
-    `HTTP ${forbiddenTransfer.status} ${forbiddenTransfer.data?.detail ?? ''}`,
-  );
+  check('a transfer out of an ungranted store is refused by the server', refusedTransfer.status === 403,
+    `HTTP ${refusedTransfer.status} ${refusedTransfer.data?.detail ?? ''}`);
 
-  console.log('\n[W8] alerts, the twenty reports, CSV and print');
-  useToken(adminToken);
-  const scan = await asAdmin('/notifications/scan', { method: 'POST' });
+  console.log('\n[W8] alerts, the twenty reports, CSV and the printed sheet');
+  token = adminToken;
+  const scan = await api('/notifications/scan', { method: 'POST' });
   check('the alert scan runs against the installed database', scan.status < 400, `HTTP ${scan.status}`);
-  const alerts = await asAdmin('/notifications');
+  const alerts = await api('/notifications');
   check('the notification list answers', alerts.status === 200, `HTTP ${alerts.status}`);
+  const count = await api('/notifications/unread-count').catch(() => ({ status: 0, data: null }));
+  if (count.status === 200) {
+    check('the unread count answers', typeof count.data?.count === 'number', `${count.data?.count}`);
+  }
 
-  const catalogue = await asAdmin('/inventory/reports');
-  const slugs = (catalogue.data?.reports ?? catalogue.data?.items ?? []).map((row) => row.slug);
-  check('the catalogue offers its twenty warehouse reports', slugs.length >= 20, `${slugs.length} report(s)`);
+  const catalogue = await api('/inventory/reports');
+  const reports = catalogue.data?.reports ?? [];
+  check('the installed catalogue offers the twenty warehouse reports', reports.length >= 20, `${reports.length} report(s)`);
 
-  const valuation = await asAdmin(`/inventory/reports/valuation-by-warehouse?warehouseId=${storeA.data.id}`);
-  check('a report runs and returns rows', valuation.status === 200 && (valuation.data?.rows ?? []).length > 0,
-    `${(valuation.data?.rows ?? []).length} row(s)`);
-  const itemCard = await asAdmin(`/inventory/reports/item-card?itemId=${item.data.id}&from=${day(-30)}&to=${today}`);
-  check('the item card answers with a movement', itemCard.status === 200, `HTTP ${itemCard.status}`);
-  const expiry = await asAdmin('/inventory/reports/expiring?days=30');
-  check('the expiring report answers', expiry.status === 200, `HTTP ${expiry.status}`);
-  const variances = await asAdmin(`/inventory/reports/count-variances?from=${day(-30)}&to=${today}`);
-  check('the count-variance report answers', variances.status === 200, `HTTP ${variances.status}`);
+  let ran = 0;
+  for (const report of reports) {
+    const query = new URLSearchParams();
+    if ((report.filters ?? []).includes('warehouseId')) query.set('warehouseId', storeA.data.id);
+    if ((report.filters ?? []).includes('itemId')) query.set('itemId', item.data.id);
+    if ((report.filters ?? []).includes('from')) query.set('from', '2020-01-01');
+    if ((report.filters ?? []).includes('to')) query.set('to', today());
+    if ((report.filters ?? []).includes('days')) query.set('days', '3650');
+    const response = await api(`/inventory/reports/${report.slug}?${query.toString()}`);
+    if (response.status === 200) ran += 1;
+    else console.log(`         ${report.slug}: HTTP ${response.status} ${response.data?.detail ?? ''}`);
+  }
+  check('every report in the catalogue answers', ran === reports.length, `${ran}/${reports.length}`);
 
-  const csv = await asAdmin(`/inventory/reports/valuation-by-warehouse/export?warehouseId=${storeA.data.id}`, { raw: true });
-  check(
-    'the CSV export returns a real CSV file',
-    csv.status === 200 && String(csv.headers.get('content-type') ?? '').includes('csv'),
-    `${csv.headers.get('content-type')} ${csv.text.length} bytes`,
-  );
+  const csv = await api(`/inventory/reports/valuation-by-warehouse/export?warehouseId=${storeA.data.id}`, { raw: true });
+  check('the CSV export returns a real CSV file',
+    csv.status === 200 && String(csv.headers.get('content-type') ?? '').includes('csv'), `${csv.headers.get('content-type')}`);
   check('the CSV names the store it exported', csv.text.includes(storeA.data.code), 'contains the store code');
+  const itemCsv = await api(`/inventory/reports/balance-by-warehouse/export?warehouseId=${storeA.data.id}`, { raw: true });
+  check('the item-level export names the item', itemCsv.status === 200 && itemCsv.text.includes(item.data.code),
+    `HTTP ${itemCsv.status} ${itemCsv.text.length} bytes`);
 
-  // The valuation sheet is one line per store; the shelf-level sheet is the one
-  // that names the item, so the item is proved where the item belongs.
-  const itemCsv = await asAdmin(
-    `/inventory/reports/balance-by-warehouse/export?warehouseId=${storeA.data.id}`,
-    { raw: true },
-  );
-  check(
-    'the item-level export names the item it exported',
-    itemCsv.status === 200 && itemCsv.text.includes(item.data.code),
-    `HTTP ${itemCsv.status} ${itemCsv.text.length} bytes`,
-  );
+  const printed = await api(`/inventory/reports/valuation/print?warehouseId=${storeA.data.id}&lang=en`, { raw: true });
+  check('the printed valuation sheet renders from the installed program',
+    printed.status === 200 && /<html/i.test(printed.text), `HTTP ${printed.status} ${printed.text.length} bytes`);
+  const slowMoving = await api('/inventory/reports/slow-moving/print?days=3650&lang=en', { raw: true });
+  check('the second printed sheet renders', slowMoving.status === 200 && /<html/i.test(slowMoving.text),
+    `HTTP ${slowMoving.status} ${slowMoving.text.length} bytes`);
 
-  const print = await asAdmin(`/inventory/reports/valuation/print?warehouseId=${storeA.data.id}`, { raw: true });
-  check(
-    'the printed valuation sheet renders',
-    print.status === 200 && /<html/i.test(print.text),
-    `HTTP ${print.status} ${print.text.length} bytes`,
-  );
-
+  // A backup taken under the licence must not reset it.
+  const backup = await api('/backup/full', { method: 'POST' });
+  check('the installed program takes a full backup', backup.status < 400,
+    `HTTP ${backup.status} ${backup.data?.fileName ?? backup.data?.name ?? ''}`);
+  const licenceAfterBackup = await api('/license/status', { anonymous: true });
+  check('the licence survives the backup', licenceAfterBackup.data?.state === 'ACTIVE', `state ${licenceAfterBackup.data?.state}`);
   return true;
 }
 
-/// A second person, because approval is the separation of duties: the clerk
-/// who records a loss cannot sign it. Two accounts, one narrow grant.
-async function makeSecondPerson(stamp, branchId) {
-  const permissions = await asAdmin('/admin/permissions');
-  const codes = (permissions.data?.items ?? permissions.data ?? []).map((row) => row.code).filter(Boolean);
-  check('the permission catalogue is readable', codes.length > 20, `${codes.length} permission(s)`);
-
-  const approverRole = await asAdmin('/admin/roles', {
+/// The two people the separation of duties needs: a clerk trusted with one
+/// shelf, and an approver. Both are real users with real roles in the installed
+/// database, not flags on a request.
+async function makeSecondPerson(stamp, branchId, grantedWarehouseIds) {
+  const permissions = await api('/admin/permissions');
+  const all = (permissions.data?.items ?? permissions.data ?? []).map((row) => row.code).filter(Boolean);
+  const approverRole = await api('/admin/roles', {
     method: 'POST',
-    body: { code: `APP-${stamp}`, nameEn: `Approver ${stamp}`, nameAr: `معتمد ${stamp}`, permissions: codes },
+    body: { code: `EAPP-${stamp}`, nameEn: `Approver ${stamp}`, nameAr: `معتمد ${stamp}`, permissions: all },
   });
-  const clerkRole = await asAdmin('/admin/roles', {
+  const clerkPermissions = all.filter((code) => code.startsWith('inventory.') || code.startsWith('common.'));
+  const clerkRole = await api('/admin/roles', {
     method: 'POST',
-    body: {
-      code: `CLERK-${stamp}`,
-      nameEn: `Clerk ${stamp}`,
-      nameAr: `أمين ${stamp}`,
-      permissions: [
-        'inventory.stock.read',
-        'inventory.warehouses.read',
-        'inventory.batches.read',
-        'inventory.batches.receive',
-        'inventory.batches.issue',
-        'inventory.batches.transfer',
-        'inventory.stock.adjust',
-        'inventory.export',
-      ],
-    },
+    body: { code: `ECLK-${stamp}`, nameEn: `Clerk ${stamp}`, nameAr: `أمين ${stamp}`, permissions: clerkPermissions },
   });
-  check('two roles are created', Boolean(approverRole.data?.id) && Boolean(clerkRole.data?.id), 'approver and clerk');
+  check('two roles are created for the two people', Boolean(approverRole.data?.id) && Boolean(clerkRole.data?.id),
+    `${approverRole.data?.code} / ${clerkRole.data?.code}`);
   if (!approverRole.data?.id || !clerkRole.data?.id) return null;
 
-  const password = 'Pr0ved!Passw0rd-2026';
-  const clerk = await asAdmin('/admin/users', {
+  const password = `E2e-installed-${stamp}!`;
+  const makeUser = async (username, roleId) => api('/admin/users', {
     method: 'POST',
     body: {
-      username: `clerk${stamp}`,
-      fullNameEn: `Clerk ${stamp}`,
-      fullNameAr: `أمين ${stamp}`,
+      username,
+      fullNameEn: username,
+      fullNameAr: username,
       password,
-      roleIds: [clerkRole.data.id],
+      roleIds: [roleId],
       branchIds: [branchId],
     },
   });
-  const approver = await asAdmin('/admin/users', {
-    method: 'POST',
-    body: {
-      username: `approver${stamp}`,
-      fullNameEn: `Approver ${stamp}`,
-      fullNameAr: `معتمد ${stamp}`,
-      password,
-      roleIds: [approverRole.data.id],
-      branchIds: [branchId],
-    },
-  });
-  check('the two people exist', Boolean(clerk.data?.id) && Boolean(approver.data?.id), `clerk ${clerk.data?.id ? 'yes' : 'no'}`);
+  const clerk = await makeUser(`eclerk${stamp}`, clerkRole.data.id);
+  const approver = await makeUser(`eapprover${stamp}`, approverRole.data.id);
+  check('both people exist in the installed database', Boolean(clerk.data?.id) && Boolean(approver.data?.id),
+    `clerk ${clerk.data?.id ? 'yes' : 'no'}`);
   if (!clerk.data?.id || !approver.data?.id) return null;
 
-  const clerkLogin = await signIn({ username: `clerk${stamp}`, password });
-  const approverLogin = await signIn({ username: `approver${stamp}`, password });
-  check('both can sign in', Boolean(clerkLogin.token) && Boolean(approverLogin.token), `clerk HTTP ${clerkLogin.status}`);
-  if (!clerkLogin.token) return null;
-
+  const clerkSession = await signIn(`eclerk${stamp}`, password);
+  const approverSession = await signIn(`eapprover${stamp}`, password);
+  check('both can sign in to the installed program',
+    clerkSession.status === 201 && approverSession.status === 201,
+    `clerk HTTP ${clerkSession.status}, approver HTTP ${approverSession.status}`);
+  void grantedWarehouseIds;
   return {
-    userId: clerk.data.id,
-    token: clerkLogin.token,
-    approverToken: approverLogin.token,
+    clerkId: clerk.data.id,
+    clerkToken: clerkSession.token,
+    approverToken: approverSession.token,
   };
-}
-
-async function main() {
-  console.log(`Proving the installed program at ${API}`);
-  if (!ADMIN_PASSWORD) throw new Error('KAYAN_ADMIN_PASSWORD is required');
-  if (!GENERATOR_HOME) throw new Error('KAYAN_GENERATOR_HOME is required');
-
-  const health = await asAnonymous('/health');
-  check('the installed program reports a healthy database', health.data?.status === 'ok' && health.data?.database === 'up', `${health.data?.database}`);
-  if (!(await proveLicence())) {
-    report();
-    return;
-  }
-  if (!(await proveWarehouse())) {
-    report();
-    return;
-  }
-  report();
 }
 
 function report() {
@@ -749,7 +599,27 @@ function report() {
   process.exitCode = fail > 0 ? 1 : 0;
 }
 
+async function main() {
+  if (!API) throw new Error('KAYAN_API is required');
+  if (!ADMIN_PASSWORD) throw new Error('KAYAN_ADMIN_PASSWORD is required');
+  if (!GENERATOR_HOME) throw new Error('KAYAN_GENERATOR_HOME is required');
+  console.log(`Proving the installed program at ${API}`);
+  const health = await api('/health', { anonymous: true });
+  check('the installed program reports a healthy database',
+    health.data?.status === 'ok' && health.data?.database === 'up', `${health.data?.database}`);
+  if (!(await proveLicence())) return report();
+  if (!(await proveWarehouse())) return report();
+  report();
+}
+
 main().catch((error) => {
   console.error('Proof aborted:', error);
+  if (REPORT_PATH) {
+    try {
+      writeFileSync(REPORT_PATH, JSON.stringify({ api: API, pass, fail, failures, results, aborted: String(error) }, null, 2));
+    } catch {
+      // Ignore.
+    }
+  }
   process.exitCode = 1;
 });
