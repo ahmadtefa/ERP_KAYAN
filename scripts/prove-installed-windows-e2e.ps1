@@ -229,6 +229,9 @@ try {
   $env:KAYAN_ADMIN_PASSWORD = $adminPassword
   $env:KAYAN_GENERATOR = Join-Path $RepoRoot 'tools\license-generator\kayan-license.mjs'
   $env:KAYAN_PROOF_REPORT = $proofReport
+  # Windows ships Edge, so a PDF that cannot be produced here is a real fault
+  # rather than a machine without a browser.
+  $env:KAYAN_REQUIRE_PDF = '1'
   $proof = Start-Process -FilePath $node -ArgumentList @(('"' + $proofScript + '"')) -WorkingDirectory $RepoRoot -Wait -PassThru -NoNewWindow -RedirectStandardOutput $proofLog -RedirectStandardError "$proofLog.err"
   $proofText = (Get-Content -LiteralPath $proofLog -Raw -ErrorAction SilentlyContinue)
   foreach ($line in @(Get-Content -LiteralPath $proofLog -ErrorAction SilentlyContinue | Where-Object { $_ -match '^(FAIL|Proof aborted)' })) {

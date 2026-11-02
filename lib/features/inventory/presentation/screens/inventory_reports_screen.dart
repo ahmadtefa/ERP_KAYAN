@@ -189,6 +189,9 @@ class _ReportsBodyState extends ConsumerState<_ReportsBody> {
     'valuation-by-warehouse',
     'slow-moving',
     'below-minimum',
+    // The count variances sheet is printed when a stock take is signed off;
+    // the backend had it and the screen could not reach it.
+    'count-variances',
   }.contains(text(report, 'slug'));
 
   /// The slug the print route knows, when it knows this report at all.
@@ -200,6 +203,8 @@ class _ReportsBodyState extends ConsumerState<_ReportsBody> {
         return 'slow-moving';
       case 'below-minimum':
         return 'reorder';
+      case 'count-variances':
+        return 'stock-take-variance';
       default:
         return null;
     }

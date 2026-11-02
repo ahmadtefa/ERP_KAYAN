@@ -38,6 +38,7 @@ const GENERATOR =
   process.env.KAYAN_GENERATOR ?? join(process.cwd(), 'tools', 'license-generator', 'kayan-license.mjs');
 const GENERATOR_HOME = process.env.KAYAN_GENERATOR_HOME ?? '';
 const REPORT_PATH = process.env.KAYAN_PROOF_REPORT ?? '';
+const REQUIRE_PDF = ['1', 'true', 'yes'].includes(String(process.env.KAYAN_REQUIRE_PDF ?? '').toLowerCase());
 
 let pass = 0;
 let fail = 0;
@@ -565,12 +566,48 @@ async function proveWarehouse() {
     itemCsv.status === 200 && itemCsv.text.includes(item.data.code) && /10\.0000|11\.0000|10\.00/.test(itemCsv.text),
     `HTTP ${itemCsv.status}, ${itemCsv.text.split('\r\n').length - 1} row(s)`);
 
-  const printed = await api(`/inventory/reports/valuation/print?warehouseId=${storeA.data.id}&lang=en`, { raw: true });
-  check('the printed valuation sheet renders from the installed program',
-    printed.status === 200 && /<html/i.test(printed.text), `HTTP ${printed.status} ${printed.text.length} bytes`);
-  const slowMoving = await api('/inventory/reports/slow-moving/print?days=3650&lang=en', { raw: true });
-  check('the second printed sheet renders', slowMoving.status === 200 && /<html/i.test(slowMoving.text),
-    `HTTP ${slowMoving.status} ${slowMoving.text.length} bytes`);
+  // Every report the server can export, exported: one route serves all twenty,
+  // so the check is the whole catalogue and not a sample of it.
+  let exported = 0;
+  for (const report of reports) {
+    const query = new URLSearchParams();
+    if ((report.filters ?? []).includes('warehouseId')) query.set('warehouseId', storeA.data.id);
+    if ((report.filters ?? []).includes('itemId')) query.set('itemId', item.data.id);
+    if ((report.filters ?? []).includes('from')) query.set('from', '2020-01-01');
+    if ((report.filters ?? []).includes('to')) query.set('to', today());
+    if ((report.filters ?? []).includes('days')) query.set('days', '3650');
+    const response = await api(`/inventory/reports/${report.slug}/export?${query.toString()}`, { raw: true });
+    if (response.status === 200 && /csv/i.test(String(response.headers.get('content-type') ?? ''))) exported += 1;
+    else console.log(`         ${report.slug}: export HTTP ${response.status}`);
+  }
+  check('every one of the twenty reports exports as CSV', exported === reports.length,
+    `${exported}/${reports.length}`);
+
+  // The printed sheets and their PDFs: the four the server renders, in both
+  // forms, with the filter each route understands.
+  const sheets = [
+    ['valuation', `warehouseId=${storeA.data.id}`],
+    ['slow-moving', 'days=3650'],
+    ['reorder', `warehouseId=${storeA.data.id}`],
+    ['stock-take-variance', `warehouseId=${storeA.data.id}`],
+  ];
+  for (const [slug, filter] of sheets) {
+    const html = await api(`/inventory/reports/${slug}/print?${filter}&lang=en`, { raw: true });
+    check(`the printed ${slug} sheet renders from the installed program`,
+      html.status === 200 && /<html/i.test(html.text), `HTTP ${html.status} ${html.text.length} bytes`);
+    const pdf = await api(`/inventory/reports/${slug}/pdf?${filter}&lang=en`, { raw: true });
+    const rendered = pdf.status === 200 && /application\/pdf/.test(String(pdf.headers.get('content-type') ?? ''));
+    // A machine with no browser on it cannot print to PDF, and the program says
+    // so instead of handing back an empty file. On the installed Windows copy
+    // Edge is always there, so the proof demands the real PDF when the caller
+    // says a browser may be assumed.
+    const noBrowser = pdf.status === 422 && /browser|متصفح/i.test(pdf.text);
+    check(`the ${slug} sheet downloads as a PDF`,
+      rendered || (!REQUIRE_PDF && noBrowser),
+      rendered ? 'application/pdf' : `HTTP ${pdf.status}: the program reported no browser to print with`);
+  }
+  check('the reports without a sheet still export, so nothing is paperless and silent',
+    reports.length - sheets.length > 0, `${reports.length - sheets.length} report(s) export as CSV only`);
 
   // A backup taken under the licence must not reset it.
   const backup = await api('/backup/full', { method: 'POST' });
