@@ -62,10 +62,12 @@ async function api(path, { method = 'GET', body, anonymous = false, raw = false 
   const headers = { Accept: raw ? 'text/html,text/csv,*/*' : 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (!anonymous && token) headers.Authorization = `Bearer ${token}`;
+  // A request that never answers must fail the proof, not hang the job.
   const response = await fetch(`${API}${path}`, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(60_000),
   });
   const text = await response.text();
   let data = null;
@@ -82,6 +84,7 @@ async function signIn(username, password) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
+    signal: AbortSignal.timeout(30_000),
   });
   const data = await response.json().catch(() => ({}));
   return { status: response.status, token: data?.accessToken ?? '' };

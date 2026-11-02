@@ -76,12 +76,21 @@ jobs:
           $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Output "::notice title=Built test-signed Setup::SHA256=$hash bytes=$($file.Length) source=$env:GITHUB_SHA"
       - name: Install, license, and work the whole warehouse on the installed copy
+        timeout-minutes: 45
         shell: pwsh
         run: |
           & pwsh -NoLogo -NoProfile -File scripts/prove-installed-windows-e2e.ps1 `
             -SetupPath 'build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe' `
             -ExpectedSourceCommit $env:GITHUB_SHA
           if ($LASTEXITCODE -ne 0) { throw 'The installed-copy proof failed.' }
+      - name: Keep the test-signed Setup for a re-run without a rebuild
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-signed-setup-${{ github.sha }}
+          path: build/windows-installer/KAYAN-ERP-TEST-ONLY-Setup.exe
+          retention-days: 3
+          if-no-files-found: warn
       - name: Upload the proof reports
         if: always()
         uses: actions/upload-artifact@v4

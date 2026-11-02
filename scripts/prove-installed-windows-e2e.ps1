@@ -94,6 +94,40 @@ function Find-KayanPort {
   return 0
 }
 
+
+/// Waits for a condition without ever blocking forever, and says what it saw.
+function Wait-Until {
+  param([scriptblock]$Condition, [int]$Seconds = 300, [string]$What = 'condition', [int]$IntervalSeconds = 2)
+  $deadline = (Get-Date).AddSeconds($Seconds)
+  while ((Get-Date) -lt $deadline) {
+    if (& $Condition) { return $true }
+    Start-Sleep -Seconds $IntervalSeconds
+  }
+  Write-Host "Timed out after $Seconds seconds waiting for $What."
+  return $false
+}
+
+/// Everything a failure needs to be diagnosable from the annotations alone,
+/// because the raw job log is not always downloadable.
+function Write-Diagnostics {
+  Write-Host '--- listening ports ---'
+  Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty LocalPort -Unique | Sort-Object | ForEach-Object { Write-Host "  $_" }
+  Write-Host '--- KAYAN processes ---'
+  Get-Process -Name erp_kayan, node -ErrorAction SilentlyContinue |
+    ForEach-Object { Write-Host ("  " + $_.ProcessName + " " + $_.Id) }
+  foreach ($candidate in @(
+      (Join-Path $env:APPDATA 'KAYAN-ERP\logs\backend.log'),
+      (Join-Path $env:ProgramData 'KAYAN-ERP\logs\backend.log'),
+      (Join-Path $env:ProgramData 'KAYAN-ERP\logs\smoke.log'),
+      (Join-Path $env:ProgramData 'KAYAN-ERP\logs\installer.log'))) {
+    if (Test-Path -LiteralPath $candidate) {
+      Write-Host "--- $candidate (tail) ---"
+      Get-Content -LiteralPath $candidate -Tail 25 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host ("  " + $_) }
+    }
+  }
+}
+
 function Stop-KayanProcesses {
   Get-Process -Name erp_kayan -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue)) {
@@ -109,8 +143,19 @@ try {
   $phase = 'install'
   Say 'Installing the built Setup silently on a disposable runner.'
   $installLog = Join-Path $env:TEMP 'kayan-installed-e2e-setup.log'
-  $install = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG=' + $installLog)) -Wait -PassThru
-  if ($install.ExitCode -ne 0) { Fail "Setup.exe exited with $($install.ExitCode). See $installLog" }
+  # Setup launches the program when it finishes. Waiting on that process tree
+  # waits for the window the user is looking at, which on a locked-down runner
+  # never closes. Install, wait for the files and the service, and move on.
+  $install = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG=' + $installLog)) -PassThru
+  $installed = Wait-Until -Seconds 900 -What 'the installed files and the PostgreSQL service' -Condition {
+    (Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'KAYAN ERP\erp_kayan.exe')) -and
+    (Get-Service -Name 'KayanERPPostgreSQL' -ErrorAction SilentlyContinue) -and
+    ((Get-Service -Name 'KayanERPPostgreSQL' -ErrorAction SilentlyContinue).Status -eq 'Running')
+  }
+  if (-not $installed) {
+    Write-Diagnostics
+    Fail "Setup.exe did not finish installing within 15 minutes (exit code: " + $(if ($install.HasExited) { $install.ExitCode } else { 'still running' }) + ")."
+  }
   Get-Process -Name erp_kayan -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
   foreach ($relative in @('backend\node\node.exe', 'backend\dist\src\main.js', 'backend\scripts\prepare-database.mjs',
@@ -152,13 +197,16 @@ try {
   $phase = 'start'
   Say 'Starting the installed erp_kayan.exe and waiting for its own local server.'
   $clientProcess = Start-Process -FilePath $clientPath -WorkingDirectory $installRoot -PassThru
-  for ($attempt = 0; $attempt -lt 120; $attempt++) {
-    if ($clientProcess.HasExited) { Fail "The installed client exited with code $($clientProcess.ExitCode) before its server became healthy." }
-    $apiPort = Find-KayanPort
-    if ($apiPort -gt 0) { break }
-    Start-Sleep -Seconds 1
+  $healthy = Wait-Until -Seconds 300 -What 'the installed program\'s own local server' -Condition {
+    if ($clientProcess.HasExited) { return $false }
+    $script:apiPort = Find-KayanPort
+    return ($script:apiPort -gt 0)
   }
-  if (-not $apiPort) { Fail 'The installed program did not start a healthy local server within 120 seconds.' }
+  if (-not $healthy) {
+    Write-Diagnostics
+    Fail ("The installed program did not start a healthy local server within 5 minutes" +
+      $(if ($clientProcess.HasExited) { " (the client exited with code $($clientProcess.ExitCode))" } else { '' }) + '.')
+  }
   $api = "http://127.0.0.1:$apiPort/api/v1"
   Say "The installed program's own server is healthy on port $apiPort."
 
@@ -196,14 +244,12 @@ try {
   $before = Invoke-RestMethod -Uri "$api/license/status" -TimeoutSec 10
   Stop-KayanProcesses
   $clientProcess = Start-Process -FilePath $clientPath -WorkingDirectory $installRoot -PassThru
-  $apiPort = 0
-  for ($attempt = 0; $attempt -lt 120; $attempt++) {
-    if ($clientProcess.HasExited) { Fail "The installed client exited with code $($clientProcess.ExitCode) after the restart." }
-    $apiPort = Find-KayanPort
-    if ($apiPort -gt 0) { break }
-    Start-Sleep -Seconds 1
+  $cameBack = Wait-Until -Seconds 300 -What 'the installed program after a restart' -Condition {
+    if ($clientProcess.HasExited) { return $false }
+    $script:apiPort = Find-KayanPort
+    return ($script:apiPort -gt 0)
   }
-  if (-not $apiPort) { Fail 'The installed program did not come back after the restart.' }
+  if (-not $cameBack) { Write-Diagnostics; Fail 'The installed program did not come back after the restart.' }
   $api = "http://127.0.0.1:$apiPort/api/v1"
   $after = Invoke-RestMethod -Uri "$api/license/status" -TimeoutSec 10
   if ($after.state -ne 'ACTIVE') { Fail "The licence is not ACTIVE after a restart (state $($after.state))." }
