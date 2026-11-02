@@ -659,7 +659,10 @@ export class InventoryAnalysisService {
     const ledger = await this.prisma.$queryRaw<
       Array<{ branchId: string; balance: Prisma.Decimal }>
     >(Prisma.sql`
-      SELECT jl."branchId",
+      -- A journal line carries an account, not a branch: the branch lives on
+      -- the entry it belongs to. Reading it from the line made this report the
+      -- only one of the twenty that could not answer at all.
+      SELECT je."branchId",
              COALESCE(SUM(jl."debit" - jl."credit"), 0) AS "balance"
         FROM "journal_lines" jl
         JOIN "journal_entries" je ON je."id" = jl."journalEntryId"
@@ -667,7 +670,7 @@ export class InventoryAnalysisService {
        WHERE je."companyId" = ${companyId}::uuid
          AND je."status" <> 'DRAFT'
          AND a."code" = '1104'
-       GROUP BY jl."branchId"
+       GROUP BY je."branchId"
     `);
     const byBranch = new Map(ledger.map((row) => [row.branchId, new Prisma.Decimal(row.balance)]));
 

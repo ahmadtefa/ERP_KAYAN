@@ -92,6 +92,19 @@ describe('the warehouse reports', () => {
     expect(report.rowCount).toBe(2);
   });
 
+  it('reads the branch of a ledger line from its entry, which is the table that has one', async () => {
+    const { service, prisma } = makeService();
+
+    await service.run('reconciliation', COMPANY, {});
+
+    // `journal_lines` has no branch column; taking one from there made the
+    // report fail with SQLSTATE 42703 in the installed program.
+    const ledgerQuery = prisma.$queryRaw.mock.calls[1][0];
+    const sql = Array.isArray(ledgerQuery?.strings) ? ledgerQuery.strings.join('?') : String(ledgerQuery);
+    expect(sql).toContain('je."branchId"');
+    expect(sql).not.toContain('jl."branchId"');
+  });
+
   it('treats a difference below one piastre as matched, and nothing larger', async () => {
     const { service } = makeService([
       [{ branchId: 'b-1', code: 'MAIN', nameEn: 'Main', nameAr: 'الرئيسي', stock: D('10.0000') }],

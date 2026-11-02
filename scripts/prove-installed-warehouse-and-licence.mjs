@@ -114,7 +114,7 @@ function mintActivation(licenceId, machine) {
   const key = output
     .split('\n')
     .map((line) => line.trim())
-    .filter((line) => /^[A-Z0-9]+-[A-Z0-9]+-/.test(line) && line.length > 60)
+    .filter((line) => /^[A-Z][A-Z0-9]*\d\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(line))
     .pop();
   if (!key) throw new Error(`The generator did not print an activation key:\n${output}`);
   return key;
@@ -122,6 +122,15 @@ function mintActivation(licenceId, machine) {
 
 const today = () => new Date().toISOString().slice(0, 10);
 const near = (a, b, tolerance = 0.01) => Math.abs(Number(a) - Number(b)) <= tolerance;
+
+/**
+ * The licence screen posts the key the customer pasted. The field is `key`;
+ * a wrong field name is a validation error, which would otherwise be mistaken
+ * for the program refusing the key.
+ */
+function activate(key) {
+  return api('/license/activate', { method: 'POST', body: { key } });
+}
 
 async function proveLicence() {
   console.log('\n[L1] an unlicensed installed program refuses business work');
@@ -156,10 +165,9 @@ async function proveLicence() {
   check('the request code carries this machine id, not a hardcoded one', Boolean(machineId), machineId);
 
   console.log('\n[L3] a key signed for this machine is accepted');
-  const licenceId = mintLicence('installed-e2e', 2);
+  const licenceId = mintLicence('installed-e2e', 6);
   const activationKey = mintActivation(licenceId, machineId);
-  const activated = await api('/license/activate', { method: 'POST', body: { licenseKey: activationKey } })
-    .catch(async () => api('/license/activate', { method: 'POST', body: { key: activationKey } }));
+  const activated = await activate(activationKey);
   check('the installed program accepts the activation', activated.status < 400,
     `HTTP ${activated.status} ${activated.data?.code ?? activated.data?.detail ?? ''}`);
   const after = await api('/license/status', { anonymous: true });
@@ -169,15 +177,13 @@ async function proveLicence() {
   check('a business route now answers', allowed.status === 200, `HTTP ${allowed.status}`);
 
   console.log('\n[L4] the refusals, which are the point of the check');
-  const second = await api('/license/activate', { method: 'POST', body: { licenseKey: activationKey } })
-    .catch(async () => api('/license/activate', { method: 'POST', body: { key: activationKey } }));
+  const second = await activate(activationKey);
   check('the same key cannot be used twice', second.status >= 400,
     `HTTP ${second.status} ${second.data?.code ?? ''}`);
 
   const otherLicence = mintLicence('installed-e2e-other-machine', 2);
   const otherKey = mintActivation(otherLicence, 'KM-SOME-OTHER-MACHINE-0001');
-  const wrongMachine = await api('/license/activate', { method: 'POST', body: { licenseKey: otherKey } })
-    .catch(async () => api('/license/activate', { method: 'POST', body: { key: otherKey } }));
+  const wrongMachine = await activate(otherKey);
   check('a key signed for another machine is refused', wrongMachine.status >= 400,
     `HTTP ${wrongMachine.status} ${wrongMachine.data?.code ?? ''}`);
 
@@ -185,13 +191,11 @@ async function proveLicence() {
   const tampered = parts.length >= 3
     ? [parts[0], parts[1], parts[2].slice(0, -2) + (parts[2].slice(-2) === 'AA' ? 'BB' : 'AA')].join('.')
     : `${activationKey.slice(0, -2)}AA`;
-  const badSignature = await api('/license/activate', { method: 'POST', body: { licenseKey: tampered } })
-    .catch(async () => api('/license/activate', { method: 'POST', body: { key: tampered } }));
+  const badSignature = await activate(tampered);
   check('a key whose signature was altered is refused', badSignature.status >= 400,
     `HTTP ${badSignature.status} ${badSignature.data?.code ?? ''}`);
 
-  const nonsense = await api('/license/activate', { method: 'POST', body: { licenseKey: 'KYN1.not-a-key.at-all' } })
-    .catch(async () => api('/license/activate', { method: 'POST', body: { key: 'KYN1.not-a-key.at-all' } }));
+  const nonsense = await activate('KYN1.not-a-key.at-all');
   check('something that is not a key is refused', nonsense.status >= 400,
     `HTTP ${nonsense.status} ${nonsense.data?.code ?? ''}`);
 
@@ -222,33 +226,57 @@ async function proveWarehouse() {
     `${storeA.data?.code} / ${storeB.data?.code}`);
   if (!storeA.data?.id || !storeB.data?.id) return false;
 
+  // The real shape of a store room: a zone holds an aisle, the aisle holds a
+  // rack, the rack holds a shelf, and the shelf is where the goods sit.
   const tree = {};
   for (const [key, store] of [['A', storeA.data], ['B', storeB.data]]) {
-    const zone = await api('/inventory/storage-locations', {
-      method: 'POST',
-      body: { warehouseId: store.id, code: `Z-${key}-${stamp}`, nameEn: `Zone ${key}`, nameAr: `منطقة ${key}`, type: 'ZONE' },
-    });
-    const rack = await api('/inventory/storage-locations', {
-      method: 'POST',
-      body: { warehouseId: store.id, parentId: zone.data?.id, code: `R-${key}-${stamp}`, nameEn: `Rack ${key}`, nameAr: `رف ${key}`, type: 'RACK' },
-    });
-    const bin = await api('/inventory/storage-locations', {
-      method: 'POST',
-      body: { warehouseId: store.id, parentId: rack.data?.id, code: `B-${key}-${stamp}`, nameEn: `Bin ${key}`, nameAr: `موقع ${key}`, type: 'BIN' },
-    });
-    tree[key] = { zone: zone.data, rack: rack.data, bin: bin.data };
+    const chain = [
+      { level: 'ZONE', code: `Z-${key}-${stamp}`, nameEn: `Zone ${key}`, nameAr: `منطقة ${key}` },
+      { level: 'AISLE', code: `A-${key}-${stamp}`, nameEn: `Aisle ${key}`, nameAr: `ممر ${key}` },
+      { level: 'RACK', code: `R-${key}-${stamp}`, nameEn: `Rack ${key}`, nameAr: `رف ${key}` },
+      { level: 'SHELF', code: `S-${key}-${stamp}`, nameEn: `Shelf ${key}`, nameAr: `ضلفة ${key}` },
+    ];
+    const made = [];
+    for (const step of chain) {
+      const created = await api('/inventory/locations', {
+        method: 'POST',
+        body: {
+          warehouseId: store.id,
+          parentId: made.length ? made[made.length - 1].id : undefined,
+          code: step.code,
+          nameEn: step.nameEn,
+          nameAr: step.nameAr,
+          kind: step.level,
+        },
+      });
+      if (!created.data?.id) {
+        check(`the ${step.level.toLowerCase()} of store ${key} is created`, false,
+          `HTTP ${created.status} ${created.data?.detail ?? ''}`);
+        break;
+      }
+      made.push(created.data);
+    }
+    tree[key] = { chain: made, shelf: made[3], bin: made[3] };
   }
-  check('a three-level shelf exists in each store',
-    Boolean(tree.A?.bin?.id) && Boolean(tree.B?.bin?.id), `${tree.A?.bin?.code} / ${tree.B?.bin?.code}`);
-  const locations = await api(`/inventory/storage-locations?warehouseId=${storeA.data.id}`);
+  check('a four-level shelf exists in each store',
+    Boolean(tree.A?.shelf?.id) && Boolean(tree.B?.shelf?.id),
+    `${tree.A?.shelf?.code} / ${tree.B?.shelf?.code}`);
+
+  const locations = await api(`/inventory/locations?warehouseId=${storeA.data.id}`);
   const flat = locations.data?.items ?? locations.data ?? [];
-  check('the shelf tree reads back from the installed database', flat.length >= 3, `${flat.length} node(s)`);
+  const treeA = await api(`/inventory/locations/tree/${storeA.data.id}`);
+  const roots = treeA.data?.items ?? treeA.data?.roots ?? treeA.data ?? [];
+  const depthOf = (node) => (node?.children?.length ? 1 + Math.max(...node.children.map(depthOf)) : 1);
+  const depth = Array.isArray(roots) && roots.length ? Math.max(...roots.map(depthOf)) : 0;
+  check('the four shelves in the one store read back from the installed database',
+    flat.length >= 4, `${flat.length} location(s)`);
+  check('the hierarchy reads back four levels deep',
+    depth >= 4, `depth ${depth}`);
 
   console.log('\n[W2] an item and a supplier');
   const supplier = await api('/parties/suppliers', {
     method: 'POST',
     body: {
-      branchId: branch.id,
       code: `SUP-${stamp}`,
       nameEn: `Supplier ${stamp}`,
       nameAr: `مورد ${stamp}`,
@@ -265,8 +293,6 @@ async function proveWarehouse() {
       salePrice: '12.0000',
       purchasePrice: '10.0000',
       isStockTracked: true,
-      requiresBatch: true,
-      requiresExpiryDate: true,
     },
   });
   check('the item and the supplier exist', Boolean(item.data?.id) && Boolean(supplier.data?.id),
@@ -277,7 +303,6 @@ async function proveWarehouse() {
   const invoice = await api('/purchases/invoices', {
     method: 'POST',
     body: {
-      branchId: branch.id,
       supplierId: supplier.data.id,
       warehouseId: storeA.data.id,
       invoiceDate: today(),
@@ -348,23 +373,21 @@ async function proveWarehouse() {
   check('the goods left one store and arrived at the other',
     near(leftA?.quantity, 12) && near(intoB?.quantity, 4), `A ${leftA?.quantity}, B ${intoB?.quantity}`);
 
-  const issue = await api('/inventory/stock-documents', {
+  // An issue is the documented loss/consumption route: warehouse, item, quantity.
+  const issue = await api('/inventory/batches/issue', {
     method: 'POST',
     body: {
-      kind: 'ADJUSTMENT',
-      documentDate: today(),
       branchId: branch.id,
-      fromWarehouseId: storeB.data.id,
+      warehouseId: storeB.data.id,
+      itemId: item.data.id,
+      quantity: 1,
+      documentDate: today(),
       reason: `installed issue ${stamp}`,
-      lines: [{ itemId: item.data.id, batchId: lotOne?.id, quantity: '-1.0000' }],
     },
   });
-  check('an issue out of the second store is created', Boolean(issue.data?.id),
+  check('an issue out of the second store is created', issue.status < 400,
     `HTTP ${issue.status} ${issue.data?.detail ?? ''}`);
-  if (issue.data?.id) {
-    const issuePosted = await api(`/inventory/stock-documents/${issue.data.id}/post`, { method: 'POST' });
-    check('the issue is posted', issuePosted.status < 400, `HTTP ${issuePosted.status} ${issuePosted.data?.detail ?? ''}`);
-  }
+
   const afterIssue = await api(`/inventory/warehouses/${storeB.data.id}/stock`);
   const rowB = (afterIssue.data?.rows ?? []).find((row) => row.code === item.data.code);
   check('the second store is one unit lower', near(rowB?.quantity, 3), `${rowB?.quantity}`);
@@ -375,7 +398,7 @@ async function proveWarehouse() {
 
   const take = await api('/inventory/stock-takes', {
     method: 'POST',
-    body: { branchId: branch.id, warehouseId: storeA.data.id, scope: 'FULL' },
+    body: { warehouseId: storeA.data.id, scope: 'FULL' },
   });
   check('the stock take is opened and freezes the book figure',
     Boolean(take.data?.id) && (take.data?.lines ?? []).length > 0,
@@ -383,7 +406,13 @@ async function proveWarehouse() {
   const takeId = take.data?.id;
   if (!takeId) return false;
 
-  const lines = take.data.lines.map((line, index) => ({
+  const takeLines = take.data.lines;
+  const frozenTotal = takeLines.reduce((sum, line) => sum + Number(line.systemQuantity), 0);
+  check('the frozen figure is the whole store: two lots, twelve units',
+    takeLines.length === 2 && near(frozenTotal, 12), `${takeLines.length} line(s), ${frozenTotal} unit(s)`);
+
+  // One unit is genuinely missing: the shelf holds eleven, the book says twelve.
+  const lines = takeLines.map((line, index) => ({
     lineId: line.id,
     countedQuantity: Number(line.systemQuantity) - (index === 0 ? 1 : 0),
   }));
@@ -400,6 +429,8 @@ async function proveWarehouse() {
   token = second.approverToken;
   const approved = await api(`/inventory/stock-takes/${takeId}/approve`, { method: 'POST' });
   check('a second person approves the count', approved.status < 400, `HTTP ${approved.status} ${approved.data?.detail ?? ''}`);
+  const twiceApproved = await api(`/inventory/stock-takes/${takeId}/approve`, { method: 'POST' });
+  check('a second approval of the same count is refused', twiceApproved.status >= 400, `HTTP ${twiceApproved.status}`);
   const postedTake = await api(`/inventory/stock-takes/${takeId}/post`, { method: 'POST' });
   check('the approved count is posted', postedTake.status < 400, `HTTP ${postedTake.status} ${postedTake.data?.detail ?? ''}`);
   check('posting the count wrote a journal entry', Boolean(postedTake.data?.journalEntryId),
@@ -418,7 +449,7 @@ async function proveWarehouse() {
       branchId: branch.id,
       reason: `installed write-off ${stamp}`,
       toWarehouseId: storeA.data.id,
-      lines: [{ itemId: item.data.id, batchId: lotOne?.id, quantity: '-1.0000', storageLocationId: tree.A.bin.id }],
+      lines: [{ itemId: item.data.id, batchId: lotOne?.id, quantity: -1, storageLocationId: tree.A.bin.id }],
     },
   });
   check('the write-off is a draft with its own number',
@@ -494,7 +525,7 @@ async function proveWarehouse() {
   check('the notification list answers', alerts.status === 200, `HTTP ${alerts.status}`);
   const count = await api('/notifications/unread-count').catch(() => ({ status: 0, data: null }));
   if (count.status === 200) {
-    check('the unread count answers', typeof count.data?.count === 'number', `${count.data?.count}`);
+    check('the unread count answers', typeof count.data?.unread === 'number', `${count.data?.unread} unread`);
   }
 
   const catalogue = await api('/inventory/reports');
@@ -518,10 +549,21 @@ async function proveWarehouse() {
   const csv = await api(`/inventory/reports/valuation-by-warehouse/export?warehouseId=${storeA.data.id}`, { raw: true });
   check('the CSV export returns a real CSV file',
     csv.status === 200 && String(csv.headers.get('content-type') ?? '').includes('csv'), `${csv.headers.get('content-type')}`);
-  check('the CSV names the store it exported', csv.text.includes(storeA.data.code), 'contains the store code');
-  const itemCsv = await api(`/inventory/reports/balance-by-warehouse/export?warehouseId=${storeA.data.id}`, { raw: true });
-  check('the item-level export names the item', itemCsv.status === 200 && itemCsv.text.includes(item.data.code),
-    `HTTP ${itemCsv.status} ${itemCsv.text.length} bytes`);
+  check('the CSV is named after the report and the date',
+    /kayan-valuation-by-warehouse-\d{4}-\d{2}-\d{2}\.csv/.test(String(csv.headers.get('content-disposition') ?? '')),
+    String(csv.headers.get('content-disposition') ?? 'no filename'));
+  const csvLines = csv.text.replace(/^\ufeff/, '').trim().split(/\r\n/);
+  check('the CSV has a header row and the store it exported',
+    csvLines.length >= 2 && csvLines[0].includes(',') && csv.text.includes(storeA.data.code),
+    `${csvLines.length - 1} data row(s)`);
+  // The item-level report is the one that has to name the item.
+  const itemCsv = await api(
+    `/inventory/reports/balance-by-warehouse/export?warehouseId=${storeA.data.id}`,
+    { raw: true },
+  );
+  check('the item-level export names the item and its quantity',
+    itemCsv.status === 200 && itemCsv.text.includes(item.data.code) && /10\.0000|11\.0000|10\.00/.test(itemCsv.text),
+    `HTTP ${itemCsv.status}, ${itemCsv.text.split('\r\n').length - 1} row(s)`);
 
   const printed = await api(`/inventory/reports/valuation/print?warehouseId=${storeA.data.id}&lang=en`, { raw: true });
   check('the printed valuation sheet renders from the installed program',
@@ -573,7 +615,7 @@ async function makeSecondPerson(stamp, branchId, grantedWarehouseIds) {
   const clerk = await makeUser(`eclerk${stamp}`, clerkRole.data.id);
   const approver = await makeUser(`eapprover${stamp}`, approverRole.data.id);
   check('both people exist in the installed database', Boolean(clerk.data?.id) && Boolean(approver.data?.id),
-    `clerk ${clerk.data?.id ? 'yes' : 'no'}`);
+    `clerk ${clerk.status}/${clerk.data?.detail ?? clerk.data?.id ?? ''} · approver ${approver.status}/${approver.data?.detail ?? approver.data?.id ?? ''}`);
   if (!clerk.data?.id || !approver.data?.id) return null;
 
   const clerkSession = await signIn(`eclerk${stamp}`, password);

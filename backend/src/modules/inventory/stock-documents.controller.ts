@@ -58,23 +58,46 @@ export class StockDocumentsController {
     });
   }
 
+  /// The warehouse a document touches, so approving or posting it is checked
+  /// against the same grant that creating it was. Recording a loss and
+  /// accepting it are two people's jobs, but both of them have to be trusted
+  /// with the shelf it happens on - otherwise the access screen would only
+  /// decide who may *start* the paperwork.
+  private async assertDocumentAccess(user: AuthUser, id: string, action: 'approve' | 'post') {
+    const document = (await this.service.findOne(user.companyId, id)) as unknown as {
+      kind?: string;
+      fromWarehouseId?: string | null;
+      toWarehouseId?: string | null;
+    };
+    const kind = String(document?.kind ?? '').toUpperCase();
+    if (kind === 'TRANSFER') {
+      assertTransferAccess(user, document.fromWarehouseId ?? '', document.toWarehouseId ?? '');
+      return;
+    }
+    const warehouseId = document?.toWarehouseId ?? document?.fromWarehouseId ?? '';
+    assertWarehouseAccess(user, warehouseId, action === 'approve' ? 'approve' : 'transfer');
+  }
+
   /// Approves a write-off. Its own permission: recording a loss and accepting
   /// it are two different people's jobs.
   @Post(':id/approve')
   @RequirePermissions('inventory.writeoff.approve')
-  approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    await this.assertDocumentAccess(user, id, 'approve');
     return this.service.approve(user.companyId, user.userId, id);
   }
 
   @Post(':id/post')
   @RequirePermissions('inventory.stock.adjust')
-  post(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async post(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    await this.assertDocumentAccess(user, id, 'post');
     return this.service.post(user.companyId, user.userId, id);
   }
 
   @Post(':id/write-off/post')
   @RequirePermissions('inventory.writeoff.post')
-  postWriteOff(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async postWriteOff(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    await this.assertDocumentAccess(user, id, 'post');
     return this.service.post(user.companyId, user.userId, id);
   }
 
