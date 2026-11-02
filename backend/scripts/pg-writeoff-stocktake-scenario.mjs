@@ -211,9 +211,11 @@ async function main() {
   const differenceAccount = await ensureAccount('5107', 'EXPENSE', 'Inventory differences', 'فروق المخزون');
   await ensureAccount('1301', 'ASSET', 'Inventory', 'المخزون');
 
-  // The shelf the goods sit on: a zone, then the bin inside it. A bin at the
-  // root of a warehouse is a place with no room around it, and the server
-  // refuses the impossible pairings rather than drawing a tree nobody can walk.
+  // The shelf the goods sit on: a zone, a rack inside it, and the bin on the
+  // rack. A bin at the root of a warehouse is a place with no room around it,
+  // and the server refuses the impossible pairings - a bin belongs on a rack or
+  // a shelf, a rack in an aisle or a zone - rather than drawing a tree nobody
+  // can walk.
   const zone = await locations.create(
     companyId,
     maker.id,
@@ -226,12 +228,25 @@ async function main() {
     },
     [branch.id],
   );
-  const bin = await locations.create(
+  const rack = await locations.create(
     companyId,
     maker.id,
     {
       warehouseId: store.id,
       parentId: zone.id,
+      kind: 'RACK',
+      code: `WO-RACK-${tag}`,
+      nameEn: 'Rack A',
+      nameAr: 'رف أ',
+    },
+    [branch.id],
+  );
+  const bin = await locations.create(
+    companyId,
+    maker.id,
+    {
+      warehouseId: store.id,
+      parentId: rack.id,
       kind: 'BIN',
       code: `WO-BIN-${tag}`,
       nameEn: 'Bin A1',
@@ -253,6 +268,7 @@ async function main() {
   // ============================================== W1  a lot on a shelf
   console.log('\n[W1] receive 100 into the main store, in a named lot and shelf');
   const lot = await batches.receive(companyId, maker.id, {
+    branchId: branch.id,
     warehouseId: store.id,
     itemId: item.id,
     batchNumber: `LOT-A-${tag}`,
@@ -279,7 +295,10 @@ async function main() {
     }),
   );
   check('W2 refused with a 400', noReason instanceof BadRequestException, noReason?.message ?? 'no error');
-  check('W2 nothing was written', (await prisma.stockDocument.count({ where: { companyId, kind: 'WRITE_OFF' } })) === 0);
+  // Scoped to this script's own branch: a store in the same company may already
+  // have a write-off from another proof, and that one is none of our business.
+  check('W2 nothing was written',
+    (await prisma.stockDocument.count({ where: { companyId, branchId: branch.id, kind: 'WRITE_OFF' } })) === 0);
 
   // ============================================== W3  the sign
   console.log('\n[W3] a write-off whose line is positive is refused');

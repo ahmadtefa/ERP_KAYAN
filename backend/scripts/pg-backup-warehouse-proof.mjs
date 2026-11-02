@@ -222,10 +222,13 @@ async function main() {
     check('the restored database has its structure', Number(tables) > 40, `${tables} tables`);
 
     console.log('\n[4] compare the warehouse tables, row for row');
-    const same = async (label, sqlText) => {
+    // `allowZero` is for a figure that is legitimately empty in a database
+    // nobody has granted warehouse rights in yet: the restore still has to
+    // reproduce it exactly, but "0 rows" is not an error there.
+    const same = async (label, sqlText, { allowZero = false } = {}) => {
       const before = await scalar(DB_URL, sqlText);
       const after = await scalar(scratchUrl, sqlText);
-      check(label, before === after && before !== '0', `${after} (was ${before})`);
+      check(label, before === after && (allowZero || before !== '0'), `${after} (was ${before})`);
     };
     await same('the warehouses are all there',
       `select count(*) from warehouses where "companyId"='${companyId}' and "deletedAt" is null`);
@@ -242,7 +245,8 @@ async function main() {
     await same('the warehouse permissions are in the catalogue',
       `select count(*) from permissions where code like 'inventory.warehouse%'`);
     await same('the roles keep the warehouse permissions they were granted',
-      `select count(*) from role_permissions rp join permissions p on p.id = rp."permissionId" where p.code like 'inventory.warehouse%'`);
+      `select count(*) from role_permissions rp join permissions p on p.id = rp."permissionId" where p.code like 'inventory.warehouse%'`,
+      { allowZero: true });
     await same('every migration was recorded in the archive',
       `select count(*) from _prisma_migrations where finished_at is not null`);
 
