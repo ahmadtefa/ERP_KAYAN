@@ -149,24 +149,28 @@ export class BatchesController {
   @Post('receive')
   @RequirePermissions('inventory.batches.receive')
   receive(@CurrentUser() user: AuthUser, @Body() dto: ReceiveLotDto) {
+    assertWarehouseAccess(user, dto.warehouseId, 'receive');
     return this.service.receive(user.companyId, user.userId, dto, warehouseScopeOf(user));
   }
 
   @Post('issue')
   @RequirePermissions('inventory.batches.issue')
   issue(@CurrentUser() user: AuthUser, @Body() dto: IssueDto) {
+    assertWarehouseAccess(user, dto.warehouseId, 'issue');
     return this.service.issue(user.companyId, user.userId, dto, warehouseScopeOf(user));
   }
 
   @Post('write-off')
   @RequirePermissions('inventory.batches.writeoff')
   writeOff(@CurrentUser() user: AuthUser, @Body() dto: WriteOffDto) {
+    assertWarehouseAccess(user, dto.warehouseId, 'issue');
     return this.service.writeOff(user.companyId, user.userId, dto, warehouseScopeOf(user));
   }
 
   @Post('transfer')
   @RequirePermissions('inventory.batches.transfer')
   transfer(@CurrentUser() user: AuthUser, @Body() dto: TransferDto) {
+    assertTransferAccess(user, dto.fromWarehouseId, dto.toWarehouseId);
     return this.service.transfer(user.companyId, user.userId, dto, warehouseScopeOf(user));
   }
 }

@@ -2,7 +2,7 @@ import { Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/comm
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost } from '../../common/auth/cost-visibility';
-import { assertWarehouseAccess } from '../../common/warehouse/warehouse-access';
+import { assertTransferAccess, assertWarehouseAccess } from '../../common/warehouse/warehouse-access';
 import { StockDocumentsService } from './stock-documents.service';
 
 /// Adjustments, transfers and physical counts. Separate permissions for
@@ -43,6 +43,15 @@ export class StockDocumentsController {
     const kind = String(body.kind ?? '').toUpperCase();
     if (kind === 'WRITE_OFF') {
       assertWarehouseAccess(user, body.toWarehouseId as string, 'transfer');
+    }
+    // A transfer leaves one shelf and arrives at another, so it is checked on
+    // both ends: being trusted with only the source is not a transfer.
+    if (kind === 'TRANSFER') {
+      assertTransferAccess(
+        user,
+        body.fromWarehouseId as string,
+        body.toWarehouseId as string,
+      );
     }
     return this.service.create(user.companyId, user.branchId, user.userId, body as never, {
       idempotencyKey: idempotencyKey?.trim() || undefined,
