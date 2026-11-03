@@ -14,7 +14,7 @@ import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/company_providers.dart';
 
 /// Company profile, logo and units — the records every report and document
-/// is headed by. Editing needs `admin.company.manage`; the server checks.
+/// is headed by. Profile and logo edits require super admin on the server.
 class CompanySettingsScreen extends ConsumerWidget {
   const CompanySettingsScreen({super.key});
 
@@ -157,6 +157,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final canEdit = ref.watch(currentUserProvider)?.isSuperAdmin == true;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -167,6 +168,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
               hasLogo: widget.profile['hasLogo'] == true,
               logoUrl: widget.profile['logoUrl'] as String?,
               companyId: widget.profile['id'] as String?,
+              canEdit: canEdit,
             ),
             const SizedBox(height: 16),
             Row(
@@ -174,6 +176,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
                 Expanded(
                   child: TextField(
                     controller: _code,
+                    enabled: canEdit && !_saving,
                     decoration: InputDecoration(labelText: l10n.companyCode),
                   ),
                 ),
@@ -181,6 +184,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
                 Expanded(
                   child: TextField(
                     controller: _taxId,
+                    enabled: canEdit && !_saving,
                     decoration: InputDecoration(labelText: l10n.taxId),
                   ),
                 ),
@@ -189,11 +193,13 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
             const SizedBox(height: 12),
             TextField(
               controller: _nameAr,
+              enabled: canEdit && !_saving,
               decoration: InputDecoration(labelText: l10n.nameArabic),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _nameEn,
+              enabled: canEdit && !_saving,
               decoration: InputDecoration(labelText: l10n.nameEnglish),
             ),
             const SizedBox(height: 12),
@@ -202,6 +208,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
                 Expanded(
                   child: TextField(
                     controller: _phone,
+                    enabled: canEdit && !_saving,
                     decoration: InputDecoration(labelText: l10n.phone),
                   ),
                 ),
@@ -209,6 +216,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
                 Expanded(
                   child: TextField(
                     controller: _email,
+                    enabled: canEdit && !_saving,
                     decoration: InputDecoration(labelText: l10n.email),
                   ),
                 ),
@@ -217,10 +225,11 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
             const SizedBox(height: 12),
             TextField(
               controller: _address,
+              enabled: canEdit && !_saving,
               decoration: InputDecoration(labelText: l10n.address),
             ),
             const SizedBox(height: 16),
-            Align(
+            if (canEdit) Align(
               alignment: AlignmentDirectional.centerEnd,
               child: FilledButton(
                 onPressed: _saving ? null : _save,
@@ -243,11 +252,13 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
 class _LogoRow extends ConsumerStatefulWidget {
   const _LogoRow({
     required this.hasLogo,
+    required this.canEdit,
     this.logoUrl,
     this.companyId,
   });
 
   final bool hasLogo;
+  final bool canEdit;
 
   /// The relative path the profile reports; [companyLogoUrl] resolves it
   /// against the address this client talks to.
@@ -397,12 +408,12 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
             ],
           ),
         ),
-        TextButton.icon(
+        if (widget.canEdit) TextButton.icon(
           onPressed: _busy ? null : _upload,
           icon: const Icon(Icons.upload, size: 18),
           label: Text(l10n.uploadLogo),
         ),
-        if (widget.hasLogo)
+        if (widget.canEdit && widget.hasLogo)
           TextButton.icon(
             onPressed: _busy ? null : _remove,
             icon: const Icon(Icons.delete_outline, size: 18),

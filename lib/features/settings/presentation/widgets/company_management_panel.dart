@@ -28,7 +28,7 @@ class _CompanyManagementPanelState
   String tr(String en, String ar) => _isArabic ? ar : en;
   bool get _canEditCompany {
     final user = ref.read(currentUserProvider);
-    return user?.permissions.contains('company.profile.manage') == true;
+    return user?.isSuperAdmin == true;
   }
 
   String _companyValue(String key) => _company?[key]?.toString() ?? '';
@@ -231,7 +231,8 @@ class _CompanyManagementPanelState
 
   @override
   Widget build(BuildContext context) {
-    if (!_canEditCompany) return const SizedBox.shrink();
+    final user = ref.watch(currentUserProvider);
+    if (user?.isSuperAdmin != true) return const SizedBox.shrink();
     if (_loading) {
       return const Center(
         child: Padding(
@@ -241,7 +242,6 @@ class _CompanyManagementPanelState
       );
     }
     final base = ref.watch(appConfigProvider).apiBaseUrl;
-    final user = ref.watch(currentUserProvider);
     // Use the same API-prefix-aware, versioned URL as every other company mark.
     final savedLogoUrl = companyLogoUrl(base, {
       ...?_company,
