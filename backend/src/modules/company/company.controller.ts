@@ -119,7 +119,6 @@ export class CompanyController {
     @CurrentUser() user: AuthUser,
     @Body() dto: CreateBranchDto,
   ) {
-    this.assertSuperAdmin(user);
     return this.service.createBranch(user.companyId, user.userId, dto);
   }
 
@@ -130,7 +129,6 @@ export class CompanyController {
     @Param('id') id: string,
     @Body() dto: UpdateBranchDto,
   ) {
-    this.assertSuperAdmin(user);
     return this.service.updateBranch(user.companyId, user.userId, id, dto);
   }
 
@@ -140,7 +138,6 @@ export class CompanyController {
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
   ) {
-    this.assertSuperAdmin(user);
     await this.service.deleteBranch(user.companyId, user.userId, id);
     return { deleted: true };
   }
