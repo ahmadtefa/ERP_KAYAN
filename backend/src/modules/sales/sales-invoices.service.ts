@@ -999,7 +999,9 @@ export class SalesInvoicesService {
       // take the tax back out first, then discount the goods value. Tax is
       // then charged on the discounted value, which is what "discount applied
       // before tax" means on these documents.
-      const grossLineTotal = settings.pricesIncludeTax && taxRate.greaterThan(0)
+      // Sales orders currently store prices as tax-exclusive when created.
+      // Do not reinterpret an old agreed price using today's company setting.
+      const grossLineTotal = !orderUnits && settings.pricesIncludeTax && taxRate.greaterThan(0)
         ? typedTotal.div(grossUp).toDecimalPlaces(MONEY_SCALE)
         : typedTotal;
 

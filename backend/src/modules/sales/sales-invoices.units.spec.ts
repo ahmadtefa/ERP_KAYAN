@@ -94,7 +94,7 @@ function makeService(itemOverride: any = milkItem) {
   );
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'invoice-1' } as never);
 
-  return { service, prisma, tx, prices, posting, warehouses };
+  return { service, prisma, tx, prices, posting, warehouses, settings };
 }
 
 const baseDto = {
@@ -114,6 +114,18 @@ describe('Sales multi-unit — milk scenario', () => {
     expect(line.unitFactor.toFixed(6)).toBe('10.000000');
     expect(line.unitQuantity.toFixed(4)).toBe('2.0000');
     expect(line.grossLineTotal.toFixed(4)).toBe('150.0000');
+  });
+
+  it('uses the historical order tax-exclusive price when company policy changes', async () => {
+    const { service, tx, settings } = makeService();
+    settings.get.mockResolvedValue({ taxRate: '14', maxDiscountPercent: '100', pricesIncludeTax: true });
+    const resolved = historicalOrderUnit({ label: 'Line 1', unitName: 'كرتونة', unitFactor: D(10), baseQuantity: D(20) });
+    await service.create(COMPANY, BRANCH, 'user-1', { ...baseDto,
+      lines: [{ itemId: MILK, quantity: '2', unitName: 'كرتونة', unitPrice: '75', taxRate: '14' }] } as any,
+      [{ itemId: MILK, resolved }]);
+    const line = tx.salesInvoice.create.mock.calls[0][0].data.lines.create[0];
+    expect(line.grossLineTotal.toFixed(4)).toBe('150.0000');
+    expect(line.taxAmount.toFixed(4)).toBe('21.0000');
   });
 
   it('treats an explicit blank tax as zero while retaining an omitted item rate', async () => {

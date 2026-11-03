@@ -169,13 +169,14 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const pi = new PurchaseInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit);
     const sales = new SalesOrdersService(prisma,numbers,settings,prices,si,audit);
     const purchases = new PurchaseOrdersService(prisma,numbers,settings,prices,pi,audit);
-    const lines = [{itemId:first.id,quantity:'3',unitName:'carton',unitPrice:'100',discountPercent:'5',taxRate:'0'},
+    const lines = [{itemId:first.id,quantity:'3',unitName:'carton',unitPrice:'100',discountPercent:'5',taxRate:'14'},
       {itemId:second.id,quantity:'5',unitPrice:'2',taxRate:'0'}];
     const so = await sales.create(company,branch,user,{customerId:customer.id,orderDate:date,lines});
     const po = await purchases.create(company,branch,user,{supplierId:supplier.id,orderDate:date,lines});
     await sales.approve(company,user,so.id);
     await purchases.approve(company,user,po.id);
     await prisma.itemUnit.update({where:{itemId_unit:{itemId:first.id,unit:'carton'}},data:{factor:'12',isActive:false}});
+    await prisma.companySetting.update({where:{companyId:company},data:{pricesIncludeTax:true}});
     const converted = {};
     for (const [kind, orders, order] of [['sales',sales,so],['purchase',purchases,po]]) {
       const orderLines = kind === 'sales'
@@ -226,6 +227,8 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(saved.lines[0].unitQuantity.toFixed(4),'2.0000');
       assert.equal(saved.lines[0].discountPercent.toFixed(4),'5.0000');
       assert.equal(saved.lines[0].lineTotal.toFixed(4),'190.0000');
+      assert.equal(saved.lines[0].taxAmount.toFixed(4),'26.6000');
+      assert.equal(saved.totalAmount.toFixed(4),'216.6000');
       const refreshed = kind === 'sales'
         ? await prisma.salesOrderLine.findMany({where:{orderId:order.id},orderBy:{lineNumber:'asc'}})
         : await prisma.purchaseOrderLine.findMany({where:{orderId:order.id},orderBy:{lineNumber:'asc'}});
