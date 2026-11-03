@@ -13,7 +13,6 @@ import '../../../../shared/widgets/resizable_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../data/presentation/providers/data_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
-import '../../../accounting/presentation/providers/cost_center_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../accounting/presentation/providers/cost_center_providers.dart' show activeCostCentersProvider, costCenterLabel;
 import '../../../common/presentation/screens/module_scaffold.dart';
