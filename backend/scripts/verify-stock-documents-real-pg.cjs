@@ -28,6 +28,8 @@ const { AccountMapService } = require('../src/modules/accounting/account-map.ser
 const { PostingService } = require('../src/modules/accounting/posting.service');
 const { StockDocumentsService } = require('../src/modules/inventory/stock-documents.service');
 const { ChartOfAccountsService } = require('../src/modules/accounting/chart-of-accounts.service');
+const { StockService } = require('../src/modules/inventory/stock.service');
+const { FinancialStatementsService } = require('../src/modules/reports/financial-statements.service');
 
 const company = '10000000-0000-4000-8000-000000000001';
 const user = '20000000-0000-4000-8000-000000000001';
@@ -64,6 +66,8 @@ let difference = '70000000-0000-4000-8000-000000000005';
     // Real chart operations, not an HTTP or Flutter test. The fixture uses
     // unique synthetic codes and keeps historical journal rows untouched.
     const chart = new ChartOfAccountsService(prisma, audit);
+    const stockReports = new StockService(prisma);
+    const statements = new FinancialStatementsService(prisma);
     const root = await chart.create(company, user, { code:'SYN-ROOT', nameEn:'Synthetic root',
       nameAr:'حساب رئيسي تجريبي', type:'ASSET', isPostable:false });
     const child = await chart.create(company, user, { code:'SYN-CHILD', nameEn:'Synthetic child',
@@ -99,6 +103,15 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(journal.rowCount,2);
     assert(journal.rows.some(r => r.accountId === difference && r.costCenterId === centre && Number(r.debit) === 30));
     assert(journal.rows.some(r => r.accountId === inventory && Number(r.credit) === 30));
+    const stockCard = await stockReports.itemLedger(company, item);
+    assert.equal(stockCard.movements.length, 2);
+    assert.equal(stockCard.movements.at(-1).runningQuantity, '6.0000');
+    assert.equal(stockCard.movements.at(-1).runningValue, '45.0000');
+    const warehouseReport = await stockReports.byWarehouse(company, {branchId: branch, itemIds: [item]});
+    assert.equal(warehouseReport.find(row => row.itemId === item).total, '6.0000');
+    const report = await statements.costCenterReport(company, {from: '2026-01-01', to: '2100-12-31', costCenterId: centre});
+    assert.equal(report.items.find(row => row.costCenterId === centre).ownExpenses, '30.0000');
+    assert.equal(report.reconciliation.balanced, true);
     const historyBefore = await sql.query('SELECT id, debit::text, credit::text FROM journal_lines WHERE "accountId"=$1 ORDER BY id', [inventory]);
     assert.equal((await chart.update(company,user,inventory,{isActive:false})).isActive,false);
     assert.equal((await chart.update(company,user,inventory,{isActive:true})).isActive,true);
@@ -128,6 +141,12 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const restored = await sql.query('SELECT quantity::text, value::text FROM stock_balances WHERE "companyId"=$1 AND "branchId"=$2 AND "itemId"=$3', [company,branch,item]);
     assert.equal(Number(restored.rows[0].quantity),10);
     assert.equal(Number(restored.rows[0].value),75);
+    const reversedCard = await stockReports.itemLedger(company, item);
+    assert.equal(reversedCard.movements.at(-1).runningQuantity, '10.0000');
+    assert.equal(reversedCard.movements.at(-1).runningValue, '75.0000');
+    const reversedReport = await statements.costCenterReport(company, {from: '2026-01-01', to: '2100-12-31', costCenterId: centre});
+    assert.equal(reversedReport.items.find(row => row.costCenterId === centre).ownExpenses, '0.0000');
+    assert.equal(reversedReport.reconciliation.balanced, true);
     console.log('PASS: real PostgreSQL + Prisma stock receipt, issue, cost-centre journal, overdraw and duplicate-post rejection, and reversal.');
   } finally {
     await prisma.$disconnect();
