@@ -176,6 +176,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     await sales.approve(company,user,so.id);
     await purchases.approve(company,user,po.id);
     await prisma.itemUnit.update({where:{itemId_unit:{itemId:first.id,unit:'carton'}},data:{factor:'12',isActive:false}});
+    const converted = {};
     for (const [kind, orders, order] of [['sales',sales,so],['purchase',purchases,po]]) {
       const orderLines = kind === 'sales'
         ? await prisma.salesOrderLine.findMany({where:{orderId:order.id},orderBy:{lineNumber:'asc'}})
@@ -219,6 +220,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(saved.lines.length,1,`${kind}: an unselected line was invoiced`);
       assert.equal(saved.lines[0].itemId,first.id);
       assert.equal(saved.lines[0].orderLineId,orderLines[0].id);
+      converted[kind] = { invoiceId:saved.id, invoiceLineId:saved.lines[0].id, orderId:order.id, orderLineId:orderLines[0].id };
       assert.equal(saved.lines[0].quantity.toFixed(4),'20.0000');
       assert.equal(saved.lines[0].unitFactor.toFixed(6),'10.000000');
       assert.equal(saved.lines[0].unitQuantity.toFixed(4),'2.0000');
@@ -241,7 +243,48 @@ let difference = '70000000-0000-4000-8000-000000000005';
         : await prisma.purchaseOrder.findUniqueOrThrow({where:{id:order.id}});
       assert.equal(completed.status,'FULFILLED');
     }
-    console.log('PASS: real PostgreSQL + Prisma order conversion: selected/historical units, audit rollback, simultaneous retry and competing allocations. No HTTP, UI or reversal test.');
+    // Configure the synthetic chart, post the purchased stock, sell it, then
+    // reverse both. Legacy/missing line links must abort without stock, journal
+    // or order mutations; a successful reversal releases the allocation.
+    for (const [code, type] of [['1103','ASSET'],['2101','LIABILITY'],['1104','ASSET'],
+      ['1105','ASSET'],['2103','LIABILITY'],['4101','REVENUE'],['5101','EXPENSE']]) {
+      await prisma.account.upsert({where:{companyId_code:{companyId:company,code}},
+        create:{companyId:company,code,nameEn:`Synthetic ${code}`,nameAr:`تجريبي ${code}`,type,isPostable:true},
+        update:{isActive:true,isPostable:true,deletedAt:null}});
+    }
+    await assert.rejects(si.updateDraft(company,branch,user,converted.sales.invoiceId,{}),/allocation reconciliation/);
+    await assert.rejects(pi.updateDraft(company,branch,user,converted.purchase.invoiceId,{}),/allocation reconciliation/);
+    await pi.post(company,user,converted.purchase.invoiceId);
+    await si.post(company,user,converted.sales.invoiceId);
+    let orderStockState = await prisma.stockBalance.findUniqueOrThrow({where:{companyId_branchId_itemId:{companyId:company,branchId:branch,itemId:first.id}}});
+    assert.equal(orderStockState.quantity.toFixed(4),'0.0000');
+    for (const [kind, svc, orders] of [['sales',si,sales],['purchase',pi,purchases]]) {
+      const target = converted[kind];
+      const invoiceLines = kind === 'sales' ? prisma.salesInvoiceLine : prisma.purchaseInvoiceLine;
+      const invoiceModel = kind === 'sales' ? prisma.salesInvoice : prisma.purchaseInvoice;
+      const orderLineModel = kind === 'sales' ? prisma.salesOrderLine : prisma.purchaseOrderLine;
+      await invoiceLines.update({where:{id:target.invoiceLineId},data:{orderLineId:null}});
+      const movements = await prisma.stockMovement.count({where:{companyId:company}});
+      const journals = await prisma.journalEntry.count({where:{companyId:company}});
+      await assert.rejects(svc.reverse(company,user,target.invoiceId),/manual review/);
+      assert.equal((await invoiceModel.findUniqueOrThrow({where:{id:target.invoiceId}})).status,'POSTED');
+      assert.equal((await orderLineModel.findUniqueOrThrow({where:{id:target.orderLineId}})).invoicedQuantity.toFixed(4),'30.0000');
+      assert.equal(await prisma.stockMovement.count({where:{companyId:company}}),movements);
+      assert.equal(await prisma.journalEntry.count({where:{companyId:company}}),journals);
+      await invoiceLines.update({where:{id:target.invoiceLineId},data:{orderLineId:target.orderLineId}});
+      await svc.reverse(company,user,target.invoiceId);
+      assert.equal((await invoiceModel.findUniqueOrThrow({where:{id:target.invoiceId}})).status,'REVERSED');
+      assert.equal((await orderLineModel.findUniqueOrThrow({where:{id:target.orderLineId}})).invoicedQuantity.toFixed(4),'10.0000');
+      await assert.rejects(svc.reverse(company,user,target.invoiceId),/Only posted/);
+      await assert.rejects(orders.convertToInvoice(company,branch,user,target.orderId,
+        {idempotencyKey:'same-request-000000001',invoiceDate:date,lines:[{orderLineId:target.orderLineId,quantity:'20'}]}),/no longer active/);
+      await orders.convertToInvoice(company,branch,user,target.orderId,
+        {idempotencyKey:'reconverted-request-0001',invoiceDate:date,lines:[{orderLineId:target.orderLineId,quantity:'20'}]});
+    }
+    orderStockState = await prisma.stockBalance.findUniqueOrThrow({where:{companyId_branchId_itemId:{companyId:company,branchId:branch,itemId:first.id}}});
+    assert.equal(orderStockState.quantity.toFixed(4),'0.0000');
+    assert.equal(orderStockState.value.toFixed(4),'0.0000');
+    console.log('PASS: PostgreSQL + Prisma order conversion selection, audit rollback, concurrent retry/competition, posting, reversal, missing-link rollback and re-conversion. No HTTP, Flutter or installed Windows test.');
   } finally {
     await prisma.$disconnect();
     await sql.end();
