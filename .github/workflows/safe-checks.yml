@@ -117,10 +117,10 @@ jobs:
       - name: Run Flutter tests and report failures
         shell: bash
         run: |
-          if flutter test --no-pub --reporter json > "$RUNNER_TEMP/flutter-tests.json"; then
-            echo 'Flutter tests passed.'
-          else
-            status=$?
+          status=0
+          flutter test --no-pub --reporter json > "$RUNNER_TEMP/flutter-tests.json" || status=$?
+          node scripts/report-flutter-test-counts.mjs "$RUNNER_TEMP/flutter-tests.json"
+          if [ "$status" -ne 0 ]; then
             node scripts/report-flutter-test-failures.mjs "$RUNNER_TEMP/flutter-tests.json"
             exit "$status"
           fi
