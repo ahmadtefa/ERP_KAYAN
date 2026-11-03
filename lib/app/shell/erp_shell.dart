@@ -96,6 +96,36 @@ class ErpShell extends ConsumerStatefulWidget {
 
 class _ErpShellState extends ConsumerState<ErpShell> {
   final ScrollController _navScrollController = ScrollController();
+  final GlobalKey _selectedNavKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    _revealSelection();
+  }
+
+  @override
+  void didUpdateWidget(covariant ErpShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentPath != widget.currentPath) _revealSelection();
+  }
+
+  void _revealSelection() {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final target = _selectedNavKey.currentContext;
+      if (target == null) return; // A narrow viewport uses a drawer instead.
+      await Scrollable.ensureVisible(
+        target,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+      );
+      if (!mounted || _selectedNavKey.currentContext != target) return;
+      await Scrollable.ensureVisible(
+        target,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+      );
+    });
+  }
 
   @override
   void dispose() {
@@ -126,7 +156,8 @@ class _ErpShellState extends ConsumerState<ErpShell> {
             if (isWide)
               _Sidebar(
                 items: items,
-                current: widget.currentPath,
+                selectedPath: items[selectedIndex].path,
+                selectedKey: _selectedNavKey,
                 extended: isExtended,
                 scrollController: _navScrollController,
               ),
@@ -395,13 +426,15 @@ bool _belongsTo(String path, String current) =>
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.items,
-    required this.current,
+    required this.selectedPath,
+    required this.selectedKey,
     required this.extended,
     required this.scrollController,
   });
 
   final List<_NavItem> items;
-  final String current;
+  final String selectedPath;
+  final GlobalKey selectedKey;
   final bool extended;
   final ScrollController scrollController;
 
@@ -462,8 +495,9 @@ class _Sidebar extends StatelessWidget {
                       ),
                       for (final item in groups[group]!)
                         _NavEntry(
+                          key: item.path == selectedPath ? selectedKey : null,
                           item: item,
-                          selected: _belongsTo(item.path, current),
+                          selected: item.path == selectedPath,
                           extended: extended,
                         ),
                     ],
@@ -616,6 +650,7 @@ class _GroupLabel extends StatelessWidget {
 
 class _NavEntry extends StatelessWidget {
   const _NavEntry({
+    super.key,
     required this.item,
     required this.selected,
     required this.extended,

@@ -334,6 +334,12 @@ Future<void> _pumpShot(
     );
   });
   await tester.pumpAndSettle();
+  final selected = find.byWidgetPredicate((widget) => widget is ListTile && widget.selected);
+  expect(selected, findsOneWidget);
+  final nav = tester.getRect(find.byKey(const Key('erp-shell-nav-list')));
+  final item = tester.getRect(selected);
+  expect(item.top, greaterThanOrEqualTo(nav.top));
+  expect(item.bottom, lessThanOrEqualTo(nav.bottom));
 }
 
 void main() {
