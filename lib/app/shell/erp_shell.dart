@@ -119,7 +119,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         target,
         alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
       );
-      if (!mounted || _selectedNavKey.currentContext != target) return;
+      if (!mounted || !target.mounted || _selectedNavKey.currentContext != target) return;
       await Scrollable.ensureVisible(
         target,
         alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart,
