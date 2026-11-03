@@ -1587,7 +1587,7 @@ Write-Output "::notice::Safe-reset exercise passed: cancel changed nothing; rese
 $uninstaller = Join-Path $installRoot 'unins000.exe'
 if (-not (Test-Path -LiteralPath $uninstaller)) { Fail "Inno Setup uninstaller is missing: $uninstaller" }
 $uninstallLog = Join-Path $env:TEMP 'kayan-uninstall-smoke.log'
-$backupRoot = Join-Path $env:ProgramData 'KAYAN-ERP\\backups'
+$backupRoot = Join-Path $env:ProgramData 'KAYAN-ERP\backups'
 Write-Output '::notice title=Windows smoke phase::Uninstalling application binaries while asserting customer data is preserved.'
 if (-not (Test-Path -LiteralPath $settings)) { Fail "Cannot test uninstall preservation: settings file is missing before uninstall: $settings" }
 if (-not (Test-Path -LiteralPath $backupRoot)) { Fail "Cannot test uninstall preservation: backup directory is missing before uninstall: $backupRoot" }
@@ -1616,7 +1616,7 @@ $reinstalledService = Get-Service -Name $serviceName -ErrorAction SilentlyContin
 if (-not $reinstalledService) { Fail 'Reinstall did not register the KAYAN PostgreSQL service.' }
 if ($reinstalledService.Status -ne 'Running') { Fail "Reinstalled PostgreSQL service is not running (state: $($reinstalledService.Status))." }
 if (-not (Test-Path -LiteralPath $settings)) { Fail 'Reinstall lost the preserved company settings.' }
-$psqlAfterReinstall = Join-Path $installRoot 'backend\\postgres\\bin\\psql.exe'
+$psqlAfterReinstall = Join-Path $installRoot 'backend\postgres\bin\psql.exe'
 if (-not (Test-Path -LiteralPath $psqlAfterReinstall)) { Fail 'Reinstall is missing the bundled PostgreSQL client.' }
 $env:PGPASSWORD = $databasePassword
 $preservedSentinel = @(& $psqlAfterReinstall -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT value FROM kayan_installer_upgrade_probe WHERE id=1" 2>&1)
