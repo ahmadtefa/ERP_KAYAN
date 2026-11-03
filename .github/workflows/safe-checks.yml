@@ -49,6 +49,7 @@ jobs:
           NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: >-
           npm test -- --runInBand
+          src/common/maintenance/maintenance.spec.ts
           src/modules/backup/full-backup.service.spec.ts
           src/modules/backup/full-backup-recovery-safety.spec.ts
           src/modules/backup/pg-backup-connection.spec.ts
