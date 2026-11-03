@@ -23,6 +23,7 @@ class _ChartSource implements ChartOfAccountsDataSource {
   ];
   int loads = 0;
   AccountInput? createdInput;
+  bool failCreate = false;
 
   @override
   Future<List<Account>> fetchAccounts() async { loads++; return [...accounts]; }
@@ -31,6 +32,7 @@ class _ChartSource implements ChartOfAccountsDataSource {
   @override
   Future<Account> createAccount(AccountInput input) async {
     createdInput = input;
+    if (failCreate) throw StateError('Synthetic save failure');
     final account = Account(id: 'new', companyId: 'c', code: input.code ?? '3',
         name: input.nameEn, nameEn: input.nameEn, nameAr: input.nameAr, type: input.type);
     accounts.add(account);
@@ -104,4 +106,46 @@ void main() {
     expect(source.createdInput!.toCreateJson().containsKey('isActive'), isFalse);
     expect(find.textContaining('3  New asset'), findsOneWidget);
   });
+  testWidgets('a failed save preserves the entered account fields for retry', (tester) async {
+    final source = _ChartSource()..failCreate = true;
+    await _open(tester, source);
+    await tester.tap(find.text('New account'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Name in Arabic *'), 'أصل جديد');
+    await tester.enterText(find.widgetWithText(TextField, 'Name in English *'), 'New asset');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNWidgets(2));
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Name in English *')).controller!.text,
+        'New asset');
+    source.failCreate = false;
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('3  New asset'), findsOneWidget);
+  });
+
+  testWidgets('cancel and system back ask before discarding edited fields', (tester) async {
+    final source = _ChartSource();
+    await _open(tester, source);
+    await tester.tap(find.text('New account'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Name in English *'), 'Unsaved asset');
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Unsaved changes'), findsOneWidget);
+    await tester.tap(find.text('Keep editing'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Name in English *')).controller!.text,
+        'Unsaved asset');
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Unsaved changes'), findsOneWidget);
+    await tester.tap(find.text('Discard changes'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'Name in English *'), findsNothing);
+    expect(source.createdInput, isNull);
+  });
+
 }

@@ -324,16 +324,63 @@ Future<void> _editAccount(
     }
   }
 
-  final result = await showDialog<bool>(
+  final initial = (
+    codeController.text, nameArController.text, nameEnController.text,
+    descriptionController.text, selectedParent, selectedType, isPostable,
+    isActive, selectedCashFlow,
+  );
+  bool saving = false;
+  bool confirmingDiscard = false;
+  bool hasChanges() => initial != (
+    codeController.text, nameArController.text, nameEnController.text,
+    descriptionController.text, selectedParent, selectedType, isPostable,
+    isActive, selectedCashFlow,
+  );
+
+  await showDialog<bool>(
     context: context,
+    barrierDismissible: false,
     builder: (dialogContext) => StatefulBuilder(
       builder: (dialogContext, setDialogState) {
         final dialogL10n = dialogContext.l10n;
-        return AlertDialog(
+        final arabic = Localizations.localeOf(dialogContext).languageCode == 'ar';
+        Future<void> closeEditor() async {
+          if (saving || confirmingDiscard) return;
+          if (hasChanges()) {
+            confirmingDiscard = true;
+            final discard = await showDialog<bool>(
+              context: dialogContext,
+              barrierDismissible: false,
+              builder: (confirmContext) => AlertDialog(
+                title: Text(arabic ? 'تغييرات غير محفوظة' : 'Unsaved changes'),
+                content: Text(arabic
+                    ? 'هل تريد الخروج دون حفظ التغييرات؟'
+                    : 'Leave without saving your changes?'),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(confirmContext, false),
+                      child: Text(arabic ? 'متابعة التعديل' : 'Keep editing')),
+                  FilledButton(onPressed: () => Navigator.pop(confirmContext, true),
+                      child: Text(arabic ? 'الخروج دون حفظ' : 'Discard changes')),
+                ],
+              ),
+            );
+            confirmingDiscard = false;
+            if (discard != true || !dialogContext.mounted) return;
+          }
+          if (dialogContext.mounted) Navigator.of(dialogContext).pop(false);
+        }
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) closeEditor();
+          },
+          child: AlertDialog(
           title: Text(
             existing == null ? dialogL10n.newAccount : dialogL10n.editAccount,
           ),
-          content: SizedBox(
+          content: IgnorePointer(
+            ignoring: saving,
+            child: SizedBox(
             width: 520,
             child: SingleChildScrollView(
               child: Column(
@@ -428,7 +475,8 @@ Future<void> _editAccount(
                         final suggestion = await ref
                             .read(chartOfAccountsRepositoryProvider)
                             .suggestCode(parentId: value);
-                        if (suggestion.valueOrNull != null) {
+                        if (dialogContext.mounted && selectedParent == value &&
+                            codeController.text.trim().isEmpty && suggestion.valueOrNull != null) {
                           setDialogState(
                             () => codeController.text = suggestion.valueOrNull!,
                           );
@@ -508,46 +556,53 @@ Future<void> _editAccount(
                 ],
               ),
             ),
+            ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
+              onPressed: saving ? null : closeEditor,
               child: Text(dialogL10n.cancel),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
+              onPressed: saving ? null : () async {
+                if (nameArController.text.trim().isEmpty || nameEnController.text.trim().isEmpty) {
+                  showMessage(dialogContext, arabic
+                      ? 'أدخل اسم الحساب بالعربية والإنجليزية.'
+                      : 'Enter both the Arabic and English account names.', error: true);
+                  return;
+                }
+                final input = AccountInput(
+                  code: codeController.text.trim().isEmpty ? null : codeController.text.trim(),
+                  nameAr: nameArController.text.trim(),
+                  nameEn: nameEnController.text.trim(),
+                  type: selectedType,
+                  parentId: selectedParent,
+                  isPostable: isPostable,
+                  isActive: isActive,
+                  description: descriptionController.text.trim(),
+                  cashFlowClass: isPostable ? selectedCashFlow : null,
+                );
+                setDialogState(() => saving = true);
+                final controller = ref.read(chartOfAccountsProvider.notifier);
+                final error = existing == null
+                    ? await controller.create(input)
+                    : await controller.updateAccount(existing.id, input);
+                if (!dialogContext.mounted) return;
+                if (error != null) {
+                  setDialogState(() => saving = false);
+                  showMessage(dialogContext, error, error: true);
+                } else {
+                  Navigator.of(dialogContext).pop(true);
+                }
+              },
               child: Text(dialogL10n.save),
             ),
           ],
+          ),
         );
       },
     ),
   );
-
-  if (result != true) return;
-
-  final input = AccountInput(
-    code: codeController.text.trim().isEmpty
-        ? null
-        : codeController.text.trim(),
-    nameAr: nameArController.text.trim(),
-    nameEn: nameEnController.text.trim(),
-    type: selectedType,
-    parentId: selectedParent,
-    isPostable: isPostable,
-    isActive: isActive,
-    description: descriptionController.text.trim(),
-    cashFlowClass: isPostable ? selectedCashFlow : null,
-  );
-
-  final controller = ref.read(chartOfAccountsProvider.notifier);
-  final error = existing == null
-      ? await controller.create(input)
-      : await controller.updateAccount(existing.id, input);
-
-  if (context.mounted && error != null) {
-    showMessage(context, error, error: true);
-  }
 }
 
 /// Activates or deactivates an account in place.
