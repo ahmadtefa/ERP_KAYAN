@@ -105,12 +105,9 @@ Name: "{autodesktop}\KAYAN ERP"; Filename: "{app}\erp_kayan.exe"; WorkingDir: "{
 Filename: "{app}\erp_kayan.exe"; Description: "Launch KAYAN ERP"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [UninstallDelete]
-; Runtime setup creates files that are not part of the original [Files] manifest
-; (for example generated runtime markers and local support files). Remove the
-; remaining contents only after InitializeUninstall has safely stopped and
-; unregistered KAYAN services and removed KAYAN-owned data. This path is the
-; exact application directory; shared Node/PostgreSQL installations are outside it.
-Type: filesandordirs; Name: "{app}"
+; Inno removes every file installed through [Files] itself. Remove the app
+; directory only when empty: never recursively erase a folder that may contain
+; customer-created or unrelated files if a destination was customized.
 
 [Code]
 var
@@ -294,8 +291,16 @@ begin
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM erp_kayan.exe /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if FileExists(ExpandConstant('{app}\remove-runtime.ps1')) then begin
     Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\remove-runtime.ps1') + '"';
-    if (not RunPowerShell(Args, ResultCode)) or (ResultCode <> 0) then begin
-      MsgBox('KAYAN could not safely stop and unregister its PostgreSQL service. The program and company data were left in place.', mbError, MB_OK);
+    if not RunPowerShell(Args, ResultCode) then begin
+      MsgBox('The KAYAN removal helper could not start. No KAYAN database or company backup was removed; close KAYAN ERP and retry.', mbError, MB_OK);
+      Result := False;
+    end else if ResultCode = 1 then begin
+      MsgBox('KAYAN could not safely stop or unregister its private PostgreSQL service. No KAYAN database, licence or company backup was removed; repair the service and retry.', mbError, MB_OK);
+      Result := False;
+    end else if ResultCode = 2 then begin
+      MsgBox('KAYAN removed the service and attempted to remove all KAYAN-owned data, but some files could not be deleted. The application uninstall will continue. Check %TEMP%\\KAYAN-ERP-uninstall-cleanup-warning.txt for details.', mbInformation, MB_OK);
+    end else if ResultCode <> 0 then begin
+      MsgBox('KAYAN removal stopped unexpectedly. The cleanup result is not fully verified; inspect the uninstall diagnostics before reinstalling.', mbError, MB_OK);
       Result := False;
     end;
   end;
