@@ -1,0 +1,63 @@
+# جرد حزم الاسترداد السابقة — مسودة غير مكتملة
+
+فُحصت metadata لمجلد Drive المعروف فقط دون تحميل أو تعديل أو نقل أو حذف. أزيلت روابط ومعرّفات Drive من نسخة المستودع حفاظًا على خصوصية الملفات. الأحجام وSHA-256 كما أعادها Drive؛ لا تثبت وحدها إعادة قراءة bytes. ليس هذا جردًا لكل Drive.
+
+تفسير الحالة: **نعم** = commit رأس الحزمة مثبت ضمن PR #70 مع تطابق hash نسخة محلية ونجاح git bundle verify؛ **جزئي** = رأس فرع العمل موجود على PR لكن refs الأربعة المستعادة منفصلة ولم يثبت وجودها هناك؛ **غير مثبت** = لم يثبت تطابق محتويات الحزمة مع GitHub، ولا يعني أن كل ميزاتها غير موجودة. لا تعتبر الاسم/الوصف دليلاً على محتوى كل ملف.
+
+الحزم الخمس ذات نسخة محلية متطابقة SHA وgit bundle verify: da46e6b و9e9a8d1 وb95e9ac و036108f و7f3e372. قاعدة 67c904ce مستعادة محليًا فقط من patch؛ 24de272 تحقق سابقًا لكن bytes الحزمة غير متاحة للفحص الآن. بقية الصفوف وصفها وhead حسب metadata، لا فحص byte-by-byte.
+
+## حزم Git وعددها 33
+
+| # | الحزمة | المحتوى/الرأس المعلن | الأساس المعلن | الحجم بايت | SHA-256 وفق Drive | GitHub |
+|---:|---|---|---|---:|---|---|
+| 1 | `kayan-backup-connection-9e9a8d1-20261103.bundle` | اتصال النسخ: da46e6b → 9e9a8d1 | 022c032 | 3778 | `e5fd64cb4a5574e912619feea68b7d51c8bc641cd0bab8d92302304b11280066` | نعم: PR #70 |
+| 2 | `kayan-backup-connection-da46e6b-20261103.bundle` | إعداد اتصال أدوات النسخ: da46e6b | 022c032 | 3172 | `ad167da9586440e7eae7bdf1602cce6709b639e5248c254fd308e0c71790821c` | نعم: PR #70 |
+| 3 | `KAYAN-continuation-through-c06f9f9-20261103.bundle` | نقطة تطوير حتى c06f9f9 | 67c904ce | 7737 | `f27fa474570c9ee48d871e9cc795274232eccdb3c28b49e7bbe213a0ef276715` | غير مثبت |
+| 4 | `kayan-partial-through-67c904c-20261103.bundle` | أربعة commits مستعادة حتى 67c904ce | 022c032 | 25058 | `4e9539cf8f4ec4185479197e2d2eb6032d8f49e76f21b5324ce6c1571ac78124` | غير مثبت |
+| 5 | `KAYAN-prework-52b6c4d-full-20261103.bundle` | نقطة تطوير حتى 52b6c4d | standalone | 32372547 | `9ea88e3d051baf74c96d531e537d70cca3142168944a2c274a36a0ed1db45a5e` | غير مثبت |
+| 6 | `KAYAN-prework-695243d-full-20261103.bundle` | نقطة تطوير حتى 695243d | standalone | 32357336 | `a689bc2a999ef215ea59dd91921a94453ab1b4e0056a60c75402a944606c508c` | غير مثبت |
+| 7 | `KAYAN-prework-e3f9226-full-20261103.bundle` | نقطة تطوير حتى e3f9226 | standalone | 32349696 | `69b2a1f3b7b912fcd761e54dcaaeefee7f031da62ac4b4e8fd60e9cb653a2f3f` | غير مثبت |
+| 8 | `kayan-restore-safety-b95e9ac-20261103.bundle` | أمان الاستعادة: da46e6b → b95e9ac | 022c032 | 8836 | `b68288de312f505a3201408b3ff29d8dbaed8a6175c787413b76b1d3a9ab0709` | نعم: PR #70 |
+| 9 | `kayan-stage-24de272-20261103.bundle` | نقطة تطوير حتى 24de272 | 67c904ce | 126647 | `0284f0adf5c138493f9af6394da3b76f756f86eba6e80d89a8d35beb69ddf7f3` | غير مثبت |
+| 10 | `KAYAN-stage-408507e-20261103.bundle` | نقطة تطوير حتى 408507e | 67c904ce | 94742 | `72e0e69a9a99b31fddac9c2cee0ad08b007009e3489f36a461ef674505c49b99` | غير مثبت |
+| 11 | `KAYAN-stage-52b6c4d-20261103.bundle` | نقطة تطوير حتى 52b6c4d | 67c904ce | 98188 | `9bded0ca1c7247d52b7d95ce8d4e14562c89fd43955acac857787dc521e2a316` | غير مثبت |
+| 12 | `KAYAN-stage-5b792b2-20261103.bundle` | نقطة تطوير حتى 5b792b2 | 67c904ce | 35617 | `8ce1e42494dc98860bbf62f6851b98069d90da626423e8d7378d34d648b71f20` | غير مثبت |
+| 13 | `KAYAN-stage-5fadda2-20261103.bundle` | نقطة تطوير حتى 5fadda2 | 67c904ce | 82147 | `396d9a5518933623ca6ed8a69f43fab14639acfa51c37ade7ad85ce79574070b` | غير مثبت |
+| 14 | `KAYAN-stage-6567b0b-20261103.bundle` | نقطة تطوير حتى 6567b0b | 67c904ce | 30227 | `5fa8d511faa6eeefaec24b1b4c34818de17cc3f48f9fd8cb09011a444d270533` | غير مثبت |
+| 15 | `KAYAN-stage-695243d-20261103.bundle` | نقطة تطوير حتى 695243d | 67c904ce | 83429 | `b5c70756c5ae10936ce420addec70ecb28fb0d0651ff96ab55ee1c3e3c6f0e58` | غير مثبت |
+| 16 | `KAYAN-stage-69fee8f-20261103.bundle` | نقطة تطوير حتى 69fee8f | 67c904ce | 14182 | `f8efe23de9a6f5d25c1cccf1c5cf215276f06e47c0d74577048e6dc2281e93b2` | غير مثبت |
+| 17 | `KAYAN-stage-7e71765-20261103.bundle` | نقطة تطوير حتى 7e71765 | 67c904ce | 106736 | `8ad1235ff0094f682d9929fa9af18f1b9d963b25d3a5f83b7d35caf82b7f6c7a` | غير مثبت |
+| 18 | `KAYAN-stage-7e7a69a-20261103.bundle` | نقطة تطوير حتى 7e7a69a | 67c904ce | 24286 | `49c037ed73ed09e91f0f85ea669b4094a97894a845b28ee64a8e23b8471ddc1a` | غير مثبت |
+| 19 | `KAYAN-stage-c1a1751-20261103.bundle` | نقطة تطوير حتى c1a1751 | 67c904ce | 110813 | `24940c145454fa69525471652aef5a03ee7f3dcaf94f08627094c1bf258de974` | غير مثبت |
+| 20 | `KAYAN-stage-d5ae090-20261103.bundle` | نقطة تطوير حتى d5ae090 | 67c904ce | 102485 | `054bf48e9e8000cc84b40dce2b155378aeefdf42cceb7cc5d484195c55b65eaf` | غير مثبت |
+| 21 | `KAYAN-stage-d94692b-20261103.bundle` | نقطة تطوير حتى d94692b | 67c904ce | 69346 | `f4eac0f2aa939caa7ce64d23b3ae8834b0770029e93df280e2ddf4d305e05e24` | غير مثبت |
+| 22 | `KAYAN-stage-e3f9226-20261103.bundle` | نقطة تطوير حتى e3f9226 | 67c904ce | 47277 | `be039a51787a7a0abe82fb051a518421027575deab8ffa84e76cc374276dd79a` | غير مثبت |
+| 23 | `KAYAN-stage-ea4593c-20261103.bundle` | نقطة تطوير حتى ea4593c | 67c904ce | 17819 | `c94fba504d588ea17181cc6a727ae9deed3ec2c9d0a89d6d6bc9d59c619c8207` | غير مثبت |
+| 24 | `KAYAN-stage-eca568f-20261103.bundle` | نقطة تطوير حتى eca568f | 67c904ce | 8929 | `858e25535f53374d962efa9bec95cd7d6770821f6e7044e7beeccf8a759b15f3` | غير مثبت |
+| 25 | `KAYAN-stage-f0d6814-20261103.bundle` | نقطة تطوير حتى f0d6814 | 67c904ce | 28820 | `d94898cd6ed1d10f54bd8543cc79d3ed59d363e0a233e819f18c3af71df80ce3` | غير مثبت |
+| 26 | `KAYAN-stage-f7bb1f1-20261103.bundle` | نقطة تطوير حتى f7bb1f1 | 67c904ce | 31154 | `f1b4f98eeb246fc0af55b428ae3a214f3792b39e169bd6be35c0c6d04150190c` | غير مثبت |
+| 27 | `kayan-work-036108f-20261103.bundle` | فرع العمل + 4 refs مستقلة | 022c032 | 38476 | `abc594bf5bbb7f81b842fd491f6adf19a0eb1923efe10514a7c31b2135e1c463` | جزئي: الفرع فقط |
+| 28 | `kayan-work-7f3e372-20261103.bundle` | فرع العمل + 4 refs مستقلة | 022c032 | 42921 | `5ebe93591401e0a87bd1f1bc9f0affbdd1b4b5df0eb77ddb80f590ef575eca93` | جزئي: الفرع فقط |
+| 29 | `RECOVERED-incremental-through-67c904c-20261103.bundle` | أربعة commits مستعادة حتى 67c904ce | 022c032 | 25027 | `13d9693d548463a52dc370c22cce8ba22a3195e482d4f47e553e0333ecbb1088` | غير مثبت |
+| 30 | `RECOVERED-pr70-delta-separate-20261103.bundle` | delta مستقل؛ fixture موقّع للاختبار فقط | standalone | 32475338 | `5f227f48e986347bf98e81cfa97fb4926de510dfb47877382235384bfe39662f` | غير مثبت |
+| 31 | `RECOVERED-standalone-through-67c904c-20261103.bundle` | أربعة commits مستعادة حتى 67c904ce | standalone | 32440413 | `73a20e5442834f598ad954559e8f85c2e454851d72ba6abc1c8a61df16914b84` | غير مثبت |
+| 32 | `SAFE-COPY-BASE-through-67c904c-20261103.bundle` | أربعة commits مستعادة حتى 67c904ce | standalone | 32440413 | `73a20e5442834f598ad954559e8f85c2e454851d72ba6abc1c8a61df16914b84` | غير مثبت |
+| 33 | `SAFE-COPY-INCREMENTAL-through-24de272-20261103.bundle` | نقطة تطوير حتى 24de272 | 67c904ce | 126647 | `0284f0adf5c138493f9af6394da3b76f756f86eba6e80d89a8d35beb69ddf7f3` | غير مثبت |
+
+## أرشيفات وpatches أخرى في المجلد — 7 ملفات
+
+| الملف | المحتوى المعلن | الأساس المعلن | الحجم بايت | SHA-256 وفق Drive | GitHub |
+|---|---|---|---:|---|---|
+| `complete-repository-private.part-00` | أرشيف خاص مجزأ: يحتوي وفق الوصف على .git وملفات متجاهلة | غير مثبت | 83886080 | `28c1a85fb57cf95e278220df0d49cae4999149c63ad8edba0c7cc5525fc6687b` | غير مثبت |
+| `complete-repository-private.part-01` | الجزء الثاني من الأرشيف الخاص | غير مثبت | 25572947 | `15eaddaaf085ba3d0b880476a642dd4fc759c997c05864be68593ceca3166329` | غير مثبت |
+| `KAYAN-continuation-SQL-evidence-20261103.tar.gz` | SQL وأدلة اصطناعية لا كود إصدار | غير مثبت | 1164 | `bc00d5d8dca8da7fa3f2b33774076a96f448256c93ac381015ce602f8c2812a2` | غير مثبت |
+| `kayan-pr70-recovery-delta-20261102.patch` | delta مستقل يتضمن fixture موقّعًا للاختبار فقط | 022c032 | 5999 | `23392c6fbe57dc01818910e66ea6c4aefa2a1710224f7ba6819fb07afc707fbd` | غير مثبت |
+| `kayan-release-work-20261102-4-commits.patch` | أربعة commits مستعادة محليًا منفصلة | 022c032 | 65190 | `75e5f9f9b05bf6f57bdea58246a1dc60afeb61e2edf2efc258a86c1d6f0008ff` | غير مثبت |
+| `protected-worktree-20261103-preservation.tar.gz` | لقطة ملفات العمل الخاصة؛ لا تنشر | غير مثبت | 52888022 | `598364b1ac5d8ad196f963d0f82830b7b670269cbaad661f572a142b9663a2a9` | غير مثبت |
+| `RECOVERY-github-inventories-20261103.tar.gz` | أدلة جرد واسترداد لا محتوى repository | لا ينطبق | 47815 | `15abdaad41780023f32b83f104bc97786ea0cac9ac8a0a604fdcdbefffc907ad` | غير مثبت |
+
+## تنبيهات
+- ملفا SAFE-COPY نسخ server-side متطابقة في metadata مع الأصليين، ولم تتحقق القراءة المحلية منهما.
+- لا تُدمج الأربع commits المستعادة والـdelta عشوائيًا. لا تُنشر الأرشيفات الخاصة أو مفاتيح أو بيانات محتملة.
+- توجد كذلك تقارير وملفات أدلة منفردة ضمن 76 عنصرًا؛ الجدول يسرد الحزم والأرشيفات وpatches، لا يدعي فحص جميع محتويات هذه التقارير.
+- المرجع GitHub للكود الحالي: PR #70؛ بقاء الحزمة في Drive ليس دليل إصدار أو بديلًا عن مراجعة محتواها.

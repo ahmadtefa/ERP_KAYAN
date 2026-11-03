@@ -94,6 +94,10 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Verify populated upgrade with the native Prisma CLI
         run: python ../scripts/ci-diagnose.py node scripts/verify-prisma-native-upgrade.mjs
+      - name: Verify failed scratch cleanup against isolated PostgreSQL
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
+        run: python ../scripts/ci-diagnose.py node scripts/verify-restore-scratch-cleanup.cjs
 
   flutter:
     name: Flutter analyze and tests
@@ -121,6 +125,27 @@ jobs:
             exit "$status"
           fi
       - run: flutter build web --release --no-pub
+
+  screenshot-diagnostic:
+    name: Synthetic screenshot preview (not golden approval)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      # Render independently for visual review; the regular test job must
+      # still compare against independently reviewed, committed baselines.
+      - run: flutter test --no-pub test/screenshots/design_screenshots_test.dart --update-goldens
+      - run: node scripts/emit-synthetic-screenshot-previews.cjs dashboard_ar.png
+      - run: node scripts/emit-synthetic-screenshot-previews.cjs customers_ar.png
+      - run: node scripts/emit-synthetic-screenshot-previews.cjs sales_invoices_ar.png
 
   licence-evidence-required:
     name: Signed licence and installed-product evidence required

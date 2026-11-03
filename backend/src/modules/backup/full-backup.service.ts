@@ -690,6 +690,8 @@ export class FullBackupService {
 
       if (this.canCreateDatabase) {
         this.logger.log(`Restoring into scratch database ${scratchName} first`);
+        let rehearsalFailure: unknown;
+        let rehearsalFailed = false;
         try {
           await run(tools.pgRestore as string, [
             '--exit-on-error',
@@ -701,16 +703,26 @@ export class FullBackupService {
           ]);
           rehearsed = true;
         } catch (error) {
+          rehearsalFailed = true;
+          rehearsalFailure = error;
+        }
+        try {
+          await this.execSql(`DROP DATABASE IF EXISTS "${scratchName}"`);
+        } catch {
+          // An unremoved rehearsal database means isolation and cleanup have
+          // not been verified. Never proceed to the live database in that
+          // state, even when pg_restore itself appeared to succeed.
+          this.logger.error('Restore rehearsal cleanup failed; the current database was not changed.');
+          throw new ServiceUnavailableException(
+            'The restore rehearsal database could not be removed. The current database was not changed.',
+          );
+        }
+        if (rehearsalFailed) {
           throw new BadRequestException(
             'This file did not restore cleanly into a test database, so the ' +
               'current data was not touched. It may be damaged, or made by a ' +
               'different PostgreSQL version. Details: ' +
-              String((error as Error).message ?? error).slice(0, 300),
-          );
-        } finally {
-          // The scratch database has done its job; drop it on the way out.
-          await this.execSql(`DROP DATABASE IF EXISTS "${scratchName}"`).catch(
-            () => {},
+              String((rehearsalFailure as Error | null | undefined)?.message ?? rehearsalFailure).slice(0, 300),
           );
         }
       }

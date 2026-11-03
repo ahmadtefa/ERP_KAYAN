@@ -59,6 +59,27 @@ describe('full restore failure safety', () => {
     expect(maintenance.isActive).toBe(false);
   });
 
+  it('does not touch the primary when the scratch database cannot be removed', async () => {
+    internals.execSql.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('scratch still in use'));
+    await expect(service.restore({ confirm: true, uploaded }, 'u')).rejects.toThrow(/rehearsal database could not be removed/i);
+    expect(internals.execSql).toHaveBeenCalledTimes(2);
+    expect(internals.createSafety).not.toHaveBeenCalled();
+    expect(internals.cleanDatabaseSchema).not.toHaveBeenCalled();
+    expect(maintenance.isActive).toBe(false);
+  });
+
+  it('reports scratch cleanup failure without touching primary even when rehearsal also fails', async () => {
+    internals.execSql.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('scratch still in use'));
+    jest.mocked(childProcess.execFile).mockImplementation(((_, __, ___, callback) => {
+      (callback as (e: Error | null, stdout: string, stderr: string) => void)(new Error('rehearsal failed'), '', 'rehearsal failed');
+      return {} as childProcess.ChildProcess;
+    }) as typeof childProcess.execFile);
+    await expect(service.restore({ confirm: true, uploaded }, 'u')).rejects.toThrow(/rehearsal database could not be removed/i);
+    expect(internals.createSafety).not.toHaveBeenCalled();
+    expect(internals.cleanDatabaseSchema).not.toHaveBeenCalled();
+    expect(maintenance.isActive).toBe(false);
+  });
+
   it('rejects an inherited libpq host override before creating or changing databases', async () => {
     const previous = process.env.PGHOSTADDR;
     process.env.PGHOSTADDR = '127.0.0.2';
