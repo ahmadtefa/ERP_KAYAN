@@ -9,6 +9,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { parseDocumentQuantity, resolveUnitSelection } from '../../common/units/unit-math';
+import type { ItemUnitLike } from '../../common/units/unit-math';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
 import { CostCentersService } from '../accounting/cost-centers.service';
@@ -265,7 +266,7 @@ export class StockDocumentsService {
       let unitFactor: Prisma.Decimal | null = null;
       let unitQuantity: Prisma.Decimal | null = null;
       if (requestedUnitName || raw.unitId) {
-        const units = (item as { units?: any[] }).units ?? [];
+        const units = (item as { units?: ItemUnitLike[] }).units ?? [];
         if (!quantity.isZero()) {
           // Adjustments may be negative (write-off): convert the
           // magnitude and restore the sign on the base quantity.
@@ -500,6 +501,9 @@ export class StockDocumentsService {
             ? line.unitCost
             : availableValue.div(availableQty).toDecimalPlaces(MONEY_SCALE);
           const totalCost = unitCost.mul(line.quantity).toDecimalPlaces(MONEY_SCALE);
+          // A later reversal must use the cost actually posted, not the draft
+          // cost entered before the balance was locked and valued.
+          await tx.stockDocumentLine.update({ where: { id: line.id }, data: { unitCost } });
 
           await this.move(tx, {
             companyId,
@@ -549,7 +553,9 @@ export class StockDocumentsService {
             warehouseId: toWarehouseId,
             itemId: line.itemId,
             quantity: quantity.abs(),
-            allowNegative: settings.allowNegativeStock,
+            // An issue/negative adjustment cannot overdraw its selected pile,
+            // even if legacy company settings allow negative stock elsewhere.
+            allowNegative: false,
             reference: document.documentNumber,
           });
         }
@@ -568,10 +574,12 @@ export class StockDocumentsService {
             where: { id: line.id },
             data: { quantity, unitCost },
           });
-        } else if (quantity.lessThan(0) && unitCost.isZero()) {
-          // A write-off leaves at what the stock costs, unless the person
-          // who wrote it off said otherwise.
+        } else if (quantity.lessThan(0)) {
+          // A write-off uses the locked moving-average inventory cost; an
+          // arbitrary draft cost would misstate both stock and the cost centre.
           unitCost = averageCost;
+          // Persist the posted cost so reversal replays the same valuation.
+          await tx.stockDocumentLine.update({ where: { id: line.id }, data: { unitCost } });
         }
 
         if (quantity.isZero()) continue;

@@ -197,10 +197,14 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
 
   const warehouses = new WarehouseService({} as never, {} as never);
   const settings = { get: jest.fn(async () => ({ allowNegativeStock })) };
+  const posting = {
+    post: jest.fn(async () => ({ id: 'j1', entryNumber: 'JE-1' })),
+    reverse: jest.fn(async () => ({})),
+  };
   const service = new StockDocumentsService(
     prisma as never,
     { next: jest.fn(async () => 'ST-000001') } as never,
-    { post: jest.fn(async () => ({ id: 'j1', entryNumber: 'JE-1' })) } as never,
+    posting as never,
     {
       resolve: jest.fn(async () => ({ inventory: 'acct-inv', inventoryDifference: 'acct-diff' })),
     } as never,
@@ -215,6 +219,7 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
     service,
     prisma,
     tx,
+    posting,
     state: {
       movements: () => movements,
       warehouseQuantity: (w: string) => warehouseQuantity(w, MILK),
@@ -446,6 +451,54 @@ describe('warehouse-level negative stock guard on transfer posting', () => {
 
     await expect(h.service.post(COMPANY, 'user-1', 'doc-1')).rejects.toThrow(/selected warehouse/);
     expect(h.state.warehouseQuantity(W_DST).toFixed(4)).toBe('3.0000');
+  });
+
+  it('blocks an overdrawn adjustment even when legacy negative stock is enabled', async () => {
+    const h = makeHarness([seedMovement(W_SRC, BRANCH, 17), seedMovement(W_DST, BRANCH, 3)], true);
+    h.prisma.stockDocument.findFirst.mockResolvedValue(transferDocument({
+      kind: StockDocumentKind.ADJUSTMENT, fromBranchId: null, fromWarehouseId: null,
+      toWarehouseId: W_DST,
+      lines: [{ id: 'l1', itemId: MILK, quantity: D(-5), unitCost: D(1) }],
+    }));
+    await expect(h.service.post(COMPANY, 'user-1', 'doc-1')).rejects.toThrow(/selected warehouse/);
+    expect(h.state.warehouseQuantity(W_DST).toFixed(4)).toBe('3.0000');
+    expect(h.state.movementCreates).not.toHaveBeenCalled();
+  });
+
+  it('posts an adjustment at the locked average cost, allocates the centre and reverses at that cost', async () => {
+    const h = makeHarness([seedMovement(W_DST, BRANCH, 20)], false);
+    const line = { id: 'l1', itemId: MILK, quantity: D(-5), unitCost: D(1) };
+    const document = transferDocument({ kind: StockDocumentKind.ADJUSTMENT,
+      fromBranchId: null, fromWarehouseId: null, toWarehouseId: W_DST,
+      costCenterId: 'cost-center-1', lines: [line] });
+    h.prisma.stockDocument.findFirst.mockResolvedValue(document);
+    await h.service.post(COMPANY, 'user-1', 'doc-1');
+    const snapshot = h.tx.stockDocumentLine.update.mock.calls[0][0] as any;
+    expect(snapshot.data.unitCost.toFixed(4)).toBe('7.5000');
+    expect(h.state.movements().at(-1)?.totalCost.toFixed(4)).toBe('37.5000');
+    const journal = h.posting.post.mock.calls[0][1] as any;
+    expect(journal.lines).toContainEqual(expect.objectContaining({
+      accountId: 'acct-diff', costCenterId: 'cost-center-1', debit: D(37.5),
+    }));
+    h.prisma.stockDocument.findFirst.mockResolvedValue({ ...document,
+      status: InvoiceStatus.POSTED, journalEntryId: 'j1',
+      lines: [{ ...line, unitCost: snapshot.data.unitCost }],
+    });
+    await h.service.reverse(COMPANY, 'user-1', 'doc-1');
+    expect(h.state.warehouseQuantity(W_DST).toFixed(4)).toBe('20.0000');
+    expect(h.state.movements().at(-1)?.totalCost.toFixed(4)).toBe('37.5000');
+    expect(h.posting.reverse).toHaveBeenCalledTimes(1);
+  });
+
+  it('freezes the actual moving-average transfer cost for a subsequent reversal', async () => {
+    const h = makeHarness([seedMovement(W_SRC, BRANCH, 20)], false);
+    h.prisma.stockDocument.findFirst.mockResolvedValue(transferDocument({
+      lines: [{ id: 'l1', itemId: MILK, quantity: D(5), unitCost: D(1) }],
+    }));
+    await h.service.post(COMPANY, 'user-1', 'doc-1');
+    const snapshot = h.tx.stockDocumentLine.update.mock.calls[0][0] as any;
+    expect(snapshot.data.unitCost.toFixed(4)).toBe('7.5000');
+    expect(h.state.movements().at(-1)?.totalCost.toFixed(4)).toBe('37.5000');
   });
 
   it('12. a COUNT document keeps reconciliation semantics and is not warehouse-gated', async () => {
