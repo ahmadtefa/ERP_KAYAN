@@ -153,6 +153,39 @@ jobs:
       - run: node scripts/emit-synthetic-screenshot-previews.cjs customers_ar.png
       - run: node scripts/emit-synthetic-screenshot-previews.cjs sales_invoices_ar.png
 
+  screenshot-lossless-diagnostic:
+    name: Full-resolution synthetic review (${{ matrix.screen }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        screen: [dashboard_ar.png, customers_ar.png, sales_invoices_ar.png]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - name: Install locked lossless encoder without lifecycle scripts
+        working-directory: backend
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: flutter pub get --enforce-lockfile
+      # A separate workspace produces synthetic pixels for human review only.
+      # This does not change, create, or approve the committed test goldens.
+      - run: flutter test --no-pub test/screenshots/design_screenshots_test.dart --update-goldens
+      - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 0
+      - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 1
+      - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 2
+      - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 3
+      - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 4
+
   licence-evidence-required:
     name: Signed licence and installed-product evidence required
     runs-on: ubuntu-24.04

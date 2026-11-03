@@ -339,6 +339,8 @@ void main() {
       route: AppRoutes.dashboard,
       child: const DashboardScreen(),
     );
+    expect(find.text('150,000'), findsOneWidget);
+    expect(find.text('90,000'), findsOneWidget);
     await expectLater(
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/dashboard_ar.png'),
@@ -353,6 +355,8 @@ void main() {
       route: AppRoutes.customers,
       child: const PartiesScreen(kind: PartyKind.customer),
     );
+    expect(find.text('CUS-001'), findsOneWidget);
+    expect(find.text('شركة النور للتجارة'), findsOneWidget);
     await expectLater(
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/customers_ar.png'),
@@ -367,6 +371,8 @@ void main() {
       route: AppRoutes.salesInvoices,
       child: const InvoiceListScreen(kind: InvoiceKind.sales),
     );
+    expect(find.text('SI-2026-0042'), findsOneWidget);
+    expect(find.text('Noor Trading'), findsOneWidget);
     await expectLater(
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/sales_invoices_ar.png'),
