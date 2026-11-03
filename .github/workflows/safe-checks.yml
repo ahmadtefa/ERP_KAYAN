@@ -54,6 +54,7 @@ jobs:
           src/modules/accounting/chart-of-accounts.service.spec.ts
           src/modules/inventory/stock-documents.warehouse-guard.spec.ts
           src/modules/inventory/stock-documents.units.spec.ts
+          src/modules/inventory/original-stock-movement.spec.ts
           src/modules/backup/full-backup.service.spec.ts
           src/modules/backup/full-backup-recovery-safety.spec.ts
           src/modules/backup/pg-backup-connection.spec.ts

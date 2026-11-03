@@ -15,6 +15,7 @@ import { AccountMapService } from '../accounting/account-map.service';
 import { CostCentersService } from '../accounting/cost-centers.service';
 import { DocumentNumberService } from '../accounting/document-number.service';
 import { PostingService } from '../accounting/posting.service';
+import { takeOriginalStockMovement } from './original-stock-movement';
 
 const MONEY_SCALE = 4;
 
@@ -768,6 +769,16 @@ export class StockDocumentsService {
         });
       }
 
+      // The original ledger movements carry the authoritative valuation for
+      // legacy documents as well as new ones; a draft line may have been zero.
+      const originalTypes = document.kind === StockDocumentKind.TRANSFER
+        ? ['STOCK_TRANSFER_OUT', 'STOCK_TRANSFER_IN']
+        : [document.kind === StockDocumentKind.COUNT ? 'STOCK_COUNT' : 'STOCK_ADJUSTMENT'];
+      const originals = await tx.stockMovement.findMany({
+        where: { companyId, referenceId: document.id, referenceType: { in: originalTypes } },
+      });
+      const usedOriginals = new Set<string>();
+
       for (const line of document.lines) {
         const targets =
           document.kind === StockDocumentKind.TRANSFER
@@ -777,6 +788,7 @@ export class StockDocumentsService {
               ]
             : [{ branchId: document.branchId, warehouseId: reversalToWarehouseId }];
 
+        let transferOriginal: { unitCost: Prisma.Decimal; totalCost: Prisma.Decimal } | null = null;
         for (const [index, target] of targets.entries()) {
           const branchId = target.branchId;
           if (line.quantity.isZero()) continue;
@@ -785,6 +797,24 @@ export class StockDocumentsService {
             document.kind === StockDocumentKind.TRANSFER
               ? index === 0
               : line.quantity.lessThan(0);
+          const original = takeOriginalStockMovement(originals, usedOriginals, {
+            itemId: line.itemId,
+            branchId,
+            warehouseId: target.warehouseId,
+            direction: wasOut ? StockDirection.OUT : StockDirection.IN,
+            referenceType: document.kind === StockDocumentKind.TRANSFER
+              ? (wasOut ? 'STOCK_TRANSFER_OUT' : 'STOCK_TRANSFER_IN')
+              : (document.kind === StockDocumentKind.COUNT ? 'STOCK_COUNT' : 'STOCK_ADJUSTMENT'),
+            quantity: line.quantity.abs(),
+          });
+          if (document.kind === StockDocumentKind.TRANSFER) {
+            if (transferOriginal &&
+                (!original.unitCost.equals(transferOriginal.unitCost) ||
+                 !original.totalCost.equals(transferOriginal.totalCost))) {
+              throw new BadRequestException('The original transfer movements have different costs; it cannot be reversed automatically.');
+            }
+            transferOriginal = original;
+          }
           await this.move(tx, {
             companyId,
             branchId,
@@ -792,8 +822,8 @@ export class StockDocumentsService {
             date: new Date(),
             direction: wasOut ? StockDirection.IN : StockDirection.OUT,
             quantity: line.quantity.abs(),
-            unitCost: line.unitCost,
-            totalCost: line.unitCost.mul(line.quantity.abs()).toDecimalPlaces(MONEY_SCALE),
+            unitCost: original.unitCost,
+            totalCost: original.totalCost,
             referenceType: 'STOCK_DOCUMENT_REVERSAL',
             referenceId: document.id,
             referenceNumber: document.documentNumber,
@@ -804,6 +834,11 @@ export class StockDocumentsService {
         }
       }
 
+      if (usedOriginals.size !== originals.length) {
+        throw new BadRequestException(
+          'The original stock movements do not match the document; it cannot be reversed automatically.',
+        );
+      }
       if (document.journalEntryId) {
         await this.posting.reverse(
           tx,

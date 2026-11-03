@@ -112,6 +112,18 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const after = await sql.query('SELECT quantity::text, value::text FROM stock_balances WHERE "companyId"=$1 AND "branchId"=$2 AND "itemId"=$3', [company,branch,item]);
     assert.equal(Number(after.rows[0].quantity),6);
     assert.equal(Number(after.rows[0].value),45);
+    // A mismatched historic line cannot be assigned to a posted movement.
+    // Reject the reversal and roll back its status and all balance writes.
+    await sql.query('UPDATE stock_document_lines SET quantity=-5 WHERE "documentId"=$1', [issue.id]);
+    await assert.rejects(service.reverse(company, user, issue.id), /missing or ambiguous/i);
+    const stillPosted = await sql.query('SELECT status FROM stock_documents WHERE id=$1', [issue.id]);
+    assert.equal(stillPosted.rows[0].status, 'POSTED');
+    const unchanged = await sql.query('SELECT quantity::text, value::text FROM stock_balances WHERE "companyId"=$1 AND "branchId"=$2 AND "itemId"=$3', [company,branch,item]);
+    assert.equal(Number(unchanged.rows[0].quantity),6);
+    assert.equal(Number(unchanged.rows[0].value),45);
+    // Emulate a legacy draft-line cost that disagrees with the immutable
+    // posted movement. Reversal must use the movement's historical valuation.
+    await sql.query('UPDATE stock_document_lines SET quantity=-4, "unitCost"=1 WHERE "documentId"=$1', [issue.id]);
     await service.reverse(company, user, issue.id);
     const restored = await sql.query('SELECT quantity::text, value::text FROM stock_balances WHERE "companyId"=$1 AND "branchId"=$2 AND "itemId"=$3', [company,branch,item]);
     assert.equal(Number(restored.rows[0].quantity),10);

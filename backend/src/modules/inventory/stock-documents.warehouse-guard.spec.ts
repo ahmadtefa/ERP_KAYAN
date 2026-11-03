@@ -28,6 +28,9 @@ type Movement = {
   totalCost: Prisma.Decimal;
   referenceType: string;
   _txn?: number;
+  id?: string;
+  referenceId?: string;
+  unitCost?: Prisma.Decimal;
 };
 
 /**
@@ -79,7 +82,7 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
     if (failOnMovementCall === movementCallCount) {
       throw new Error('simulated movement failure');
     }
-    movements.push({ ...data, _txn: txnStore.getStore() ?? 0 });
+    movements.push({ ...data, id: `m-${movements.length}`, _txn: txnStore.getStore() ?? 0 });
     return { id: `m-${movements.length}` };
   });
   const recordDelta = (delta: Prisma.Decimal) => {
@@ -92,6 +95,17 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
       .filter((m) => m.warehouseId === warehouseId && m.itemId === itemId)
       .reduce((sum, m) => sum.plus(m.direction === StockDirection.IN ? m.quantity : m.quantity.negated()), D(0));
 
+  type FixtureDocument = {
+    kind: StockDocumentKind;
+    branchId: string;
+    fromBranchId: string;
+    fromWarehouseId: string;
+    toWarehouseId: string;
+    lines: Array<{ itemId: string; quantity: Prisma.Decimal; unitCost: Prisma.Decimal }>;
+  };
+  let readLatestDocument: () => Promise<FixtureDocument> = async () => {
+    throw new Error('No synthetic document was selected');
+  };
   const tx = {
     stockDocument: {
       updateMany: jest.fn(async () => ({ count: 1 })),
@@ -111,7 +125,32 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
         code: 'WH',
       })),
     },
-    stockMovement: { create: movementCreate },
+    stockMovement: {
+      create: movementCreate,
+      // Prior reversal tests start from simulated balances, not real ledger
+      // rows. Supply matching synthetic originals; the real-PG fixture checks
+      // actual persisted movements separately.
+      findMany: jest.fn(async ({ where }: { where: { referenceId: string } }): Promise<Movement[]> => {
+        const actual = movements.filter((m) => m.referenceId === where.referenceId);
+        if (actual.length) return actual;
+        const document = await readLatestDocument();
+        return document.lines.flatMap((line: { itemId: string; quantity: Prisma.Decimal; unitCost: Prisma.Decimal }, index: number) => {
+          if (line.quantity.isZero()) return [];
+          const original = (suffix: string, branchId: string, warehouseId: string, direction: StockDirection, referenceType: string) => ({
+            id: `${index}-${suffix}`, itemId: line.itemId, branchId, warehouseId,
+            direction, referenceType, quantity: line.quantity.abs(), unitCost: line.unitCost,
+            totalCost: line.unitCost.mul(line.quantity.abs()),
+          });
+          if (document.kind === StockDocumentKind.TRANSFER) return [
+            original('out', document.fromBranchId, document.fromWarehouseId, StockDirection.OUT, 'STOCK_TRANSFER_OUT'),
+            original('in', document.branchId, document.toWarehouseId, StockDirection.IN, 'STOCK_TRANSFER_IN'),
+          ];
+          return [original('one', document.branchId, document.toWarehouseId,
+            line.quantity.isNegative() ? StockDirection.OUT : StockDirection.IN,
+            document.kind === StockDocumentKind.COUNT ? 'STOCK_COUNT' : 'STOCK_ADJUSTMENT')];
+        });
+      }),
+    },
     stockBalance: {
       update: jest.fn(async ({ data }: { data: { quantity?: { decrement: Prisma.Decimal } } }) => {
         const dec = data.quantity?.decrement ?? D(0);
@@ -195,6 +234,10 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
     },
   };
 
+  readLatestDocument = async () => {
+    const result = prisma.stockDocument.findFirst.mock.results.at(-1);
+    return await result?.value as FixtureDocument;
+  };
   const warehouses = new WarehouseService({} as never, {} as never);
   const settings = { get: jest.fn(async () => ({ allowNegativeStock })) };
   const posting = {
@@ -531,6 +574,15 @@ describe('warehouse-level stock guard on reversal', () => {
     await expect(h.service.reverse(COMPANY, 'user-1', 'doc-1')).rejects.toThrow(/negative quantities/);
     expect(h.prisma.$transaction).not.toHaveBeenCalled();
     expect(h.state.movementCreates).not.toHaveBeenCalled();
+  });
+
+  it('refuses reversal when the original movements cannot be found', async () => {
+    const h = makeHarness([seedMovement(W_SRC, BRANCH, 12), seedMovement(W_DST, BRANCH, 8)], false);
+    h.prisma.stockDocument.findFirst.mockResolvedValue(posted());
+    h.tx.stockMovement.findMany.mockResolvedValue([]);
+    await expect(h.service.reverse(COMPANY, 'user-1', 'doc-1')).rejects.toThrow(/missing or ambiguous/);
+    expect(h.state.movementCreates).not.toHaveBeenCalled();
+    expect(h.state.warehouseQuantity(W_DST).toFixed(4)).toBe('8.0000');
   });
 
   it('rejects a transfer reversal when destination stock was consumed despite sufficient branch stock', async () => {
