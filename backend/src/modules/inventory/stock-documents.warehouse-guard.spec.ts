@@ -132,7 +132,7 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
         },
       ),
     },
-    stockDocumentLine: { update: jest.fn(async () => ({})) },
+    stockDocumentLine: { update: jest.fn(async (_args: { where: { id: string }; data: { unitCost: Prisma.Decimal } }) => ({})) },
     $queryRaw: jest.fn(async (query: Prisma.Sql) => {
       const text = query.sql.replace(/"/g, '');
       const values = query.values as unknown[];
@@ -198,7 +198,7 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
   const warehouses = new WarehouseService({} as never, {} as never);
   const settings = { get: jest.fn(async () => ({ allowNegativeStock })) };
   const posting = {
-    post: jest.fn(async () => ({ id: 'j1', entryNumber: 'JE-1' })),
+    post: jest.fn(async (_tx: unknown, _request: unknown) => ({ id: 'j1', entryNumber: 'JE-1' })),
     reverse: jest.fn(async () => ({})),
   };
   const service = new StockDocumentsService(

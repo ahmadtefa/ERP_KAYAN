@@ -34,8 +34,8 @@ const item = '30000000-0000-4000-8000-000000000001';
 const branch = '70000000-0000-4000-8000-000000000001';
 const warehouse = '70000000-0000-4000-8000-000000000002';
 const centre = '70000000-0000-4000-8000-000000000003';
-const inventory = '70000000-0000-4000-8000-000000000004';
-const difference = '70000000-0000-4000-8000-000000000005';
+let inventory = '70000000-0000-4000-8000-000000000004';
+let difference = '70000000-0000-4000-8000-000000000005';
 
 (async () => {
   const sql = new Client({ connectionString: url.toString() });
@@ -46,7 +46,11 @@ const difference = '70000000-0000-4000-8000-000000000005';
     await sql.query('INSERT INTO branches (id,"companyId",code,"nameEn","nameAr","updatedAt") VALUES ($1,$2,$3,$4,$5,now())', [branch,company,'B','Synthetic branch','فرع تجريبي']);
     await sql.query('INSERT INTO warehouses (id,"companyId","branchId",code,"nameEn","nameAr","isDefault","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,true,now())', [warehouse,company,branch,'W','Synthetic warehouse','مخزن تجريبي']);
     await sql.query('INSERT INTO cost_centers (id,"companyId",code,"nameEn","nameAr","updatedAt") VALUES ($1,$2,$3,$4,$5,now())', [centre,company,'CC','Synthetic center','مركز تجريبي']);
-    await sql.query('INSERT INTO accounts (id,"companyId",code,"nameEn","nameAr",type,"updatedAt") VALUES ($1,$2,$3,$4,$5,$6,now()),($7,$2,$8,$9,$10,$11,now())', [inventory,company,'1104','Inventory','مخزون','ASSET',difference,'5107','Inventory difference','فرق مخزون','EXPENSE']);
+    // Upgrade migrations may already seed either conventional account. Reuse
+    // its actual id rather than inserting a duplicate company/code pair.
+    const accounts = await sql.query('INSERT INTO accounts (id,"companyId",code,"nameEn","nameAr",type,"updatedAt") VALUES ($1,$2,$3,$4,$5,$6,now()),($7,$2,$8,$9,$10,$11,now()) ON CONFLICT ("companyId",code) DO UPDATE SET "isActive"=true,"isPostable"=true,"deletedAt"=NULL,"updatedAt"=now() RETURNING id,code', [inventory,company,'1104','Inventory','مخزون','ASSET',difference,'5107','Inventory difference','فرق مخزون','EXPENSE']);
+    inventory = accounts.rows.find(row => row.code === '1104').id;
+    difference = accounts.rows.find(row => row.code === '5107').id;
     await prisma.$connect();
     const audit = new AuditService(prisma);
     const costCenters = new CostCentersService(prisma, audit);
