@@ -41,10 +41,10 @@ export class CompanySettingsService {
 
   /// Reads the settings, creating the row with its defaults the first time.
   /// A company that has never opened the settings screen still has settings.
-  async get(companyId: string): Promise<CompanySettings & { companyId: string }> {
+  async get(companyId: string, client: Pick<Prisma.TransactionClient, 'companySetting'> = this.prisma): Promise<CompanySettings & { companyId: string }> {
     const row =
-      (await this.prisma.companySetting.findUnique({ where: { companyId } })) ??
-      (await this.prisma.companySetting.create({ data: { companyId } }));
+      (await client.companySetting.findUnique({ where: { companyId } })) ??
+      (await client.companySetting.create({ data: { companyId } }));
     return this.toResponse(row);
   }
 

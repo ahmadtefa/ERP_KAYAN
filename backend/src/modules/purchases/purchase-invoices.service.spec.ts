@@ -58,6 +58,8 @@ function makeService() {
     };
   });
   const tx = {
+    supplier: { findFirst: supplierFind },
+    item: { findFirst: itemFind },
     purchaseInvoice: {
       create: jest.fn(async ({ data }: { data: Record<string, any> }) => {
         detail.subTotal = data.subTotal;
@@ -217,7 +219,7 @@ describe('PurchaseInvoicesService landed-cost charges', () => {
   });
 
   it('rejects an aggregate amount that disagrees with the named charges', async () => {
-    const { service, prisma } = makeService();
+    const { service, tx } = makeService();
 
     await expect(service.create(COMPANY, BRANCH, 'user-1', {
       invoiceDate: '2026-10-18',
@@ -227,6 +229,6 @@ describe('PurchaseInvoicesService landed-cost charges', () => {
       lines: [{ itemId: ITEMS[0], quantity: '1.0000', unitPrice: '600.0000', taxRate: '0.0000' }],
     })).rejects.toBeInstanceOf(BadRequestException);
 
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.purchaseInvoice.create).not.toHaveBeenCalled();
   });
 });

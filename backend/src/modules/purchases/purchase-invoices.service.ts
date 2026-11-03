@@ -227,7 +227,7 @@ export class PurchaseInvoicesService {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
     }
 
-    const supplier = await this.prisma.supplier.findFirst({
+    const supplier = await tx.supplier.findFirst({
       where: { id: dto.supplierId, companyId, deletedAt: null },
       select: { id: true, isActive: true },
     });
@@ -243,6 +243,7 @@ export class PurchaseInvoicesService {
       landedCostAmount,
       { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
       orderUnits,
+      tx,
     );
     const lines = prepared.lines;
     const subTotal = lines.reduce((s, l) => s.plus(l.lineTotal), new Prisma.Decimal(0));
@@ -266,7 +267,7 @@ export class PurchaseInvoicesService {
           invoiceDate: new Date(dto.invoiceDate),
           dueDate: dto.dueDate
             ? new Date(dto.dueDate)
-            : (await this.dueDateFromTerms(companyId, dto.supplierId, new Date(dto.invoiceDate))),
+            : (await this.dueDateFromTerms(companyId, dto.supplierId, new Date(dto.invoiceDate), tx)),
           supplierId: dto.supplierId,
           status: InvoiceStatus.DRAFT,
           discountType: prepared.documentDiscount.type,
@@ -798,8 +799,9 @@ export class PurchaseInvoicesService {
     companyId: string,
     supplierId: string,
     invoiceDate: Date,
+    client: Prisma.TransactionClient = this.prisma,
   ): Promise<Date | null> {
-    const supplier = await this.prisma.supplier.findFirst({
+    const supplier = await client.supplier.findFirst({
       where: { id: supplierId, companyId },
       select: { paymentTermDays: true },
     });
@@ -867,15 +869,16 @@ export class PurchaseInvoicesService {
     landedCostAmount: Prisma.Decimal,
     documentDiscount: DiscountInput,
     orderUnits?: readonly TrustedOrderUnit[],
+    client: Prisma.TransactionClient = this.prisma,
   ): Promise<PreparedInvoice> {
     const prepared: PreparedLine[] = [];
-    const settings = await this.settings.get(companyId);
+    const settings = await this.settings.get(companyId, client);
 
     if (orderUnits && orderUnits.length !== input.length) {
       throw new BadRequestException('Order invoice unit snapshots do not match its lines');
     }
     for (const [index, raw] of input.entries()) {
-      const item = await this.prisma.item.findFirst({
+      const item = await client.item.findFirst({
         where: { id: raw.itemId, companyId, deletedAt: null },
         select: {
           code: true,
@@ -919,7 +922,7 @@ export class PurchaseInvoicesService {
           : this.nonNegative(raw.unitPrice, `Line ${index + 1} unitPrice`);
       if (unitPrice === null) {
         const chosenUnitName = resolved.snapshot.unitName ?? item.unit;
-        const listed = await this.prices.resolvePrice(this.prisma, companyId, {
+        const listed = await this.prices.resolvePrice(client, companyId, {
           partyId: supplierId ?? null,
           partyKind: 'SUPPLIER',
           itemId: raw.itemId,
@@ -955,7 +958,7 @@ export class PurchaseInvoicesService {
       // The centre must exist, belong to this company and still be active.
       let costCenterId: string | null = raw.costCenterId ?? null;
       if (costCenterId) {
-        const center = await this.prisma.costCenter.findFirst({
+        const center = await client.costCenter.findFirst({
           where: { id: costCenterId, companyId, deletedAt: null },
           select: { id: true, isActive: true, code: true },
         });

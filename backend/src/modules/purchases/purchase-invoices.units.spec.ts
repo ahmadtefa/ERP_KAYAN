@@ -117,7 +117,9 @@ function makeService(itemOverrides: Record<string, any> = {}) {
       }),
       updateMany: jest.fn(async () => ({ count: 1 })),
     },
+    supplier: { findFirst: jest.fn(async () => ({ id: SUPPLIER, isActive: true })) },
     item: { findFirst: itemFind },
+    costCenter: { findFirst: jest.fn() },
     stockMovement: { create: jest.fn(async () => ({})) },
     stockBalance: { upsert: jest.fn(async () => ({})) },
   };
