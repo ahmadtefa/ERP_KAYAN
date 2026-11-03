@@ -131,6 +131,7 @@ describe('purchase orders with multiple units', () => {
 
     await service.convertToInvoice(COMPANY, BRANCH, 'user-1', 'order-1', {
       invoiceDate: '2026-10-27',
+      lines: [{ orderLineId: 'ol-1', quantity: '50' }],
     } as any);
 
     const dto = (invoices.create.mock.calls as any[])[0][3];

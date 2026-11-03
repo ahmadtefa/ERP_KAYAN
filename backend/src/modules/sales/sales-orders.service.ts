@@ -7,6 +7,7 @@ import { OrderStatus, Prisma } from '@prisma/client';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { selectedOrderLineQuantities } from '../../common/units/order-conversion-selection';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import {
   defaultUnitPrice,
@@ -327,26 +328,17 @@ export class SalesOrdersService {
       throw new BadRequestException('Approve the order before invoicing it');
     }
 
-    // Which lines, and how much of each. Naming none invoices everything that
-    // is still outstanding.
-    const requested = new Map<string, Prisma.Decimal>();
-    if (Array.isArray(dto.lines) && (dto.lines as unknown[]).length > 0) {
-      for (const raw of dto.lines as Array<{ orderLineId?: string; quantity?: string }>) {
-        const lineId = String(raw.orderLineId ?? '');
-        const line = order.lines.find((candidate) => candidate.id === lineId);
-        if (!line) throw new BadRequestException(`Order line ${lineId} does not belong to this order`);
-        const requestedQuantity = parseDocumentQuantity(raw.quantity, 'quantity');
-        if (requestedQuantity.lessThanOrEqualTo(0)) throw new BadRequestException('quantity must be greater than zero');
-        requested.set(lineId, requestedQuantity);
-      }
-    }
+    // Never infer unselected quantities: an omitted line is not an instruction
+    // to invoice its outstanding balance. Quantities are base-unit amounts.
+    const requested = selectedOrderLineQuantities(dto.lines, order.lines);
 
     const invoiceLines: Array<{ itemId: string; description: string; quantity: string; unitPrice: string; taxRate: string; unitName?: string }> = [];
     const consumed: Array<{ lineId: string; quantity: Prisma.Decimal }> = [];
 
     for (const line of order.lines) {
+      const quantity = requested.get(line.id);
+      if (!quantity) continue;
       const outstanding = line.quantity.minus(line.invoicedQuantity);
-      const quantity = requested.get(line.id) ?? outstanding;
       if (quantity.lessThanOrEqualTo(0)) continue;
       if (quantity.greaterThan(outstanding)) {
         throw new BadRequestException(
