@@ -48,26 +48,59 @@ if ($service) {
   }
 }
 
+# The service is now safely unregistered. From this point onward, cleanup is
+# best-effort: try every KAYAN-owned path and never leave the uninstaller
+# claiming that all company data is intact after some of it has been removed.
+$failed = New-Object 'System.Collections.Generic.List[string]'
+function Try-RemoveOwnedTree([string]$Path) {
+  try {
+    Remove-OwnedTree $Path
+  } catch {
+    $failed.Add(("${Path}: " + $_.Exception.Message))
+  }
+}
+
 # Remove only firewall rules whose display name is explicitly owned by KAYAN.
-if (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue) {
-  Get-NetFirewallRule -ErrorAction SilentlyContinue |
-    Where-Object { $_.DisplayName -like 'KAYAN ERP*' -or $_.DisplayName -like 'KAYAN-ERP*' } |
-    Remove-NetFirewallRule -ErrorAction SilentlyContinue
+try {
+  if (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue) {
+    $rules = @(Get-NetFirewallRule -ErrorAction Stop |
+      Where-Object { $_.DisplayName -like 'KAYAN ERP*' -or $_.DisplayName -like 'KAYAN-ERP*' })
+    foreach ($rule in $rules) {
+      try { $rule | Remove-NetFirewallRule -ErrorAction Stop }
+      catch { $failed.Add(("Firewall rule '{0}': {1}" -f $rule.DisplayName, $_.Exception.Message)) }
+    }
+  }
+} catch {
+  $failed.Add(("KAYAN firewall rules: " + $_.Exception.Message))
 }
 
 # Remove machine-wide database, licence, licence backups, company backups,
 # uploads, settings and diagnostics.
-Remove-OwnedTree $programDataRoot
+Try-RemoveOwnedTree $programDataRoot
 
 # Settings/logs may have been created in more than one Windows profile.
 # Restrict removal to the exact KAYAN-ERP child folders under user profiles.
 $profilesRoot = Join-Path $env:SystemDrive 'Users'
 if (Test-Path -LiteralPath $profilesRoot) {
-  Get-ChildItem -LiteralPath $profilesRoot -Directory -Force -ErrorAction SilentlyContinue |
-    ForEach-Object {
-      Remove-OwnedTree (Join-Path $_.FullName 'AppData\Roaming\KAYAN-ERP')
-      Remove-OwnedTree (Join-Path $_.FullName 'AppData\Local\KAYAN-ERP')
+  try {
+    $profiles = @(Get-ChildItem -LiteralPath $profilesRoot -Directory -Force -ErrorAction Stop)
+    foreach ($profile in $profiles) {
+      Try-RemoveOwnedTree (Join-Path $profile.FullName 'AppData\Roaming\KAYAN-ERP')
+      Try-RemoveOwnedTree (Join-Path $profile.FullName 'AppData\Local\KAYAN-ERP')
     }
+  } catch {
+    $failed.Add(("Windows user profiles: " + $_.Exception.Message))
+  }
+}
+
+if ($failed.Count -gt 0) {
+  $report = Join-Path $env:TEMP 'KAYAN-ERP-uninstall-cleanup-warning.txt'
+  @(
+    'Some KAYAN-owned data could not be removed. The application uninstall will continue.'
+    $failed
+  ) | Set-Content -LiteralPath $report -Encoding UTF8
+  Write-Warning ("Partial KAYAN cleanup. Details: " + $report)
+  exit 2
 }
 
 # Inno Setup removes installed files and its own Start Menu/uninstall entries
