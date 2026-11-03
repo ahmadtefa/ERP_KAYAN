@@ -134,65 +134,67 @@ export class CompanyService {
     userId: string,
     dto: UpdateCompanyProfileDto,
   ) {
-    const before = await this.prisma.company.findUnique({
-      where: { id: companyId },
-    });
-    if (!before || before.deletedAt) {
-      throw new NotFoundException('Company not found');
-    }
-
-    if (
-      (dto.nameEn !== undefined && !dto.nameEn.trim()) ||
-      (dto.nameAr !== undefined && !dto.nameAr.trim())
-    ) {
-      throw new BadRequestException('Company names cannot be blank');
-    }
-
-    const code = dto.code?.trim();
-    if (code !== undefined && code !== before.code) {
-      const clash = await this.prisma.company.findFirst({
-        where: { code, id: { not: companyId } },
-        select: { id: true },
+    await this.prisma.$transaction(async (tx) => {
+      const before = await tx.company.findUnique({
+        where: { id: companyId },
       });
-      if (clash) {
-        throw new ConflictException(
-          `Another company already uses the code "${code}"`,
-        );
+      if (!before || before.deletedAt) {
+        throw new NotFoundException('Company not found');
       }
-    }
 
-    const optional = (value: string | null | undefined) =>
-      value === undefined ? undefined : value?.trim() || null;
+      if (
+        (dto.nameEn !== undefined && !dto.nameEn.trim()) ||
+        (dto.nameAr !== undefined && !dto.nameAr.trim())
+      ) {
+        throw new BadRequestException('Company names cannot be blank');
+      }
 
-    const updated = await this.prisma.company.update({
-      where: { id: companyId },
-      data: {
-        ...(code !== undefined ? { code } : {}),
-        nameEn: dto.nameEn?.trim(),
-        nameAr: dto.nameAr?.trim(),
-        taxId: optional(dto.taxId),
-        commercialRegistration: optional(dto.commercialRegistration),
-        // `address` is the single-line field of the desktop screens; it fills
-        // the English address unless the caller sends addressEn explicitly.
-        addressEn: optional(
-          dto.addressEn !== undefined ? dto.addressEn : dto.address,
-        ),
-        addressAr: optional(dto.addressAr),
-        phone: optional(dto.phone),
-        email: optional(dto.email),
-        updatedBy: userId,
-      },
-    });
+      const code = dto.code?.trim();
+      if (code !== undefined && code !== before.code) {
+        const clash = await tx.company.findFirst({
+          where: { code, id: { not: companyId } },
+          select: { id: true },
+        });
+        if (clash) {
+          throw new ConflictException(
+            `Another company already uses the code "${code}"`,
+          );
+        }
+      }
 
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'UPDATE',
-      entity: 'companies',
-      entityId: companyId,
-      before: this.auditProfile(before),
-      after: this.auditProfile(updated),
-    });
+      const optional = (value: string | null | undefined) =>
+        value === undefined ? undefined : value?.trim() || null;
+
+      const updated = await tx.company.update({
+        where: { id: companyId },
+        data: {
+          ...(code !== undefined ? { code } : {}),
+          nameEn: dto.nameEn?.trim(),
+          nameAr: dto.nameAr?.trim(),
+          taxId: optional(dto.taxId),
+          commercialRegistration: optional(dto.commercialRegistration),
+          // `address` is the single-line field of the desktop screens; it fills
+          // the English address unless the caller sends addressEn explicitly.
+          addressEn: optional(
+            dto.addressEn !== undefined ? dto.addressEn : dto.address,
+          ),
+          addressAr: optional(dto.addressAr),
+          phone: optional(dto.phone),
+          email: optional(dto.email),
+          updatedBy: userId,
+        },
+      });
+
+      await this.audit.recordRequired({
+        companyId,
+        userId,
+        action: 'UPDATE',
+        entity: 'companies',
+        entityId: companyId,
+        before: this.auditProfile(before),
+        after: this.auditProfile(updated),
+      }, tx);
+    }, { isolationLevel: 'Serializable' });
 
     return this.getProfile(companyId);
   }
@@ -206,35 +208,38 @@ export class CompanyService {
     mime: string,
   ): Promise<Record<string, unknown>> {
     const checked = await normalizeLogo(data, mime);
-    const before = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: { id: true, logoPath: true, deletedAt: true },
-    });
-    if (!before || before.deletedAt) {
-      throw new NotFoundException('Company not found');
-    }
+    const legacyPath = await this.prisma.$transaction(async (tx) => {
+      const before = await tx.company.findUnique({
+        where: { id: companyId },
+        select: { id: true, logoPath: true, deletedAt: true },
+      });
+      if (!before || before.deletedAt) {
+        throw new NotFoundException('Company not found');
+      }
 
-    await this.prisma.company.update({
-      where: { id: companyId },
-      data: {
-        logoData: checked.data,
-        logoMime: checked.mime,
-        // The database copy replaces any legacy file.
-        logoPath: null,
-        updatedBy: userId,
-      },
-    });
-    await this.removeLegacyFile(before.logoPath);
+      await tx.company.update({
+        where: { id: companyId },
+        data: {
+          logoData: checked.data,
+          logoMime: checked.mime,
+          // The database copy replaces any legacy file.
+          logoPath: null,
+          updatedBy: userId,
+        },
+      });
 
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'UPDATE',
-      entity: 'companies',
-      entityId: companyId,
-      // The bytes themselves are not audited — only that the logo changed.
-      after: { logo: checked.mime, size: checked.data.length },
-    });
+      await this.audit.recordRequired({
+        companyId,
+        userId,
+        action: 'UPDATE',
+        entity: 'companies',
+        entityId: companyId,
+        // The bytes themselves are not audited — only that the logo changed.
+        after: { logo: checked.mime, size: checked.data.length },
+      }, tx);
+      return before.logoPath;
+    }, { isolationLevel: 'Serializable' });
+    await this.removeLegacyFile(legacyPath);
 
     const profile = await this.getProfile(companyId);
     return { ...profile, hasLogo: true, logoMime: checked.mime };
@@ -273,31 +278,34 @@ export class CompanyService {
   }
 
   async deleteLogo(companyId: string, userId: string): Promise<void> {
-    const before = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: { id: true, logoPath: true },
-    });
-    if (!before) throw new NotFoundException('Company not found');
+    const legacyPath = await this.prisma.$transaction(async (tx) => {
+      const before = await tx.company.findUnique({
+        where: { id: companyId },
+        select: { id: true, logoPath: true },
+      });
+      if (!before) throw new NotFoundException('Company not found');
 
-    await this.prisma.company.update({
-      where: { id: companyId },
-      data: {
-        logoData: null,
-        logoMime: null,
-        logoPath: null,
-        updatedBy: userId,
-      },
-    });
-    await this.removeLegacyFile(before.logoPath);
+      await tx.company.update({
+        where: { id: companyId },
+        data: {
+          logoData: null,
+          logoMime: null,
+          logoPath: null,
+          updatedBy: userId,
+        },
+      });
 
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'UPDATE',
-      entity: 'companies',
-      entityId: companyId,
-      after: { logo: null },
-    });
+      await this.audit.recordRequired({
+        companyId,
+        userId,
+        action: 'UPDATE',
+        entity: 'companies',
+        entityId: companyId,
+        after: { logo: null },
+      }, tx);
+      return before.logoPath;
+    }, { isolationLevel: 'Serializable' });
+    await this.removeLegacyFile(legacyPath);
   }
 
   /// ────────────────────────────────────────────────────────────── branches
@@ -603,13 +611,12 @@ export class CompanyService {
   }
 
   private auditProfile(company: object) {
-    const {
-      logoData: _logoData,
-      logoMime: _logoMime,
-      logoPath: _logoPath,
-      ...safe
-    } = company as Record<string, unknown>;
-    return safe;
+    const safe = { ...company } as Record<string, unknown>;
+    delete safe.logoData;
+    delete safe.logoMime;
+    delete safe.logoPath;
+    // Prisma JSON columns require JSON values, not Date/Decimal instances.
+    return JSON.parse(JSON.stringify(safe)) as Record<string, unknown>;
   }
 
   private async removeLegacyFile(oldPath: string | null) {

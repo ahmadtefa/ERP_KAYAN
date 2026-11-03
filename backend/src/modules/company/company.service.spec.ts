@@ -139,6 +139,7 @@ describe('normalizeLogo', () => {
 
 describe('CompanyService', () => {
   const prisma = {
+    $transaction: jest.fn((work: (tx: unknown) => unknown) => work(prisma)),
     company: {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
@@ -149,6 +150,7 @@ describe('CompanyService', () => {
 
   const audit = {
     record: jest.fn().mockResolvedValue(undefined),
+    recordRequired: jest.fn().mockResolvedValue(undefined),
   } as unknown as AuditService;
 
   const service = new CompanyService(prisma, audit);
@@ -295,14 +297,15 @@ describe('CompanyService', () => {
 
       await service.updateProfile('comp-1', 'user-1', { nameEn: 'New Name' });
 
-      expect(audit.record).toHaveBeenCalledWith(
+      expect(audit.recordRequired).toHaveBeenCalledWith(
         expect.objectContaining({
           action: 'UPDATE',
           entity: 'companies',
           entityId: 'comp-1',
         }),
+        prisma,
       );
-      const call = (audit.record as jest.Mock).mock.calls[0][0];
+      const call = (audit.recordRequired as jest.Mock).mock.calls[0][0];
       expect(JSON.stringify(call)).not.toContain('logoData');
     });
 

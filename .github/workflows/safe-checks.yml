@@ -58,6 +58,8 @@ jobs:
           src/modules/licensing/license.guard.spec.ts
           src/common/guards/super-admin.guard.spec.ts
           src/modules/company/company-profile.guard.spec.ts
+          src/modules/company/company.service.spec.ts
+          src/modules/company/company-audit-atomic.spec.ts
 
   prisma-upgrade:
     name: Native Prisma and PostgreSQL 16 upgrade
