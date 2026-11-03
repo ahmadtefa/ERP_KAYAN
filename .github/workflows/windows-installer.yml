@@ -21,6 +21,7 @@ on:
       - 'arena/2d794f08-erp-kayan'
       - 'arena/7b5dfd31-erp-kayan'
       - 'fix/inno-inspector-callsites-20261030'
+      - 'codex/full-clean-uninstall'
 
 # Building or inspecting a candidate never needs permission to publish releases.
 # Any future publishing job must request write permission separately, after its
@@ -102,6 +103,7 @@ jobs:
             'scripts\smoke-test-installed-windows.ps1',
             'scripts\prepare-isolated-windows-install-test.ps1',
             'distribution\windows\install-runtime.ps1',
+            'distribution\windows\remove-runtime.ps1',
             'distribution\windows\repair-runtime.ps1',
             'distribution\windows\reset-kayan.ps1',
             'distribution\windows\verify-licensed-install.ps1',
