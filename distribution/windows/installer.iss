@@ -289,19 +289,14 @@ var
   Args: String;
 begin
   Result := True;
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM erp_kayan.exe /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  if FileExists(ExpandConstant('{app}\remove-runtime.ps1')) then begin
-    Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\remove-runtime.ps1') + '"';
+  Exec(ExpandConstant('{sys}\\taskkill.exe'), '/IM erp_kayan.exe /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if FileExists(ExpandConstant('{app}\\remove-runtime.ps1')) then begin
+    Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\\remove-runtime.ps1') + '"';
     if not RunPowerShell(Args, ResultCode) then begin
-      MsgBox('The KAYAN removal helper could not start. No KAYAN database or company backup was removed; close KAYAN ERP and retry.', mbError, MB_OK);
+      MsgBox('KAYAN could not run its safe service-removal helper. Company database, backups and licence data were not deleted. Close KAYAN ERP, repair the service and retry.', mbError, MB_OK);
       Result := False;
-    end else if ResultCode = 1 then begin
-      MsgBox('KAYAN could not safely stop or unregister its private PostgreSQL service. No KAYAN database, licence or company backup was removed; repair the service and retry.', mbError, MB_OK);
-      Result := False;
-    end else if ResultCode = 2 then begin
-      MsgBox('KAYAN removed the service and attempted to remove all KAYAN-owned data, but some files could not be deleted. The application uninstall will continue. Check %TEMP%\KAYAN-ERP-uninstall-cleanup-warning.txt for details.', mbInformation, MB_OK);
     end else if ResultCode <> 0 then begin
-      MsgBox('KAYAN removal stopped unexpectedly. The cleanup result is not fully verified; inspect the uninstall diagnostics before reinstalling.', mbError, MB_OK);
+      MsgBox('KAYAN could not safely stop or unregister its private PostgreSQL service. Company database, backups, licence data and settings were preserved; no customer data was deleted. Repair the service and retry.', mbError, MB_OK);
       Result := False;
     end;
   end;
