@@ -2,9 +2,9 @@ name: ERP KAYAN CI
 
 on:
   pull_request:
-    branches: [main, 'arena/**']
+    branches: [main, 'arena/**', 'codex/fix-six-ui-requests-from-pr71']
   push:
-    branches: [main]
+    branches: [main, 'codex/full-clean-uninstall']
   workflow_dispatch:
 
 permissions:
