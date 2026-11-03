@@ -10,6 +10,7 @@ import { randomUUID } from 'crypto';
 import { existsSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import {
+  link,
   mkdir,
   open,
   readFile,
@@ -332,11 +333,19 @@ export class FullBackupService {
     const dir = await this.ensureBackupDir();
     const database = this.requireDatabase();
     const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
-    const name = `kayan-${kind}-${stamp}.dump`;
+    const name = `kayan-${kind}-${stamp}-${randomUUID()}.dump`;
     const path = join(dir, name);
+    const partial = `${path}.partial`;
 
     const started = Date.now();
+    let reserved = false;
+    let file: FullBackupFile;
     try {
+      // The private staging name cannot collide with a backup already in
+      // progress. Incomplete archives do not appear in the backup list.
+      const handle = await open(partial, 'wx', 0o600);
+      reserved = true;
+      await handle.close();
       await run(tools.pgDump as string, [
         '--format=custom',
         '--no-owner',
@@ -345,13 +354,19 @@ export class FullBackupService {
         // waiting for a password looks exactly like a backup that hangs
         // forever. Failing fast with the real reason beats both.
         '--no-password',
-        `--file=${path}`,
+        `--file=${partial}`,
         // The database itself comes from the environment, never from a
         // parameter a caller could point at someone else's books.
         ...this.connectionArgs(),
       ]);
+      file = await this.validateAndDescribe(partial, name, kind);
+      // Hard-linking within the same directory is atomic and fails if a
+      // completed backup already occupies the destination. Never replace it.
+      await link(partial, path);
     } catch (error) {
-      await unlink(path).catch(() => {});
+      // Only remove the staging file if this operation created it; in
+      // particular, a collision must not delete another process's file.
+      if (reserved) await unlink(partial).catch(() => {});
       // The command line is not logged: it carries the database name, and the
       // password travels in the child's environment. Only what pg_dump itself
       // said, and the shape of the command, reach the log.
@@ -365,7 +380,11 @@ export class FullBackupService {
       );
     }
 
-    const file = await this.validateAndDescribe(path, name, kind);
+    // The completed name now points to the validated archive. A cleanup
+    // failure leaves only an unlisted staging link, not a partial backup.
+    await unlink(partial).catch(() => {
+      this.logger.warn('A completed backup has an unremoved staging link.');
+    });
 
     if (userId) {
       await this.audit.record({

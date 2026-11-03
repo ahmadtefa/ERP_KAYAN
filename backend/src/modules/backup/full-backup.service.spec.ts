@@ -4,7 +4,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import * as childProcess from 'child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 
@@ -211,7 +211,65 @@ describe('FullBackupService guards', () => {
       await expect(service.createFull('user-1')).rejects.toBeInstanceOf(
         ServiceUnavailableException,
       );
-      await expect(service.list()).resolves.toEqual([]);
+      expect(readdirSync(dir)).toEqual([]);
+    });
+
+    it('creates distinct completed files for concurrent backups in the same second', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      const service = serviceWithTools(dir);
+      jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
+        const fileArg = (args as string[]).find((a) => a.startsWith('--file='));
+        if (fileArg) writeFileSync(fileArg.slice(7), Buffer.from('PGDMP-fake-archive'));
+        setImmediate(() => (callback as (e: Error | null, o: string, s: string) => void)(null, '', ''));
+        return {} as childProcess.ChildProcess;
+      }) as typeof childProcess.execFile);
+      const [first, second] = await Promise.all([service.createFull('u1'), service.createFull('u2')]);
+      expect(first.file.name).not.toBe(second.file.name);
+      expect((await service.list()).map((file) => file.name)).toEqual(expect.arrayContaining([first.file.name, second.file.name]));
+      expect(readdirSync(dir).filter((file) => file.endsWith('.partial'))).toEqual([]);
+    });
+
+    it('never overwrites an existing destination if publication collides', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      const service = serviceWithTools(dir);
+      jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
+        const fileArg = (args as string[]).find((a) => a.startsWith('--file='));
+        if (fileArg) writeFileSync(fileArg.slice(7), Buffer.from('PGDMP-fake-archive'));
+        (callback as (e: Error | null, o: string, s: string) => void)(null, '', '');
+        return {} as childProcess.ChildProcess;
+      }) as typeof childProcess.execFile);
+      const fsPromises = jest.requireActual<typeof import('fs/promises')>('fs/promises');
+      let collisionPath = '';
+      const spy = jest.spyOn(fsPromises, 'link').mockImplementationOnce(async (_source, destination) => {
+        collisionPath = String(destination);
+        writeFileSync(collisionPath, 'existing backup');
+        throw Object.assign(new Error('destination exists'), { code: 'EEXIST' });
+      });
+      try {
+        await expect(service.createFull('u1')).rejects.toBeInstanceOf(ServiceUnavailableException);
+        expect((await import('fs')).readFileSync(collisionPath, 'utf8')).toBe('existing backup');
+        expect(readdirSync(dir).filter((file) => file.endsWith('.partial'))).toEqual([]);
+      } finally { spy.mockRestore(); }
+    });
+
+    it('does not expose an unfinished or malformed archive as a backup', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      const service = serviceWithTools(dir);
+      let finish!: () => void;
+      jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
+        const fileArg = (args as string[]).find((a) => a.startsWith('--file='));
+        if (fileArg) writeFileSync(fileArg.slice(7), Buffer.from('not-a-pg-archive'));
+        finish = () => (callback as (e: Error | null, o: string, s: string) => void)(null, '', '');
+        return {} as childProcess.ChildProcess;
+      }) as typeof childProcess.execFile);
+      const before = await service.list();
+      const pending = service.createFull('u1');
+      while (!finish) await new Promise((resolve) => setImmediate(resolve));
+      expect(await service.list()).toEqual(before);
+      finish();
+      await expect(pending).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(await service.list()).toEqual(before);
+      expect(readdirSync(dir)).toEqual([]);
     });
 
     it('still lists backups written by older builds into the working directory', async () => {
@@ -373,6 +431,7 @@ describe('FullBackupService guards', () => {
     it('a full backup is reported only after the file exists and is a real archive', async () => {
       const dir = temporaryDir('kayan-backups-');
       fakeTools(dir);
+      process.env.KAYAN_BACKUP_DIR = dir;
       // The "pg_dump" writes a Custom-format file where it was told to.
       jest.mocked(childProcess.execFile).mockImplementation(
         ((_, args, ___, callback) => {
