@@ -348,11 +348,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   }
 
   void _applyItemDefaults(_LineDraft line, Json item) {
-    // An explicit rate the user typed is respected; only the empty case is
-    // filled in from the item.
-    if (line.taxRate.text.trim().isEmpty || line.taxRate.text.trim() == '0') {
-      line.taxRate.text = formatQuantity(asString(item['taxRate']), decimals: 2);
-    }
+    // A blank tax field means zero, including when an item has a nonzero
+    // default. Never replace a blank or explicitly entered rate on selection.
     final units = lineUnitsOf(item);
     // A fractional pack can sort before the base unit; use the item's actual
     // base label rather than assuming the smallest factor is the base.

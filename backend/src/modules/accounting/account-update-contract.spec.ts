@@ -105,6 +105,17 @@ describe('chart-of-accounts update contract', () => {
     expect(badType.map((e) => e.property)).toContain('type');
   });
 
+  it('accepts the corrected create payload and still rejects update-only flags', async () => {
+    const body = {
+      code: '1104', nameEn: 'Inventory', nameAr: 'المخزون', type: 'ASSET',
+      parentId: '6f1d4b3a-2c1e-4a53-9a2b-1f0e5c7d8a11',
+      isPostable: true, description: 'Stock on hand', cashFlowClass: 'OPERATING',
+    };
+    expect(await errorsFor(CreateAccountDto, body)).toHaveLength(0);
+    const rejected = await errorsFor(CreateAccountDto, { ...body, isActive: true });
+    expect(rejected.map((error) => error.property)).toContain('isActive');
+  });
+
   it('the update contract never grows a `type` field', () => {
     // A DTO property would accept the field instead of refusing it, and the
     // bug would come back the moment the client sent the old payload again.

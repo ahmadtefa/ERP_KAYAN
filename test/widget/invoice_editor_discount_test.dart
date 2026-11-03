@@ -69,7 +69,18 @@ void main() {
               'unit': 'piece',
               'isActive': true,
               'isStockTracked': true,
-              'taxRate': '0.0000',
+              'taxRate': '14.0000',
+              'salePrice': '100.0000',
+            },
+            {
+              'id': 'item-2',
+              'code': 'ITEM-2',
+              'nameEn': 'Other item',
+              'nameAr': 'صنف آخر',
+              'unit': 'piece',
+              'isActive': true,
+              'isStockTracked': true,
+              'taxRate': '19.0000',
               'salePrice': '100.0000',
             },
           ]),
@@ -121,6 +132,31 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('ITEM-1 — Tracked item').last);
     await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormField>(find.byKey(const ValueKey('line-tax-rate-0'))).controller!.text,
+      '0',
+      reason: 'selecting a taxable item must not override an explicit zero',
+    );
+    await tester.enterText(find.byKey(const ValueKey('line-tax-rate-0')), '7');
+    await tester.tap(find.byKey(const ValueKey('item-choice-item-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ITEM-2 — Other item').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormField>(find.byKey(const ValueKey('line-tax-rate-0'))).controller!.text,
+      '7',
+      reason: 'changing item must not override a user-entered rate',
+    );
+    await tester.enterText(find.byKey(const ValueKey('line-tax-rate-0')), '');
+    await tester.tap(find.byKey(const ValueKey('item-choice-item-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ITEM-1 — Tracked item').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormField>(find.byKey(const ValueKey('line-tax-rate-0'))).controller!.text,
+      '',
+      reason: 'changing item must not replace an intentionally blank rate',
+    );
 
     await tester.enterText(find.byKey(const ValueKey('line-quantity-0')), '2');
     await tester.enterText(find.byKey(const ValueKey('line-price-0')), '100');

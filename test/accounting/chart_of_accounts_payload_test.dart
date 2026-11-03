@@ -154,6 +154,10 @@ void main() {
       expect(_input.toCreateJson()['type'], 'ASSET');
     });
 
+    test('creation omits update-only active flag', () {
+      expect(_input.toCreateJson().containsKey('isActive'), isFalse);
+    });
+
     test('an update never sends the type', () {
       expect(_input.toUpdateJson().containsKey('type'), isFalse);
     });
@@ -220,6 +224,7 @@ void main() {
       final call = f.adapter.calls.single;
       expect(call.method, 'POST');
       expect(_bodyOf(call)['type'], 'ASSET');
+      expect(_bodyOf(call).containsKey('isActive'), isFalse);
     });
   });
 }

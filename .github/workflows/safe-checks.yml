@@ -50,6 +50,8 @@ jobs:
         run: >-
           npm test -- --runInBand
           src/common/maintenance/maintenance.spec.ts
+          src/modules/accounting/account-update-contract.spec.ts
+          src/modules/accounting/chart-of-accounts.service.spec.ts
           src/modules/backup/full-backup.service.spec.ts
           src/modules/backup/full-backup-recovery-safety.spec.ts
           src/modules/backup/pg-backup-connection.spec.ts

@@ -34,17 +34,15 @@ class AccountInput {
   /// The body of `POST /accounting/chart-of-accounts`.
   ///
   /// A new account has to state its type: that is what decides which side of
-  /// the ledger it lives on, and the server cannot guess it.
+  /// the ledger it lives on, and the server cannot guess it. New accounts
+  /// are active by default; `isActive` belongs to the update contract only.
   Map<String, dynamic> toCreateJson() => {
     if (code != null && code!.isNotEmpty) 'code': code,
     'nameEn': nameEn,
-    // An empty Arabic name is left out, so an update does not overwrite the
-    // stored name with blank text (the server requires at least one character).
-    if (nameAr.isNotEmpty) 'nameAr': nameAr,
+    'nameAr': nameAr,
     'type': type.name.toUpperCase(),
     if (parentId != null) 'parentId': parentId,
     if (isPostable != null) 'isPostable': isPostable,
-    if (isActive != null) 'isActive': isActive,
     if (description != null) 'description': description,
     // Always sent, null included: an explicit null clears the
     // classification, while a missing key would leave it unchanged.
