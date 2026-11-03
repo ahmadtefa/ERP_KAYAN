@@ -11,6 +11,16 @@ export const REQUIRED_CHECKS = Object.freeze({
     'approved-licence-public-key', 'licence-signature-compatibility',
     'isolated-clean-install', 'isolated-active-licence-upgrade',
     'final-installer-inspected', 'no-private-material-inspected',
+    // These are required claims about the exact artifact, commit and run.
+    // A signature over claims is not a substitute for reviewing the evidence.
+    'legacy-and-new-licence-verification',
+    'invalid-signature-machine-expiry-revocation-rejected',
+    'licence-restoration-proof-and-revalidation',
+    'windows-10-fresh-install-offline', 'windows-11-fresh-install-offline',
+    'services-restart-health-and-migrations', 'installed-login-and-basic-operations',
+    'repair-and-upgrade-preserve-data', 'uninstall-reinstall-preserves-data',
+    'full-backup-restore-database-and-files', 'restore-failure-crash-and-concurrency',
+    'tls-certificate-validation', 'real-stock-posting-reversal-and-rollback',
   ]),
   android: Object.freeze([
     'approved-licence-key-policy', 'licence-signature-compatibility',
