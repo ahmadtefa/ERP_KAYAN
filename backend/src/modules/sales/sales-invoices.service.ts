@@ -17,6 +17,7 @@ import {
 } from '../../common/pricing/discount';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
+import { orderUnitForInvoiceLine, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
 import {
   defaultUnitPrice,
   parseDocumentQuantity,
@@ -187,6 +188,7 @@ export class SalesInvoicesService {
     branchId: string | null,
     userId: string,
     dto: CreateSalesInvoiceDto,
+    orderUnits?: readonly TrustedOrderUnit[],
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
@@ -204,6 +206,7 @@ export class SalesInvoicesService {
       dto.lines,
       dto.customerId,
       { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
+      orderUnits,
     );
     const lines = prepared.lines;
     const totals = this.totalsOf(lines);
@@ -818,12 +821,16 @@ export class SalesInvoicesService {
     input: SalesInvoiceLineDto[],
     customerId: string | null | undefined,
     documentDiscount: DiscountInput,
+    orderUnits?: readonly TrustedOrderUnit[],
   ): Promise<PreparedInvoice> {
     const prepared: PreparedLine[] = [];
     // The company's own policy: the rate to apply when nobody said otherwise,
     // and whether the prices being typed already contain it.
     const settings = await this.settings.get(companyId);
 
+    if (orderUnits && orderUnits.length !== input.length) {
+      throw new BadRequestException('Order invoice unit snapshots do not match its lines');
+    }
     for (const [index, raw] of input.entries()) {
       const quantity = parseDocumentQuantity(raw.quantity, `Line ${index + 1} quantity`);
       if (quantity.lessThanOrEqualTo(0)) throw new BadRequestException(`Line ${index + 1} quantity must be greater than zero`);
@@ -867,7 +874,8 @@ export class SalesInvoicesService {
 
       // Resolve the chosen unit before any money is calculated. The entered
       // quantity is in the chosen unit; the base quantity is what stock moves.
-      const resolved = item
+      const historical = orderUnitForInvoiceLine(orderUnits, index, raw.itemId, quantity);
+      const resolved = historical ?? (item
         ? resolveUnitSelection({
             lineLabel: `Line ${index + 1}`,
             requestedUnitId: raw.unitId,
@@ -881,7 +889,7 @@ export class SalesInvoicesService {
             baseQuantity: quantity,
             row: null,
             isLegacy: true,
-          };
+          });
       // What the user typed, measured in the unit they picked. All money is
       // computed from this; the base quantity is reserved for stock.
       const enteredQuantity = resolved.snapshot.unitQuantity ?? quantity;

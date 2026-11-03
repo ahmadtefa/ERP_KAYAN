@@ -7,6 +7,7 @@ import {
 } from '@prisma/client';
 
 import { PurchaseInvoicesService } from './purchase-invoices.service';
+import { historicalOrderUnit } from '../../common/units/order-conversion-unit';
 
 const D = (v: string | number) => new Prisma.Decimal(v);
 const COMPANY = '11111111-1111-4111-8111-111111111111';
@@ -158,6 +159,18 @@ function makeService(itemOverrides: Record<string, any> = {}) {
 }
 
 describe('Purchase multi-unit — milk scenario', () => {
+  it('preserves a trusted order unit even when the catalogue factor changes or is disabled', async () => {
+    const changed = { ...milkItem, units: [milkItem.units[0], { ...milkItem.units[1], factor: D(12), isActive: false }] };
+    const { service, tx } = makeService({ [MILK]: changed });
+    const resolved = historicalOrderUnit({ label: 'Line 1', unitName: 'كرتونة', unitFactor: D(10), baseQuantity: D(20) });
+    await service.create(COMPANY, BRANCH, 'user-1', { invoiceDate: '2026-10-27', supplierId: SUPPLIER, lines: [{ itemId: MILK, quantity: '2', unitName: 'كرتونة', unitPrice: '75', taxRate: '0' }] } as any, [{ itemId: MILK, resolved }]);
+    const line = tx.purchaseInvoice.create.mock.calls[0][0].data.lines.create[0];
+    expect(line.quantity.toFixed(4)).toBe('20.0000');
+    expect(line.unitFactor.toFixed(6)).toBe('10.000000');
+    expect(line.unitQuantity.toFixed(4)).toBe('2.0000');
+    expect(line.grossLineTotal.toFixed(4)).toBe('150.0000');
+  });
+
   it('treats an explicit blank tax as zero while retaining an omitted item rate', async () => {
     const { service, tx } = makeService({ [MILK]: { ...milkItem, taxRate: D(14) } });
     await service.create(COMPANY, BRANCH, 'user-1', { invoiceDate: '2026-10-27', supplierId: SUPPLIER,

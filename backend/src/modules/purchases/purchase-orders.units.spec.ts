@@ -106,6 +106,7 @@ describe('purchase orders with multiple units', () => {
           invoicedQuantity: D(0),
           unitPrice: D(75),
           taxRate: D(0),
+          discountPercent: D(5),
           unitName: 'كرتونة',
           unitFactor: D(10),
           unitQuantity: D(5),

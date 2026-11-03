@@ -66,6 +66,9 @@ jobs:
           src/modules/purchases/purchase-orders.units.spec.ts
           src/common/units/unit-math.spec.ts
           src/common/units/order-conversion-selection.spec.ts
+          src/common/units/order-conversion-unit.spec.ts
+          src/modules/sales/sales-invoices.units.spec.ts
+          src/modules/purchases/purchase-invoices.units.spec.ts
           src/modules/licensing/license.guard.spec.ts
           src/modules/licensing/license-keyring.spec.ts
           src/common/guards/super-admin.guard.spec.ts

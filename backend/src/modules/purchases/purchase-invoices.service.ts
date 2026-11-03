@@ -14,6 +14,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
+import { orderUnitForInvoiceLine, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
 import {
   defaultUnitPrice,
   parseDocumentQuantity,
@@ -191,6 +192,7 @@ export class PurchaseInvoicesService {
     branchId: string | null,
     userId: string,
     dto: CreatePurchaseInvoiceDto,
+    orderUnits?: readonly TrustedOrderUnit[],
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
@@ -211,6 +213,7 @@ export class PurchaseInvoicesService {
       dto.supplierId,
       landedCostAmount,
       { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
+      orderUnits,
     );
     const lines = prepared.lines;
     const subTotal = lines.reduce((s, l) => s.plus(l.lineTotal), new Prisma.Decimal(0));
@@ -816,10 +819,14 @@ export class PurchaseInvoicesService {
     supplierId: string | null | undefined,
     landedCostAmount: Prisma.Decimal,
     documentDiscount: DiscountInput,
+    orderUnits?: readonly TrustedOrderUnit[],
   ): Promise<PreparedInvoice> {
     const prepared: PreparedLine[] = [];
     const settings = await this.settings.get(companyId);
 
+    if (orderUnits && orderUnits.length !== input.length) {
+      throw new BadRequestException('Order invoice unit snapshots do not match its lines');
+    }
     for (const [index, raw] of input.entries()) {
       const item = await this.prisma.item.findFirst({
         where: { id: raw.itemId, companyId, deletedAt: null },
@@ -846,7 +853,7 @@ export class PurchaseInvoicesService {
 
       // Resolve the chosen unit. The entered quantity is expressed in it; the
       // base quantity is what is received into stock and drives unit cost.
-      const resolved = resolveUnitSelection({
+      const resolved = orderUnitForInvoiceLine(orderUnits, index, raw.itemId, quantity) ?? resolveUnitSelection({
         lineLabel: `Line ${index + 1}`,
         requestedUnitId: raw.unitId,
         requestedUnitName: raw.unitName,

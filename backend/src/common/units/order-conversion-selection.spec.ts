@@ -29,7 +29,7 @@ describe('explicit order conversion selection', () => {
   ] as const)('%s invoices only explicitly selected lines', async (_kind, Service, orderModel, lineModel, invoiceModel) => {
     const line = (id: string) => ({ id, lineNumber: id === 'one' ? 1 : 2,
       itemId: `item-${id}`, description: id, quantity: D(10), invoicedQuantity: D(0),
-      unitPrice: D(3), taxRate: D(0), unitName: null, unitFactor: null });
+      unitPrice: D(3), taxRate: D(0), discountPercent: D(5), unitName: null, unitFactor: null });
     const order = { id: 'order', orderNumber: 'O-1', status: 'APPROVED',
       customerId: 'customer', supplierId: 'supplier', lines: [line('one'), line('two')] };
     const update = jest.fn(async (args: unknown) => { void args; return {}; });
@@ -47,7 +47,7 @@ describe('explicit order conversion selection', () => {
       invoiceDate: '2026-11-03', lines: [{ orderLineId: 'one', quantity: '2' }],
     });
     const dto = create.mock.calls[0][3] as { lines: Array<{ itemId: string; quantity: string }> };
-    expect(dto.lines).toEqual([expect.objectContaining({ itemId: 'item-one', quantity: '2.0000' })]);
+    expect(dto.lines).toEqual([expect.objectContaining({ itemId: 'item-one', quantity: '2.0000', discountPercent: '5.0000' })]);
     expect(update).toHaveBeenCalledTimes(1);
     expect(update.mock.calls[0][0]).toEqual(expect.objectContaining({ where: { id: 'one' } }));
     await expect(service.convertToInvoice('company', 'branch', 'user', 'order', {})).rejects.toThrow(/Select/);

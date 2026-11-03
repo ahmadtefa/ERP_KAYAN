@@ -8,6 +8,7 @@ import { OrderStatus, Prisma } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { selectedOrderLineQuantities } from '../../common/units/order-conversion-selection';
+import { historicalOrderUnit, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import {
   defaultUnitPrice,
@@ -332,8 +333,9 @@ export class PurchaseOrdersService {
     // to invoice its outstanding balance. Quantities are base-unit amounts.
     const requested = selectedOrderLineQuantities(dto.lines, order.lines);
 
-    const invoiceLines: Array<{ itemId: string; description: string; quantity: string; unitPrice: string; taxRate: string; unitName?: string }> = [];
+    const invoiceLines: Array<{ itemId: string; description: string; quantity: string; unitPrice: string; taxRate: string; discountPercent: string; unitName?: string }> = [];
     const consumed: Array<{ lineId: string; quantity: Prisma.Decimal }> = [];
+    const orderUnits: TrustedOrderUnit[] = [];
 
     for (const line of order.lines) {
       const quantity = requested.get(line.id);
@@ -346,19 +348,21 @@ export class PurchaseOrdersService {
             `${quantity.toFixed(MONEY_SCALE)} was asked for`,
         );
       }
-      // The order stores base units; hand the invoice the quantity in the
-      // chosen unit so it re-applies the same factor and lands on the same
-      // base quantity. Legacy lines (no snapshot) pass through unchanged.
-      const hasUnit = line.unitFactor !== null && line.unitFactor !== undefined;
-      const invoiceQuantity = hasUnit
-        ? quantity.div(line.unitFactor as Prisma.Decimal).toDecimalPlaces(MONEY_SCALE)
-        : quantity;
+      const historical = historicalOrderUnit({
+        label: `Line ${line.lineNumber}`,
+        unitName: line.unitName ?? null,
+        unitFactor: line.unitFactor ?? null,
+        baseQuantity: quantity,
+      });
+      const invoiceQuantity = historical.snapshot.unitQuantity ?? quantity;
+      orderUnits.push({ itemId: line.itemId, resolved: historical });
       invoiceLines.push({
         itemId: line.itemId,
         description: line.description,
         quantity: invoiceQuantity.toFixed(MONEY_SCALE),
         unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
         taxRate: line.taxRate.toFixed(MONEY_SCALE),
+        discountPercent: line.discountPercent.toFixed(MONEY_SCALE),
         unitName: line.unitName ?? undefined,
       });
       consumed.push({ lineId: line.id, quantity });
@@ -373,7 +377,7 @@ export class PurchaseOrdersService {
       supplierId: order.supplierId,
       notes: `From purchase order ${order.orderNumber}`,
       lines: invoiceLines,
-    } as never);
+    } as never, orderUnits);
 
     const invoiceId = String((invoice as { id?: string }).id ?? '');
 
