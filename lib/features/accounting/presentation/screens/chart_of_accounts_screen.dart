@@ -32,6 +32,11 @@ class ChartOfAccountsScreen extends ConsumerWidget {
         PageHeader(
           title: l10n.chartOfAccounts,
           actions: [
+            IconButton(
+              tooltip: l10n.refresh,
+              onPressed: () => ref.read(chartOfAccountsProvider.notifier).refresh(),
+              icon: const Icon(Icons.refresh),
+            ),
             const ListExportActions(list: 'chart-of-accounts'),
             FilledButton.icon(
               onPressed: () => _editAccount(context, ref, null),
@@ -111,57 +116,84 @@ class _TypeFilter extends StatelessWidget {
   }
 }
 
-class _AccountTree extends ConsumerWidget {
+class _AccountTree extends ConsumerStatefulWidget {
   const _AccountTree();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_AccountTree> createState() => _AccountTreeState();
+}
+
+class _AccountTreeState extends ConsumerState<_AccountTree> {
+  final Set<String> _collapsed = {};
+
+  @override
+  Widget build(BuildContext context) {
     final nodes = ref.watch(accountTreeProvider);
     final l10n = context.l10n;
     if (nodes.isEmpty) {
       return EmptyView(message: l10n.noAccounts, icon: Icons.search_off);
     }
 
+    // Traverse the original parents-first list. A collapsed node hides every
+    // deeper descendant, not just its immediate children. Child existence is
+    // determined before filtering so the expander remains available to reopen.
+    final visible = <({AccountNode node, bool hasChildren})>[];
+    int? hiddenBelowDepth;
+    for (var index = 0; index < nodes.length; index++) {
+      final node = nodes[index];
+      if (hiddenBelowDepth != null && node.depth <= hiddenBelowDepth) {
+        hiddenBelowDepth = null;
+      }
+      if (hiddenBelowDepth != null) continue;
+      final hasChildren =
+          index + 1 < nodes.length && nodes[index + 1].depth > node.depth;
+      visible.add((node: node, hasChildren: hasChildren));
+      if (hasChildren && _collapsed.contains(node.account.id)) {
+        hiddenBelowDepth = node.depth;
+      }
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 24),
-      itemCount: nodes.length,
+      itemCount: visible.length,
       itemBuilder: (context, index) {
-        final node = nodes[index];
+        final entry = visible[index];
+        final id = entry.node.account.id;
         return _AccountTile(
-          key: ValueKey(node.account.id),
-          node: node,
-          hasChildren:
-              nodes.length > index + 1 && nodes[index + 1].depth > node.depth,
+          key: ValueKey(id),
+          node: entry.node,
+          hasChildren: entry.hasChildren,
+          expanded: !_collapsed.contains(id),
+          onToggle: () => setState(() {
+            if (!_collapsed.remove(id)) _collapsed.add(id);
+          }),
         );
       },
     );
   }
 }
 
-class _AccountTile extends ConsumerStatefulWidget {
+class _AccountTile extends ConsumerWidget {
   const _AccountTile({
     super.key,
     required this.node,
     required this.hasChildren,
+    required this.expanded,
+    required this.onToggle,
   });
 
   final AccountNode node;
   final bool hasChildren;
+  final bool expanded;
+  final VoidCallback onToggle;
 
   @override
-  ConsumerState<_AccountTile> createState() => _AccountTileState();
-}
-
-class _AccountTileState extends ConsumerState<_AccountTile> {
-  bool _expanded = true;
-
-  @override
-  Widget build(BuildContext context) {
-    final account = widget.node.account;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final account = node.account;
     final l10n = context.l10n;
     final theme = Theme.of(context);
     final lang = Localizations.localeOf(context).languageCode;
-    final indent = 8.0 + widget.node.depth * 20.0;
+    final indent = 8.0 + node.depth * 20.0;
 
     final nameStyle = TextStyle(
       fontWeight: account.isPostable ? FontWeight.w400 : FontWeight.w600,
@@ -171,10 +203,13 @@ class _AccountTileState extends ConsumerState<_AccountTile> {
     return ListTile(
       dense: true,
       contentPadding: EdgeInsetsDirectional.only(start: indent, end: 8),
-      leading: widget.hasChildren
+      leading: hasChildren
           ? IconButton(
-              icon: Icon(_expanded ? Icons.expand_more : Icons.chevron_right),
-              onPressed: () => setState(() => _expanded = !_expanded),
+              tooltip: expanded
+                  ? (lang == 'ar' ? 'طي الحسابات الفرعية' : 'Collapse subaccounts')
+                  : (lang == 'ar' ? 'إظهار الحسابات الفرعية' : 'Expand subaccounts'),
+              icon: Icon(expanded ? Icons.expand_more : Icons.chevron_right),
+              onPressed: onToggle,
             )
           : const SizedBox(width: 24),
       title: Text(
