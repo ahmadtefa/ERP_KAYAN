@@ -58,6 +58,7 @@ export function pgBackupConnectionEnv(
     PGPASSWORD: option('password') || decodeURIComponent(url.password) || inherited.PGPASSWORD,
     PGDATABASE: decodeURIComponent(url.pathname.replace(/^\//, '')),
   };
+  if (negotiation) env.PGSSLNEGOTIATION = negotiation;
   if (sslRequested) env.PGSSLMODE = 'verify-full';
   else if (sslMode === 'disable' || ssl === '0' || inheritedMode === 'disable') env.PGSSLMODE = 'disable';
   for (const [key, variable] of [

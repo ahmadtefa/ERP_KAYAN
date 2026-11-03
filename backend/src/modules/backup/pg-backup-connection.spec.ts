@@ -27,6 +27,7 @@ describe('pgBackupConnectionEnv', () => {
     expect(pgBackupConnectionEnv('postgresql://db.example/books', { PGSSLMODE: 'require' }).PGSSLMODE).toBe('verify-full');
     expect(pgBackupConnectionEnv('postgresql://db.example/books?sslmode=verify-full', { PGSSLMODE: 'disable' }).PGSSLMODE).toBe('verify-full');
     expect(() => pgBackupConnectionEnv('postgresql://db.example/books', { PGSSLMODE: 'no-verify' })).toThrow('unsupported');
+    expect(pgBackupConnectionEnv('postgresql://db.example/books?sslnegotiation=postgres', { PGSSLNEGOTIATION: 'direct' }).PGSSLNEGOTIATION).toBe('postgres');
     const env = pgBackupConnectionEnv('postgresql:///books?host=%2Ftmp%2Fsocket', { PGUSER: 'from-env', PGPASSWORD: 'from-env', PGPORT: '6543' });
     expect(env).toMatchObject({ PGUSER: 'from-env', PGPASSWORD: 'from-env', PGPORT: '6543' });
   });
