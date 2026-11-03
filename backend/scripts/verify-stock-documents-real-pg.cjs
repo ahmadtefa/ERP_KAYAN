@@ -30,6 +30,11 @@ const { StockDocumentsService } = require('../src/modules/inventory/stock-docume
 const { ChartOfAccountsService } = require('../src/modules/accounting/chart-of-accounts.service');
 const { StockService } = require('../src/modules/inventory/stock.service');
 const { FinancialStatementsService } = require('../src/modules/reports/financial-statements.service');
+const { PriceListsService } = require('../src/modules/sales/price-lists.service');
+const { SalesOrdersService } = require('../src/modules/sales/sales-orders.service');
+const { PurchaseOrdersService } = require('../src/modules/purchases/purchase-orders.service');
+const { SalesInvoicesService } = require('../src/modules/sales/sales-invoices.service');
+const { PurchaseInvoicesService } = require('../src/modules/purchases/purchase-invoices.service');
 
 const company = '10000000-0000-4000-8000-000000000001';
 const user = '20000000-0000-4000-8000-000000000001';
@@ -148,6 +153,54 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(reversedReport.items.find(row => row.costCenterId === centre).ownExpenses, '0.0000');
     assert.equal(reversedReport.reconciliation.balanced, true);
     console.log('PASS: real PostgreSQL + Prisma stock receipt, issue, cost-centre journal, overdraw and duplicate-post rejection, and reversal.');
+
+    // Exercise the selected-line and frozen-unit conversion fixes against the
+    // real services and Prisma. This does NOT test concurrency, idempotency,
+    // order/invoice atomicity, update/reversal reconciliation, HTTP or Flutter.
+    const customer = await prisma.customer.create({data:{companyId:company, code:'SYN-C', nameEn:'Synthetic customer', nameAr:'عميل تجريبي'}});
+    const supplier = await prisma.supplier.create({data:{companyId:company, code:'SYN-S', nameEn:'Synthetic supplier', nameAr:'مورد تجريبي'}});
+    const first = await prisma.item.create({data:{companyId:company, code:'SYN-ORDER-1', nameEn:'Synthetic order item', nameAr:'صنف طلب', unit:'piece', salePrice:'8', purchasePrice:'8', taxRate:'0', units:{create:[{unit:'carton',factor:'10'}]}}});
+    const second = await prisma.item.create({data:{companyId:company, code:'SYN-ORDER-2', nameEn:'Synthetic second item', nameAr:'صنف ثان', unit:'piece', salePrice:'2', purchasePrice:'2', taxRate:'0'}});
+    const settings = new CompanySettingsService(prisma,audit);
+    const warehouses = new WarehouseService(prisma,audit);
+    const prices = new PriceListsService(prisma,audit);
+    const posting = new PostingService(numbers,periods,costCenters);
+    const map = new AccountMapService();
+    const si = new SalesInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit);
+    const pi = new PurchaseInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit);
+    const sales = new SalesOrdersService(prisma,numbers,settings,prices,si,audit);
+    const purchases = new PurchaseOrdersService(prisma,numbers,settings,prices,pi,audit);
+    const lines = [{itemId:first.id,quantity:'3',unitName:'carton',unitPrice:'100',discountPercent:'5',taxRate:'0'},
+      {itemId:second.id,quantity:'5',unitPrice:'2',taxRate:'0'}];
+    const so = await sales.create(company,branch,user,{customerId:customer.id,orderDate:date,lines});
+    const po = await purchases.create(company,branch,user,{supplierId:supplier.id,orderDate:date,lines});
+    await sales.approve(company,user,so.id);
+    await purchases.approve(company,user,po.id);
+    await prisma.itemUnit.update({where:{itemId_unit:{itemId:first.id,unit:'carton'}},data:{factor:'12',isActive:false}});
+    for (const [kind, orders, order] of [['sales',sales,so],['purchase',purchases,po]]) {
+      const orderLines = kind === 'sales'
+        ? await prisma.salesOrderLine.findMany({where:{orderId:order.id},orderBy:{lineNumber:'asc'}})
+        : await prisma.purchaseOrderLine.findMany({where:{orderId:order.id},orderBy:{lineNumber:'asc'}});
+      await assert.rejects(orders.convertToInvoice(company,branch,user,order.id,{}),/Select the order lines/);
+      const conversion = await orders.convertToInvoice(company,branch,user,order.id,
+        {invoiceDate:date,lines:[{orderLineId:orderLines[0].id,quantity:'20'}]});
+      const saved = kind === 'sales'
+        ? await prisma.salesInvoice.findUniqueOrThrow({where:{id:conversion.invoice.id},include:{lines:true}})
+        : await prisma.purchaseInvoice.findUniqueOrThrow({where:{id:conversion.invoice.id},include:{lines:true}});
+      assert.equal(saved.lines.length,1,`${kind}: an unselected line was invoiced`);
+      assert.equal(saved.lines[0].itemId,first.id);
+      assert.equal(saved.lines[0].quantity.toFixed(4),'20.0000');
+      assert.equal(saved.lines[0].unitFactor.toFixed(6),'10.000000');
+      assert.equal(saved.lines[0].unitQuantity.toFixed(4),'2.0000');
+      assert.equal(saved.lines[0].discountPercent.toFixed(4),'5.0000');
+      assert.equal(saved.lines[0].lineTotal.toFixed(4),'190.0000');
+      const refreshed = kind === 'sales'
+        ? await prisma.salesOrderLine.findMany({where:{orderId:order.id},orderBy:{lineNumber:'asc'}})
+        : await prisma.purchaseOrderLine.findMany({where:{orderId:order.id},orderBy:{lineNumber:'asc'}});
+      assert.equal(refreshed[0].invoicedQuantity.toFixed(4),'20.0000');
+      assert.equal(refreshed[1].invoicedQuantity.toFixed(4),'0.0000');
+    }
+    console.log('PASS: real PostgreSQL + Prisma order services convert only selected lines with saved units and discount. Concurrency and atomicity remain unproved.');
   } finally {
     await prisma.$disconnect();
     await sql.end();
