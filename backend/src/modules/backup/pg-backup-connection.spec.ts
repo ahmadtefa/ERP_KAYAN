@@ -1,3 +1,4 @@
+import { parse } from 'pg-connection-string';
 import { pgBackupConnectionEnv } from './pg-backup-connection';
 
 describe('pgBackupConnectionEnv', () => {
@@ -21,6 +22,20 @@ describe('pgBackupConnectionEnv', () => {
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).message).not.toContain('private');
     }
+  });
+
+  it('preserves encoded database separators in the same way as node-postgres', () => {
+    for (const name of ['books%2F2026', 'books%3Fpart', 'books%20archive', 'books%252Farchive']) {
+      const url = `postgresql://u:p@db.example/${name}`;
+      expect(pgBackupConnectionEnv(url, {}).PGDATABASE).toBe(parse(url).database);
+    }
+  });
+
+  it('rejects libpq-only inherited target overrides and multi-host settings', () => {
+    for (const key of ['PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE', 'PGTARGETSESSIONATTRS']) {
+      expect(() => pgBackupConnectionEnv('postgresql://u:p@db.example/books', { [key]: 'synthetic' })).toThrow('override');
+    }
+    expect(() => pgBackupConnectionEnv('postgresql://u:p@db.example/books?host=one%2Ctwo', {})).toThrow('Multiple');
   });
 
   it('does not downgrade inherited SSL settings and preserves driver defaults', () => {

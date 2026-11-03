@@ -7,6 +7,9 @@ export function pgBackupConnectionEnv(
   raw: string,
   inherited: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
+  for (const key of ['PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE', 'PGTARGETSESSIONATTRS']) {
+    if (inherited[key]) throw new Error('An inherited libpq connection override is unsupported for backup tools.');
+  }
   const url = new URL(raw);
   if (!['postgres:', 'postgresql:'].includes(url.protocol)) {
     throw new Error('The backup database URL must use PostgreSQL.');
@@ -56,8 +59,12 @@ export function pgBackupConnectionEnv(
     PGPORT: option('port') || url.port || inherited.PGPORT || '5432',
     PGUSER: option('user') || decodeURIComponent(url.username) || inherited.PGUSER || inherited.USER,
     PGPASSWORD: option('password') || decodeURIComponent(url.password) || inherited.PGPASSWORD,
-    PGDATABASE: decodeURIComponent(url.pathname.replace(/^\//, '')),
+    // Match pg-connection-string: decodeURI preserves encoded URI separators.
+    PGDATABASE: decodeURI(url.pathname.replace(/^\//, '')),
   };
+  if (env.PGHOST?.includes(',') || env.PGPORT?.includes(',')) {
+    throw new Error('Multiple PostgreSQL hosts or ports are unsupported for backup tools.');
+  }
   if (negotiation) env.PGSSLNEGOTIATION = negotiation;
   if (sslRequested) env.PGSSLMODE = 'verify-full';
   else if (sslMode === 'disable' || ssl === '0' || inheritedMode === 'disable') env.PGSSLMODE = 'disable';

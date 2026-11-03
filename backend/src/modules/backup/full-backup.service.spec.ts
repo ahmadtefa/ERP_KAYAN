@@ -128,6 +128,20 @@ describe('FullBackupService guards', () => {
     });
   });
 
+  describe('database tool target', () => {
+    it('preserves encoded separators and rejects libpq connection-string database names', () => {
+      const service = serviceWithEnv(temporaryDir('kayan-backups-'));
+      process.env.DATABASE_URL = 'postgresql://u:p@localhost/books%2Farchive';
+      expect((service as unknown as { requireDatabase(): string }).requireDatabase()).toBe('books%2Farchive');
+      process.env.DATABASE_URL = 'postgresql://u:p@localhost/db%3Dother';
+      // node-postgres preserves %3D as part of the database name; it cannot
+      // become a libpq key/value connection string.
+      expect((service as unknown as { requireDatabase(): string }).requireDatabase()).toBe('db%3Dother');
+      process.env.DATABASE_URL = 'postgresql://u:p@localhost/db=other';
+      expect(() => (service as unknown as { requireDatabase(): string }).requireDatabase()).toThrow(/ambiguous/);
+    });
+  });
+
   describe('creating a backup', () => {
     function serviceWithTools(dir: string, audit = { record: jest.fn(async () => {}) }) {
       const toolsDir = temporaryDir('kayan-tools-');

@@ -6,6 +6,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { execFile } from 'child_process';
+import { randomUUID } from 'crypto';
 import { existsSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import {
@@ -106,6 +107,7 @@ export class FullBackupService {
   /// `capabilities()` so the screen can say which protection is in place.
   private canCreateDatabase = true;
   private lastCreateDatabaseFailure: string | null = null;
+  private restoreInProgress = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -152,16 +154,13 @@ export class FullBackupService {
       serverVersion,
       warning,
       backupDirectory: this.backupDir(),
-      // Whether this installation may open a scratch database. Without it a
-      // restore can still be checked with `pg_restore --list`, but it cannot
-      // be rehearsed first, and the screen says which of the two it is.
+      // A scratch restore is mandatory before the primary can be touched.
       canRehearseRestore: this.canCreateDatabase,
       rehearsalNote: this.canCreateDatabase
         ? null
         : `A restore could not be rehearsed in a scratch database (${
             this.lastCreateDatabaseFailure ?? 'the server refused'
-          }). Uploads are still checked with pg_restore --list and a safety ` +
-          'copy is taken first.',
+          }). Restore is blocked until rehearsal is available.`,
       reason: available
         ? null
         : 'PostgreSQL command-line tools (pg_dump / pg_restore) were not found ' +
@@ -573,21 +572,25 @@ export class FullBackupService {
   async restore(options: RestoreOptions, userId: string) {
     if (!options.confirm) {
       throw new BadRequestException(
-        'A full restore replaces the whole database. Send confirm=true to say ' +
-          'you understand that.',
+        'A full restore replaces the whole database. Send confirm=true to say you understand that.',
       );
     }
-
-    // Two restores at once would each take a safety copy of the other's
-    // half-written database. The switch is the same one that blocks writes
-    // for the duration, so it is already the right question to ask.
-    if (this.maintenance.isActive) {
+    if (this.maintenance.isActive || this.restoreInProgress) {
       throw new ServiceUnavailableException(
-        'A restore is already running. Wait for it to finish before starting ' +
-          'another one.',
+        'A restore is already running or the database is in maintenance mode.',
       );
     }
+    // Claim synchronously, before the first await: another request in this
+    // process must not clear this restore's maintenance flag or staging file.
+    this.restoreInProgress = true;
+    try {
+      return await this.performRestore(options, userId);
+    } finally {
+      this.restoreInProgress = false;
+    }
+  }
 
+  private async performRestore(options: RestoreOptions, userId: string) {
     // 1. The file itself, before anything else happens.
     let buffer: Buffer;
     let label: string;
@@ -605,14 +608,25 @@ export class FullBackupService {
     }
     this.assertCustomDump(buffer, label);
 
+    // Validate the tool connection before creating a scratch database or
+    // touching the primary. This rejects libpq-only target overrides.
+    this.requireDatabase();
+    try {
+      pgBackupConnectionEnv(process.env.DATABASE_URL as string);
+    } catch {
+      throw new ServiceUnavailableException(
+        'The backup tool connection settings cannot be verified. The current database was not changed.',
+      );
+    }
+
     // Only now are the tools needed — a bad request is a bad request even on
     // a machine without PostgreSQL tools.
     const tools = this.requireTools();
 
     const dir = await this.ensureBackupDir();
-    const staging = join(dir, `.restore-staging-${Date.now()}.dump`);
+    const staging = join(dir, `.restore-staging-${randomUUID()}.dump`);
     try {
-      await writeFile(staging, buffer);
+      await writeFile(staging, buffer, { flag: 'wx', mode: 0o600 });
     } catch (error) {
       throw new ServiceUnavailableException(
         `The upload could not be written to "${dir}" ` +
@@ -621,6 +635,10 @@ export class FullBackupService {
       );
     }
 
+    // Once production is touched, never release maintenance until either the
+    // restore and licence reconciliation, or verified recovery, completes.
+    let maintenanceOwned = false;
+    let safeToReleaseMaintenance = false;
     try {
       // 1b. Read the archive's table of contents. This is what catches a
       //     truncated download or a file from a foreign database before any
@@ -633,12 +651,9 @@ export class FullBackupService {
       );
       this.logger.log(`Backup "${label}" lists ${entries} objects`);
 
-      // 2. A scratch database: the file must restore cleanly somewhere before
-      //    it is allowed to restore here. Where the installation is not
-      //    allowed to create one (a locked-down hosted database), the
-      //    `--list` check above plus the safety copy below are the protection,
-      //    and the reason is recorded rather than silently swallowed.
-      const scratchName = `kayan_restore_check_${Date.now()}`;
+      // 2. Rehearse in a new database. If CREATE fails, never continue to the
+      // primary: an archive listing alone cannot establish a usable restore.
+      const scratchName = `kayan_restore_check_${randomUUID().replace(/-/g, '')}`;
       let rehearsed = false;
       try {
         await this.execSql(`CREATE DATABASE "${scratchName}"`);
@@ -648,10 +663,9 @@ export class FullBackupService {
         this.lastCreateDatabaseFailure = String(
           (error as Error).message ?? error,
         );
-        this.logger.warn(
-          'A restore could not be rehearsed in a scratch database: ' +
-            `${this.lastCreateDatabaseFailure}. Continuing: the archive was ` +
-            'checked with pg_restore --list and a safety copy is taken next.',
+        this.logger.warn('A restore could not be rehearsed in a scratch database.');
+        throw new ServiceUnavailableException(
+          'The restore rehearsal database could not be created. The current database was not changed.',
         );
       }
 
@@ -682,14 +696,20 @@ export class FullBackupService {
         }
       }
 
-      // 3. The safety net. No safety copy, no restore.
-      const safety = await this.createSafety();
-      this.logger.log(`Safety backup taken: ${safety.name}`);
-
-      // 4. The real thing, with writes blocked.
+      // Block newly admitted writes before taking the safety snapshot.
+      // Already in-flight writes and multi-process deployments still need a
+      // shared quiescence protocol; this local switch alone cannot drain them.
       this.maintenance.begin(
         `Restoring database from ${label}. The system will be back shortly.`,
       );
+      maintenanceOwned = true;
+      safeToReleaseMaintenance = true; // production has not yet been changed
+      const safety = await this.createSafety();
+      this.logger.log(`Safety backup taken: ${safety.name}`);
+
+      // Once destruction starts, only a verified restore or recovery may
+      // release the maintenance switch.
+      safeToReleaseMaintenance = false;
       let restored = false;
       try {
         await this.cleanDatabaseSchema();
@@ -706,6 +726,7 @@ export class FullBackupService {
         this.logger.error(`pg_restore failed: ${(error as Error).message}`);
         // The database may be half-replaced. Put the safety copy back.
         await this.recoverFrom(safety.name, tools.pgRestore as string);
+        safeToReleaseMaintenance = true;
         throw new ServiceUnavailableException(
           'The restore failed part way through. The safety backup taken just ' +
             `before (${safety.name}) was restored back automatically. ` +
@@ -719,6 +740,7 @@ export class FullBackupService {
         if (!check.ok) {
           this.logger.error(`Post-restore check failed: ${check.detail}`);
           await this.recoverFrom(safety.name, tools.pgRestore as string);
+          safeToReleaseMaintenance = true;
           throw new ServiceUnavailableException(
             'The restore finished but the data did not pass the checks that ' +
               'follow one. The safety backup was restored back automatically. ' +
@@ -763,11 +785,15 @@ export class FullBackupService {
       // The protected watermarks remember the latest term and seat limit, so
       // a restore is repaired after it lands instead of quietly shrinking the
       // licence the customer paid for (or handing seats back).
-      await this.licensing.reconcile().catch((error: Error) => {
-        this.logger.warn(
-          `The licence could not be reconciled after the restore: ${error.message}`,
+      try {
+        await this.licensing.reconcile();
+      } catch {
+        this.logger.error('The licence could not be reconciled after the restore. Maintenance remains active.');
+        throw new ServiceUnavailableException(
+          'Licence reconciliation after restore failed. Maintenance remains active; do not enter data.',
         );
-      });
+      }
+      safeToReleaseMaintenance = true;
 
       return {
         restored: true,
@@ -778,7 +804,7 @@ export class FullBackupService {
       };
     } finally {
       await unlink(staging).catch(() => {});
-      this.maintenance.end();
+      if (maintenanceOwned && safeToReleaseMaintenance) this.maintenance.end();
     }
   }
 
@@ -829,7 +855,7 @@ export class FullBackupService {
       ]);
       const check = await this.postRestoreCheck();
       if (!check.ok) throw new Error(check.detail);
-      this.maintenance.end();
+      await this.licensing.reconcile();
     } catch (error) {
       this.maintenance.begin(
         'ATTENTION: a database restore failed and the automatic recovery ' +
@@ -838,6 +864,9 @@ export class FullBackupService {
       );
       this.logger.error(
         `Recovery from ${name} failed: ${(error as Error).message}`,
+      );
+      throw new ServiceUnavailableException(
+        `The restore and automatic recovery both failed. Maintenance remains active. Restore manually from ${name}.`,
       );
     }
   }
@@ -922,9 +951,15 @@ export class FullBackupService {
     }
     try {
       const url = new URL(raw);
-      const name = decodeURIComponent(url.pathname.replace(/^\//, ''));
+      const name = decodeURI(url.pathname.replace(/^\//, ''));
       if (!name) {
         throw new Error('the address names no database');
+      }
+      // libpq interprets these names as connection strings, not database
+      // names. Reject them rather than allow a different target or credentials
+      // to enter the command line.
+      if (name.includes('=') || /^postgres(?:ql)?:\/\//i.test(name)) {
+        throw new Error('the database name is ambiguous for backup tools');
       }
       return name;
     } catch (error) {
@@ -1072,11 +1107,8 @@ export class FullBackupService {
    * The password travels in the child's environment, never in its command
    * line where every user of the machine could read it.
    */
-  private connectionArgs(databaseOverride?: string): string[] {
-    if (databaseOverride) {
-      return [`--dbname=${cleanDatabaseUrl(databaseOverride)}`];
-    }
-    return [`--dbname=${cleanDatabaseUrl(this.requireDatabase())}`];
+  private connectionArgs(): string[] {
+    return [`--dbname=${this.requireDatabase()}`];
   }
 
   private async execSql(sql: string): Promise<void> {
@@ -1087,22 +1119,14 @@ export class FullBackupService {
     try {
       await this.execSql('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
     } catch (error) {
-      this.logger.warn(
+      this.logger.error(
         `Could not drop public schema with CASCADE: ${(error as Error).message}`,
       );
+      throw error;
     }
   }
 }
 
-function cleanDatabaseUrl(raw: string): string {
-  try {
-    const url = new URL(raw);
-    url.searchParams.delete('schema');
-    return url.toString();
-  } catch {
-    return raw.replace(/([?&])schema=[^&]*/, '$1').replace(/[?&]$/, '');
-  }
-}
 
 /// Environment for a child process that speaks to the same PostgreSQL the
 /// program uses. Kept out of the command line on purpose.
