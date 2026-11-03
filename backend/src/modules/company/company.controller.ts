@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Body,
   Controller,
   Delete,
@@ -56,7 +57,14 @@ export class CompanyController {
     @CurrentUser() user: AuthUser,
     @Body() dto: UpdateCompanyProfileDto,
   ) {
+    this.assertSuperAdmin(user);
     return this.service.updateProfile(user.companyId, user.userId, dto);
+  }
+
+  private assertSuperAdmin(user: AuthUser) {
+    if (!user.isSuperAdmin) {
+      throw new ForbiddenException('Only the Super Admin can modify company details.');
+    }
   }
 
   @Get('logo')
@@ -80,6 +88,7 @@ export class CompanyController {
     @CurrentUser() user: AuthUser,
     @UploadedFile() file: UploadedLogo | undefined,
   ) {
+    this.assertSuperAdmin(user);
     if (!file?.buffer?.length) {
       throw new BadRequestException('لم يتم اختيار ملف للشعار / No logo file was uploaded.');
     }
@@ -94,6 +103,7 @@ export class CompanyController {
   @Delete('logo')
   @RequirePermissions('admin.company.manage')
   async deleteLogo(@CurrentUser() user: AuthUser) {
+    this.assertSuperAdmin(user);
     await this.service.deleteLogo(user.companyId, user.userId);
     return { deleted: true };
   }
@@ -109,6 +119,7 @@ export class CompanyController {
     @CurrentUser() user: AuthUser,
     @Body() dto: CreateBranchDto,
   ) {
+    this.assertSuperAdmin(user);
     return this.service.createBranch(user.companyId, user.userId, dto);
   }
 
@@ -119,6 +130,7 @@ export class CompanyController {
     @Param('id') id: string,
     @Body() dto: UpdateBranchDto,
   ) {
+    this.assertSuperAdmin(user);
     return this.service.updateBranch(user.companyId, user.userId, id, dto);
   }
 
@@ -128,6 +140,7 @@ export class CompanyController {
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
   ) {
+    this.assertSuperAdmin(user);
     await this.service.deleteBranch(user.companyId, user.userId, id);
     return { deleted: true };
   }
