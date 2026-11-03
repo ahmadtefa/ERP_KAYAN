@@ -108,7 +108,16 @@ jobs:
           cache: true
       - run: flutter pub get --enforce-lockfile
       - run: python scripts/ci-diagnose.py flutter analyze --no-pub
-      - run: python scripts/ci-diagnose.py flutter test --no-pub --reporter expanded
+      - name: Run Flutter tests and report failures
+        shell: bash
+        run: |
+          if flutter test --no-pub --reporter json > "$RUNNER_TEMP/flutter-tests.json"; then
+            echo 'Flutter tests passed.'
+          else
+            status=$?
+            node scripts/report-flutter-test-failures.mjs "$RUNNER_TEMP/flutter-tests.json"
+            exit "$status"
+          fi
       - run: flutter build web --release --no-pub
 
   licence-evidence-required:
