@@ -429,6 +429,32 @@ export class SalesInvoicesService {
    * weighted average cost, the cost lines are written onto the invoice, and the
    * journal entry is created. If any of it fails, none of it happened.
    */
+  /** Cancel a draft without deleting its historical identity or retry key. */
+  async cancelDraft(companyId: string, branchId: string | null, userId: string, id: string) {
+    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    await this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.salesInvoice.findFirst({
+        where: { id, companyId, branchId, deletedAt: null },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      if (!invoice) throw new NotFoundException('Sales invoice not found');
+      if (invoice.documentType !== InvoiceDocumentType.INVOICE || invoice.status !== InvoiceStatus.DRAFT) {
+        throw new BadRequestException('Only a draft invoice can be cancelled');
+      }
+      if (invoice.salesOrderId) {
+        await releaseOrderAllocations(tx, 'sales', companyId, invoice.salesOrderId, invoice.lines);
+      }
+      const claimed = await tx.salesInvoice.updateMany({
+        where: { id, companyId, branchId, status: InvoiceStatus.DRAFT, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
+      if (claimed.count !== 1) throw new BadRequestException('Invoice was posted or cancelled concurrently');
+      await this.audit.recordRequired({ companyId, userId, action: 'CANCEL_DRAFT',
+        entity: 'sales_invoices', entityId: id, after: { invoiceNumber: invoice.invoiceNumber } }, tx);
+    });
+    return { id, cancelled: true };
+  }
+
   async post(companyId: string, userId: string, id: string) {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, deletedAt: null },

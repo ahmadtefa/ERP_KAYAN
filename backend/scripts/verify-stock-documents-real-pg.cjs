@@ -278,13 +278,20 @@ let difference = '70000000-0000-4000-8000-000000000005';
       await assert.rejects(svc.reverse(company,user,target.invoiceId),/Only posted/);
       await assert.rejects(orders.convertToInvoice(company,branch,user,target.orderId,
         {idempotencyKey:'same-request-000000001',invoiceDate:date,lines:[{orderLineId:target.orderLineId,quantity:'20'}]}),/no longer active/);
-      await orders.convertToInvoice(company,branch,user,target.orderId,
+      const reissued = await orders.convertToInvoice(company,branch,user,target.orderId,
         {idempotencyKey:'reconverted-request-0001',invoiceDate:date,lines:[{orderLineId:target.orderLineId,quantity:'20'}]});
+      await svc.cancelDraft(company,branch,user,reissued.invoice.id);
+      assert.equal((await orderLineModel.findUniqueOrThrow({where:{id:target.orderLineId}})).invoicedQuantity.toFixed(4),'10.0000');
+      assert.ok((await invoiceModel.findUniqueOrThrow({where:{id:reissued.invoice.id}})).deletedAt);
+      await assert.rejects(orders.convertToInvoice(company,branch,user,target.orderId,
+        {idempotencyKey:'reconverted-request-0001',invoiceDate:date,lines:[{orderLineId:target.orderLineId,quantity:'20'}]}),/no longer active/);
+      await orders.convertToInvoice(company,branch,user,target.orderId,
+        {idempotencyKey:'after-draft-cancel-00001',invoiceDate:date,lines:[{orderLineId:target.orderLineId,quantity:'20'}]});
     }
     orderStockState = await prisma.stockBalance.findUniqueOrThrow({where:{companyId_branchId_itemId:{companyId:company,branchId:branch,itemId:first.id}}});
     assert.equal(orderStockState.quantity.toFixed(4),'0.0000');
     assert.equal(orderStockState.value.toFixed(4),'0.0000');
-    console.log('PASS: PostgreSQL + Prisma order conversion selection, audit rollback, concurrent retry/competition, posting, reversal, missing-link rollback and re-conversion. No HTTP, Flutter or installed Windows test.');
+    console.log('PASS: PostgreSQL + Prisma order conversion selection, audit rollback, concurrent retry/competition, posting, reversal, missing-link rollback, draft cancellation and re-conversion. No HTTP, Flutter or installed Windows test.');
   } finally {
     await prisma.$disconnect();
     await sql.end();
