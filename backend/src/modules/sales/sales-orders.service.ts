@@ -10,6 +10,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import {
   defaultUnitPrice,
+  ItemUnitLike,
   parseDocumentQuantity,
   resolveUnitSelection,
 } from '../../common/units/unit-math';
@@ -463,7 +464,7 @@ export class SalesOrdersService {
         requestedUnitName: raw.unitName,
         enteredQuantity,
         baseUnitName: item.unit,
-        units: (item as { units?: any[] }).units ?? [],
+        units: (item as { units?: ItemUnitLike[] }).units ?? [],
       });
       const quantity = resolved.baseQuantity;
       const discountPercent = this.percent(raw.discountPercent, `Line ${index + 1} discountPercent`);
@@ -475,7 +476,7 @@ export class SalesOrdersService {
         const chosenUnitName = resolved.snapshot.unitName ?? item.unit;
         const listed = await this.prices.resolvePrice(this.prisma, companyId, {
           partyId: customerId,
-          partyKind: 'SUPPLIER',
+          partyKind: 'CUSTOMER',
           itemId: item.id,
           unit: chosenUnitName,
           quantity: enteredQuantity,
@@ -485,9 +486,13 @@ export class SalesOrdersService {
           : defaultUnitPrice('sale', resolved.row, item.salePrice);
       }
 
-      const taxRate = raw.taxRate === undefined || raw.taxRate === null || raw.taxRate === ''
+      // An explicitly cleared rate means zero; omission still inherits the
+      // item or company setting. Keep this consistent with invoice lines.
+      const taxRate = raw.taxRate === undefined
         ? item.taxRate ?? new Prisma.Decimal(settings.taxRate)
-        : this.percent(raw.taxRate, `Line ${index + 1} taxRate`);
+        : raw.taxRate === null || (typeof raw.taxRate === 'string' && raw.taxRate.trim() === '')
+          ? new Prisma.Decimal(0)
+          : this.percent(raw.taxRate, `Line ${index + 1} taxRate`);
 
       // Money follows the entered quantity in the chosen unit.
       const net = enteredQuantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);
