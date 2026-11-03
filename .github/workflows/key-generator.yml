@@ -6,12 +6,12 @@ name: Key Generator (Windows x64)
 # workflow artifact. It deliberately has no release step: an artifact is a test
 # deliverable, and publishing anything needs a decision made outside this file.
 #
-# No signing key is involved anywhere: the smoke test generates a throwaway
-# test key in a temporary folder and deletes it.
+# This legacy workflow creates a throwaway signing key. It must not be
+# dispatched while signing inside CI is prohibited.
 
+# Contains signing tests. Never dispatch in CI under the current policy;
+# a separate non-signing security check runs automatically instead.
 on:
-  pull_request:
-    branches: [main, 'arena/**']
   workflow_dispatch:
 
 permissions:

@@ -1,10 +1,8 @@
 name: ERP KAYAN CI
 
+# Legacy full suite includes tests that create and sign test licences.
+# Retained for review; do not dispatch until signing is moved to an approved VM.
 on:
-  pull_request:
-    branches: [main, 'arena/**']
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:

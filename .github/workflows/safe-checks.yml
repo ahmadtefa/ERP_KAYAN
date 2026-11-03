@@ -1,0 +1,121 @@
+name: Safe backend and Flutter checks (not release approval)
+
+on:
+  pull_request:
+    branches: [main, 'arena/**']
+  push:
+    branches: [main, 'arena/2d794f08-erp-kayan']
+
+permissions:
+  contents: read
+
+jobs:
+  backend-safe:
+    name: Backend focused non-signing tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql://synthetic@127.0.0.1:5432/kayan_unused?schema=public
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate standard Prisma Client
+        run: npx prisma generate
+      - name: Validate schema and typecheck
+        run: |
+          npx prisma validate
+          npx tsc --noEmit
+      - name: Audit automatic workflow triggers
+        run: node ../scripts/ci-workflow-safety.test.cjs
+      - name: Check signing guard fails closed without creating a key
+        run: >-
+          node --require ../scripts/ci-no-signing.cjs -e "const c=require('node:crypto');
+          for(const name of ['generateKeyPairSync','sign','createPrivateKey']) {
+          let blocked=false; try { c[name](); } catch(e) { blocked=e.message.includes('CI policy forbids'); }
+          if(!blocked) throw Error(name+' was not blocked'); }"
+      - name: Run reviewed non-signing backend and authorization tests
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
+        run: >-
+          npm test -- --runInBand
+          src/modules/backup/full-backup.service.spec.ts
+          src/modules/backup/full-backup-recovery-safety.spec.ts
+          src/modules/backup/pg-backup-connection.spec.ts
+          src/modules/sales/sales-orders.pricing-tax.spec.ts
+          src/modules/purchases/purchase-orders.units.spec.ts
+          src/common/units/unit-math.spec.ts
+          src/modules/licensing/license.guard.spec.ts
+          src/common/guards/super-admin.guard.spec.ts
+
+  prisma-upgrade:
+    name: Native Prisma and PostgreSQL 16 upgrade
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ci -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres?schema=public
+      KAYAN_TEST_ADMIN_URL: postgresql://ci:ci@127.0.0.1:5432/postgres
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify populated upgrade with the native Prisma CLI
+        run: node scripts/verify-prisma-native-upgrade.mjs
+
+  flutter:
+    name: Flutter analyze and tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - run: flutter analyze --no-pub
+      - run: flutter test --no-pub
+      - run: flutter build web --release --no-pub
+
+  licence-evidence-required:
+    name: Signed licence and installed-product evidence required
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Explicitly report missing approved-VM security evidence
+        run: |
+          echo '::error title=Security and installed-product tests blocked::Signed licence, generator and installed product tests require the approved isolated VM. They have not run and this PR is not release-approved.'
+          exit 1

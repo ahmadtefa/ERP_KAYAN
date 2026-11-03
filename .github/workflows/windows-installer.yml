@@ -9,10 +9,8 @@ on:
         options: [product, test-signed]
         default: product
         required: true
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main, 'arena/key-generator-register-ui-fix', 'arena/2d794f08-erp-kayan']
+  # No automatic PR/push builds, installation, signing or publication.
+  # Do not dispatch before the workflow is revised for the approved test VM.
 
 # Building or inspecting a candidate never needs permission to publish releases.
 # Any future publishing job must request write permission separately, after its

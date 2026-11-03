@@ -1,10 +1,10 @@
 name: Windows candidate preflight (no publication)
 
-# Runs only a committed tree at this session's branch. This is NOT an
-# installation/upgrade/licence-recovery test and cannot authorize a release.
+# This retained diagnostic is NOT an installation/upgrade/licence-recovery
+# test and cannot authorize a release.
+# This legacy workflow generates keypairs and runs signing tests. Retained
+# for review only; it must not be dispatched while the CI policy forbids them.
 on:
-  push:
-    branches: ['arena/2d794f08-erp-kayan']
   workflow_dispatch:
 
 permissions:

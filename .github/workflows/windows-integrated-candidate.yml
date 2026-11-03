@@ -1,8 +1,8 @@
 name: Integrated Windows candidate (not a release)
 
+# Contains test signing and a product install. Never dispatch until both have
+# been moved to an explicitly approved disposable VM outside CI.
 on:
-  push:
-    branches: ['arena/2d794f08-erp-kayan']
   workflow_dispatch:
 
 permissions:

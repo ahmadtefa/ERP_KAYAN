@@ -59,17 +59,26 @@ try {
   const legacy = new pg.Client({ connectionString: url.toString() }); await legacy.connect();
   await legacy.query('INSERT INTO license_keys (id,"keyId","licenseId",type,"payloadJson") VALUES ($1,$2,$3,$4,$5)',
     ['50000000-0000-4000-8000-000000000001', 'legacy-upgrade-key', 'legacy-upgrade-license', 'ACTIVATION', '{"legacy":true}']);
+  // Seed an existing rate before the tax-default migration. The migration
+  // must not rewrite it, while a new company must receive zero afterwards.
+  await legacy.query('INSERT INTO company_settings ("companyId", "taxRate", "updatedAt") VALUES ($1,14,now()) ON CONFLICT ("companyId") DO UPDATE SET "taxRate"=14', [company]);
   await legacy.end();
   migrate(join(root, 'prisma', 'schema.prisma'));
   const verify = new pg.Client({ connectionString: url.toString() }); await verify.connect();
   const result = await verify.query('SELECT c.code,u.username,i.code AS item_code,i."salePrice"::text AS price,t.name,t.columns,t.design FROM companies c JOIN users u ON u."companyId"=c.id JOIN items i ON i."companyId"=c.id JOIN quotation_column_templates t ON t."companyId"=c.id WHERE c.id=$1',[company]);
   const history = await verify.query('SELECT count(*)::int AS n FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL');
   const legacyProof = await verify.query('SELECT "payloadJson", "signedKey" FROM license_keys WHERE "keyId"=$1', ['legacy-upgrade-key']);
+  const historicalTax = await verify.query('SELECT "taxRate"::text AS rate FROM company_settings WHERE "companyId"=$1', [company]);
+  const newCompany = '60000000-0000-4000-8000-000000000001';
+  await verify.query('INSERT INTO companies (id,code,"nameEn","nameAr","isActive","updatedAt") VALUES ($1,$2,$3,$4,false,now())', [newCompany,'synthetic-tax-new','Synthetic Tax','Synthetic Tax']);
+  await verify.query('INSERT INTO company_settings ("companyId","updatedAt") VALUES ($1,now())', [newCompany]);
+  const newTax = await verify.query('SELECT "taxRate"::text AS rate FROM company_settings WHERE "companyId"=$1', [newCompany]);
   await verify.end();
+  if (historicalTax.rowCount !== 1 || Number(historicalTax.rows[0].rate) !== 14 || newTax.rowCount !== 1 || Number(newTax.rows[0].rate) !== 0) throw new Error('Tax default upgrade changed historical rate or failed to default a new company to zero');
   if (legacyProof.rowCount !== 1 || legacyProof.rows[0].payloadJson !== '{"legacy":true}' || legacyProof.rows[0].signedKey !== null) throw new Error('Legacy licence row changed or acquired fabricated signature proof');
   const row = result.rows[0];
   if (result.rowCount !== 1 || row.code !== 'synthetic-upgrade' || row.username !== 'synthetic-user' || row.item_code !== 'synthetic-item' || Number(row.price) !== 42.5 || row.columns[0].id !== 'synthetic-column' || history.rows[0].n !== entries.length) throw new Error('Synthetic data or migration history did not survive');
-  console.log(`PASS: native Prisma populated upgrade: ${old.length} old migrations, ${entries.length-old.length} new migrations; synthetic company/user/item/template preserved; ${history.rows[0].n} recorded migrations.`);
+  console.log(`PASS: native Prisma populated upgrade: ${old.length} old migrations, ${entries.length-old.length} new migrations; synthetic company/user/item/template preserved; historical tax retained and new default zero; ${history.rows[0].n} recorded migrations.`);
 } finally {
   if (created) await dbAdmin.query(`DROP DATABASE "${name}" WITH (FORCE)`);
   await dbAdmin.end();
