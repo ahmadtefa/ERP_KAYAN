@@ -10,7 +10,7 @@ on:
         default: product
         required: true
   pull_request:
-    branches: [main, 'arena/2d794f08-erp-kayan']
+    branches: [main, 'arena/2d794f08-erp-kayan', 'codex/fix-six-ui-requests-from-pr71']
   push:
     # A push to one of these branches builds a product candidate and runs the
     # installed-runtime smoke test. It cannot publish: publication needs a push
