@@ -79,10 +79,18 @@ try {
   const legacyProof = await verify.query('SELECT "payloadJson", "signedKey" FROM license_keys WHERE "keyId"=$1', ['legacy-upgrade-key']);
   const historicalTax = await verify.query('SELECT "taxRate"::text AS rate FROM company_settings WHERE "companyId"=$1', [company]);
   const newCompany = '60000000-0000-4000-8000-000000000001';
-  await verify.query('INSERT INTO companies (id,code,"nameEn","nameAr","isActive","updatedAt") VALUES ($1,$2,$3,$4,false,now())', [newCompany,'synthetic-tax-new','Synthetic Tax','Synthetic Tax']);
+  // A partial unique index permits one non-deleted company per installation.
+  // Simulate a replacement installation inside a rolled-back transaction so
+  // the fixture tests a genuinely active new company without losing history.
+  await verify.query('BEGIN');
+  await verify.query('UPDATE companies SET "deletedAt"=now() WHERE id=$1', [company]);
+  await verify.query('INSERT INTO companies (id,code,"nameEn","nameAr","updatedAt") VALUES ($1,$2,$3,$4,now())', [newCompany,'synthetic-tax-new','Synthetic Tax','Synthetic Tax']);
   await verify.query('INSERT INTO company_settings ("companyId","updatedAt") VALUES ($1,now())', [newCompany]);
   const newTax = await verify.query('SELECT "taxRate"::text AS rate FROM company_settings WHERE "companyId"=$1', [newCompany]);
+  await verify.query('ROLLBACK');
+  const preservedCompany = await verify.query('SELECT "deletedAt" FROM companies WHERE id=$1', [company]);
   await verify.end();
+  if (preservedCompany.rowCount !== 1 || preservedCompany.rows[0].deletedAt !== null) throw new Error('Historical company was not preserved after fixture rollback');
   if (historicalTax.rowCount !== 1 || Number(historicalTax.rows[0].rate) !== 14 || newTax.rowCount !== 1 || Number(newTax.rows[0].rate) !== 0) throw new Error('Tax default upgrade changed historical rate or failed to default a new company to zero');
   if (legacyProof.rowCount !== 1 || legacyProof.rows[0].payloadJson !== '{"legacy":true}' || legacyProof.rows[0].signedKey !== null) throw new Error('Legacy licence row changed or acquired fabricated signature proof');
   const row = result.rows[0];
