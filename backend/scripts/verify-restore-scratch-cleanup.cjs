@@ -57,13 +57,30 @@ const path = require('node:path');
     const service = new FullBackupService(prisma, { record: async () => {} }, maintenance, { reconcile: async () => {} });
     await client.query("CREATE TABLE fixture_items(id integer primary key, value text); INSERT INTO fixture_items VALUES(1,'before')");
     const backup = await service.createFull('fixture');
+    assert.ok((await service.verify(backup.file.name)).entries > 0);
+    // pg_dump exits successfully but writes a truncated PGDMP header. The
+    // real pg_restore must refuse it before a safety file is published.
+    const fakeDump = path.join(dir, 'fake-pg-dump');
+    await fs.writeFile(fakeDump, '#!/bin/sh\nfor x in "$@"; do case "$x" in --file=*) out=${x#--file=};; esac; done\nprintf PGDMP-broken > "$out"\n', { mode: 0o700 });
+    const savedDump = process.env.KAYAN_PG_DUMP;
+    process.env.KAYAN_PG_DUMP = fakeDump;
+    try {
+      const invalid = new FullBackupService(prisma, { record: async () => {} }, maintenance, { reconcile: async () => {} });
+      const before = (await fs.readdir(dir)).filter(name => name.endsWith('.dump'));
+      await assert.rejects(invalid.createSafety());
+      assert.deepEqual((await fs.readdir(dir)).filter(name => name.endsWith('.dump')), before);
+      assert.equal((await fs.readdir(dir)).some(name => name.endsWith('.partial')), false);
+    } finally {
+      if (savedDump === undefined) delete process.env.KAYAN_PG_DUMP;
+      else process.env.KAYAN_PG_DUMP = savedDump;
+    }
     await client.query("UPDATE fixture_items SET value='changed-after-backup'");
     await assert.rejects(service.restore({ confirm: true, fileName: backup.file.name }, 'fixture'), /rehearsal database could not be removed/i);
     assert.equal(schemaDestructions, 0);
     assert.equal(maintenance.isActive, false);
     assert.equal((await client.query('SELECT value FROM fixture_items')).rows[0].value, 'changed-after-backup');
     assert.equal((await service.list()).filter(f => f.kind === 'safety').length, 0);
-    console.log('PASS: real PostgreSQL scratch cleanup failure leaves the synthetic primary unchanged; Prisma and licence checks mocked.');
+    console.log('PASS: real pg_restore rejects a truncated safety archive and scratch cleanup failure leaves synthetic primary unchanged; Prisma and licence checks mocked.');
   } finally {
     if (scratchClient) await scratchClient.end();
     if (scratchName) await admin.query(`DROP DATABASE "${scratchName}"`);

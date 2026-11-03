@@ -175,14 +175,15 @@ describe('FullBackupService guards', () => {
           if (fileArg) {
             writeFileSync(fileArg.slice('--file='.length), Buffer.from('PGDMP-fake-archive'));
           }
-          (callback as (e: Error | null, o: string, s: string) => void)(null, '', '');
+          (callback as (e: Error | null, o: string, s: string) => void)(null, fileArg ? '' : '1; 0 0 TABLE synthetic', '');
           return {} as childProcess.ChildProcess;
         }) as typeof childProcess.execFile,
       );
 
       const result = await service.createFull('user-1');
 
-      expect(seenArgs).toHaveLength(1);
+      expect(seenArgs).toHaveLength(2);
+      expect(seenArgs[1]).toContain('--list');
       expect(seenArgs[0]).toContain('--no-password');
       expect(seenArgs[0]).toContain('--format=custom');
       expect(result.file.name).toMatch(/^kayan-full-.*\.dump$/);
@@ -214,13 +215,35 @@ describe('FullBackupService guards', () => {
       expect(readdirSync(dir)).toEqual([]);
     });
 
+    it.each(['unreadable', 'empty'] as const)(
+      'does not publish a %s archive even when pg_dump exits successfully',
+      async (failure) => {
+        const dir = temporaryDir('kayan-backups-');
+        const audit = { record: jest.fn(async () => {}) };
+        const service = serviceWithTools(dir, audit);
+        const before = await service.list();
+        jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
+          const argv = args as string[];
+          const fileArg = argv.find((a) => a.startsWith('--file='));
+          if (fileArg) writeFileSync(fileArg.slice(7), Buffer.from('PGDMP-truncated'));
+          const error = !fileArg && failure === 'unreadable' ? new Error('bad archive') : null;
+          (callback as (e: Error | null, o: string, s: string) => void)(error, '; header only', error ? 'bad archive' : '');
+          return {} as childProcess.ChildProcess;
+        }) as typeof childProcess.execFile);
+        await expect(service.createFull('u1')).rejects.toBeInstanceOf(ServiceUnavailableException);
+        expect(readdirSync(dir)).toEqual([]);
+        expect(await service.list()).toEqual(before);
+        expect(audit.record).not.toHaveBeenCalled();
+      },
+    );
+
     it('creates distinct completed files for concurrent backups in the same second', async () => {
       const dir = temporaryDir('kayan-backups-');
       const service = serviceWithTools(dir);
       jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
         const fileArg = (args as string[]).find((a) => a.startsWith('--file='));
         if (fileArg) writeFileSync(fileArg.slice(7), Buffer.from('PGDMP-fake-archive'));
-        setImmediate(() => (callback as (e: Error | null, o: string, s: string) => void)(null, '', ''));
+        setImmediate(() => (callback as (e: Error | null, o: string, s: string) => void)(null, fileArg ? '' : '1; 0 0 TABLE synthetic', ''));
         return {} as childProcess.ChildProcess;
       }) as typeof childProcess.execFile);
       const [first, second] = await Promise.all([service.createFull('u1'), service.createFull('u2')]);
@@ -235,7 +258,7 @@ describe('FullBackupService guards', () => {
       jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
         const fileArg = (args as string[]).find((a) => a.startsWith('--file='));
         if (fileArg) writeFileSync(fileArg.slice(7), Buffer.from('PGDMP-fake-archive'));
-        (callback as (e: Error | null, o: string, s: string) => void)(null, '', '');
+        (callback as (e: Error | null, o: string, s: string) => void)(null, fileArg ? '' : '1; 0 0 TABLE synthetic', '');
         return {} as childProcess.ChildProcess;
       }) as typeof childProcess.execFile);
       const fsPromises = jest.requireActual<typeof import('fs/promises')>('fs/promises');
@@ -436,8 +459,8 @@ describe('FullBackupService guards', () => {
       jest.mocked(childProcess.execFile).mockImplementation(
         ((_, args, ___, callback) => {
           const fileArg = (args as string[]).find((a) => a.startsWith('--file='));
-          writeFileSync(
-            String(fileArg).slice('--file='.length),
+          if (fileArg) writeFileSync(
+            fileArg.slice('--file='.length),
             Buffer.concat([Buffer.from('PGDMP', 'latin1'), Buffer.alloc(32)]),
           );
           const complete = callback as (
@@ -445,7 +468,7 @@ describe('FullBackupService guards', () => {
             stdout: string,
             stderr: string,
           ) => void;
-          complete(null, '', '');
+          complete(null, fileArg ? '' : '1; 0 0 TABLE synthetic', '');
           return {} as childProcess.ChildProcess;
         }) as typeof childProcess.execFile,
       );

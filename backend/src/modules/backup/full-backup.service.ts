@@ -360,6 +360,10 @@ export class FullBackupService {
         ...this.connectionArgs(),
       ]);
       file = await this.validateAndDescribe(partial, name, kind);
+      // The header alone is not enough: refuse an unreadable or empty table
+      // of contents before publishing either a user or a safety backup. This
+      // is not a substitute for a full restore rehearsal of the archive data.
+      await this.verifyUploaded(name, tools.pgRestore as string, partial);
       // Hard-linking within the same directory is atomic and fails if a
       // completed backup already occupies the destination. Never replace it.
       await link(partial, path);
@@ -453,13 +457,10 @@ export class FullBackupService {
   }
 
   /**
-   * Reads a backup back and proves it is a usable archive, not merely a file
-   * with the right first five bytes: `pg_restore --list` walks the whole
-   * table of contents, so a truncated or foreign file is caught here rather
-   * than halfway through a restore.
-   *
-   * Used before a destructive reset, where "the backup exists" is not good
-   * enough — it has to be a backup that can be put back.
+   * Checks the archive header and table of contents with `pg_restore --list`.
+   * This catches unreadable or empty archive metadata, but does not read every
+   * data block and does not establish that the archive can be fully restored.
+   * A complete restore rehearsal is needed before relying on that claim.
    */
   async verify(name: string): Promise<BackupVerification> {
     const tools = this.requireTools();
@@ -532,7 +533,6 @@ export class FullBackupService {
 
   /// The same check, for bytes that were uploaded rather than read from disk.
   private async verifyUploaded(
-    buffer: Buffer,
     label: string,
     pgRestore: string,
     stagingPath: string,
@@ -663,7 +663,6 @@ export class FullBackupService {
       //     truncated download or a file from a foreign database before any
       //     database is involved at all.
       const entries = await this.verifyUploaded(
-        buffer,
         label,
         tools.pgRestore as string,
         staging,
