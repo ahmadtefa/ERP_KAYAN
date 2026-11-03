@@ -105,7 +105,12 @@ Name: "{autodesktop}\KAYAN ERP"; Filename: "{app}\erp_kayan.exe"; WorkingDir: "{
 Filename: "{app}\erp_kayan.exe"; Description: "Launch KAYAN ERP"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [UninstallDelete]
-Type: dirifempty; Name: "{app}"
+; Runtime setup creates files that are not part of the original [Files] manifest
+; (for example generated runtime markers and local support files). Remove the
+; remaining contents only after InitializeUninstall has safely stopped and
+; unregistered KAYAN services and removed KAYAN-owned data. This path is the
+; exact application directory; shared Node/PostgreSQL installations are outside it.
+Type: filesandordirs; Name: "{app}"
 
 [Code]
 var
