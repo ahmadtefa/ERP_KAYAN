@@ -357,7 +357,8 @@ export class ChartOfAccountsService {
       where: {
         companyId,
         code,
-        deletedAt: null,
+        // The database unique constraint includes soft-deleted accounts.
+        // Do not promise a code is free if inserting it will fail there.
         ...(exceptId ? { id: { not: exceptId } } : {}),
       },
       select: { id: true },

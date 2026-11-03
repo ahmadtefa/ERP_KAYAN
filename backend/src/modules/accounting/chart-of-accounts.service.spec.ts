@@ -32,7 +32,7 @@ function fakePrisma(state: {
       return (
         accounts.find((a) =>
           args?.where
-            ? matches(a, { deletedAt: null, ...args.where })
+            ? matches(a, args.where)
             : true,
         ) ?? null
       );
@@ -142,6 +142,13 @@ describe('ChartOfAccountsService', () => {
           type: 'ASSET',
         }),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('refuses a code retained by a soft-deleted account', async () => {
+      const prisma = fakePrisma({ accounts: [{ ...baseAccounts[1], deletedAt: new Date() }] });
+      await expect(serviceWith(prisma).create('c1', 'u1', {
+        code: '11', nameEn: 'Duplicate', nameAr: 'مكرر', type: 'ASSET',
+      })).rejects.toBeInstanceOf(ConflictException);
     });
 
     it('refuses a parent of a different account type', async () => {

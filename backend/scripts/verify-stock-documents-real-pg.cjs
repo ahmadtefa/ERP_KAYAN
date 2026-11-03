@@ -27,6 +27,7 @@ const { DocumentNumberService } = require('../src/modules/accounting/document-nu
 const { AccountMapService } = require('../src/modules/accounting/account-map.service');
 const { PostingService } = require('../src/modules/accounting/posting.service');
 const { StockDocumentsService } = require('../src/modules/inventory/stock-documents.service');
+const { ChartOfAccountsService } = require('../src/modules/accounting/chart-of-accounts.service');
 
 const company = '10000000-0000-4000-8000-000000000001';
 const user = '20000000-0000-4000-8000-000000000001';
@@ -60,6 +61,23 @@ let difference = '70000000-0000-4000-8000-000000000005';
       new PostingService(numbers, periods, costCenters), new AccountMapService(), audit,
       new CompanySettingsService(prisma, audit), new WarehouseService(prisma, audit), costCenters);
     const date = '2026-10-28';
+    // Real chart operations, not an HTTP or Flutter test. The fixture uses
+    // unique synthetic codes and keeps historical journal rows untouched.
+    const chart = new ChartOfAccountsService(prisma, audit);
+    const root = await chart.create(company, user, { code:'SYN-ROOT', nameEn:'Synthetic root',
+      nameAr:'حساب رئيسي تجريبي', type:'ASSET', isPostable:false });
+    const child = await chart.create(company, user, { code:'SYN-CHILD', nameEn:'Synthetic child',
+      nameAr:'حساب فرعي تجريبي', type:'ASSET', parentId:root.id, isPostable:true });
+    assert.equal(child.parentId,root.id);
+    await assert.rejects(chart.create(company,user,{code:'SYN-CHILD',nameEn:'Duplicate',nameAr:'مكرر',type:'ASSET'}), /already used/i);
+    await assert.rejects(chart.update(company,user,root.id,{isActive:false}), /subaccounts/i);
+    assert.equal((await chart.update(company,user,child.id,{isActive:false})).isActive,false);
+    assert.equal((await chart.update(company,user,child.id,{isActive:true})).isActive,true);
+    const hierarchy = await sql.query('SELECT "parentId", "isActive" FROM accounts WHERE id=$1', [child.id]);
+    assert.equal(hierarchy.rows[0].parentId, root.id);
+    assert.equal(hierarchy.rows[0].isActive, true);
+    console.log('PASS: real PostgreSQL + Prisma chart create, child relationship, duplicate and activation rules.');
+
     const receipt = await service.create(company, branch, user, { kind:'ADJUSTMENT', documentDate:date,
       toWarehouseId:warehouse, reason:'Synthetic receipt', lines:[{itemId:item, quantity:'10', unitCost:'7.5'}] });
     await service.post(company, user, receipt.id);
@@ -81,6 +99,11 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(journal.rowCount,2);
     assert(journal.rows.some(r => r.accountId === difference && r.costCenterId === centre && Number(r.debit) === 30));
     assert(journal.rows.some(r => r.accountId === inventory && Number(r.credit) === 30));
+    const historyBefore = await sql.query('SELECT id, debit::text, credit::text FROM journal_lines WHERE "accountId"=$1 ORDER BY id', [inventory]);
+    assert.equal((await chart.update(company,user,inventory,{isActive:false})).isActive,false);
+    assert.equal((await chart.update(company,user,inventory,{isActive:true})).isActive,true);
+    const historyAfter = await sql.query('SELECT id, debit::text, credit::text FROM journal_lines WHERE "accountId"=$1 ORDER BY id', [inventory]);
+    assert.deepEqual(historyAfter.rows,historyBefore.rows);
     const excessive = await service.create(company, branch, user, { kind:'ADJUSTMENT', documentDate:date,
       toWarehouseId:warehouse, costCenterId:centre, lines:[{itemId:item, quantity:'-9'}] });
     await assert.rejects(service.post(company, user, excessive.id), /stock|warehouse/i);
