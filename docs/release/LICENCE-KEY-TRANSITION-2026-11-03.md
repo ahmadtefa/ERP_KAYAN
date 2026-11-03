@@ -7,7 +7,7 @@
 | التحقق القديم | `9153e15e475ba2e2251a7e40d8eb58559006bbba2923ee8ba564d8d59cc602c4` | `distribution/windows/public-key.pem`، ما زال يستخدمه مسار Windows الحالي؛ لا يجوز حذفه |
 | الإصدار الجديد الذي أقرّه المستخدم | `f93238b0cdc0a81d345f160cf8dcdbb7de5e4d20fa99959b7e4b165ac1ebb5c3` | `public-key-next.pem`؛ مطابقة البصمة مثبتة، لكنه **غير موصول بعد** بمسار المنتج/المثبت/الاستعادة |
 
-`node --require ./scripts/ci-no-signing.cjs --test scripts/license-public-key-transition.test.mjs` يفحص الملفين والبصمتين ونوع المفتاح فقط؛ ليس اختبار توقيع أو إصدار أو ترخيص.
+`node --require ./scripts/ci-no-signing.cjs --test scripts/license-public-key-transition.test.mjs` يفحص الملفين والبصمتين ونوع المفتاح فقط؛ ليس اختبار توقيع أو إصدار أو ترخيص. أُضيفت نواة `PublicLicenseKeyring` منفصلة تشترط البصمتين الكاملتين وتجرّب المفتاح الثاني فقط بعد رفض توقيع الأول؛ ليست موصولة بخدمة المنتج. اختبارها يستخدم mock للتحقق ويختبر التحكم والبصمات دون توليد أو توقيع أو تحقق توقيع حقيقي؛ نجاحه ليس دليل توافق التراخيص.
 
 ## ما يمنع التبديل الآن
 

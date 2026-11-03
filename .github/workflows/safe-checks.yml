@@ -64,6 +64,7 @@ jobs:
           src/modules/purchases/purchase-orders.units.spec.ts
           src/common/units/unit-math.spec.ts
           src/modules/licensing/license.guard.spec.ts
+          src/modules/licensing/license-keyring.spec.ts
           src/common/guards/super-admin.guard.spec.ts
           src/modules/company/company-profile.guard.spec.ts
           src/modules/company/company.service.spec.ts
