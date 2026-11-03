@@ -47,6 +47,22 @@ class _StockScreenState extends ConsumerState<StockScreen> {
   Future<void> _createMovement({required bool issue}) async {
     final language = Localizations.localeOf(context).languageCode;
     final arabic = language == 'ar';
+    final user = ref.read(currentUserProvider);
+    if (user?.branchId == null || user!.branchId.isEmpty) {
+      showMessage(context, arabic ? 'المستخدم غير مرتبط بفرع.' : 'The signed-in user has no branch.', error: true);
+      return;
+    }
+    final client = ref.read(apiClientProvider);
+    final warehouses = await client.getList(
+      '/inventory/warehouses',
+      query: {'branchId': user.branchId},
+    );
+    if (!mounted) return;
+    if (warehouses.isEmpty) {
+      showMessage(context, arabic ? 'لا يوجد مخزن نشط في الفرع الحالي.' : 'There is no active warehouse in the current branch.', error: true);
+      return;
+    }
+
     final items = await ref.read(activeItemsProvider.future);
     if (!mounted) return;
     if (items.isEmpty) {
@@ -82,6 +98,19 @@ class _StockScreenState extends ConsumerState<StockScreen> {
               FieldOption(
                 asString(item['id']) ?? '',
                 '${text(item, 'code')} — ${arabic ? text(item, 'nameAr') : text(item, 'nameEn')}',
+              ),
+          ],
+        ),
+        FieldSpec(
+          'toWarehouseId',
+          arabic ? 'المخزن' : 'Warehouse',
+          kind: FieldKind.select,
+          required: true,
+          options: [
+            for (final warehouse in warehouses)
+              FieldOption(
+                asString(warehouse['id']) ?? '',
+                '${text(warehouse, 'code')} — ${arabic ? text(warehouse, 'nameAr') : text(warehouse, 'nameEn')}',
               ),
           ],
         ),
@@ -127,12 +156,6 @@ class _StockScreenState extends ConsumerState<StockScreen> {
     );
     if (values == null || !mounted) return;
 
-    final user = ref.read(currentUserProvider);
-    if (user?.branchId == null || user!.branchId.isEmpty) {
-      showMessage(context, arabic ? 'المستخدم غير مرتبط بفرع.' : 'The signed-in user has no branch.', error: true);
-      return;
-    }
-
     setState(() => _busy = true);
     try {
       final quantity = asString(values['quantity'])!;
@@ -141,12 +164,12 @@ class _StockScreenState extends ConsumerState<StockScreen> {
         'quantity': issue ? '-$quantity' : quantity,
         if (!issue) 'unitCost': values['unitCost'],
       };
-      final client = ref.read(apiClientProvider);
       final document = await client.post(
         '/inventory/stock-documents',
         body: {
           'kind': 'ADJUSTMENT',
           'branchId': user.branchId,
+          'toWarehouseId': values['toWarehouseId'],
           'documentDate': values['documentDate'],
           'reason': values['reason'],
           if (issue) 'costCenterId': values['costCenterId'],
