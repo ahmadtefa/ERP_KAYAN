@@ -346,6 +346,7 @@ async function main() {
       lines: [{ itemId: item.id, quantity: '-1.0000' }],
     },
   });
+  if (!issue?.id) return;
   const issuePosted = await api(`/inventory/stock-documents/${issue.id}/post`, {
     method: 'POST',
   });
