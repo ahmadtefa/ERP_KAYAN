@@ -24,8 +24,10 @@ function Remove-OwnedTree([string]$Path) {
 }
 
 # Stop the desktop client and any child processes before touching its files.
-Get-Process -Name 'erp_kayan' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Milliseconds 500
+Get-Process -Name 'erp_kayan' -ErrorAction SilentlyContinue | ForEach-Object {
+  & taskkill.exe /PID $_.Id /T /F *> $null
+}
+Start-Sleep -Milliseconds 800
 
 # Stop and unregister only KAYAN's private PostgreSQL service. The bundled
 # PostgreSQL directory is inside the KAYAN install tree; shared PostgreSQL
