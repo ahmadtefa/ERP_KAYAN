@@ -298,6 +298,22 @@ async function main() {
     `${adjustment.costCenter?.code}`,
   );
 
+  const issueWithoutCentre = await api('/inventory/stock-documents', {
+    method: 'POST',
+    json: {
+      kind: 'ADJUSTMENT',
+      documentDate: today,
+      reason: 'Issue without attribution must be refused',
+      lines: [{ itemId: item.id, quantity: '-1.0000' }],
+    },
+  });
+  check(
+    'a stock issue without a cost centre is refused',
+    issueWithoutCentre.status === 400 &&
+      /cost center is required/i.test(JSON.stringify(issueWithoutCentre.data ?? {})),
+    `status ${issueWithoutCentre.status} ${JSON.stringify(issueWithoutCentre.data ?? {})?.slice(0, 160)}`,
+  );
+
   const transfer = await api('/inventory/stock-documents', {
     method: 'POST',
     json: {
@@ -319,6 +335,32 @@ async function main() {
     method: 'POST',
   });
   check('the adjustment posts', adjustmentPosted.status === 201 || adjustmentPosted.status === 200, `status ${adjustmentPosted.status}`);
+
+  const issue = await must('create a stock issue with its cost centre', '/inventory/stock-documents', {
+    method: 'POST',
+    json: {
+      kind: 'ADJUSTMENT',
+      documentDate: today,
+      reason: 'Issue to project cost centre',
+      costCenterId: project.id,
+      lines: [{ itemId: item.id, quantity: '-1.0000' }],
+    },
+  });
+  const issuePosted = await api(`/inventory/stock-documents/${issue.id}/post`, {
+    method: 'POST',
+  });
+  check('the attributed stock issue posts', issuePosted.status === 201 || issuePosted.status === 200, `status ${issuePosted.status}`);
+  const postedIssue = await must('read the posted stock issue', `/inventory/stock-documents/${issue.id}`);
+  const issueJournal = postedIssue?.journalEntryId
+    ? await must('read the stock issue journal', `/accounting/journal-entries/${postedIssue.journalEntryId}`)
+    : null;
+  check(
+    'the stock issue expense is charged to the selected cost centre',
+    (issueJournal?.lines ?? []).some((line) => line.costCenterId === project.id),
+    `attributed lines ${(issueJournal?.lines ?? []).filter((line) => line.costCenterId === project.id).length}`,
+  );
+  const issueReversed = await api(`/inventory/stock-documents/${issue.id}/reverse`, { method: 'POST' });
+  check('the attributed stock issue reverses', issueReversed.status === 201 || issueReversed.status === 200, `status ${issueReversed.status}`);
 
   const postedDoc = await must('read the posted adjustment', `/inventory/stock-documents/${adjustment.id}`);
   const journal = postedDoc?.journalEntryId
