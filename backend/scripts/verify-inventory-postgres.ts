@@ -414,7 +414,7 @@ async function main() {
         orderBy: { createdAt: 'asc' },
       });
       assert.equal(history.length, 4, 'three receipts and one issue');
-      assert.equal(history[3].unitCostAfter.toFixed(4), '14.545455');
+      assert.equal(history[3].unitCostAfter.toFixed(6), '14.545455');
       created.costHistory.push(...history.map((row) => row.id));
     });
 

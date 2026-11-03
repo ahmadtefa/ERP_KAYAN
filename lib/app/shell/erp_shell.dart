@@ -989,6 +989,12 @@ class _TopBar extends StatelessWidget {
               ],
             ),
           ),
+          IconButton(
+            tooltip: context.l10n.dashboard,
+            onPressed: () => context.go(AppRoutes.dashboard),
+            icon: const Icon(Icons.home_outlined, size: 19),
+          ),
+          const SizedBox(width: AppSpacing.xs),
           _SearchTrigger(expanded: isExtended),
           const SizedBox(width: AppSpacing.xs),
           // Before the language menu: an unread alert is more urgent than a

@@ -60,7 +60,7 @@ class _FakeApiClient extends ApiClient {
 }
 
 /// Mineral water: sold by the bottle, bought and sold by the carton of twelve.
-Map<String, dynamic> waterItem({bool cartonTakesFractions = true}) => {
+Map<String, dynamic> waterItem({bool cartonTakesFractions = true, String taxRate = '0.0000'}) => {
   'id': 'item-water',
   'code': 'WATER-1',
   'nameEn': 'Mineral water',
@@ -68,7 +68,7 @@ Map<String, dynamic> waterItem({bool cartonTakesFractions = true}) => {
   'unit': 'عبوة',
   'isActive': true,
   'isStockTracked': true,
-  'taxRate': '0.0000',
+  'taxRate': taxRate,
   'salePrice': '5.0000',
   'purchasePrice': '4.0000',
   'units': <Map<String, dynamic>>[
@@ -300,6 +300,17 @@ void main() {
     expect(lines.single['quantity'], '10');
     expect(lines.single['unitName'], 'كرتونة');
     expect(lines.single['unitPrice'], '48');
+  });
+
+  testWidgets('an item tax rate is not silently applied to a new invoice line', (tester) async {
+    final api = await _openEditor(tester, waterItem(taxRate: '14.0000'));
+    await _chooseCustomerAndItem(tester);
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(api.postPath, '/sales/invoices');
+    final lines = (api.postBody?['lines'] as List).cast<Map>();
+    expect(lines.single['taxRate'], '0');
   });
 
   testWidgets('a price typed on purpose survives a unit switch', (

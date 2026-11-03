@@ -405,11 +405,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   }
 
   void _applyItemDefaults(_LineDraft line, Json item) {
-    // An explicit rate the user typed is respected; only the empty case is
-    // filled in from the item.
-    if (line.taxRate.text.trim().isEmpty || line.taxRate.text.trim() == '0') {
-      line.taxRate.text = formatQuantity(asString(item['taxRate']), decimals: 2);
-    }
+    // Tax is never inherited silently from the item. An empty tax field
+    // means zero; the operator must enter a rate explicitly when needed.
     final units = lineUnitsOf(item);
     // Default to the smallest (base) unit the first time an item is picked;
     // a reopened line keeps the unit its snapshot recorded.
@@ -507,7 +504,9 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           'unitName': line.unitName!.trim(),
         'quantity': quantity,
         'unitPrice': price,
-        if (line.taxRate.text.trim().isNotEmpty) 'taxRate': line.taxRate.text.trim(),
+        'taxRate': line.taxRate.text.trim().isEmpty
+            ? '0'
+            : line.taxRate.text.trim(),
         if (line.costCenterId != null) 'costCenterId': line.costCenterId,
         if (line.discountKind != DiscountKind.none)
           'discountType': discountTypeOf(line.discountKind),

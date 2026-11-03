@@ -104,6 +104,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(currentRoute, AppRoutes.settings);
 
+      // The top-bar home control must return to the main dashboard.
+      await tester.tap(find.byIcon(Icons.home_outlined));
+      await tester.pumpAndSettle();
+      expect(currentRoute, AppRoutes.dashboard);
+
       // Scroll back up to the first item (لوحة التحكم / Dashboard).
       final firstItemFinder = find.widgetWithText(ListTile, 'لوحة التحكم');
       await tester.scrollUntilVisible(
