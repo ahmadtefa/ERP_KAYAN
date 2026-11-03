@@ -251,7 +251,7 @@ Future<void> _loadScreenshotFonts() async {
   await loader.load();
 
   final roots = <String>{
-    if (Platform.environment['FLUTTER_ROOT'] case final root?) root,
+    ?Platform.environment['FLUTTER_ROOT'],
     for (final part in (Platform.environment['PATH'] ?? '').split(
       Platform.isWindows ? ';' : ':',
     ))

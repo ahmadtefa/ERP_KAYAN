@@ -6,6 +6,9 @@ void main() {
     for (final theme in [AppTheme.light(), AppTheme.dark()]) {
       expect(theme.textTheme.bodyMedium?.fontFamily, 'IBMPlexSansArabic');
       expect(theme.textTheme.titleLarge?.fontFamily, 'IBMPlexSansArabic');
+      expect(theme.filledButtonTheme.style?.textStyle?.resolve({})?.fontFamily, 'IBMPlexSansArabic');
+      expect(theme.outlinedButtonTheme.style?.textStyle?.resolve({})?.fontFamily, 'IBMPlexSansArabic');
+      expect(theme.textButtonTheme.style?.textStyle?.resolve({})?.fontFamily, 'IBMPlexSansArabic');
     }
   });
 }
