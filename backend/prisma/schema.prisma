@@ -657,7 +657,7 @@ model CompanySetting {
 
   /// Default VAT rate in percent, used when neither the item nor the line
   /// carries one. 0 means "this company does not charge VAT".
-  taxRate Decimal @default(14) @db.Decimal(9, 4)
+  taxRate Decimal @default(0) @db.Decimal(9, 4)
 
   /// When true, the prices typed on a sales line already include VAT and the
   /// tax is backed out of them instead of being added.
