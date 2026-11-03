@@ -27,12 +27,9 @@ import '../widget/test_harness.dart';
 
 /// Design screenshots, rendered from the real screens.
 ///
-/// These tests exist so a visual change can be *seen*, not just described.
-/// CI runs this file with `--update-goldens` and uploads the PNGs as the
-/// `design-screenshots` artifact; the same file then participates in the
-/// normal test run against the freshly rendered baselines. They are
-/// screenshot generators first and regression checks second — nothing here
-/// is allowed to fail the build because a pixel moved.
+/// The normal CI job compares the current rendering to separately reviewed
+/// committed goldens. A separate diagnostic job may render synthetic preview
+/// images, but never updates the expected images used by that comparison.
 class _FakeApiClient extends ApiClient {
   _FakeApiClient()
     : super(AppConfig.forLocalServer('http://screenshot.invalid'), FakeTokenStore());
@@ -240,36 +237,43 @@ final Json _monthly = <String, dynamic>{
   ],
 };
 
-/// The app ships no font of its own; a widget-test render would otherwise
-/// draw every glyph as a box. When the machine has a real font with Arabic
-/// coverage, register it so the screenshots stay readable. Absent fonts are
-/// fine — layout and colour still render.
-Future<void> _tryLoadSystemFonts() async {
-  const candidates = <String, List<String>>{
-    'NotoNaskhArabic': [
-      '/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf',
-      '/usr/share/fonts/truetype/fonts-noto-core/NotoNaskhArabic-Regular.ttf',
-    ],
-    'DejaVuSans': [
-      '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-      '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-    ],
+/// The test runner defaults to Ahem and does not load application fonts. Load
+/// the exact bundled files and Flutter SDK icon font rather than accepting
+/// unreadable boxes or a machine-dependent system fallback as a golden.
+Future<void> _loadScreenshotFonts() async {
+  final loader = FontLoader('IBMPlexSansArabic');
+  for (final weight in ['Regular', 'Medium', 'SemiBold', 'Bold']) {
+    final bytes = await File(
+      'assets/fonts/IBMPlexSansArabic-$weight.ttf',
+    ).readAsBytes();
+    loader.addFont(Future.value(ByteData.sublistView(bytes)));
+  }
+  await loader.load();
+
+  final roots = <String>{
+    if (Platform.environment['FLUTTER_ROOT'] case final root?) root,
+    for (final part in (Platform.environment['PATH'] ?? '').split(
+      Platform.isWindows ? ';' : ':',
+    ))
+      if (part.isNotEmpty) File(part).parent.path,
   };
-  for (final entry in candidates.entries) {
-    for (final path in entry.value) {
-      final file = File(path);
-      if (!await file.exists()) continue;
-      try {
-        final bytes = await file.readAsBytes();
-        final loader = FontLoader(entry.key)
-          ..addFont(Future.value(ByteData.view(bytes.buffer)));
-        await loader.load();
-      } catch (_) {
-        // A font that will not load must not fail a screenshot.
-      }
+  File? icons;
+  for (final root in roots) {
+    final candidate = File(
+      '$root/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+    );
+    if (await candidate.exists()) {
+      icons = candidate;
       break;
     }
   }
+  if (icons == null) {
+    throw StateError('Flutter SDK MaterialIcons font is required for screenshot tests');
+  }
+  final iconBytes = await icons.readAsBytes();
+  final iconLoader = FontLoader('MaterialIcons')
+    ..addFont(Future.value(ByteData.sublistView(iconBytes)));
+  await iconLoader.load();
 }
 
 Future<void> _pumpShot(
@@ -325,7 +329,7 @@ Future<void> _pumpShot(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUpAll(_tryLoadSystemFonts);
+  setUpAll(_loadScreenshotFonts);
 
   testWidgets('screenshot: dashboard inside the shell (Arabic RTL)', (
     tester,

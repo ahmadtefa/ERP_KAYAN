@@ -32,7 +32,9 @@ abstract final class AppTheme {
   static ThemeData _build(Brightness brightness, double textScale) {
     final isLight = brightness == Brightness.light;
     final scheme = isLight ? _lightScheme : _darkScheme;
-    final textTheme = _textTheme(scheme);
+    // Apply the bundled family to explicit styles as well as ThemeData's
+    // defaults, so Arabic and Latin stay readable offline across controls.
+    final textTheme = _textTheme(scheme).apply(fontFamily: 'IBMPlexSansArabic');
     final border = isLight ? AppColors.border : AppColors.darkBorder;
     final surface = isLight ? AppColors.surface : AppColors.darkSurface;
     final surfaceAlt = isLight ? AppColors.surfaceMuted : AppColors.darkSurfaceAlt;
@@ -42,6 +44,7 @@ abstract final class AppTheme {
       useMaterial3: true,
       brightness: brightness,
       colorScheme: scheme,
+      fontFamily: 'IBMPlexSansArabic',
       textTheme: textTheme,
       scaffoldBackgroundColor: canvas,
       canvasColor: canvas,
