@@ -174,7 +174,11 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
             ),
             ColumnSpec(l10n.nameEnglish, value: (r) => text(r, 'nameEn')),
             ColumnSpec(l10n.nameArabic, value: (r) => text(r, 'nameAr')),
-            ColumnSpec(l10n.phone, value: (r) => text(r, 'phone')),
+            ColumnSpec(
+              l10n.phone,
+              value: (r) => text(r, 'phone'),
+              textDirection: TextDirection.ltr,
+            ),
             if (_isCustomer)
               ColumnSpec(
                 l10n.creditLimit,

@@ -315,6 +315,7 @@ Future<void> _pumpShot(
         dashboardMonthlyProvider.overrideWith((ref) async => _monthly),
       ],
       child: MaterialApp.router(
+        debugShowCheckedModeBanner: false,
         locale: const Locale('ar'),
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -323,6 +324,15 @@ Future<void> _pumpShot(
       ),
     ),
   );
+  await tester.pumpAndSettle();
+  // Decode the actual bundled logo before capturing the first screen too;
+  // otherwise later screenshots see a warmed cache while the first is blank.
+  await tester.runAsync(() async {
+    await precacheImage(
+      const AssetImage('1.png'),
+      tester.element(find.byType(MaterialApp)),
+    );
+  });
   await tester.pumpAndSettle();
 }
 
