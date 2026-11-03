@@ -96,6 +96,16 @@ try {
   const row = result.rows[0];
   if (result.rowCount !== 1 || row.code !== 'synthetic-upgrade' || row.username !== 'synthetic-user' || row.item_code !== 'synthetic-item' || Number(row.price) !== 42.5 || row.columns[0].id !== 'synthetic-column' || history.rows[0].n !== entries.length) throw new Error('Synthetic data or migration history did not survive');
   console.log(`PASS: native Prisma populated upgrade: ${old.length} old migrations, ${entries.length-old.length} new migrations; synthetic company/user/item/template preserved; historical tax retained and new default zero; ${history.rows[0].n} recorded migrations.`);
+  // The child can only touch this script's disposable database. Production
+  // stock, journal and Prisma services run, not a Prisma-shaped test double.
+  const stock = spawnSync(process.execPath, [join(root, 'scripts', 'verify-stock-documents-real-pg.cjs')], {
+    cwd: root,
+    env: { ...process.env, DATABASE_URL: url.toString(), KAYAN_STOCK_DISPOSABLE_DATABASE: name },
+    encoding: 'utf8',
+  });
+  if (stock.status !== 0) throw new Error(`Stock PostgreSQL fixture failed: ${(stock.stderr || stock.stdout || '').slice(-5000).replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, '[DATABASE URL REDACTED]')}`);
+  process.stdout.write(stock.stdout);
+
 } finally {
   for (const client of fixtureClients) await client.end();
   if (created) await dbAdmin.query(`DROP DATABASE "${name}" WITH (FORCE)`);

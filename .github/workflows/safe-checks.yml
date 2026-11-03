@@ -97,7 +97,11 @@ jobs:
         with:
           node-version: '22.22.3'
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Verify populated upgrade with the native Prisma CLI
+      - name: Generate production Prisma client for the isolated stock fixture
+        run: npx prisma generate
+      - name: Verify populated upgrade and stock posting on isolated PostgreSQL
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: python ../scripts/ci-diagnose.py node scripts/verify-prisma-native-upgrade.mjs
       - name: Verify failed scratch cleanup against isolated PostgreSQL
         env:
