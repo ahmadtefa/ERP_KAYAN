@@ -21,6 +21,7 @@ export const REQUIRED_CHECKS = Object.freeze({
     'repair-and-upgrade-preserve-data', 'uninstall-reinstall-preserves-data',
     'full-backup-restore-database-and-files', 'restore-failure-crash-and-concurrency',
     'tls-certificate-validation', 'real-stock-posting-reversal-and-rollback',
+    'order-conversion-idempotency-atomicity-and-historical-units',
   ]),
   android: Object.freeze([
     'approved-licence-key-policy', 'licence-signature-compatibility',

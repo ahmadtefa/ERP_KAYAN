@@ -17,6 +17,7 @@ test('Windows release claims include the requested product and recovery evidence
     'repair-and-upgrade-preserve-data', 'uninstall-reinstall-preserves-data',
     'full-backup-restore-database-and-files', 'restore-failure-crash-and-concurrency',
     'tls-certificate-validation', 'real-stock-posting-reversal-and-rollback',
+    'order-conversion-idempotency-atomicity-and-historical-units',
   ];
   assert.deepEqual(REQUIRED_CHECKS.windows, expected);
   assert.ok(Object.isFrozen(REQUIRED_CHECKS));
