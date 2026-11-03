@@ -97,7 +97,7 @@ if ($failed.Count -gt 0) {
   $report = Join-Path $env:TEMP 'KAYAN-ERP-uninstall-cleanup-warning.txt'
   @(
     'Some KAYAN-owned data could not be removed. The application uninstall will continue.'
-    $failed
+    ($failed -join [Environment]::NewLine)
   ) | Set-Content -LiteralPath $report -Encoding UTF8
   Write-Warning ("Partial KAYAN cleanup. Details: " + $report)
   exit 2
