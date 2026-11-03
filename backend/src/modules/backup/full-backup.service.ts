@@ -24,6 +24,7 @@ import { LicensingService } from '../licensing/licensing.service';
 import { MaintenanceService } from '../../common/maintenance/maintenance';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { reconcileRestoredAccess } from './restore-access';
+import { pgBackupConnectionEnv } from './pg-backup-connection';
 
 /**
  * Full-database backup and restore, on the server that hosts PostgreSQL.
@@ -1107,19 +1108,7 @@ function cleanDatabaseUrl(raw: string): string {
 /// program uses. Kept out of the command line on purpose.
 function connectionEnv(): NodeJS.ProcessEnv {
   const raw = process.env.DATABASE_URL;
-  if (!raw) return {};
-  try {
-    const url = new URL(raw);
-    return {
-      PGHOST: url.hostname,
-      PGPORT: url.port || '5432',
-      PGUSER: decodeURIComponent(url.username),
-      PGPASSWORD: decodeURIComponent(url.password),
-      PGDATABASE: decodeURIComponent(url.pathname.replace(/^\//, '')).split('?')[0],
-    };
-  } catch {
-    return {};
-  }
+  return raw ? pgBackupConnectionEnv(raw) : {};
 }
 
 /// Runs a command and resolves when it exits cleanly; rejects with the tool's
