@@ -21,6 +21,15 @@ const dir = mkdtempSync(join(tmpdir(), 'kayan-prisma-native-upgrade-'));
 const oldPrisma = join(dir, 'prisma');
 const config = join(root, `prisma-native-ci-${randomBytes(8).toString('hex')}.config.ts`);
 const dbAdmin = new pg.Client({ connectionString: admin.toString() });
+// Close fixture sessions before dropping the disposable database. Otherwise a
+// query failure leaves a client open and DROP ... FORCE emits an unhandled
+// 57P01 event, masking the actual migration or fixture error.
+const fixtureClients = [];
+function fixtureClient() {
+  const client = new pg.Client({ connectionString: url.toString() });
+  fixtureClients.push(client);
+  return client;
+}
 let created = false;
 function migrate(schema) {
   const env = { ...process.env, DATABASE_URL: url.toString(), KAYAN_NATIVE_CI_SCHEMA: schema };
@@ -40,7 +49,7 @@ try {
   for (const entry of old) cpSync(join(root, 'prisma', 'migrations', entry), join(oldPrisma, 'migrations', entry), { recursive: true });
   writeFileSync(config, "import { defineConfig } from 'prisma/config';\nexport default defineConfig({ schema: process.env.KAYAN_NATIVE_CI_SCHEMA });\n", { flag: 'wx' });
   migrate(join(oldPrisma, 'schema.prisma'));
-  const client = new pg.Client({ connectionString: url.toString() });
+  const client = fixtureClient();
   await client.connect();
   const company = '10000000-0000-4000-8000-000000000001', user = '20000000-0000-4000-8000-000000000001', item = '30000000-0000-4000-8000-000000000001', template = '40000000-0000-4000-8000-000000000001';
   await client.query('INSERT INTO companies (id,code,"nameEn","nameAr","updatedAt") VALUES ($1,$2,$3,$4,now())',[company,'synthetic-upgrade','Synthetic Company','Synthetic Company']);
@@ -56,7 +65,7 @@ try {
     cpSync(join(root, 'prisma', 'migrations', entry), join(oldPrisma, 'migrations', entry), { recursive: true });
   }
   migrate(join(oldPrisma, 'schema.prisma'));
-  const legacy = new pg.Client({ connectionString: url.toString() }); await legacy.connect();
+  const legacy = fixtureClient(); await legacy.connect();
   await legacy.query('INSERT INTO license_keys (id,"keyId","licenseId",type,"payloadJson") VALUES ($1,$2,$3,$4,$5)',
     ['50000000-0000-4000-8000-000000000001', 'legacy-upgrade-key', 'legacy-upgrade-license', 'ACTIVATION', '{"legacy":true}']);
   // Seed an existing rate before the tax-default migration. The migration
@@ -64,7 +73,7 @@ try {
   await legacy.query('INSERT INTO company_settings ("companyId", "taxRate", "updatedAt") VALUES ($1,14,now()) ON CONFLICT ("companyId") DO UPDATE SET "taxRate"=14', [company]);
   await legacy.end();
   migrate(join(root, 'prisma', 'schema.prisma'));
-  const verify = new pg.Client({ connectionString: url.toString() }); await verify.connect();
+  const verify = fixtureClient(); await verify.connect();
   const result = await verify.query('SELECT c.code,u.username,i.code AS item_code,i."salePrice"::text AS price,t.name,t.columns,t.design FROM companies c JOIN users u ON u."companyId"=c.id JOIN items i ON i."companyId"=c.id JOIN quotation_column_templates t ON t."companyId"=c.id WHERE c.id=$1',[company]);
   const history = await verify.query('SELECT count(*)::int AS n FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL');
   const legacyProof = await verify.query('SELECT "payloadJson", "signedKey" FROM license_keys WHERE "keyId"=$1', ['legacy-upgrade-key']);
@@ -80,6 +89,7 @@ try {
   if (result.rowCount !== 1 || row.code !== 'synthetic-upgrade' || row.username !== 'synthetic-user' || row.item_code !== 'synthetic-item' || Number(row.price) !== 42.5 || row.columns[0].id !== 'synthetic-column' || history.rows[0].n !== entries.length) throw new Error('Synthetic data or migration history did not survive');
   console.log(`PASS: native Prisma populated upgrade: ${old.length} old migrations, ${entries.length-old.length} new migrations; synthetic company/user/item/template preserved; historical tax retained and new default zero; ${history.rows[0].n} recorded migrations.`);
 } finally {
+  for (const client of fixtureClients) await client.end();
   if (created) await dbAdmin.query(`DROP DATABASE "${name}" WITH (FORCE)`);
   await dbAdmin.end();
   rmSync(dir, { recursive: true, force: true });
