@@ -1469,6 +1469,8 @@ model SalesInvoice {
 
   /// The order this invoice fulfils, when it was raised from one.
   salesOrderId String? @db.Uuid
+  orderConversionKey String? @db.VarChar(128)
+  orderConversionHash String? @db.VarChar(64)
 
   notes          String?
   journalEntryId String?   @db.Uuid
@@ -1495,6 +1497,7 @@ model SalesInvoice {
   /// makes a second conversion impossible even under two simultaneous clicks.
   sourceQuotation Quotation?
 
+  @@unique([companyId, salesOrderId, orderConversionKey], map: "sales_invoice_order_conversion_key")
   @@unique([companyId, invoiceNumber])
   @@index([companyId, invoiceDate])
   @@index([companyId, status])
@@ -1504,6 +1507,7 @@ model SalesInvoice {
 model SalesInvoiceLine {
   id        String @id @default(uuid()) @db.Uuid
   invoiceId String @db.Uuid
+  orderLineId String? @db.Uuid
   lineNumber Int
   itemId    String? @db.Uuid
 
@@ -1569,6 +1573,7 @@ model SalesInvoiceLine {
   /// What the user typed, measured in `unitName` (e.g. 1 carton).
   unitQuantity Decimal? @db.Decimal(19, 4)
 
+  orderLine SalesOrderLine? @relation(fields: [orderLineId], references: [id], onDelete: Restrict)
   invoice SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item    Item?        @relation(fields: [itemId], references: [id], onDelete: Restrict)
   costCenter CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
@@ -1576,6 +1581,7 @@ model SalesInvoiceLine {
   returnedBy   SalesInvoiceLine[] @relation("SalesReturnLines")
 
   @@unique([invoiceId, lineNumber])
+  @@index([orderLineId])
   @@index([itemId])
   @@map("sales_invoice_lines")
 }
@@ -1621,6 +1627,8 @@ model PurchaseInvoice {
 
   /// The order this invoice fulfils, when it was raised from one.
   purchaseOrderId String? @db.Uuid
+  orderConversionKey String? @db.VarChar(128)
+  orderConversionHash String? @db.VarChar(64)
 
   notes          String?
   journalEntryId String?   @db.Uuid
@@ -1642,6 +1650,7 @@ model PurchaseInvoice {
   originalInvoice PurchaseInvoice?  @relation("PurchaseReturns", fields: [originalInvoiceId], references: [id], onDelete: Restrict)
   returns         PurchaseInvoice[] @relation("PurchaseReturns")
 
+  @@unique([companyId, purchaseOrderId, orderConversionKey], map: "purchase_invoice_order_conversion_key")
   @@unique([companyId, invoiceNumber])
   @@index([companyId, invoiceDate])
   @@index([companyId, status])
@@ -1651,6 +1660,7 @@ model PurchaseInvoice {
 model PurchaseInvoiceLine {
   id        String @id @default(uuid()) @db.Uuid
   invoiceId String @db.Uuid
+  orderLineId String? @db.Uuid
   lineNumber Int
   itemId    String? @db.Uuid
 
@@ -1695,6 +1705,7 @@ model PurchaseInvoiceLine {
   /// What the user typed, measured in `unitName` (e.g. 5 cartons).
   unitQuantity Decimal? @db.Decimal(19, 4)
 
+  orderLine PurchaseOrderLine? @relation(fields: [orderLineId], references: [id], onDelete: Restrict)
   invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   item    Item?           @relation(fields: [itemId], references: [id], onDelete: Restrict)
   costCenter CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
@@ -1702,6 +1713,7 @@ model PurchaseInvoiceLine {
   returnedBy   PurchaseInvoiceLine[] @relation("PurchaseReturnLines")
 
   @@unique([invoiceId, lineNumber])
+  @@index([orderLineId])
   @@index([itemId])
   @@map("purchase_invoice_lines")
 }
@@ -2122,6 +2134,7 @@ model PurchaseOrderLine {
   unitFactor   Decimal? @db.Decimal(19, 6)
   unitQuantity Decimal? @db.Decimal(19, 4)
 
+  invoiceLines PurchaseInvoiceLine[]
   order PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   item  Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
@@ -2190,6 +2203,7 @@ model SalesOrderLine {
   unitFactor   Decimal? @db.Decimal(19, 6)
   unitQuantity Decimal? @db.Decimal(19, 4)
 
+  invoiceLines SalesInvoiceLine[]
   order SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   item  Item       @relation(fields: [itemId], references: [id], onDelete: Restrict)
 

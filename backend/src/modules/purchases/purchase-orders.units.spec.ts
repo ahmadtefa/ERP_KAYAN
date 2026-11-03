@@ -39,7 +39,8 @@ function makeService() {
     $transaction: jest.fn(async (work: (client: unknown) => unknown) => work(tx)),
   };
   const invoices = {
-    create: jest.fn(async () => ({ id: 'invoice-1' })),
+    createInTransaction: jest.fn(async () => ({ id: 'invoice-1', invoiceNumber: 'PI-1', totalAmount: D(375), lines: [{ id: 'invoice-line-1' }] })),
+    findOne: jest.fn(async () => ({ id: 'invoice-1' })),
   };
   const service = new PurchaseOrdersService(
     prisma as never,
@@ -47,7 +48,7 @@ function makeService() {
     { get: jest.fn(async () => ({ taxRate: '0', maxDiscountPercent: '100' })) } as never,
     { resolvePrice: jest.fn(async () => null) } as never,
     invoices as never,
-    { record: jest.fn(async () => undefined) } as never,
+    { record: jest.fn(async () => undefined), recordRequired: jest.fn(async () => undefined) } as never,
   );
   jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'order-1' } as never);
   return { service, tx, invoices };
@@ -115,14 +116,16 @@ describe('purchase orders with multiple units', () => {
     };
     // The service re-reads the order before converting.
     const tx = {
+      $queryRaw: jest.fn(async () => [{ id: 'order-1' }]),
       purchaseOrderLine: {
         update: jest.fn(async () => ({})),
         findMany: jest.fn(async () => [
           { quantity: D(50), invoicedQuantity: D(50) },
         ]),
       },
-      purchaseInvoice: { update: jest.fn(async () => ({})) },
-      purchaseOrder: { update: jest.fn(async () => ({})) },
+      purchaseInvoice: { update: jest.fn(async () => ({})), findFirst: jest.fn(async () => null) },
+      purchaseInvoiceLine: { update: jest.fn(async () => ({})) },
+      purchaseOrder: { findFirst: jest.fn(async () => order), update: jest.fn(async () => ({})) },
     };
     const prisma = {
       purchaseOrder: { findFirst: jest.fn(async () => order) },
@@ -131,11 +134,12 @@ describe('purchase orders with multiple units', () => {
     (service as any).prisma = prisma;
 
     await service.convertToInvoice(COMPANY, BRANCH, 'user-1', 'order-1', {
+      idempotencyKey: 'conversion-key-00000001',
       invoiceDate: '2026-10-27',
       lines: [{ orderLineId: 'ol-1', quantity: '50' }],
     } as any);
 
-    const dto = (invoices.create.mock.calls as any[])[0][3];
+    const dto = (invoices.createInTransaction.mock.calls as any[])[0][3];
     expect(dto.lines[0].unitName).toBe('كرتونة');
     // 50 base / factor 10 = 5 cartons handed to the invoice service.
     expect(dto.lines[0].quantity).toBe('5.0000');

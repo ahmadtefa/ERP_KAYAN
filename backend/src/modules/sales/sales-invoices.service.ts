@@ -18,6 +18,7 @@ import {
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { orderUnitForInvoiceLine, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
+import { releaseOrderAllocations } from '../../common/units/order-invoice-reconciliation';
 import {
   defaultUnitPrice,
   parseDocumentQuantity,
@@ -190,6 +191,34 @@ export class SalesInvoicesService {
     dto: CreateSalesInvoiceDto,
     orderUnits?: readonly TrustedOrderUnit[],
   ) {
+    const created = await this.prisma.$transaction((tx) =>
+      this.createInTransaction(companyId, branchId, userId, dto, tx, orderUnits),
+    );
+
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'CREATE',
+      entity: 'sales_invoices',
+      entityId: created.id,
+      after: {
+        invoiceNumber: created.invoiceNumber,
+        totalAmount: created.totalAmount.toFixed(MONEY_SCALE),
+      },
+    });
+
+    return this.findOne(companyId, created.id);
+  }
+
+  /** Internal: caller owns the transaction and any required audit records. */
+  async createInTransaction(
+    companyId: string,
+    branchId: string | null,
+    userId: string,
+    dto: CreateSalesInvoiceDto,
+    tx: Prisma.TransactionClient,
+    orderUnits?: readonly TrustedOrderUnit[],
+  ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
     }
@@ -211,7 +240,6 @@ export class SalesInvoicesService {
     const lines = prepared.lines;
     const totals = this.totalsOf(lines);
 
-    const created = await this.prisma.$transaction(async (tx) => {
       const invoiceNumber = await this.numbers.next(
         tx,
         companyId,
@@ -267,21 +295,7 @@ export class SalesInvoicesService {
         },
         include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
-    });
 
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'CREATE',
-      entity: 'sales_invoices',
-      entityId: created.id,
-      after: {
-        invoiceNumber: created.invoiceNumber,
-        totalAmount: created.totalAmount.toFixed(MONEY_SCALE),
-      },
-    });
-
-    return this.findOne(companyId, created.id);
   }
 
   /**
@@ -308,6 +322,7 @@ export class SalesInvoicesService {
       where: { id, companyId, deletedAt: null },
     });
     if (!invoice) throw new NotFoundException('Sales invoice not found');
+    if (invoice.salesOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
     if (invoice.documentType !== InvoiceDocumentType.INVOICE) {
       throw new BadRequestException('Return documents cannot be edited as sales invoices');
     }
@@ -339,8 +354,8 @@ export class SalesInvoicesService {
       : await this.dueDateFromTerms(companyId, dto.customerId, invoiceDate);
 
     await this.prisma.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<Array<{ status: InvoiceStatus }>>(Prisma.sql`
-        SELECT status
+      const locked = await tx.$queryRaw<Array<{ status: InvoiceStatus; salesOrderId: string | null }>>(Prisma.sql`
+        SELECT status, "salesOrderId"
           FROM sales_invoices
          WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
          FOR UPDATE
@@ -350,6 +365,8 @@ export class SalesInvoicesService {
           'This invoice was posted or changed by someone else. Reload it before editing.',
         );
       }
+
+      if (locked[0].salesOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
 
       await tx.salesInvoice.update({
         where: { id },
@@ -684,6 +701,9 @@ export class SalesInvoicesService {
     }
 
     const journal = await this.prisma.$transaction(async (tx) => {
+      if (invoice.salesOrderId) {
+        await releaseOrderAllocations(tx, 'sales', companyId, invoice.salesOrderId, invoice.lines);
+      }
       const claimedInvoice = await tx.salesInvoice.updateMany({
         where: { id: invoice.id, companyId, status: InvoiceStatus.POSTED, deletedAt: null },
         data: { status: InvoiceStatus.REVERSED },

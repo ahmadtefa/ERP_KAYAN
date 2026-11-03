@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,6 +9,7 @@ import { OrderStatus, Prisma } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { selectedOrderLineQuantities } from '../../common/units/order-conversion-selection';
+import { orderConversionIdentity } from '../../common/units/order-conversion-identity';
 import { historicalOrderUnit, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import {
@@ -270,23 +272,22 @@ export class SalesOrdersService {
   }
 
   async cancel(companyId: string, userId: string, id: string, reason?: string) {
-    const order = await this.prisma.salesOrder.findFirst({
-      where: { id, companyId, deletedAt: null },
-      include: { _count: { select: { invoices: true } } },
-    });
-    if (!order) throw new NotFoundException('Sales order not found');
-    if (order.status === OrderStatus.CANCELLED) {
-      throw new BadRequestException('This order is already cancelled');
-    }
-    if (order._count.invoices > 0) {
-      throw new BadRequestException(
-        'This order has invoices against it; cancel or reverse those instead of the order',
-      );
-    }
-
-    await this.prisma.salesOrder.update({
-      where: { id },
-      data: { status: OrderStatus.CANCELLED, notes: reason ? `${order.notes ?? ''}\n${reason}`.trim() : order.notes },
+    const order = await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id FROM sales_orders WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+          AND "deletedAt" IS NULL FOR UPDATE
+      `);
+      if (locked.length !== 1) throw new NotFoundException('Sales order not found');
+      const order = await tx.salesOrder.findFirst({ where: { id, companyId, deletedAt: null } });
+      if (!order) throw new NotFoundException('Sales order not found');
+      if (order.status === OrderStatus.CANCELLED) throw new BadRequestException('This order is already cancelled');
+      const activeInvoices = await tx.salesInvoice.count({
+        where: { companyId, salesOrderId: id, deletedAt: null, status: { not: 'REVERSED' } },
+      });
+      if (activeInvoices > 0) throw new BadRequestException('This order has active invoices; reverse them before cancelling');
+      await tx.salesOrder.update({ where: { id }, data: { status: OrderStatus.CANCELLED,
+        notes: reason ? `${order.notes ?? ''}\n${reason}`.trim() : order.notes } });
+      return order;
     });
 
     await this.audit.record({
@@ -317,21 +318,35 @@ export class SalesOrdersService {
     dto: Record<string, unknown> = {},
   ) {
     if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
-    const order = await this.prisma.salesOrder.findFirst({
-      where: { id, companyId, deletedAt: null },
-      include: { lines: { orderBy: { lineNumber: 'asc' } } },
-    });
-    if (!order) throw new NotFoundException('Sales order not found');
-    if (order.status === OrderStatus.CANCELLED) {
-      throw new BadRequestException('A cancelled order cannot be invoiced');
-    }
-    if (order.status === OrderStatus.DRAFT) {
-      throw new BadRequestException('Approve the order before invoicing it');
-    }
-
+    const invoiceId = await this.prisma.$transaction(async (tx) => {
+      // Serialize both identical retries and competing allocations for the
+      // same order before reading its current quantities or state.
+      const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id FROM sales_orders
+        WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+          AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL
+        FOR UPDATE
+      `);
+      if (locked.length !== 1) throw new NotFoundException('Sales order not found');
+      const order = await tx.salesOrder.findFirst({
+        where: { id, companyId, branchId, deletedAt: null },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      if (!order) throw new NotFoundException('Sales order not found');
     // Never infer unselected quantities: an omitted line is not an instruction
     // to invoice its outstanding balance. Quantities are base-unit amounts.
     const requested = selectedOrderLineQuantities(dto.lines, order.lines);
+    const identity = orderConversionIdentity(dto, requested);
+    const previous = await tx.salesInvoice.findFirst({
+      where: { companyId, salesOrderId: id, orderConversionKey: identity.key },
+    });
+    if (previous) {
+      if (previous.orderConversionHash !== identity.hash) throw new ConflictException('The idempotency key was used for a different request');
+      if (previous.deletedAt || previous.status === 'REVERSED') throw new ConflictException('The invoice for this idempotency key is no longer active');
+      return previous.id;
+    }
+      if (order.status === OrderStatus.CANCELLED) throw new BadRequestException('A cancelled order cannot be invoiced');
+      if (order.status === OrderStatus.DRAFT) throw new BadRequestException('Approve the order before invoicing it');
 
     const invoiceLines: Array<{ itemId: string; description: string; quantity: string; unitPrice: string; taxRate: string; discountPercent: string; unitName?: string }> = [];
     const consumed: Array<{ lineId: string; quantity: Prisma.Decimal }> = [];
@@ -372,52 +387,34 @@ export class SalesOrdersService {
       throw new BadRequestException('This order is fully invoiced; nothing is outstanding');
     }
 
-    const invoice = await this.invoices.create(companyId, branchId, userId, {
-      invoiceDate: String(dto.invoiceDate ?? new Date().toISOString().slice(0, 10)),
-      customerId: order.customerId,
-      notes: `From sales order ${order.orderNumber}`,
-      lines: invoiceLines,
-    } as never, orderUnits);
 
-    const invoiceId = String((invoice as { id?: string }).id ?? '');
-
-    await this.prisma.$transaction(async (tx) => {
-      for (const entry of consumed) {
-        await tx.salesOrderLine.update({
-          where: { id: entry.lineId },
-          data: { invoicedQuantity: { increment: entry.quantity } },
-        });
-      }
-      if (invoiceId) {
-        await tx.salesInvoice.update({
-          where: { id: invoiceId },
-          data: { salesOrderId: order.id },
-        });
-      }
-      const lines = await tx.salesOrderLine.findMany({ where: { orderId: order.id } });
-      const complete = lines.every((line) => line.invoicedQuantity.greaterThanOrEqualTo(line.quantity));
-      await tx.salesOrder.update({
-        where: { id: order.id },
-        data: {
-          status: complete ? OrderStatus.FULFILLED : OrderStatus.PARTIALLY_FULFILLED,
-        },
+      const invoice = await this.invoices.createInTransaction(companyId, branchId, userId, {
+        invoiceDate: String(dto.invoiceDate ?? new Date().toISOString().slice(0, 10)),
+        customerId: order.customerId, notes: `From sales order ${order.orderNumber}`, lines: invoiceLines,
+      } as never, tx, orderUnits);
+      await tx.salesInvoice.update({
+        where: { id: invoice.id },
+        data: { salesOrderId: id, orderConversionKey: identity.key, orderConversionHash: identity.hash },
       });
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'INVOICE',
-      entity: 'sales_orders',
-      entityId: order.id,
-      after: {
-        orderNumber: order.orderNumber,
-        invoiceId: invoiceId || null,
-        lines: consumed.length,
-      },
-    });
-
-    return { order: await this.findOne(companyId, id), invoice };
+      if (invoice.lines.length !== consumed.length) throw new Error('Order invoice allocation mismatch');
+      for (const [index, entry] of consumed.entries()) {
+        await tx.salesInvoiceLine.update({
+          where: { id: invoice.lines[index].id }, data: { orderLineId: entry.lineId },
+        });
+        await tx.salesOrderLine.update({
+          where: { id: entry.lineId }, data: { invoicedQuantity: { increment: entry.quantity } },
+        });
+      }
+      const lines = await tx.salesOrderLine.findMany({ where: { orderId: id } });
+      const complete = lines.every((line) => line.invoicedQuantity.greaterThanOrEqualTo(line.quantity));
+      await tx.salesOrder.update({ where: { id }, data: { status: complete ? OrderStatus.FULFILLED : OrderStatus.PARTIALLY_FULFILLED } });
+      await this.audit.recordRequired({ companyId, userId, action: 'CREATE', entity: 'sales_invoices',
+        entityId: invoice.id, after: { invoiceNumber: invoice.invoiceNumber, totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE) } }, tx);
+      await this.audit.recordRequired({ companyId, userId, action: 'INVOICE', entity: 'sales_orders',
+        entityId: id, after: { orderNumber: order.orderNumber, invoiceId: invoice.id, lines: consumed.length } }, tx);
+      return invoice.id;
+    }, { maxWait: 10000, timeout: 30000 });
+    return { order: await this.findOne(companyId, id), invoice: await this.invoices.findOne(companyId, invoiceId) };
   }
 
   // ------------------------------------------------------------------ helpers

@@ -154,9 +154,8 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(reversedReport.reconciliation.balanced, true);
     console.log('PASS: real PostgreSQL + Prisma stock receipt, issue, cost-centre journal, overdraw and duplicate-post rejection, and reversal.');
 
-    // Exercise the selected-line and frozen-unit conversion fixes against the
-    // real services and Prisma. This does NOT test concurrency, idempotency,
-    // order/invoice atomicity, update/reversal reconciliation, HTTP or Flutter.
+    // Real services and Prisma on the guarded disposable database. This is
+    // not an HTTP, Flutter, installed-Windows or licensed-product test.
     const customer = await prisma.customer.create({data:{companyId:company, code:'SYN-C', nameEn:'Synthetic customer', nameAr:'عميل تجريبي'}});
     const supplier = await prisma.supplier.create({data:{companyId:company, code:'SYN-S', nameEn:'Synthetic supplier', nameAr:'مورد تجريبي'}});
     const first = await prisma.item.create({data:{companyId:company, code:'SYN-ORDER-1', nameEn:'Synthetic order item', nameAr:'صنف طلب', unit:'piece', salePrice:'8', purchasePrice:'8', taxRate:'0', units:{create:[{unit:'carton',factor:'10'}]}}});
@@ -182,13 +181,44 @@ let difference = '70000000-0000-4000-8000-000000000005';
         ? await prisma.salesOrderLine.findMany({where:{orderId:order.id},orderBy:{lineNumber:'asc'}})
         : await prisma.purchaseOrderLine.findMany({where:{orderId:order.id},orderBy:{lineNumber:'asc'}});
       await assert.rejects(orders.convertToInvoice(company,branch,user,order.id,{}),/Select the order lines/);
-      const conversion = await orders.convertToInvoice(company,branch,user,order.id,
-        {invoiceDate:date,lines:[{orderLineId:orderLines[0].id,quantity:'20'}]});
+      const selected = [{orderLineId:orderLines[0].id,quantity:'20'}];
+      await assert.rejects(orders.convertToInvoice(company,branch,user,order.id,{invoiceDate:date,lines:selected}),/idempotencyKey/);
+      const countInvoices = () => kind === 'sales'
+        ? prisma.salesInvoice.count({where:{companyId:company}}) : prisma.purchaseInvoice.count({where:{companyId:company}});
+      const beforeInvoices = await countInvoices();
+      const beforeMoves = await prisma.stockMovement.count({where:{companyId:company}});
+      const beforeJournals = await prisma.journalEntry.count({where:{companyId:company}});
+      // Fail after both the invoice and allocations were written, while the
+      // transaction is still open: none of them or either audit may survive.
+      const originalAudit = audit.recordRequired.bind(audit);
+      audit.recordRequired = async (input, tx) => {
+        if (input.entity === `${kind}_orders` && input.action === 'INVOICE') throw new Error('injected audit failure');
+        return originalAudit(input, tx);
+      };
+      try {
+        await assert.rejects(orders.convertToInvoice(company,branch,user,order.id,
+          {idempotencyKey:'failure-request-00000001',invoiceDate:date,lines:selected}),/injected audit failure/);
+      } finally { audit.recordRequired = originalAudit; }
+      assert.equal(await countInvoices(),beforeInvoices);
+      assert.equal(await prisma.stockMovement.count({where:{companyId:company}}),beforeMoves);
+      assert.equal(await prisma.journalEntry.count({where:{companyId:company}}),beforeJournals);
+      const afterFailure = kind === 'sales'
+        ? await prisma.salesOrderLine.findUniqueOrThrow({where:{id:orderLines[0].id}})
+        : await prisma.purchaseOrderLine.findUniqueOrThrow({where:{id:orderLines[0].id}});
+      assert.equal(afterFailure.invoicedQuantity.toFixed(4),'0.0000');
+      const request = () => orders.convertToInvoice(company,branch,user,order.id,
+        {idempotencyKey:'same-request-000000001',invoiceDate:date,lines:selected});
+      const [conversion, retry] = await Promise.all([request(),request()]);
+      assert.equal(conversion.invoice.id,retry.invoice.id,`${kind}: retry created another invoice`);
+      assert.equal(await countInvoices(),beforeInvoices+1);
+      await assert.rejects(orders.convertToInvoice(company,branch,user,order.id,
+        {idempotencyKey:'same-request-000000001',invoiceDate:date,lines:[{orderLineId:orderLines[0].id,quantity:'10'}]}),/different request/);
       const saved = kind === 'sales'
         ? await prisma.salesInvoice.findUniqueOrThrow({where:{id:conversion.invoice.id},include:{lines:true}})
         : await prisma.purchaseInvoice.findUniqueOrThrow({where:{id:conversion.invoice.id},include:{lines:true}});
       assert.equal(saved.lines.length,1,`${kind}: an unselected line was invoiced`);
       assert.equal(saved.lines[0].itemId,first.id);
+      assert.equal(saved.lines[0].orderLineId,orderLines[0].id);
       assert.equal(saved.lines[0].quantity.toFixed(4),'20.0000');
       assert.equal(saved.lines[0].unitFactor.toFixed(6),'10.000000');
       assert.equal(saved.lines[0].unitQuantity.toFixed(4),'2.0000');
@@ -199,8 +229,19 @@ let difference = '70000000-0000-4000-8000-000000000005';
         : await prisma.purchaseOrderLine.findMany({where:{orderId:order.id},orderBy:{lineNumber:'asc'}});
       assert.equal(refreshed[0].invoicedQuantity.toFixed(4),'20.0000');
       assert.equal(refreshed[1].invoicedQuantity.toFixed(4),'0.0000');
+      // Two different keys compete for the same remaining ten base units.
+      const compete = key => orders.convertToInvoice(company,branch,user,order.id,
+        {idempotencyKey:key,invoiceDate:date,lines:[{orderLineId:orderLines[0].id,quantity:'10'}]});
+      const attempts = await Promise.allSettled([compete('competing-request-000001'),compete('competing-request-000002')]);
+      assert.equal(attempts.filter(x => x.status === 'fulfilled').length,1);
+      assert.equal(attempts.filter(x => x.status === 'rejected').length,1);
+      await orders.convertToInvoice(company,branch,user,order.id,
+        {idempotencyKey:'final-line-request-00001',invoiceDate:date,lines:[{orderLineId:orderLines[1].id,quantity:'5'}]});
+      const completed = kind === 'sales' ? await prisma.salesOrder.findUniqueOrThrow({where:{id:order.id}})
+        : await prisma.purchaseOrder.findUniqueOrThrow({where:{id:order.id}});
+      assert.equal(completed.status,'FULFILLED');
     }
-    console.log('PASS: real PostgreSQL + Prisma order services convert only selected lines with saved units and discount. Concurrency and atomicity remain unproved.');
+    console.log('PASS: real PostgreSQL + Prisma order conversion: selected/historical units, audit rollback, simultaneous retry and competing allocations. No HTTP, UI or reversal test.');
   } finally {
     await prisma.$disconnect();
     await sql.end();

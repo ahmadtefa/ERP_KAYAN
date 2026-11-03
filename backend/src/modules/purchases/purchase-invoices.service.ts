@@ -15,6 +15,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { orderUnitForInvoiceLine, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
+import { releaseOrderAllocations } from '../../common/units/order-invoice-reconciliation';
 import {
   defaultUnitPrice,
   parseDocumentQuantity,
@@ -194,6 +195,34 @@ export class PurchaseInvoicesService {
     dto: CreatePurchaseInvoiceDto,
     orderUnits?: readonly TrustedOrderUnit[],
   ) {
+    const created = await this.prisma.$transaction((tx) =>
+      this.createInTransaction(companyId, branchId, userId, dto, tx, orderUnits),
+    );
+
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'CREATE',
+      entity: 'purchase_invoices',
+      entityId: created.id,
+      after: {
+        invoiceNumber: created.invoiceNumber,
+        totalAmount: created.totalAmount.toFixed(MONEY_SCALE),
+      },
+    });
+
+    return this.findOne(companyId, created.id);
+  }
+
+  /** Internal: caller owns the transaction and any required audit records. */
+  async createInTransaction(
+    companyId: string,
+    branchId: string | null,
+    userId: string,
+    dto: CreatePurchaseInvoiceDto,
+    tx: Prisma.TransactionClient,
+    orderUnits?: readonly TrustedOrderUnit[],
+  ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
     }
@@ -220,7 +249,6 @@ export class PurchaseInvoicesService {
     const taxAmount = lines.reduce((s, l) => s.plus(l.taxAmount), new Prisma.Decimal(0));
     const totalAmount = subTotal.plus(taxAmount).plus(landedCostAmount);
 
-    const created = await this.prisma.$transaction(async (tx) => {
       const invoiceNumber = await this.numbers.next(
         tx,
         companyId,
@@ -276,22 +304,9 @@ export class PurchaseInvoicesService {
             })),
           },
         },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
-    });
 
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'CREATE',
-      entity: 'purchase_invoices',
-      entityId: created.id,
-      after: {
-        invoiceNumber: created.invoiceNumber,
-        totalAmount: created.totalAmount.toFixed(MONEY_SCALE),
-      },
-    });
-
-    return this.findOne(companyId, created.id);
   }
 
   /**
@@ -315,6 +330,7 @@ export class PurchaseInvoicesService {
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
     if (!invoice) throw new NotFoundException('Purchase invoice not found');
+    if (invoice.purchaseOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
     if (invoice.documentType !== InvoiceDocumentType.INVOICE) {
       throw new BadRequestException('Return documents cannot be edited as purchase invoices');
     }
@@ -351,8 +367,8 @@ export class PurchaseInvoicesService {
       : await this.dueDateFromTerms(companyId, dto.supplierId, invoiceDate);
 
     await this.prisma.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<Array<{ status: InvoiceStatus }>>(Prisma.sql`
-        SELECT status
+      const locked = await tx.$queryRaw<Array<{ status: InvoiceStatus; purchaseOrderId: string | null }>>(Prisma.sql`
+        SELECT status, "purchaseOrderId"
           FROM purchase_invoices
          WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
          FOR UPDATE
@@ -362,6 +378,8 @@ export class PurchaseInvoicesService {
           'This invoice was posted or changed by someone else. Reload it before editing.',
         );
       }
+
+      if (locked[0].purchaseOrderId) throw new BadRequestException('Order-linked draft editing requires allocation reconciliation; manual review required');
 
       await tx.purchaseInvoice.update({
         where: { id },
@@ -622,6 +640,9 @@ export class PurchaseInvoicesService {
     }
 
     const reversal = await this.prisma.$transaction(async (tx) => {
+      if (invoice.purchaseOrderId) {
+        await releaseOrderAllocations(tx, 'purchase', companyId, invoice.purchaseOrderId, invoice.lines);
+      }
       const claimedInvoice = await tx.purchaseInvoice.updateMany({
         where: { id: invoice.id, companyId, status: InvoiceStatus.POSTED, deletedAt: null },
         data: { status: InvoiceStatus.REVERSED },
