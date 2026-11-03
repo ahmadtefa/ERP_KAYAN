@@ -1582,4 +1582,46 @@ try {
   Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
 }
 Write-Output "::notice::Safe-reset exercise passed: cancel changed nothing; reset backed up (PGDMP, pg_restore-readable), switched to a fresh empty database, preserved the old database and its sentinel, kept previous settings, redacted logs, and the next launch waits at first-run setup."
+# FULL UNINSTALL / CLEAN REINSTALL EXERCISE. This runs only on the disposable
+# GitHub-hosted VM guarded at the top of this script. It deliberately verifies
+# that every KAYAN-owned data root is gone, then installs and starts KAYAN again.
+$uninstaller = Join-Path $installRoot 'unins000.exe'
+if (-not (Test-Path -LiteralPath $uninstaller)) { Fail "Inno Setup uninstaller is missing: $uninstaller" }
+$roamingKayan = Join-Path $env:APPDATA 'KAYAN-ERP'
+$localKayan = Join-Path $env:LOCALAPPDATA 'KAYAN-ERP'
+$uninstallLog = Join-Path $env:TEMP 'kayan-uninstall-smoke.log'
+Write-Output '::notice title=Windows smoke phase::Running full KAYAN uninstall and verifying every owned data root is removed.'
+$uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/LOG=' + $uninstallLog)) -Wait -PassThru
+if ($uninstall.ExitCode -ne 0) { Fail "KAYAN uninstall failed with exit code $($uninstall.ExitCode)." }
+Start-Sleep -Seconds 2
+if (Test-Path -LiteralPath $installRoot) { Fail "Uninstall left application files under $installRoot." }
+if (Test-Path -LiteralPath $existingData) { Fail "Uninstall left machine data, database, backups or licence files under $existingData." }
+if (Test-Path -LiteralPath $roamingKayan) { Fail "Uninstall left current-user Roaming data under $roamingKayan." }
+if (Test-Path -LiteralPath $localKayan) { Fail "Uninstall left current-user Local data under $localKayan." }
+if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) { Fail "Uninstall left the KAYAN PostgreSQL service registered." }
+$leftoverRules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like 'KAYAN ERP*' -or $_.DisplayName -like 'KAYAN-ERP*' })
+if ($leftoverRules.Count -gt 0) { Fail ("Uninstall left KAYAN firewall rules: " + (($leftoverRules | ForEach-Object DisplayName) -join ', ')) }
+Write-Output '::notice::Full uninstall passed: app files, ProgramData (database/backups/licence/logs), user AppData, PostgreSQL service and KAYAN firewall rules are absent.'
+
+Write-Output '::notice title=Windows smoke phase::Reinstalling KAYAN after full uninstall.'
+$reinstallLog = Join-Path $env:TEMP 'kayan-clean-reinstall-smoke.log'
+$reinstall = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/LOG=' + $reinstallLog)) -Wait -PassThru
+if ($reinstall.ExitCode -ne 0) { Fail "Clean reinstall after uninstall failed with exit code $($reinstall.ExitCode)." }
+if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'erp_kayan.exe'))) { Fail 'Clean reinstall did not restore erp_kayan.exe.' }
+$reinstalledService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if (-not $reinstalledService) { Fail 'Clean reinstall did not register the KAYAN PostgreSQL service.' }
+if ($reinstalledService.Status -ne 'Running') { Fail "Clean reinstall PostgreSQL service is not running (state: $($reinstalledService.Status))." }
+$reinstalledClient = Start-Process -FilePath (Join-Path $installRoot 'erp_kayan.exe') -WorkingDirectory $installRoot -PassThru
+try {
+  Start-Sleep -Seconds 8
+  if ($reinstalledClient.HasExited) { Fail "KAYAN client exited after clean reinstall (exit code $($reinstalledClient.ExitCode))." }
+} finally {
+  if ($reinstalledClient -and -not $reinstalledClient.HasExited) {
+    $null = $reinstalledClient.CloseMainWindow()
+    try { Wait-Process -Id $reinstalledClient.Id -Timeout 10 -ErrorAction SilentlyContinue } catch { }
+    if (-not $reinstalledClient.HasExited) { Stop-Process -Id $reinstalledClient.Id -Force -ErrorAction SilentlyContinue }
+  }
+}
+Write-Output '::notice::Clean reinstall passed after full uninstall: fresh app files, PostgreSQL service running and desktop client stayed alive.'
+
 Remove-KayanOfflineRules
