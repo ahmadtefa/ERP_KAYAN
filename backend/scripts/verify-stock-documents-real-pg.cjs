@@ -294,7 +294,41 @@ let difference = '70000000-0000-4000-8000-000000000005';
     orderStockState = await prisma.stockBalance.findUniqueOrThrow({where:{companyId_branchId_itemId:{companyId:company,branchId:branch,itemId:first.id}}});
     assert.equal(orderStockState.quantity.toFixed(4),'0.0000');
     assert.equal(orderStockState.value.toFixed(4),'0.0000');
-    console.log('PASS: PostgreSQL + Prisma order conversion selection, audit rollback, concurrent retry/competition, posting, reversal, missing-link rollback, draft cancellation and re-conversion. No HTTP, Flutter or installed Windows test.');
+    for (const [kind, orders, invoices, party] of [['sales',sales,si,customer.id],['purchase',purchases,pi,supplier.id]]) {
+      const partyField = kind === 'sales' ? 'customerId' : 'supplierId';
+      const full = await orders.create(company,branch,user,{[partyField]:party,orderDate:date,lines:[
+        {itemId:first.id,quantity:'3',unitPrice:'7',taxRate:'14'},
+        {itemId:second.id,quantity:'5',unitPrice:'2',taxRate:'0'},
+      ]});
+      await orders.approve(company,user,full.id);
+      const rows = kind === 'sales' ? await prisma.salesOrderLine.findMany({where:{orderId:full.id},orderBy:{lineNumber:'asc'}})
+        : await prisma.purchaseOrderLine.findMany({where:{orderId:full.id},orderBy:{lineNumber:'asc'}});
+      const result = await orders.convertToInvoice(company,branch,user,full.id,{idempotencyKey:'full-order-request-00001',invoiceDate:date,
+        lines:rows.map(row => ({orderLineId:row.id,quantity:row.quantity.toFixed(4)}))});
+      assert.equal(result.order.status,'FULFILLED');
+      assert.equal(result.invoice.lines.length,2);
+      await assert.rejects(orders.cancel(company,user,full.id),/active invoices/);
+      await invoices.cancelDraft(company,branch,user,result.invoice.id);
+      await orders.cancel(company,user,full.id,'synthetic cancellation');
+      const finalOrder = kind === 'sales' ? await prisma.salesOrder.findUniqueOrThrow({where:{id:full.id}})
+        : await prisma.purchaseOrder.findUniqueOrThrow({where:{id:full.id}});
+      assert.equal(finalOrder.status,'CANCELLED');
+
+      // Cancellation and conversion must serialize on the same parent row.
+      const race = await orders.create(company,branch,user,{[partyField]:party,orderDate:date,
+        lines:[{itemId:second.id,quantity:'2',unitPrice:'2',taxRate:'0'}]});
+      await orders.approve(company,user,race.id);
+      const raceLine = kind === 'sales' ? await prisma.salesOrderLine.findFirstOrThrow({where:{orderId:race.id}})
+        : await prisma.purchaseOrderLine.findFirstOrThrow({where:{orderId:race.id}});
+      const outcomes = await Promise.allSettled([
+        orders.cancel(company,user,race.id,'synthetic concurrent cancellation'),
+        orders.convertToInvoice(company,branch,user,race.id,{idempotencyKey:'concurrent-cancel-000001',invoiceDate:date,
+          lines:[{orderLineId:raceLine.id,quantity:'2'}]}),
+      ]);
+      assert.equal(outcomes.filter(outcome => outcome.status === 'fulfilled').length,1);
+      assert.equal(outcomes.filter(outcome => outcome.status === 'rejected').length,1);
+    }
+    console.log('PASS: PostgreSQL + Prisma order conversion full/partial, historical values, audit rollback, retry/competition, post/reverse, draft cancel and order-cancel race. No HTTP, Flutter or installed Windows test.');
   } finally {
     await prisma.$disconnect();
     await sql.end();
