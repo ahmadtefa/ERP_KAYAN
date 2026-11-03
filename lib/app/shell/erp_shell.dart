@@ -632,7 +632,7 @@ class _NavigationGroupState extends State<_NavigationGroup> {
   @override
   void initState() {
     super.initState();
-    _expanded = !widget.extended || _containsCurrent;
+    _expanded = true;
   }
 
   @override
