@@ -83,7 +83,6 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
 
   Future<void> _createBackup() async {
     final l10n = context.l10n;
-    final knownNames = {for (final file in _files) '${file['name']}'};
     setState(() {
       _busy = true;
       _notice = l10n.backupInProgress;
@@ -91,36 +90,29 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     });
     try {
       final result = await ref.read(fullBackupServiceProvider).create();
-      final file = result['file'] as Map<String, dynamic>?;
+      final file = result['file'];
+      if (file is! Map<String, dynamic> ||
+          file['name'] is! String || (file['name'] as String).trim().isEmpty) {
+        throw const FormatException('The backup response did not identify a file.');
+      }
       if (!mounted) return;
       setState(() => _notice = _createdNotice(file));
       await _load();
     } catch (error) {
       if (!mounted) return;
-      // The request can fail on this side (a timeout, a dropped
-      // connection) while the server finishes the dump anyway. Before
-      // declaring failure, look at the folder: a file that was not there
-      // when we started means the backup actually happened, and saying
-      // "failed" over a good backup would be its own kind of lie.
-      var recovered = false;
-      try {
-        final files = await ref.read(fullBackupServiceProvider).list();
-        final fresh = files.where(
-          (file) => !knownNames.contains('${file['name']}'),
-        );
-        if (fresh.isNotEmpty && mounted) {
-          recovered = true;
-          setState(() {
-            _files = files;
-            _notice = _createdNotice(fresh.first);
-          });
-        }
-      } catch (_) {
-        // The list could not be read either; the original error stands.
-      }
-      if (!recovered && mounted) {
-        setState(() => _failure = describeApiError(error));
-      }
+      // A timeout can happen after the server has finished, but a new file
+      // may also be another user's concurrent backup. Refresh the list without
+      // claiming that any file belongs to this request or is restorable.
+      final message = describeApiError(error);
+      final arabic = Localizations.localeOf(context).languageCode == 'ar';
+      await _load();
+      if (!mounted) return;
+      setState(() {
+        _notice = null;
+        _failure = '$message\n${arabic
+            ? 'تعذر تأكيد نتيجة الطلب. قد تنتمي الملفات الجديدة إلى عملية أخرى؛ افحص النسخة قبل الاعتماد عليها.'
+            : 'The request outcome could not be confirmed. A new file may belong to another backup; inspect it before relying on it.'}';
+      });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -261,10 +253,7 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
           ),
           content: const Text(
             'تمت استعادة قاعدة البيانات الكاملة بنجاح واستبدال البيانات السابقة.\n\n'
-            'لتحديث البيانات وعرضها داخل البرنامج، يجب تسجيل الدخول مجددًا باستخدام بيانات الدخول الموجودة في النسخة المستعادة.\n\n'
-            'مثال للنسخة التجريبية (Demo Backup):\n'
-            '• اسم المستخدم: admin\n'
-            '• كلمة المرور: Admin@12345',
+            'لتحديث البيانات وعرضها داخل البرنامج، يجب تسجيل الدخول مجددًا باستخدام بيانات الدخول الموجودة في النسخة المستعادة.',
           ),
           actions: [
             FilledButton(

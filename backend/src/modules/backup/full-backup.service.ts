@@ -34,27 +34,28 @@ import { pgBackupConnectionEnv } from './pg-backup-connection';
  * The company-level JSON backup (see backup.service.ts) moves one company's
  * books between installations. This one is different in kind: it takes the
  * whole database — every company, every user, every role, every index — the
- * way `pg_dump` does it, so a machine that dies can be brought back exactly
- * as it was.
+ * way `pg_dump` does it. It does not include external licence state or
+ * legacy files and is not by itself a complete machine disaster backup.
  *
  * The tools are the ones PostgreSQL itself ships: `pg_dump` writes a Custom
  * archive (-Fc), `pg_restore` puts one back. Neither is assumed to exist —
  * the screen asks what this machine can do and only offers the buttons that
  * work. Where the tools are missing the reason is shown, not hidden.
  *
- * Restoring is deliberately paranoid:
+ * Restore currently has important limits: maintenance is process-local,
+ * in-flight writes are not drained, and crash recovery is not persistent.
+ * It must not be considered safe for production until those gaps are closed.
+ * Its present checks include:
  *
- *  1. the file is checked before anything else (magic bytes, then a real
- *     `pg_restore --list` so a truncated or foreign archive is refused before
- *     it is allowed near the database);
+ *  1. the file header and table of contents are checked with `pg_restore --list`
+ *     (this does not validate every data block);
  *  2. it is restored into a scratch database first — a restore that cannot
  *     complete never touches production;
  *  3. the current database is dumped to a safety file; if that fails, the
  *     restore stops right there;
- *  4. only then is the real restore run, with writes blocked for its duration;
- *  5. afterwards the data is checked; a failed check triggers an automatic
- *     restore from the safety file, and failing that the program stays in
- *     maintenance mode and says so plainly.
+ *  4. maintenance is enabled in this process and the real restore is run;
+ *  5. afterwards limited checks and a safety restore are attempted on failure.
+ *     Maintenance does not yet survive restart or coordinate other processes.
  */
 
 /// `PGDMP` — the first five bytes of every Custom-format archive.

@@ -1341,7 +1341,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get fullBackupDescription =>
-      'نسخة كاملة لكل قاعدة البيانات (جميع الشركات والمستخدمين) بصيغة PostgreSQL. تعمل على الخادم نفسه الذي تستضيف القاعدة.';
+      'أرشيف PostgreSQL لقاعدة البيانات بجميع الشركات والمستخدمين. لا يتضمن حالة الترخيص أو الملفات القديمة المخزنة خارج القاعدة. قراءة فهرس الأرشيف وحدها لا تثبت نجاح استعادة كاملة.';
 
   @override
   String get createFullBackup => 'إنشاء نسخة احتياطية الآن';

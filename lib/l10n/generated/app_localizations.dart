@@ -2681,7 +2681,7 @@ abstract class AppLocalizations {
   /// No description provided for @fullBackupDescription.
   ///
   /// In en, this message translates to:
-  /// **'A complete copy of the whole database (every company and user) in PostgreSQL format. It is made on the server that hosts the database.'**
+  /// **'A PostgreSQL database archive for all companies and users. It does not include external licence state or legacy files. A readable archive listing alone does not prove a complete restore.'**
   String get fullBackupDescription;
 
   /// No description provided for @createFullBackup.

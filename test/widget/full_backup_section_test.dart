@@ -20,6 +20,7 @@ class _FakeFullBackupService extends FullBackupService {
   Object? capabilitiesError;
   Completer<Map<String, dynamic>>? createGate;
   Object? createError;
+  Map<String, dynamic>? createResult;
   List<Map<String, dynamic>> files = const [];
   List<Map<String, dynamic>> filesAfterCreate = const [];
   bool createCalled = false;
@@ -42,7 +43,7 @@ class _FakeFullBackupService extends FullBackupService {
     if (gate != null) return gate.future;
     final error = createError;
     if (error != null) throw error;
-    return const {
+    return createResult ?? const {
       'file': {'name': 'kayan-full-test.dump'},
     };
   }
@@ -147,7 +148,7 @@ void main() {
   });
 
   testWidgets(
-    'a create request that errors after the server finished still reports the new file',
+    'a timeout does not claim a concurrently created file as this request',
     (tester) async {
       final service = _FakeFullBackupService()
         ..createError = DioException(
@@ -166,9 +167,20 @@ void main() {
 
       expect(find.byType(LinearProgressIndicator), findsNothing);
       expect(find.textContaining('kayan-full-late.dump'), findsWidgets);
-      expect(find.textContaining('Saved successfully'), findsWidgets);
+      expect(find.textContaining('Saved successfully'), findsNothing);
+      expect(find.textContaining('outcome could not be confirmed'), findsOneWidget);
     },
   );
+
+  testWidgets('a success response without a file is not reported as saved', (tester) async {
+    final service = _FakeFullBackupService()..createResult = {};
+    await _pump(tester, service);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Create backup now'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Saved successfully'), findsNothing);
+    expect(find.textContaining('outcome could not be confirmed'), findsOneWidget);
+  });
 
   testWidgets('a create that truly fails ends busy with a visible error', (
     tester,
