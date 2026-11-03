@@ -17,7 +17,7 @@ for (const file of manualOnly) {
 const reviewed = [
   '_licence-step-diagnose.yml', 'ci.yml', 'installer-focused-tests.yml',
   'installer-historical-inventory.yml', 'key-generator.yml', 'licence-startup-focused.yml',
-  'safe-checks.yml', 'windows-candidate-preflight.yml', 'windows-installer-runtime-smoke.yml',
+  'safe-checks.yml', 'release-evidence-gate.yml', 'windows-candidate-preflight.yml', 'windows-installer-runtime-smoke.yml',
   'windows-installer.yml', 'windows-integrated-candidate.yml', 'windows-packaging-probe.yml',
 ].sort();
 assert.deepEqual(fs.readdirSync(workflows).filter(name => /\.ya?ml$/.test(name)).sort(), reviewed, 'New or removed workflow needs a fresh safety review');
@@ -29,11 +29,29 @@ for (const name of reviewed) {
 }
 const safe = read('safe-checks.yml');
 assert.ok(safe.on.push && safe.on.pull_request, 'Safe checks must remain active on push and PR');
+assert.deepEqual(safe.on.push.branches, ['main'], 'Main must retain push checks without duplicating open PR commits');
+assert.ok(safe.on.pull_request.branches.includes('main'), 'PRs targeting main must retain code checks');
 const source = fs.readFileSync(path.join(workflows, 'safe-checks.yml'), 'utf8');
 for (const forbidden of ['smoke-test-installed-windows', 'memory-flow.test', 'verify-licensing-postgres', 'publish-verified-windows', 'license-generator.spec']) {
   assert.equal(source.includes(forbidden), false, `Safe checks reference forbidden path: ${forbidden}`);
 }
 assert.match(source, /ci-no-signing\.cjs/);
-assert.match(source, /Signed licence, generator and installed product tests require the approved isolated VM/);
-assert.match(source, /exit 1/);
-console.log('PASS: workflow trigger inventory and explicit blocked security-evidence gate');
+const gate = read('release-evidence-gate.yml');
+assert.deepEqual(gate.on, safe.on, 'Code CI and the independent evidence gate must run for the same events');
+assert.deepEqual(gate.permissions, { contents: 'read' }, 'Evidence gate must not publish or obtain write privileges');
+assert.deepEqual(Object.keys(gate.jobs), ['licence-evidence-required']);
+const gateJob = gate.jobs['licence-evidence-required'];
+assert.equal(gateJob.if, undefined, 'Evidence gate must not be conditional');
+assert.equal(gateJob['continue-on-error'], undefined, 'Evidence gate must not ignore a failure');
+assert.equal(gateJob.steps.length, 1, 'Evidence gate changes require security review');
+assert.match(gateJob.steps[0].run, /Signed licence, generator and installed product tests require the approved isolated VM/);
+assert.match(gateJob.steps[0].run, /exit 1/);
+assert.equal(gateJob.steps[0].if, undefined);
+assert.equal(gateJob.steps[0]['continue-on-error'], undefined);
+const publish = read('windows-installer.yml').jobs['publish-windows'];
+assert.ok(publish.steps.some(step => String(step.run ?? '').includes('verify-release-evidence.mjs')),
+  'Moving the CI evidence signal must not remove the independent publisher evidence check');
+assert.equal(publish.environment, 'windows-production');
+const publisher = fs.readFileSync(path.join(root, 'scripts/publish-verified-windows.mjs'), 'utf8');
+assert.match(publisher, /verify-release-evidence\.mjs/, 'Publisher must independently verify evidence');
+console.log('PASS: workflow trigger inventory, independent blocked evidence gate and publisher checks');

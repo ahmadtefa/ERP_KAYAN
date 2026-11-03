@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, 'arena/**']
   push:
-    branches: [main, 'arena/2d794f08-erp-kayan']
+    branches: [main]
 
 permissions:
   contents: read
@@ -38,6 +38,8 @@ jobs:
           npx tsc --noEmit
       - name: Audit automatic workflow triggers
         run: node ../scripts/ci-workflow-safety.test.cjs
+      - name: Verify public-key transition inventory without signing
+        run: node --require ../scripts/ci-no-signing.cjs --test ../scripts/license-public-key-transition.test.mjs
       - name: Check signing guard fails closed without creating a key
         run: >-
           node --require ../scripts/ci-no-signing.cjs -e "const c=require('node:crypto');
@@ -195,13 +197,3 @@ jobs:
       - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 2
       - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 3
       - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 4
-
-  licence-evidence-required:
-    name: Signed licence and installed-product evidence required
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Explicitly report missing approved-VM security evidence
-        run: |
-          echo '::error title=Security and installed-product tests blocked::Signed licence, generator and installed product tests require the approved isolated VM. They have not run and this PR is not release-approved.'
-          exit 1

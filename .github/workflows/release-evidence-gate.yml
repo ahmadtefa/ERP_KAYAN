@@ -1,0 +1,25 @@
+name: Release security evidence (not release approval)
+
+# Independent from code CI; this gate remains explicitly failing until the
+# separately approved VM evidence can be authenticated for the exact artifact.
+# It does not publish or modify releases and does not replace the checks in
+# the publisher. Both PR and push receive the same missing-evidence signal.
+on:
+  pull_request:
+    branches: [main, 'arena/**']
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  licence-evidence-required:
+    name: Signed licence and installed-product evidence required
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Explicitly report missing approved-VM security evidence
+        run: |
+          echo '::error title=Security and installed-product tests blocked::Signed licence, generator and installed product tests require the approved isolated VM. They have not run and this PR is not release-approved.'
+          exit 1
