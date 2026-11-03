@@ -105,6 +105,9 @@ Name: "{autodesktop}\KAYAN ERP"; Filename: "{app}\erp_kayan.exe"; WorkingDir: "{
 Filename: "{app}\erp_kayan.exe"; Description: "Launch KAYAN ERP"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [UninstallDelete]
+; Inno removes every file installed through [Files] itself. Remove the app
+; directory only when empty: never recursively erase a folder that may contain
+; customer-created or unrelated files if a destination was customized.
 Type: dirifempty; Name: "{app}"
 
 [Code]
@@ -289,8 +292,11 @@ begin
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM erp_kayan.exe /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if FileExists(ExpandConstant('{app}\remove-runtime.ps1')) then begin
     Args := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\remove-runtime.ps1') + '"';
-    if (not RunPowerShell(Args, ResultCode)) or (ResultCode <> 0) then begin
-      MsgBox('KAYAN could not safely stop and unregister its PostgreSQL service. The program and company data were left in place.', mbError, MB_OK);
+    if not RunPowerShell(Args, ResultCode) then begin
+      MsgBox('KAYAN could not run its safe service-removal helper. Company database, backups and licence data were not deleted. Close KAYAN ERP, repair the service and retry.', mbError, MB_OK);
+      Result := False;
+    end else if ResultCode <> 0 then begin
+      MsgBox('KAYAN could not safely stop or unregister its private PostgreSQL service. Company database, backups, licence data and settings were preserved; no customer data was deleted. Repair the service and retry.', mbError, MB_OK);
       Result := False;
     end;
   end;

@@ -1582,4 +1582,60 @@ try {
   Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
 }
 Write-Output "::notice::Safe-reset exercise passed: cancel changed nothing; reset backed up (PGDMP, pg_restore-readable), switched to a fresh empty database, preserved the old database and its sentinel, kept previous settings, redacted logs, and the next launch waits at first-run setup."
+# SAFE UNINSTALL / REINSTALL EXERCISE. Application binaries and shortcuts are
+# removed, but customer data, backups, licence state and settings must survive.
+$uninstaller = Join-Path $installRoot 'unins000.exe'
+if (-not (Test-Path -LiteralPath $uninstaller)) { Fail "Inno Setup uninstaller is missing: $uninstaller" }
+$uninstallLog = Join-Path $env:TEMP 'kayan-uninstall-smoke.log'
+$backupRoot = Join-Path $env:ProgramData 'KAYAN-ERP\backups'
+Write-Output '::notice title=Windows smoke phase::Uninstalling application binaries while asserting customer data is preserved.'
+if (-not (Test-Path -LiteralPath $settings)) { Fail "Cannot test uninstall preservation: settings file is missing before uninstall: $settings" }
+if (-not (Test-Path -LiteralPath $backupRoot)) { Fail "Cannot test uninstall preservation: backup directory is missing before uninstall: $backupRoot" }
+$settingsHashBeforeUninstall = (Get-FileHash -LiteralPath $settings -Algorithm SHA256).Hash
+$uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/LOG=' + $uninstallLog)) -Wait -PassThru
+if ($uninstall.ExitCode -ne 0) { Fail "KAYAN uninstall failed with exit code $($uninstall.ExitCode)." }
+Start-Sleep -Seconds 2
+if (Test-Path -LiteralPath $installRoot) { Fail "Uninstall left application binaries under $installRoot." }
+if (-not (Test-Path -LiteralPath $existingData)) { Fail "Uninstall deleted customer data under $existingData." }
+if (-not (Test-Path -LiteralPath $settings)) { Fail "Uninstall deleted company settings: $settings." }
+if ((Get-FileHash -LiteralPath $settings -Algorithm SHA256).Hash -ne $settingsHashBeforeUninstall) {
+  Fail "Uninstall changed the company's settings file."
+}
+if (-not (Test-Path -LiteralPath $backupRoot)) { Fail "Uninstall deleted company backups under $backupRoot." }
+if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) { Fail "Uninstall left the KAYAN PostgreSQL service registered." }
+$leftoverRules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like 'KAYAN ERP*' -or $_.DisplayName -like 'KAYAN-ERP*' })
+if ($leftoverRules.Count -gt 0) { Fail ("Uninstall left KAYAN firewall rules: " + (($leftoverRules | ForEach-Object DisplayName) -join ', ')) }
+Write-Output '::notice::Safe uninstall passed: application files and KAYAN service were removed; ProgramData, company settings and backups were preserved.'
+
+Write-Output '::notice title=Windows smoke phase::Reinstalling KAYAN and reconnecting to the preserved company data.'
+$reinstallLog = Join-Path $env:TEMP 'kayan-preserving-reinstall-smoke.log'
+$reinstall = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/LOG=' + $reinstallLog)) -Wait -PassThru
+if ($reinstall.ExitCode -ne 0) { Fail "Reinstall after safe uninstall failed with exit code $($reinstall.ExitCode)." }
+if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'erp_kayan.exe'))) { Fail 'Reinstall did not restore erp_kayan.exe.' }
+$reinstalledService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if (-not $reinstalledService) { Fail 'Reinstall did not register the KAYAN PostgreSQL service.' }
+if ($reinstalledService.Status -ne 'Running') { Fail "Reinstalled PostgreSQL service is not running (state: $($reinstalledService.Status))." }
+if (-not (Test-Path -LiteralPath $settings)) { Fail 'Reinstall lost the preserved company settings.' }
+$psqlAfterReinstall = Join-Path $installRoot 'backend\postgres\bin\psql.exe'
+if (-not (Test-Path -LiteralPath $psqlAfterReinstall)) { Fail 'Reinstall is missing the bundled PostgreSQL client.' }
+$env:PGPASSWORD = $databasePassword
+$preservedSentinel = @(& $psqlAfterReinstall -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT value FROM kayan_installer_upgrade_probe WHERE id=1" 2>&1)
+$preservedSentinelExit = $LASTEXITCODE
+Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+if ($preservedSentinelExit -ne 0 -or (($preservedSentinel -join '').Trim() -ne 'preserved')) {
+  Fail "The original company database or its sentinel did not survive uninstall and reinstall: $($preservedSentinel -join ' ')"
+}
+$reinstalledClient = Start-Process -FilePath (Join-Path $installRoot 'erp_kayan.exe') -WorkingDirectory $installRoot -PassThru
+try {
+  Start-Sleep -Seconds 8
+  if ($reinstalledClient.HasExited) { Fail "KAYAN client exited after preserving reinstall (exit code $($reinstalledClient.ExitCode))." }
+} finally {
+  if ($reinstalledClient -and -not $reinstalledClient.HasExited) {
+    $null = $reinstalledClient.CloseMainWindow()
+    try { Wait-Process -Id $reinstalledClient.Id -Timeout 10 -ErrorAction SilentlyContinue } catch { }
+    if (-not $reinstalledClient.HasExited) { Stop-Process -Id $reinstalledClient.Id -Force -ErrorAction SilentlyContinue }
+  }
+}
+Write-Output '::notice::Safe reinstall passed: service running, desktop client alive, company settings and original PostgreSQL sentinel preserved.'
+
 Remove-KayanOfflineRules

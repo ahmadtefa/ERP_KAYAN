@@ -26,10 +26,8 @@ class _CompanyManagementPanelState
 
   bool get _isArabic => Localizations.localeOf(context).languageCode == 'ar';
   String tr(String en, String ar) => _isArabic ? ar : en;
-  bool get _canEditCompany {
-    final user = ref.read(currentUserProvider);
-    return user?.permissions.contains('company.profile.manage') == true;
-  }
+  bool get _canEditCompany =>
+      ref.read(currentUserProvider)?.isSuperAdmin == true;
 
   String _companyValue(String key) => _company?[key]?.toString() ?? '';
 
@@ -46,7 +44,7 @@ class _CompanyManagementPanelState
     });
     try {
       final client = ref.read(apiClientProvider);
-      if (_canEditCompany) _company = await client.get('/companies/profile');
+      _company = await client.get('/company/profile');
     } catch (e) {
       _error = '$e';
     } finally {
@@ -231,7 +229,6 @@ class _CompanyManagementPanelState
 
   @override
   Widget build(BuildContext context) {
-    if (!_canEditCompany) return const SizedBox.shrink();
     if (_loading) {
       return const Center(
         child: Padding(
@@ -273,14 +270,15 @@ class _CompanyManagementPanelState
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ),
-                    IconButton(
-                      onPressed: _busy ? null : _editCompany,
-                      icon: const Icon(Icons.edit_outlined),
-                      tooltip: tr(
-                        'Edit company profile',
-                        'تعديل بيانات الشركة',
+                    if (_canEditCompany)
+                      IconButton(
+                        onPressed: _busy ? null : _editCompany,
+                        icon: const Icon(Icons.edit_outlined),
+                        tooltip: tr(
+                          'Edit company profile',
+                          'تعديل بيانات الشركة',
+                        ),
                       ),
-                    ),
                   ],
                 ),
                 Text(
@@ -310,8 +308,9 @@ class _CompanyManagementPanelState
                       ),
                     ),
                     const SizedBox(width: 12),
-                    Expanded(
-                      child: Wrap(
+                    if (_canEditCompany)
+                      Expanded(
+                        child: Wrap(
                         spacing: 8,
                         runSpacing: 8,
                         children: [

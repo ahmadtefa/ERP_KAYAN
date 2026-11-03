@@ -527,20 +527,14 @@ class _Sidebar extends StatelessWidget {
                 ),
                 children: [
                   for (final group in _NavGroup.values)
-                    if (groups[group]?.isNotEmpty ?? false) ...[
-                      _GroupLabel(
+                    if (groups[group]?.isNotEmpty ?? false)
+                      _NavigationGroup(
+                        label: _groupLabel(group, arabic),
+                        items: groups[group]!,
+                        current: current,
                         extended: extended,
                         first: group == _NavGroup.values.first,
-                        label: _groupLabel(group, arabic),
-                        accent: _accentForGroup(group),
                       ),
-                      for (final item in groups[group]!)
-                        _NavEntry(
-                          item: item,
-                          selected: _belongsTo(item.path, current),
-                          extended: extended,
-                        ),
-                    ],
                 ],
               ),
             ),
@@ -608,57 +602,133 @@ class _SidebarBrand extends StatelessWidget {
   }
 }
 
-class _GroupLabel extends StatelessWidget {
-  const _GroupLabel({
+/// A collapsible navigation group. The same accent is used by the
+/// sidebar group surface and by SectionCanvas on every screen in the group.
+class _NavigationGroup extends StatefulWidget {
+  const _NavigationGroup({
+    required this.label,
+    required this.items,
+    required this.current,
     required this.extended,
     required this.first,
-    required this.label,
-    required this.accent,
   });
 
+  final String label;
+  final List<_NavItem> items;
+  final String current;
   final bool extended;
   final bool first;
-  final String label;
-  final SectionAccent accent;
+
+  @override
+  State<_NavigationGroup> createState() => _NavigationGroupState();
+}
+
+class _NavigationGroupState extends State<_NavigationGroup> {
+  late bool _expanded;
+
+  bool get _containsCurrent =>
+      widget.items.any((item) => _belongsTo(item.path, widget.current));
+
+  @override
+  void initState() {
+    super.initState();
+    _expanded = true;
+  }
+
+  @override
+  void didUpdateWidget(covariant _NavigationGroup oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.current != oldWidget.current && _containsCurrent) {
+      _expanded = true;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (!extended) {
-      return Padding(
-        padding: EdgeInsets.fromLTRB(10, first ? 4 : 12, 10, 6),
-        child: Container(height: 1, color: AppColors.sidebarHairline),
+    final accent = _accentForGroup(widget.items.first.group);
+    if (!widget.extended) {
+      return Column(
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(10, widget.first ? 4 : 12, 10, 6),
+            child: Container(height: 1, color: AppColors.sidebarHairline),
+          ),
+          for (final item in widget.items)
+            _NavEntry(
+              item: item,
+              selected: _belongsTo(item.path, widget.current),
+              extended: false,
+            ),
+        ],
       );
     }
+
     return Padding(
-      padding: EdgeInsets.fromLTRB(8, first ? 4 : 16, 8, 6),
-      child: Row(
+      padding: EdgeInsets.only(top: widget.first ? 0 : 8, bottom: 4),
+      child: Column(
         children: [
-          // The section's colour dot: the same hue its entries light up
-          // with when selected, so the eye groups them before reading.
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(
-              // The sidebar is a dark surface in both themes, so the dot
-              // takes the step mixed for dark surfaces.
-              color: accent.darkBase,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Text(
-              label.toUpperCase(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: AppColors.onSidebarMuted,
-                fontSize: 10.5,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
+          Material(
+            color: accent.darkBase.withValues(alpha: 0.16),
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: Padding(
+                padding: const EdgeInsetsDirectional.fromSTEB(10, 10, 8, 10),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: accent.darkBase,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Text(
+                        widget.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.onSidebar,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      _expanded
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
+                      color: accent.darkBase,
+                      size: 20,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
+          if (_expanded)
+            Container(
+              margin: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
+              decoration: BoxDecoration(
+                color: accent.darkBase.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(AppRadii.md),
+              ),
+              child: Column(
+                children: [
+                  for (final item in widget.items)
+                    _NavEntry(
+                      item: item,
+                      selected: _belongsTo(item.path, widget.current),
+                      extended: true,
+                    ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -1225,20 +1295,14 @@ class _ModuleDrawer extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(10, 10, 10, 20),
                 children: [
                   for (final group in _NavGroup.values)
-                    if (groups[group]?.isNotEmpty ?? false) ...[
-                      _GroupLabel(
+                    if (groups[group]?.isNotEmpty ?? false)
+                      _NavigationGroup(
+                        label: _Sidebar._groupLabel(group, arabic),
+                        items: groups[group]!,
+                        current: current,
                         extended: true,
                         first: group == _NavGroup.values.first,
-                        label: _Sidebar._groupLabel(group, arabic),
-                        accent: _accentForGroup(group),
                       ),
-                      for (final item in groups[group]!)
-                        _NavEntry(
-                          item: item,
-                          selected: _belongsTo(item.path, current),
-                          extended: true,
-                        ),
-                    ],
                 ],
               ),
             ),

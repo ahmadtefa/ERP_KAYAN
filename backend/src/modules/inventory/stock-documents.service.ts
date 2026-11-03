@@ -375,6 +375,19 @@ export class StockDocumentsService {
       });
     }
 
+    // A negative adjustment is an issue from stock. Every such issue
+    // must name the cost centre that bears the inventory-difference expense;
+    // positive receipts remain unallocated, and transfers are not costs.
+    if (
+      kind === StockDocumentKind.ADJUSTMENT &&
+      lines.some((line) => line.quantity.isNegative()) &&
+      !costCenterId
+    ) {
+      throw new BadRequestException(
+        'A cost center is required when issuing stock from a warehouse.',
+      );
+    }
+
     const fromWarehouseId = dto.fromWarehouseId ? String(dto.fromWarehouseId) : null;
     const toWarehouseId = dto.toWarehouseId ? String(dto.toWarehouseId) : null;
 

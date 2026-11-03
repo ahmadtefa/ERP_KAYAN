@@ -6,6 +6,7 @@ import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/data_dialog.dart';
+import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/resizable_table.dart';
@@ -13,6 +14,7 @@ import '../../../../shared/widgets/state_views.dart';
 import '../../../data/presentation/providers/data_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
+import '../../../accounting/presentation/providers/cost_center_providers.dart' show activeCostCentersProvider, costCenterLabel;
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import '../../../data/presentation/widgets/print_visibility_prompt.dart';
@@ -40,15 +42,184 @@ class StockScreen extends ConsumerStatefulWidget {
 
 class _StockScreenState extends ConsumerState<StockScreen> {
   String _query = '';
+  bool _busy = false;
+
+  Future<void> _createMovement({required bool issue}) async {
+    final language = Localizations.localeOf(context).languageCode;
+    final arabic = language == 'ar';
+    final user = ref.read(currentUserProvider);
+    if (user?.branchId == null || user!.branchId.isEmpty) {
+      showMessage(context, arabic ? 'المستخدم غير مرتبط بفرع.' : 'The signed-in user has no branch.', error: true);
+      return;
+    }
+    final client = ref.read(apiClientProvider);
+    final warehouses = await client.getList(
+      '/inventory/warehouses',
+      query: {'branchId': user.branchId},
+    );
+    if (!mounted) return;
+    if (warehouses.isEmpty) {
+      showMessage(context, arabic ? 'لا يوجد مخزن نشط في الفرع الحالي.' : 'There is no active warehouse in the current branch.', error: true);
+      return;
+    }
+
+    final items = await ref.read(activeItemsProvider.future);
+    if (!mounted) return;
+    if (items.isEmpty) {
+      showMessage(context, arabic ? 'لا توجد أصناف نشطة للصرف أو الإضافة.' : 'There are no active items to move.', error: true);
+      return;
+    }
+
+    final costCenters = issue
+        ? await ref.read(activeCostCentersProvider.future)
+        : const <Json>[];
+    if (!mounted) return;
+    if (issue && costCenters.isEmpty) {
+      showMessage(context, arabic ? 'أضف مركز تكلفة نشطًا أولًا قبل صرف المخزون.' : 'Create an active cost centre before issuing stock.', error: true);
+      return;
+    }
+
+    final today = DateTime.now();
+    final dateText = '${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    final values = await showFormSheet(
+      context,
+      title: issue
+          ? (arabic ? 'صرف من المخزن' : 'Issue from warehouse')
+          : (arabic ? 'إضافة إلى المخزن' : 'Add to warehouse'),
+      initial: {'documentDate': dateText},
+      fields: [
+        FieldSpec(
+          'itemId',
+          arabic ? 'الصنف' : 'Item',
+          kind: FieldKind.select,
+          required: true,
+          options: [
+            for (final item in items)
+              FieldOption(
+                asString(item['id']) ?? '',
+                '${text(item, 'code')} — ${arabic ? text(item, 'nameAr') : text(item, 'nameEn')}',
+              ),
+          ],
+        ),
+        FieldSpec(
+          'toWarehouseId',
+          arabic ? 'المخزن' : 'Warehouse',
+          kind: FieldKind.select,
+          required: true,
+          options: [
+            for (final warehouse in warehouses)
+              FieldOption(
+                asString(warehouse['id']) ?? '',
+                '${text(warehouse, 'code')} — ${arabic ? text(warehouse, 'nameAr') : text(warehouse, 'nameEn')}',
+              ),
+          ],
+        ),
+        FieldSpec(
+          'quantity',
+          arabic ? 'الكمية' : 'Quantity',
+          kind: FieldKind.decimal,
+          required: true,
+        ),
+        if (!issue)
+          FieldSpec(
+            'unitCost',
+            arabic ? 'تكلفة الوحدة' : 'Unit cost',
+            kind: FieldKind.decimal,
+            required: true,
+          ),
+        if (issue)
+          FieldSpec(
+            'costCenterId',
+            arabic ? 'مركز التكلفة' : 'Cost centre',
+            kind: FieldKind.select,
+            required: true,
+            options: [
+              for (final centre in costCenters)
+                FieldOption(
+                  asString(centre['id']) ?? '',
+                  costCenterLabel(centre, language),
+                ),
+            ],
+          ),
+        FieldSpec(
+          'documentDate',
+          arabic ? 'تاريخ الحركة' : 'Movement date',
+          kind: FieldKind.date,
+          required: true,
+        ),
+        FieldSpec(
+          'reason',
+          arabic ? 'سبب الحركة' : 'Reason',
+          required: true,
+        ),
+      ],
+    );
+    if (values == null || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      final quantity = asString(values['quantity'])!;
+      final line = <String, dynamic>{
+        'itemId': values['itemId'],
+        'quantity': issue ? '-$quantity' : quantity,
+        if (!issue) 'unitCost': values['unitCost'],
+      };
+      final document = await client.post(
+        '/inventory/stock-documents',
+        body: {
+          'kind': 'ADJUSTMENT',
+          'branchId': user.branchId,
+          'toWarehouseId': values['toWarehouseId'],
+          'documentDate': values['documentDate'],
+          'reason': values['reason'],
+          if (issue) 'costCenterId': values['costCenterId'],
+          'lines': [line],
+        },
+      );
+      final id = asString(document['id']);
+      if (id == null || id.isEmpty) {
+        throw const FormatException('The stock document response did not include an id.');
+      }
+      await client.post('/inventory/stock-documents/$id/post');
+      await ref.read(stockListProvider.notifier).reload();
+      if (mounted) {
+        showMessage(
+          context,
+          issue
+              ? (arabic ? 'تم ترحيل الصرف وتحميله على مركز التكلفة.' : 'Stock issue posted to the selected cost centre.')
+              : (arabic ? 'تم ترحيل الإضافة إلى المخزن.' : 'Stock receipt posted.'),
+        );
+      }
+    } on Failure catch (error) {
+      if (mounted) showMessage(context, error.message, error: true);
+    } catch (error) {
+      if (mounted) showMessage(context, '$error', error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
     final async = ref.watch(stockListProvider);
 
     return ModuleScaffold(
       title: l10n.stockBalances,
-      actions: const [ListExportActions(list: 'stock')],
+      actions: [
+        OutlinedButton.icon(
+          onPressed: _busy ? null : () => _createMovement(issue: false),
+          icon: const Icon(Icons.add_box_outlined),
+          label: Text(arabic ? 'إضافة للمخزن' : 'Stock receipt'),
+        ),
+        FilledButton.tonalIcon(
+          onPressed: _busy ? null : () => _createMovement(issue: true),
+          icon: const Icon(Icons.outbox_outlined),
+          label: Text(arabic ? 'صرف للمركز' : 'Issue to cost centre'),
+        ),
+        const ListExportActions(list: 'stock'),
+      ],
       trailing: SearchField(
         hint: l10n.searchItems,
         onChanged: (value) => setState(() => _query = value.trim()),

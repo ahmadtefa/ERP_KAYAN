@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Body,
   Controller,
   Delete,
@@ -68,7 +69,6 @@ export class CompaniesController {
   }
 
   @Get('profile')
-  @RequirePermissions('company.profile.manage')
   profile(@CurrentUser() user: AuthUser) {
     return this.companies.getProfile(user.companyId);
   }
@@ -76,6 +76,7 @@ export class CompaniesController {
   @Patch('profile')
   @RequirePermissions('company.profile.manage')
   update(@CurrentUser() user: AuthUser, @Body() dto: UpdateCompanyProfileDto) {
+    this.assertSuperAdmin(user);
     return this.companies.updateProfile(user.companyId, user.userId, dto);
   }
 
@@ -88,6 +89,7 @@ export class CompaniesController {
     @CurrentUser() user: AuthUser,
     @UploadedFile() file: UploadedLogo | undefined,
   ) {
+    this.assertSuperAdmin(user);
     if (!file?.buffer?.length) {
       throw new BadRequestException('لم يتم اختيار ملف للشعار / No logo file was uploaded.');
     }
@@ -102,8 +104,15 @@ export class CompaniesController {
   @Delete('logo')
   @RequirePermissions('company.profile.manage')
   async removeLogo(@CurrentUser() user: AuthUser) {
+    this.assertSuperAdmin(user);
     await this.companies.deleteLogo(user.companyId, user.userId);
     return this.companies.getProfile(user.companyId);
+  }
+
+  private assertSuperAdmin(user: AuthUser) {
+    if (!user.isSuperAdmin) {
+      throw new ForbiddenException('Only the Super Admin can modify company details.');
+    }
   }
 
   private async sendLogo(companyId: string | undefined, response: Response) {
