@@ -735,63 +735,6 @@ class _NavigationGroupState extends State<_NavigationGroup> {
   }
 }
 
-class _GroupLabel extends StatelessWidget {
-  const _GroupLabel({
-    required this.extended,
-    required this.first,
-    required this.label,
-    required this.accent,
-  });
-
-  final bool extended;
-  final bool first;
-  final String label;
-  final SectionAccent accent;
-
-  @override
-  Widget build(BuildContext context) {
-    if (!extended) {
-      return Padding(
-        padding: EdgeInsets.fromLTRB(10, first ? 4 : 12, 10, 6),
-        child: Container(height: 1, color: AppColors.sidebarHairline),
-      );
-    }
-    return Padding(
-      padding: EdgeInsets.fromLTRB(8, first ? 4 : 16, 8, 6),
-      child: Row(
-        children: [
-          // The section's colour dot: the same hue its entries light up
-          // with when selected, so the eye groups them before reading.
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(
-              // The sidebar is a dark surface in both themes, so the dot
-              // takes the step mixed for dark surfaces.
-              color: accent.darkBase,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Text(
-              label.toUpperCase(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: AppColors.onSidebarMuted,
-                fontSize: 10.5,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _NavEntry extends StatelessWidget {
   const _NavEntry({
     required this.item,
