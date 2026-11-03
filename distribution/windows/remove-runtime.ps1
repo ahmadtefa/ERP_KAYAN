@@ -22,8 +22,13 @@ if ($service) {
   # Unregister the KAYAN-owned service before Inno removes bundled binaries.
   # The PostgreSQL data directory under ProgramData is deliberately retained.
   $pgCtl = Join-Path $PSScriptRoot 'backend\postgres\bin\pg_ctl.exe'
+  $data = Join-Path $env:ProgramData 'KAYAN-ERP\PostgreSQL\data'
   if (Test-Path -LiteralPath $pgCtl) {
-    & $pgCtl unregister -N $serviceName
+    if (Test-Path -LiteralPath (Join-Path $data 'PG_VERSION')) {
+      & $pgCtl unregister -N $serviceName -D $data
+    } else {
+      & $pgCtl unregister -N $serviceName
+    }
     if ($LASTEXITCODE -ne 0) {
       throw "Could not unregister $serviceName. Customer database and backups were not removed."
     }
