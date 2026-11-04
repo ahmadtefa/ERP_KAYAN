@@ -584,6 +584,8 @@ class AppErrorMessageResolver {
 
   /// Messages with a variable inside them.
   static final List<_BusinessRule> _patterns = <_BusinessRule>[
+    _BusinessRule(_ci(r'^Nothing to depreciate for (\d{4}-\d{2})\s+[—-]\s+.*already depreciated for \1(?:;.*)?$'),
+        (m) => 'لا توجد أصول مؤهلة للإهلاك في ${m.group(1)}؛ سبق احتساب إهلاك أصل واحد على الأقل لهذه الفترة.'),
     _BusinessRule(_ci(r'^Account (\S+) is inactive$'), (m) =>
         'الحساب ${m.group(1)} غير نشط.'),
     _BusinessRule(_ci(r'^Account (\S+) cannot receive postings$'), (m) =>

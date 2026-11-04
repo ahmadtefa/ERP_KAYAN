@@ -63,6 +63,12 @@ void main() {
   });
 
   group('business reasons survive, in Arabic', () {
+    test('an already depreciated period has a useful Arabic explanation', () {
+      final text = arabic.resolve('Nothing to depreciate for 2024-01 — FA-M-1: already depreciated for 2024-01', statusCode: 400);
+      expect(text.businessMessage, contains('سبق احتساب إهلاك'));
+      expect(text.businessMessage, contains('2024-01'));
+    });
+
     test('a grouping account refuses to be turned off', () {
       final text = arabic.resolve(
         'Deactivate active subaccounts before deactivating their parent',
