@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
@@ -25,9 +26,10 @@ import '../../../data/presentation/widgets/list_export_actions.dart';
 /// is therefore the moment the figures become real, and it is always behind a
 /// confirmation.
 class InvoiceListScreen extends ConsumerStatefulWidget {
-  const InvoiceListScreen({super.key, required this.kind});
+  const InvoiceListScreen({super.key, required this.kind, this.navigationKey});
 
   final InvoiceKind kind;
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<InvoiceListScreen> createState() => _InvoiceListScreenState();
@@ -36,6 +38,22 @@ class InvoiceListScreen extends ConsumerStatefulWidget {
 class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
   String _status = '';
   bool _busy = false;
+  final _exitRelay = InvoiceDraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
 
   String get _basePath => widget.kind.basePath;
 
@@ -45,6 +63,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
         builder: (_) => InvoiceEditorScreen(
           kind: widget.kind,
           invoiceId: invoiceId,
+          exitRelay: _exitRelay,
         ),
       ),
     );

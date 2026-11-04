@@ -148,15 +148,25 @@ class _LandedCostDraft {
   }
 }
 
+/// The routed invoice list owns the navigation guard; an imperative editor
+/// temporarily attaches its own confirmation while it is on top.
+class InvoiceDraftExitRelay {
+  Future<bool> Function()? _guard;
+  void attach(Future<bool> Function() guard) { _guard = guard; }
+  void detach(Future<bool> Function() guard) { if (_guard == guard) _guard = null; }
+  Future<bool> canLeave() => _guard?.call() ?? Future.value(true);
+}
+
 /// Creates a draft sales or purchase invoice.
 ///
 /// The screen only ever creates a draft. Posting is a separate, deliberate
 /// step from the list, because posting moves stock and writes to the ledger.
 class InvoiceEditorScreen extends ConsumerStatefulWidget {
-  const InvoiceEditorScreen({super.key, required this.kind, this.invoiceId});
+  const InvoiceEditorScreen({super.key, required this.kind, this.invoiceId, this.exitRelay});
 
   final InvoiceKind kind;
   final String? invoiceId;
+  final InvoiceDraftExitRelay? exitRelay;
 
   @override
   ConsumerState<InvoiceEditorScreen> createState() =>
@@ -186,19 +196,22 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       line.quantity.text, line.unitPrice.text, line.taxRate.text, line.discountKind.name, line.discountValue.text]],
   });
 
-  Future<void> _close() async {
-    if (_saving || _loadingExisting || _confirmingExit) return;
-    if (_snapshot() != _savedSnapshot) {
-      _confirmingExit = true;
+  Future<bool> _confirmExit() async {
+    if (_saving || _loadingExisting || _confirmingExit) return false;
+    if (_snapshot() == _savedSnapshot) return true;
+    _confirmingExit = true;
+    try {
       final ar = Localizations.localeOf(context).languageCode == 'ar';
       final leave = await confirmAction(context,
         title: ar ? 'تغييرات غير محفوظة' : 'Unsaved changes',
         message: ar ? 'الخروج دون حفظ الفاتورة؟' : 'Leave without saving the invoice?',
         confirmLabel: ar ? 'خروج' : 'Discard', destructive: true);
-      _confirmingExit = false;
-      if (!leave || !mounted) return;
-    }
-    if (mounted) Navigator.of(context).pop();
+      return leave && mounted;
+    } finally { _confirmingExit = false; }
+  }
+
+  Future<void> _close() async {
+    if (await _confirmExit() && mounted) Navigator.of(context).pop();
   }
 
   @override
@@ -211,6 +224,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         '${now.day.toString().padLeft(2, '0')}';
     _lines.add(_LineDraft());
     _savedSnapshot = _snapshot();
+    widget.exitRelay?.attach(_confirmExit);
     if (widget.invoiceId != null) {
       _loadingExisting = true;
       _loadExisting();
@@ -310,6 +324,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
 
   @override
   void dispose() {
+    widget.exitRelay?.detach(_confirmExit);
     for (final line in _lines) {
       line.dispose();
     }
@@ -511,6 +526,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
       }
     } on Failure catch (e) {
       if (mounted) showMessage(context, e.message, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
