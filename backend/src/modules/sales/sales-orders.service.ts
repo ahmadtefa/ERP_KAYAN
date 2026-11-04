@@ -298,7 +298,7 @@ export class SalesOrdersService {
         throw new BadRequestException('expectedUpdatedAt is required');
       }
       if (new Date(dto.expectedUpdatedAt).getTime() !== order.updatedAt.getTime()) {
-        throw new ConflictException('The order changed since it was opened; refresh before editing');
+        throw new ConflictException({ code: 'ORDER_EDIT_STALE', detail: 'The order changed since it was opened; refresh before editing' });
       }
       if (await tx.salesInvoice.count({ where: { companyId, salesOrderId: id } }) > 0) {
         throw new BadRequestException('Order has invoice history; draft editing is not allowed');

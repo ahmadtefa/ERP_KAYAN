@@ -15,16 +15,40 @@ import '../../widget/test_harness.dart';
 class _EditApi extends ApiClient {
   _EditApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'), FakeTokenStore());
   final requests = <Map<String, dynamic>>[];
+  bool stale = false;
   final paths = <String>[];
   @override
   Future<Map<String, dynamic>> put(String path, {Object? body}) async {
     paths.add(path); requests.add(Map<String, dynamic>.from(body! as Map));
+    if (stale) throw const ApiFailure('The order changed', statusCode: 409, code: 'ORDER_EDIT_STALE');
     if (requests.length == 1) throw const NetworkFailure();
     return {'id':'order-1'};
   }
 }
 
 void main() {
+  testWidgets('stale draft edits keep the entered values and require reopening', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(1400, 1000); tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _EditApi()..stale = true;
+    const user = AppUser(id:'user',username:'tester',fullName:'Tester',companyId:'company',branchId:'branch',isSuperAdmin:true);
+    final order = <String, dynamic>{'id':'order-1', 'updatedAt':'2026-11-04T12:00:00.000Z',
+      'lines':[{'id':'line-1','itemNameEn':'Synthetic item','unit':'piece','unitQuantity':'3',
+        'unitPrice':'10','discountPercent':'0','taxRate':'0'}]};
+    await tester.pumpWidget(ProviderScope(overrides:[
+      apiClientProvider.overrideWithValue(api), currentUserProvider.overrideWith((ref) => user),
+      appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1')),
+    ], child: MaterialApp(locale: const Locale('en'), localizationsDelegates:AppLocalizations.localizationsDelegates,
+      supportedLocales:AppLocalizations.supportedLocales, home:OrderEditScreen(kind:InvoiceKind.sales, order:order))));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, 'Quantity'), '2');
+    await tester.tap(find.text('Save changes')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
+    expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField, 'Quantity')).controller!.text,'2');
+    expect(find.textContaining('The order changed.'), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save changes')).onPressed, isNull);
+  });
   for (final kind in InvoiceKind.values) {
     testWidgets('${kind.name}: draft edit retains its exact retry after reopening', (tester) async {
       SharedPreferences.setMockInitialValues({});

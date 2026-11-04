@@ -1,6 +1,7 @@
-import { Module } from '@nestjs/common';
+import { ConflictException, Module } from '@nestjs/common';
 import { NestFactory, Reflector } from '@nestjs/core';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { ProblemDetailsFilter } from '../../common/filters/problem-details.filter';
 import { SalesOrdersController } from './sales-orders.controller';
 import { SalesOrdersService } from './sales-orders.service';
 import { PurchaseOrdersController } from '../purchases/purchase-orders.controller';
@@ -21,6 +22,7 @@ describe('draft order edit HTTP permissions', () => {
       next();
     });
     app.useGlobalGuards(new PermissionsGuard(new Reflector()));
+    app.useGlobalFilters(new ProblemDetailsFilter());
     await app.listen(0, '127.0.0.1');
     const port = (app.getHttpServer().address() as {port:number}).port;
     try {
@@ -33,6 +35,10 @@ describe('draft order edit HTTP permissions', () => {
         expect(service.updateDraft).not.toHaveBeenCalled();
         expect((await call(`${scope}.orders.read,${scope}.orders.manage`)).status).toBe(200);
         expect(service.updateDraft).toHaveBeenCalledTimes(1);
+        service.updateDraft.mockRejectedValueOnce(new ConflictException({ code:'ORDER_EDIT_STALE', detail:'Order changed' }));
+        const stale = await call(`${scope}.orders.read,${scope}.orders.manage`);
+        expect(stale.status).toBe(409);
+        expect(await stale.json()).toEqual(expect.objectContaining({ code:'ORDER_EDIT_STALE', detail:'Order changed' }));
       }
     } finally { await app.close(); }
   });

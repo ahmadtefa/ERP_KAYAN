@@ -39,7 +39,7 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
   OrderRetryStore? _store;
   String? _scope;
   Map<String, dynamic>? _pending;
-  bool _busy = false, _dirty = false, _confirming = false;
+  bool _busy = false, _dirty = false, _confirming = false, _stale = false;
   bool get _ar => Localizations.localeOf(context).languageCode == 'ar';
   String tr(String ar, String en) => _ar ? ar : en;
   String get _path => '${widget.kind.isSales ? '/sales/orders' : '/purchases/orders'}/${text(widget.order, 'id')}';
@@ -136,9 +136,10 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
       _dirty = false;
       Navigator.of(context).pop(true);
     } on Failure catch (error) {
-      if (error is ApiFailure && const {400, 422}.contains(error.statusCode)) {
+      if (error is ApiFailure && (const {400, 422}.contains(error.statusCode) ||
+          (error.statusCode == 409 && error.code == 'ORDER_EDIT_STALE'))) {
         await _store!.complete(_scope!);
-        if (mounted) setState(() => _pending = null);
+        if (mounted) setState(() { _pending = null; _stale = error.code == 'ORDER_EDIT_STALE'; });
       }
       if (mounted) showMessage(context, error.message, error: true);
     } catch (error) { if (mounted) showMessage(context, error.toString(), error: true); }
@@ -153,6 +154,8 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
         body: ListView(padding: const EdgeInsets.all(20), children: [
           Text(tr('لا يمكن تغيير الأصناف أو الوحدات؛ تُحفظ معاملات الوحدات التاريخية.',
             'Items and units cannot be changed; historical unit factors are preserved.')),
+          if (_stale) Text(tr('تغير الأمر؛ احتفظ بالقيم للمراجعة ثم ارجع وأعد فتحه من البيانات المحدثة.',
+            'The order changed. Review your values, then go back and reopen the refreshed order.')),
           if (_pending != null) Card(child: ListTile(
             title: Text(tr('لم يتأكد رد تعديل الأمر؛ أعد المحاولة بنفس الطلب.', 'Order edit is unresolved; retry the same request.')),
             trailing: FilledButton(onPressed: _busy ? null : () => _send(_pending!), child: Text(tr('إعادة المحاولة', 'Retry'))),
@@ -168,8 +171,8 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
                 decoration: InputDecoration(labelText: tr('الخصم %', 'Discount %')), validator: (v) => _number(v, percent: true)),
               TextFormField(controller: line.tax, onChanged: (_) => _changed(), keyboardType: TextInputType.number,
                 decoration: InputDecoration(labelText: tr('الضريبة %', 'Tax %')), validator: (v) => _number(v, percent: true)),
-            ])))),
-            FilledButton(onPressed: disabled || _lines.isEmpty || text(widget.order, 'updatedAt').isEmpty ? null : _save,
+            ]))),
+            FilledButton(onPressed: disabled || _stale || _lines.isEmpty || text(widget.order, 'updatedAt').isEmpty ? null : _save,
               child: Text(tr('حفظ التعديلات', 'Save changes'))),
           ]))),
         ]),

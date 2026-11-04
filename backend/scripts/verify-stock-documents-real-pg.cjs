@@ -216,7 +216,8 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.notEqual(updated.updatedAt,draft.updatedAt);
       assert.equal((await orders.updateDraft(company,branch,user,draft.id,request)).id,draft.id);
       await assert.rejects(orders.updateDraft(company,branch,user,draft.id,{...request, lines:[{...request.lines[0],quantity:'3'}]}),/different request/);
-      await assert.rejects(orders.updateDraft(company,branch,user,draft.id,{...request,idempotencyKey:`draft-${kind}-stale-000001`}),/changed since/);
+      await assert.rejects(orders.updateDraft(company,branch,user,draft.id,{...request,idempotencyKey:`draft-${kind}-stale-000001`}),
+        error => error.getResponse?.()?.code === 'ORDER_EDIT_STALE');
       const fail = {...request,idempotencyKey:`draft-${kind}-audit-fail-001`,expectedUpdatedAt:updated.updatedAt,
         lines:[{...request.lines[0],quantity:'4'}]};
       const originalAudit = audit.recordRequired.bind(audit);

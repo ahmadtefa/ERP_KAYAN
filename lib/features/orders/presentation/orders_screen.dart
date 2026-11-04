@@ -247,6 +247,10 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
           if (status == 'DRAFT' && _can('$_permissions.orders.manage'))
             OutlinedButton(onPressed: _busy || _pending != null || _store == null ? null : () => _editDraft(order),
               child: Text(tr('تعديل المسودة', 'Edit draft'))),
+          if (status == 'DRAFT' && _can('$_permissions.orders.manage') &&
+              _pending?['method'] == 'PUT' && _pending?['path'] == '$_base/${widget.orderId}')
+            OutlinedButton(onPressed: _busy ? null : () => _editDraft(order),
+              child: Text(tr('مراجعة التعديل المعلّق', 'Review pending edit'))),
           if (status == 'DRAFT' && _can('$_permissions.orders.approve'))
             OutlinedButton(onPressed: _busy || _pending != null ? null : () => _action('$_base/${widget.orderId}/approve'), child: Text(tr('اعتماد', 'Approve'))),
           if (status != 'CANCELLED' && _can('$_permissions.orders.create'))
