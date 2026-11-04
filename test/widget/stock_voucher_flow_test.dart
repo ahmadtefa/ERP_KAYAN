@@ -85,7 +85,7 @@ void main() {
       await tester.ensureVisible(find.text('Save draft')); await tester.tap(find.text('Save draft')); await tester.pumpAndSettle();
       expect(api.requests,hasLength(1));
       expect((api.requests.single['lines'] as List).single['quantity'],kind == 'ISSUE' ? '-2' : '2');
-      await tester.tap(find.text('OK')); await tester.pumpAndSettle();
+      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
       await tester.pageBack(); await tester.pumpAndSettle();
       await tester.tap(find.text('Open voucher')); await tester.pumpAndSettle();
       expect(find.textContaining('Voucher request is unresolved'),findsOneWidget);

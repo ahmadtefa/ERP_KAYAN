@@ -70,7 +70,7 @@ void main() {
       await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
       expect(api.requests.length, 1);
-      await tester.tap(find.text('OK'));
+      await tester.tap(find.text('حسنًا'));
       await tester.pumpAndSettle();
       expect(find.text('An earlier request is unresolved; retry the same request.'), findsOneWidget);
       await tester.tap(find.text('Retry'));

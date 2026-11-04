@@ -12,18 +12,12 @@ import '../../../../shared/widgets/resizable_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../data/presentation/providers/data_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
-import '../../../common/presentation/providers/resource_providers.dart';
+import '../providers/stock_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import 'stock_vouchers_screen.dart';
 
-class StockController extends JsonListController {
-  @override
-  String get resourcePath => '/inventory/stock';
-}
-
-final stockListProvider =
-    AsyncNotifierProvider<JsonListController, List<Json>>(StockController.new);
+export '../providers/stock_providers.dart' show stockListProvider, StockController;
 
 /// Stock on hand per item and branch, with the moving average cost the ledger
 /// is carrying.
@@ -41,6 +35,11 @@ class StockScreen extends ConsumerStatefulWidget {
 class _StockScreenState extends ConsumerState<StockScreen> {
   String _query = '';
 
+  Future<void> _openVouchers() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => const StockVouchersScreen()));
+    if (mounted) ref.invalidate(stockListProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -50,7 +49,9 @@ class _StockScreenState extends ConsumerState<StockScreen> {
     return ModuleScaffold(
       title: l10n.stockBalances,
       actions: [
-        OutlinedButton.icon(onPressed:() => Navigator.of(context).push<void>(MaterialPageRoute(builder:(_) => const StockVouchersScreen())),
+        IconButton(tooltip: l10n.refresh, icon: const Icon(Icons.refresh),
+          onPressed: () => ref.read(stockListProvider.notifier).reload()),
+        OutlinedButton.icon(onPressed: _openVouchers,
           icon:const Icon(Icons.inventory_2_outlined),
           label:Text(Localizations.localeOf(context).languageCode == 'ar' ? 'أذون المخزون' : 'Stock vouchers')),
         const ListExportActions(list: 'stock'),

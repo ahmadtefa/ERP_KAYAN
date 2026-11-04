@@ -10,6 +10,8 @@ import '../../../shared/widgets/state_views.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../common/presentation/screens/module_scaffold.dart';
 import '../../invoicing/presentation/providers/invoice_providers.dart';
+import '../../inventory/presentation/providers/stock_providers.dart';
+import '../../accounting/presentation/screens/journal_entries_screen.dart';
 import 'order_retry_store.dart';
 import 'order_create_screen.dart';
 import 'order_edit_screen.dart';
@@ -220,7 +222,15 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
         _refresh();
         showMessage(context, error.toString(), error: true);
       }
-    } finally { if (mounted) setState(() => _busy = false); }
+    } finally {
+      if (mounted) {
+        if (path.startsWith('$_invoiceBase/') && (path.endsWith('/post') || path.endsWith('/reverse'))) {
+          ref.invalidate(stockListProvider);
+          ref.invalidate(journalEntriesProvider);
+        }
+        setState(() => _busy = false);
+      }
+    }
   }
 
   @override

@@ -116,7 +116,7 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNWidgets(2));
-    await tester.tap(find.text('OK'));
+    await tester.tap(find.text('حسنًا'));
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Name in English *')).controller!.text,
         'New asset');

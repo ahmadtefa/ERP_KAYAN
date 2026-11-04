@@ -4,6 +4,32 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('errors remain Arabic RTL and require explicit acknowledgement', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      locale: const Locale('en'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(body: Builder(builder: (context) => TextButton(
+        onPressed: () => showAppError(context, 'Network unavailable'),
+        child: const Text('Show error'),
+      ))),
+    ));
+    await tester.tap(find.text('Show error'));
+    await tester.pumpAndSettle();
+    expect(find.text('حدث خطأ'), findsOneWidget);
+    expect(find.text('حسنًا'), findsOneWidget);
+    expect(Directionality.of(tester.element(find.byType(AlertDialog))), TextDirection.rtl);
+    await tester.pump(const Duration(seconds: 10));
+    await tester.tapAt(const Offset(1, 1));
+    await tester.pumpAndSettle();
+    expect(find.byType(AppErrorDialog), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(AppErrorDialog), findsOneWidget);
+    await tester.tap(find.text('حسنًا'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AppErrorDialog), findsNothing);
+  });
   testWidgets('a disposed navigator does not suppress errors in its replacement', (tester) async {
     Widget app(Key key) => MaterialApp(
       key: key,
@@ -26,7 +52,7 @@ void main() {
     await tester.tap(find.text('Show error'));
     await tester.pumpAndSettle();
     expect(find.byType(AppErrorDialog), findsOneWidget);
-    await tester.tap(find.text('OK'));
+    await tester.tap(find.text('حسنًا'));
     await tester.pumpAndSettle();
   });
 }

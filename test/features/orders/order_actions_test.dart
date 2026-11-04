@@ -5,6 +5,8 @@ import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/invoicing/presentation/providers/invoice_providers.dart';
 import 'package:erp_kayan/features/orders/presentation/orders_screen.dart';
+import 'package:erp_kayan/features/inventory/presentation/providers/stock_providers.dart';
+import 'package:erp_kayan/features/accounting/presentation/screens/journal_entries_screen.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,6 +20,13 @@ class _ActionApi extends ApiClient {
   String? invoiceStatus;
   final paths = <String>[];
   int loads = 0;
+  int stockLoads = 0, journalLoads = 0;
+  @override
+  Future<List<Map<String, dynamic>>> getList(String path, {Map<String, dynamic>? query}) async {
+    if (path == '/inventory/stock') stockLoads++;
+    if (path == '/accounting/journal-entries') journalLoads++;
+    return [];
+  }
   @override
   Future<Map<String, dynamic>> get(String path, {Map<String, dynamic>? query}) async {
     loads++;
@@ -67,20 +76,30 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
       final api = _ActionApi()..orderStatus = 'PARTIALLY_FULFILLED'..invoiceStatus = 'DRAFT';
       const user = AppUser(id:'user',username:'tester',fullName:'Tester',companyId:'company',branchId:'branch',isSuperAdmin:true);
-      await tester.pumpWidget(ProviderScope(overrides: [
+      final container = ProviderContainer(overrides: [
         apiClientProvider.overrideWithValue(api), currentUserProvider.overrideWith((ref) => user),
         appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1')),
-      ], child: MaterialApp(locale: const Locale('en'), localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales, home: OrderDetailScreen(kind: kind, orderId: 'order-1'))));
+      ]);
+      addTearDown(container.dispose);
+      final stockSubscription = container.listen(stockListProvider, (_, _) {});
+      final journalSubscription = container.listen(journalEntriesProvider, (_, _) {});
+      addTearDown(stockSubscription.close); addTearDown(journalSubscription.close);
+      await container.read(stockListProvider.future);
+      await container.read(journalEntriesProvider.future);
+      await tester.pumpWidget(UncontrolledProviderScope(container: container,
+        child: MaterialApp(locale: const Locale('en'), localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales, home: OrderDetailScreen(kind: kind, orderId: 'order-1'))));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Post')); await tester.pumpAndSettle();
       await tester.tap(find.text('Confirm').last); await tester.pumpAndSettle();
-      await tester.tap(find.text('OK')); await tester.pumpAndSettle();
+      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
       expect(find.textContaining('POSTED'), findsOneWidget);
+      expect(api.stockLoads, 2); expect(api.journalLoads, 2);
       expect(find.byTooltip('Post'), findsNothing);
       await tester.tap(find.byTooltip('Reverse')); await tester.pumpAndSettle();
       await tester.tap(find.text('Confirm').last); await tester.pumpAndSettle();
       expect(find.textContaining('REVERSED'), findsOneWidget);
+      expect(api.stockLoads, 3); expect(api.journalLoads, 3);
       expect(api.paths, ['${kind.basePath}/invoice-1/post', '${kind.basePath}/invoice-1/reverse']);
       expect(api.loads, greaterThanOrEqualTo(3));
     });

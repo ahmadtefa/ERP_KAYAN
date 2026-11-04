@@ -4,6 +4,7 @@ import '../../app/theme/design_tokens.dart';
 import '../../core/error/app_error_text.dart';
 import '../../core/logging/app_logger.dart';
 import '../../l10n/generated/app_localizations.dart';
+import '../../l10n/generated/app_localizations_ar.dart';
 import '../extensions/l10n_extension.dart';
 
 /// The one place a system error is shown.
@@ -16,15 +17,14 @@ import '../extensions/l10n_extension.dart';
 /// in their language.
 ///
 /// Rules it enforces:
-///  * never auto-dismisses — only "حسنًا" (or a tap outside / the back
-///    gesture, both of which are the user's own choice) closes it;
+///  * never auto-dismisses — the person must acknowledge it with "حسنًا";
 ///  * never stacks: a second error arriving while one is open is dropped
 ///    and logged, so the person is not asked to dismiss five identical
 ///    dialogs after a retry storm;
 ///  * never shows a stack trace, an SQL fragment or a field name from the
 ///    API — [AppErrorMessageResolver] decides the wording;
-///  * reads right-to-left in the Arabic interface, because the whole app is
-///    wrapped in a [Directionality] by the localisation delegates.
+///  * uses Arabic and right-to-left direction even if the surrounding screen
+///    is in another language, as required for central error dialogs.
 class AppErrorDialog extends StatelessWidget {
   const AppErrorDialog({
     super.key,
@@ -38,12 +38,14 @@ class AppErrorDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final l10n = context.l10n;
+    final l10n = AppLocalizationsAr();
     final isWarning = severity == AppErrorSeverity.warning;
     final accent = isWarning ? AppColors.warning : theme.colorScheme.error;
     final soft = isWarning ? AppColors.warningSoft : AppColors.errorSoft;
 
-    return AlertDialog(
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
       // The title and the action sit at the start edge, which is the right
       // edge under RTL.
       titlePadding: const EdgeInsets.fromLTRB(
@@ -118,7 +120,7 @@ class AppErrorDialog extends StatelessWidget {
           child: Text(l10n.okAction),
         ),
       ],
-    );
+    ));
   }
 }
 
@@ -193,25 +195,24 @@ Future<void> showAppError(
     return;
   }
 
-  final isArabic = Localizations.localeOf(context).languageCode == 'ar';
-  final resolved = AppErrorMessageResolver(
-    isArabic: isArabic,
+  final resolved = const AppErrorMessageResolver(
+    isArabic: true,
   ).resolve(error, statusCode: statusCode);
   final business = resolved.businessMessage;
   final message = business != null && business.trim().isNotEmpty
       ? business
-      : defaultErrorMessage(context.l10n, resolved.reason);
+      : defaultErrorMessage(AppLocalizationsAr(), resolved.reason);
 
   _errorDialogVisible[navigator] = true;
   try {
     await showDialog<void>(
       context: context,
-      // A tap outside or the back gesture closes it — both are the user's
-      // decision. Nothing closes it on a timer.
-      barrierDismissible: true,
+      barrierDismissible: false,
       useRootNavigator: true,
-      builder: (_) =>
-          AppErrorDialog(message: message, severity: resolved.severity),
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AppErrorDialog(message: message, severity: resolved.severity),
+      ),
     );
   } finally {
     _errorDialogVisible[navigator] = null;

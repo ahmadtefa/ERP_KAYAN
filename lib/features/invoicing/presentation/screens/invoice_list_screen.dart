@@ -11,6 +11,8 @@ import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../../../inventory/presentation/providers/stock_providers.dart';
+import '../../../accounting/presentation/screens/journal_entries_screen.dart';
 import '../invoice_status.dart';
 import '../providers/invoice_providers.dart';
 import 'invoice_detail_dialog.dart';
@@ -66,9 +68,16 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
       await ref.read(invoiceListProvider(widget.kind).notifier).reload();
       if (mounted) showMessage(context, l10n.invoicePosted);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) {
+        ref.invalidate(invoiceListProvider(widget.kind));
+        showMessage(context, e.message, error: true);
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        ref.invalidate(stockListProvider);
+        ref.invalidate(journalEntriesProvider);
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -91,9 +100,16 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
       await ref.read(invoiceListProvider(widget.kind).notifier).reload();
       if (mounted) showMessage(context, l10n.invoiceReversed);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) {
+        ref.invalidate(invoiceListProvider(widget.kind));
+        showMessage(context, e.message, error: true);
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        ref.invalidate(stockListProvider);
+        ref.invalidate(journalEntriesProvider);
+        setState(() => _busy = false);
+      }
     }
   }
 

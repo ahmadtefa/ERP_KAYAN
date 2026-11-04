@@ -10,6 +10,8 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../orders/presentation/order_retry_store.dart';
 import '../../../data/presentation/widgets/document_export_actions.dart';
+import '../providers/stock_providers.dart';
+import '../../../accounting/presentation/screens/journal_entries_screen.dart';
 
 const _base = '/inventory/stock-documents';
 String _label(BuildContext context, String ar, String en) =>
@@ -109,7 +111,16 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
       if (mounted) { _refresh(); showMessage(context,_label(context,'تم تحديث الإذن','Voucher refreshed')); }
     } catch (error) {
       if (mounted) { _refresh(); showMessage(context,error is Failure ? error.message : '$error',error:true); }
-    } finally { if (mounted) setState(() => _busy = false); }
+    } finally {
+      if (mounted) {
+        if (action == 'post' || action == 'reverse') {
+          // A failed network response can still follow a committed transaction.
+          ref.invalidate(stockListProvider);
+          ref.invalidate(journalEntriesProvider);
+        }
+        setState(() => _busy = false);
+      }
+    }
   }
   @override
   Widget build(BuildContext context) {

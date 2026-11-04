@@ -68,7 +68,7 @@ void main() {
       expect(api.requests, hasLength(1));
       expect(api.requests.single[kind.isSales ? 'customerId' : 'supplierId'], 'party-1');
       expect((api.requests.single['lines'] as List).single['taxRate'], '');
-      await tester.tap(find.text('OK'));
+      await tester.tap(find.text('حسنًا'));
       await tester.pumpAndSettle();
       await tester.pageBack();
       await tester.pumpAndSettle();

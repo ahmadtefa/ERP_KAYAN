@@ -12,6 +12,8 @@ import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
+import '../../../inventory/presentation/providers/stock_providers.dart';
+import '../../../accounting/presentation/screens/journal_entries_screen.dart';
 import '../invoice_status.dart';
 import '../providers/invoice_providers.dart';
 
@@ -79,9 +81,16 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
       await ref.read(returnListProvider(widget.kind).notifier).reload();
       if (mounted) showMessage(context, l10n.returnPosted);
     } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) {
+        ref.invalidate(returnListProvider(widget.kind));
+        showMessage(context, error.message, error: true);
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        ref.invalidate(stockListProvider);
+        ref.invalidate(journalEntriesProvider);
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -104,9 +113,16 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
       await ref.read(returnListProvider(widget.kind).notifier).reload();
       if (mounted) showMessage(context, l10n.returnReversed);
     } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) {
+        ref.invalidate(returnListProvider(widget.kind));
+        showMessage(context, error.message, error: true);
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        ref.invalidate(stockListProvider);
+        ref.invalidate(journalEntriesProvider);
+        setState(() => _busy = false);
+      }
     }
   }
 
