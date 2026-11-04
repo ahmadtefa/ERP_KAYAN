@@ -448,6 +448,20 @@ describe('warehouse-level negative stock guard on transfer posting', () => {
     expect(h.state.movementCreates).not.toHaveBeenCalled();
   });
 
+  it('requires the reviewed voucher version for HTTP posting and checks it after locking', async () => {
+    const h = makeHarness([seedMovement(W_DST, BRANCH, 20)], false);
+    const voucher = transferDocument({kind:StockDocumentKind.ADJUSTMENT,fromBranchId:null,
+      fromWarehouseId:null,toWarehouseId:W_DST,voucherKind:'ISSUE',editVersion:4,
+      reviewedAt:new Date(),approvedAt:new Date(),
+      lines:[{id:'l1',itemId:MILK,quantity:D(-2),unitCost:D(0)}]});
+    h.prisma.stockDocument.findFirst.mockResolvedValue(voucher);
+    await expect(h.service.post(COMPANY,'user-1','doc-1',true,BRANCH,undefined,true)).rejects.toThrow(/expectedVersion/);
+    const lockedFind = (h.tx.stockDocument as unknown as {findFirst: jest.Mock}).findFirst;
+    lockedFind.mockResolvedValueOnce({...voucher,status:InvoiceStatus.POSTED,editVersion:5});
+    await expect(h.service.post(COMPANY,'user-1','doc-1',true,BRANCH,4,true)).rejects.toThrow(/changed/);
+    expect(h.state.movementCreates).not.toHaveBeenCalled();
+  });
+
   it('7. a transfer onto the same warehouse is refused at creation (no movements)', async () => {
     const h = makeHarness([seedMovement(W_SRC, BRANCH, 20)], false);
     await expect(

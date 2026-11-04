@@ -354,7 +354,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     }
     // Pause after the preliminary read, commit a concurrent change under the
     // same parent lock, then verify posting re-reads the locked version.
-    async function pauseStockPost(doc) {
+    async function pauseStockPost(doc, expectedVersion) {
       let arrived, resume;
       const barrier = new Promise(resolve => { arrived = resolve; });
       const continuation = new Promise(resolve => { resume = resolve; });
@@ -377,7 +377,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
       }});
       const guarded = new StockDocumentsService(wrappedPrisma,service.numbers,service.posting,service.accounts,
         service.audit,service.settings,service.warehouses,service.costCenters);
-      const pending = guarded.post(company,user,doc.id,true,branch);
+      const pending = guarded.post(company,user,doc.id,true,branch,expectedVersion,expectedVersion !== undefined);
       try { await waitForBarrier(barrier,pending); } catch (error) { resume(); throw error; }
       return {pending,resume};
     }
@@ -417,13 +417,13 @@ let difference = '70000000-0000-4000-8000-000000000005';
     await service.transitionVoucher(company,branch,user,editable.id,'APPROVE',true);
     const current = await service.findOne(company,editable.id,true);
     await assert.rejects(service.post(company,user,editable.id,true,branch,approvedEdit.editVersion,true),/changed/);
-    const race = await pauseStockPost(editable);
+    const race = await pauseStockPost(editable,current.editVersion);
     try {
       await service.updateVoucher(company,branch,user,editable.id,{...draftEdit,idempotencyKey:'editable-voucher-race-0001',
         expectedVersion:current.editVersion,lines:current.lines.map(line => ({id:line.id,itemId:line.itemId,
           ...(line.unitName ? {unitName:line.unitName} : {}),quantity:line.unitQuantity,unitCost:line.unitCost}))},true);
     } finally { race.resume(); }
-    await assert.rejects(race.pending,/reviewed and approved/);
+    await assert.rejects(race.pending,/changed/);
     assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:editable.id}})).status,'DRAFT');
     assert.equal(await prisma.stockMovement.count({where:{referenceId:editable.id}}),0);
     assert.equal(await prisma.journalEntry.count({where:{sourceId:editable.id}}),0);

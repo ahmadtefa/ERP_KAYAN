@@ -83,7 +83,8 @@ class _EditVoucherApi extends _VoucherApi {
       'editVersion':committed ? 3 : 2,'reviewedAt':committed ? null : '2026-11-04T12:00:00Z',
       'approvedAt':committed ? null : '2026-11-04T12:01:00Z',
       'lines':[{'id':'line','itemId':'item','itemCode':'IT','itemNameEn':'Item','quantity':kind == 'ISSUE' ? '-4' : '4',
-        'unit':'box','unitName':'box','unitFactor':'2.000000','unitQuantity':kind == 'ISSUE' ? '-2' : '2','unitCost':'7.5'}]};
+        'unit':'box','unitName':'box','unitFactor':'2.000000','unitQuantity':kind == 'ISSUE' ? '-2' : '2','unitCost':'7.5',
+        'notes':'Original line note'}]};
   }
   @override
   Future<Map<String,dynamic>> put(String path,{Object? body}) async {
@@ -243,6 +244,7 @@ void main() {
       expect((api.edits.first['lines'] as List).single['id'],'line');
       expect((api.edits.first['lines'] as List).single['quantity'],kind == 'ISSUE' ? '-3' : '3');
       expect((api.edits.first['lines'] as List).single['unitName'],'box');
+      expect((api.edits.first['lines'] as List).single['notes'],'Original line note');
       await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
       await tester.pageBack(); await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Edit draft')); await tester.tap(find.text('Edit draft')); await tester.pumpAndSettle();

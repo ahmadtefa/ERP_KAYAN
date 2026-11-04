@@ -158,7 +158,7 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
     if (!ok) return;
     setState(() => _busy = true);
     try {
-      await ref.read(apiClientProvider).post('$_base/${widget.id}/$action',body:{if (version != null) 'expectedVersion':version});
+      await ref.read(apiClientProvider).post('$_base/${widget.id}/$action',body:{'expectedVersion':version});
       if (mounted) { _refresh(); showMessage(context,_label(context,'تم تحديث الإذن','Voucher refreshed')); }
     } catch (error) {
       if (mounted) { _refresh(); showAppError(context,error); }
@@ -198,7 +198,7 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
           Text('${_label(context,'الاعتماد','Approved')}: ${text(doc,'approvedAt',fallback:'—')}'),
           for (final line in listOf(doc['lines'])) ListTile(
             title:Text('${text(line,'itemCode')} • ${text(line,'itemNameAr',fallback:text(line,'itemNameEn'))}'),
-            subtitle:Text('${_label(context,'الكمية','Quantity')}: ${text(line,'unitQuantity',fallback:text(line,'quantity'))} • ${text(line,'unit')}'),
+            subtitle:Text('${_label(context,'الكمية','Quantity')}: ${text(line,'unitQuantity',fallback:text(line,'quantity'))} • ${text(line,'unit')}${text(line,'notes').isEmpty ? '' : ' • ${text(line,'notes')}'}'),
             trailing:can('inventory.cost.read') ? Text('${_label(context,'تكلفة الوحدة الأساسية','Base unit cost')}: ${text(line,'unitCost')}') : null,
           ),
           if (can('admin.audit.read')) _VoucherHistory(key:ValueKey('${widget.id}:$status:$reviewed:$approved'),id:widget.id),
@@ -420,7 +420,7 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
       if (_notes.text.trim().isNotEmpty) 'notes':_notes.text.trim(),
       'lines':[for (final line in _lines) {'itemId':line.itemId,
         if (_editing && line.id != null) 'id':line.id,
-        if (_editing && line.notes != null) 'notes':line.notes,
+        if (line.notes != null && line.notes!.trim().isNotEmpty) 'notes':line.notes!.trim(),
         if (line.unitName != null) 'unitName':line.unitName,
         'quantity':widget.kind == 'ISSUE' ? '-${line.quantity.text.trim()}' : line.quantity.text.trim(),
         if (widget.kind == 'RECEIPT') 'unitCost':line.cost.text.trim()}]};
@@ -534,6 +534,8 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
                     : _label(context,'الكمية بالوحدة المختارة','Quantity in selected unit')),validator:(v) => _number(v,positive:true)),
                 if (widget.kind == 'RECEIPT') TextFormField(controller:line.cost,onChanged:(_) => _changed(),keyboardType:TextInputType.number,
                   decoration:InputDecoration(labelText:_label(context,'تكلفة الوحدة الأساسية','Base unit cost')),validator:_number),
+                TextFormField(initialValue:line.notes,onChanged:(value) { line.notes=value; _changed(); },
+                  decoration:InputDecoration(labelText:_label(context,'ملاحظات السطر','Line notes'))),
                 if (_lines.length > 1) TextButton(onPressed:() {
                   setState(() => _lines.remove(line)); _changed();
                   WidgetsBinding.instance.addPostFrameCallback((_) => line.dispose());
