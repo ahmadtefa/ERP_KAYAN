@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -448,19 +447,19 @@ class _CashScreenState extends ConsumerState<CashScreen>
     final accounts = ref.watch(cashAccountsProvider);
     final balances = ref.watch(cashBalancesProvider);
     final isArabic = Localizations.localeOf(context).languageCode == 'ar';
-    final balanceByCode = {
-      for (final row in balances.value ?? const <Json>[]) text(row, 'code'): row,
+    // Absence, loading, and errors are not zero balances. Match on the
+    // stable account id, and only display amounts from a successful response.
+    final balanceById = {
+      if (!balances.hasError && !balances.isLoading)
+        for (final row in balances.value ?? const <Json>[])
+          text(row, 'cashAccountId'): row,
     };
 
     return Column(
       children: [
         if (balances.hasError)
           MaterialBanner(
-            content: Text(
-              balances.error is Failure
-                  ? (balances.error as Failure).message
-                  : l10n.unexpectedError,
-            ),
+            content: Text(l10n.unexpectedError),
             leading: const Icon(Icons.warning_amber_outlined),
             actions: [
               TextButton(
@@ -529,9 +528,10 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   l10n.balance,
                   numeric: true,
                   emphasise: true,
-                  value: (r) => formatAmount(
-                    amount(balanceByCode[text(r, 'code')] ?? const {}, 'balance'),
-                  ),
+                  value: (r) {
+                    final balance = asString(balanceById[text(r, 'id')]?['balance']);
+                    return balance == null || balance.isEmpty ? '—' : formatAmount(balance);
+                  },
                 ),
               ],
               actions: (row) => [
