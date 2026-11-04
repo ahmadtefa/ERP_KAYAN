@@ -9,10 +9,16 @@ Module._load = function (request, parent, main) {
   if (request === '@prisma/client') return load.call(this, require.resolve('../jest-prisma-shim.cjs'), parent, main);
   return load.call(this, request, parent, main);
 };
+require('reflect-metadata');
 require('ts-node/register/transpile-only');
 const { Client } = require('pg');
 const { FullBackupService } = require('../src/modules/backup/full-backup.service');
 const { MaintenanceService } = require('../src/common/maintenance/maintenance');
+const { FullBackupController } = require('../src/modules/backup/full-backup.controller');
+const { PermissionsGuard } = require('../src/common/guards/permissions.guard');
+const { ProblemDetailsFilter } = require('../src/common/filters/problem-details.filter');
+const { Module: NestModule } = require('@nestjs/common');
+const { NestFactory, Reflector } = require('@nestjs/core');
 const fs = require('node:fs/promises');
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
@@ -89,6 +95,39 @@ const path = require('node:path');
     await assert.rejects(service.remove(backup.file.name, 'fixture'), error => error.getStatus?.() === 409);
     assert.ok((await service.verify(backup.file.name)).archiveContentReadable);
 
+    // Exercise the real controller and service over HTTP with real archive
+    // tools and PostgreSQL. Identity is injected, not a JWT or licence test.
+    class BackupHttpFixtureModule {}
+    NestModule({ controllers: [FullBackupController], providers: [
+      { provide: FullBackupService, useValue: service },
+      { provide: MaintenanceService, useValue: maintenance },
+    ] })(BackupHttpFixtureModule);
+    const http = await NestFactory.create(BackupHttpFixtureModule, { logger: false });
+    try {
+      http.use((req, _res, next) => {
+        req.user = { userId:'synthetic-user', companyId:'synthetic-company', branchId:null,
+          username:'synthetic', isSuperAdmin:req.headers['x-fixture-super'] === 'yes', permissions:['admin.backup'] };
+        next();
+      });
+      http.useGlobalGuards(new PermissionsGuard(new Reflector()));
+      http.useGlobalFilters(new ProblemDetailsFilter());
+      await http.listen(0, '127.0.0.1');
+      const base = `http://127.0.0.1:${http.getHttpServer().address().port}/backup/full`;
+      const headers = {'x-fixture-super':'yes'};
+      const content = await fetch(`${base}/${backup.file.name}/verify`, {method:'POST',headers});
+      assert.equal(content.status, 201);
+      assert.deepEqual(Object.fromEntries(Object.entries(await content.json()).filter(([key]) =>
+        ['archiveContentReadable','fullRestoreRehearsed','includesExternalFiles'].includes(key))),
+        {archiveContentReadable:true,fullRestoreRehearsed:false,includesExternalFiles:false});
+      assert.equal((await fetch(`${base}/synthetic-corrupt.dump/verify`, {method:'POST',headers})).status, 503);
+      assert.equal((await fetch(`${base}/${backup.file.name}`, {method:'DELETE',headers:{'x-fixture-super':'no'}})).status, 403);
+      const denied = await fetch(`${base}/${backup.file.name}`, {method:'DELETE',headers});
+      assert.equal(denied.status, 409);
+      assert.equal((await denied.json()).code, 'BACKUP_DELETE_PROTECTED');
+      assert.ok((await service.verify(backup.file.name)).archiveContentReadable);
+      assert.deepEqual((await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows, before.rows);
+    } finally { await http.close(); }
+
     // A tool may exit zero while leaving a data-corrupt archive; it must not
     // be published even if its TOC can be listed successfully.
     const corruptDumpTool = path.join(dir, 'corrupt-pg-dump');
@@ -132,7 +171,7 @@ const path = require('node:path');
     assert.equal(maintenance.isActive, false);
     assert.equal((await client.query('SELECT value FROM fixture_items WHERE id = 1')).rows[0].value, 'changed-after-backup');
     assert.equal((await service.list()).filter(f => f.kind === 'safety').length, 0);
-    console.log('PASS: real pg_restore reads a valid archive and rejects TOC-readable truncated data without publication or primary changes; scratch cleanup failure leaves synthetic primary unchanged. Prisma and licence checks mocked; external files and full restore not verified.');
+    console.log('PASS: real HTTP and pg_restore read a valid archive, reject TOC-readable truncated data and protect deletion without primary changes; scratch cleanup failure leaves synthetic primary unchanged. Prisma and licence checks mocked; external files and full restore not verified.');
   } finally {
     if (scratchClient) await scratchClient.end();
     if (scratchName) await admin.query(`DROP DATABASE "${scratchName}"`);
