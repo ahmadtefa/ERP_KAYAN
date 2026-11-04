@@ -46,6 +46,18 @@ for (const line of lines) {
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
+  // The voucher load-retry tests contain only checked-in synthetic data.
+  // Report assertion counts, source locations and fixed framework diagnostics,
+  // never arbitrary exception text or request payloads.
+  if (event.type === 'print' && /^(?:list|detail|create) voucher load shows a safe acknowledged error and retries$/.test(tests.get(event.testID) ?? '')) {
+    const details = String(event.message ?? '').split(/\r?\n/).map(line =>
+      line.match(/^\s*(?:Expected:|Actual:)\s*(?:<\d+>|exactly \d+ matching candidates|no matching candidates)/)?.[0]?.trim() ??
+      line.match(/test\/widget\/stock_voucher_flow_test\.dart:\d+:\d+/)?.[0] ??
+      line.match(/(?:Bad state: No element|Bad state: Too many elements|Cannot hit test a render box that has never been laid out|RenderFlex overflowed|pumpAndSettle timed out|A Timer is still pending|Multiple exceptions|No ScaffoldMessenger widget found)/)?.[0] ??
+      line.match(/^The following [A-Za-z]+ (?:was thrown|object was thrown).*$/)?.[0] ?? ''
+    ).filter(Boolean).join(' ');
+    if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
+  }
   if (event.type === 'error') {
     errors.push(`${tests.get(event.testID) ?? `test ${event.testID ?? 'unknown'}`}: ${event.error ?? 'unknown error'} ${event.stackTrace ?? ''} ${printed.get(event.testID) ?? ''}`);
   }
