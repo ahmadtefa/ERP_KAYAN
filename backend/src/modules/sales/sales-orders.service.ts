@@ -272,7 +272,7 @@ export class SalesOrdersService {
   }
 
   async cancel(companyId: string, userId: string, id: string, reason?: string) {
-    const order = await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT id FROM sales_orders WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
           AND "deletedAt" IS NULL FOR UPDATE
@@ -287,17 +287,15 @@ export class SalesOrdersService {
       if (activeInvoices > 0) throw new BadRequestException('This order has active invoices; reverse them before cancelling');
       await tx.salesOrder.update({ where: { id }, data: { status: OrderStatus.CANCELLED,
         notes: reason ? `${order.notes ?? ''}\n${reason}`.trim() : order.notes } });
-      return order;
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'CANCEL',
-      entity: 'sales_orders',
-      entityId: id,
-      before: { status: order.status },
-      after: { status: OrderStatus.CANCELLED, reason: reason ?? null },
+      await this.audit.recordRequired({
+        companyId,
+        userId,
+        action: 'CANCEL',
+        entity: 'sales_orders',
+        entityId: id,
+        before: { status: order.status },
+        after: { status: OrderStatus.CANCELLED, reason: reason ?? null },
+      }, tx);
     });
 
     return this.findOne(companyId, id);

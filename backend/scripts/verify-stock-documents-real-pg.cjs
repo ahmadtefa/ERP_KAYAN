@@ -309,6 +309,16 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(result.invoice.lines.length,2);
       await assert.rejects(orders.cancel(company,user,full.id),/active invoices/);
       await invoices.cancelDraft(company,branch,user,result.invoice.id);
+      const orderAudit = audit.recordRequired.bind(audit);
+      audit.recordRequired = async (input, tx) => {
+        if (input.entity === `${kind}_orders` && input.action === 'CANCEL') throw new Error('injected order cancel audit failure');
+        return orderAudit(input, tx);
+      };
+      try { await assert.rejects(orders.cancel(company,user,full.id,'audit failure'),/injected order cancel audit failure/); }
+      finally { audit.recordRequired = orderAudit; }
+      const afterCancelFailure = kind === 'sales' ? await prisma.salesOrder.findUniqueOrThrow({where:{id:full.id}})
+        : await prisma.purchaseOrder.findUniqueOrThrow({where:{id:full.id}});
+      assert.equal(afterCancelFailure.status,'APPROVED');
       await orders.cancel(company,user,full.id,'synthetic cancellation');
       const finalOrder = kind === 'sales' ? await prisma.salesOrder.findUniqueOrThrow({where:{id:full.id}})
         : await prisma.purchaseOrder.findUniqueOrThrow({where:{id:full.id}});
