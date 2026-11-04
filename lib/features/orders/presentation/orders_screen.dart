@@ -203,7 +203,13 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
       _refresh();
       showMessage(context, tr('تم تحديث البيانات', 'Data refreshed'));
     } catch (error) {
-      if (mounted) showMessage(context, error.toString(), error: true);
+      // A timeout may follow a committed post, reversal, approval or
+      // cancellation. Re-read the authoritative state before enabling actions
+      // again rather than leaving a stale draft on screen.
+      if (mounted) {
+        _refresh();
+        showMessage(context, error.toString(), error: true);
+      }
     } finally { if (mounted) setState(() => _busy = false); }
   }
 
