@@ -765,6 +765,17 @@ class _Header extends StatelessWidget {
                       border: const OutlineInputBorder(),
                     ),
                     items: [
+                      // Preserve an existing draft selection if a source refresh
+                      // deactivates/removes it. It remains visible but cannot be
+                      // newly selected; the server still validates on save/post.
+                      if (partyId != null && !parties.any((party) => text(party, 'id') == partyId))
+                        DropdownMenuItem(
+                          value: partyId,
+                          enabled: false,
+                          child: Text(Localizations.localeOf(context).languageCode == 'ar'
+                              ? 'الطرف المحدد غير متاح'
+                              : 'Selected party unavailable'),
+                        ),
                       for (final party in parties)
                         DropdownMenuItem(
                           value: text(party, 'id'),

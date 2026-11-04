@@ -39,7 +39,41 @@ class _InvoiceApi extends ApiClient {
   Future<List<Map<String, dynamic>>> getList(String path, {Map<String, dynamic>? query}) async => [];
 }
 
+class _MutablePartyApi extends _InvoiceApi {
+  List<Map<String,dynamic>> parties = [
+    {'id':'old','code':'P-1','nameEn':'Old party','isActive':true},
+  ];
+  @override
+  Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async =>
+    path.startsWith('/parties/') ? parties : [];
+}
+
 void main() {
+  for (final kind in InvoiceKind.values) {
+    testWidgets('${kind.name} invoice keeps selected party and draft on source refresh', (tester) async {
+      tester.view.physicalSize=const Size(1600,1000); tester.view.devicePixelRatio=1;
+      addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+      final api=_MutablePartyApi();
+      final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api)]);
+      addTearDown(container.dispose);
+      await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp(
+        locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,home:InvoiceEditorScreen(kind:kind))));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<String>).first); await tester.pumpAndSettle();
+      await tester.tap(find.text('P-1 — Old party').last); await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('line-quantity-0')),'2');
+      api.parties=[{'id':'old','code':'P-1','nameEn':'Old party','isActive':false},
+        {'id':'new','code':'P-2','nameEn':'New party','isActive':true}];
+      container.invalidate(kind == InvoiceKind.sales ? customersProvider : suppliersProvider);
+      await tester.pumpAndSettle();
+      expect(find.text('Selected party unavailable'),findsOneWidget);
+      expect(tester.widget<TextFormField>(find.byKey(const ValueKey('line-quantity-0'))).controller!.text,'2');
+      await tester.tap(find.byType(DropdownButtonFormField<String>).first); await tester.pumpAndSettle();
+      expect(find.text('P-2 — New party'),findsOneWidget);
+      expect(tester.takeException(),isNull);
+    });
+  }
   for (final kind in InvoiceKind.values) {
     testWidgets('${kind.name} invoice unexpected save error is acknowledged without losing inputs', (tester) async {
       tester.view.physicalSize = const Size(1600,1000); tester.view.devicePixelRatio = 1;
