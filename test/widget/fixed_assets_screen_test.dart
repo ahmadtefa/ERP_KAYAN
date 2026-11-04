@@ -192,6 +192,7 @@ class _FakeApiClient extends ApiClient {
           statusCode: 400,
         );
       }
+      if (loseDepreciationResponse) throw const ApiFailure('private depreciation',statusCode:503);
       return {'run': {'runNumber': 'DEP-000001'}};
     }
     if (path.endsWith('/activate')) {
@@ -623,6 +624,8 @@ void main() {
     final dispose=find.byTooltip('Dispose of asset');
     await tester.ensureVisible(dispose); await tester.pumpAndSettle();
     await tester.tap(dispose); await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextField,'Disposal date')); await tester.pumpAndSettle();
+    await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     final proceeds=find.widgetWithText(TextFormField,'Proceeds');
     await tester.enterText(proceeds,'1000');
     await tester.tap(find.text('Save')); await tester.pumpAndSettle();
