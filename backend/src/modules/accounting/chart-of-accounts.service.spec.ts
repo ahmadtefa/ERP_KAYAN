@@ -329,6 +329,16 @@ describe('ChartOfAccountsService desktop expense rules', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('does not reactivate a child under an inactive parent', async () => {
+    const prisma = fakePrisma({
+      accounts: [{ ...expenseParent, isActive: false },
+        { ...expenseParent, id: 'child', parentId: 'exp-parent', code: '51', isActive: false }],
+    });
+    await expect(serviceWith(prisma).update('c1', 'u1', 'child', { isActive: true }))
+      .rejects.toThrow(/parent account is inactive/i);
+    expect(prisma.calls.some((call: { method: string }) => call.method === 'account.update')).toBe(false);
+  });
+
   it('will not deactivate an account that still has active subaccounts', async () => {
     const prisma = fakePrisma({
       accounts: [expenseParent, { ...expenseParent, id: 'child', parentId: 'exp-parent', code: '51', isActive: true }],

@@ -215,6 +215,15 @@ export class ChartOfAccountsService {
       }
     }
 
+    // An inactive grouping account cannot acquire an active child through
+    // reactivation any more than it can through creation or reparenting.
+    if (dto.isActive === true && !account.isActive) {
+      const parentId = dto.parentId === undefined ? account.parentId : dto.parentId;
+      if (parentId) {
+        await this.assertParentUsable(companyId, parentId, account.type as AccountType, id);
+      }
+    }
+
     if (dto.code !== undefined && dto.code !== account.code) {
       const movements = await this.prisma.journalLine.count({
         where: { accountId: id },
