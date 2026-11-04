@@ -7,6 +7,7 @@ import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
@@ -140,8 +141,14 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
       ref.invalidate(customersProvider);
       ref.invalidate(suppliersProvider);
       if (mounted) showMessage(context, l10n.createdSuccessfully);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+    } catch (error) {
+      if (mounted) {
+        // A timeout or unexpected error may follow a committed status change.
+        ref.invalidate(_provider);
+        ref.invalidate(customersProvider);
+        ref.invalidate(suppliersProvider);
+        await showAppError(context, error);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
