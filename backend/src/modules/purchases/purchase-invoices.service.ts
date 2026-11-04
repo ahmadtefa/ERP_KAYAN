@@ -669,7 +669,7 @@ export class PurchaseInvoicesService {
       throw new BadRequestException('This invoice has already been reversed');
     }
 
-    const reversal = await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       if (invoice.purchaseOrderId) {
         await releaseOrderAllocations(tx, 'purchase', companyId, invoice.purchaseOrderId, invoice.lines);
       }
@@ -775,22 +775,17 @@ export class PurchaseInvoicesService {
       // refuses a closed period with a readable message (instead of the
       // database trigger surfacing as a 500), and stamps the mirror with
       // the invoice as its source so a ledger reader can drill back to it.
-      return this.posting.reverse(
+      const reversal = await this.posting.reverse(
         tx,
         companyId,
         userId,
         original.id,
         `Reversal of purchase invoice ${invoice.invoiceNumber}`,
       );
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'REVERSE',
-      entity: 'purchase_invoices',
-      entityId: id,
-      after: { reversalJournalNumber: reversal.entryNumber },
+      await this.audit.recordRequired({
+        companyId, userId, action: 'REVERSE', entity: 'purchase_invoices', entityId: id,
+        after: { reversalJournalNumber: reversal.entryNumber },
+      }, tx);
     });
 
     return this.findOne(companyId, id);

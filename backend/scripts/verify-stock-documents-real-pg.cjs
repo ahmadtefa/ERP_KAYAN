@@ -275,6 +275,24 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(await prisma.stockMovement.count({where:{companyId:company}}),movements);
       assert.equal(await prisma.journalEntry.count({where:{companyId:company}}),journals);
       await invoiceLines.update({where:{id:target.invoiceLineId},data:{orderLineId:target.orderLineId}});
+      const beforeReversalInvoice = await invoiceModel.findUniqueOrThrow({where:{id:target.invoiceId}});
+      const beforeReversalJournal = await prisma.journalEntry.findUniqueOrThrow({where:{id:beforeReversalInvoice.journalEntryId}});
+      const beforeReversalStock = await prisma.stockBalance.findUniqueOrThrow({where:{companyId_branchId_itemId:{companyId:company,branchId:branch,itemId:first.id}}});
+      const reversalAudit = audit.recordRequired.bind(audit);
+      audit.recordRequired = async (input, tx) => {
+        if (input.entity === `${kind}_invoices` && input.action === 'REVERSE') throw new Error('injected reversal audit failure');
+        return reversalAudit(input, tx);
+      };
+      try { await assert.rejects(svc.reverse(company,user,target.invoiceId),/injected reversal audit failure/); }
+      finally { audit.recordRequired = reversalAudit; }
+      assert.equal((await invoiceModel.findUniqueOrThrow({where:{id:target.invoiceId}})).status,'POSTED');
+      assert.equal((await orderLineModel.findUniqueOrThrow({where:{id:target.orderLineId}})).invoicedQuantity.toFixed(4),'30.0000');
+      assert.equal(await prisma.stockMovement.count({where:{companyId:company}}),movements);
+      assert.equal(await prisma.journalEntry.count({where:{companyId:company}}),journals);
+      assert.equal((await prisma.journalEntry.findUniqueOrThrow({where:{id:beforeReversalInvoice.journalEntryId}})).status,beforeReversalJournal.status);
+      const afterReversalStock = await prisma.stockBalance.findUniqueOrThrow({where:{companyId_branchId_itemId:{companyId:company,branchId:branch,itemId:first.id}}});
+      assert.equal(afterReversalStock.quantity.toFixed(4),beforeReversalStock.quantity.toFixed(4));
+      assert.equal(afterReversalStock.value.toFixed(4),beforeReversalStock.value.toFixed(4));
       await svc.reverse(company,user,target.invoiceId);
       assert.equal((await invoiceModel.findUniqueOrThrow({where:{id:target.invoiceId}})).status,'REVERSED');
       assert.equal((await orderLineModel.findUniqueOrThrow({where:{id:target.orderLineId}})).invoicedQuantity.toFixed(4),'10.0000');

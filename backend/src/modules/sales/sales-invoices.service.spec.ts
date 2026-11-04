@@ -22,7 +22,7 @@ function serviceWith(prisma: Record<string, any>, tx: Record<string, any>) {
       .mockResolvedValue({ id: 'reversal-id', entryNumber: 'JV-REV-1' }),
   };
   const warehouses = { resolveForReversal: jest.fn().mockResolvedValue(WAREHOUSE_ID) };
-  const audit = { record: jest.fn().mockResolvedValue(undefined) };
+  const audit = { record: jest.fn().mockResolvedValue(undefined), recordRequired: jest.fn().mockResolvedValue(undefined) };
   const service = new SalesInvoicesService(
     prisma as never,
     numbers as never,
@@ -167,8 +167,8 @@ describe('SalesInvoicesService.reverse', () => {
     );
     expect(numbers.next).not.toHaveBeenCalledWith(tx, COMPANY_ID, 'JOURNAL', 'JV');
     expect(tx.journalEntry.create).not.toHaveBeenCalled();
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'REVERSE', entity: 'sales_invoices' }),
+    expect(audit.recordRequired).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'REVERSE', entity: 'sales_invoices' }), tx,
     );
   });
 });
