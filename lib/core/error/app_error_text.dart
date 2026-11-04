@@ -385,6 +385,8 @@ class AppErrorMessageResolver {
     'The parent cost center does not exist': 'مركز التكلفة الأب غير موجود.',
     'A closed period cannot be changed': 'لا يمكن التعديل في فترة محاسبية مغلقة.',
     'This period is already closed': 'هذه الفترة مغلقة بالفعل.',
+    'This fiscal period overlaps another period; correct the ranges before closing.':
+        'تتداخل هذه الفترة مع فترة أخرى. صحّح التواريخ قبل الإقفال.',
     'A period with that code already exists': 'توجد فترة محاسبية بهذا الكود بالفعل.',
     'Fiscal period not found': 'لم يتم العثور على الفترة المحاسبية.',
     'The end date must be after the start date': 'يجب أن يكون تاريخ النهاية بعد تاريخ البداية.',

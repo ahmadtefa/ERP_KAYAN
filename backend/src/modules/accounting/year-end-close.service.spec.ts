@@ -63,7 +63,7 @@ describe('YearEndCloseService', () => {
     const tx: any = {};
     const prisma = {
       fiscalPeriod: {
-        findFirst: jest.fn().mockResolvedValue(period),
+        findFirst: jest.fn().mockImplementation(async ({where}) => where.id?.not ? null : period),
         update: jest.fn().mockImplementation(async ({ data }) => ({ ...period, ...data })),
       },
       journalEntry: { groupBy: jest.fn().mockResolvedValue([]) },
@@ -157,6 +157,14 @@ describe('YearEndCloseService', () => {
       await expect(service.close(companyId,userId,periodId)).rejects.toMatchObject({
         message:'The year cannot be closed yet',
       });
+      expect(tx.fiscalPeriod.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses legacy overlapping periods before computing closing balances', async () => {
+      const {service,prisma,tx} = buildService();
+      (prisma.fiscalPeriod.findFirst as jest.Mock).mockImplementation(async ({where}) =>
+        where.id?.not ? {id:'overlap'} : openPeriod);
+      await expect(service.close(companyId,userId,periodId)).rejects.toThrow(/overlaps/);
       expect(tx.fiscalPeriod.update).not.toHaveBeenCalled();
     });
 

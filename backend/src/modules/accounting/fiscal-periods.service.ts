@@ -139,6 +139,17 @@ export class FiscalPeriodsService {
       if (period.status === PeriodStatus.CLOSED) {
         throw new BadRequestException('This period is already closed');
       }
+      // Legacy data can contain overlapping periods from earlier releases.
+      // The DB posting trigger locks only one matching row, so an ambiguous
+      // range is not safe to close until the overlaps are corrected.
+      const overlap = await tx.fiscalPeriod.findFirst({
+        where: { companyId, id: { not: period.id },
+          startDate: { lte: period.endDate }, endDate: { gte: period.startDate } },
+        select: { id: true },
+      });
+      if (overlap) {
+        throw new BadRequestException('This fiscal period overlaps another period; correct the ranges before closing.');
+      }
       const date = { gte: period.startDate, lte: period.endDate };
       const [entries, sales, purchases, vouchers, transfers, stock, opening] = await Promise.all([
         tx.journalEntry.count({ where: { companyId, status: { in: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'] }, entryDate: date } }),

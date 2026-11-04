@@ -369,7 +369,16 @@ let difference = '70000000-0000-4000-8000-000000000005';
       await closer.end();
       if (pendingEdit) await pendingEdit.catch(() => {});
     }
-    console.log('PASS: PostgreSQL application period create races, overlap edits, closure/edit lock, audit rollback and period/year close competition. Draft creation and direct SQL range changes remain outside this test.');
+    // Legacy data may already contain overlapping periods even though the
+    // application now prevents new overlaps. Both close operations fail closed.
+    const legacyOne = await makePeriod(2304);
+    await prisma.fiscalPeriod.create({data:{companyId:company,code:'SYN-LEGACY-OVERLAP',
+      nameEn:'Legacy overlap',nameAr:'تداخل تجريبي',
+      startDate:new Date('2304-06-01T00:00:00Z'),endDate:new Date('2304-07-01T00:00:00Z')}});
+    await assert.rejects(yearClose.close(company,user,legacyOne.id),/overlaps/);
+    await assert.rejects(periods.close(company,user,legacyOne.id),/overlaps/);
+    assert.equal((await prisma.fiscalPeriod.findUniqueOrThrow({where:{id:legacyOne.id}})).status,'OPEN');
+    console.log('PASS: PostgreSQL application period create races, overlap edits, legacy overlap refusal, closure/edit lock, audit rollback and period/year close competition. Draft creation and direct SQL range changes remain outside this test.');
 
 
     const failStockAudit = async (action, operation) => {

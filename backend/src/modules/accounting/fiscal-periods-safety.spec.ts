@@ -54,6 +54,12 @@ describe('fiscal period locking and range validation', () => {
     await expect(service.update('company','user','one',{nameEn:'x'})).rejects.toBeInstanceOf(BadRequestException);
     expect(tx.fiscalPeriod.update).not.toHaveBeenCalled();
   });
+  it('refuses to close legacy overlapping periods', async () => {
+    const {service,tx,periods} = setup();
+    periods[1] = {...periods[1],startDate:new Date('2026-12-01T00:00:00Z')};
+    await expect(service.close('company','user','one')).rejects.toThrow(/overlaps/);
+    expect(tx.fiscalPeriod.update).not.toHaveBeenCalled();
+  });
   it('blocks unposted cash transfers when closing a period', async () => {
     const {service,tx} = setup();
     tx.cashTransfer.count.mockResolvedValue(1);

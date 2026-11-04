@@ -84,6 +84,17 @@ export class YearEndCloseService {
       if (period.status === PeriodStatus.CLOSED) {
         throw new BadRequestException('This period is already closed');
       }
+      // Legacy data can contain overlapping periods from earlier releases.
+      // The DB posting trigger locks only one matching row, so an ambiguous
+      // range is not safe to close until the overlaps are corrected.
+      const overlap = await tx.fiscalPeriod.findFirst({
+        where: { companyId, id: { not: period.id },
+          startDate: { lte: period.endDate }, endDate: { gte: period.startDate } },
+        select: { id: true },
+      });
+      if (overlap) {
+        throw new BadRequestException('This fiscal period overlaps another period; correct the ranges before closing.');
+      }
       const blockers = await this.blockers(companyId, period, tx);
       if (blockers.length > 0) {
         throw new BadRequestException({
