@@ -1521,7 +1521,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get resetBackupFirst =>
-      'A full backup will be taken and checked before anything is deleted. If the backup cannot be taken, or cannot be read back, nothing is deleted at all.';
+      'A database archive or company-only JSON backup is created before deletion. Checks cover its index or format, not a complete restore. External files and license data may be missing. Verify a separate complete backup before proceeding.';
 
   @override
   String get resetConfirmTitle => 'This cannot be undone';
@@ -1550,7 +1550,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String resetDone(Object file) {
-    return 'The company’s data was cleared. “$file” holds the old data.';
+    return 'The company’s data was cleared. Backup “$file” was created, but a complete restore has not been verified.';
   }
 
   @override

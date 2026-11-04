@@ -36,10 +36,10 @@ import { RESET_CONFIRMATION_WORD } from './dto/reset.dto';
  *  2. **The password, verified on the server.** Argon2id against the stored
  *     hash. A stolen token alone cannot wipe the books.
  *  3. **A typed confirmation.** `RESET`, checked here too.
- *  4. **A backup first, and a verified one.** `pg_dump` writes the file, then
- *     `pg_restore --list` proves the archive can actually be read back. If
- *     either step fails the reset does not happen — a reset without a way
- *     back is data destruction, not a reset.
+ *  4. **A backup attempt first.** `pg_restore --list` checks an archive index,
+ *     not a complete restore. A company-only JSON fallback can also be used;
+ *     neither proves external files or license recovery. If both backup checks
+ *     fail, the reset is aborted; passing them does not prove recovery.
  *  5. **One transaction.** Everything is deleted inside it, so a failure
  *     half way leaves the company exactly as it was.
  *  6. **Nothing structural is touched.** No database is dropped, no
@@ -231,8 +231,8 @@ export class ResetService {
     );
 
     try {
-      // 4. A verified backup first — and one that is proven readable, not merely a
-      //    file that exists. No backup, no reset.
+      // 4. Check the archive index or company JSON format before resetting.
+      //    This does not prove a complete restore or include external files.
       let verified: { name: string; sizeBytes: number; entries: number };
 
       const fullCapabilities =
@@ -729,7 +729,7 @@ export class ResetService {
 
       this.logger.warn(
         `Reset finished for company ${me.company?.code ?? me.companyId}: ` +
-          `${verified.name} holds the old data`,
+          `backup ${verified.name} was created; full restoration was not verified`,
       );
 
       return {

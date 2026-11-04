@@ -1512,7 +1512,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get resetBackupFirst =>
-      'تؤخذ نسخة احتياطية كاملة ويتم التأكد من صحتها قبل حذف أي شيء. وإن تعذّر أخذ النسخة أو التحقق منها فلن يُحذف شيء.';
+      'تُنشأ نسخة لقاعدة البيانات أو ملف للشركة فقط قبل الحذف. الفحص للفهرس أو الصيغة ولا يثبت الاستعادة الكاملة؛ قد لا تشمل النسخة الملفات الخارجية والترخيص. تأكد من نسخة كاملة مستقلة قبل المتابعة.';
 
   @override
   String get resetConfirmTitle => 'لا يمكن التراجع عن هذا';
@@ -1541,7 +1541,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String resetDone(Object file) {
-    return 'تم حذف بيانات الشركة. تحتوي «$file» على البيانات القديمة.';
+    return 'تم حذف بيانات الشركة وإنشاء النسخة «$file»، لكن لم يتم إثبات استعادتها كاملة.';
   }
 
   @override

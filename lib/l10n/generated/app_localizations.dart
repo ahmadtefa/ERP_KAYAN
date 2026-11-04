@@ -2993,7 +2993,7 @@ abstract class AppLocalizations {
   /// No description provided for @resetBackupFirst.
   ///
   /// In en, this message translates to:
-  /// **'A full backup will be taken and checked before anything is deleted. If the backup cannot be taken, or cannot be read back, nothing is deleted at all.'**
+  /// **'A database archive or company-only JSON backup is created before deletion. Checks cover its index or format, not a complete restore. External files and license data may be missing. Verify a separate complete backup before proceeding.'**
   String get resetBackupFirst;
 
   /// No description provided for @resetConfirmTitle.
@@ -3035,7 +3035,7 @@ abstract class AppLocalizations {
   /// No description provided for @resetDone.
   ///
   /// In en, this message translates to:
-  /// **'The company’s data was cleared. “{file}” holds the old data.'**
+  /// **'The company’s data was cleared. Backup “{file}” was created, but a complete restore has not been verified.'**
   String resetDone(Object file);
 
   /// No description provided for @resetNeedsSetup.

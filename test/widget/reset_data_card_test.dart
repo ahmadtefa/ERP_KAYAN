@@ -88,6 +88,7 @@ void main() {
         companyCode:'synthetic',companyName:'Synthetic',counts:{'accounts':3},confirmationWord:'RESET'))],
       child:wrapWithApp(child:const Scaffold(body:SingleChildScrollView(child:ResetDataCard())))));
     await tester.pumpAndSettle();
+    expect(find.textContaining('not a complete restore'),findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton,'Reset program')); await tester.pumpAndSettle();
     await tester.tap(find.text('Confirm')); await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).first,'synthetic-password');
