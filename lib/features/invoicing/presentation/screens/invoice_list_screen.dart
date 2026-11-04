@@ -8,6 +8,7 @@ import '../../../../core/error/failure.dart';
 import '../../../../shared/widgets/status_pill.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -91,6 +92,12 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
         ref.invalidate(invoiceListProvider(widget.kind));
         showMessage(context, e.message, error: true);
       }
+    } catch (error) {
+      if (mounted) {
+        // An unexpected failure may still follow a committed server action.
+        ref.invalidate(invoiceListProvider(widget.kind));
+        showAppError(context, error);
+      }
     } finally {
       if (mounted) {
         ref.invalidate(stockListProvider);
@@ -122,6 +129,12 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
       if (mounted) {
         ref.invalidate(invoiceListProvider(widget.kind));
         showMessage(context, e.message, error: true);
+      }
+    } catch (error) {
+      if (mounted) {
+        // An unexpected failure may still follow a committed server action.
+        ref.invalidate(invoiceListProvider(widget.kind));
+        showAppError(context, error);
       }
     } finally {
       if (mounted) {
