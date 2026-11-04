@@ -178,9 +178,11 @@ class _ItemPickerDialogState extends ConsumerState<ItemPickerDialog> {
                         ),
                       ],
                       actions: (row) => [
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(row),
-                          child: Text(l10n.selectItem),
+                        Flexible(
+                          child: TextButton(
+                            onPressed: () => Navigator.of(context).pop(row),
+                            child: Text(l10n.selectItem, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          ),
                         ),
                       ],
                     ),
