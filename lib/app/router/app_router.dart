@@ -158,8 +158,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       for (final route in _shellRoutes)
         GoRoute(
           path: route.path,
-          builder: (context, state) =>
-              ErpShell(currentPath: route.path, child: route.child),
+          onExit: route.path == AppRoutes.companySettings
+            ? (context,state) => ref.read(currentUserProvider) == null
+                ? true : ref.read(draftExitGuardProvider).canLeave(state.pageKey)
+            : null,
+          builder: (context, state) => ErpShell(currentPath: route.path,
+            child:route.path == AppRoutes.companySettings
+              ? CompanySettingsScreen(navigationKey:state.pageKey) : route.child),
         ),
     ],
   );
