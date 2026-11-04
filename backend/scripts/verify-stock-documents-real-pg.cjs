@@ -40,6 +40,7 @@ const { PurchaseOrdersService } = require('../src/modules/purchases/purchase-ord
 const { SalesInvoicesService } = require('../src/modules/sales/sales-invoices.service');
 const { PurchaseInvoicesService } = require('../src/modules/purchases/purchase-invoices.service');
 const { ProfilePhotoService } = require('../src/modules/auth/profile-photo.service');
+const { RolesService } = require('../src/modules/admin/roles.service');
 const { normalizeLogo } = require('../src/modules/company/company.service');
 const sharp = require('sharp');
 
@@ -105,6 +106,35 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(photoAudit.length,2);
     assert.ok(!JSON.stringify(photoAudit).includes(savedPhoto.data));
     console.log('PASS: real PostgreSQL profile photo persistence, tenant isolation and audit rollback.');
+    // Competing UI permission edits start from the same snapshot. The role
+    // lock and expected set permit exactly one and retain an atomic audit.
+    const roles = new RolesService(prisma,audit);
+    const grants = await Promise.all(['synthetic.read','synthetic.write','synthetic.export'].map(code =>
+      prisma.permission.create({data:{code,nameEn:'Synthetic',nameAr:'تجريبي',module:'synthetic'}})));
+    const role = await prisma.role.create({data:{companyId:company,code:'SYN-CAS',nameEn:'Synthetic role',nameAr:'دور تجريبي'}});
+    await prisma.rolePermission.create({data:{roleId:role.id,permissionId:grants[0].id}});
+    const roleRace = await Promise.allSettled([
+      roles.setPermissions(company,user,role.id,['synthetic.read','synthetic.write'],[],true,['synthetic.read']),
+      roles.setPermissions(company,user,role.id,['synthetic.read','synthetic.export'],[],true,['synthetic.read']),
+    ]);
+    assert.equal(roleRace.filter(x => x.status === 'fulfilled').length,1);
+    assert.equal(roleRace.filter(x => x.status === 'rejected').length,1);
+    assert.match(String(roleRace.find(x => x.status === 'rejected').reason?.message),/changed since they were loaded/);
+    const roleCodes = async () => (await prisma.rolePermission.findMany({where:{roleId:role.id},include:{permission:true}})).map(x=>x.permission.code).sort();
+    const successfulCodes = await roleCodes();
+    assert.equal(successfulCodes.length,2);
+    assert.equal(await prisma.auditLog.count({where:{entity:'roles',entityId:role.id,action:'role.permissions_set'}}),1);
+    const roleAudit = audit.recordRequired.bind(audit);
+    audit.recordRequired = async (input,tx) => {
+      if (input.action === 'role.permissions_set') throw new Error('injected role audit failure');
+      return roleAudit(input,tx);
+    };
+    try {
+      await assert.rejects(roles.setPermissions(company,user,role.id,['synthetic.read'],[],true,successfulCodes),/injected role audit failure/);
+      assert.deepEqual(await roleCodes(),successfulCodes);
+      assert.equal(await prisma.auditLog.count({where:{entity:'roles',entityId:role.id,action:'role.permissions_set'}}),1);
+    } finally { audit.recordRequired = roleAudit; }
+    console.log('PASS: real PostgreSQL serializes competing role grants and rolls back audit failure. Legacy callers without an expected set can still overwrite later changes.');
     const costCenters = new CostCentersService(prisma, audit);
     const numbers = new DocumentNumberService();
     const periods = new FiscalPeriodsService(prisma, audit);

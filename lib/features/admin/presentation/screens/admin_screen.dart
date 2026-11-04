@@ -484,7 +484,8 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
         onSubmit: (chosen) async {
           try {
             await ref.read(apiClientProvider).post('/admin/roles/${role['id']}/permissions',
-              body: {'permissions': chosen.toList(growable: false)});
+              body: {'permissions': chosen.toList(growable: false),
+                'expectedPermissions': selected.toList(growable: false)});
           } finally {
             if (mounted) {
               ref.invalidate(rolesListProvider);

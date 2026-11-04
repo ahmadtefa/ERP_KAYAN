@@ -195,6 +195,7 @@ void main() {
       if (role) {
         expect(api.posts,1);
         expect(api.submitted!['permissions'],containsAll(['sales.invoices.read','sales.invoices.write']));
+        expect(api.submitted!['expectedPermissions'],['sales.invoices.read']);
       } else {
         expect(find.text('حسنًا'),findsOneWidget);
         await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();

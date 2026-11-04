@@ -6,6 +6,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
+import { Prisma } from '@prisma/client';
+
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
@@ -154,6 +156,7 @@ export class RolesService {
     codes: string[],
     actorPermissions: string[],
     isSuperAdmin: boolean,
+    expectedPermissions?: string[],
   ) {
     const role = await this.prisma.role.findFirst({
       where: { id, deletedAt: null, OR: [{ companyId }, { companyId: null }] },
@@ -169,26 +172,35 @@ export class RolesService {
 
     this.assertCanGrantPermissionCodes(codes, actorPermissions, isSuperAdmin);
     const permissionIds = await this.resolvePermissions(codes);
-    const before = await this.prisma.rolePermission.findMany({
-      where: { roleId: id },
-      include: { permission: true },
-    });
-
     await this.prisma.$transaction(async (tx) => {
+      // Serialize permission replacements even for legacy clients that do not
+      // supply an expected set. No migration of the role table is required.
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM roles WHERE id = ${id}::uuid FOR UPDATE`);
+      const lockedRole = await tx.role.findFirst({
+        where: { id, deletedAt: null, OR: [{ companyId }, { companyId: null }] },
+      });
+      if (!lockedRole) throw new NotFoundException('Role not found');
+      if ((lockedRole.isSystem || lockedRole.companyId === null) && !isSuperAdmin) {
+        throw new ForbiddenException('Only a super administrator can change permissions on a global system role');
+      }
+      const before = await tx.rolePermission.findMany({
+        where: { roleId: id }, include: { permission: true },
+      });
+      const previous = before.map((rp) => rp.permission.code).sort();
+      if (expectedPermissions !== undefined) {
+        const expected = [...expectedPermissions].sort();
+        if (expected.length !== previous.length || expected.some((code, index) => code !== previous[index])) {
+          throw new ConflictException('Role permissions changed since they were loaded. Refresh and review them before saving.');
+        }
+      }
       await tx.rolePermission.deleteMany({ where: { roleId: id } });
       for (const permissionId of permissionIds) {
         await tx.rolePermission.create({ data: { roleId: id, permissionId } });
       }
-    });
-
-    await this.audit.record({
-      companyId,
-      userId: actorId,
-      action: 'role.permissions_set',
-      entity: 'roles',
-      entityId: id,
-      before: { permissions: before.map((rp) => rp.permission.code) },
-      after: { permissions: codes },
+      await this.audit.recordRequired({
+        companyId, userId: actorId, action: 'role.permissions_set', entity: 'roles', entityId: id,
+        before: { permissions: previous }, after: { permissions: codes },
+      }, tx);
     });
     return this.findOne(companyId, id);
   }
