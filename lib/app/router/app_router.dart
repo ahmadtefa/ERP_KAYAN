@@ -1,3 +1,4 @@
+import 'return_exit_guard.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -107,16 +108,20 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.salesReturnNew,
+        onExit: (context, state) => ref.read(currentUserProvider) == null
+            ? true : ref.read(returnExitGuardProvider).canLeave(state.pageKey),
         builder: (context, state) => ErpShell(
           currentPath: AppRoutes.salesReturns,
-          child: const ReturnEditorScreen(kind: InvoiceKind.sales),
+          child: ReturnEditorScreen(kind: InvoiceKind.sales, navigationKey: state.pageKey),
         ),
       ),
       GoRoute(
         path: AppRoutes.purchaseReturnNew,
+        onExit: (context, state) => ref.read(currentUserProvider) == null
+            ? true : ref.read(returnExitGuardProvider).canLeave(state.pageKey),
         builder: (context, state) => ErpShell(
           currentPath: AppRoutes.purchaseReturns,
-          child: const ReturnEditorScreen(kind: InvoiceKind.purchase),
+          child: ReturnEditorScreen(kind: InvoiceKind.purchase, navigationKey: state.pageKey),
         ),
       ),
       GoRoute(

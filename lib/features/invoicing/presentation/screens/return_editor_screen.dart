@@ -4,10 +4,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../app/router/return_exit_guard.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/state_views.dart';
+import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/invoice_providers.dart';
@@ -48,9 +50,10 @@ class _ReturnLineDraft {
 
 /// Creates a draft credit/debit note against a posted invoice.
 class ReturnEditorScreen extends ConsumerStatefulWidget {
-  const ReturnEditorScreen({super.key, required this.kind});
+  const ReturnEditorScreen({super.key, required this.kind, required this.navigationKey});
 
   final InvoiceKind kind;
+  final ValueKey<String> navigationKey;
 
   @override
   ConsumerState<ReturnEditorScreen> createState() => _ReturnEditorScreenState();
@@ -64,15 +67,35 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
   late String _returnDate;
   bool _loadingSource = false;
   bool _saving = false;
+  bool _confirmingExit = false;
+  bool _saved = false;
+  late final ReturnExitGuard _exitGuard;
+
+  Future<bool> _confirmExit() async {
+    if (_saved) return true;
+    if (_saving || _confirmingExit) return false;
+    if (_invoiceId == null && _reason.text.isEmpty && _lines.every((line) => line.quantity.text.isEmpty)) return true;
+    _confirmingExit = true;
+    try {
+      final ar = Localizations.localeOf(context).languageCode == 'ar';
+      return await confirmAction(context,
+        title: ar ? 'تغييرات غير محفوظة' : 'Unsaved changes',
+        message: ar ? 'الخروج دون حفظ المرتجع؟' : 'Leave without saving the return?',
+        confirmLabel: ar ? 'خروج' : 'Discard', destructive: true);
+    } finally { _confirmingExit = false; }
+  }
 
   @override
   void initState() {
     super.initState();
     _returnDate = _formatDate(DateTime.now());
+    _exitGuard = ref.read(returnExitGuardProvider);
+    _exitGuard.register(widget.navigationKey, _confirmExit);
   }
 
   @override
   void dispose() {
+    _exitGuard.unregister(widget.navigationKey, _confirmExit);
     _reason.dispose();
     for (final line in _lines) {
       line.dispose();
@@ -193,7 +216,12 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
       await ref.read(returnListProvider(widget.kind).notifier).reload();
       if (!mounted) return;
       showMessage(context, l10n.returnCreated);
-      context.pop(true);
+      _saved = true;
+      if (context.canPop()) {
+        context.pop(true);
+      } else {
+        context.go(widget.kind.returnsRoute);
+      }
     } on Failure catch (error) {
       if (mounted) showMessage(context, error.message, error: true);
     } finally {
@@ -210,6 +238,10 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
         (user!.can(widget.kind.isSales ? 'sales.invoices.create' : 'purchases.invoices.create'));
 
     return ModuleScaffold(
+      leading: IconButton(key:const Key('return-editor-back'),tooltip:MaterialLocalizations.of(context).backButtonTooltip,
+        icon:const Icon(Icons.arrow_back),onPressed:_saving ? null : () {
+          if (context.canPop()) { context.pop(); } else { context.go(widget.kind.returnsRoute); }
+        }),
       title: widget.kind.isSales ? l10n.newSalesReturn : l10n.newPurchaseReturn,
       body: invoices.when(
         loading: () => const LoadingView(),
