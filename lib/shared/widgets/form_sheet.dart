@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../../app/router/draft_exit_guard.dart';
 import '../../app/theme/design_tokens.dart';
 import '../../core/json/json_utils.dart';
 import '../extensions/l10n_extension.dart';
@@ -67,6 +68,7 @@ Future<Json?> showFormSheet(
   String? submitLabel,
   bool readOnly = false,
   Future<void> Function(Json values)? onSubmit,
+  DraftExitRelay? exitRelay,
 }) {
   return showDialog<Json>(
     context: context,
@@ -78,6 +80,7 @@ Future<Json?> showFormSheet(
       submitLabel: submitLabel,
       readOnly: readOnly,
       onSubmit: onSubmit,
+      exitRelay: exitRelay,
     ),
   );
 }
@@ -90,6 +93,7 @@ class _FormSheet extends StatefulWidget {
     this.submitLabel,
     this.readOnly = false,
     this.onSubmit,
+    this.exitRelay,
   });
 
   final String title;
@@ -98,6 +102,7 @@ class _FormSheet extends StatefulWidget {
   final String? submitLabel;
   final bool readOnly;
   final Future<void> Function(Json values)? onSubmit;
+  final DraftExitRelay? exitRelay;
 
   @override
   State<_FormSheet> createState() => _FormSheetState();
@@ -137,6 +142,7 @@ class _FormSheetState extends State<_FormSheet> {
       }
     }
     _initialSnapshot = _snapshot();
+    widget.exitRelay?.attach(_leaveForRoute);
   }
 
   String _snapshot() => jsonEncode({
@@ -146,8 +152,8 @@ class _FormSheetState extends State<_FormSheet> {
     'multi': {for (final entry in _multiSelections.entries) entry.key: (entry.value.toList()..sort())},
   });
 
-  Future<void> _close() async {
-    if (_confirmingExit || _saving) return;
+  Future<bool> _canLeave() async {
+    if (_confirmingExit || _saving) return false;
     if (!widget.readOnly && (_uncertain || _snapshot() != _initialSnapshot)) {
       _confirmingExit = true;
       try {
@@ -158,14 +164,27 @@ class _FormSheetState extends State<_FormSheet> {
               ? (arabic ? 'قد تكون العملية قد اكتملت. أغلق النموذج وراجع القائمة قبل إنشاء سجل آخر.' : 'The operation may have completed. Close this form and review the list before creating another record.')
               : (arabic ? 'الخروج دون حفظ المدخلات؟' : 'Leave without saving your changes?'),
           confirmLabel: arabic ? 'الخروج دون حفظ' : 'Discard changes',destructive:true);
-        if (!discard || !mounted) return;
+        if (!discard || !mounted) return false;
       } finally { _confirmingExit = false; }
     }
-    if (mounted) Navigator.of(context).pop();
+    return mounted;
+  }
+
+  Future<void> _close() async {
+    if (await _canLeave() && mounted) Navigator.of(context).pop();
+  }
+
+  /// A routed navigation or sign-out must also remove the dialog after the
+  /// user confirms. Otherwise it can remain on top of the destination page.
+  Future<bool> _leaveForRoute() async {
+    if (!await _canLeave() || !mounted) return false;
+    Navigator.of(context).pop();
+    return true;
   }
 
   @override
   void dispose() {
+    widget.exitRelay?.detach(_leaveForRoute);
     for (final controller in _controllers.values) {
       controller.dispose();
     }

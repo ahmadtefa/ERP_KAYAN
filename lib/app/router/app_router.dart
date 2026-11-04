@@ -168,7 +168,9 @@ final routerProvider = Provider<GoRouter>((ref) {
             : null,
           builder: (context, state) => ErpShell(currentPath: route.path,
             guardKey: _guardedShellPaths.contains(route.path) ? state.pageKey : null,
-            child:route.path == AppRoutes.journalEntries
+            child:route.path == AppRoutes.cash
+              ? CashScreen(navigationKey:state.pageKey)
+              : route.path == AppRoutes.journalEntries
               ? JournalEntriesScreen(navigationKey:state.pageKey)
               : route.path == AppRoutes.companySettings
                 ? CompanySettingsScreen(navigationKey:state.pageKey)
@@ -189,7 +191,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 });
 
 const _guardedShellPaths = <String>{
-  AppRoutes.companySettings, AppRoutes.journalEntries, AppRoutes.salesInvoices, AppRoutes.purchaseInvoices,
+  AppRoutes.cash, AppRoutes.companySettings, AppRoutes.journalEntries, AppRoutes.salesInvoices, AppRoutes.purchaseInvoices,
   AppRoutes.salesOrders, AppRoutes.purchaseOrders, AppRoutes.stock,
 };
 

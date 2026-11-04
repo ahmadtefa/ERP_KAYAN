@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -29,7 +30,9 @@ import '../widgets/voucher_details_view.dart';
 /// holds. A box is bound to a ledger account, so "how much is in the safe?"
 /// has exactly one answer.
 class CashScreen extends ConsumerStatefulWidget {
-  const CashScreen({super.key});
+  const CashScreen({super.key, this.navigationKey});
+
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<CashScreen> createState() => _CashScreenState();
@@ -39,9 +42,21 @@ class _CashScreenState extends ConsumerState<CashScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 3, vsync: this);
   bool _busy = false;
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
 
   @override
   void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
     _tabs.dispose();
     super.dispose();
   }
@@ -105,6 +120,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: l10n.newCashAccount,
       fields: [
         FieldSpec('code', l10n.accountCode, required: true),
@@ -157,6 +173,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
     final kindValues = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: l10n.newVoucher,
       fields: [
         FieldSpec(
@@ -199,6 +216,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: isReceipt ? l10n.receipt : l10n.payment,
       fields: [
         FieldSpec(
@@ -309,6 +327,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: l10n.newTransfer,
       fields: [
         FieldSpec(
