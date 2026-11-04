@@ -43,7 +43,7 @@ void main() {
         appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1')),
         exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
         child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
-          supportedLocales:AppLocalizations.supportedLocales,home:const ItemsScreen())));
+          supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:ItemsScreen()))));
       await tester.pumpAndSettle();
       if (editing) {
         await tester.tap(find.byTooltip('Edit').first);
@@ -71,7 +71,7 @@ void main() {
       appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1')),
       exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
       child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
-        supportedLocales:AppLocalizations.supportedLocales,home:const ItemsScreen())));
+        supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:ItemsScreen()))));
     await tester.pumpAndSettle();
     await tester.tap(find.text('New item').first); await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextFormField,'Code'),'I-1');
