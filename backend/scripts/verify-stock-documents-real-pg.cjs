@@ -51,6 +51,9 @@ const { normalizeLogo, CompanyService } = require('../src/modules/company/compan
 const { CompanyController } = require('../src/modules/company/company.controller');
 const { CompaniesController } = require('../src/modules/company/companies.controller');
 const { AccountingSettingsController } = require('../src/modules/accounting/settings.controller');
+const { BackupScheduleController } = require('../src/modules/backup/backup-schedule.controller');
+const { BackupScheduleService } = require('../src/modules/backup/backup-schedule.service');
+const { AuditedSuperAdminGuard } = require('../src/common/guards/audited-super-admin.guard');
 const { PermissionsGuard } = require('../src/common/guards/permissions.guard');
 const { Reflector } = require('@nestjs/core');
 const sharp = require('sharp');
@@ -126,14 +129,19 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(companyBefore.logoPath,null);
     assert.equal(companyBefore.logoData,null);
     const settingsBefore = await companySettings.get(company);
+    let scheduleRuns=0, schedulePrunes=0;
+    const scheduleFixture={status:async()=>({retentionCount:1}),history:async()=>[],
+      runNow:async()=>{scheduleRuns++;return [];},pruneRetention:async()=>{schedulePrunes++;return [];}};
     class CompanyHttpFixtureModule {}
-    Module({controllers:[CompanyController,CompaniesController,AccountingSettingsController],providers:[
+    Module({controllers:[CompanyController,CompaniesController,AccountingSettingsController,BackupScheduleController],providers:[
+      AuditedSuperAdminGuard,{provide:AuditService,useValue:audit},{provide:PrismaService,useValue:prisma},
       {provide:CompanyService,useValue:companies},{provide:CompanySettingsService,useValue:companySettings},
+      {provide:BackupScheduleService,useValue:scheduleFixture},
     ]})(CompanyHttpFixtureModule);
     const companyHttp = await NestFactory.create(CompanyHttpFixtureModule,{logger:false});
     try {
       companyHttp.use((req,_res,next)=>{req.user={userId:user,companyId:company,branchId:branch,username:'synthetic',
-        isSuperAdmin:req.headers['x-fixture-super']==='yes',permissions:['admin.company.manage','company.profile.manage','reports.read']};next();});
+        isSuperAdmin:req.headers['x-fixture-super']==='yes',permissions:['admin.company.manage','company.profile.manage','reports.read','admin.backup']};next();});
       companyHttp.useGlobalGuards(new PermissionsGuard(new Reflector()));
       companyHttp.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
       companyHttp.useGlobalFilters(new ProblemDetailsFilter());
@@ -141,6 +149,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
       const base=`http://127.0.0.1:${companyHttp.getHttpServer().address().port}`;
       const patch=(path,body,superAdmin)=>fetch(base+path,{method:'PATCH',headers:{'content-type':'application/json',
         'x-fixture-super':superAdmin?'yes':'no'},body:JSON.stringify(body)});
+      const deniedBefore=await prisma.auditLog.count({where:{companyId:company,userId:user,entity:'super_admin_access',action:'ACCESS_DENIED'}});
       for (const prefix of ['/company','/companies']) {
         const beforeName=(await prisma.company.findUniqueOrThrow({where:{id:company}})).nameEn;
         const auditBefore=await prisma.auditLog.count({where:{companyId:company,entity:'companies'}});
@@ -180,10 +189,31 @@ let difference = '70000000-0000-4000-8000-000000000005';
         assert.equal((await companySettings.get(company)).managerName,'Synthetic manager');
         assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'company_settings'}}),policyAudits+1);
       } finally {audit.recordRequired=realSettingsAudit;}
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,userId:user,entity:'super_admin_access',action:'ACCESS_DENIED'}}),deniedBefore+7);
+      const beforeDeniedAudit=audit.recordRequired.bind(audit);
+      audit.recordRequired=async (entry,tx)=>{
+        if(entry.entity==='super_admin_access') throw new Error('injected denial audit failure');
+        return beforeDeniedAudit(entry,tx);
+      };
+      try {
+        assert.equal((await patch('/accounting/settings',{managerName:'unauthorized'},false)).status,503);
+        assert.equal((await companySettings.get(company)).managerName,'Synthetic manager');
+      } finally {audit.recordRequired=beforeDeniedAudit;}
+      for (const [method,route] of [['GET',''],['GET','/history'],['POST','/run'],['POST','/prune']]) {
+        const send=(superAdmin)=>fetch(base+'/backup/schedule'+route,{method,
+          headers:{'x-fixture-super':superAdmin?'yes':'no','content-type':'application/json'},
+          ...(method==='POST'?{body:JSON.stringify({companyId:'another-company'})}:{})});
+        assert.equal((await send(false)).status,403);
+        assert.equal((await send(true)).status,method==='POST'?201:200);
+      }
+      assert.equal(scheduleRuns,1); assert.equal(schedulePrunes,1);
+      const denials=await prisma.auditLog.findMany({where:{companyId:company,userId:user,entity:'super_admin_access',action:'ACCESS_DENIED'}});
+      assert.equal(denials.length,deniedBefore+11);
+      assert.ok(!JSON.stringify(denials).includes('Unauthorized manager'));
       assert.equal((await patch('/accounting/settings',{managerName:settingsBefore.managerName},true)).status,200);
       assert.equal((await patch('/company/profile',{nameEn:companyBefore.nameEn},true)).status,200);
     } finally { await companyHttp.close(); }
-    console.log('PASS: real HTTP and PostgreSQL profile/logo/settings: delegated admin denied, super admin allowed, settings audit failure rolls back. Test-injected principal: JWT and license guards not tested.');
+    console.log('PASS: real HTTP and PostgreSQL company/settings and scheduled-backup guards: delegated admin denied with audit, super admin allowed, audit failure fails closed. Schedule actions are stubbed and test-injected principal: JWT and license guards not tested.');
     // Competing UI permission edits start from the same snapshot. The role
     // lock and expected set permit exactly one and retain an atomic audit.
     const roles = new RolesService(prisma,audit);

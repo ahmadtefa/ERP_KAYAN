@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuditedSuperAdminGuard } from '../../common/guards/audited-super-admin.guard';
 
 import { AuditModule } from '../../common/audit/audit.module';
 import { PrismaModule } from '../../common/prisma/prisma.module';
@@ -13,7 +14,7 @@ import { SetupService } from './setup.service';
 @Module({
   imports: [PrismaModule, AuditModule],
   controllers: [CompanyController, CompaniesController, SetupController],
-  providers: [CompanyService, SetupService],
+  providers: [AuditedSuperAdminGuard, CompanyService, SetupService],
   exports: [CompanyService],
 })
 export class CompanyModule {}
