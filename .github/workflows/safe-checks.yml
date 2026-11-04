@@ -73,6 +73,7 @@ jobs:
           src/modules/sales/sales-invoices.units.spec.ts
           src/modules/sales/sales-invoices.service.spec.ts
           src/modules/sales/sales-invoices.update.spec.ts
+          src/modules/purchases/order-allocation-permissions.spec.ts
           src/modules/purchases/purchase-invoices.units.spec.ts
           src/modules/purchases/purchase-invoices.service.spec.ts
           src/modules/licensing/license.guard.spec.ts

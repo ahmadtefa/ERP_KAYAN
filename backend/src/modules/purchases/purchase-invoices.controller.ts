@@ -43,7 +43,7 @@ export class PurchaseInvoicesController {
   }
 
   @Put(':id/order-allocation')
-  @RequirePermissions('purchase.orders.read', 'purchase.invoices.create')
+  @RequirePermissions('purchases.orders.read', 'purchases.invoices.create')
   updateOrderAllocation(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: Record<string, unknown>) {
     return this.service.updateOrderAllocation(user.companyId, user.branchId, user.userId, id, dto ?? {});
   }
