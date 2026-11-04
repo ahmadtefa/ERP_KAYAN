@@ -79,6 +79,14 @@ describe('chart-of-accounts update contract', () => {
     expect(errors[0].property).toBe('isActive');
   });
 
+  it('distinguishes an omitted parent from an explicit null and validates snapshots', async () => {
+    for (const body of [{}, {parentId:null,expectedParentId:null},
+      {parentId:null,expectedParentId:'6f1d4b3a-2c1e-4a53-9a2b-1f0e5c7d8a11'}]) {
+      expect(await errorsFor(UpdateAccountDto,body)).toHaveLength(0);
+    }
+    expect((await errorsFor(UpdateAccountDto,{expectedParentId:'invalid'})).map(e=>e.property)).toContain('expectedParentId');
+  });
+
   it('still rejects a parent id that is not a UUID', async () => {
     const errors = await errorsFor(UpdateAccountDto, {
       parentId: 'not-a-uuid',

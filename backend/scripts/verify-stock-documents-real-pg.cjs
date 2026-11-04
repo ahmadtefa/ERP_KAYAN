@@ -32,8 +32,13 @@ const { StockDocumentsService } = require('../src/modules/inventory/stock-docume
 const { ItemsService } = require('../src/modules/inventory/items.service');
 const { DocumentsService } = require('../src/modules/export/documents.service');
 const { ChartOfAccountsService } = require('../src/modules/accounting/chart-of-accounts.service');
+const { ChartOfAccountsController } = require('../src/modules/accounting/chart-of-accounts.controller');
+const { Module, ValidationPipe } = require('@nestjs/common');
+const { NestFactory } = require('@nestjs/core');
+const { ProblemDetailsFilter } = require('../src/common/filters/problem-details.filter');
 const { StockService } = require('../src/modules/inventory/stock.service');
 const { FinancialStatementsService } = require('../src/modules/reports/financial-statements.service');
+const { ReportsService } = require('../src/modules/reports/reports.service');
 const { PriceListsService } = require('../src/modules/sales/price-lists.service');
 const { SalesOrdersService } = require('../src/modules/sales/sales-orders.service');
 const { PurchaseOrdersService } = require('../src/modules/purchases/purchase-orders.service');
@@ -277,6 +282,102 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const accountAudit = await prisma.auditLog.count({where:{companyId:company,entity:'accounts',entityId:leaf.id,action:'CREATE'}});
     assert.equal(accountAudit,1);
     console.log('PASS: real PostgreSQL + Prisma chart relationship, duplicate, activation and atomic audit rollback.');
+    // Account moves are only allowed for subtrees with no journal lines.
+    // Reports currently group using the live tree, so moving existing history
+    // would retroactively change historical account subtotals.
+    const destination = await chart.create(company,user,{code:'SYN-TREE-DEST',nameEn:'Destination',nameAr:'وجهة',type:'ASSET',isPostable:false});
+    const movable = await chart.create(company,user,{code:'SYN-TREE-FREE',nameEn:'Movable',nameAr:'قابل للنقل',type:'ASSET',parentId:root.id});
+    assert.equal((await chart.update(company,user,movable.id,{parentId:null,expectedParentId:root.id})).parentId,null);
+    await assert.rejects(chart.update(company,user,movable.id,{parentId:destination.id,expectedParentId:root.id}),/parent changed/);
+    assert.equal((await chart.update(company,user,movable.id,{parentId:destination.id,expectedParentId:null})).parentId,destination.id);
+    audit.recordRequired = async (input,tx) => {
+      if (input.entity === 'accounts' && input.entityId === movable.id) throw new Error('injected move audit failure');
+      return chartAudit(input,tx);
+    };
+    try {
+      await assert.rejects(chart.update(company,user,movable.id,{parentId:null,expectedParentId:destination.id}),/injected move audit failure/);
+      assert.equal((await prisma.account.findUniqueOrThrow({where:{id:movable.id}})).parentId,destination.id);
+    } finally { audit.recordRequired = chartAudit; }
+    // Exercise the real controller, validation pipe, service and PostgreSQL
+    // over loopback HTTP. The synthetic principal is injected by test-only
+    // middleware: this is NOT an authentication/permission-guard test.
+    class ChartHttpFixtureModule {}
+    Module({controllers:[ChartOfAccountsController],providers:[{provide:ChartOfAccountsService,useValue:chart}]})(ChartHttpFixtureModule);
+    const httpApp = await NestFactory.create(ChartHttpFixtureModule,{logger:false});
+    try {
+      httpApp.use((req,_res,next)=>{req.user={companyId:company,userId:user,branchId:branch,isSuperAdmin:true,permissions:[]};next();});
+      httpApp.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
+      httpApp.useGlobalFilters(new ProblemDetailsFilter());
+      await httpApp.listen(0,'127.0.0.1');
+      const address=httpApp.getHttpServer().address();
+      const endpoint=`http://127.0.0.1:${address.port}/accounting/chart-of-accounts/${movable.id}`;
+      const patch=body=>fetch(endpoint,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+      assert.equal((await patch({parentId:null,expectedParentId:'not-a-uuid'})).status,400);
+      assert.equal((await patch({parentId:null,expectedParentId:root.id})).status,409);
+      const detached=await patch({parentId:null,expectedParentId:destination.id});
+      assert.equal(detached.status,200);
+      assert.equal((await detached.json()).parentId,null);
+      assert.equal((await prisma.account.findUniqueOrThrow({where:{id:movable.id}})).parentId,null);
+    } finally { await httpApp.close(); }
+    console.log('PASS: chart PATCH over real HTTP with DTO validation, service and PostgreSQL; test-injected principal, no auth guard or Flutter.');
+    const usedGroup = await chart.create(company,user,{code:'SYN-HIST-GROUP',nameEn:'History group',nameAr:'مجموعة تاريخية',type:'ASSET',parentId:root.id,isPostable:false});
+    const usedLeaf = await chart.create(company,user,{code:'SYN-HIST-LEAF',nameEn:'History leaf',nameAr:'حساب تاريخي',type:'ASSET',parentId:usedGroup.id,isPostable:true});
+    await prisma.journalEntry.create({data:{companyId:company,branchId:branch,entryNumber:'SYN-TREE-HISTORY',
+      entryDate:new Date('2090-01-10T00:00:00Z'),status:'POSTED',totalDebit:11,totalCredit:11,
+      lines:{create:[{lineNumber:1,accountId:usedLeaf.id,debit:11,credit:0},
+        {lineNumber:2,accountId:inventory,debit:0,credit:11}]}}});
+    const reports = new ReportsService(prisma);
+    const reportBefore = await reports.trialBalance(company,{from:'2090-01-01',to:'2090-12-31'});
+    assert.equal(reportBefore.groups.find(x=>x.accountId===root.id).debit,'11.0000');
+    await assert.rejects(chart.update(company,user,usedGroup.id,{parentId:destination.id,expectedParentId:root.id}),/historical reports/);
+    const reportAfter = await reports.trialBalance(company,{from:'2090-01-01',to:'2090-12-31'});
+    assert.deepEqual(reportAfter.groups,reportBefore.groups);
+    assert.deepEqual(reportAfter.totals,reportBefore.totals);
+    assert.equal((await prisma.account.findUniqueOrThrow({where:{id:usedGroup.id}})).parentId,root.id);
+    const a = await chart.create(company,user,{code:'SYN-TREE-A',nameEn:'A',nameAr:'أ',type:'ASSET',isPostable:false});
+    const b = await chart.create(company,user,{code:'SYN-TREE-B',nameEn:'B',nameAr:'ب',type:'ASSET',isPostable:false});
+    const treeRace = await Promise.allSettled([
+      chart.update(company,user,a.id,{parentId:b.id,expectedParentId:null}),
+      chart.update(company,user,b.id,{parentId:a.id,expectedParentId:null}),
+    ]);
+    assert.equal(treeRace.filter(x=>x.status==='fulfilled').length,1);
+    assert.equal(treeRace.filter(x=>x.status==='rejected').length,1);
+    const aAfter=await prisma.account.findUniqueOrThrow({where:{id:a.id}});
+    const bAfter=await prisma.account.findUniqueOrThrow({where:{id:b.id}});
+    assert(!(aAfter.parentId===b.id && bAfter.parentId===a.id));
+
+    // A journal insert obtains PostgreSQL's FK key-share lock on its account.
+    // The move must wait, then observe the newly committed line and refuse.
+    const raceGroup = await chart.create(company,user,{code:'SYN-TREE-LOCK',nameEn:'Race group',nameAr:'مجموعة سباق',type:'ASSET',parentId:root.id,isPostable:false});
+    const raceLeaf = await chart.create(company,user,{code:'SYN-TREE-LOCK-L',nameEn:'Race leaf',nameAr:'فرع سباق',type:'ASSET',parentId:raceGroup.id});
+    const journalWriter = new Client({connectionString:url.toString()});
+    await journalWriter.connect();
+    try {
+      await journalWriter.query('BEGIN');
+      await journalWriter.query(`INSERT INTO journal_entries (id,"companyId","branchId","entryNumber","entryDate",status,"totalDebit","totalCredit","updatedAt")
+        VALUES ('70000000-0000-4000-8000-000000000080',$1,$2,'SYN-TREE-RACE','2091-01-01','DRAFT',0,0,now())`,[company,branch]);
+      await journalWriter.query(`INSERT INTO journal_lines (id,"journalEntryId","lineNumber","accountId",debit,credit)
+        VALUES ('70000000-0000-4000-8000-000000000081','70000000-0000-4000-8000-000000000080',1,$1,1,0)`,[raceLeaf.id]);
+      const observed = chart.update(company,user,raceGroup.id,{parentId:null,expectedParentId:root.id})
+        .then(value=>({value}),error=>({error}));
+      let sawWait=false;
+      for (let attempt=0;attempt<30;attempt++) {
+        const waiting=await sql.query(`SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+          WHERE wait_event_type='Lock' AND query LIKE '%WITH RECURSIVE subtree%' AND query LIKE '%FOR UPDATE%' AND pid<>pg_backend_pid()) AS waiting`);
+        if (waiting.rows[0].waiting) {sawWait=true;break;}
+        await new Promise(resolve=>setTimeout(resolve,50));
+      }
+      assert.equal(sawWait,true,'account move must wait for the in-flight journal FK');
+      await journalWriter.query('COMMIT');
+      const outcome=await observed;
+      assert.match(String(outcome.error?.message),/historical reports/);
+      assert.equal((await prisma.account.findUniqueOrThrow({where:{id:raceGroup.id}})).parentId,root.id);
+    } finally {
+      await journalWriter.query('ROLLBACK').catch(()=>{});
+      await journalWriter.end();
+    }
+    console.log('PASS: real PostgreSQL account detach/move, stale snapshots, audit rollback, preserved trial balance, opposing moves and concurrent journal insert. Not HTTP, Flutter or direct SQL protection.');
+
 
     // Closing owns the same PostgreSQL period row locked by the posting
     // triggers. This uses a disposable future period and synthetic accounts;

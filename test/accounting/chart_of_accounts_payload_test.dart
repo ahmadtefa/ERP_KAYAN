@@ -141,6 +141,7 @@ const _updateContract = {
   'nameEn',
   'nameAr',
   'parentId',
+  'expectedParentId',
   'isPostable',
   'isActive',
   'currency',
@@ -167,6 +168,22 @@ void main() {
         _input.toUpdateJson().keys.toSet().difference(_updateContract),
         isEmpty,
       );
+    });
+
+    test('unchanged parent is omitted, and explicit detach keeps the expected parent', () {
+      const unchanged = AccountInput(nameEn: 'Child', nameAr: 'فرعي',
+        type: AccountType.asset, parentId: 'p1', updateParent: false);
+      const detach = AccountInput(nameEn: 'Child', nameAr: 'فرعي',
+        type: AccountType.asset, clearParent: true, checkParent: true, expectedParentId: 'p1');
+      const moveFromRoot = AccountInput(nameEn: 'Child', nameAr: 'فرعي',
+        type: AccountType.asset, parentId: 'p1', checkParent: true);
+      expect(unchanged.toUpdateJson().containsKey('parentId'), isFalse);
+      expect(detach.toUpdateJson().containsKey('parentId'), isTrue);
+      expect(detach.toUpdateJson()['parentId'], isNull);
+      expect(detach.toUpdateJson()['expectedParentId'], 'p1');
+      expect(moveFromRoot.toUpdateJson().containsKey('expectedParentId'), isTrue);
+      expect(moveFromRoot.toUpdateJson()['expectedParentId'], isNull);
+      expect(detach.toCreateJson().containsKey('expectedParentId'), isFalse);
     });
 
     test('a code is only sent when there is one', () {

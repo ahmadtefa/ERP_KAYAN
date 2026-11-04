@@ -54,7 +54,8 @@ function fakePrisma(state: {
     },
     update: async (args: any) => {
       calls.push({ method: 'account.update', args });
-      return { ...accounts[0], ...args.data };
+      const row = accounts.find((a) => a.id === args.where.id) ?? accounts[0];
+      return { ...row, ...Object.fromEntries(Object.entries(args.data).filter(([, value]) => value !== undefined)) };
     },
   };
 
@@ -67,7 +68,16 @@ function fakePrisma(state: {
     account: delegate,
     journalLine,
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
-      fn({ account: delegate, journalLine }),
+      fn({ account: delegate, journalLine, $queryRaw: async (query: {sql:string,values:unknown[]}) => {
+        if (!query.sql.includes('WITH RECURSIVE')) return [{locked: 1}];
+        const ids = new Set([query.values[0]]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const a of accounts) if (ids.has(a.parentId) && !ids.has(a.id)) { ids.add(a.id); changed = true; }
+        }
+        return [...ids].map(id => ({id}));
+      } }),
   } as any;
 }
 
@@ -247,6 +257,33 @@ describe('ChartOfAccountsService', () => {
       await expect(
         service.update('c1', 'u1', 'root-1', { parentId: 'child-11' }),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('detaches an unused account when the expected parent matches', async () => {
+      const prisma = fakePrisma({accounts:baseAccounts});
+      const result = await serviceWith(prisma).update('c1','u1','child-11',{
+        parentId:null,expectedParentId:'root-1',
+      });
+      expect(result.parentId).toBeNull();
+    });
+
+    it('refuses a stale expected parent and a snapshot without a move', async () => {
+      const prisma = fakePrisma({accounts:baseAccounts});
+      await expect(serviceWith(prisma).update('c1','u1','child-11',{
+        parentId:null,expectedParentId:'other',
+      })).rejects.toBeInstanceOf(ConflictException);
+      await expect(serviceWith(prisma).update('c1','u1','child-11',{
+        expectedParentId:'root-1',
+      })).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.calls.some((c: {method:string})=>c.method==='account.update')).toBe(false);
+    });
+
+    it('refuses moving a subtree with any journal lines, including drafts', async () => {
+      const prisma = fakePrisma({accounts:baseAccounts,journalLines:1});
+      await expect(serviceWith(prisma).update('c1','u1','child-11',{
+        parentId:null,expectedParentId:'root-1',
+      })).rejects.toThrow(/historical reports/);
+      expect(prisma.calls.some((c: {method:string})=>c.method==='account.update')).toBe(false);
     });
 
     it('refuses to make a parent postable while it has children', async () => {

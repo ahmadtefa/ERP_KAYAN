@@ -7,6 +7,7 @@ import { AccountType, Prisma } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { OpeningBalancesService } from '../accounting/opening-balances.service';
+import { lockChart } from '../accounting/chart-lock';
 import {
   ImportFormatError,
   isXlsx,
@@ -981,11 +982,21 @@ export class ImportService {
 
     if (!options.dryRun && errors.length === 0 && newRows.size > 0) {
       await this.prisma.$transaction(async (tx) => {
+        await lockChart(tx, companyId);
         const current = await tx.account.findMany({
           where: { companyId, code: { in: codes } },
           select: { id: true, code: true, type: true, parentId: true, isPostable: true, isActive: true, deletedAt: true },
         });
         const currentByCode = new Map(current.map((account) => [account.code, account]));
+        // The preview ran outside this transaction. A chart edit could have
+        // retired or changed a parent before the lock was acquired.
+        for (const row of newRows.values()) {
+          if (!row.parentCode || newRows.has(row.parentCode)) continue;
+          const parent = currentByCode.get(row.parentCode);
+          if (!parent || parent.deletedAt || !parent.isActive || parent.type !== row.type) {
+            throw new BadRequestException('An account parent changed while this workbook was being imported. Read it again and retry.');
+          }
+        }
         for (const row of newRows.values()) {
           if (currentByCode.has(row.code)) {
             throw new BadRequestException(`Account code "${row.code}" changed while this workbook was being imported. Read it again and retry.`);

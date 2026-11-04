@@ -12,6 +12,10 @@ class AccountInput {
     required this.nameAr,
     required this.type,
     this.parentId,
+    this.updateParent = true,
+    this.clearParent = false,
+    this.checkParent = false,
+    this.expectedParentId,
     this.isPostable,
     this.isActive,
     this.description,
@@ -23,6 +27,12 @@ class AccountInput {
   final String nameAr;
   final AccountType type;
   final String? parentId;
+  /// Do not replace an unchanged parent from a stale editor snapshot.
+  final bool updateParent;
+  /// Unlike omission, explicitly sending null removes the parent.
+  final bool clearParent;
+  final bool checkParent;
+  final String? expectedParentId;
   final bool? isPostable;
   final bool? isActive;
   final String? description;
@@ -67,7 +77,8 @@ class AccountInput {
     // An empty Arabic name is left out, so an update does not overwrite the
     // stored name with blank text (the server requires at least one character).
     if (nameAr.isNotEmpty) 'nameAr': nameAr,
-    if (parentId != null) 'parentId': parentId,
+    if (updateParent && (parentId != null || clearParent)) 'parentId': parentId,
+    if (updateParent && checkParent) 'expectedParentId': expectedParentId,
     if (isPostable != null) 'isPostable': isPostable,
     if (isActive != null) 'isActive': isActive,
     if (description != null) 'description': description,

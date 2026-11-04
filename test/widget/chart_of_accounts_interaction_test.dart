@@ -28,6 +28,8 @@ class _ChartSource implements ChartOfAccountsDataSource {
   ];
   int loads = 0;
   AccountInput? createdInput;
+  AccountInput? updatedInput;
+  String? updatedId;
   bool failCreate = false;
   Failure? createError;
   bool commitBeforeFailure = false;
@@ -52,7 +54,11 @@ class _ChartSource implements ChartOfAccountsDataSource {
     return account;
   }
   @override
-  Future<Account> updateAccount(String id, AccountInput input) => throw UnimplementedError();
+  Future<Account> updateAccount(String id, AccountInput input) async {
+    updatedId = id;
+    updatedInput = input;
+    return accounts.firstWhere((account) => account.id == id);
+  }
   @override
   Future<Account> setActive(String id, {required bool isActive}) => throw UnimplementedError();
   @override
@@ -119,6 +125,39 @@ void main() {
     expect(source.createdInput!.toCreateJson().containsKey('isActive'), isFalse);
     expect(find.textContaining('3  New asset'), findsOneWidget);
   });
+  testWidgets('detaching an account sends explicit null and its original parent', (tester) async {
+    final source = _ChartSource();
+    await _open(tester, source);
+    final row = find.byKey(const ValueKey('leaf'));
+    await tester.tap(find.descendant(of: row, matching: find.byTooltip('Edit account')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String?>).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('No parent (top-level)').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(source.updatedId, 'leaf');
+    final payload = source.updatedInput!.toUpdateJson();
+    expect(payload.containsKey('parentId'), isTrue);
+    expect(payload['parentId'], isNull);
+    expect(payload['expectedParentId'], 'child');
+  });
+
+  testWidgets('editing a name does not resend an unchanged parent', (tester) async {
+    final source = _ChartSource();
+    await _open(tester, source);
+    final row = find.byKey(const ValueKey('leaf'));
+    await tester.tap(find.descendant(of: row, matching: find.byTooltip('Edit account')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Name in English *'), 'Edited cash');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(source.updatedId, 'leaf');
+    expect(source.updatedInput!.toUpdateJson().containsKey('parentId'), isFalse);
+    expect(source.updatedInput!.toUpdateJson().containsKey('expectedParentId'), isFalse);
+  });
+
   testWidgets('an uncertain save preserves the draft and refuses blind retry', (tester) async {
     final source = _ChartSource()..failCreate = true..commitBeforeFailure = true;
     await _open(tester, source);

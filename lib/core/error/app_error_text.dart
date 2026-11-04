@@ -388,6 +388,10 @@ class AppErrorMessageResolver {
         'تغيّرت صلاحيات الدور منذ فتحها؛ حدّث القائمة وراجع الصلاحيات قبل الحفظ.',
     'User roles changed since they were loaded. Refresh and review them before saving.':
         'تغيّرت أدوار المستخدم منذ فتحها؛ حدّث القائمة وراجع الأدوار قبل الحفظ.',
+    'The account parent changed since it was loaded. Refresh and review it before saving.':
+        'تغيّر الحساب الأب منذ فتح النموذج؛ حدّث الدليل وراجع التعديل قبل الحفظ.',
+    'An account or its subaccounts have journal movements; moving them would change historical reports.':
+        'لا يمكن نقل الحساب أو فصله لوجود قيود عليه أو على حساباته الفرعية؛ حفاظًا على التقارير التاريخية.',
     'User permissions changed since they were loaded. Refresh and review them before saving.':
         'تغيّرت صلاحيات المستخدم منذ فتحها؛ حدّث القائمة وراجع الصلاحيات قبل الحفظ.',
     'The changed dates contain posted history; the fiscal period boundaries cannot be changed.':

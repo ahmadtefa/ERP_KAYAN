@@ -65,6 +65,8 @@ jobs:
           src/modules/admin/user-grant-concurrency.spec.ts
           src/modules/accounting/account-update-contract.spec.ts
           src/modules/accounting/chart-of-accounts.service.spec.ts
+          src/modules/import/import.service.spec.ts
+          src/modules/reports/trial-balance-groups.spec.ts
           src/modules/accounting/year-end-close.service.spec.ts
           src/modules/accounting/fiscal-periods-safety.spec.ts
           src/modules/accounting/cost-center-dates.spec.ts
