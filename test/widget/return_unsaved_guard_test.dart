@@ -1,4 +1,6 @@
 import 'package:erp_kayan/app/router/draft_exit_guard.dart';
+import 'package:erp_kayan/app/router/app_router.dart';
+import 'package:erp_kayan/app/shell/erp_shell.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
@@ -64,6 +66,37 @@ void main() {
     await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
     expect(find.byType(ReturnEditorScreen),findsOneWidget);
     expect(find.text('Synthetic item'),findsNothing);
+  });
+  testWidgets('both Home buttons preserve a return draft when navigation is cancelled', (tester) async {
+    tester.view.physicalSize=const Size(1500,1000); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(_ReturnApi()),
+      currentUserProvider.overrideWithValue(const AppUser(id:'user',username:'user',fullName:'User',companyId:'company',branchId:'branch',isSuperAdmin:true))]);
+    addTearDown(container.dispose);
+    final router=GoRouter(initialLocation:AppRoutes.salesReturnNew,routes:[
+      GoRoute(path:AppRoutes.dashboard,builder:(_,_) => const Scaffold(body:Text('Dashboard destination'))),
+      GoRoute(path:AppRoutes.salesReturnNew,onExit:(_,state) => container.read(draftExitGuardProvider).canLeave(state.pageKey),
+        builder:(context,state) => ErpShell(currentPath:AppRoutes.salesReturns,
+          child:ReturnEditorScreen(kind:InvoiceKind.sales,navigationKey:state.pageKey))),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp.router(locale:const Locale('en'),
+      localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,routerConfig:router)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('erp-home-shortcut'))); await tester.pumpAndSettle();
+    expect(find.text('Dashboard destination'),findsOneWidget);
+    router.go(AppRoutes.salesReturnNew); await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>)); await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('INV-1').last); await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first,'keep this reason');
+    await tester.tap(find.byKey(const ValueKey('erp-home-shortcut'))); await tester.pumpAndSettle();
+    expect(find.text('Unsaved changes'),findsOneWidget);
+    await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byType(TextField).first).controller!.text,'keep this reason');
+    await tester.tap(find.widgetWithText(ListTile,'Dashboard')); await tester.pumpAndSettle();
+    expect(find.text('Unsaved changes'),findsOneWidget);
+    await tester.tap(find.text('Discard')); await tester.pumpAndSettle();
+    expect(find.text('Dashboard destination'),findsOneWidget);
   });
   for (final kind in InvoiceKind.values) {
     testWidgets('${kind.name} return protects shell navigation and back, preserving cancelled input', (tester) async {

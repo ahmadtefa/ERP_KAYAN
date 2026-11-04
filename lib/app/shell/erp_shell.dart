@@ -1028,6 +1028,12 @@ class _TopBar extends StatelessWidget {
               ],
             ),
           ),
+          IconButton(
+            key: const ValueKey('erp-home-shortcut'),
+            tooltip: Localizations.localeOf(context).languageCode == 'ar' ? 'الرئيسية' : 'Home',
+            icon: const Icon(Icons.home_outlined, size: 20),
+            onPressed: () => context.go(AppRoutes.dashboard),
+          ),
           _SearchTrigger(expanded: isExtended),
           const SizedBox(width: AppSpacing.xs),
           const _LanguageMenu(),
