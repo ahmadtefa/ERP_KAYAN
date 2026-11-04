@@ -19,7 +19,7 @@ class _CostCenterApi extends ApiClient {
   @override
   Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async => {'items':[
     {'id':'center','code':'CC','nameEn':'Synthetic','nameAr':'تجريبي','type':'DEPARTMENT',
-      'isActive':true,'startDate':'2026-01-01','endDate':'2026-12-31','responsiblePerson':'Person','description':'Description'}]};
+      'isActive':true,'startDate':'2026-01-01','endDate':'2026-12-31','responsiblePerson':'Person','description':'Synthetic description'}]};
   @override
   Future<Map<String,dynamic>> patch(String path,{Object? body}) async {
     attempts++; submitted=body;
@@ -43,8 +43,8 @@ void main() {
     await tester.ensureVisible(end); await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Clear date').last); await tester.pumpAndSettle();
     final person=find.widgetWithText(TextFormField,'Responsible person');
-    final description=find.byWidgetPredicate((widget) =>
-        widget is TextFormField && widget.decoration?.labelText == 'Description');
+    // The initial value differs from the label so the text finder is unique.
+    final description=find.widgetWithText(TextFormField,'Description');
     await tester.ensureVisible(person); await tester.pumpAndSettle();
     await tester.enterText(person,'');
     await tester.ensureVisible(description); await tester.pumpAndSettle();

@@ -246,3 +246,5 @@
 - [Safe Checks 41881284919](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/41881284919): راجع حالة التشغيل، ولا تفترض نجاح Flutter أو PostgreSQL قبل اكتمال jobs الفعلية.
 - [Release Gate 41881285069](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/41881285069): فشلت البوابة المانعة لغياب أدلة VM كما صُممت، وليس بسبب اختبار كود.
 - ظهر فحص Gitar تلقائيًا على commit المدفوع وانتهى بنجاح. لم نشغّله يدويًا ولم نراجع نتائجه أو نبدأ إصلاحاته؛ حدوثه قبل التقرير لم يكن مقصودًا. دفع commit آخر قد يعيد تشغيله تلقائيًا؛ لذلك حُفظ تصحيح checkout محليًا ولم يُدفع قبل التقرير.
+
+- [Safe Checks 41881284919](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/41881284919) فشل في Flutter analyze قبل الاختبارات لأن `TextFormField` لا يعرّض `decoration`؛ لذلك تخطت اختبارات Flutter وweb build. صححنا fixture محليًا بجعل قيمة الوصف مختلفة عن نص التسمية مع استخدام `widgetWithText` المعروف؛ لم يُتحقق منه بـFlutter أو CI بعد. PostgreSQL نجح على 3e8ff4b، وحالة Backend المسترجعة من API بقيت غير نهائية.
