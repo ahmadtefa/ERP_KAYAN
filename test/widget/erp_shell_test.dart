@@ -12,6 +12,23 @@ import 'package:go_router/go_router.dart';
 import 'test_harness.dart';
 
 void main() {
+  testWidgets('Home shortcut fits a narrow shell and navigates to the dashboard', (tester) async {
+    tester.view.physicalSize=const Size(320,700); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final router=GoRouter(initialLocation:AppRoutes.customers,routes:[
+      GoRoute(path:AppRoutes.dashboard,builder:(_,_) => const Scaffold(body:Text('Dashboard destination'))),
+      GoRoute(path:AppRoutes.customers,builder:(_,_) => const ErpShell(currentPath:AppRoutes.customers,child:SizedBox.expand())),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(ProviderScope(overrides:[tokenStoreProvider.overrideWithValue(FakeTokenStore()),
+      authRepositoryProvider.overrideWithValue(FakeAuthRepository())],child:MaterialApp.router(
+        locale:const Locale('ar'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,routerConfig:router)));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(),isNull);
+    await tester.tap(find.byKey(const ValueKey('erp-home-shortcut'))); await tester.pumpAndSettle();
+    expect(find.text('Dashboard destination'),findsOneWidget);
+  });
   testWidgets(
     'Arabic RTL side navigation is on the right, scrollable up/down, and reaches the last item',
     (tester) async {

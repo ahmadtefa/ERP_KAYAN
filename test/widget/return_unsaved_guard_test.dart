@@ -93,7 +93,12 @@ void main() {
     expect(find.text('Unsaved changes'),findsOneWidget);
     await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byType(TextField).first).controller!.text,'keep this reason');
-    await tester.tap(find.widgetWithText(ListTile,'Dashboard')); await tester.pumpAndSettle();
+    final navigation=find.byKey(const Key('erp-shell-nav-list'));
+    final dashboard=find.widgetWithText(ListTile,'Dashboard');
+    await tester.scrollUntilVisible(dashboard,-150,
+      scrollable:find.descendant(of:navigation,matching:find.byType(Scrollable)));
+    await tester.pumpAndSettle();
+    await tester.tap(dashboard); await tester.pumpAndSettle();
     expect(find.text('Unsaved changes'),findsOneWidget);
     await tester.tap(find.text('Discard')); await tester.pumpAndSettle();
     expect(find.text('Dashboard destination'),findsOneWidget);

@@ -36,3 +36,13 @@ Windows rendering, backend integration, or product readiness.
 | dashboard_ar.png | `5398be343a40c369d41608e219b8d8f10f5290a4fc50a44fcf51a93697c1ccc3` |
 | customers_ar.png | `bdcbfd05f9e28b4e105e3e9f378e6de1d008ed380ca097c8cc3ae3a79c13c1f4` |
 | sales_invoices_ar.png | `2891d330457dfae15144cbea9443ee9ce994144d9064ab6f4bb2dedda3a2a567` |
+
+## Additional Home shortcut — 6993250
+
+The independent full-resolution synthetic renders from [run 41836178565](https://github.com/ahmadtefa/ERP_KAYAN/actions/runs/41836178565) were reconstructed losslessly and reviewed against the prior baselines. Each image changes exactly 132 pixels within x=165–182, y=23–37: the added Home icon. The sidebar dashboard entry and the rest of each image remain pixel-identical. This review does not establish product approval, live backend integration, or Windows rendering. The Home navigation widget test remains the behavioral check.
+
+| File | SHA-256 of updated 1440×900 RGBA pixels |
+| --- | --- |
+| dashboard_ar.png | `e9b3c65c1c8c3cfdd20a6950e3617965c7e564e4e4b9c02ca950c0831c8f2669` |
+| customers_ar.png | `6486fff6ea6c1053988fb13dc2725a413480aa17bea786201b3d0f4ecdcb5164` |
+| sales_invoices_ar.png | `2eb540e2d12bf4ed5eb9af8b0a8e1834eac820e1065601fc7efe8dd73ef6bc27` |

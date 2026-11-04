@@ -89,17 +89,19 @@ for (const line of lines) {
   }
   // These UI/refresh fixtures contain only synthetic constants. Restrict
   // diagnostics to locations, numeric counts and known framework errors.
-  if (event.type === 'print' && /^(?:blank item tax sends zero when (?:creating|editing)|item save failure keeps the form and its tax input|cancel and system back protect text until explicit discard|a changed switch is protected and an unchanged form closes directly|a failed submit keeps the entered fields until a successful retry|overlapping refreshes keep the latest result, not the last response|a stale failure does not overwrite a newer successful refresh)$/.test(tests.get(event.testID) ?? '')) {
+  if (event.type === 'print' && /^(?:blank item tax sends zero when (?:creating|editing)|item save failure keeps the form and its tax input|both Home buttons preserve a return draft when navigation is cancelled|cancel and system back protect text until explicit discard|a changed switch is protected and an unchanged form closes directly|a failed submit keeps the entered fields until a successful retry|overlapping refreshes keep the latest result, not the last response|a stale failure does not overwrite a newer successful refresh)$/.test(tests.get(event.testID) ?? '')) {
     const details = String(event.message ?? '').split(/\r?\n/).map(line =>
       line.match(/^\s*(?:Expected:|Actual:)\s*(?:<\d+>|exactly \d+ matching candidates|no matching candidates)/)?.[0]?.trim() ??
-      line.match(/test\/(?:widget\/(?:item_blank_tax|form_sheet_unsaved)_test|features\/common\/resource_refresh_race_test)\.dart:\d+:\d+/)?.[0] ??
+      line.match(/test\/(?:widget\/(?:item_blank_tax|form_sheet_unsaved|return_unsaved_guard)_test|features\/common\/resource_refresh_race_test)\.dart:\d+:\d+/)?.[0] ??
       line.match(/(?:Bad state: No element|Bad state: Too many elements|Cannot hit test a render box that has never been laid out|RenderFlex overflowed|pumpAndSettle timed out|A Timer is still pending|Multiple exceptions|No Material widget found|No ScaffoldMessenger widget found|No Scaffold widget found)/)?.[0] ??
       line.match(/^The following [A-Za-z]+ (?:was thrown|object was thrown).*$/)?.[0] ?? ''
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
   if (event.type === 'error') {
-    errors.push(`${tests.get(event.testID) ?? `test ${event.testID ?? 'unknown'}`}: ${event.error ?? 'unknown error'} ${event.stackTrace ?? ''} ${printed.get(event.testID) ?? ''}`);
+    const message = `${tests.get(event.testID) ?? `test ${event.testID ?? 'unknown'}`}: ${event.error ?? 'unknown error'} ${event.stackTrace ?? ''} ${printed.get(event.testID) ?? ''}`;
+    if (tests.get(event.testID)?.startsWith('screenshot:')) errors.push(message);
+    else errors.unshift(message);
   }
 }
 const message = (errors.length ? errors.slice(0, 12).join(' | ') : lines.slice(-35).join(' | '))
