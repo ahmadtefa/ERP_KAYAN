@@ -19,6 +19,8 @@ class _PhotoClient extends ApiClient {
     apiBaseUrl:'https://test.invalid/api/v1',connectTimeout:Duration(seconds:1),receiveTimeout:Duration(seconds:1)),FakeTokenStore());
   final Uint8List bytes;
   final Map<String,Uint8List> photos = {};
+  bool loseUploadResponse = false;
+  bool loseRemoveResponse = false;
   @override
   Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async {
     final photo = photos[query?['expectedUserId']];
@@ -30,11 +32,13 @@ class _PhotoClient extends ApiClient {
     expect(path,'/profile/photo'); expect(form.files.single.key,'file');
     final id = form.fields.singleWhere((field) => field.key == 'expectedUserId').value;
     photos[id] = bytes;
+    if (loseUploadResponse) throw StateError('SYNTHETIC_UPLOAD_DIAGNOSTIC');
     return {'updated':true};
   }
   @override
   Future<Map<String,dynamic>> delete(String path) async {
     photos.remove(Uri.parse(path).queryParameters['expectedUserId']);
+    if (loseRemoveResponse) throw StateError('SYNTHETIC_REMOVE_DIAGNOSTIC');
     return {'deleted':true};
   }
 }
@@ -75,4 +79,28 @@ void main() {
     expect(client.photos,isEmpty);
     expect(find.byKey(const Key('user-photo-remove')),findsNothing);
   });
+  testWidgets('photo refreshes after upload and delete commit with lost responses', (tester) async {
+    final bytes = base64Decode('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAN0lEQVRIie3WuQkAQAwDQZW+pV8VhgsGnAuMnt3q9kYgLxoXJWhTFWnTDE4mM1Qx4BV03M90/QB30QA96QETDgAAAABJRU5ErkJggg==');
+    final client = _PhotoClient(bytes)..loseUploadResponse = true..loseRemoveResponse = true;
+    await tester.pumpWidget(ProviderScope(overrides:[
+      currentUserProvider.overrideWithValue(const AppUser(id:'one',username:'one',fullName:'one',companyId:'company')),
+      apiClientProvider.overrideWithValue(client),
+      userPhotoPickerProvider.overrideWithValue(() async => PickedFile(name:'synthetic.png',bytes:bytes,mimeType:'image/png')),
+      userPhotoNormalizerProvider.overrideWithValue((source) async => source),
+    ],child:wrapWithApp(child:const Scaffold(body:UserPhotoCard()))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('user-photo-upload'))); await tester.pumpAndSettle();
+    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.textContaining('SYNTHETIC_UPLOAD_DIAGNOSTIC'),findsNothing);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(find.byKey(const Key('user-photo-remove')),findsOneWidget);
+    await tester.tap(find.byKey(const Key('user-photo-remove'))); await tester.pumpAndSettle();
+    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.textContaining('SYNTHETIC_REMOVE_DIAGNOSTIC'),findsNothing);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(client.photos,isEmpty);
+    expect(find.byKey(const Key('user-photo-remove')),findsNothing);
+    expect(tester.takeException(),isNull);
+  });
+
 }

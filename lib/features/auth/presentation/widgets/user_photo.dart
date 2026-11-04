@@ -48,6 +48,7 @@ class _UserPhotoCardState extends ConsumerState<UserPhotoCard> {
   Future<void> _upload(PhotoScope scope) async {
     if (_busy) return;
     setState(() => _busy = true);
+    var sent = false;
     try {
       final picked = await ref.read(userPhotoPickerProvider)();
       if (picked == null || !mounted || !_same(scope)) return;
@@ -55,9 +56,12 @@ class _UserPhotoCardState extends ConsumerState<UserPhotoCard> {
       if (!mounted || !_same(scope)) return;
       final form = FormData.fromMap({'expectedUserId':scope.userId,
         'file':MultipartFile.fromBytes(data,filename:'profile-photo.png')});
+      sent = true;
       await ref.read(apiClientProvider).post('/profile/photo',body:form);
       if (mounted && _same(scope)) ref.invalidate(userPhotoProvider(scope));
     } catch (error) {
+      // A lost response may follow a committed photo upload.
+      if (mounted && sent && _same(scope)) ref.invalidate(userPhotoProvider(scope));
       if (mounted) await showAppError(context,error);
     } finally { if (mounted) setState(() => _busy = false); }
   }
@@ -69,6 +73,8 @@ class _UserPhotoCardState extends ConsumerState<UserPhotoCard> {
       await ref.read(apiClientProvider).delete('/profile/photo?expectedUserId=${Uri.encodeQueryComponent(scope.userId)}');
       if (mounted && _same(scope)) ref.invalidate(userPhotoProvider(scope));
     } catch (error) {
+      // Deletion may also have committed before the response was lost.
+      if (mounted && _same(scope)) ref.invalidate(userPhotoProvider(scope));
       if (mounted) await showAppError(context,error);
     } finally { if (mounted) setState(() => _busy = false); }
   }
