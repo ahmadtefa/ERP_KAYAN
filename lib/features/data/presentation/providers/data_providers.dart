@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/error/app_error_text.dart';
+import '../../../../core/error/failure.dart';
 import '../../../../core/platform/download_request.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -688,15 +689,13 @@ final fullBackupServiceProvider = Provider<FullBackupService>(
 
 /// Turns whatever was thrown into something worth reading.
 ///
-/// The API answers errors as Problem Details - a title and a `detail` written
-/// to be read by a person, e.g. why a file was refused. That message is shown
-/// as it is; anything else falls back to the exception's own text rather than
-/// pretending nothing went wrong.
+/// Preserve the transport status and do not render an arbitrary response body.
+/// Known business rules may be translated; unknown internals stay hidden.
 String describeApiError(Object error) {
   final status = error is DioException ? error.response?.statusCode : null;
   if (error is DioException) {
     final detail = _detailOf(error.response?.data);
-    if (detail != null) return _safeMessage(detail, status);
+    if (detail != null) return _safeMessage(ApiFailure(detail, statusCode: status), status);
     switch (error.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.receiveTimeout:
@@ -708,7 +707,10 @@ String describeApiError(Object error) {
         break;
     }
   }
-  return _safeMessage(error.toString(), status);
+  if (error is DownloadFailure) {
+    return _safeMessage(ApiFailure(error.message, statusCode: error.statusCode), error.statusCode);
+  }
+  return _safeMessage(error, status);
 }
 
 String? _detailOf(Object? data) {
@@ -725,7 +727,7 @@ String? _detailOf(Object? data) {
 /// screen cannot print a DTO field name or a stack frame either. It answers
 /// in English because these panels are read by administrators next to the
 /// server log.
-String _safeMessage(String raw, int? status) {
+String _safeMessage(Object raw, int? status) {
   final resolved = AppErrorMessageResolver(
     isArabic: false,
   ).resolve(raw, statusCode: status);

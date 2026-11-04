@@ -86,7 +86,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(LinearProgressIndicator), findsNothing);
-      expect(find.textContaining('program administrator'), findsOneWidget);
+      expect(find.text('You do not have permission to do this.'), findsOneWidget);
+      expect(find.textContaining('program administrator'), findsNothing);
       expect(find.widgetWithText(OutlinedButton, 'Refresh status'), findsOneWidget);
       // The reported bug: this state used to leave «Refresh status» as the
       // only button in the section. The create action itself must be on
