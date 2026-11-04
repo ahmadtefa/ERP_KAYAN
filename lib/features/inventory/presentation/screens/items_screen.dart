@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
@@ -31,7 +32,9 @@ final itemsListProvider =
     AsyncNotifierProvider<JsonListController, List<Json>>(ItemsController.new);
 
 class ItemsScreen extends ConsumerStatefulWidget {
-  const ItemsScreen({super.key});
+  const ItemsScreen({super.key, this.navigationKey});
+
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<ItemsScreen> createState() => _ItemsScreenState();
@@ -40,12 +43,30 @@ class ItemsScreen extends ConsumerStatefulWidget {
 class _ItemsScreenState extends ConsumerState<ItemsScreen> {
   String _query = '';
   bool _busy = false;
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
 
   Future<void> _save({Json? existing}) async {
     final l10n = context.l10n;
     final isEdit = existing != null;
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: isEdit ? l10n.editItem : l10n.newItem,
       fields: [
         if (!isEdit) FieldSpec('code', l10n.accountCode, required: true),
@@ -275,6 +296,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       if (action == 'add') {
         final values = await showFormSheet(
           context,
+          exitRelay: _exitRelay,
           title: l10n.unitsBarcodesAdd,
           fields: [
             FieldSpec('unit', l10n.unitsBarcodesFieldUnit, required: true),
@@ -397,6 +419,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       if (verb == 'edit') {
         final values = await showFormSheet(
           context,
+          exitRelay: _exitRelay,
           title: l10n.unitsBarcodesEditTitle,
           initial: {
             'unit': unit['unit'],

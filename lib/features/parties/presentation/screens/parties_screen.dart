@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
@@ -24,9 +25,10 @@ enum PartyKind { customer, supplier }
 /// Customers and suppliers, which differ only in the label and in whether a
 /// credit limit applies.
 class PartiesScreen extends ConsumerStatefulWidget {
-  const PartiesScreen({super.key, required this.kind});
+  const PartiesScreen({super.key, required this.kind, this.navigationKey});
 
   final PartyKind kind;
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<PartiesScreen> createState() => _PartiesScreenState();
@@ -35,6 +37,23 @@ class PartiesScreen extends ConsumerStatefulWidget {
 class _PartiesScreenState extends ConsumerState<PartiesScreen> {
   String _query = '';
   bool _busy = false;
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
 
   bool get _isCustomer => widget.kind == PartyKind.customer;
 
@@ -68,6 +87,7 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
 
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: isEdit
           ? (_isCustomer ? l10n.editCustomer : l10n.editSupplier)
           : (_isCustomer ? l10n.newCustomer : l10n.newSupplier),
