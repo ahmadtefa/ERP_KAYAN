@@ -91,7 +91,9 @@ void main() {
       await tester.tap(field); await tester.pumpAndSettle();
       expect(find.byType(DatePickerDialog),findsOneWidget);
       expect(tester.takeException(),isNull);
-      await tester.tap(find.text('Cancel').last); await tester.pumpAndSettle();
+      final picker=find.byType(DatePickerDialog);
+      final cancel=MaterialLocalizations.of(tester.element(picker)).cancelButtonLabel;
+      await tester.tap(find.descendant(of:picker,matching:find.text(cancel))); await tester.pumpAndSettle();
       expect(tester.widget<TextFormField>(field).controller!.text,date);
       await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
     }
