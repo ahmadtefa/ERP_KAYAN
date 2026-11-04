@@ -38,6 +38,10 @@ void main() {
     final api=_OpeningApi();
     final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api)]);
     addTearDown(container.dispose);
+    final stockSubscription=container.listen(stockListProvider,(_,_) {});
+    final journalSubscription=container.listen(journalEntriesProvider,(_,_) {});
+    addTearDown(stockSubscription.close);
+    addTearDown(journalSubscription.close);
     expect((await container.read(stockListProvider.future)).single['status'],'draft');
     expect((await container.read(journalEntriesProvider.future)).single['status'],'draft');
     expect((await container.read(dashboardSummaryProvider.future))['status'],'draft');
