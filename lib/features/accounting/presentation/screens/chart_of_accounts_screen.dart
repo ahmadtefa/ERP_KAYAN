@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/extensions/account_type_labels.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -17,11 +18,35 @@ import '../providers/chart_of_accounts_providers.dart';
 
 /// The chart of accounts as a tree: every depth, expandable, searchable, and
 /// editable — with every rule still enforced on the server, never here.
-class ChartOfAccountsScreen extends ConsumerWidget {
-  const ChartOfAccountsScreen({super.key});
+class ChartOfAccountsScreen extends ConsumerStatefulWidget {
+  const ChartOfAccountsScreen({super.key, this.navigationKey});
+  final ValueKey<String>? navigationKey;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ChartOfAccountsScreen> createState() => _ChartOfAccountsScreenState();
+}
+
+class _ChartOfAccountsScreenState extends ConsumerState<ChartOfAccountsScreen> {
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final accounts = ref.watch(chartOfAccountsProvider);
     final showSampleNotice = ref.watch(appConfigProvider).useSeedData;
     final l10n = context.l10n;
@@ -39,7 +64,7 @@ class ChartOfAccountsScreen extends ConsumerWidget {
             ),
             const ListExportActions(list: 'chart-of-accounts'),
             FilledButton.icon(
-              onPressed: () => _editAccount(context, ref, null),
+              onPressed: () => _editAccount(context, ref, null, _exitRelay),
               icon: const Icon(Icons.add, size: 17),
               label: Text(l10n.newAccount),
             ),
@@ -80,7 +105,7 @@ class ChartOfAccountsScreen extends ConsumerWidget {
             onRetry: () => ref.read(chartOfAccountsProvider.notifier).refresh(),
             emptyMessage: l10n.noAccounts,
             isEmpty: (list) => list.isEmpty,
-            data: (_) => const _AccountTree(),
+            data: (_) => _AccountTree(exitRelay: _exitRelay),
           ),
         ),
       ],
@@ -117,7 +142,8 @@ class _TypeFilter extends StatelessWidget {
 }
 
 class _AccountTree extends ConsumerStatefulWidget {
-  const _AccountTree();
+  const _AccountTree({required this.exitRelay});
+  final DraftExitRelay exitRelay;
 
   @override
   ConsumerState<_AccountTree> createState() => _AccountTreeState();
@@ -162,6 +188,7 @@ class _AccountTreeState extends ConsumerState<_AccountTree> {
         return _AccountTile(
           key: ValueKey(id),
           node: entry.node,
+          exitRelay: widget.exitRelay,
           hasChildren: entry.hasChildren,
           expanded: !_collapsed.contains(id),
           onToggle: () => setState(() {
@@ -177,12 +204,14 @@ class _AccountTile extends ConsumerWidget {
   const _AccountTile({
     super.key,
     required this.node,
+    required this.exitRelay,
     required this.hasChildren,
     required this.expanded,
     required this.onToggle,
   });
 
   final AccountNode node;
+  final DraftExitRelay exitRelay;
   final bool hasChildren;
   final bool expanded;
   final VoidCallback onToggle;
@@ -247,7 +276,7 @@ class _AccountTile extends ConsumerWidget {
           IconButton(
             tooltip: l10n.editAccount,
             icon: const Icon(Icons.edit_outlined, size: 20),
-            onPressed: () => _editAccount(context, ref, account),
+            onPressed: () => _editAccount(context, ref, account, exitRelay),
           ),
           IconButton(
             tooltip: l10n.deleteAccount,
@@ -265,6 +294,7 @@ Future<void> _editAccount(
   BuildContext context,
   WidgetRef ref,
   Account? existing,
+  DraftExitRelay exitRelay,
 ) async {
   final all = ref.read(chartOfAccountsProvider).value ?? const <Account>[];
 
@@ -340,38 +370,54 @@ Future<void> _editAccount(
     isActive, selectedCashFlow,
   );
 
+  BuildContext? editorContext;
+  Future<bool> canLeave() async {
+    final dialogContext = editorContext;
+    if (dialogContext == null || !dialogContext.mounted || saving || confirmingDiscard) return false;
+    if (hasChanges() || uncertain) {
+      final arabic = Localizations.localeOf(dialogContext).languageCode == 'ar';
+      confirmingDiscard = true;
+      try {
+        final discard = await showDialog<bool>(
+          context: dialogContext,
+          barrierDismissible: false,
+          builder: (confirmContext) => AlertDialog(
+            title: Text(arabic ? 'تغييرات غير محفوظة' : 'Unsaved changes'),
+            content: Text(uncertain
+                ? (arabic ? 'قد تكون العملية قد اكتملت. أغلق النموذج وراجع الحسابات قبل المحاولة مجددًا.' : 'The operation may have completed. Close the form and review the accounts before trying again.')
+                : (arabic ? 'هل تريد الخروج دون حفظ التغييرات؟' : 'Leave without saving your changes?')),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(confirmContext, false),
+                  child: Text(arabic ? 'متابعة التعديل' : 'Keep editing')),
+              FilledButton(onPressed: () => Navigator.pop(confirmContext, true),
+                  child: Text(arabic ? 'الخروج دون حفظ' : 'Discard changes')),
+            ],
+          ),
+        );
+        if (discard != true || !dialogContext.mounted) return false;
+      } finally { confirmingDiscard = false; }
+    }
+    return dialogContext.mounted;
+  }
+  Future<bool> leaveForRoute() async {
+    if (!await canLeave()) return false;
+    final dialogContext = editorContext;
+    if (dialogContext == null || !dialogContext.mounted) return false;
+    Navigator.of(dialogContext).pop(false);
+    return true;
+  }
+  Future<void> closeEditor() async { await leaveForRoute(); }
+
+  exitRelay.attach(leaveForRoute);
+  try {
   await showDialog<bool>(
     context: context,
     barrierDismissible: false,
     builder: (dialogContext) => StatefulBuilder(
       builder: (dialogContext, setDialogState) {
+        editorContext = dialogContext;
         final dialogL10n = dialogContext.l10n;
         final arabic = Localizations.localeOf(dialogContext).languageCode == 'ar';
-        Future<void> closeEditor() async {
-          if (saving || confirmingDiscard) return;
-          if (hasChanges()) {
-            confirmingDiscard = true;
-            final discard = await showDialog<bool>(
-              context: dialogContext,
-              barrierDismissible: false,
-              builder: (confirmContext) => AlertDialog(
-                title: Text(arabic ? 'تغييرات غير محفوظة' : 'Unsaved changes'),
-                content: Text(arabic
-                    ? 'هل تريد الخروج دون حفظ التغييرات؟'
-                    : 'Leave without saving your changes?'),
-                actions: [
-                  TextButton(onPressed: () => Navigator.pop(confirmContext, false),
-                      child: Text(arabic ? 'متابعة التعديل' : 'Keep editing')),
-                  FilledButton(onPressed: () => Navigator.pop(confirmContext, true),
-                      child: Text(arabic ? 'الخروج دون حفظ' : 'Discard changes')),
-                ],
-              ),
-            );
-            confirmingDiscard = false;
-            if (discard != true || !dialogContext.mounted) return;
-          }
-          if (dialogContext.mounted) Navigator.of(dialogContext).pop(false);
-        }
         return PopScope(
           canPop: false,
           onPopInvokedWithResult: (didPop, _) {
@@ -615,6 +661,9 @@ Future<void> _editAccount(
       },
     ),
   );
+  } finally {
+    exitRelay.detach(leaveForRoute);
+  }
 }
 
 /// Activates or deactivates an account in place.

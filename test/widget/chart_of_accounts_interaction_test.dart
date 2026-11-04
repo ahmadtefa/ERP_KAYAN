@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:erp_kayan/app/router/draft_exit_guard.dart';
 import 'package:erp_kayan/features/accounting/data/datasources/chart_of_accounts_data_source.dart';
 import 'package:erp_kayan/features/accounting/domain/entities/account.dart';
 import 'package:erp_kayan/features/accounting/domain/entities/account_type.dart';
@@ -8,6 +11,7 @@ import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
 class _ChartSource implements ChartOfAccountsDataSource {
   final List<Account> accounts = [
@@ -26,6 +30,7 @@ class _ChartSource implements ChartOfAccountsDataSource {
   bool failCreate = false;
   bool commitBeforeFailure = false;
   int createAttempts = 0;
+  Completer<Account>? createHold;
 
   @override
   Future<List<Account>> fetchAccounts() async { loads++; return [...accounts]; }
@@ -35,6 +40,7 @@ class _ChartSource implements ChartOfAccountsDataSource {
   Future<Account> createAccount(AccountInput input) async {
     createAttempts++;
     createdInput = input;
+    if (createHold != null) return createHold!.future;
     if (failCreate && !commitBeforeFailure) throw StateError('Synthetic save failure');
     final account = Account(id: 'new', companyId: 'c', code: input.code ?? '3',
         name: input.nameEn, nameEn: input.nameEn, nameAr: input.nameAr, type: input.type);
@@ -151,6 +157,70 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.widgetWithText(TextField, 'Name in English *'), findsNothing);
     expect(source.createdInput, isNull);
+  });
+
+  testWidgets('routed chart navigation preserves or discards its open draft', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900); tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final source = _ChartSource();
+    final container = ProviderContainer(overrides:[
+      chartOfAccountsDataSourceProvider.overrideWithValue(source),
+      exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown),
+    ]);
+    addTearDown(container.dispose);
+    final router = GoRouter(initialLocation:'/chart',routes:[
+      GoRoute(path:'/chart', onExit:(_,state) => container.read(draftExitGuardProvider).canLeave(state.pageKey),
+        builder:(_,state) => Scaffold(body:ChartOfAccountsScreen(navigationKey:state.pageKey))),
+      GoRoute(path:'/home', builder:(_,_) => const Scaffold(body:Text('Home destination'))),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(container:container,
+      child:MaterialApp.router(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,routerConfig:router)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New account')); await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Name in English *'), 'Unsaved chart');
+    router.go('/home'); await tester.pumpAndSettle();
+    expect(find.text('Unsaved changes'),findsOneWidget);
+    await tester.tap(find.text('Keep editing')); await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Name in English *')).controller!.text,'Unsaved chart');
+    router.go('/home'); await tester.pumpAndSettle();
+    await tester.tap(find.text('Discard changes')); await tester.pumpAndSettle();
+    expect(find.text('Home destination'),findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Name in English *'),findsNothing);
+    expect(source.createAttempts,0);
+    expect(tester.takeException(),isNull);
+  });
+
+  testWidgets('routed chart navigation waits for a pending save', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900); tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final source = _ChartSource()..createHold = Completer<Account>();
+    final container = ProviderContainer(overrides:[chartOfAccountsDataSourceProvider.overrideWithValue(source),
+      exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)]);
+    addTearDown(container.dispose);
+    final router = GoRouter(initialLocation:'/chart',routes:[
+      GoRoute(path:'/chart', onExit:(_,state) => container.read(draftExitGuardProvider).canLeave(state.pageKey),
+        builder:(_,state) => Scaffold(body:ChartOfAccountsScreen(navigationKey:state.pageKey))),
+      GoRoute(path:'/home', builder:(_,_) => const Scaffold(body:Text('Home destination'))),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(container:container,
+      child:MaterialApp.router(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,routerConfig:router)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New account')); await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField,'Name in Arabic *'),'أصل جديد');
+    await tester.enterText(find.widgetWithText(TextField,'Name in English *'),'New asset');
+    await tester.tap(find.text('Save')); await tester.pump();
+    expect(source.createAttempts,1);
+    router.go('/home'); await tester.pumpAndSettle();
+    expect(find.text('Home destination'),findsNothing);
+    expect(find.text('Unsaved changes'),findsNothing);
+    source.createHold!.complete(const Account(id:'saved',companyId:'c',code:'3',name:'New asset',
+      nameEn:'New asset',nameAr:'أصل جديد',type:AccountType.asset));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(),isNull);
   });
 
 }
