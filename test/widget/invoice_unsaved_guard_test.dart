@@ -1,0 +1,73 @@
+import 'package:erp_kayan/core/config/app_config.dart';
+import 'package:erp_kayan/core/error/failure.dart';
+import 'package:erp_kayan/core/network/api_client.dart';
+import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
+import 'package:erp_kayan/features/common/presentation/providers/resource_providers.dart';
+import 'package:erp_kayan/features/invoicing/presentation/providers/invoice_providers.dart';
+import 'package:erp_kayan/features/invoicing/presentation/screens/invoice_editor_screen.dart';
+import 'package:erp_kayan/l10n/generated/app_localizations.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'test_harness.dart';
+
+class _InvoiceApi extends ApiClient {
+  _InvoiceApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'), FakeTokenStore());
+  bool failLoad = false;
+  @override
+  Future<Map<String, dynamic>> getObject(String path, {Map<String, dynamic>? query}) async {
+    if (failLoad) throw const NetworkFailure();
+    return {'status':'draft','lines':<Object>[],'invoiceDate':'2026-11-04'};
+  }
+  @override
+  Future<List<Map<String, dynamic>>> getList(String path, {Map<String, dynamic>? query}) async => [];
+}
+
+void main() {
+  for (final kind in InvoiceKind.values) {
+    testWidgets('${kind.name} invoice back protects changed fields and preserves cancel', (tester) async {
+      tester.view.physicalSize = const Size(1600, 1000); tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _InvoiceApi();
+      await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+        activeItemsProvider.overrideWith((ref) async => []),
+        activeCustomersProvider.overrideWith((ref) async => []),
+        activeSuppliersProvider.overrideWith((ref) async => [])],
+        child: MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+          supportedLocales:AppLocalizations.supportedLocales,home:Builder(builder:(context) => Scaffold(body:TextButton(
+            onPressed:() => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => InvoiceEditorScreen(kind:kind))),
+            child:const Text('Open invoice')))))));
+      await tester.tap(find.text('Open invoice')); await tester.pumpAndSettle();
+      await tester.pageBack(); await tester.pumpAndSettle();
+      expect(find.text('Open invoice'),findsOneWidget);
+      await tester.tap(find.text('Open invoice')); await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('line-quantity-0')), '2');
+      await tester.pageBack(); await tester.pumpAndSettle();
+      expect(find.text('Unsaved changes'),findsOneWidget);
+      await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
+      expect(tester.widget<TextFormField>(find.byKey(const ValueKey('line-quantity-0'))).controller!.text, '2');
+      await tester.pageBack(); await tester.pumpAndSettle();
+      await tester.tap(find.text('Discard')); await tester.pumpAndSettle();
+      expect(find.text('Open invoice'),findsOneWidget);
+    });
+  }
+  testWidgets('failed draft load cannot be overwritten and can be retried', (tester) async {
+    tester.view.physicalSize = const Size(1600, 1000); tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _InvoiceApi()..failLoad = true;
+    await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+      activeItemsProvider.overrideWith((ref) async => []),activeCustomersProvider.overrideWith((ref) async => []),
+      activeSuppliersProvider.overrideWith((ref) async => [])],
+      child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,home:const InvoiceEditorScreen(kind:InvoiceKind.sales,invoiceId:'invoice-1'))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
+    expect(find.byKey(const ValueKey('line-quantity-0')),findsNothing);
+    api.failLoad = false;
+    await tester.tap(find.text('Retry')); await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('line-quantity-0')),findsOneWidget);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNotNull);
+  });
+}

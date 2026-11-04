@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +11,8 @@ import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/discount_kind_label.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
+import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../accounting/presentation/providers/cost_center_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
@@ -170,6 +174,32 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   DiscountKind _documentDiscountKind = DiscountKind.none;
   bool _saving = false;
   bool _loadingExisting = false;
+  bool _loadFailed = false;
+  bool _confirmingExit = false;
+  late String _savedSnapshot;
+
+  String _snapshot() => jsonEncode({
+    'party': _partyId, 'reference': _supplierReference, 'notes': _notes, 'date': _invoiceDate,
+    'discountKind': _documentDiscountKind.name, 'discount': _documentDiscount.text,
+    'costs': [for (final cost in _landedCosts) [cost.description.text, cost.amount.text]],
+    'lines': [for (final line in _lines) [line.itemId, line.unitName, line.costCenterId,
+      line.quantity.text, line.unitPrice.text, line.taxRate.text, line.discountKind.name, line.discountValue.text]],
+  });
+
+  Future<void> _close() async {
+    if (_saving || _loadingExisting || _confirmingExit) return;
+    if (_snapshot() != _savedSnapshot) {
+      _confirmingExit = true;
+      final ar = Localizations.localeOf(context).languageCode == 'ar';
+      final leave = await confirmAction(context,
+        title: ar ? 'تغييرات غير محفوظة' : 'Unsaved changes',
+        message: ar ? 'الخروج دون حفظ الفاتورة؟' : 'Leave without saving the invoice?',
+        confirmLabel: ar ? 'خروج' : 'Discard', destructive: true);
+      _confirmingExit = false;
+      if (!leave || !mounted) return;
+    }
+    if (mounted) Navigator.of(context).pop();
+  }
 
   @override
   void initState() {
@@ -180,6 +210,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
     _lines.add(_LineDraft());
+    _savedSnapshot = _snapshot();
     if (widget.invoiceId != null) {
       _loadingExisting = true;
       _loadExisting();
@@ -193,8 +224,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           .getObject('${widget.kind.basePath}/${widget.invoiceId}');
       if (!mounted) return;
       if (text(invoice, 'status').toLowerCase() != 'draft') {
-        showMessage(context, context.l10n.onlyDraftInvoiceCanBeEdited, error: true);
-        Navigator.of(context).pop();
+        await showAppError(context, context.l10n.onlyDraftInvoiceCanBeEdited);
+        if (mounted) Navigator.of(context).pop();
         return;
       }
       for (final line in _lines) {
@@ -268,9 +299,10 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         _invoiceDate = text(invoice, 'invoiceDate', fallback: _invoiceDate);
         _loadingExisting = false;
       });
+      _savedSnapshot = _snapshot();
     } on Failure catch (error) {
       if (mounted) {
-        setState(() => _loadingExisting = false);
+        setState(() { _loadingExisting = false; _loadFailed = true; });
         showMessage(context, error.message, error: true);
       }
     }
@@ -497,7 +529,10 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     final costCenters = ref.watch(costCentersProvider).value ?? const <Json>[];
     final language = Localizations.localeOf(context).languageCode;
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) { if (!didPop) _close(); },
+      child: Scaffold(
       appBar: AppBar(
         title: Text(
           widget.invoiceId != null
@@ -510,14 +545,19 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           Padding(
             padding: const EdgeInsetsDirectional.only(end: 16),
             child: FilledButton.icon(
-              onPressed: _saving || _loadingExisting ? null : _save,
+              onPressed: _saving || _loadingExisting || _loadFailed ? null : _save,
               icon: const Icon(Icons.save_outlined),
               label: Text(l10n.save),
             ),
           ),
         ],
       ),
-      body: ListView(
+      body: _loadFailed ? Center(child: OutlinedButton.icon(
+        icon: const Icon(Icons.refresh), label: Text(l10n.retry),
+        onPressed: () { setState(() { _loadFailed = false; _loadingExisting = true; }); _loadExisting(); },
+      )) : IgnorePointer(
+        ignoring: _loadingExisting || _saving,
+        child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           _Header(
@@ -620,8 +660,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           const SizedBox(height: 16),
           _Totals(totals: _totals, showLandedCost: !widget.kind.isSales),
         ],
-      ),
-    );
+      )),
+    ));
   }
 }
 
