@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { selectedOrderLineQuantities } from './order-conversion-selection';
+import { orderConversionIdentity } from './order-conversion-identity';
 import { SalesOrdersService } from '../../modules/sales/sales-orders.service';
 import { PurchaseOrdersService } from '../../modules/purchases/purchase-orders.service';
 
@@ -33,10 +34,11 @@ describe('explicit order conversion selection', () => {
     const order = { id: 'order', orderNumber: 'O-1', status: 'APPROVED',
       customerId: 'customer', supplierId: 'supplier', lines: [line('one'), line('two')] };
     const update = jest.fn(async (args: unknown) => { void args; return {}; });
+    const findPrevious = jest.fn(async (): Promise<{ id: string; orderConversionHash: string; deletedAt: null; status: string } | null> => null);
     const tx = { $queryRaw: jest.fn(async () => [{ id: 'order' }]),
       [lineModel]: { update, findMany: jest.fn(async () => [
       { quantity: D(10), invoicedQuantity: D(2) }, { quantity: D(10), invoicedQuantity: D(0) },
-    ]) }, [invoiceModel]: { update: jest.fn(async () => ({})), findFirst: jest.fn(async () => null) },
+    ]) }, [invoiceModel]: { update: jest.fn(async () => ({})), findFirst: findPrevious },
     [invoiceLineModel]: { update: jest.fn(async () => ({})) },
     [orderModel]: { findFirst: jest.fn(async () => order), update: jest.fn(async () => ({})) } };
     const prisma = { [orderModel]: { findFirst: jest.fn(async () => order) },
@@ -54,6 +56,17 @@ describe('explicit order conversion selection', () => {
     expect(update).toHaveBeenCalledTimes(1);
     expect(update.mock.calls[0][0]).toEqual(expect.objectContaining({ where: { id: 'one' } }));
     await expect(service.convertToInvoice('company', 'branch', 'user', 'order', {})).rejects.toThrow(/Select/);
+    expect(create).toHaveBeenCalledTimes(1);
+
+    // An exact replay must resolve before testing membership against the
+    // current order, which can differ from its state at initial conversion.
+    const retry = { idempotencyKey: 'conversion-key-00000001', invoiceDate: '2026-11-03',
+      lines: [{ orderLineId: 'one', quantity: '2' }] };
+    const identity = orderConversionIdentity(retry, selectedOrderLineQuantities(retry.lines));
+    findPrevious.mockResolvedValueOnce({ id: 'invoice', orderConversionHash: identity.hash,
+      deletedAt: null, status: 'DRAFT' });
+    order.lines = [line('two')];
+    await service.convertToInvoice('company', 'branch', 'user', 'order', retry);
     expect(create).toHaveBeenCalledTimes(1);
   });
 });

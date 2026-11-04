@@ -131,9 +131,10 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
       _refresh();
       showMessage(context, tr('تم حفظ العملية وتحديث البيانات', 'Saved and refreshed'));
     } on Failure catch (error) {
-      // Business validation failures are definitive transaction rollbacks.
-      // Network/5xx failures are ambiguous: retain the exact request to retry.
-      if (error is ApiFailure && const {400, 409, 422}.contains(error.statusCode)) {
+      // A conflict may mean that this key already has a result which was
+      // subsequently changed or reversed; never silently discard that key.
+      // Network/5xx failures are ambiguous and also remain available to retry.
+      if (error is ApiFailure && const {400, 422}.contains(error.statusCode)) {
         await _store!.complete(_scope!);
         if (mounted) setState(() => _pending = null);
       }

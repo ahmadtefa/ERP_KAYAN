@@ -334,7 +334,9 @@ export class SalesOrdersService {
       if (!order) throw new NotFoundException('Sales order not found');
     // Never infer unselected quantities: an omitted line is not an instruction
     // to invoice its outstanding balance. Quantities are base-unit amounts.
-    const requested = selectedOrderLineQuantities(dto.lines, order.lines);
+    // Compute the identity without consulting mutable order lines so an exact
+    // replay can find the original invoice even after later order changes.
+    const requested = selectedOrderLineQuantities(dto.lines);
     const identity = orderConversionIdentity(dto, requested);
     const previous = await tx.salesInvoice.findFirst({
       where: { companyId, salesOrderId: id, orderConversionKey: identity.key },
@@ -344,6 +346,7 @@ export class SalesOrdersService {
       if (previous.deletedAt || previous.status === 'REVERSED') throw new ConflictException('The invoice for this idempotency key is no longer active');
       return previous.id;
     }
+    selectedOrderLineQuantities(dto.lines, order.lines);
       if (order.status === OrderStatus.CANCELLED) throw new BadRequestException('A cancelled order cannot be invoiced');
       if (order.status === OrderStatus.DRAFT) throw new BadRequestException('Approve the order before invoicing it');
 

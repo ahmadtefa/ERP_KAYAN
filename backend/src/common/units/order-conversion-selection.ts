@@ -5,12 +5,12 @@ import { parseDocumentQuantity } from './unit-math';
 /** Explicit base-unit quantities only; omitted or duplicate lines are ambiguous. */
 export function selectedOrderLineQuantities(
   input: unknown,
-  orderLines: ReadonlyArray<{ id: string }>,
+  orderLines?: ReadonlyArray<{ id: string }>,
 ): Map<string, Prisma.Decimal> {
   if (!Array.isArray(input) || input.length === 0) {
     throw new BadRequestException('Select the order lines and quantities to invoice');
   }
-  const available = new Set(orderLines.map((line) => line.id));
+  const available = orderLines && new Set(orderLines.map((line) => line.id));
   const requested = new Map<string, Prisma.Decimal>();
   for (const value of input as unknown[]) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -18,7 +18,7 @@ export function selectedOrderLineQuantities(
     }
     const raw = value as { orderLineId?: unknown; quantity?: unknown };
     const id = typeof raw.orderLineId === 'string' ? raw.orderLineId.trim() : '';
-    if (!id || !available.has(id)) {
+    if (!id || (available && !available.has(id))) {
       throw new BadRequestException('Selected order line does not belong to this order');
     }
     if (requested.has(id)) {
