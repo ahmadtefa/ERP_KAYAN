@@ -93,6 +93,9 @@ for (const line of lines) {
     const details = String(event.message ?? '').split(/\r?\n/).map(line =>
       line.match(/^\s*(?:Expected:|Actual:)\s*(?:<\d+>|exactly \d+ matching candidates|no matching candidates)/)?.[0]?.trim() ??
       line.match(/test\/(?:widget\/(?:item_blank_tax|item_picker_refresh|form_sheet_unsaved|return_unsaved_guard|invoice_unsaved_guard)_test|features\/common\/resource_refresh_race_test)\.dart:\d+:\d+/)?.[0] ??
+      line.match(/lib\/shared\/widgets\/(?:item_picker_dialog|resizable_table|state_views)\.dart:\d+:\d+/)?.[0] ??
+      line.match(/A RenderFlex overflowed by [0-9.]+ pixels on the (?:left|right|top|bottom)/)?.[0] ??
+      line.match(/The overflowing RenderFlex has an orientation of Axis\.(?:vertical|horizontal)/)?.[0] ??
       line.match(/(?:Bad state: No element|Bad state: Too many elements|Cannot hit test a render box that has never been laid out|RenderFlex overflowed|pumpAndSettle timed out|A Timer is still pending|Multiple exceptions|No Material widget found|No ScaffoldMessenger widget found|No Scaffold widget found)/)?.[0] ??
       line.match(/^The following [A-Za-z]+ (?:was thrown|object was thrown).*$/)?.[0] ?? ''
     ).filter(Boolean).join(' ');
