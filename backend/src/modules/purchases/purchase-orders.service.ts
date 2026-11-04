@@ -265,39 +265,36 @@ export class PurchaseOrdersService {
   }
 
   async approve(companyId: string, userId: string, id: string) {
-    const order = await this.prisma.purchaseOrder.findFirst({
-      where: { id, companyId, deletedAt: null },
-      select: { id: true, status: true, createdBy: true, orderNumber: true },
-    });
-    if (!order) throw new NotFoundException('Purchase order not found');
-    if (order.status !== OrderStatus.DRAFT) {
-      throw new BadRequestException(`Only a draft order can be approved (it is ${order.status})`);
-    }
-
     const settings = await this.settings.get(companyId);
-    if (settings.segregationOfDuties && order.createdBy === userId) {
-      throw new BadRequestException(
-        'Segregation of duties is on: the person who raised this order may not approve it',
-      );
-    }
-
-    const claimed = await this.prisma.purchaseOrder.updateMany({
-      where: { id, companyId, status: OrderStatus.DRAFT, deletedAt: null },
-      data: { status: OrderStatus.APPROVED, approvedAt: new Date(), approvedBy: userId },
+    await this.prisma.$transaction(async (tx) => {
+      // Share the order lock with conversion and cancellation. The audit is a
+      // required part of the same transaction as the state change.
+      const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id FROM purchase_orders WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+          AND "deletedAt" IS NULL FOR UPDATE
+      `);
+      if (locked.length !== 1) throw new NotFoundException('Purchase order not found');
+      const order = await tx.purchaseOrder.findFirst({
+        where: { id, companyId, deletedAt: null },
+        select: { id: true, status: true, createdBy: true, orderNumber: true },
+      });
+      if (!order) throw new NotFoundException('Purchase order not found');
+      if (order.status !== OrderStatus.DRAFT) {
+        throw new BadRequestException(`Only a draft order can be approved (it is ${order.status})`);
+      }
+      if (settings.segregationOfDuties && order.createdBy === userId) {
+        throw new BadRequestException('Segregation of duties is on: the person who raised this order may not approve it');
+      }
+      const claimed = await tx.purchaseOrder.updateMany({
+        where: { id, companyId, status: OrderStatus.DRAFT, deletedAt: null },
+        data: { status: OrderStatus.APPROVED, approvedAt: new Date(), approvedBy: userId },
+      });
+      if (claimed.count !== 1) throw new BadRequestException('This order was approved by someone else a moment ago.');
+      await this.audit.recordRequired({
+        companyId, userId, action: 'APPROVE', entity: 'purchase_orders', entityId: id,
+        before: { status: order.status }, after: { orderNumber: order.orderNumber, status: OrderStatus.APPROVED },
+      }, tx);
     });
-    if (claimed.count !== 1) {
-      throw new BadRequestException('This order was approved by someone else a moment ago.');
-    }
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'APPROVE',
-      entity: 'purchase_orders',
-      entityId: id,
-      after: { orderNumber: order.orderNumber },
-    });
-
     return this.findOne(companyId, id);
   }
 

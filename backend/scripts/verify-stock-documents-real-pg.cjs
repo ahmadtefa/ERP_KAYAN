@@ -201,8 +201,23 @@ let difference = '70000000-0000-4000-8000-000000000005';
       {itemId:second.id,quantity:'5',unitPrice:'2',taxRate:'0'}];
     const so = await sales.create(company,branch,user,{customerId:customer.id,orderDate:date,lines});
     const po = await purchases.create(company,branch,user,{supplierId:supplier.id,orderDate:date,lines});
-    await sales.approve(company,user,so.id);
-    await purchases.approve(company,user,po.id);
+    for (const [kind, orders, order] of [['sales',sales,so],['purchase',purchases,po]]) {
+      const model = kind === 'sales' ? prisma.salesOrder : prisma.purchaseOrder;
+      const originalAudit = audit.recordRequired.bind(audit);
+      audit.recordRequired = async (input,tx) => {
+        if (input.entity === `${kind}_orders` && input.action === 'APPROVE') throw new Error('injected order approval audit failure');
+        return originalAudit(input,tx);
+      };
+      try { await assert.rejects(orders.approve(company,user,order.id),/injected order approval audit failure/); }
+      finally { audit.recordRequired = originalAudit; }
+      const rolledBack = await model.findUnique({where:{id:order.id}});
+      assert.equal(rolledBack.status,'DRAFT');
+      assert.equal(rolledBack.approvedBy,null);
+      assert.equal(rolledBack.approvedAt,null);
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:`${kind}_orders`,entityId:order.id,action:'APPROVE'}}),0);
+      await orders.approve(company,user,order.id);
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:`${kind}_orders`,entityId:order.id,action:'APPROVE'}}),1);
+    }
     await prisma.itemUnit.update({where:{itemId_unit:{itemId:first.id,unit:'carton'}},data:{factor:'12',isActive:false}});
     await prisma.companySetting.update({where:{companyId:company},data:{pricesIncludeTax:true}});
     const converted = {};
