@@ -72,17 +72,30 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
           : (_isCustomer ? l10n.newCustomer : l10n.newSupplier),
       fields: fields,
       initial: existing,
+      onSubmit: (draft) async {
+        final client = ref.read(apiClientProvider);
+        try {
+          if (isEdit) {
+            await client.patch('$_path/${existing['id']}', body: draft);
+          } else {
+            await client.post(_path, body: draft);
+          }
+        } catch (_) {
+          // The server may have committed before a transport failure. Re-read
+          // the lists, while keeping the draft open for the user to inspect.
+          if (mounted) {
+            ref.invalidate(_provider);
+            ref.invalidate(customersProvider);
+            ref.invalidate(suppliersProvider);
+          }
+          rethrow;
+        }
+      },
     );
     if (values == null || !mounted) return;
 
     setState(() => _busy = true);
-    final client = ref.read(apiClientProvider);
     try {
-      if (isEdit) {
-        await client.patch('$_path/${existing['id']}', body: values);
-      } else {
-        await client.post(_path, body: values);
-      }
       await ref.read(_provider.notifier).reload();
       // The invoice and voucher pickers read these cached lists. Without
       // this a customer created here is missing from the invoice form until
