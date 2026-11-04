@@ -50,6 +50,38 @@ void main() {
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save changes')).onPressed, isNull);
   });
   for (final kind in InvoiceKind.values) {
+    testWidgets('${kind.name}: partially fulfilled amendment locks allocated terms and replays exactly', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize = const Size(1400, 1000); tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _EditApi();
+      const user = AppUser(id:'user',username:'tester',fullName:'Tester',companyId:'company',branchId:'branch',isSuperAdmin:true);
+      final order = <String,dynamic>{'id':'order-1','updatedAt':'2026-11-04T12:00:00.000Z',
+        'lines':[{'id':'line-1','itemNameEn':'Synthetic item','unit':'carton','unitQuantity':'3',
+          'invoicedQuantity':'20','unitPrice':'100','discountPercent':'5','taxRate':'14'}]};
+      await tester.pumpWidget(ProviderScope(overrides:[
+        apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWith((ref) => user),
+        appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1')),
+      ], child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,home:Builder(builder:(context) => Scaffold(body:TextButton(
+          onPressed:() => Navigator.of(context).push<bool>(MaterialPageRoute(builder:(_) => OrderEditScreen(kind:kind,order:order,amendApproved:true))),
+          child:const Text('Open amendment')))))));
+      await tester.tap(find.text('Open amendment')); await tester.pumpAndSettle();
+      expect(find.text('Allocated in base units: 20'), findsOneWidget);
+      for (final label in ['Price','Discount %','Tax %']) {
+        expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,label)).enabled,isFalse);
+      }
+      await tester.enterText(find.widgetWithText(TextFormField,'Quantity'),'2');
+      await tester.tap(find.text('Save changes')); await tester.pumpAndSettle();
+      await tester.tap(find.text('OK')); await tester.pumpAndSettle();
+      await tester.pageBack(); await tester.pumpAndSettle();
+      await tester.tap(find.text('Open amendment')); await tester.pumpAndSettle();
+      expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Quantity')).controller!.text,'2');
+      await tester.tap(find.text('Retry')); await tester.pumpAndSettle();
+      expect(api.requests.last,api.requests.first);
+      expect(api.paths, everyElement(endsWith('/order-1/amend')));
+      expect(find.text('Open amendment'),findsOneWidget);
+    });
     testWidgets('${kind.name}: draft edit retains its exact retry after reopening', (tester) async {
       SharedPreferences.setMockInitialValues({});
       tester.view.physicalSize = const Size(1400, 1000); tester.view.devicePixelRatio = 1;

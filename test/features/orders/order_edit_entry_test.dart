@@ -12,19 +12,38 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../widget/test_harness.dart';
 
 class _OrderApi extends ApiClient {
-  _OrderApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'), FakeTokenStore());
+  _OrderApi([this.status = 'DRAFT']) : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'), FakeTokenStore());
+  final String status;
   @override
   Future<Map<String, dynamic>> get(String path, {Map<String, dynamic>? query}) async => {
-    'id':'order-1', 'orderNumber':'ORD-1', 'orderDate':'2026-11-04', 'status':'DRAFT',
+    'id':'order-1', 'orderNumber':'ORD-1', 'orderDate':'2026-11-04', 'status':status,
     'updatedAt':'2026-11-04T12:00:00.000Z', 'customerNameEn':'Synthetic customer',
     'supplierNameEn':'Synthetic supplier', 'invoices':<Object>[],
     'lines':[{'id':'line-1','itemNameEn':'Synthetic item','unit':'piece','unitQuantity':'3',
-      'baseQuantity':'3','remainingQuantity':'3','unitPrice':'10','discountPercent':'0','taxRate':'0'}],
+      'baseQuantity':'3','remainingQuantity':'3','invoicedQuantity':'1','unitPrice':'10','discountPercent':'0','taxRate':'0'}],
   };
 }
 
 void main() {
   for (final kind in InvoiceKind.values) {
+    testWidgets('${kind.name}: partially fulfilled order opens the protected amendment editor', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize = const Size(1400, 1000); tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _OrderApi('PARTIALLY_FULFILLED');
+      final scope = kind.isSales ? 'sales' : 'purchases';
+      await tester.pumpWidget(ProviderScope(overrides:[
+        apiClientProvider.overrideWithValue(api),
+        currentUserProvider.overrideWith((ref) => AppUser(id:'user',username:'tester',fullName:'Tester',
+          companyId:'company',branchId:'branch',permissions:['$scope.orders.read','$scope.orders.manage'])),
+        appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1')),
+      ],child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,home:OrderDetailScreen(kind:kind,orderId:'order-1'))));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Amend approved order')); await tester.pumpAndSettle();
+      expect(find.text('Allocated in base units: 1'),findsOneWidget);
+      expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Price')).enabled,isFalse);
+    });
     testWidgets('${kind.name}: draft edit is shown only to a user with manage permission', (tester) async {
       SharedPreferences.setMockInitialValues({});
       tester.view.physicalSize = const Size(1400, 1000); tester.view.devicePixelRatio = 1;

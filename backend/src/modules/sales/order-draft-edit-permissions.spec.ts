@@ -7,8 +7,8 @@ import { SalesOrdersService } from './sales-orders.service';
 import { PurchaseOrdersController } from '../purchases/purchase-orders.controller';
 import { PurchaseOrdersService } from '../purchases/purchase-orders.service';
 
-const sales = { updateDraft: jest.fn().mockResolvedValue({ id:'order' }) };
-const purchases = { updateDraft: jest.fn().mockResolvedValue({ id:'order' }) };
+const sales = { updateDraft: jest.fn().mockResolvedValue({ id:'order' }), amend: jest.fn().mockResolvedValue({id:'order'}) };
+const purchases = { updateDraft: jest.fn().mockResolvedValue({ id:'order' }), amend: jest.fn().mockResolvedValue({id:'order'}) };
 @Module({ controllers:[SalesOrdersController, PurchaseOrdersController], providers:[
   { provide:SalesOrdersService, useValue:sales }, { provide:PurchaseOrdersService, useValue:purchases },
 ] }) class FixtureModule {}
@@ -39,6 +39,13 @@ describe('draft order edit HTTP permissions', () => {
         const stale = await call(`${scope}.orders.read,${scope}.orders.manage`);
         expect(stale.status).toBe(409);
         expect(await stale.json()).toEqual(expect.objectContaining({ code:'ORDER_EDIT_STALE', detail:'Order changed' }));
+        const amend = (permissions:string) => fetch(`http://127.0.0.1:${port}/${scope}/orders/order/amend`,
+          {method:'PUT', headers:{'content-type':'application/json','x-permissions':permissions}, body:'{}'});
+        expect((await amend(`${scope}.orders.read`)).status).toBe(403);
+        expect((await amend(`${scope}.orders.manage`)).status).toBe(403);
+        expect(service.amend).not.toHaveBeenCalled();
+        expect((await amend(`${scope}.orders.read,${scope}.orders.manage`)).status).toBe(200);
+        expect(service.amend).toHaveBeenCalledTimes(1);
       }
     } finally { await app.close(); }
   });

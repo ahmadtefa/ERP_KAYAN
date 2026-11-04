@@ -12,6 +12,7 @@ import { selectedOrderLineQuantities } from '../../common/units/order-conversion
 import { orderConversionIdentity } from '../../common/units/order-conversion-identity';
 import { orderCreationIdentity, OrderCreationDuplicateError } from '../../common/units/order-creation-identity';
 import { planDraftOrderEdit } from '../../common/units/order-draft-edit';
+import { assertActiveOrderAllocations } from '../../common/units/order-amendment-allocation';
 import { historicalOrderUnit, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import {
@@ -269,9 +270,19 @@ export class PurchaseOrdersService {
   /** Only drafts with no invoice history can be changed; allocations and
    * approved promises must be revised by a separate controlled workflow. */
   async updateDraft(companyId: string, branchId: string | null, userId: string, id: string, dto: Record<string, unknown>) {
+    return this.updateOrder(companyId, branchId, userId, id, dto, false);
+  }
+
+  async amend(companyId: string, branchId: string | null, userId: string, id: string, dto: Record<string, unknown>) {
+    return this.updateOrder(companyId, branchId, userId, id, dto, true);
+  }
+
+  private async updateOrder(companyId: string, branchId: string | null, userId: string, id: string,
+    dto: Record<string, unknown>, approved: boolean) {
     if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
     const identity = orderCreationIdentity({ ...dto, orderId: id });
     if (!identity) throw new BadRequestException('idempotencyKey is required');
+    const operation = approved ? 'p-amend' : 'p-edit';
     await this.prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT id FROM purchase_orders WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
@@ -281,7 +292,7 @@ export class PurchaseOrdersService {
       const previous = await tx.$queryRaw<Array<{ orderId: string; requestHash: string }>>(Prisma.sql`
         SELECT "orderId", "requestHash" FROM order_creation_requests
         WHERE "companyId" = ${companyId}::uuid AND "branchId" = ${branchId}::uuid
-          AND kind = 'p-edit' AND "requestKey" = ${identity.key}
+          AND kind = ${operation} AND "requestKey" = ${identity.key}
       `);
       if (previous.length) {
         if (previous[0].orderId !== id || previous[0].requestHash !== identity.hash) {
@@ -293,17 +304,26 @@ export class PurchaseOrdersService {
         where: { id, companyId, branchId, deletedAt: null }, include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
       if (!order) throw new NotFoundException('Purchase order not found');
-      if (order.status !== OrderStatus.DRAFT) throw new BadRequestException('Only draft orders can be edited');
+      if (approved ? (order.status !== OrderStatus.APPROVED && order.status !== OrderStatus.PARTIALLY_FULFILLED)
+        : order.status !== OrderStatus.DRAFT) {
+        throw new BadRequestException(approved ? 'Only approved or partially fulfilled orders can be amended' : 'Only draft orders can be edited');
+      }
       if (typeof dto.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(dto.expectedUpdatedAt))) {
         throw new BadRequestException('expectedUpdatedAt is required');
       }
       if (new Date(dto.expectedUpdatedAt).getTime() !== order.updatedAt.getTime()) {
         throw new ConflictException({ code: 'ORDER_EDIT_STALE', detail: 'The order changed since it was opened; refresh before editing' });
       }
-      if (await tx.purchaseInvoice.count({ where: { companyId, purchaseOrderId: id } }) > 0) {
+      if (approved) {
+        const invoices = await tx.purchaseInvoice.findMany({
+          where: { companyId, purchaseOrderId: id, deletedAt: null, status: { in: ['DRAFT', 'POSTED'] } },
+          select: { lines: { select: { orderLineId: true, quantity: true } } },
+        });
+        assertActiveOrderAllocations(order.lines, invoices);
+      } else if (await tx.purchaseInvoice.count({ where: { companyId, purchaseOrderId: id } }) > 0) {
         throw new BadRequestException('Order has invoice history; draft editing is not allowed');
       }
-      const planned = planDraftOrderEdit(order.lines, dto.lines);
+      const planned = planDraftOrderEdit(order.lines, dto.lines, approved);
       for (const line of planned.lines) {
         await tx.purchaseOrderLine.update({ where: { id: line.id }, data: {
           quantity: line.quantity, unitQuantity: line.unitQuantity, unitPrice: line.unitPrice,
@@ -313,17 +333,25 @@ export class PurchaseOrdersService {
       // Prisma timestamps use millisecond resolution. Ensure successive edits
       // always produce a distinct optimistic version even within the same ms.
       const updatedAt = new Date(Math.max(Date.now(), order.updatedAt.getTime() + 1));
+      const status = approved
+        ? order.lines.every((line, index) => line.invoicedQuantity.equals(planned.lines[index].quantity))
+          ? OrderStatus.FULFILLED
+          : order.lines.every(line => line.invoicedQuantity.isZero()) ? OrderStatus.APPROVED : OrderStatus.PARTIALLY_FULFILLED
+        : order.status;
       await tx.purchaseOrder.update({ where: { id }, data: { subTotal: planned.subTotal, taxAmount: planned.taxAmount,
-        totalAmount: planned.totalAmount, updatedBy: userId, updatedAt } });
+        totalAmount: planned.totalAmount, status, updatedBy: userId, updatedAt } });
       const inserted = await tx.$queryRaw<Array<{ orderId: string }>>(Prisma.sql`
         INSERT INTO order_creation_requests ("companyId", "branchId", kind, "requestKey", "requestHash", "orderId")
-        VALUES (${companyId}::uuid, ${branchId}::uuid, 'p-edit', ${identity.key}, ${identity.hash}, ${id}::uuid)
+        VALUES (${companyId}::uuid, ${branchId}::uuid, ${operation}, ${identity.key}, ${identity.hash}, ${id}::uuid)
         ON CONFLICT ("companyId", "branchId", kind, "requestKey") DO NOTHING RETURNING "orderId"
       `);
       if (inserted.length !== 1) throw new ConflictException('The idempotency key was used for a different request');
-      await this.audit.recordRequired({ companyId, userId, action: 'UPDATE', entity: 'purchase_orders', entityId: id,
-        before: { total: order.totalAmount.toFixed(MONEY_SCALE), updatedAt: order.updatedAt.toISOString() },
-        after: { total: planned.totalAmount.toFixed(MONEY_SCALE), updatedAt: updatedAt.toISOString(),
+      await this.audit.recordRequired({ companyId, userId, action: approved ? 'AMEND' : 'UPDATE', entity: 'purchase_orders', entityId: id,
+        before: { total: order.totalAmount.toFixed(MONEY_SCALE), status: order.status, updatedAt: order.updatedAt.toISOString(),
+          lines: order.lines.map(line => ({ id: line.id, quantity: line.quantity.toFixed(MONEY_SCALE),
+            invoicedQuantity: line.invoicedQuantity.toFixed(MONEY_SCALE), unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
+            discountPercent: line.discountPercent.toFixed(MONEY_SCALE), taxRate: line.taxRate.toFixed(MONEY_SCALE) })) },
+        after: { total: planned.totalAmount.toFixed(MONEY_SCALE), status, updatedAt: updatedAt.toISOString(),
           lines: planned.lines.map(line => ({ id: line.id, quantity: line.quantity.toFixed(MONEY_SCALE),
             unitPrice: line.unitPrice.toFixed(MONEY_SCALE), discountPercent: line.discountPercent.toFixed(MONEY_SCALE),
             taxRate: line.taxRate.toFixed(MONEY_SCALE) })) },

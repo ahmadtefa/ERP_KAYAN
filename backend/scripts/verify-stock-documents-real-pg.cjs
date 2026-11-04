@@ -408,6 +408,35 @@ let difference = '70000000-0000-4000-8000-000000000005';
         lines:partialOrder.lines.map(line => ({orderLineId:line.id,quantity:line.unitQuantity,
           unitPrice:'1',discountPercent:'0',taxRate:'0'})),
       }),/Only draft/);
+      const amendment = {idempotencyKey:`partial-${kind}-amend-0001`,expectedUpdatedAt:partialOrder.updatedAt,
+        lines:partialOrder.lines.map((line,index) => ({orderLineId:line.id,quantity:line.unitQuantity,
+          unitPrice:index === 1 ? '3' : line.unitPrice,discountPercent:line.discountPercent,taxRate:line.taxRate}))};
+      const below = structuredClone(amendment); below.idempotencyKey=`partial-${kind}-below-0001`; below.lines[0].quantity='1';
+      await assert.rejects(orders.amend(company,branch,user,order.id,below),/less than the allocated/);
+      const reprice = structuredClone(amendment); reprice.idempotencyKey=`partial-${kind}-reprice-01`; reprice.lines[0].unitPrice='1';
+      await assert.rejects(orders.amend(company,branch,user,order.id,reprice),/Financial terms/);
+      const invoiceLineModel = kind === 'sales' ? prisma.salesInvoiceLine : prisma.purchaseInvoiceLine;
+      await invoiceLineModel.update({where:{id:saved.lines[0].id},data:{orderLineId:null}});
+      try { await assert.rejects(orders.amend(company,branch,user,order.id,amendment),/manual review/); }
+      finally { await invoiceLineModel.update({where:{id:saved.lines[0].id},data:{orderLineId:orderLines[0].id}}); }
+      const originalAmendAudit = audit.recordRequired.bind(audit);
+      audit.recordRequired = async (input, tx) => {
+        if (input.entity === `${kind}_orders` && input.action === 'AMEND') throw new Error('injected amendment audit failure');
+        return originalAmendAudit(input,tx);
+      };
+      try { await assert.rejects(orders.amend(company,branch,user,order.id,amendment),/injected amendment audit failure/); }
+      finally { audit.recordRequired = originalAmendAudit; }
+      assert.equal((await orders.findOne(company,order.id)).lines[1].unitPrice,'2.0000');
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:`${kind}_orders`,entityId:order.id,action:'AMEND'}}),0);
+      const [amended,replayed] = await Promise.all([
+        orders.amend(company,branch,user,order.id,amendment),orders.amend(company,branch,user,order.id,amendment),
+      ]);
+      assert.equal(amended.lines[1].unitPrice,'3.0000');
+      assert.equal(replayed.id,amended.id);
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:`${kind}_orders`,entityId:order.id,action:'AMEND'}}),1);
+      await assert.rejects(orders.amend(company,branch,user,order.id,{...amendment,lines:below.lines}),/different request/);
+      const staleAmend = {...amendment,idempotencyKey:`partial-${kind}-stale-0001`};
+      await assert.rejects(orders.amend(company,branch,user,order.id,staleAmend),error => error.getResponse?.()?.code === 'ORDER_EDIT_STALE');
       const unchanged = kind === 'sales'
         ? await prisma.salesInvoice.findUniqueOrThrow({where:{id:saved.id},include:{lines:true}})
         : await prisma.purchaseInvoice.findUniqueOrThrow({where:{id:saved.id},include:{lines:true}});
@@ -524,6 +553,22 @@ let difference = '70000000-0000-4000-8000-000000000005';
         : await prisma.purchaseOrder.findUniqueOrThrow({where:{id:full.id}});
       assert.equal(finalOrder.status,'CANCELLED');
 
+      // An amendment and a conversion compete for the same remaining units.
+      const amendRace = await orders.create(company,branch,user,{[partyField]:party,orderDate:date,
+        lines:[{itemId:second.id,quantity:'10',unitPrice:'2',taxRate:'0'}]});
+      await orders.approve(company,user,amendRace.id);
+      await orders.convertToInvoice(company,branch,user,amendRace.id,{idempotencyKey:'amend-race-initial-00001',invoiceDate:date,
+        lines:[{orderLineId:amendRace.lines[0].id,quantity:'4'}]});
+      const raceSnapshot = await orders.findOne(company,amendRace.id);
+      const raceResults = await Promise.allSettled([
+        orders.amend(company,branch,user,amendRace.id,{idempotencyKey:'amend-race-update-000001',expectedUpdatedAt:raceSnapshot.updatedAt,
+          lines:[{orderLineId:raceSnapshot.lines[0].id,quantity:'6',unitPrice:'2',discountPercent:'0',taxRate:'0'}]}),
+        orders.convertToInvoice(company,branch,user,amendRace.id,{idempotencyKey:'amend-race-invoice-00001',invoiceDate:date,
+          lines:[{orderLineId:amendRace.lines[0].id,quantity:'4'}]}),
+      ]);
+      assert.equal(raceResults.filter(result => result.status === 'fulfilled').length,1);
+      const raceFinal = await orders.findOne(company,amendRace.id);
+      assert(Number(raceFinal.lines[0].invoicedQuantity) <= Number(raceFinal.lines[0].baseQuantity));
       // Cancellation and conversion must serialize on the same parent row.
       const race = await orders.create(company,branch,user,{[partyField]:party,orderDate:date,
         lines:[{itemId:second.id,quantity:'2',unitPrice:'2',taxRate:'0'}]});

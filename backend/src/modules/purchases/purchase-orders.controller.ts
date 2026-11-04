@@ -44,6 +44,12 @@ export class PurchaseOrdersController {
     return this.service.updateDraft(user.companyId, user.branchId, user.userId, id, dto ?? {});
   }
 
+  @Put(':id/amend')
+  @RequirePermissions('purchases.orders.read', 'purchases.orders.manage')
+  amend(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: Record<string, unknown>) {
+    return this.service.amend(user.companyId, user.branchId, user.userId, id, dto ?? {});
+  }
+
   @Post(':id/approve')
   @RequirePermissions('purchases.orders.approve')
   approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {

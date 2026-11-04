@@ -18,15 +18,18 @@ class _EditableLine {
     quantity = TextEditingController(text: text(line, 'unitQuantity')),
     price = TextEditingController(text: text(line, 'unitPrice')),
     discount = TextEditingController(text: text(line, 'discountPercent')),
-    tax = TextEditingController(text: text(line, 'taxRate'));
+    tax = TextEditingController(text: text(line, 'taxRate')),
+    allocated = Decimal.tryParse(text(line, 'invoicedQuantity'));
   final String id, name, unit;
   final TextEditingController quantity, price, discount, tax;
+  final Decimal? allocated;
   void dispose() { quantity.dispose(); price.dispose(); discount.dispose(); tax.dispose(); }
 }
 
-/// Edits values on existing draft lines; unit snapshots and line IDs stay put.
+/// Edits existing lines; approved amendments preserve allocated financial terms.
 class OrderEditScreen extends ConsumerStatefulWidget {
-  const OrderEditScreen({super.key, required this.kind, required this.order});
+  const OrderEditScreen({super.key, required this.kind, required this.order, this.amendApproved = false});
+  final bool amendApproved;
   final InvoiceKind kind;
   final Json order;
   @override
@@ -42,7 +45,7 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
   bool _busy = false, _dirty = false, _confirming = false, _stale = false;
   bool get _ar => Localizations.localeOf(context).languageCode == 'ar';
   String tr(String ar, String en) => _ar ? ar : en;
-  String get _path => '${widget.kind.isSales ? '/sales/orders' : '/purchases/orders'}/${text(widget.order, 'id')}';
+  String get _path => '${widget.kind.isSales ? '/sales/orders' : '/purchases/orders'}/${text(widget.order, 'id')}${widget.amendApproved ? '/amend' : ''}';
 
   @override
   void initState() {
@@ -150,10 +153,13 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
   Widget build(BuildContext context) {
     final disabled = _busy || _store == null || _pending != null;
     return PopScope(canPop: false, onPopInvokedWithResult: (didPop, _) { if (!didPop) _close(); },
-      child: Scaffold(appBar: AppBar(title: Text(tr('تعديل مسودة الأمر', 'Edit draft order'))),
+      child: Scaffold(appBar: AppBar(title: Text(widget.amendApproved
+        ? tr('تعديل الأمر المعتمد', 'Amend approved order') : tr('تعديل مسودة الأمر', 'Edit draft order'))),
         body: ListView(padding: const EdgeInsets.all(20), children: [
           Text(tr('لا يمكن تغيير الأصناف أو الوحدات؛ تُحفظ معاملات الوحدات التاريخية.',
             'Items and units cannot be changed; historical unit factors are preserved.')),
+          if (widget.amendApproved) Text(tr('لا يجوز تقليل الكمية عن المخصص، أو تغيير سعر أو خصم أو ضريبة سطر خُصصت له فاتورة.',
+            'Quantity cannot fall below allocations. Price, discount and tax of allocated lines are locked.')),
           if (_stale) Text(tr('تغير الأمر؛ احتفظ بالقيم للمراجعة ثم ارجع وأعد فتحه من البيانات المحدثة.',
             'The order changed. Review your values, then go back and reopen the refreshed order.')),
           if (_pending != null) Card(child: ListTile(
@@ -163,13 +169,17 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
           Form(key: _form, child: IgnorePointer(ignoring: disabled, child: Column(children: [
             for (final line in _lines) Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
               Text('${line.name} • ${line.unit}'),
+              if (widget.amendApproved) Text('${tr('المخصص بالوحدة الأساسية', 'Allocated in base units')}: ${line.allocated ?? '—'}'),
               TextFormField(controller: line.quantity, onChanged: (_) => _changed(), keyboardType: TextInputType.number,
                 decoration: InputDecoration(labelText: tr('الكمية', 'Quantity')), validator: (v) => _number(v, positive: true)),
-              TextFormField(controller: line.price, onChanged: (_) => _changed(), keyboardType: TextInputType.number,
+              TextFormField(controller: line.price, enabled: !widget.amendApproved || (line.allocated != null && line.allocated == Decimal.zero),
+                onChanged: (_) => _changed(), keyboardType: TextInputType.number,
                 decoration: InputDecoration(labelText: tr('السعر', 'Price')), validator: _number),
-              TextFormField(controller: line.discount, onChanged: (_) => _changed(), keyboardType: TextInputType.number,
+              TextFormField(controller: line.discount, enabled: !widget.amendApproved || (line.allocated != null && line.allocated == Decimal.zero),
+                onChanged: (_) => _changed(), keyboardType: TextInputType.number,
                 decoration: InputDecoration(labelText: tr('الخصم %', 'Discount %')), validator: (v) => _number(v, percent: true)),
-              TextFormField(controller: line.tax, onChanged: (_) => _changed(), keyboardType: TextInputType.number,
+              TextFormField(controller: line.tax, enabled: !widget.amendApproved || (line.allocated != null && line.allocated == Decimal.zero),
+                onChanged: (_) => _changed(), keyboardType: TextInputType.number,
                 decoration: InputDecoration(labelText: tr('الضريبة %', 'Tax %')), validator: (v) => _number(v, percent: true)),
             ]))),
             FilledButton(onPressed: disabled || _stale || _lines.isEmpty || text(widget.order, 'updatedAt').isEmpty ? null : _save,

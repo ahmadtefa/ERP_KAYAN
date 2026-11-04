@@ -45,6 +45,12 @@ export class SalesOrdersController {
     return this.service.updateDraft(user.companyId, user.branchId, user.userId, id, dto ?? {});
   }
 
+  @Put(':id/amend')
+  @RequirePermissions('sales.orders.read', 'sales.orders.manage')
+  amend(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: Record<string, unknown>) {
+    return this.service.amend(user.companyId, user.branchId, user.userId, id, dto ?? {});
+  }
+
   @Post(':id/approve')
   @RequirePermissions('sales.orders.approve')
   approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {

@@ -28,3 +28,16 @@ describe('draft order edit arithmetic and historical unit policy', () => {
     expect(() => planDraftOrderEdit(original(), [{...input()[0],unitPrice:'0.00001'}])).toThrow();
   });
 });
+
+describe('approved order amendment safeguards', () => {
+  const allocated = () => [{...original()[0], invoicedQuantity:D('20'), unitPrice:D('100'), discountPercent:D('5'), taxRate:D('14')}];
+  it('allows an allocation-preserving quantity, but not below invoiced quantity', () => {
+    expect(planDraftOrderEdit(allocated(), input(), true).lines[0].quantity.toFixed(4)).toBe('20.0000');
+    expect(() => planDraftOrderEdit(allocated(), [{...input()[0],quantity:'1'}], true)).toThrow(/less than the allocated/);
+  });
+  it('does not reprice already allocated lines', () => {
+    for (const change of [{unitPrice:'101'}, {discountPercent:'6'}, {taxRate:'15'}]) {
+      expect(() => planDraftOrderEdit(allocated(), [{...input()[0],...change}], true)).toThrow(/Financial terms/);
+    }
+  });
+});

@@ -136,7 +136,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
       final method = request['method'];
       final body = Map<String, dynamic>.from(request['body'] as Map);
       final amendmentPath = RegExp('^${RegExp.escape(_invoiceBase)}/[0-9a-fA-F-]{36}/order-allocation\$');
-      if (method == 'PUT' && (amendmentPath.hasMatch(path) || path == '$_base/${widget.orderId}')) {
+      if (method == 'PUT' && (amendmentPath.hasMatch(path) || path == '$_base/${widget.orderId}' || path == '$_base/${widget.orderId}/amend')) {
         await ref.read(apiClientProvider).put(path, body: body);
       } else if (method == 'POST' && path == '$_base/${widget.orderId}/invoice') {
         await ref.read(apiClientProvider).post(path, body: body);
@@ -164,9 +164,9 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
     }
   }
 
-  Future<void> _editDraft(Json order) async {
+  Future<void> _editDraft(Json order, {bool amendApproved = false}) async {
     await Navigator.of(context).push<bool>(MaterialPageRoute(
-      builder: (_) => OrderEditScreen(kind: widget.kind, order: order),
+      builder: (_) => OrderEditScreen(kind: widget.kind, order: order, amendApproved: amendApproved),
     ));
     if (!mounted) return;
     await _loadPending();
@@ -247,9 +247,12 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
           if (status == 'DRAFT' && _can('$_permissions.orders.manage'))
             OutlinedButton(onPressed: _busy || _pending != null || _store == null ? null : () => _editDraft(order),
               child: Text(tr('تعديل المسودة', 'Edit draft'))),
-          if (status == 'DRAFT' && _can('$_permissions.orders.manage') &&
-              _pending?['method'] == 'PUT' && _pending?['path'] == '$_base/${widget.orderId}')
-            OutlinedButton(onPressed: _busy ? null : () => _editDraft(order),
+          if (const {'APPROVED', 'PARTIALLY_FULFILLED'}.contains(status) && _can('$_permissions.orders.manage'))
+            OutlinedButton(onPressed: _busy || _pending != null || _store == null ? null : () => _editDraft(order, amendApproved: true),
+              child: Text(tr('تعديل الأمر المعتمد', 'Amend approved order'))),
+          if (_can('$_permissions.orders.manage') && _pending?['method'] == 'PUT' &&
+              (_pending?['path'] == '$_base/${widget.orderId}' || _pending?['path'] == '$_base/${widget.orderId}/amend'))
+            OutlinedButton(onPressed: _busy ? null : () => _editDraft(order, amendApproved: _pending?['path'] == '$_base/${widget.orderId}/amend'),
               child: Text(tr('مراجعة التعديل المعلّق', 'Review pending edit'))),
           if (status == 'DRAFT' && _can('$_permissions.orders.approve'))
             OutlinedButton(onPressed: _busy || _pending != null ? null : () => _action('$_base/${widget.orderId}/approve'), child: Text(tr('اعتماد', 'Approve'))),
