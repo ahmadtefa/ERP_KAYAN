@@ -38,6 +38,8 @@ jobs:
           npx tsc --noEmit
       - name: Audit automatic workflow triggers
         run: node ../scripts/ci-workflow-safety.test.cjs
+      - name: Check retained Windows preflight policy without running it
+        run: node --test ../scripts/windows-candidate-preflight.test.mjs
       - name: Verify public-key transition inventory without signing
         run: node --require ../scripts/ci-no-signing.cjs --test ../scripts/license-public-key-transition.test.mjs
       - name: Verify release evidence requirements without signing
@@ -91,6 +93,7 @@ jobs:
           src/modules/purchases/purchase-invoices.units.spec.ts
           src/modules/purchases/purchase-invoices.service.spec.ts
           src/modules/licensing/license.guard.spec.ts
+          src/modules/licensing/license-status-safety.spec.ts
           src/modules/licensing/license-keyring.spec.ts
           src/common/guards/super-admin.guard.spec.ts
           src/modules/company/company-profile.guard.spec.ts

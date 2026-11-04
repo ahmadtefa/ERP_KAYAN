@@ -11,8 +11,8 @@ final licenceDataSourceProvider = Provider<LicenceDataSource>(
 /// The licence state, read from the server.
 ///
 /// A failure here is **not** treated as "unlicensed": the server's own guard
-/// fails open when it cannot read the licence, and a client that locked the
-/// screen on a network hiccup would be worse than the problem it imagines.
+/// fails closed for protected business requests when the licence cannot be
+/// verified. The client still leaves repair and backup routes reachable.
 /// The gate therefore only blocks on a positive `blocked: true`.
 final licenceStatusProvider = FutureProvider<LicenceStatus>((ref) async {
   final data = await ref.read(licenceDataSourceProvider).status();

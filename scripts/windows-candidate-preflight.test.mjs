@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { summarize } from './report-flutter-test-failures.mjs';
 
@@ -7,7 +8,11 @@ import { summarize } from './report-flutter-test-failures.mjs';
 const workflow = readFileSync(new URL('../.github/workflows/windows-candidate-preflight.yml', import.meta.url), 'utf8');
 
 test('preflight checks out the event SHA without persisting credentials', () => {
-  assert.match(workflow, /branches:\s*\['arena\/2d794f08-erp-kayan'\]/);
+  // The legacy preflight still generates keys and must never run on push/PR.
+  // Dispatch is restricted by policy to an approved isolated VM.
+  const requireBackend = createRequire(new URL('../backend/package.json', import.meta.url));
+  const parsed = requireBackend('js-yaml').load(workflow);
+  assert.deepEqual(Object.keys(parsed.on), ['workflow_dispatch']);
   assert.match(workflow, /ref:\s*\$\{\{ github\.sha \}\}/);
   assert.match(workflow, /persist-credentials:\s*false/);
   assert.match(workflow, /EXPECTED_SHA:\s*\$\{\{ github\.sha \}\}/);

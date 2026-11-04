@@ -57,7 +57,21 @@ import {
  * `license_events` hold the operational state the screens read.
  */
 
-export type LicenseState = 'UNLICENSED' | 'ACTIVE' | 'EXPIRED' | 'SUSPENDED' | 'WRONG_MACHINE';
+export type LicenseState =
+  | 'UNLICENSED' | 'ACTIVE' | 'EXPIRED' | 'SUSPENDED' | 'WRONG_MACHINE'
+  | 'REVOKED' | 'INVALID_STATUS' | 'NOT_YET_VALID';
+
+/** Only recognized live/clock-suspended rows may be changed by these operations. */
+function mutableLicenseStatus(status: string): boolean {
+  return status === 'ACTIVE' || status === 'SUSPENDED';
+}
+
+function invalidLicenseStatus(): ForbiddenException {
+  return new ForbiddenException({
+    detail: 'This licence is revoked or its status is invalid. Preserve the data and contact the supplier.',
+    code: 'LICENSE_STATUS_INVALID',
+  });
+}
 
 export interface LicenseSeatStatus {
   /** 0 means "no licence yet"; it does not mean "unlimited forever". */
@@ -510,8 +524,12 @@ export class LicensingService implements OnModuleInit {
     let state: LicenseState;
     if (!row) state = 'UNLICENSED';
     else if (row.machineId !== currentMachineId) state = 'WRONG_MACHINE';
+    else if (row.status === 'REVOKED') state = 'REVOKED';
+    else if (!mutableLicenseStatus(row.status)) state = 'INVALID_STATUS';
     else if (row.status === 'SUSPENDED' || store.clockState === 'TAMPERED') {
       state = 'SUSPENDED';
+    } else if (row.startsAt.getTime() > now.getTime()) {
+      state = 'NOT_YET_VALID';
     } else if (row.expiresAt && row.expiresAt.getTime() <= now.getTime()) {
       state = 'EXPIRED';
     } else {
@@ -686,6 +704,9 @@ export class LicensingService implements OnModuleInit {
         code: 'LICENSE_KEY_WRONG_MACHINE',
       });
     }
+    if (existing && !mutableLicenseStatus(existing.status)) {
+      throw invalidLicenseStatus();
+    }
     const replay = await this.prisma.licenseKeyRecord.findUnique({
       where: { keyId: payload.keyId },
     });
@@ -788,7 +809,7 @@ export class LicensingService implements OnModuleInit {
           outcome = await this.applySeats(tx, payload, existing!, used);
           break;
         case 'TRANSFER':
-          outcome = await this.applyTransfer(tx, payload, used);
+          outcome = await this.applyTransfer(tx, payload, used, existing);
           break;
         default:
           throw new ForbiddenException({
@@ -933,8 +954,9 @@ export class LicensingService implements OnModuleInit {
     } else {
       expiresAt = renewalEnd(existing.expiresAt, term.months, now);
     }
-    await tx.licenseInstallation.update({
-      where: { licenseId: existing.licenseId },
+    const changed = await tx.licenseInstallation.updateMany({
+      where: { licenseId: existing.licenseId, machineId: existing.machineId,
+        status: { in: ['ACTIVE', 'SUSPENDED'] } },
       data: {
         expiresAt,
         status: 'ACTIVE',
@@ -944,6 +966,7 @@ export class LicensingService implements OnModuleInit {
         clockNote: null,
       },
     });
+    if (changed.count !== 1) throw invalidLicenseStatus();
     return {
       expiresAt,
       seatLimit: existing.seatLimit,
@@ -972,14 +995,16 @@ export class LicensingService implements OnModuleInit {
         code: 'LICENSE_SEATS_BELOW_USED',
       });
     }
-    await tx.licenseInstallation.update({
-      where: { licenseId: existing.licenseId },
+    const changed = await tx.licenseInstallation.updateMany({
+      where: { licenseId: existing.licenseId, machineId: existing.machineId,
+        status: { in: ['ACTIVE', 'SUSPENDED'] } },
       data: {
         seatLimit: limit,
         lastKeyId: payload.keyId,
         lastSeenAt: this.clock(),
       },
     });
+    if (changed.count !== 1) throw invalidLicenseStatus();
     return {
       expiresAt: existing.expiresAt,
       seatLimit: limit,
@@ -992,6 +1017,7 @@ export class LicensingService implements OnModuleInit {
     tx: PrismaLike,
     payload: LicensePayload,
     used: number,
+    existing: LicenseRow | null,
   ): Promise<AppliedOutcome> {
     const state = payload.state!;
     if (state.seatLimit < used) {
@@ -1016,11 +1042,18 @@ export class LicensingService implements OnModuleInit {
       clockState: 'OK',
       clockNote: null,
     };
-    await tx.licenseInstallation.upsert({
-      where: { licenseId: payload.licenseId },
-      create: { licenseId: payload.licenseId, ...data },
-      update: data,
-    });
+    if (existing) {
+      const changed = await tx.licenseInstallation.updateMany({
+        where: { licenseId: existing.licenseId, machineId: existing.machineId,
+          status: { in: ['ACTIVE', 'SUSPENDED'] } },
+        data,
+      });
+      if (changed.count !== 1) throw invalidLicenseStatus();
+    } else {
+      // A concurrent install with the same licence id fails the unique insert,
+      // rather than an upsert replacing a row that could have been revoked.
+      await tx.licenseInstallation.create({ data: { licenseId: payload.licenseId, ...data } });
+    }
     await tx.licenseSeatUsage.updateMany({
       where: { licenseId: null },
       data: { licenseId: payload.licenseId },
@@ -1190,7 +1223,8 @@ export class LicensingService implements OnModuleInit {
     const store = this.store.current;
     const dbRow = await this.licenseRow();
     // Never update the copied licence or its clock state on the wrong machine.
-    if (dbRow && dbRow.machineId !== this.machineId()) return;
+    if (dbRow && (dbRow.machineId !== this.machineId() ||
+        !mutableLicenseStatus(dbRow.status))) return;
     const lastSeenCandidates: Date[] = [];
     if (store.lastSeenAt) lastSeenCandidates.push(new Date(store.lastSeenAt));
     if (dbRow?.lastSeenAt) lastSeenCandidates.push(dbRow.lastSeenAt);
@@ -1249,8 +1283,8 @@ export class LicensingService implements OnModuleInit {
 
     if (tampered) {
       if (dbRow && dbRow.status !== 'SUSPENDED') {
-        await this.prisma.licenseInstallation.update({
-          where: { licenseId: dbRow.licenseId },
+        await this.prisma.licenseInstallation.updateMany({
+          where: { licenseId: dbRow.licenseId, machineId: dbRow.machineId, status: 'ACTIVE' },
           data: { status: 'SUSPENDED', clockState: 'TAMPERED', clockNote: note },
         });
       }
@@ -1305,7 +1339,8 @@ export class LicensingService implements OnModuleInit {
     if (!this.ensureReadyUnlessBootstrapping()) return;
     const row = await this.licenseRow();
     // Do not import foreign entitlements or spent-key state from a copied DB.
-    if (row && row.machineId !== this.machineId()) return;
+    if (row && (row.machineId !== this.machineId() ||
+        !mutableLicenseStatus(row.status))) return;
     const store = this.store.current;
     const used = await this.prisma.licenseSeatUsage.count();
     // Older versions discarded keys after 500 entries. Recover any still
@@ -1404,6 +1439,7 @@ export class LicensingService implements OnModuleInit {
         code: 'LICENSE_KEY_WRONG_MACHINE',
       });
     }
+    if (!mutableLicenseStatus(row.status)) throw invalidLicenseStatus();
     const now = this.clock();
     const store = this.store.current;
     const lastSeen = store.lastSeenAt ? new Date(store.lastSeenAt) : null;
@@ -1414,10 +1450,12 @@ export class LicensingService implements OnModuleInit {
         code: 'LICENSE_CLOCK_STILL_BEHIND',
       });
     }
-    await this.prisma.licenseInstallation.update({
-      where: { licenseId: row.licenseId },
+    const changed = await this.prisma.licenseInstallation.updateMany({
+      where: { licenseId: row.licenseId, machineId: row.machineId,
+        status: { in: ['ACTIVE', 'SUSPENDED'] } },
       data: { status: 'ACTIVE', clockState: 'OK', clockNote: null },
     });
+    if (changed.count !== 1) throw invalidLicenseStatus();
     this.store.update((state) => {
       state.clockState = 'OK';
       state.clockSuspects = [];
@@ -1498,7 +1536,7 @@ export type PrismaLike = {
   licenseInstallation: {
     create(args: unknown): Promise<unknown>;
     update(args: unknown): Promise<unknown>;
-    upsert(args: unknown): Promise<unknown>;
+    updateMany(args: unknown): Promise<{ count: number }>;
     findFirst(args: unknown): Promise<LicenseRow | null>;
   };
   licenseKeyRecord: {

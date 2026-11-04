@@ -79,6 +79,12 @@ export class LicenseGuard implements CanActivate {
           ? 'LICENSE_PUBLIC_KEY_MISSING'
           : status.state === 'WRONG_MACHINE'
           ? 'LICENSE_WRONG_MACHINE'
+          : status.state === 'REVOKED'
+          ? 'LICENSE_REVOKED'
+          : status.state === 'INVALID_STATUS'
+          ? 'LICENSE_STATUS_INVALID'
+          : status.state === 'NOT_YET_VALID'
+          ? 'LICENSE_NOT_YET_VALID'
           : status.state === 'EXPIRED'
           ? 'LICENSE_EXPIRED'
           : status.state === 'SUSPENDED'
@@ -94,6 +100,12 @@ export class LicenseGuard implements CanActivate {
 }
 
 export function licenceMessage(state: string): string {
+  if (state === 'REVOKED' || state === 'INVALID_STATUS') {
+    return 'الترخيص ملغى أو حالته غير صالحة. البيانات محفوظة؛ تواصل مع المورّد. / The licence is revoked or its status is invalid. Preserve the data and contact the supplier.';
+  }
+  if (state === 'NOT_YET_VALID') {
+    return 'لم يبدأ سريان الترخيص بعد. تحقق من تاريخ الجهاز وتواصل مع المورّد. / This licence is not yet valid. Check the system date and contact the supplier.';
+  }
   if (state === 'WRONG_MACHINE') {
     return 'الترخيص مخصص لجهاز آخر. البيانات محفوظة؛ تواصل مع المورّد لطلب نقل معتمد. / This licence belongs to another computer. Preserve the data and request an authorised transfer.';
   }

@@ -67,7 +67,8 @@ class LicenceStatus {
     );
   }
 
-  /// UNLICENSED, ACTIVE, EXPIRED or SUSPENDED.
+  /// Server status including ACTIVE, EXPIRED, SUSPENDED, WRONG_MACHINE,
+  /// REVOKED, INVALID_STATUS and NOT_YET_VALID.
   final String state;
 
   /// True only when the licence policy is enforced and this installation may

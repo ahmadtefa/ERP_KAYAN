@@ -105,6 +105,13 @@ try {
   });
   if (stock.status !== 0) throw new Error(`Stock PostgreSQL fixture failed: ${(stock.stderr || stock.stdout || '').slice(-5000).replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, '[DATABASE URL REDACTED]')}`);
   process.stdout.write(stock.stdout);
+  const licenceStatus = spawnSync(process.execPath, [join(root, 'scripts', 'verify-license-status-real-pg.cjs')], {
+    cwd: root,
+    env: { ...process.env, DATABASE_URL: url.toString(), KAYAN_STOCK_DISPOSABLE_DATABASE: name },
+    encoding: 'utf8',
+  });
+  if (licenceStatus.status !== 0) throw new Error(`Licence status PostgreSQL fixture failed: ${(licenceStatus.stderr || licenceStatus.stdout || '').slice(-5000).replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, '[DATABASE URL REDACTED]')}`);
+  process.stdout.write(licenceStatus.stdout);
 
 } finally {
   for (const client of fixtureClients) await client.end();

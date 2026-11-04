@@ -139,7 +139,9 @@ class _LicenceScreenState extends ConsumerState<LicenceScreen> {
                 tone: _Tone.warning,
               ),
             ],
-            if (statusAsync.value!.state != 'WRONG_MACHINE' &&
+            if ((statusAsync.value!.state == 'ACTIVE' ||
+                    statusAsync.value!.state == 'EXPIRED' ||
+                    statusAsync.value!.state == 'SUSPENDED') &&
                 (statusAsync.value!.clockState != 'OK' ||
                     statusAsync.value!.state == 'SUSPENDED')) ...[
               const SizedBox(height: AppSpacing.lg),
@@ -235,6 +237,9 @@ class _StatusCard extends StatelessWidget {
 
     final (label, colour) = switch (status.state) {
       'ACTIVE' => (l10n.licenceStateActive, theme.colorScheme.primary),
+      'REVOKED' => (Localizations.localeOf(context).languageCode == 'ar' ? 'الترخيص ملغى' : 'Licence revoked', theme.colorScheme.error),
+      'INVALID_STATUS' => (Localizations.localeOf(context).languageCode == 'ar' ? 'حالة الترخيص غير صالحة' : 'Invalid licence status', theme.colorScheme.error),
+      'NOT_YET_VALID' => (Localizations.localeOf(context).languageCode == 'ar' ? 'لم يبدأ سريان الترخيص' : 'Licence not yet valid', theme.colorScheme.error),
       'EXPIRED' => (l10n.licenceStateExpired, theme.colorScheme.error),
       'SUSPENDED' => (l10n.licenceStateSuspended, theme.colorScheme.error),
       'WRONG_MACHINE' => (

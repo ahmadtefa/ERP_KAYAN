@@ -90,6 +90,16 @@ export class FakeDb {
       Object.assign(row, data, { updatedAt: new Date() });
       return row;
     },
+    updateMany: async ({ where, data }: { where: Row; data: Row }) => {
+      const rows = this.installations.filter((row) =>
+        row.licenseId === where.licenseId &&
+        (where.machineId === undefined || row.machineId === where.machineId) &&
+        (typeof where.status === 'string' ? row.status === where.status :
+          where.status?.in?.includes(row.status) ?? true),
+      );
+      for (const row of rows) Object.assign(row, data, { updatedAt: this.now() });
+      return { count: rows.length };
+    },
     upsert: async ({
       where,
       create,

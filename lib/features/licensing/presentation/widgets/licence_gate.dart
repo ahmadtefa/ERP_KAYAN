@@ -83,7 +83,15 @@ class _BlockedView extends StatelessWidget {
               ),
               const SizedBox(height: AppSpacing.md),
               Text(
-                status.state == 'WRONG_MACHINE'
+                status.state == 'REVOKED' || status.state == 'INVALID_STATUS'
+                    ? (Localizations.localeOf(context).languageCode == 'ar'
+                        ? 'الترخيص ملغى أو حالته غير صالحة. البيانات محفوظة؛ تواصل مع المورّد.'
+                        : 'The licence is revoked or its status is invalid. Preserve the data and contact the supplier.')
+                    : status.state == 'NOT_YET_VALID'
+                        ? (Localizations.localeOf(context).languageCode == 'ar'
+                            ? 'لم يبدأ سريان الترخيص بعد. تحقق من تاريخ الجهاز وتواصل مع المورّد.'
+                            : 'This licence is not yet valid. Check the system date and contact the supplier.')
+                    : status.state == 'WRONG_MACHINE'
                     ? l10n.licenceWrongMachineBody
                     : suspended
                         ? l10n.licenceSuspendedBody
