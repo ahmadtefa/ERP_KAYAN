@@ -66,9 +66,18 @@ describe('fiscal period locking and range validation', () => {
     const {service,tx} = setup();
     await service.update('company','user','one',{startDate:'2026-02-01'});
     expect(tx.journalEntry.count).toHaveBeenCalledWith(expect.objectContaining({where:expect.objectContaining({
-      companyId:'company', OR:[{entryDate:{gte:original.startDate,lt:new Date('2026-02-01T00:00:00Z')}}],
+      companyId:'company', OR:[{entryDate:{gte:original.startDate,lte:new Date('2026-01-31T00:00:00Z')}}],
     })}));
     expect(tx.fiscalPeriod.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('excludes a gap belonging to neither period when moving a range', async () => {
+    const {service,tx} = setup();
+    await service.update('company','user','one',{startDate:'2028-01-01',endDate:'2028-12-31'});
+    expect(tx.journalEntry.count).toHaveBeenCalledWith(expect.objectContaining({where:expect.objectContaining({
+      OR:[{entryDate:{gte:original.startDate,lte:original.endDate}},
+        {entryDate:{gte:new Date('2028-01-01T00:00:00Z'),lte:new Date('2028-12-31T00:00:00Z')}}],
+    })}));
   });
 
   it('checks closed status after locking and cannot edit a closed period', async () => {

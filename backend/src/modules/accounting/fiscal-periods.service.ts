@@ -121,16 +121,22 @@ export class FiscalPeriodsService {
   private async assertBoundaryPreservesHistory(tx: Prisma.TransactionClient, companyId: string,
     previous: { startDate: Date; endDate: Date }, startDate: Date, endDate: Date) {
     const changed: Prisma.DateTimeFilter[] = [];
-    if (previous.startDate.getTime() !== startDate.getTime()) {
-      const earlier = previous.startDate < startDate ? previous.startDate : startDate;
-      const later = previous.startDate < startDate ? startDate : previous.startDate;
-      changed.push({ gte: earlier, lt: later });
-    }
-    if (previous.endDate.getTime() !== endDate.getTime()) {
-      const earlier = previous.endDate < endDate ? previous.endDate : endDate;
-      const later = previous.endDate < endDate ? endDate : previous.endDate;
-      changed.push({ gt: earlier, lte: later });
-    }
+    // All persisted boundaries and document dates are SQL DATEs. Compute
+    // each set difference separately, including for disjoint ranges; a gap
+    // belonging to neither period must not block a legitimate correction.
+    const day = 24 * 60 * 60 * 1000;
+    const addDifference = (aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) => {
+      if (aStart < bStart) {
+        const end = new Date(Math.min(aEnd.getTime(), bStart.getTime() - day));
+        if (aStart <= end) changed.push({ gte: aStart, lte: end });
+      }
+      if (aEnd > bEnd) {
+        const start = new Date(Math.max(aStart.getTime(), bEnd.getTime() + day));
+        if (start <= aEnd) changed.push({ gte: start, lte: aEnd });
+      }
+    };
+    addDifference(previous.startDate, previous.endDate, startDate, endDate);
+    addDifference(startDate, endDate, previous.startDate, previous.endDate);
     if (changed.length === 0) return;
     // The period row lock serializes postings covered by the old period.
     // Expansion into previously uncovered dates still needs a common lock
