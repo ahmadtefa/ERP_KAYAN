@@ -57,6 +57,7 @@ jobs:
         run: >-
           npm test -- --runInBand
           src/common/maintenance/maintenance.spec.ts
+          src/common/audit/audit.service.spec.ts
           src/modules/auth/profile-photo.service.spec.ts
           src/modules/auth/profile-photo.controller.spec.ts
           src/modules/admin/permissions.catalogue.spec.ts

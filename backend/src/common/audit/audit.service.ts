@@ -29,11 +29,11 @@ export class AuditService {
   async record(input: AuditInput): Promise<void> {
     try {
       await this.recordRequired(input, this.prisma);
-    } catch (error) {
-      this.logger.error(
-        `Failed to write audit record for ${input.action} ${input.entity}`,
-        error instanceof Error ? error.stack : String(error),
-      );
+    } catch {
+      // Database errors and stack traces can contain connection strings,
+      // bound values or customer data. Keep the failure visible without
+      // copying any database or caller-supplied content into logs.
+      this.logger.error('Failed to write an audit record');
     }
   }
 
