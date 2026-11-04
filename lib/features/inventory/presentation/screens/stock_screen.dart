@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
@@ -26,7 +27,8 @@ export '../providers/stock_providers.dart' show stockListProvider, StockControll
 /// stock tables are built on. FIFO or standard costing would change these
 /// figures and needs an explicit decision.
 class StockScreen extends ConsumerStatefulWidget {
-  const StockScreen({super.key});
+  const StockScreen({super.key,this.navigationKey});
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<StockScreen> createState() => _StockScreenState();
@@ -34,9 +36,24 @@ class StockScreen extends ConsumerStatefulWidget {
 
 class _StockScreenState extends ConsumerState<StockScreen> {
   String _query = '';
+  late final DraftExitGuard _exitGuard;
+  final _exitRelay = DraftExitRelay();
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key,_exitRelay.canLeave);
+  }
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key,_exitRelay.canLeave);
+    super.dispose();
+  }
 
   Future<void> _openVouchers() async {
-    await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => const StockVouchersScreen()));
+    await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => StockVouchersScreen(exitRelay:_exitRelay)));
     if (mounted) ref.invalidate(stockListProvider);
   }
 

@@ -158,7 +158,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       for (final route in _shellRoutes)
         GoRoute(
           path: route.path,
-          onExit: [AppRoutes.companySettings,AppRoutes.salesInvoices,AppRoutes.purchaseInvoices,AppRoutes.salesOrders,AppRoutes.purchaseOrders].contains(route.path)
+          onExit: [AppRoutes.companySettings,AppRoutes.salesInvoices,AppRoutes.purchaseInvoices,AppRoutes.salesOrders,AppRoutes.purchaseOrders,AppRoutes.stock].contains(route.path)
             ? (context,state) => ref.read(currentUserProvider) == null
                 ? true : ref.read(draftExitGuardProvider).canLeave(state.pageKey)
             : null,
@@ -173,7 +173,9 @@ final routerProvider = Provider<GoRouter>((ref) {
                     ? OrdersScreen(kind:InvoiceKind.sales,navigationKey:state.pageKey)
                     : route.path == AppRoutes.purchaseOrders
                       ? OrdersScreen(kind:InvoiceKind.purchase,navigationKey:state.pageKey)
-                      : route.child),
+                      : route.path == AppRoutes.stock
+                        ? StockScreen(navigationKey:state.pageKey)
+                        : route.child),
         ),
     ],
   );

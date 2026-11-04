@@ -1,3 +1,8 @@
+import 'package:erp_kayan/app/router/app_router.dart';
+import 'package:erp_kayan/app/router/draft_exit_guard.dart';
+import 'package:erp_kayan/app/shell/erp_shell.dart';
+import 'package:erp_kayan/features/inventory/presentation/screens/stock_screen.dart';
+import 'package:go_router/go_router.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
@@ -14,6 +19,8 @@ import 'test_harness.dart';
 
 class _VoucherApi extends ApiClient {
   _VoucherApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'), FakeTokenStore());
+  @override
+  Future<Map<String,dynamic>> get(String path,{Map<String,dynamic>? query}) async => {'blocked':false};
   final requests=<Map<String,dynamic>>[];
   final actions=<String>[];
   bool reviewed=false, approved=false, paged=false;
@@ -85,6 +92,37 @@ class _FailingLoadApi extends _VoucherApi {
 const _user=AppUser(id:'user',username:'tester',fullName:'Tester',companyId:'company',branchId:'branch',isSuperAdmin:true);
 
 void main() {
+  for (final kind in ['RECEIPT','ISSUE']) {
+    testWidgets('$kind voucher draft protects the routed stock screen exit', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize=const Size(1600,1100); tester.view.devicePixelRatio=1;
+      addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+      final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(_VoucherApi()),
+        currentUserProvider.overrideWithValue(_user),
+        appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'))]);
+      addTearDown(container.dispose);
+      final router=GoRouter(initialLocation:AppRoutes.stock,routes:[
+        GoRoute(path:AppRoutes.dashboard,builder:(_,_) => const Scaffold(body:Text('Dashboard destination'))),
+        GoRoute(path:AppRoutes.stock,onExit:(_,state) => container.read(draftExitGuardProvider).canLeave(state.pageKey),
+          builder:(context,state) => ErpShell(currentPath:AppRoutes.stock,child:StockScreen(navigationKey:state.pageKey))),
+      ]);
+      addTearDown(router.dispose);
+      await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp.router(locale:const Locale('en'),
+        localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,routerConfig:router)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Stock vouchers')); await tester.pumpAndSettle();
+      await tester.tap(find.text(kind == 'RECEIPT' ? 'New receipt' : 'New issue')); await tester.pumpAndSettle();
+      final field=find.widgetWithText(TextFormField,'Counterparty');
+      await tester.enterText(field,'Unsaved department');
+      router.go(AppRoutes.dashboard); await tester.pumpAndSettle();
+      expect(find.text('Unsaved changes'),findsOneWidget);
+      await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
+      expect(tester.widget<TextFormField>(field).controller!.text,'Unsaved department');
+      router.go(AppRoutes.dashboard); await tester.pumpAndSettle();
+      await tester.tap(find.text('Discard')); await tester.pumpAndSettle();
+      expect(find.text('Dashboard destination'),findsOneWidget);
+    });
+  }
   for (final target in ['list','detail','create','history']) {
     testWidgets('$target voucher load shows a safe acknowledged error and retries', (tester) async {
       SharedPreferences.setMockInitialValues({});

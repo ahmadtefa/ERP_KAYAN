@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
@@ -49,7 +50,8 @@ class _VoucherLoadErrorState extends State<_VoucherLoadError> {
 /// The list is sourced from the server after every action, not an optimistic
 /// local status. Pagination prevents old vouchers from silently disappearing.
 class StockVouchersScreen extends ConsumerStatefulWidget {
-  const StockVouchersScreen({super.key});
+  const StockVouchersScreen({super.key,this.exitRelay});
+  final DraftExitRelay? exitRelay;
   @override
   ConsumerState<StockVouchersScreen> createState() => _StockVouchersScreenState();
 }
@@ -72,11 +74,11 @@ class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
   @override
   void dispose() { _search.dispose(); super.dispose(); }
   Future<void> _create(String kind) async {
-    await Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => StockVoucherCreateScreen(kind:kind)));
+    await Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => StockVoucherCreateScreen(kind:kind,exitRelay:widget.exitRelay)));
     if (mounted) _refresh();
   }
   Future<void> _detail(String id) async {
-    await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => StockVoucherDetailScreen(id:id)));
+    await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => StockVoucherDetailScreen(id:id,exitRelay:widget.exitRelay)));
     if (mounted) _refresh();
   }
   @override
@@ -125,8 +127,9 @@ class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
 }
 
 class StockVoucherDetailScreen extends ConsumerStatefulWidget {
-  const StockVoucherDetailScreen({super.key,required this.id});
+  const StockVoucherDetailScreen({super.key,required this.id,this.exitRelay});
   final String id;
+  final DraftExitRelay? exitRelay;
   @override
   ConsumerState<StockVoucherDetailScreen> createState() => _StockVoucherDetailScreenState();
 }
@@ -134,7 +137,10 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
   late Future<Json> _future;
   bool _busy = false, _confirming = false;
   @override
-  void initState() { super.initState(); _future = _load(); }
+  void initState() { super.initState(); widget.exitRelay?.attach(_canLeave); _future = _load(); }
+  @override
+  void dispose() { widget.exitRelay?.detach(_canLeave); super.dispose(); }
+  Future<bool> _canLeave() async => !_busy && !_confirming;
   Future<Json> _load() => ref.read(apiClientProvider).getObject('$_base/${widget.id}');
   void _refresh() => setState(() { _future = _load(); });
   Future<void> _action(String action) async {
@@ -167,7 +173,7 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
   Widget build(BuildContext context) {
     final user = ref.watch(currentUserProvider);
     bool can(String permission) => user?.can(permission) ?? false;
-    return Scaffold(appBar:AppBar(title:Text(_label(context,'تفاصيل الإذن','Voucher details'))),
+    return PopScope(canPop:!_busy && !_confirming,child:Scaffold(appBar:AppBar(title:Text(_label(context,'تفاصيل الإذن','Voucher details'))),
       body:FutureBuilder<Json>(future:_future,builder:(context,snapshot) {
         if (snapshot.connectionState != ConnectionState.done) return const Center(child:CircularProgressIndicator());
         if (snapshot.hasError) return _VoucherLoadError(error:snapshot.error!,onRetry:_refresh);
@@ -203,7 +209,7 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
               OutlinedButton(onPressed:_busy || _confirming ? null : () => _action('reverse'),child:Text(_label(context,'عكس','Reverse'))),
           ]),
         ]);
-      }));
+      })));
   }
 }
 
@@ -251,8 +257,9 @@ class _VoucherLine {
 /// A retained request always keeps the original body/key until a successful
 /// replay. Ambiguous failures, including conflicts, are never discarded.
 class StockVoucherCreateScreen extends ConsumerStatefulWidget {
-  const StockVoucherCreateScreen({super.key,required this.kind});
+  const StockVoucherCreateScreen({super.key,required this.kind,this.exitRelay});
   final String kind;
+  final DraftExitRelay? exitRelay;
   @override
   ConsumerState<StockVoucherCreateScreen> createState() => _StockVoucherCreateScreenState();
 }
@@ -272,6 +279,7 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
     super.initState();
     final now=DateTime.now();
     _date.text='${now.year.toString().padLeft(4,'0')}-${now.month.toString().padLeft(2,'0')}-${now.day.toString().padLeft(2,'0')}';
+    widget.exitRelay?.attach(_confirmExit);
     _options=_loadOptions(); _loadPending();
   }
   Future<List<List<Json>>> _loadOptions() async {
@@ -338,17 +346,20 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
     WidgetsBinding.instance.addPostFrameCallback((_) { for (final line in old) { line.dispose(); } });
   }
   @override
-  void dispose() { _date.dispose(); _reason.dispose(); _party.dispose(); _notes.dispose(); for (final line in _lines) { line.dispose(); } super.dispose(); }
+  void dispose() { widget.exitRelay?.detach(_confirmExit); _date.dispose(); _reason.dispose(); _party.dispose(); _notes.dispose(); for (final line in _lines) { line.dispose(); } super.dispose(); }
   void _changed() { if (!_dirty) setState(() => _dirty=true); }
-  Future<void> _close() async {
-    if (_busy || _confirming) return;
-    if (_dirty && _pending == null) {
-      _confirming=true;
+  Future<bool> _confirmExit() async {
+    if (_busy || _confirming) return false;
+    if (!_dirty || _pending != null) return true;
+    _confirming=true;
+    try {
       final leave=await confirmAction(context,title:_label(context,'تغييرات غير محفوظة','Unsaved changes'),
         message:_label(context,'الخروج دون حفظ؟','Leave without saving?'),confirmLabel:_label(context,'خروج','Discard'),destructive:true);
-      _confirming=false; if (!leave || !mounted) return;
-    }
-    if (mounted) Navigator.of(context).pop();
+      return leave && mounted;
+    } finally { _confirming=false; }
+  }
+  Future<void> _close() async {
+    if (await _confirmExit() && mounted) Navigator.of(context).pop();
   }
   String? _number(String? raw,{bool positive=false}) {
     final value=(raw ?? '').trim(); final parsed=Decimal.tryParse(value);
