@@ -1,6 +1,7 @@
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
+import 'package:erp_kayan/features/data/presentation/providers/data_providers.dart' show exportCapabilitiesProvider, ExportCapabilities;
 import 'package:erp_kayan/features/invoicing/presentation/providers/invoice_providers.dart';
 import 'package:erp_kayan/features/invoicing/presentation/screens/invoice_list_screen.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
@@ -32,7 +33,8 @@ void main() {
         tester.view.physicalSize=const Size(1700,1000); tester.view.devicePixelRatio=1;
         addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
         final api=_CommittedThenFailedApi(reverse ? 'posted' : 'draft');
-        await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api)],
+        await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+          exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
           child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
             supportedLocales:AppLocalizations.supportedLocales,home:Scaffold(body:InvoiceListScreen(kind:kind)))));
         await tester.pumpAndSettle();
