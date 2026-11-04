@@ -5,6 +5,7 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { canReadCost } from '../../common/auth/cost-visibility';
 import { SalesOrdersService } from './sales-orders.service';
 
 /**
@@ -67,6 +68,7 @@ export class SalesOrdersController {
       user.userId,
       id,
       dto ?? {},
+      canReadCost(user),
     );
   }
 }

@@ -430,31 +430,43 @@ let difference = '70000000-0000-4000-8000-000000000005';
       const current = await model.findUniqueOrThrow({where:{id:raceInvoice.invoice.id}});
       const change = {expectedUpdatedAt:current.updatedAt.toISOString(),idempotencyKey:'amend-cancel-change-001',
         lines:[{orderLineId:raceLine.id,quantity:'4'}]};
-      // Hold the parent lock so the cancellation reads the old invoice lines
-      // before waiting. The amendment queues first and commits new lines;
-      // cancellation must re-read those lines after it acquires the lock.
-      await sql.query('BEGIN');
-      let pendingAmend, pendingCancel;
+      // Pause a real cancellation after it has read its old invoice lines.
+      // Commit the amendment in another transaction before cancellation
+      // acquires the order lock; it must then reload the allocations.
+      let cancelRead, resumeCancel;
+      const cancelReadBarrier = new Promise(resolve => { cancelRead = resolve; });
+      const resumeCancelBarrier = new Promise(resolve => { resumeCancel = resolve; });
+      const invoiceModelName = kind === 'sales' ? 'salesInvoice' : 'purchaseInvoice';
+      let paused = false;
+      const cancelPrisma = new Proxy(prisma,{get(target,key) {
+        if (key === '$transaction') return (work, options) => target.$transaction(async realTx => {
+          const realModel = realTx[invoiceModelName];
+          const wrappedModel = new Proxy(realModel,{get(modelTarget, modelKey) {
+            const value = modelTarget[modelKey];
+            if (modelKey === 'findFirst') return async (...args) => {
+              const found = await value.apply(modelTarget,args);
+              if (!paused) { paused=true; cancelRead(); await resumeCancelBarrier; }
+              return found;
+            };
+            return typeof value === 'function' ? value.bind(modelTarget) : value;
+          }});
+          const wrappedTx = new Proxy(realTx,{get(txTarget, txKey) {
+            if (txKey === invoiceModelName) return wrappedModel;
+            const value = txTarget[txKey];
+            return typeof value === 'function' ? value.bind(txTarget) : value;
+          }});
+          return work(wrappedTx);
+        },options);
+        const value = target[key];
+        return typeof value === 'function' ? value.bind(target) : value;
+      }});
+      const CancelClass = kind === 'sales' ? SalesInvoicesService : PurchaseInvoicesService;
+      const delayedCancel = new CancelClass(cancelPrisma,numbers,posting,map,settings,warehouses,prices,audit);
+      const pendingCancel = delayedCancel.cancelDraft(company,branch,user,raceInvoice.invoice.id);
       try {
-        const table = kind === 'sales' ? 'sales_orders' : 'purchase_orders';
-        await sql.query(`SELECT id FROM ${table} WHERE id=$1 FOR UPDATE`,[raceOrder.id]);
-        const waitForLockers = async count => {
-          for (let n=0;n<100;n++) {
-            const waiting = await sql.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE $1`,[`%${table}%FOR UPDATE%`]);
-            if (waiting.rows[0].n >= count) return;
-            await new Promise(resolve => setTimeout(resolve,50));
-          }
-          throw new Error(`${kind}: timed out waiting for locked operations`);
-        };
-        pendingAmend = invoices.updateOrderAllocation(company,branch,user,raceInvoice.invoice.id,change);
-        pendingAmend.catch(() => {});
-        await waitForLockers(1);
-        pendingCancel = invoices.cancelDraft(company,branch,user,raceInvoice.invoice.id);
-        pendingCancel.catch(() => {});
-        await waitForLockers(2);
-        await sql.query('COMMIT');
-      } catch (error) { await sql.query('ROLLBACK'); throw error; }
-      await pendingAmend;
+        await waitForBarrier(cancelReadBarrier,pendingCancel);
+        await invoices.updateOrderAllocation(company,branch,user,raceInvoice.invoice.id,change);
+      } finally { resumeCancel(); }
       await pendingCancel;
       assert.equal((await linesModel.findUniqueOrThrow({where:{id:raceLine.id}})).invoicedQuantity.toFixed(4),'0.0000');
       assert.ok((await model.findUniqueOrThrow({where:{id:raceInvoice.invoice.id}})).deletedAt);

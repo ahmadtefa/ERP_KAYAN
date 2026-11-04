@@ -535,7 +535,7 @@ export class SalesInvoicesService {
           allocations: selected.map((line) => ({ orderLineId: line.id, quantity: requested.get(line.id)!.toFixed(MONEY_SCALE) })) },
       }, tx);
     }, { maxWait: 10000, timeout: 30000 });
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, false);
   }
 
   /** Cancel a draft without deleting its historical identity or retry key. */
