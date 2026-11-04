@@ -210,7 +210,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
   }
 
   Future<void> _save() async {
-    if (_saving || _externalChange) return;
+    if (busy || _externalChange) return;
     setState(() => _saving = true);
     final error = await ref.read(companyProfileProvider.notifier).updateProfile(
       {
@@ -247,6 +247,8 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
           children: [
             _LogoRow(
               key:_logoKey,
+              profileSaving:_saving,
+              onBusyChanged:() { if (mounted) setState(() {}); },
               hasLogo: widget.profile['hasLogo'] == true,
               logoUrl: widget.profile['logoUrl'] as String?,
               companyId: widget.profile['id'] as String?,
@@ -327,7 +329,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
             if (canEdit) Align(
               alignment: AlignmentDirectional.centerEnd,
               child: FilledButton(
-                onPressed: _saving || _externalChange ? null : _save,
+                onPressed: busy || _externalChange ? null : _save,
                 child: _saving
                     ? const SizedBox(
                         height: 18,
@@ -348,12 +350,16 @@ class _LogoRow extends ConsumerStatefulWidget {
   const _LogoRow({
     required this.hasLogo,
     required this.canEdit,
+    required this.profileSaving,
+    required this.onBusyChanged,
     this.logoUrl,
     this.companyId,
   });
 
   final bool hasLogo;
   final bool canEdit;
+  final bool profileSaving;
+  final VoidCallback onBusyChanged;
 
   /// The relative path the profile reports; [companyLogoUrl] resolves it
   /// against the address this client talks to.
@@ -366,8 +372,13 @@ class _LogoRow extends ConsumerStatefulWidget {
 
 class _LogoRowState extends ConsumerState<_LogoRow> {
   bool _busy = false;
+  void _setBusy(bool value) {
+    setState(() => _busy = value);
+    widget.onBusyChanged();
+  }
 
   Future<void> _upload() async {
+    if (_busy || widget.profileSaving) return;
     final l10n = context.l10n;
     PickedFile? picked;
     try {
@@ -379,7 +390,7 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
       showMessage(context, '$error', error: true);
       return;
     }
-    if (picked == null || !mounted) return;
+    if (picked == null || !mounted || widget.profileSaving) return;
 
     late final PickedFile normalized;
     try {
@@ -398,14 +409,14 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
       );
       return;
     }
-    if (!mounted) return;
+    if (!mounted || widget.profileSaving) return;
 
-    setState(() => _busy = true);
+    _setBusy(true);
     final error = await ref
         .read(companyProfileProvider.notifier)
         .uploadLogo(normalized);
     if (!mounted) return;
-    setState(() => _busy = false);
+    _setBusy(false);
     if (error == null) {
       showMessage(context, l10n.logoUpdated);
     } else {
@@ -441,12 +452,13 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
   }
 
   Future<void> _remove() async {
+    if (_busy || widget.profileSaving) return;
     final l10n = context.l10n;
-    setState(() => _busy = true);
+    _setBusy(true);
     final error =
         await ref.read(companyProfileProvider.notifier).removeLogo();
     if (!mounted) return;
-    setState(() => _busy = false);
+    _setBusy(false);
     if (error == null) {
       showMessage(context, l10n.logoRemoved);
     } else {
@@ -504,13 +516,13 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
           ),
         ),
         if (widget.canEdit) TextButton.icon(
-          onPressed: _busy ? null : _upload,
+          onPressed: _busy || widget.profileSaving ? null : _upload,
           icon: const Icon(Icons.upload, size: 18),
           label: Text(l10n.uploadLogo),
         ),
         if (widget.canEdit && widget.hasLogo)
           TextButton.icon(
-            onPressed: _busy ? null : _remove,
+            onPressed: _busy || widget.profileSaving ? null : _remove,
             icon: const Icon(Icons.delete_outline, size: 18),
             label: Text(l10n.removeLogo),
           ),

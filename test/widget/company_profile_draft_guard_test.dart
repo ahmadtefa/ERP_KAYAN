@@ -15,6 +15,9 @@ Map<String,dynamic> _profile(String name) => {'id':'company','code':'C','nameAr'
   'nameEn':name,'taxId':'','phone':'','email':'','address':'','hasLogo':false};
 class _Profile extends CompanyProfileController {
   Completer<Map<String,dynamic>>? pending;
+  Completer<String?>? pendingSave;
+  @override
+  Future<String?> updateProfile(Map<String,dynamic> patch) async => await pendingSave?.future;
   @override
   Future<Map<String,dynamic>> build() async => _profile('Original');
   @override
@@ -30,6 +33,25 @@ class _Branches extends BranchesController {
 }
 
 void main() {
+  testWidgets('saving a profile disables simultaneous logo actions', (tester) async {
+    tester.view.physicalSize = const Size(1500,1200); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final container = ProviderContainer(overrides:[
+      currentUserProvider.overrideWithValue(const AppUser(id:'u',username:'u',fullName:'u',companyId:'company',isSuperAdmin:true)),
+      companyProfileProvider.overrideWith(_Profile.new),branchesProvider.overrideWith(_Branches.new),
+    ]);
+    addTearDown(container.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp(locale:const Locale('en'),
+      localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,
+      home:const Scaffold(body:CompanySettingsScreen()))));
+    await tester.pumpAndSettle();
+    final controller = container.read(companyProfileProvider.notifier) as _Profile;
+    controller.pendingSave = Completer<String?>();
+    await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pump();
+    expect(tester.widget<TextButton>(find.widgetWithText(TextButton,'Upload logo')).onPressed,isNull);
+    controller.pendingSave!.complete(null); await tester.pumpAndSettle();
+    expect(tester.widget<TextButton>(find.widgetWithText(TextButton,'Upload logo')).onPressed,isNotNull);
+  });
   testWidgets('company draft survives refresh, blocks remote conflict and protects route exits', (tester) async {
     tester.view.physicalSize = const Size(1500,1200); tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
