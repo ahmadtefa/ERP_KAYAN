@@ -214,14 +214,20 @@ class _VoucherHistory extends ConsumerStatefulWidget {
   ConsumerState<_VoucherHistory> createState() => _VoucherHistoryState();
 }
 class _VoucherHistoryState extends ConsumerState<_VoucherHistory> {
-  late Future<List<Json>> _future;
+  Future<List<Json>>? _future;
+  Future<List<Json>> _load() async {
+    return ref.read(apiClientProvider).getList('/admin/audit-logs',
+      query:{'entity':'stock_documents','entityId':widget.id,'pageSize':200});
+  }
   @override
-  void initState() { super.initState(); _future = _load(); }
-  Future<List<Json>> _load() => ref.read(apiClientProvider).getList('/admin/audit-logs',
-    query:{'entity':'stock_documents','entityId':widget.id,'pageSize':200});
-  @override
-  Widget build(BuildContext context) => ExpansionTile(title:Text(_label(context,'السجل','History')),
-    children:[FutureBuilder<List<Json>>(future:_future,builder:(context,snapshot) {
+  Widget build(BuildContext context) => ExpansionTile(
+    title:Text(_label(context,'السجل','History')),
+    // The child FutureBuilder is not mounted while the tile is collapsed.
+    // Start the request only when expanding so an early failure is observed.
+    onExpansionChanged:(expanded) {
+      if (expanded && _future == null) setState(() { _future = _load(); });
+    },
+    children:[if (_future != null) FutureBuilder<List<Json>>(future:_future,builder:(context,snapshot) {
       if (snapshot.connectionState != ConnectionState.done) return const CircularProgressIndicator();
       if (snapshot.hasError) return _VoucherLoadError(error:snapshot.error!,onRetry:() => setState(() { _future = _load(); }));
       if (!snapshot.hasData) return const CircularProgressIndicator();
