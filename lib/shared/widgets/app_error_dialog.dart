@@ -198,7 +198,7 @@ Future<void> showAppError(
   final ready = previous == null
       ? Future<void>.value()
       // The previous caller still receives its error; do not poison the queue.
-      : previous.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+      : previous.then<void>((_) {}, onError: (Object _, StackTrace _) {});
   final next = ready.then<void>((_) async {
     if (!navigator.mounted) return;
     await showDialog<void>(
