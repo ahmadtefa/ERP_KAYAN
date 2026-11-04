@@ -199,7 +199,7 @@ class _CompanyManagementPanelState
     if (error is! DioException || (error.response?.statusCode ?? 0) >= 500) {
       return presentErrorText(context, error);
     }
-    final response = error is DioException ? error.response?.data : null;
+    final response = error.response?.data;
     final raw = response is Map && response['detail'] is String
         ? response['detail'] as String
         : '$error';
