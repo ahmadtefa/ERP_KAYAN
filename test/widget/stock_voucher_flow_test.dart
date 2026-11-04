@@ -24,8 +24,10 @@ class _VoucherApi extends ApiClient {
     if (path == '/inventory/items') {
       final page=(query?['page'] as int?) ?? 1;
       itemPages.add(page);
-      if (paged) return page == 1 ? [for (var i=1;i<=200;i++) {'id':'item-$i','code':'IT-$i','nameEn':'Item $i'}]
-        : [{'id':'item-201','code':'IT-201','nameEn':'Item 201'}];
+      if (paged) {
+        return page == 1 ? [for (var i=1;i<=200;i++) {'id':'item-$i','code':'IT-$i','nameEn':'Item $i'}]
+          : [{'id':'item-201','code':'IT-201','nameEn':'Item 201'}];
+      }
       return [{'id':'item','code':'IT','nameEn':'Item'}];
     }
     if (path == '/inventory/warehouses') return [{'id':'warehouse','code':'WH','nameEn':'Warehouse'}];
