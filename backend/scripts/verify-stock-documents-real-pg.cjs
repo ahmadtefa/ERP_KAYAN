@@ -299,6 +299,11 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(await prisma.journalEntry.count({where:{companyId:company,sourceType:'YEAR_END_CLOSE',sourceId:rollbackYear.id}}),0);
       assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'fiscal_periods',entityId:rollbackYear.id,action:'fiscal_year.close'}}),0);
     } finally { audit.recordRequired = closeAudit; }
+    // A period with a posted entry cannot move that entry across its boundary,
+    // although a name-only correction remains possible.
+    await assert.rejects(periods.update(company,user,rollbackYear.id,{endDate:'2202-04-30'}),/posted history/);
+    assert.equal((await prisma.fiscalPeriod.findUniqueOrThrow({where:{id:rollbackYear.id}})).endDate.toISOString().slice(0,10),'2202-12-31');
+    assert.equal((await periods.update(company,user,rollbackYear.id,{nameEn:'Reviewed year'})).nameEn,'Reviewed year');
     console.log('PASS: real PostgreSQL serializes concurrent closes and posting before close; audit failure rolls back empty and nonempty closes. Draft creation races remain outside this test.');
     // Application-mediated create/update ranges serialize per company. A
     // database-wide exclusion constraint is not added to an existing migration.

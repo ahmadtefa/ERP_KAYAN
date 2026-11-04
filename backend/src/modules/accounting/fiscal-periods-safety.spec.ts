@@ -27,7 +27,7 @@ describe('fiscal period locking and range validation', () => {
       update: jest.fn(async ({where,data}:any) => ({...periods.find(p => p.id === where.id),...data})),
     };
     const tx = {$queryRaw:jest.fn().mockResolvedValue([]),fiscalPeriod:fp,
-      journalEntry:{count:jest.fn().mockResolvedValue(0)},
+      journalEntry:{count:jest.fn().mockResolvedValue(0)},stockMovement:{count:jest.fn().mockResolvedValue(0)},
       salesInvoice:{count:jest.fn().mockResolvedValue(0)},purchaseInvoice:{count:jest.fn().mockResolvedValue(0)},
       cashVoucher:{count:jest.fn().mockResolvedValue(0)},cashTransfer:{count:jest.fn().mockResolvedValue(0)},
       stockDocument:{count:jest.fn().mockResolvedValue(0)},openingBalance:{count:jest.fn().mockResolvedValue(0)}};
@@ -48,6 +48,29 @@ describe('fiscal period locking and range validation', () => {
     expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
     expect(tx.fiscalPeriod.update).not.toHaveBeenCalled();
   });
+  it('refuses to move posted journal or stock history across a boundary', async () => {
+    for (const model of ['journalEntry','stockMovement'] as const) {
+      const {service,tx} = setup();
+      tx[model].count.mockResolvedValue(1);
+      await expect(service.update('company','user','one',{startDate:'2026-02-01'})).rejects.toThrow(/posted history/);
+      expect(tx.fiscalPeriod.update).not.toHaveBeenCalled();
+    }
+  });
+  it('allows a rename without scanning or altering history', async () => {
+    const {service,tx} = setup();
+    await service.update('company','user','one',{nameEn:'New name'});
+    expect(tx.journalEntry.count).not.toHaveBeenCalled();
+    expect(tx.stockMovement.count).not.toHaveBeenCalled();
+  });
+  it('allows date edits when the changed interval has no committed history', async () => {
+    const {service,tx} = setup();
+    await service.update('company','user','one',{startDate:'2026-02-01'});
+    expect(tx.journalEntry.count).toHaveBeenCalledWith(expect.objectContaining({where:expect.objectContaining({
+      companyId:'company', OR:[{entryDate:{gte:original.startDate,lt:new Date('2026-02-01T00:00:00Z')}}],
+    })}));
+    expect(tx.fiscalPeriod.update).toHaveBeenCalledTimes(1);
+  });
+
   it('checks closed status after locking and cannot edit a closed period', async () => {
     const {service,tx,periods} = setup();
     periods[0] = {...original,status:PeriodStatus.CLOSED};

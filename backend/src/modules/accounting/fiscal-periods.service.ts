@@ -104,6 +104,7 @@ export class FiscalPeriodsService {
         throw new BadRequestException('The end date must be after the start date');
       }
       await this.assertNoOverlap(tx, companyId, startDate, endDate, id);
+      await this.assertBoundaryPreservesHistory(tx, companyId, period, startDate, endDate);
       const updated = await tx.fiscalPeriod.update({
         where: { id }, data: { nameEn: dto.nameEn?.trim(), nameAr: dto.nameAr?.trim(), startDate, endDate },
       });
@@ -114,6 +115,39 @@ export class FiscalPeriodsService {
       }, tx);
       return this.toResponse(updated);
     });
+  }
+
+  /** Refuse a boundary change that reclassifies already committed history. */
+  private async assertBoundaryPreservesHistory(tx: Prisma.TransactionClient, companyId: string,
+    previous: { startDate: Date; endDate: Date }, startDate: Date, endDate: Date) {
+    const changed: Prisma.DateTimeFilter[] = [];
+    if (previous.startDate.getTime() !== startDate.getTime()) {
+      const earlier = previous.startDate < startDate ? previous.startDate : startDate;
+      const later = previous.startDate < startDate ? startDate : previous.startDate;
+      changed.push({ gte: earlier, lt: later });
+    }
+    if (previous.endDate.getTime() !== endDate.getTime()) {
+      const earlier = previous.endDate < endDate ? previous.endDate : endDate;
+      const later = previous.endDate < endDate ? endDate : previous.endDate;
+      changed.push({ gt: earlier, lte: later });
+    }
+    if (changed.length === 0) return;
+    // The period row lock serializes postings covered by the old period.
+    // Expansion into previously uncovered dates still needs a common lock
+    // with postings outside any period; do not claim that race is solved.
+    const [journal, movements, sales, purchases, vouchers, transfers, stock, opening] = await Promise.all([
+      tx.journalEntry.count({ where: { companyId, status: { in: ['POSTED', 'REVERSED'] }, OR: changed.map(entryDate => ({ entryDate })) } }),
+      tx.stockMovement.count({ where: { companyId, OR: changed.map(movementDate => ({ movementDate })) } }),
+      tx.salesInvoice.count({ where: { companyId, status: { in: ['POSTED', 'REVERSED'] }, OR: changed.map(invoiceDate => ({ invoiceDate })) } }),
+      tx.purchaseInvoice.count({ where: { companyId, status: { in: ['POSTED', 'REVERSED'] }, OR: changed.map(invoiceDate => ({ invoiceDate })) } }),
+      tx.cashVoucher.count({ where: { companyId, status: { in: ['POSTED', 'REVERSED'] }, OR: changed.map(voucherDate => ({ voucherDate })) } }),
+      tx.cashTransfer.count({ where: { companyId, status: { in: ['POSTED', 'REVERSED'] }, OR: changed.map(transferDate => ({ transferDate })) } }),
+      tx.stockDocument.count({ where: { companyId, status: { in: ['POSTED', 'REVERSED'] }, OR: changed.map(documentDate => ({ documentDate })) } }),
+      tx.openingBalance.count({ where: { companyId, status: { in: ['POSTED', 'REVERSED'] }, OR: changed.map(asOfDate => ({ asOfDate })) } }),
+    ]);
+    if (journal + movements + sales + purchases + vouchers + transfers + stock + opening > 0) {
+      throw new BadRequestException('The changed dates contain posted history; the fiscal period boundaries cannot be changed.');
+    }
   }
 
   private async assertNoOverlap(tx: Prisma.TransactionClient, companyId: string,
