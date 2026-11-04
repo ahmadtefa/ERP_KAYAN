@@ -46,6 +46,14 @@ class FieldSpec {
   final String? emptyValue;
 }
 
+/// The server may have committed a non-idempotent submission despite an
+/// error response. The caller must refresh the relevant lists before throwing
+/// this, and the form will prevent an immediate blind retry.
+class UncertainFormSubmission implements Exception {
+  const UncertainFormSubmission(this.cause);
+  final Object cause;
+}
+
 /// Opens a modal form built from [fields].
 ///
 /// Returns the entered values keyed by [FieldSpec.key], or null if the user
@@ -102,7 +110,7 @@ class _FormSheetState extends State<_FormSheet> {
   final _selections = <String, String?>{};
   final _multiSelections = <String, Set<String>>{};
   late final String _initialSnapshot;
-  bool _confirmingExit = false, _saving = false;
+  bool _confirmingExit = false, _saving = false, _uncertain = false;
 
   @override
   void initState() {
@@ -140,13 +148,15 @@ class _FormSheetState extends State<_FormSheet> {
 
   Future<void> _close() async {
     if (_confirmingExit || _saving) return;
-    if (!widget.readOnly && _snapshot() != _initialSnapshot) {
+    if (!widget.readOnly && (_uncertain || _snapshot() != _initialSnapshot)) {
       _confirmingExit = true;
       try {
         final arabic = Localizations.localeOf(context).languageCode == 'ar';
         final discard = await confirmAction(context,
           title: arabic ? 'تغييرات غير محفوظة' : 'Unsaved changes',
-          message: arabic ? 'الخروج دون حفظ المدخلات؟' : 'Leave without saving your changes?',
+          message: _uncertain
+              ? (arabic ? 'قد تكون العملية قد اكتملت. أغلق النموذج وراجع القائمة قبل إنشاء سجل آخر.' : 'The operation may have completed. Close this form and review the list before creating another record.')
+              : (arabic ? 'الخروج دون حفظ المدخلات؟' : 'Leave without saving your changes?'),
           confirmLabel: arabic ? 'الخروج دون حفظ' : 'Discard changes',destructive:true);
         if (!discard || !mounted) return;
       } finally { _confirmingExit = false; }
@@ -202,7 +212,7 @@ class _FormSheetState extends State<_FormSheet> {
   }
 
   Future<void> _submit() async {
-    if (_saving || _confirmingExit || !(_formKey.currentState?.validate() ?? false)) return;
+    if (_saving || _uncertain || _confirmingExit || !(_formKey.currentState?.validate() ?? false)) return;
     final result = <String, dynamic>{};
     for (final field in widget.fields) {
       switch (field.kind) {
@@ -234,7 +244,10 @@ class _FormSheetState extends State<_FormSheet> {
       await widget.onSubmit!(result);
       if (mounted) Navigator.of(context).pop(result);
     } catch (error) {
-      if (mounted) await showAppError(context,error);
+      if (mounted) {
+        if (error is UncertainFormSubmission) setState(() => _uncertain = true);
+        await showAppError(context, error is UncertainFormSubmission ? error.cause : error);
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -250,12 +263,19 @@ class _FormSheetState extends State<_FormSheet> {
         width: 440,
         child: SingleChildScrollView(
           padding: const EdgeInsets.only(top: AppSpacing.xs),
-          child: AbsorbPointer(absorbing:_saving,child:Form(
+          child: AbsorbPointer(absorbing:_saving || _uncertain,child:Form(
             key: _formKey,
             autovalidateMode: AutovalidateMode.onUserInteraction,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (_uncertain)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                    child: Text(Localizations.localeOf(context).languageCode == 'ar'
+                      ? 'قد تكون العملية قد اكتملت. راجع القائمة قبل إنشاء سجل آخر؛ لا يمكن إعادة الإرسال من هذا النموذج.'
+                      : 'The operation may have completed. Review the list before creating another record; this form cannot be resubmitted.'),
+                  ),
                 for (final field in widget.fields) _buildField(field),
               ],
             ),
@@ -269,7 +289,7 @@ class _FormSheetState extends State<_FormSheet> {
         ),
         if (!widget.readOnly)
           FilledButton(
-            onPressed: _saving ? null : _submit,
+            onPressed: _saving || _uncertain ? null : _submit,
             child: Text(widget.submitLabel ?? l10n.save),
           ),
       ],

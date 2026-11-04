@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -73,6 +72,18 @@ class _CashScreenState extends ConsumerState<CashScreen>
     }
   }
 
+  /// Cash creation endpoints do not yet provide idempotency. After a lost
+  /// response, refresh and prevent this form from issuing the same POST again.
+  Future<void> _submitCreation(String path, Json body) async {
+    try {
+      await ref.read(apiClientProvider).post(path, body: body);
+    } catch (error) {
+      throw UncertainFormSubmission(error);
+    } finally {
+      if (mounted) _reloadAll();
+    }
+  }
+
   Future<void> _newAccount() async {
     final l10n = context.l10n;
     setState(() => _busy = true);
@@ -81,9 +92,6 @@ class _CashScreenState extends ConsumerState<CashScreen>
       accounts = await ref
           .read(apiClientProvider)
           .getList('/accounting/chart-of-accounts');
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
-      return;
     } catch (error) {
       if (mounted) showAppError(context, error);
       return;
@@ -127,13 +135,9 @@ class _CashScreenState extends ConsumerState<CashScreen>
         FieldSpec('bankName', l10n.bankName),
         FieldSpec('iban', l10n.iban),
       ],
+      onSubmit: (values) => _submitCreation('/cash/accounts', values),
     );
-    if (values == null || !mounted) return;
-
-    await _run(() async {
-      await ref.read(apiClientProvider).post('/cash/accounts', body: values);
-      if (mounted) showMessage(context, l10n.saved);
-    });
+    if (values != null && mounted) showMessage(context, l10n.saved);
   }
 
   Future<void> _newVoucher() async {
@@ -141,9 +145,6 @@ class _CashScreenState extends ConsumerState<CashScreen>
     List<Json> accounts;
     try {
       accounts = await ref.read(cashAccountsProvider.future);
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
-      return;
     } catch (error) {
       if (mounted) showAppError(context, error);
       return;
@@ -260,56 +261,34 @@ class _CashScreenState extends ConsumerState<CashScreen>
       initial: {
         'voucherDate': DateTime.now().toIso8601String().substring(0, 10),
       },
-    );
-    if (values == null || !mounted) return;
-
-    // What is still open for this party, oldest first: money is applied to the
-    // oldest debt unless somebody says otherwise, and the screen says so.
-    final partyId = text(values, isReceipt ? 'customerId' : 'supplierId');
-    var allocations = const <Json>[];
-    var allocationLookupFailed = false;
-    if (partyId.isNotEmpty) {
-      setState(() => _busy = true);
-      try {
-        final open = await ref.read(
-          openInvoicesProvider((
+      onSubmit: (values) async {
+        // Lookup occurs before the POST. A failed lookup leaves the form
+        // editable and retryable; a failed POST is conservatively uncertain.
+        final partyId = text(values, isReceipt ? 'customerId' : 'supplierId');
+        var allocations = const <Json>[];
+        if (partyId.isNotEmpty) {
+          final invoices = openInvoicesProvider((
             kind: isReceipt ? 'customer' : 'supplier',
             partyId: partyId,
-          )).future,
-        );
-        allocations = planAllocations(
-          openInvoices: open,
-          amount: text(values, 'amount'),
-          isReceipt: isReceipt,
-        );
-      } on Failure catch (error) {
-        allocationLookupFailed = true;
-        if (mounted) showMessage(context, error.message, error: true);
-      } catch (error) {
-        allocationLookupFailed = true;
-        if (mounted) showAppError(context, error);
-      } finally {
-        if (mounted) setState(() => _busy = false);
-      }
-      if (!mounted || allocationLookupFailed) return;
-    }
-
-    final body = <String, dynamic>{
-      ...values,
-      'kind': isReceipt ? 'RECEIPT' : 'PAYMENT',
-    };
-    if (allocations.isNotEmpty) {
-      body['allocations'] = allocations;
-    } else if (partyId.isNotEmpty) {
-      // Nothing open to settle: the money is carried on account, which is only
-      // allowed when the voucher names the party it belongs to.
-      body[isReceipt ? 'customerId' : 'supplierId'] = partyId;
-    }
-
-    await _run(() async {
-      await ref.read(apiClientProvider).post('/cash/vouchers', body: body);
-      if (mounted) showMessage(context, l10n.saved);
-    });
+          ));
+          // Do not allocate against a cached or previously failed lookup.
+          ref.invalidate(invoices);
+          final open = await ref.read(invoices.future);
+          allocations = planAllocations(
+            openInvoices: open,
+            amount: text(values, 'amount'),
+            isReceipt: isReceipt,
+          );
+        }
+        final body = <String, dynamic>{
+          ...values,
+          'kind': isReceipt ? 'RECEIPT' : 'PAYMENT',
+          if (allocations.isNotEmpty) 'allocations': allocations,
+        };
+        await _submitCreation('/cash/vouchers', body);
+      },
+    );
+    if (values != null && mounted) showMessage(context, l10n.saved);
   }
 
   Future<void> _newTransfer() async {
@@ -317,9 +296,6 @@ class _CashScreenState extends ConsumerState<CashScreen>
     List<Json> accounts;
     try {
       accounts = await ref.read(cashAccountsProvider.future);
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
-      return;
     } catch (error) {
       if (mounted) showAppError(context, error);
       return;
@@ -367,13 +343,9 @@ class _CashScreenState extends ConsumerState<CashScreen>
       initial: {
         'transferDate': DateTime.now().toIso8601String().substring(0, 10),
       },
+      onSubmit: (values) => _submitCreation('/cash/transfers', values),
     );
-    if (values == null || !mounted) return;
-
-    await _run(() async {
-      await ref.read(apiClientProvider).post('/cash/transfers', body: values);
-      if (mounted) showMessage(context, l10n.saved);
-    });
+    if (values != null && mounted) showMessage(context, l10n.saved);
   }
 
   Future<void> _post(String path, String confirmMessage, String done) async {

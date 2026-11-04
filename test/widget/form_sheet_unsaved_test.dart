@@ -55,4 +55,28 @@ void main() {
     expect(calls,2); expect(find.text('Edit record'),findsNothing);
   });
 
+  testWidgets('uncertain submission preserves the fields and blocks blind retry', (tester) async {
+    var calls=0;
+    await tester.pumpWidget(MaterialApp(locale:const Locale('en'),
+      localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,
+      home:Scaffold(body:Builder(builder:(context) => TextButton(onPressed:() => showFormSheet(context,title:'Create record',
+        fields:const [FieldSpec('name','Name')],onSubmit:(values) async {
+          calls++;
+          throw UncertainFormSubmission(StateError('PRIVATE_CREATE_ERROR'));
+        }),child:const Text('Open'))))));
+    await tester.tap(find.text('Open')); await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField,'Name'),'Original draft');
+    await tester.tap(find.text('Save')); await tester.pumpAndSettle();
+    expect(find.textContaining('PRIVATE_CREATE_ERROR'),findsNothing);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Name')).controller!.text,'Original draft');
+    expect(find.textContaining('operation may have completed'),findsOneWidget);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
+    await tester.binding.handlePopRoute(); await tester.pumpAndSettle();
+    expect(find.textContaining('Close this form and review the list'),findsOneWidget);
+    await tester.tap(find.text('Cancel').last); await tester.pumpAndSettle();
+    expect(find.text('Create record'),findsOneWidget);
+    expect(calls,1);
+  });
+
 }
