@@ -7,6 +7,7 @@ import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/status_pill.dart';
@@ -56,26 +57,19 @@ class _CashScreenState extends ConsumerState<CashScreen>
     invalidateMoneyViews(ref);
   }
 
-  /// Everything thrown is shown as the server worded it, never as a stack.
+  /// A failed response may follow a committed cash action. Refresh all
+  /// dependent lists and figures without logging the exception or payload.
   Future<void> _run(Future<void> Function() action) async {
     setState(() => _busy = true);
     try {
       await action();
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
-    } catch (error, stackTrace) {
-      // A malformed response or an unexpected client exception must never
-      // leave an action looking as if it succeeded.
-      debugPrint('Cash action failed: $error\\n$stackTrace');
-      if (mounted) {
-        showMessage(
-          context,
-          context.l10n.unexpectedError,
-          error: true,
-        );
-      }
+    } catch (error) {
+      if (mounted) showAppError(context, error);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        _reloadAll();
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -90,11 +84,8 @@ class _CashScreenState extends ConsumerState<CashScreen>
     } on Failure catch (error) {
       if (mounted) showMessage(context, error.message, error: true);
       return;
-    } catch (error, stackTrace) {
-      debugPrint('Loading ledger accounts failed: $error\\n$stackTrace');
-      if (mounted) {
-        showMessage(context, context.l10n.unexpectedError, error: true);
-      }
+    } catch (error) {
+      if (mounted) showAppError(context, error);
       return;
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -141,7 +132,6 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
     await _run(() async {
       await ref.read(apiClientProvider).post('/cash/accounts', body: values);
-      _reloadAll();
       if (mounted) showMessage(context, l10n.saved);
     });
   }
@@ -154,9 +144,8 @@ class _CashScreenState extends ConsumerState<CashScreen>
     } on Failure catch (error) {
       if (mounted) showMessage(context, error.message, error: true);
       return;
-    } catch (error, stackTrace) {
-      debugPrint('Loading cash accounts for voucher failed: $error\\n$stackTrace');
-      if (mounted) showMessage(context, l10n.unexpectedError, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
       return;
     }
     if (!mounted) return;
@@ -189,8 +178,9 @@ class _CashScreenState extends ConsumerState<CashScreen>
     List<Json> costCenters = const <Json>[];
     try {
       costCenters = await ref.read(activeCostCentersProvider.future);
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+      return;
     }
     if (!mounted) return;
 
@@ -199,15 +189,9 @@ class _CashScreenState extends ConsumerState<CashScreen>
       parties = isReceipt
           ? await ref.read(activeCustomersProvider.future)
           : await ref.read(activeSuppliersProvider.future);
-    } on Failure catch (error) {
-      // A party is optional for an on-account voucher. Keep the workflow
-      // available if this auxiliary picker cannot load.
-      if (mounted) showMessage(context, error.message, error: true);
-    } catch (error, stackTrace) {
-      debugPrint('Loading voucher parties failed: $error\\n$stackTrace');
-      if (mounted) {
-        showMessage(context, l10n.unexpectedError, error: true);
-      }
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+      return;
     }
     if (!mounted) return;
 
@@ -301,12 +285,9 @@ class _CashScreenState extends ConsumerState<CashScreen>
       } on Failure catch (error) {
         allocationLookupFailed = true;
         if (mounted) showMessage(context, error.message, error: true);
-      } catch (error, stackTrace) {
+      } catch (error) {
         allocationLookupFailed = true;
-        debugPrint('Loading open invoices failed: $error\\n$stackTrace');
-        if (mounted) {
-          showMessage(context, l10n.unexpectedError, error: true);
-        }
+        if (mounted) showAppError(context, error);
       } finally {
         if (mounted) setState(() => _busy = false);
       }
@@ -327,7 +308,6 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
     await _run(() async {
       await ref.read(apiClientProvider).post('/cash/vouchers', body: body);
-      _reloadAll();
       if (mounted) showMessage(context, l10n.saved);
     });
   }
@@ -340,9 +320,8 @@ class _CashScreenState extends ConsumerState<CashScreen>
     } on Failure catch (error) {
       if (mounted) showMessage(context, error.message, error: true);
       return;
-    } catch (error, stackTrace) {
-      debugPrint('Loading cash accounts for transfer failed: $error\\n$stackTrace');
-      if (mounted) showMessage(context, l10n.unexpectedError, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
       return;
     }
     if (!mounted) return;
@@ -393,7 +372,6 @@ class _CashScreenState extends ConsumerState<CashScreen>
 
     await _run(() async {
       await ref.read(apiClientProvider).post('/cash/transfers', body: values);
-      _reloadAll();
       if (mounted) showMessage(context, l10n.saved);
     });
   }
@@ -408,7 +386,6 @@ class _CashScreenState extends ConsumerState<CashScreen>
     if (!ok || !mounted) return;
     await _run(() async {
       await ref.read(apiClientProvider).post(path);
-      _reloadAll();
       if (mounted) showMessage(context, done);
     });
   }
@@ -425,7 +402,6 @@ class _CashScreenState extends ConsumerState<CashScreen>
     if (!ok || !mounted) return;
     await _run(() async {
       await ref.read(apiClientProvider).post(path);
-      _reloadAll();
       if (mounted) showMessage(context, l10n.entryReversed);
     });
   }
@@ -600,7 +576,6 @@ class _CashScreenState extends ConsumerState<CashScreen>
                           await ref
                               .read(apiClientProvider)
                               .post('/cash/accounts/${text(row, 'id')}/deactivate');
-                          _reloadAll();
                         }),
                 ),
               ],

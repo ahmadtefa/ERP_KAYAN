@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/json/json_utils.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../accounting/presentation/screens/journal_entries_screen.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../dashboard/presentation/providers/dashboard_providers.dart';
 import '../../../invoicing/presentation/providers/invoice_providers.dart';
@@ -113,7 +114,8 @@ void invalidateMoneyViews(WidgetRef ref) {
   ref.invalidate(suppliersProvider);
   ref.invalidate(partySummaryProvider);
   ref.invalidate(partyStatementProvider);
-  // The figures on the dashboard come from the same journal.
+  // The cash posting writes journal entries as well as dashboard figures.
+  ref.invalidate(journalEntriesProvider);
   ref.invalidate(dashboardSummaryProvider);
   ref.invalidate(dashboardMonthlyProvider);
 }
