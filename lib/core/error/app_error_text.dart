@@ -151,6 +151,8 @@ class AppErrorMessageResolver {
     AppErrorReason? preferred,
     bool untrusted = false,
   }) {
+    // Do not feed unbounded remote diagnostic blobs into UI or regex rules.
+    if (raw.length > 1024) return _fallback(statusCode: statusCode, preferred: preferred);
     var text = _clean(raw);
 
     // "ServerFailure: no such record" -> "no such record".
@@ -604,35 +606,35 @@ class AppErrorMessageResolver {
     _BusinessRule(_ci(r'^Nothing to depreciate for (\d{4}-\d{2})\s+[—-]\s+.*already depreciated for \1(?:;.*)?$'),
         (m) => 'لا توجد أصول مؤهلة للإهلاك في ${m.group(1)}؛ سبق احتساب إهلاك أصل واحد على الأقل لهذه الفترة.'),
     _BusinessRule(_ci(r'^Account (\S+) is inactive$'), (m) =>
-        'الحساب ${m.group(1)} غير نشط.'),
+        'الحساب${_codeSuffix(m.group(1))} غير نشط.'),
     _BusinessRule(_ci(r'^Account (\S+) cannot receive postings$'), (m) =>
-        'الحساب ${m.group(1)} لا يمكن الترحيل عليه.'),
+        'الحساب${_codeSuffix(m.group(1))} لا يمكن الترحيل عليه.'),
     _BusinessRule(_ci(r'^Account (\S+) is a grouping account$'), (m) =>
-        'الحساب ${m.group(1)} حساب تجميعي ولا يمكن الترحيل عليه.'),
+        'الحساب${_codeSuffix(m.group(1))} حساب تجميعي ولا يمكن الترحيل عليه.'),
     _BusinessRule(_ci(r'^Account (\S+) does not exist$'), (m) =>
-        'الحساب ${m.group(1)} غير موجود.'),
+        'الحساب${_codeSuffix(m.group(1))} غير موجود.'),
     _BusinessRule(_ci(r'^Account (\S+) is (?:already )?used'),
-        (m) => 'الحساب ${m.group(1)} مستخدم بالفعل.'),
+        (m) => 'الحساب${_codeSuffix(m.group(1))} مستخدم بالفعل.'),
     _BusinessRule(_ci(r'^Account (\S+) cannot be deleted'), (m) =>
-        'لا يمكن حذف الحساب ${m.group(1)}.'),
+        'لا يمكن حذف الحساب${_codeSuffix(m.group(1))}.'),
     _BusinessRule(_ci(r'^(.+) code (\S+) is already used$'), (m) {
       final noun = _nounOrNull(m.group(1));
-      return noun == null ? null : 'كود $noun رقم ${m.group(2)} مستخدم بالفعل.';
+      return noun == null ? null : 'كود $noun${_codeSuffix(m.group(2))} مستخدم بالفعل.';
     }),
     _BusinessRule(_ci(r'^The code "(\S+)" is already used by another account in this company$'),
-        (m) => 'الكود ${m.group(1)} مستخدم بالفعل في حساب آخر بهذه الشركة.'),
+        (m) => 'الكود${_codeSuffix(m.group(1))} مستخدم بالفعل في حساب آخر بهذه الشركة.'),
     _BusinessRule(_ci(r'^Cash account code (\S+) is already used$'), (m) =>
-        'كود الحساب النقدي رقم ${m.group(1)} مستخدم بالفعل.'),
+        'كود الحساب النقدي${_codeSuffix(m.group(1))} مستخدم بالفعل.'),
     _BusinessRule(_ci(r'^(.+) code (\S+) does not exist$'), (m) {
       final noun = _nounOrNull(m.group(1));
-      return noun == null ? null : '$noun رقم ${m.group(2)} غير موجود.';
+      return noun == null ? null : '$noun${_codeSuffix(m.group(2))} غير موجود.';
     }),
     _BusinessRule(_ci(r'^(.+?) (\S+) is inactive$'), (m) {
       final noun = _nounOrNull(m.group(1));
-      return noun == null ? null : '$noun ${m.group(2)} غير نشط.';
+      return noun == null ? null : '$noun${_codeSuffix(m.group(2))} غير نشط.';
     }),
-    _BusinessRule(_ci(r'^Missing permission: (.+)$'), (m) =>
-        'ليس لديك صلاحية «${m.group(1)}». راجع مسؤول النظام.'),
+    _BusinessRule(_ci(r'^Missing permission: (.+)$'), (_) =>
+        'ليس لديك الصلاحية المطلوبة. راجع مسؤول النظام.'),
     _BusinessRule(_ci(r'^(The )?(\w+) does not exist$'), (m) {
       final noun = m.group(2) ?? '';
       final translated = _nounsAr[noun.toLowerCase()];
@@ -706,8 +708,8 @@ class AppErrorMessageResolver {
       final noun = _nounOrNull(m.group(1));
       return noun == null ? null : 'لا يمكن اعتماد $noun إلا وهو مسودة.';
     }),
-    _BusinessRule(_ci(r'^(?:Line \\d+: )?item (\\S+) is not stock-tracked$'), (m) =>
-        'الصنف ${m.group(1)} غير متتبع في المخزون.'),
+    _BusinessRule(_ci(r'^item (\S+) is not stock-tracked$'), (m) =>
+        'الصنف${_codeSuffix(m.group(1))} غير متتبع في المخزون.'),
 
     // ---- the same sentences the import, returns and validation paths write --
     // A date is a date: these arrive from the DTO when a date field is typed
@@ -786,7 +788,7 @@ class AppErrorMessageResolver {
     // Quotation editor and cash documents.
     _BusinessRule(_ci(r'^Quotation: (?:the )?(\w+) (does not exist|is inactive)$'),
         (m) {
-      final noun = _nounsAr[m.group(1)!.toLowerCase()] ?? m.group(1);
+      final noun = _nounsAr[m.group(1)!.toLowerCase()] ?? 'البيانات';
       return m.group(2)!.toLowerCase() == 'is inactive'
           ? 'العرض: $noun غير نشط.'
           : 'العرض: $noun غير موجود.';
@@ -804,7 +806,7 @@ class AppErrorMessageResolver {
         'is inactive': 'غير نشط',
         'is required': 'مطلوب',
       };
-      return 'الحساب النقدي ${m.group(1)} ${reasons[what] ?? 'غير صالح'}.';
+      return 'الحساب النقدي ${reasons[what] ?? 'غير صالح'}.';
     }),
     _BusinessRule(
         _ci(r'^This company has no active branch to post the closing entry to$'),
@@ -821,8 +823,8 @@ class AppErrorMessageResolver {
         'ملف النسخة الاحتياطية لا يحتوي على جداول. تأكد أنه ملف نسخة صحيح.'),
     _BusinessRule(_ci(r'^That file is outside the backup folder\.?$'), (_) =>
         'هذا الملف خارج مجلد النسخ الاحتياطية، ولا يمكن قراءته.'),
-    _BusinessRule(_ci(r'^No backup file named "(.+)" on this server\.?$'), (m) =>
-        'لا توجد نسخة احتياطية باسم «${m.group(1)}» على الخادم.'),
+    _BusinessRule(_ci(r'^No backup file named "(.+)" on this server\.?$'), (_) =>
+        'لم يتم العثور على ملف النسخة الاحتياطية على الخادم.'),
   ];
 
   /// A pattern that ignores capitalisation: the API writes "The item does
@@ -834,9 +836,16 @@ class AppErrorMessageResolver {
   static String? _nounOrNull(String? raw) =>
       _nounsAr[(raw ?? '').trim().toLowerCase()];
 
+  // Only short numeric codes are safe to echo from server-side patterns;
+  // arbitrary tokens and file paths can contain credentials or customer data.
+  static String _codeSuffix(String? raw) {
+    final code = raw ?? '';
+    return RegExp(r'^\d{1,12}$').hasMatch(code) ? ' $code' : '';
+  }
+
   static String _fieldAr(String? raw) {
     final key = (raw ?? '').trim().toLowerCase();
-    return _fieldsAr[key] ?? (raw ?? '').trim();
+    return _fieldsAr[key] ?? 'الحقل';
   }
 
   static const _nounsAr = <String, String>{

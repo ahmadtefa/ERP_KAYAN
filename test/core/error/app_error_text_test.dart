@@ -86,6 +86,21 @@ void main() {
       }
     });
 
+    test('parameterised translations do not echo unknown remote tokens or paths', () {
+      for (final raw in [
+        'Account SYNTHETIC_PRIVATE is inactive',
+        'Missing permission: SYNTHETIC_PRIVATE',
+        'No backup file named "SYNTHETIC_PRIVATE" on this server.',
+        'SYNTHETIC_PRIVATE is required',
+        'item SYNTHETIC_PRIVATE is not stock-tracked',
+      ]) {
+        final result = arabic.resolve(ApiFailure(raw,statusCode:400));
+        expect(result.businessMessage ?? '', isNot(contains('SYNTHETIC_PRIVATE')));
+      }
+      final long = arabic.resolve(ApiFailure('A' * 1025,statusCode:400));
+      expect(long.hasBusinessMessage,isFalse);
+    });
+
     test('a raw exception object is not forwarded', () {
       final text = arabic.resolve(StateError('Bad state: no element'));
       expect(text.hasBusinessMessage, isFalse);
