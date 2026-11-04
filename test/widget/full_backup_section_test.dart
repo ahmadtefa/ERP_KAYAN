@@ -183,8 +183,12 @@ void main() {
     await _pump(tester, service);
     await tester.pumpAndSettle();
     expect(find.textContaining('Deletion is paused'), findsOneWidget);
-    final deleteButton = tester.widget<IconButton>(find.byTooltip('Delete backup'));
-    expect(deleteButton.onPressed, isNull);
+    final deleteButton = find.ancestor(
+      of: find.byIcon(Icons.delete_outline, skipOffstage: false),
+      matching: find.byType(IconButton, skipOffstage: false),
+    );
+    expect(deleteButton, findsOneWidget);
+    expect(tester.widget<IconButton>(deleteButton).onPressed, isNull);
   });
 
   testWidgets('a success response without a file is not reported as saved', (tester) async {
