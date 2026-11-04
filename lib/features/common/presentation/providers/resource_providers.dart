@@ -9,12 +9,18 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 /// handling behave identically everywhere. Subclasses only say where the data
 /// lives.
 abstract class JsonListController extends AsyncNotifier<List<Json>> {
+  int _loadGeneration = 0;
   String get resourcePath;
 
   Map<String, dynamic> get resourceQuery => const {};
 
   @override
-  Future<List<Json>> build() => _load();
+  Future<List<Json>> build() {
+    // Invalidate any in-flight manual refresh if this provider is disposed or
+    // rebuilt, so it cannot publish a result into a replacement lifecycle.
+    ref.onDispose(() { _loadGeneration++; });
+    return _load();
+  }
 
   Future<List<Json>> _load() async {
     return ref
@@ -24,13 +30,17 @@ abstract class JsonListController extends AsyncNotifier<List<Json>> {
 
   /// Re-reads the collection, showing the loading state again.
   Future<void> reload() async {
+    final generation = ++_loadGeneration;
     state = const AsyncValue.loading();
-    state = await AsyncValue.guard(_load);
+    final result = await AsyncValue.guard(_load);
+    if (generation == _loadGeneration) state = result;
   }
 
   /// Re-reads quietly, keeping the current rows on screen meanwhile.
   Future<void> refreshQuietly() async {
-    state = await AsyncValue.guard(_load);
+    final generation = ++_loadGeneration;
+    final result = await AsyncValue.guard(_load);
+    if (generation == _loadGeneration) state = result;
   }
 }
 
