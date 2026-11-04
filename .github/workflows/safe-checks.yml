@@ -151,7 +151,7 @@ jobs:
         env:
           NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: python ../scripts/ci-diagnose.py node scripts/verify-prisma-native-upgrade.mjs
-      - name: Verify failed scratch cleanup against isolated PostgreSQL
+      - name: Verify archive content and scratch cleanup against isolated PostgreSQL
         env:
           NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: python ../scripts/ci-diagnose.py node scripts/verify-restore-scratch-cleanup.cjs

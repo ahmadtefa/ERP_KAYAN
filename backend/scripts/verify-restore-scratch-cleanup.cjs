@@ -15,6 +15,7 @@ const { FullBackupService } = require('../src/modules/backup/full-backup.service
 const { MaintenanceService } = require('../src/common/maintenance/maintenance');
 const fs = require('node:fs/promises');
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const os = require('node:os');
 const path = require('node:path');
 
@@ -55,9 +56,46 @@ const path = require('node:path');
     } };
     const maintenance = new MaintenanceService();
     const service = new FullBackupService(prisma, { record: async () => {} }, maintenance, { reconcile: async () => {} });
-    await client.query("CREATE TABLE fixture_items(id integer primary key, value text); INSERT INTO fixture_items VALUES(1,'before')");
+    await client.query("CREATE TABLE fixture_items(id integer primary key, value text); INSERT INTO fixture_items VALUES(1,'before'); INSERT INTO fixture_items SELECT i, md5(i::text) || md5((i+1)::text) FROM generate_series(2,1002) AS i");
+    const before = await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`);
     const backup = await service.createFull('fixture');
-    assert.ok((await service.verify(backup.file.name)).entries > 0);
+    const verified = await service.verify(backup.file.name);
+    assert.ok(verified.entries > 0);
+    assert.equal(verified.archiveContentReadable, true);
+    assert.equal(verified.fullRestoreRehearsed, false);
+    assert.equal(verified.includesExternalFiles, false);
+
+    // A readable TOC is insufficient: truncate the synthetic data section,
+    // retain the original, and prove the real pg_restore can still list it.
+    const corruptPath = path.join(dir, 'synthetic-corrupt.dump');
+    await fs.copyFile(path.join(dir, backup.file.name), corruptPath);
+    const size = (await fs.stat(corruptPath)).size;
+    assert.ok(size > 1000);
+    await fs.truncate(corruptPath, size - 128);
+    assert.match(execFileSync('pg_restore', ['--list', corruptPath], { encoding: 'utf8' }), /fixture_items/);
+    await assert.rejects(service.verify('synthetic-corrupt.dump'), /could not read/);
+    assert.deepEqual((await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows, before.rows);
+    assert.ok((await service.verify(backup.file.name)).archiveContentReadable);
+
+    // A tool may exit zero while leaving a data-corrupt archive; it must not
+    // be published even if its TOC can be listed successfully.
+    const corruptDumpTool = path.join(dir, 'corrupt-pg-dump');
+    await fs.writeFile(corruptDumpTool, '#!/bin/sh\nfor x in "$@"; do case "$x" in --file=*) out=${x#--file=};; esac; done\ncp "$KAYAN_CORRUPT_FIXTURE" "$out"\n', { mode: 0o700 });
+    const previousDump = process.env.KAYAN_PG_DUMP;
+    process.env.KAYAN_PG_DUMP = corruptDumpTool;
+    process.env.KAYAN_CORRUPT_FIXTURE = corruptPath;
+    try {
+      const invalid = new FullBackupService(prisma, { record: async () => {} }, maintenance, { reconcile: async () => {} });
+      const files = (await fs.readdir(dir)).filter(name => name.endsWith('.dump')).sort();
+      await assert.rejects(invalid.createFull('fixture'));
+      assert.deepEqual((await fs.readdir(dir)).filter(name => name.endsWith('.dump')).sort(), files);
+      assert.equal((await fs.readdir(dir)).some(name => name.endsWith('.partial')), false);
+      assert.deepEqual((await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows, before.rows);
+    } finally {
+      if (previousDump === undefined) delete process.env.KAYAN_PG_DUMP;
+      else process.env.KAYAN_PG_DUMP = previousDump;
+      delete process.env.KAYAN_CORRUPT_FIXTURE;
+    }
     // pg_dump exits successfully but writes a truncated PGDMP header. The
     // real pg_restore must refuse it before a safety file is published.
     const fakeDump = path.join(dir, 'fake-pg-dump');
@@ -74,13 +112,13 @@ const path = require('node:path');
       if (savedDump === undefined) delete process.env.KAYAN_PG_DUMP;
       else process.env.KAYAN_PG_DUMP = savedDump;
     }
-    await client.query("UPDATE fixture_items SET value='changed-after-backup'");
+    await client.query("UPDATE fixture_items SET value='changed-after-backup' WHERE id=1");
     await assert.rejects(service.restore({ confirm: true, fileName: backup.file.name }, 'fixture'), /rehearsal database could not be removed/i);
     assert.equal(schemaDestructions, 0);
     assert.equal(maintenance.isActive, false);
-    assert.equal((await client.query('SELECT value FROM fixture_items')).rows[0].value, 'changed-after-backup');
+    assert.equal((await client.query('SELECT value FROM fixture_items WHERE id = 1')).rows[0].value, 'changed-after-backup');
     assert.equal((await service.list()).filter(f => f.kind === 'safety').length, 0);
-    console.log('PASS: real pg_restore rejects a truncated safety archive and scratch cleanup failure leaves synthetic primary unchanged; Prisma and licence checks mocked.');
+    console.log('PASS: real pg_restore reads a valid archive and rejects TOC-readable truncated data without publication or primary changes; scratch cleanup failure leaves synthetic primary unchanged. Prisma and licence checks mocked; external files and full restore not verified.');
   } finally {
     if (scratchClient) await scratchClient.end();
     if (scratchName) await admin.query(`DROP DATABASE "${scratchName}"`);

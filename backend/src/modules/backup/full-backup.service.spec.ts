@@ -182,8 +182,10 @@ describe('FullBackupService guards', () => {
 
       const result = await service.createFull('user-1');
 
-      expect(seenArgs).toHaveLength(2);
+      expect(seenArgs).toHaveLength(3);
       expect(seenArgs[1]).toContain('--list');
+      expect(seenArgs[2]).toContain('--file');
+      expect(seenArgs[2]).toContain(process.platform === 'win32' ? 'NUL' : '/dev/null');
       expect(seenArgs[0]).toContain('--no-password');
       expect(seenArgs[0]).toContain('--format=custom');
       expect(result.file.name).toMatch(/^kayan-full-.*\.dump$/);
@@ -236,6 +238,24 @@ describe('FullBackupService guards', () => {
         expect(audit.record).not.toHaveBeenCalled();
       },
     );
+
+    it('does not publish an archive when its table of contents reads but data does not', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      const service = serviceWithTools(dir);
+      jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
+        const argv = args as string[];
+        const fileArg = argv.find((a) => a.startsWith('--file='));
+        if (fileArg) writeFileSync(fileArg.slice(7), Buffer.from('PGDMP-synthetic'));
+        const dataRead = argv.includes('--file');
+        (callback as (e: Error | null, o: string, s: string) => void)(
+          dataRead ? new Error('synthetic data corruption') : null,
+          argv.includes('--list') ? '1; 0 0 TABLE DATA synthetic' : '', '',
+        );
+        return {} as childProcess.ChildProcess;
+      }) as typeof childProcess.execFile);
+      await expect(service.createFull('u1')).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(readdirSync(dir)).toEqual([]);
+    });
 
     it('creates distinct completed files for concurrent backups in the same second', async () => {
       const dir = temporaryDir('kayan-backups-');
@@ -598,6 +618,24 @@ describe('FullBackupService guards', () => {
       );
       expect(verified.entries).toBe(2);
       expect(verified.sizeBytes).toBe(69);
+      expect(verified).toMatchObject({ archiveContentReadable: true, fullRestoreRehearsed: false, includesExternalFiles: false });
+    });
+
+    it('refuses data corruption even when the table of contents is readable', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      fakeTools(dir);
+      process.env.KAYAN_BACKUP_DIR = dir;
+      writeFileSync(join(dir, 'corrupt.dump'), Buffer.from('PGDMP-synthetic'));
+      jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
+        const isList = (args as string[]).includes('--list');
+        (callback as (e: Error | null, o: string, s: string) => void)(
+          isList ? null : new Error('synthetic corruption'), isList ? '1; 0 TABLE DATA test' : '', '',
+        );
+        return {} as childProcess.ChildProcess;
+      }) as typeof childProcess.execFile);
+      const service = serviceWithEnv(dir);
+      await expect(service.verify('corrupt.dump')).rejects.toThrow(/could not read/);
+      expect(readdirSync(dir)).toContain('corrupt.dump');
     });
 
     it('refuses an archive that holds no objects', async () => {
