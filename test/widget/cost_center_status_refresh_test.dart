@@ -38,7 +38,7 @@ void main() {
         localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,
         home:const Scaffold(body:CostCentersScreen()))));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip(initialActive ? 'Deactivate' : 'Activate')); await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip(initialActive ? 'Deactivate' : 'Reactivate')); await tester.pumpAndSettle();
       if (initialActive) {
         await tester.tap(find.widgetWithText(FilledButton,'Deactivate')); await tester.pumpAndSettle();
       }
@@ -46,7 +46,7 @@ void main() {
       expect(find.textContaining('PRIVATE_CENTER_STATUS'),findsNothing);
       await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
       expect(api.calls,1);
-      expect(find.byTooltip(initialActive ? 'Activate' : 'Deactivate'),findsOneWidget);
+      expect(find.byTooltip(initialActive ? 'Reactivate' : 'Deactivate'),findsOneWidget);
       expect((await container.read(activeCostCentersProvider.future)).length,initialActive ? 0 : 1);
       expect(tester.takeException(),isNull);
     });
