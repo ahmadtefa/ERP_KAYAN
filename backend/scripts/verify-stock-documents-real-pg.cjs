@@ -197,6 +197,42 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.ok(recovered.id);
     }
     console.log('PASS: order creation idempotency, conflicting payloads, concurrency and audit rollback for both types.');
+    // Draft edits preserve existing line IDs and historical unit factors.
+    // The fixture verifies retry, stale writes and required-audit rollback on
+    // real Prisma transactions, then refuses an approved order amendment.
+    for (const [kind, orders, party] of [['sales',sales,customer.id],['purchase',purchases,supplier.id]]) {
+      const partyField = kind === 'sales' ? 'customerId' : 'supplierId';
+      const model = kind === 'sales' ? prisma.salesOrder : prisma.purchaseOrder;
+      const draft = await orders.create(company,branch,user,{[partyField]:party,orderDate:date,
+        lines:[{itemId:first.id,quantity:'3',unitName:'carton',unitPrice:'100',discountPercent:'5',taxRate:'14'}]});
+      await prisma.itemUnit.update({where:{itemId_unit:{itemId:first.id,unit:'carton'}},data:{factor:'12',isActive:false}});
+      const request = { idempotencyKey:`draft-${kind}-update-00001`, expectedUpdatedAt:draft.updatedAt,
+        lines:[{orderLineId:draft.lines[0].id,quantity:'2',unitPrice:'100',discountPercent:'5',taxRate:'14'}] };
+      const updated = await orders.updateDraft(company,branch,user,draft.id,request);
+      assert.equal(updated.lines[0].id,draft.lines[0].id);
+      assert.equal(updated.lines[0].baseQuantity,'20.0000');
+      assert.equal(updated.lines[0].unitFactor,'10.000000');
+      assert.equal(updated.totalAmount,'216.6000');
+      assert.notEqual(updated.updatedAt,draft.updatedAt);
+      assert.equal((await orders.updateDraft(company,branch,user,draft.id,request)).id,draft.id);
+      await assert.rejects(orders.updateDraft(company,branch,user,draft.id,{...request, lines:[{...request.lines[0],quantity:'3'}]}),/different request/);
+      await assert.rejects(orders.updateDraft(company,branch,user,draft.id,{...request,idempotencyKey:`draft-${kind}-stale-000001`}),/changed since/);
+      const fail = {...request,idempotencyKey:`draft-${kind}-audit-fail-001`,expectedUpdatedAt:updated.updatedAt,
+        lines:[{...request.lines[0],quantity:'4'}]};
+      const originalAudit = audit.recordRequired.bind(audit);
+      audit.recordRequired = async (input,tx) => {
+        if (input.entity === `${kind}_orders` && input.action === 'UPDATE') throw new Error('injected draft edit audit failure');
+        return originalAudit(input,tx);
+      };
+      try { await assert.rejects(orders.updateDraft(company,branch,user,draft.id,fail),/injected draft edit audit failure/); }
+      finally { audit.recordRequired = originalAudit; }
+      assert.equal((await model.findUnique({where:{id:draft.id}})).totalAmount.toFixed(4),'216.6000');
+      assert.equal((await sql.query('SELECT count(*)::int AS n FROM order_creation_requests WHERE "companyId"=$1 AND "requestKey"=$2',[company,fail.idempotencyKey])).rows[0].n,0);
+      await orders.approve(company,user,draft.id);
+      await assert.rejects(orders.updateDraft(company,branch,user,draft.id,{...fail,idempotencyKey:`draft-${kind}-approved-0001`}),/Only draft/);
+      await prisma.itemUnit.update({where:{itemId_unit:{itemId:first.id,unit:'carton'}},data:{factor:'10',isActive:true}});
+    }
+    console.log('PASS: draft order edit, historical factors, retry, stale update and audit rollback for both types.');
     const lines = [{itemId:first.id,quantity:'3',unitName:'carton',unitPrice:'100',discountPercent:'5',taxRate:'14'},
       {itemId:second.id,quantity:'5',unitPrice:'2',taxRate:'0'}];
     const so = await sales.create(company,branch,user,{customerId:customer.id,orderDate:date,lines});

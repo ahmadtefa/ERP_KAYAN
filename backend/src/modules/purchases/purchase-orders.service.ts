@@ -11,6 +11,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { selectedOrderLineQuantities } from '../../common/units/order-conversion-selection';
 import { orderConversionIdentity } from '../../common/units/order-conversion-identity';
 import { orderCreationIdentity, OrderCreationDuplicateError } from '../../common/units/order-creation-identity';
+import { planDraftOrderEdit } from '../../common/units/order-draft-edit';
 import { historicalOrderUnit, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import {
@@ -132,6 +133,7 @@ export class PurchaseOrdersService {
 
     return {
       ...this.summary(order),
+      updatedAt: order.updatedAt.toISOString(),
       supplierCode: order.supplier.code,
       supplierNameEn: order.supplier.nameEn,
       supplierNameAr: order.supplier.nameAr,
@@ -262,6 +264,72 @@ export class PurchaseOrdersService {
       throw error;
     }
     return this.findOne(companyId, created.id);
+  }
+
+  /** Only drafts with no invoice history can be changed; allocations and
+   * approved promises must be revised by a separate controlled workflow. */
+  async updateDraft(companyId: string, branchId: string | null, userId: string, id: string, dto: Record<string, unknown>) {
+    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    const identity = orderCreationIdentity({ ...dto, orderId: id });
+    if (!identity) throw new BadRequestException('idempotencyKey is required');
+    await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id FROM purchase_orders WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+          AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
+      `);
+      if (locked.length !== 1) throw new NotFoundException('Purchase order not found');
+      const previous = await tx.$queryRaw<Array<{ orderId: string; requestHash: string }>>(Prisma.sql`
+        SELECT "orderId", "requestHash" FROM order_creation_requests
+        WHERE "companyId" = ${companyId}::uuid AND "branchId" = ${branchId}::uuid
+          AND kind = 'p-edit' AND "requestKey" = ${identity.key}
+      `);
+      if (previous.length) {
+        if (previous[0].orderId !== id || previous[0].requestHash !== identity.hash) {
+          throw new ConflictException('The idempotency key was used for a different request');
+        }
+        return;
+      }
+      const order = await tx.purchaseOrder.findFirst({
+        where: { id, companyId, branchId, deletedAt: null }, include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      if (!order) throw new NotFoundException('Purchase order not found');
+      if (order.status !== OrderStatus.DRAFT) throw new BadRequestException('Only draft orders can be edited');
+      if (typeof dto.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(dto.expectedUpdatedAt))) {
+        throw new BadRequestException('expectedUpdatedAt is required');
+      }
+      if (new Date(dto.expectedUpdatedAt).getTime() !== order.updatedAt.getTime()) {
+        throw new ConflictException('The order changed since it was opened; refresh before editing');
+      }
+      if (await tx.purchaseInvoice.count({ where: { companyId, purchaseOrderId: id } }) > 0) {
+        throw new BadRequestException('Order has invoice history; draft editing is not allowed');
+      }
+      const planned = planDraftOrderEdit(order.lines, dto.lines);
+      for (const line of planned.lines) {
+        await tx.purchaseOrderLine.update({ where: { id: line.id }, data: {
+          quantity: line.quantity, unitQuantity: line.unitQuantity, unitPrice: line.unitPrice,
+          discountPercent: line.discountPercent, taxRate: line.taxRate, lineTotal: line.lineTotal,
+        } });
+      }
+      // Prisma timestamps use millisecond resolution. Ensure successive edits
+      // always produce a distinct optimistic version even within the same ms.
+      const updatedAt = new Date(Math.max(Date.now(), order.updatedAt.getTime() + 1));
+      await tx.purchaseOrder.update({ where: { id }, data: { subTotal: planned.subTotal, taxAmount: planned.taxAmount,
+        totalAmount: planned.totalAmount, updatedBy: userId, updatedAt } });
+      const inserted = await tx.$queryRaw<Array<{ orderId: string }>>(Prisma.sql`
+        INSERT INTO order_creation_requests ("companyId", "branchId", kind, "requestKey", "requestHash", "orderId")
+        VALUES (${companyId}::uuid, ${branchId}::uuid, 'p-edit', ${identity.key}, ${identity.hash}, ${id}::uuid)
+        ON CONFLICT ("companyId", "branchId", kind, "requestKey") DO NOTHING RETURNING "orderId"
+      `);
+      if (inserted.length !== 1) throw new ConflictException('The idempotency key was used for a different request');
+      await this.audit.recordRequired({ companyId, userId, action: 'UPDATE', entity: 'purchase_orders', entityId: id,
+        before: { total: order.totalAmount.toFixed(MONEY_SCALE), updatedAt: order.updatedAt.toISOString() },
+        after: { total: planned.totalAmount.toFixed(MONEY_SCALE), updatedAt: updatedAt.toISOString(),
+          lines: planned.lines.map(line => ({ id: line.id, quantity: line.quantity.toFixed(MONEY_SCALE),
+            unitPrice: line.unitPrice.toFixed(MONEY_SCALE), discountPercent: line.discountPercent.toFixed(MONEY_SCALE),
+            taxRate: line.taxRate.toFixed(MONEY_SCALE) })) },
+      }, tx);
+    });
+    return this.findOne(companyId, id);
   }
 
   async approve(companyId: string, userId: string, id: string) {

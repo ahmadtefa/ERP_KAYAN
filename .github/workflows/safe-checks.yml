@@ -65,6 +65,7 @@ jobs:
           src/modules/sales/sales-orders.pricing-tax.spec.ts
           src/modules/purchases/purchase-orders.units.spec.ts
           src/common/units/unit-math.spec.ts
+          src/common/units/order-draft-edit.spec.ts
           src/common/units/order-creation-identity.spec.ts
           src/common/units/order-conversion-selection.spec.ts
           src/common/units/order-conversion-unit.spec.ts
