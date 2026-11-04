@@ -374,6 +374,115 @@ let difference = '70000000-0000-4000-8000-000000000005';
     await service.post(company,user,raceStock.id);
     for (const [kind, orders, invoices, party] of [['sales',sales,si,customer.id],['purchase',purchases,pi,supplier.id]]) {
       const field = kind === 'sales' ? 'customerId' : 'supplierId';
+      const model = kind === 'sales' ? prisma.salesInvoice : prisma.purchaseInvoice;
+      const linesModel = kind === 'sales' ? prisma.salesOrderLine : prisma.purchaseOrderLine;
+      const order = await orders.create(company,branch,user,{[field]:party,orderDate:date,
+        lines:[{itemId:second.id,quantity:'10',unitPrice:'2',taxRate:'14'},
+          {itemId:first.id,quantity:'5',unitPrice:'3',taxRate:'0'}]});
+      await orders.approve(company,user,order.id);
+      const orderLines = await linesModel.findMany({where:{orderId:order.id},orderBy:{lineNumber:'asc'}});
+      const initial = await orders.convertToInvoice(company,branch,user,order.id,{idempotencyKey:'amend-original-request-01',invoiceDate:date,
+        lines:[{orderLineId:orderLines[0].id,quantity:'4'}]});
+      await orders.convertToInvoice(company,branch,user,order.id,{idempotencyKey:'amend-other-request-0001',invoiceDate:date,
+        lines:[{orderLineId:orderLines[1].id,quantity:'2'}]});
+      const old = await model.findUniqueOrThrow({where:{id:initial.invoice.id},include:{lines:true}});
+      const request = {expectedUpdatedAt:old.updatedAt.toISOString(),idempotencyKey:'amend-request-00000001',
+        lines:[{orderLineId:orderLines[0].id,quantity:'6'},{orderLineId:orderLines[1].id,quantity:'3'}]};
+      const failureAudit = audit.recordRequired.bind(audit);
+      audit.recordRequired = async (input, tx) => {
+        if (input.entity === `${kind}_invoices` && input.action === 'AMEND_ORDER_ALLOCATION') throw new Error('injected amendment audit failure');
+        return failureAudit(input,tx);
+      };
+      try { await assert.rejects(invoices.updateOrderAllocation(company,branch,user,initial.invoice.id,request),/injected amendment audit failure/); }
+      finally { audit.recordRequired = failureAudit; }
+      assert.equal((await model.findUniqueOrThrow({where:{id:initial.invoice.id},include:{lines:true}})).lines.length,1);
+      assert.equal((await linesModel.findUniqueOrThrow({where:{id:orderLines[0].id}})).invoicedQuantity.toFixed(4),'4.0000');
+      assert.equal((await linesModel.findUniqueOrThrow({where:{id:orderLines[1].id}})).invoicedQuantity.toFixed(4),'2.0000');
+      const amended = await Promise.all([invoices.updateOrderAllocation(company,branch,user,initial.invoice.id,request),
+        invoices.updateOrderAllocation(company,branch,user,initial.invoice.id,request)]);
+      assert.equal(amended[0].id,initial.invoice.id);
+      assert.equal(amended[1].id,initial.invoice.id);
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:`${kind}_invoices`,entityId:initial.invoice.id,action:'AMEND_ORDER_ALLOCATION'}}),1);
+      const saved = await model.findUniqueOrThrow({where:{id:initial.invoice.id},include:{lines:{orderBy:{lineNumber:'asc'}}}});
+      assert.equal(saved.lines.length,2);
+      assert.equal(saved.lines[0].quantity.toFixed(4),'6.0000');
+      assert.equal(saved.lines[0].unitPrice.toFixed(4),'2.0000');
+      assert.equal(saved.lines[0].taxAmount.toFixed(4),'1.6800');
+      assert.equal(saved.lines[1].orderLineId,orderLines[1].id);
+      assert.equal((await linesModel.findUniqueOrThrow({where:{id:orderLines[0].id}})).invoicedQuantity.toFixed(4),'6.0000');
+      assert.equal((await linesModel.findUniqueOrThrow({where:{id:orderLines[1].id}})).invoicedQuantity.toFixed(4),'5.0000');
+      await assert.rejects(invoices.updateOrderAllocation(company,branch,user,initial.invoice.id,{...request,
+        lines:[{orderLineId:orderLines[0].id,quantity:'5'}]}),/different amendment/);
+      await assert.rejects(invoices.updateOrderAllocation(company,branch,user,initial.invoice.id,{...request,
+        idempotencyKey:'different-amendment-001',lines:[{orderLineId:orderLines[0].id,quantity:'5'}]}),/changed; reload/);
+      assert.equal((await orders.convertToInvoice(company,branch,user,order.id,{idempotencyKey:'amend-original-request-01',invoiceDate:date,
+        lines:[{orderLineId:orderLines[0].id,quantity:'4'}]})).invoice.id,initial.invoice.id);
+      await invoices.cancelDraft(company,branch,user,initial.invoice.id);
+      assert.equal((await linesModel.findUniqueOrThrow({where:{id:orderLines[0].id}})).invoicedQuantity.toFixed(4),'0.0000');
+      assert.equal((await linesModel.findUniqueOrThrow({where:{id:orderLines[1].id}})).invoicedQuantity.toFixed(4),'2.0000');
+
+      const raceOrder = await orders.create(company,branch,user,{[field]:party,orderDate:date,
+        lines:[{itemId:second.id,quantity:'5',unitPrice:'2',taxRate:'0'}]});
+      await orders.approve(company,user,raceOrder.id);
+      const raceLine = await linesModel.findFirstOrThrow({where:{orderId:raceOrder.id}});
+      const raceInvoice = await orders.convertToInvoice(company,branch,user,raceOrder.id,
+        {idempotencyKey:'amend-cancel-original-1',invoiceDate:date,lines:[{orderLineId:raceLine.id,quantity:'2'}]});
+      const current = await model.findUniqueOrThrow({where:{id:raceInvoice.invoice.id}});
+      const change = {expectedUpdatedAt:current.updatedAt.toISOString(),idempotencyKey:'amend-cancel-change-001',
+        lines:[{orderLineId:raceLine.id,quantity:'4'}]};
+      // Hold the parent lock so the cancellation reads the old invoice lines
+      // before waiting. The amendment queues first and commits new lines;
+      // cancellation must re-read those lines after it acquires the lock.
+      await sql.query('BEGIN');
+      let pendingAmend, pendingCancel;
+      try {
+        const table = kind === 'sales' ? 'sales_orders' : 'purchase_orders';
+        await sql.query(`SELECT id FROM ${table} WHERE id=$1 FOR UPDATE`,[raceOrder.id]);
+        const waitForLockers = async count => {
+          for (let n=0;n<100;n++) {
+            const waiting = await sql.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE $1`,[`%${table}%FOR UPDATE%`]);
+            if (waiting.rows[0].n >= count) return;
+            await new Promise(resolve => setTimeout(resolve,50));
+          }
+          throw new Error(`${kind}: timed out waiting for locked operations`);
+        };
+        pendingAmend = invoices.updateOrderAllocation(company,branch,user,raceInvoice.invoice.id,change);
+        pendingAmend.catch(() => {});
+        await waitForLockers(1);
+        pendingCancel = invoices.cancelDraft(company,branch,user,raceInvoice.invoice.id);
+        pendingCancel.catch(() => {});
+        await waitForLockers(2);
+        await sql.query('COMMIT');
+      } catch (error) { await sql.query('ROLLBACK'); throw error; }
+      await pendingAmend;
+      await pendingCancel;
+      assert.equal((await linesModel.findUniqueOrThrow({where:{id:raceLine.id}})).invoicedQuantity.toFixed(4),'0.0000');
+      assert.ok((await model.findUniqueOrThrow({where:{id:raceInvoice.invoice.id}})).deletedAt);
+      assert.equal(await prisma.stockMovement.count({where:{companyId:company,referenceId:raceInvoice.invoice.id}}),0);
+
+      const postOrder = await orders.create(company,branch,user,{[field]:party,orderDate:date,
+        lines:[{itemId:second.id,quantity:'5',unitPrice:'2',taxRate:'0'}]});
+      await orders.approve(company,user,postOrder.id);
+      const postLine = await linesModel.findFirstOrThrow({where:{orderId:postOrder.id}});
+      const postInvoice = await orders.convertToInvoice(company,branch,user,postOrder.id,
+        {idempotencyKey:'amend-post-original-001',invoiceDate:date,lines:[{orderLineId:postLine.id,quantity:'2'}]});
+      const postBefore = await model.findUniqueOrThrow({where:{id:postInvoice.invoice.id}});
+      const postAttempts = await Promise.allSettled([
+        invoices.post(company,user,postInvoice.invoice.id),
+        invoices.updateOrderAllocation(company,branch,user,postInvoice.invoice.id,{expectedUpdatedAt:postBefore.updatedAt.toISOString(),
+          idempotencyKey:'amend-post-change-0001',lines:[{orderLineId:postLine.id,quantity:'4'}]}),
+      ]);
+      assert.equal(postAttempts[0].status,'fulfilled');
+      const posted = await model.findUniqueOrThrow({where:{id:postInvoice.invoice.id},include:{lines:true}});
+      assert.equal(posted.status,'POSTED');
+      const moves = await prisma.stockMovement.findMany({where:{companyId:company,referenceId:postInvoice.invoice.id}});
+      assert.equal(moves.length,1);
+      assert.equal(moves[0].quantity.toFixed(4),posted.lines[0].quantity.toFixed(4));
+      assert.equal((await linesModel.findUniqueOrThrow({where:{id:postLine.id}})).invoicedQuantity.toFixed(4),posted.lines[0].quantity.toFixed(4));
+      assert.equal(await prisma.journalEntry.count({where:{companyId:company,sourceId:postInvoice.invoice.id}}),1);
+    }
+    for (const [kind, orders, invoices, party] of [['sales',sales,si,customer.id],['purchase',purchases,pi,supplier.id]]) {
+      const field = kind === 'sales' ? 'customerId' : 'supplierId';
       const model = kind === 'sales' ? 'salesInvoice' : 'purchaseInvoice';
       const orderLineModel = kind === 'sales' ? prisma.salesOrderLine : prisma.purchaseOrderLine;
       const order = await orders.create(company,branch,user,{[field]:party,orderDate:date,

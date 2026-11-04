@@ -43,6 +43,12 @@ export class SalesInvoicesController {
     return this.service.updateDraft(user.companyId, user.branchId, user.userId, id, dto);
   }
 
+  @Put(':id/order-allocation')
+  @RequirePermissions('sales.orders.read', 'sales.invoices.create')
+  updateOrderAllocation(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: Record<string, unknown>) {
+    return this.service.updateOrderAllocation(user.companyId, user.branchId, user.userId, id, dto ?? {});
+  }
+
   @Delete(':id')
   @RequirePermissions('sales.invoices.create')
   cancelDraft(@CurrentUser() user: AuthUser, @Param('id') id: string) {

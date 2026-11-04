@@ -68,6 +68,7 @@ jobs:
           src/common/units/order-conversion-selection.spec.ts
           src/common/units/order-conversion-unit.spec.ts
           src/common/units/order-conversion-identity.spec.ts
+          src/common/units/order-reallocation.spec.ts
           src/modules/sales/sales-invoices.units.spec.ts
           src/modules/sales/sales-invoices.service.spec.ts
           src/modules/sales/sales-invoices.update.spec.ts

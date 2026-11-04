@@ -78,6 +78,7 @@ function makeService(itemOverrides: Record<string, any> = {}) {
     journalEntryId: null,
     postedAt: null,
     createdAt: new Date('2026-10-27T00:00:00Z'),
+    updatedAt: new Date('2026-10-27T00:00:00Z'),
     supplier: { id: SUPPLIER, code: 'SUP-1', nameEn: 'Supplier', nameAr: 'مورد' },
     branch: { code: 'HQ', nameEn: 'HQ', nameAr: 'الرئيسية' },
     lines: [],

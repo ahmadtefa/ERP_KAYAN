@@ -23,6 +23,7 @@ function invoiceRow() {
     paidAmount: D('114'),
     costOfGoods: D('60'),
     createdAt: new Date('2026-10-05T00:00:00Z'),
+    updatedAt: new Date('2026-10-27T00:00:00Z'),
     discountType: null,
     discountPercent: D('0'),
     discountAmount: D('0'),

@@ -1,9 +1,10 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InvoiceDocumentType, InvoiceStatus, JournalStatus, Prisma, StockDirection } from '@prisma/client';
+import { InvoiceDocumentType, InvoiceStatus, JournalStatus, OrderStatus, Prisma, StockDirection } from '@prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
@@ -17,7 +18,11 @@ import {
 } from '../../common/pricing/discount';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
-import { orderUnitForInvoiceLine, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
+import { historicalOrderUnit, orderUnitForInvoiceLine, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
+import { orderConversionIdentity } from '../../common/units/order-conversion-identity';
+import { selectedOrderLineQuantities } from '../../common/units/order-conversion-selection';
+import { planOrderReallocation } from '../../common/units/order-reallocation';
+import { createHash } from 'node:crypto';
 import { releaseOrderAllocations } from '../../common/units/order-invoice-reconciliation';
 import {
   defaultUnitPrice,
@@ -142,11 +147,14 @@ export class SalesInvoicesService {
     return {
       ...this.toSummary(invoice, mayReadCost),
       branch: invoice.branch,
+      orderId: invoice.salesOrderId,
+      updatedAt: invoice.updatedAt.toISOString(),
       notes: invoice.notes,
       journalEntryId: invoice.journalEntryId,
       postedAt: invoice.postedAt?.toISOString() ?? null,
       lines: invoice.lines.map((l) => ({
         id: l.id,
+        orderLineId: l.orderLineId,
         lineNumber: l.lineNumber,
         itemId: l.itemId,
         itemCode: l.item?.code ?? null,
@@ -430,11 +438,111 @@ export class SalesInvoicesService {
    * weighted average cost, the cost lines are written onto the invoice, and the
    * journal entry is created. If any of it fails, none of it happened.
    */
+  /** Replace the allocation of an order-linked draft without changing its original conversion identity. */
+  async updateOrderAllocation(companyId: string, branchId: string | null, userId: string, id: string, dto: Record<string, unknown>) {
+    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    const before = await this.prisma.salesInvoice.findFirst({
+      where: { id, companyId, branchId, deletedAt: null }, select: { salesOrderId: true },
+    });
+    if (!before?.salesOrderId) throw new BadRequestException('Invoice is not linked to an order');
+    const orderId = before.salesOrderId;
+    if (typeof dto.expectedUpdatedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(dto.expectedUpdatedAt)) {
+      throw new BadRequestException('expectedUpdatedAt is required');
+    }
+    const expectedUpdatedAt = dto.expectedUpdatedAt;
+    await this.prisma.$transaction(async (tx) => {
+      // Lock in the same order as conversion, cancellation and reversal.
+      const lockedOrder = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id FROM sales_orders WHERE id = ${orderId}::uuid AND "companyId" = ${companyId}::uuid
+          AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
+      `);
+      if (lockedOrder.length !== 1) throw new NotFoundException('Sales order not found');
+      const lockedInvoice = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id FROM sales_invoices WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+          AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
+      `);
+      if (lockedInvoice.length !== 1) throw new NotFoundException('Sales invoice not found');
+      const invoice = await tx.salesInvoice.findFirst({
+        where: { id, companyId, branchId, deletedAt: null }, include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      const order = await tx.salesOrder.findFirst({
+        where: { id: orderId, companyId, branchId, deletedAt: null }, include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      if (!invoice || !order || invoice.salesOrderId !== orderId) throw new BadRequestException('Order allocation changed; reload');
+      const requested = selectedOrderLineQuantities(dto.lines, order.lines);
+      const identity = orderConversionIdentity(dto, requested);
+      const hash = createHash('sha256').update(JSON.stringify({ selection: identity.hash, expectedUpdatedAt })).digest('hex');
+      const previous = await tx.auditLog.findFirst({
+        where: { companyId, entity: 'sales_invoices', entityId: id, action: 'AMEND_ORDER_ALLOCATION',
+          afterJson: { path: ['amendmentKey'], equals: identity.key } },
+      });
+      if (previous) {
+        const after = previous.afterJson as { amendmentHash?: string } | null;
+        if (after?.amendmentHash !== hash) throw new ConflictException('The idempotency key was used for a different amendment');
+        if (invoice.status !== InvoiceStatus.DRAFT) throw new ConflictException('The amended invoice is no longer a draft');
+        return;
+      }
+      if (invoice.status !== InvoiceStatus.DRAFT || invoice.documentType !== InvoiceDocumentType.INVOICE) {
+        throw new BadRequestException('Only an active draft invoice can be amended');
+      }
+      if (invoice.updatedAt.toISOString() !== expectedUpdatedAt) throw new ConflictException('The invoice changed; reload before editing');
+      if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.DRAFT) throw new BadRequestException('Related order cannot be amended');
+      if (!invoice.discountAmount.isZero() || !invoice.discountPercent.isZero()) {
+        throw new BadRequestException('This invoice has additional charges or discounts; manual review required');
+      }
+      const counters = planOrderReallocation(order.lines, invoice.lines, requested);
+      const selected = order.lines.filter((line) => requested.has(line.id));
+      const units: TrustedOrderUnit[] = [];
+      const rawLines = selected.map((line) => {
+        const historical = historicalOrderUnit({ label: `Line ${line.lineNumber}`, unitName: line.unitName,
+          unitFactor: line.unitFactor, baseQuantity: requested.get(line.id)! });
+        units.push({ itemId: line.itemId, resolved: historical });
+        return { itemId: line.itemId, description: line.description,
+          quantity: (historical.snapshot.unitQuantity ?? historical.baseQuantity).toFixed(MONEY_SCALE),
+          unitPrice: line.unitPrice.toFixed(MONEY_SCALE), taxRate: line.taxRate.toFixed(MONEY_SCALE),
+          discountPercent: line.discountPercent.toFixed(MONEY_SCALE), unitName: line.unitName ?? undefined };
+      });
+      const prepared = await this.prepareLines(companyId, rawLines, invoice.customerId, {}, units, tx);
+      const totals = this.totalsOf(prepared.lines);
+      const subTotal = totals.subTotal, taxAmount = totals.taxAmount, totalAmount = totals.totalAmount;
+      await tx.salesInvoice.update({
+        where: { id }, data: { subTotal, taxAmount, totalAmount,
+          discountType: prepared.documentDiscount.type, discountPercent: prepared.documentDiscount.percent,
+          discountAmount: prepared.documentDiscount.amount, lineDiscountTotal: prepared.lineDiscountTotal,
+          lines: { deleteMany: {}, create: prepared.lines.map((line, index) => ({
+            orderLineId: selected[index].id, lineNumber: line.lineNumber, itemId: line.itemId,
+            description: line.description, quantity: line.quantity, unitPrice: line.unitPrice,
+            taxRate: line.taxRate, taxAmount: line.taxAmount, lineTotal: line.lineTotal,
+            grossLineTotal: line.grossLineTotal, discountType: line.discountType,
+            discountPercent: line.discountPercent, discountAmount: line.discountAmount,
+            invoiceDiscountAmount: line.invoiceDiscountAmount,
+            costCenterId: line.costCenterId, unitName: line.unitName, unitFactor: line.unitFactor, unitQuantity: line.unitQuantity,
+          })) },
+        },
+      });
+      for (const line of order.lines) await tx.salesOrderLine.update({
+        where: { id: line.id }, data: { invoicedQuantity: counters.get(line.id)! },
+      });
+      const complete = order.lines.every((line) => counters.get(line.id)!.greaterThanOrEqualTo(line.quantity));
+      const none = order.lines.every((line) => counters.get(line.id)!.isZero());
+      await tx.salesOrder.update({ where: { id: orderId }, data: {
+        status: none ? OrderStatus.APPROVED : complete ? OrderStatus.FULFILLED : OrderStatus.PARTIALLY_FULFILLED,
+      } });
+      await this.audit.recordRequired({
+        companyId, userId, action: 'AMEND_ORDER_ALLOCATION', entity: 'sales_invoices', entityId: id,
+        before: { totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE), allocations: invoice.lines.map((line) => ({ orderLineId: line.orderLineId, quantity: line.quantity.toFixed(MONEY_SCALE) })) },
+        after: { amendmentKey: identity.key, amendmentHash: hash, totalAmount: totalAmount.toFixed(MONEY_SCALE),
+          allocations: selected.map((line) => ({ orderLineId: line.id, quantity: requested.get(line.id)!.toFixed(MONEY_SCALE) })) },
+      }, tx);
+    }, { maxWait: 10000, timeout: 30000 });
+    return this.findOne(companyId, id);
+  }
+
   /** Cancel a draft without deleting its historical identity or retry key. */
   async cancelDraft(companyId: string, branchId: string | null, userId: string, id: string) {
     if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
     await this.prisma.$transaction(async (tx) => {
-      const invoice = await tx.salesInvoice.findFirst({
+      let invoice = await tx.salesInvoice.findFirst({
         where: { id, companyId, branchId, deletedAt: null },
         include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
@@ -443,7 +551,23 @@ export class SalesInvoicesService {
         throw new BadRequestException('Only a draft invoice can be cancelled');
       }
       if (invoice.salesOrderId) {
-        await releaseOrderAllocations(tx, 'sales', companyId, invoice.salesOrderId, invoice.lines);
+        // An amendment can commit while we wait for the order lock. Reload
+        // its allocation afterwards; releasing the pre-lock snapshot corrupts
+        // the order counters even though both operations are transactions.
+        const orderId = invoice.salesOrderId;
+        const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT id FROM sales_orders WHERE id = ${orderId}::uuid AND "companyId" = ${companyId}::uuid
+            AND "deletedAt" IS NULL FOR UPDATE
+        `);
+        if (locked.length !== 1) throw new BadRequestException('Related order is missing; manual review required');
+        invoice = await tx.salesInvoice.findFirst({
+          where: { id, companyId, branchId, deletedAt: null },
+          include: { lines: { orderBy: { lineNumber: 'asc' } } },
+        });
+        if (!invoice || invoice.salesOrderId !== orderId || invoice.status !== InvoiceStatus.DRAFT) {
+          throw new BadRequestException('Invoice was posted or cancelled concurrently');
+        }
+        await releaseOrderAllocations(tx, 'sales', companyId, orderId, invoice.lines);
       }
       const claimed = await tx.salesInvoice.updateMany({
         where: { id, companyId, branchId, status: InvoiceStatus.DRAFT, deletedAt: null },
@@ -1010,7 +1134,7 @@ export class SalesInvoicesService {
         grossLineTotal,
         raw,
         index,
-        new Prisma.Decimal(settings.maxDiscountPercent),
+        new Prisma.Decimal(orderUnits ? '100' : settings.maxDiscountPercent),
       );
 
       // A cost center must be this company's and active; the posting path
@@ -1086,7 +1210,7 @@ export class SalesInvoicesService {
           grossTotal,
           lineDiscountTotal.plus(allocation.discount.amount),
         ),
-        new Prisma.Decimal(settings.maxDiscountPercent),
+        new Prisma.Decimal(orderUnits ? '100' : settings.maxDiscountPercent),
         'Document',
       );
     } catch (error) {
