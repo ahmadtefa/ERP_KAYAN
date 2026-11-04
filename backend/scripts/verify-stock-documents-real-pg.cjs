@@ -127,7 +127,27 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const hierarchy = await sql.query('SELECT "parentId", "isActive" FROM accounts WHERE id=$1', [child.id]);
     assert.equal(hierarchy.rows[0].parentId, root.id);
     assert.equal(hierarchy.rows[0].isActive, true);
-    console.log('PASS: real PostgreSQL + Prisma chart create, child relationship, duplicate and activation rules.');
+    // Audit is required in the same transaction as all chart mutations.
+    // A failed audit must roll back both a newly created child and any parent
+    // demotion, as well as account edits and soft deletion.
+    const leaf = await chart.create(company,user,{code:'SYN-AUDIT',nameEn:'Audit leaf',nameAr:'فرعي',type:'ASSET',isPostable:true});
+    const chartAudit = audit.recordRequired.bind(audit);
+    audit.recordRequired = async (input,tx) => {
+      if (input.entity === 'accounts') throw new Error('injected chart audit failure');
+      return chartAudit(input,tx);
+    };
+    try {
+      await assert.rejects(chart.create(company,user,{code:'SYN-ROLLBACK',nameEn:'Rollback',nameAr:'تراجع',type:'ASSET',parentId:leaf.id}),/injected chart audit failure/);
+      assert.equal(await prisma.account.count({where:{companyId:company,code:'SYN-ROLLBACK'}}),0);
+      assert.equal((await prisma.account.findUniqueOrThrow({where:{id:leaf.id}})).isPostable,true);
+      await assert.rejects(chart.update(company,user,leaf.id,{nameEn:'Changed'}),/injected chart audit failure/);
+      assert.equal((await prisma.account.findUniqueOrThrow({where:{id:leaf.id}})).nameEn,'Audit leaf');
+      await assert.rejects(chart.remove(company,user,leaf.id),/injected chart audit failure/);
+      assert.equal((await prisma.account.findUniqueOrThrow({where:{id:leaf.id}})).deletedAt,null);
+    } finally { audit.recordRequired = chartAudit; }
+    const accountAudit = await prisma.auditLog.count({where:{companyId:company,entity:'accounts',entityId:leaf.id,action:'CREATE'}});
+    assert.equal(accountAudit,1);
+    console.log('PASS: real PostgreSQL + Prisma chart relationship, duplicate, activation and atomic audit rollback.');
 
     const failStockAudit = async (action, operation) => {
       const original = audit.recordRequired.bind(audit);

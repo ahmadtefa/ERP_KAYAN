@@ -173,23 +173,22 @@ export class ChartOfAccountsService {
       if (parentId) {
         await this.demoteParentToGrouping(tx, companyId, parentId);
       }
+      await this.audit.recordRequired({
+        companyId,
+        userId,
+        action: 'CREATE',
+        entity: 'accounts',
+        entityId: row.id,
+        after: {
+          code: row.code,
+          nameEn: row.nameEn,
+          nameAr: row.nameAr,
+          type: row.type,
+          parentId: row.parentId,
+          isPostable: row.isPostable,
+        },
+      }, tx);
       return row;
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'CREATE',
-      entity: 'accounts',
-      entityId: created.id,
-      after: {
-        code: created.code,
-        nameEn: created.nameEn,
-        nameAr: created.nameAr,
-        type: created.type,
-        parentId: created.parentId,
-        isPostable: created.isPostable,
-      },
     });
 
     return toResponse(created);
@@ -278,17 +277,16 @@ export class ChartOfAccountsService {
       if (parentChanged && dto.parentId) {
         await this.demoteParentToGrouping(tx, companyId, dto.parentId);
       }
+      await this.audit.recordRequired({
+        companyId,
+        userId,
+        action: 'UPDATE',
+        entity: 'accounts',
+        entityId: id,
+        before: toResponse(account),
+        after: toResponse(row),
+      }, tx);
       return row;
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'UPDATE',
-      entity: 'accounts',
-      entityId: id,
-      before: toResponse(account),
-      after: toResponse(updated),
     });
 
     return toResponse(updated);
@@ -323,18 +321,19 @@ export class ChartOfAccountsService {
       );
     }
 
-    await this.prisma.account.update({
-      where: { id },
-      data: { deletedAt: new Date(), updatedBy: userId },
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'DELETE',
-      entity: 'accounts',
-      entityId: id,
-      before: toResponse(account),
+    await this.prisma.$transaction(async (tx) => {
+      await tx.account.update({
+        where: { id },
+        data: { deletedAt: new Date(), updatedBy: userId },
+      });
+      await this.audit.recordRequired({
+        companyId,
+        userId,
+        action: 'DELETE',
+        entity: 'accounts',
+        entityId: id,
+        before: toResponse(account),
+      }, tx);
     });
   }
 

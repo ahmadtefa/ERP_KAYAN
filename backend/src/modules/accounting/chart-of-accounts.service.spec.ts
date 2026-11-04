@@ -72,7 +72,7 @@ function fakePrisma(state: {
 }
 
 function serviceWith(prisma: any) {
-  const audit = { record: async () => {} } as any;
+  const audit = { recordRequired: async () => {} } as any;
   return new ChartOfAccountsService(prisma, audit);
 }
 
@@ -104,6 +104,28 @@ const baseAccounts = [
     deletedAt: null,
   },
 ];
+
+describe('chart audit requirement', () => {
+  it.each(['create', 'update', 'remove'] as const)(
+    '%s propagates audit failures from the transaction', async (operation) => {
+      const prisma = fakePrisma({ accounts: baseAccounts });
+      const error = new Error('synthetic audit failure');
+      const recordRequired = jest.fn(async (_input: unknown, tx: unknown) => {
+        expect(tx).toBeDefined();
+        throw error;
+      });
+      const service = new ChartOfAccountsService(prisma, { recordRequired } as any);
+      const action = operation === 'create'
+        ? service.create('c1', 'u1', { code: '12', nameEn: 'New', nameAr: 'جديد', type: 'ASSET' })
+        : operation === 'update'
+          ? service.update('c1', 'u1', 'child-11', { nameEn: 'Updated' })
+          : service.remove('c1', 'u1', 'child-11');
+      await expect(action).rejects.toBe(error);
+      expect(recordRequired).toHaveBeenCalledTimes(1);
+      expect(recordRequired.mock.calls[0][0]).toMatchObject({ entity: 'accounts' });
+    },
+  );
+});
 
 describe('ChartOfAccountsService', () => {
   describe('suggestCode', () => {
