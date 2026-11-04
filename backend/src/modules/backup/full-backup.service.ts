@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -161,6 +162,8 @@ export class FullBackupService {
       serverVersion,
       warning,
       backupDirectory: this.backupDir(),
+      // No archive currently has proof of a complete machine restore.
+      deletionProtected: true,
       // A scratch restore is mandatory before the primary can be touched.
       canRehearseRestore: this.canCreateDatabase,
       rehearsalNote: this.canCreateDatabase
@@ -585,11 +588,24 @@ export class FullBackupService {
     await runCapture(pgRestore, ['--file', nullDevice, archive], 600_000);
   }
 
+  /**
+   * Reading a pg_dump is not evidence that database, files and licence can be
+   * restored together. Until such evidence exists, deletion is fail-closed.
+   * This protects the last viable copy in both manual and retention paths.
+   */
+  async assertDeletionSafe(): Promise<void> {
+    throw new ConflictException({
+      code: 'BACKUP_DELETE_PROTECTED',
+      detail: 'Backup deletion is paused until a complete replacement restore can be verified.',
+    });
+  }
+
   async remove(name: string, userId: string | null): Promise<void> {
     const path = this.safePath(name);
     if (!existsSync(path)) {
       throw new NotFoundException(`No backup file named "${name}" on this server`);
     }
+    await this.assertDeletionSafe();
     try {
       await unlink(path);
     } catch (error) {

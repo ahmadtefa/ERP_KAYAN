@@ -471,6 +471,21 @@ describe('FullBackupService guards', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
+    it('refuses manual deletion without complete replacement restore evidence', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      const service = serviceWithEnv(dir);
+      const old = join(dir, 'old.dump');
+      const newer = join(dir, 'new.dump');
+      writeFileSync(old, 'synthetic old backup');
+      writeFileSync(newer, 'synthetic new backup');
+      await expect(service.remove('old.dump', 'u1')).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'BACKUP_DELETE_PROTECTED' }),
+      });
+      const fs = await import('fs');
+      expect(fs.readFileSync(old, 'utf8')).toBe('synthetic old backup');
+      expect(fs.readFileSync(newer, 'utf8')).toBe('synthetic new backup');
+    });
+
     it('a full backup is reported only after the file exists and is a real archive', async () => {
       const dir = temporaryDir('kayan-backups-');
       fakeTools(dir);

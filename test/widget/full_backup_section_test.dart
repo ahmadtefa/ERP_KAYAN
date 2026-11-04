@@ -18,6 +18,7 @@ class _FakeFullBackupService extends FullBackupService {
   _FakeFullBackupService() : super(Dio());
 
   Object? capabilitiesError;
+  bool deletionProtected = false;
   Completer<Map<String, dynamic>>? createGate;
   Object? createError;
   Map<String, dynamic>? createResult;
@@ -29,7 +30,7 @@ class _FakeFullBackupService extends FullBackupService {
   Future<Map<String, dynamic>> capabilities() async {
     final error = capabilitiesError;
     if (error != null) throw error;
-    return const {'available': true};
+    return {'available': true, 'deletionProtected': deletionProtected};
   }
 
   @override
@@ -172,6 +173,19 @@ void main() {
       expect(find.textContaining('outcome could not be confirmed'), findsOneWidget);
     },
   );
+
+  testWidgets('protected backups show why deletion is unavailable', (tester) async {
+    final service = _FakeFullBackupService()
+      ..deletionProtected = true
+      ..files = const [
+        {'name': 'old.dump', 'kind': 'full', 'sizeBytes': 1024},
+      ];
+    await _pump(tester, service);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Deletion is paused'), findsOneWidget);
+    final deleteButton = tester.widget<IconButton>(find.byTooltip('Delete backup'));
+    expect(deleteButton.onPressed, isNull);
+  });
 
   testWidgets('a success response without a file is not reported as saved', (tester) async {
     final service = _FakeFullBackupService()..createResult = {};

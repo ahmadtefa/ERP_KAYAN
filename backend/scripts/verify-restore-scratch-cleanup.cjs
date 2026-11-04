@@ -76,6 +76,8 @@ const path = require('node:path');
     await assert.rejects(service.verify('synthetic-corrupt.dump'), /could not read/);
     assert.deepEqual((await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows, before.rows);
     assert.ok((await service.verify(backup.file.name)).archiveContentReadable);
+    await assert.rejects(service.remove(backup.file.name, 'fixture'), error => error.getStatus?.() === 409);
+    assert.ok((await service.verify(backup.file.name)).archiveContentReadable);
 
     // A tool may exit zero while leaving a data-corrupt archive; it must not
     // be published even if its TOC can be listed successfully.
