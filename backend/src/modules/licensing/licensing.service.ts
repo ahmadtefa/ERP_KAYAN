@@ -231,11 +231,9 @@ export class LicensingService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     try {
       await this.ensureReady();
-    } catch (error) {
-      // A licence subsystem that cannot start must never take the program
-      // down: the guard fails closed for business routes but the operator can
-      // still reach the licence screen and the backups.
-      this.logger.error(`Licensing did not start: ${describeError(error)}`);
+    } catch {
+      // Fail closed without putting licence, machine or database data in logs.
+      this.logger.error('Licensing did not start; business operations remain blocked.');
     }
   }
 
@@ -264,13 +262,7 @@ export class LicensingService implements OnModuleInit {
     // Keep reporting the failure until the restored store, database and clock
     // have all completed bootstrap, not merely until the JSON could be read.
     this.installedStateError = null;
-    this.logger.log(
-      `Licence mode ${this.enforcement}; public key ${
-        this.publicKeyPrint ?? 'none'
-      }; state ${this.directory}${
-        this.installedDirectory ? ' (installed copy)' : ' (development copy)'
-      }; machine ${this.machineId()}`,
-    );
+    this.logger.log(`Licence subsystem started in ${this.enforcement} mode.`);
   }
 
   private openStore(): void {
@@ -325,7 +317,7 @@ export class LicensingService implements OnModuleInit {
         candidates.push(text);
       } else {
         this.logger.error(
-          `This is an installed copy but its licence key file is missing (${installedKey}). ` +
+          'This is an installed copy but its licence key file is missing. ' +
             'No key can be verified until the installation is repaired.',
         );
       }
@@ -606,14 +598,10 @@ export class LicensingService implements OnModuleInit {
     try {
       const status = await this.status();
       return status.blocked;
-    } catch (error) {
-      // The licence could not be read at all. A failure to establish that a
-      // licence is valid is never permission to work: the guard blocks and the
-      // reason is logged, and the licence/backup/sign-in routes stay reachable
-      // so the installation can be put right without losing anything.
-      this.logger.error(
-        `The licence state could not be read, so business operations are blocked: ${(error as Error).message}`,
-      );
+    } catch {
+      // A failure to establish validity is never permission to work. Avoid
+      // copying arbitrary database or licence error data into the log.
+      this.logger.error('The licence state could not be read; business operations are blocked.');
       return true;
     }
   }
@@ -865,11 +853,7 @@ export class LicensingService implements OnModuleInit {
           `; seats ${result.seatLimit}`,
       },
     });
-    this.logger.log(
-      `${payload.type} key ${payload.keyId} applied for licence ${payload.licenseId}: seats ${result.seatLimit}, ${
-        result.expiresAt ? `expires ${result.expiresAt.toISOString()}` : 'perpetual'
-      }`,
-    );
+    this.logger.log('A verified licence operation was applied.');
     return this.status({ fresh: true });
   }
 
@@ -1631,17 +1615,6 @@ function readBackendVersion(): string {
     }
   }
   return '0.0.0';
-}
-
-/** A failure line that is never empty, even for a driver error with no text. */
-function describeError(error: unknown): string {
-  if (error instanceof Error) {
-    const code = (error as { code?: unknown }).code;
-    const name = error.name || 'Error';
-    const message = error.message || String(error);
-    return code ? `${name} ${String(code)}: ${message}` : `${name}: ${message}`;
-  }
-  return String(error);
 }
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';

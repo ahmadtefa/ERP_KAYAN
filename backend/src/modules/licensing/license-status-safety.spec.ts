@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, Logger } from '@nestjs/common';
 
 import { LicenseGuard } from './license.guard';
 import { LicensingService } from './licensing.service';
@@ -52,6 +52,33 @@ async function code(promise: Promise<unknown>) {
 }
 
 describe('licence state safety without signing', () => {
+  afterEach(() => jest.restoreAllMocks());
+  it('does not log raw bootstrap or licence-read exceptions and still blocks', async () => {
+    const marker = 'synthetic-private-marker';
+    const log = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { service, internals } = setup();
+    internals.ensureReady = jest.fn().mockRejectedValue(new Error(marker));
+    await service.onModuleInit();
+    jest.spyOn(service, 'status').mockRejectedValue(new Error(marker));
+    expect(await service.isBlocked()).toBe(true);
+    expect(log).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(marker);
+  });
+  it('does not log the machine identifier or licence-state directory at startup', async () => {
+    const marker = 'synthetic-private-marker';
+    const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    const { internals } = setup();
+    internals.directory = marker;
+    internals.machineId = () => marker;
+    internals.openStore = () => {};
+    internals.loadKey = () => {};
+    internals.resolveEnforcement = () => {};
+    internals.reconcile = async () => {};
+    internals.runClockCheck = async () => {};
+    await internals.bootstrap();
+    expect(log).toHaveBeenCalled();
+    expect(JSON.stringify(log.mock.calls)).not.toContain(marker);
+  });
   it.each([
     ['REVOKED', 'REVOKED'], ['UNKNOWN', 'INVALID_STATUS'], ['', 'INVALID_STATUS'],
     ['SUSPENDED', 'SUSPENDED'], ['ACTIVE', 'ACTIVE'],
@@ -93,6 +120,7 @@ describe('licence state safety without signing', () => {
     expect(row.licenseId).toBe('synthetic-license');
   });
   it.each(['RENEWAL','SEATS','TRANSFER'])('applies a mock-verified %s to an eligible row', async (type) => {
+    const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     const { internals, row } = setup();
     if (type === 'RENEWAL') row.expiresAt = new Date('2027-01-01T00:00:00Z');
     const payload = { type, keyId:'synthetic-key', licenseId:row.licenseId, machineId:row.machineId,
@@ -100,6 +128,8 @@ describe('licence state safety without signing', () => {
       state:{ issuedAt:now.toISOString(), startsAt:now.toISOString(), expiresAt:null, seatLimit:2, seatsUsed:0 }, note:null };
     internals.verify = () => ({payload,payloadJson:'{}',signedText:'synthetic',signature:'synthetic'});
     expect(await internals.applyKey('synthetic',type,{})).toMatchObject({state:'ACTIVE',blocked:false});
+    expect(JSON.stringify(log.mock.calls)).not.toContain(row.licenseId);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(payload.keyId);
     if (type === 'SEATS') expect(row.seatLimit).toBe(3);
     if (type === 'RENEWAL') expect(row.expiresAt).not.toBeNull();
   });
