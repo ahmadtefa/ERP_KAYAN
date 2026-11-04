@@ -34,7 +34,8 @@ class _VoucherApi extends ApiClient {
     return [];
   }
   @override
-  Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async => {
+  Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async => path == '/inventory/stock-documents'
+    ? {'items':<Map<String,dynamic>>[],'total':0} : {
     'id':'document','documentNumber':'SA-1','documentDate':'2026-11-04','voucherKind':'ISSUE',
     'status':status,'counterpartyName':'Department','reason':'Synthetic','toWarehouseId':'warehouse',
     'reviewedAt':reviewed ? '2026-11-04T12:00:00Z' : null,
@@ -109,6 +110,25 @@ void main() {
     expect(api.itemPages,[1,2]);
     final dropdowns=tester.widgetList<DropdownButton<String>>(find.byType(DropdownButton<String>));
     expect(dropdowns.any((dropdown) => dropdown.items?.any((item) => item.value == 'item-201') ?? false),isTrue);
+  });
+  testWidgets('limited role cannot see receipt costs review approval or export', (tester) async {
+    const limited=AppUser(id:'limited',username:'tester',fullName:'Tester',companyId:'company',branchId:'branch',
+      permissions:['inventory.stock.read','inventory.stock.adjust','inventory.items.read','inventory.warehouses.read']);
+    final api=_VoucherApi();
+    await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWithValue(limited)],
+      child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,home:const StockVouchersScreen())));
+    await tester.pumpAndSettle();
+    expect(find.text('New receipt'),findsNothing);
+    expect(find.text('New issue'),findsOneWidget);
+    await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWithValue(limited)],
+      child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,home:const StockVoucherDetailScreen(id:'document'))));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Base unit cost'),findsNothing);
+    expect(find.text('Review'),findsNothing);
+    expect(find.text('Approve'),findsNothing);
+    expect(find.text('Print'),findsNothing);
   });
   testWidgets('voucher workflow refreshes after review approval posting and reversal', (tester) async {
     tester.view.physicalSize=const Size(1400,1000); tester.view.devicePixelRatio=1;

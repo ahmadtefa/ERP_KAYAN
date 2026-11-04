@@ -46,12 +46,14 @@ class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
   Widget build(BuildContext context) {
     final user = ref.watch(currentUserProvider);
     final canCreate = user?.can('inventory.stock.adjust') ?? false;
+    final canPrepare = canCreate && (user?.can('inventory.items.read') ?? false) && (user?.can('inventory.warehouses.read') ?? false);
     final canSeeCost = user?.can('inventory.cost.read') ?? false;
     return Scaffold(appBar:AppBar(title:Text(_label(context,'أذون المخزون','Stock vouchers'))),
       body:Column(children:[
         Wrap(spacing:8,children:[
-          if (canCreate && canSeeCost) FilledButton(onPressed:() => _create('RECEIPT'), child:Text(_label(context,'إذن إضافة','New receipt'))),
-          if (canCreate) FilledButton(onPressed:() => _create('ISSUE'), child:Text(_label(context,'إذن صرف','New issue'))),
+          if (canPrepare && canSeeCost) FilledButton(onPressed:() => _create('RECEIPT'), child:Text(_label(context,'إذن إضافة','New receipt'))),
+          if (canPrepare) FilledButton(onPressed:() => _create('ISSUE'), child:Text(_label(context,'إذن صرف','New issue'))),
+          if (canCreate && !canPrepare) Text(_label(context,'يلزم صلاحية قراءة الأصناف والمخازن لإنشاء إذن','Item and warehouse read permissions are required to create a voucher')),
           IconButton(onPressed:_refresh,icon:const Icon(Icons.refresh),tooltip:_label(context,'تحديث','Refresh')),
         ]),
         Expanded(child:FutureBuilder<Json>(future:_future,builder:(context,snapshot) {
