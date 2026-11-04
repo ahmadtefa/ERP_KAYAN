@@ -75,21 +75,22 @@ class _FailingLoadApi extends _VoucherApi {
   }
   @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async {
-    if (fail && target == 'create' && path == '/inventory/items') throw StateError('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW');
+    if (fail && ((target == 'create' && path == '/inventory/items') ||
+      (target == 'history' && path == '/admin/audit-logs'))) throw StateError('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW');
     return super.getList(path,query:query);
   }
 }
 const _user=AppUser(id:'user',username:'tester',fullName:'Tester',companyId:'company',branchId:'branch',isSuperAdmin:true);
 
 void main() {
-  for (final target in ['list','detail','create']) {
+  for (final target in ['list','detail','create','history']) {
     testWidgets('$target voucher load shows a safe acknowledged error and retries', (tester) async {
       SharedPreferences.setMockInitialValues({});
       tester.view.physicalSize=const Size(1400,1200); tester.view.devicePixelRatio=1;
       addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
       final api=_FailingLoadApi(target);
       final screen = target == 'list' ? const StockVouchersScreen()
-        : target == 'detail' ? const StockVoucherDetailScreen(id:'document')
+        : target == 'detail' || target == 'history' ? const StockVoucherDetailScreen(id:'document')
         : const StockVoucherCreateScreen(kind:'ISSUE');
       await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
         currentUserProvider.overrideWithValue(_user),
@@ -98,6 +99,10 @@ void main() {
         child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
           supportedLocales:AppLocalizations.supportedLocales,home:screen)));
       await tester.pumpAndSettle();
+      if (target == 'history') {
+        await tester.ensureVisible(find.text('History'));
+        await tester.tap(find.text('History')); await tester.pumpAndSettle();
+      }
       expect(find.text('حسنًا'),findsOneWidget);
       expect(find.textContaining('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW'),findsNothing);
       await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
@@ -108,6 +113,7 @@ void main() {
       if (target == 'list') expect(find.text('No vouchers on this page'),findsOneWidget);
       if (target == 'detail') expect(find.textContaining('SA-1'),findsOneWidget);
       if (target == 'create') expect(find.text('Save draft'),findsOneWidget);
+      if (target == 'history') expect(find.text('History'),findsOneWidget);
     });
   }
   for (final kind in ['RECEIPT','ISSUE']) {
