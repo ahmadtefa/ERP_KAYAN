@@ -2,6 +2,7 @@ import 'package:erp_kayan/app/router/app_router.dart';
 import 'package:erp_kayan/app/router/draft_exit_guard.dart';
 import 'package:erp_kayan/app/shell/erp_shell.dart';
 import 'package:erp_kayan/features/inventory/presentation/screens/stock_screen.dart';
+import 'package:erp_kayan/features/dashboard/presentation/providers/dashboard_providers.dart';
 import 'package:go_router/go_router.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/error/failure.dart';
@@ -307,9 +308,13 @@ void main() {
     tester.view.physicalSize=const Size(1400,1000); tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
     final api=_VoucherApi();
-    await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWithValue(_user),
+    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWithValue(_user),
       appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1')),
-      exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
+      exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)]);
+    addTearDown(container.dispose);
+    expect((await container.read(dashboardSummaryProvider.future))['status'],'draft');
+    expect((await container.read(dashboardMonthlyProvider.future))['status'],'draft');
+    await tester.pumpWidget(UncontrolledProviderScope(container:container,
       child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
         supportedLocales:AppLocalizations.supportedLocales,home:const StockVoucherDetailScreen(id:'document'))));
     await tester.pumpAndSettle();
@@ -322,6 +327,11 @@ void main() {
       expect(find.text(action),findsOneWidget);
       await tester.tap(find.text(action)); await tester.pumpAndSettle();
       await tester.tap(find.text('Confirm')); await tester.pumpAndSettle();
+      if (action == 'Post' || action == 'Reverse') {
+        final status=action == 'Post' ? 'posted' : 'reversed';
+        expect((await container.read(dashboardSummaryProvider.future))['status'],status);
+        expect((await container.read(dashboardMonthlyProvider.future))['status'],status);
+      }
     }
     expect(api.actions,['review','approve','post','reverse']);
     expect(api.actionVersions,[0,1,2,2]);
