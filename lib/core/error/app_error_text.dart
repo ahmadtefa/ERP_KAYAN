@@ -386,6 +386,10 @@ class AppErrorMessageResolver {
     'A closed period cannot be changed': 'لا يمكن التعديل في فترة محاسبية مغلقة.',
     'Role permissions changed since they were loaded. Refresh and review them before saving.':
         'تغيّرت صلاحيات الدور منذ فتحها؛ حدّث القائمة وراجع الصلاحيات قبل الحفظ.',
+    'User roles changed since they were loaded. Refresh and review them before saving.':
+        'تغيّرت أدوار المستخدم منذ فتحها؛ حدّث القائمة وراجع الأدوار قبل الحفظ.',
+    'User permissions changed since they were loaded. Refresh and review them before saving.':
+        'تغيّرت صلاحيات المستخدم منذ فتحها؛ حدّث القائمة وراجع الصلاحيات قبل الحفظ.',
     'The changed dates contain posted history; the fiscal period boundaries cannot be changed.':
         'تتضمن التواريخ المتغيرة حركات مُرحّلة؛ لا يمكن تعديل حدود الفترة حفاظًا على التاريخ.',
     'This period is already closed': 'هذه الفترة مغلقة بالفعل.',

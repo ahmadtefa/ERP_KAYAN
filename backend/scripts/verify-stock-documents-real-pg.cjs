@@ -41,6 +41,7 @@ const { SalesInvoicesService } = require('../src/modules/sales/sales-invoices.se
 const { PurchaseInvoicesService } = require('../src/modules/purchases/purchase-invoices.service');
 const { ProfilePhotoService } = require('../src/modules/auth/profile-photo.service');
 const { RolesService } = require('../src/modules/admin/roles.service');
+const { UsersService } = require('../src/modules/admin/users.service');
 const { normalizeLogo } = require('../src/modules/company/company.service');
 const sharp = require('sharp');
 
@@ -135,6 +136,34 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(await prisma.auditLog.count({where:{entity:'roles',entityId:role.id,action:'role.permissions_set'}}),1);
     } finally { audit.recordRequired = roleAudit; }
     console.log('PASS: real PostgreSQL serializes competing role grants and rolls back audit failure. Legacy callers without an expected set can still overwrite later changes.');
+    const users = new UsersService(prisma,audit,{});
+    const role2 = await prisma.role.create({data:{companyId:company,code:'SYN-CAS-2',nameEn:'Synthetic role 2',nameAr:'دور تجريبي ٢'}});
+    const existingRoles = (await prisma.userRole.findMany({where:{userId:user,companyId:company},select:{roleId:true}})).map(x=>x.roleId).sort();
+    assert.deepEqual(existingRoles,[]);
+    const userRoleRace = await Promise.allSettled([
+      users.update(company,user,user,{roleIds:[role.id],expectedRoleIds:existingRoles},[],true),
+      users.update(company,user,user,{roleIds:[role2.id],expectedRoleIds:existingRoles},[],true),
+    ]);
+    assert.equal(userRoleRace.filter(x=>x.status==='fulfilled').length,1);
+    assert.equal(userRoleRace.filter(x=>x.status==='rejected').length,1);
+    assert.match(String(userRoleRace.find(x=>x.status==='rejected').reason?.message),/User roles changed/);
+    assert.equal(await prisma.userRole.count({where:{userId:user,companyId:company}}),1);
+    const existingExtra = (await prisma.userPermission.findMany({where:{userId:user},include:{permission:true}})).map(x=>x.permission.code).sort();
+    assert.deepEqual(existingExtra,[]);
+    const userGrantRace = await Promise.allSettled([
+      users.update(company,user,user,{extraPermissions:['synthetic.read'],expectedExtraPermissions:existingExtra},[],true),
+      users.update(company,user,user,{extraPermissions:['synthetic.write'],expectedExtraPermissions:existingExtra},[],true),
+    ]);
+    assert.equal(userGrantRace.filter(x=>x.status==='fulfilled').length,1);
+    assert.equal(userGrantRace.filter(x=>x.status==='rejected').length,1);
+    assert.match(String(userGrantRace.find(x=>x.status==='rejected').reason?.message),/User permissions changed/);
+    assert.equal(await prisma.userPermission.count({where:{userId:user}}),1);
+    // Restore the synthetic user's empty grants so unrelated later fixtures
+    // execute with the same inputs they had before this concurrency test.
+    await prisma.userRole.deleteMany({where:{userId:user,companyId:company}});
+    await prisma.userPermission.deleteMany({where:{userId:user}});
+    console.log('PASS: real PostgreSQL serializes stale user role and direct-grant replacements; legacy clients remain compatible without a snapshot.');
+
     const costCenters = new CostCentersService(prisma, audit);
     const numbers = new DocumentNumberService();
     const periods = new FiscalPeriodsService(prisma, audit);

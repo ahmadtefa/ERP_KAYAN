@@ -138,9 +138,10 @@ export class FiscalPeriodsService {
     addDifference(previous.startDate, previous.endDate, startDate, endDate);
     addDifference(startDate, endDate, previous.startDate, previous.endDate);
     if (changed.length === 0) return;
-    // The period row lock serializes postings covered by the old period.
-    // Expansion into previously uncovered dates still needs a common lock
-    // with postings outside any period; do not claim that race is solved.
+    // The row lock lets this check observe prior postings that acquired it.
+    // It cannot prevent concurrent postings into dates that were uncovered
+    // before expansion or become uncovered after shrinking the period. Those
+    // races need a common lock with postings outside all periods.
     const [journal, movements, sales, purchases, vouchers, transfers, stock, opening] = await Promise.all([
       tx.journalEntry.count({ where: { companyId, status: { in: ['POSTED', 'REVERSED'] }, OR: changed.map(entryDate => ({ entryDate })) } }),
       tx.stockMovement.count({ where: { companyId, OR: changed.map(movementDate => ({ movementDate })) } }),

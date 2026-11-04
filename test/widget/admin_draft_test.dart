@@ -124,6 +124,7 @@ void main() {
     expect(tester.widget<FilterChip>(unavailable).onSelected,isNull);
     await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
     expect(api.submitted!['roleIds'],['role-a']);
+    expect(api.submitted!['expectedRoleIds'],containsAll(['role-a','role-b']));
   });
 
   testWidgets('uncertain user edit retains draft and refreshes list', (tester) async {
@@ -203,6 +204,7 @@ void main() {
         expect(tester.widget<CheckboxListTile>(find.widgetWithText(CheckboxListTile,'Edit invoices')).value,isTrue);
         expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
         expect(api.submitted!['extraPermissions'],containsAll(['sales.invoices.read','sales.invoices.write']));
+        expect(api.submitted!['expectedExtraPermissions'],['sales.invoices.read']);
       }
     });
   }

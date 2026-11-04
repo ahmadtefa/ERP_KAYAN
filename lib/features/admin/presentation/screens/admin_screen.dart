@@ -194,6 +194,8 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
             // Omission means unchanged on the server. This also avoids
             // overwriting a concurrent role change on a name-only edit.
             payload.remove('roleIds');
+          } else if (isEdit) {
+            payload['expectedRoleIds'] = roleIds;
           }
           if (isEdit && payload['isActive'] == existing['isActive']) {
             payload.remove('isActive');
@@ -230,7 +232,8 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
         onSubmit: (chosen) async {
           try {
             await ref.read(apiClientProvider).patch('/admin/users/${row['id']}',
-              body: {'extraPermissions': chosen.toList(growable: false)});
+              body: {'extraPermissions': chosen.toList(growable: false),
+                'expectedExtraPermissions': selected.toList(growable: false)});
           } finally {
             if (mounted) ref.invalidate(usersListProvider);
           }
