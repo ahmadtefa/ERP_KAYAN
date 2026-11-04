@@ -5,6 +5,7 @@ import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.da
 import 'package:erp_kayan/features/cash/presentation/providers/cash_providers.dart';
 import 'package:erp_kayan/features/cash/presentation/screens/cash_screen.dart';
 import 'package:erp_kayan/features/dashboard/presentation/providers/dashboard_providers.dart';
+import 'package:erp_kayan/features/reports/presentation/report_providers.dart';
 import 'package:erp_kayan/features/data/presentation/providers/data_providers.dart' show exportCapabilitiesProvider, ExportCapabilities;
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
@@ -47,6 +48,7 @@ void main() {
       addTearDown(container.dispose);
       expect((await container.read(dashboardSummaryProvider.future))['status'],entry.initial);
       expect((await container.read(dashboardMonthlyProvider.future))['status'],entry.initial);
+      expect((await container.read(reportProvider('/reports/cash-flow').future))['status'],entry.initial);
       expect((await container.read(journalEntriesProvider.future)).single['status'],entry.initial);
       await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp(
         locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
@@ -64,6 +66,7 @@ void main() {
       expect((await container.read(journalEntriesProvider.future)).single['status'],entry.expected);
       expect((await container.read(dashboardSummaryProvider.future))['status'],entry.expected);
       expect((await container.read(dashboardMonthlyProvider.future))['status'],entry.expected);
+      expect((await container.read(reportProvider('/reports/cash-flow').future))['status'],entry.expected);
       expect(tester.takeException(),isNull);
     });
   }

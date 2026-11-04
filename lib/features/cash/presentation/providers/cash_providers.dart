@@ -114,8 +114,7 @@ void invalidateMoneyViews(WidgetRef ref) {
   ref.invalidate(suppliersProvider);
   ref.invalidate(partySummaryProvider);
   ref.invalidate(partyStatementProvider);
-  // The cash posting writes journal entries as well as dashboard figures.
+  // Cash postings affect journal entries, dashboard figures and reports.
   ref.invalidate(journalEntriesProvider);
-  ref.invalidate(dashboardSummaryProvider);
-  ref.invalidate(dashboardMonthlyProvider);
+  invalidateDashboardAndReports(ref);
 }
