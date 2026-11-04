@@ -246,7 +246,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
       body: invoices.when(
         loading: () => const LoadingView(),
         error: (error, _) => ErrorView(
-          message: error.toString(),
+          message: error,
           onRetry: () => ref.read(invoiceListProvider(widget.kind).notifier).reload(),
         ),
         data: (rows) {

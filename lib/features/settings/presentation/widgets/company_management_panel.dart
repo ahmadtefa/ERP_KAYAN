@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/image/company_logo_image.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../core/image/company_logo_url.dart';
 import '../../../../core/platform/browser_actions.dart';
 import '../../../../core/platform/picked_file.dart';
@@ -48,7 +49,7 @@ class _CompanyManagementPanelState
       final client = ref.read(apiClientProvider);
       if (_canEditCompany) _company = await client.get('/companies/profile');
     } catch (e) {
-      _error = '$e';
+      if (mounted) _error = presentErrorText(context, e);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -163,7 +164,7 @@ class _CompanyManagementPanelState
               );
       });
     } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+      if (mounted) setState(() => _error = presentErrorText(context, e));
     }
   }
 
@@ -195,6 +196,9 @@ class _CompanyManagementPanelState
   }
 
   String _friendlyError(Object error) {
+    if (error is! DioException || (error.response?.statusCode ?? 0) >= 500) {
+      return presentErrorText(context, error);
+    }
     final response = error is DioException ? error.response?.data : null;
     final raw = response is Map && response['detail'] is String
         ? response['detail'] as String
@@ -213,7 +217,7 @@ class _CompanyManagementPanelState
         'اختر صورة PNG أو JPEG أو WebP صالحة، وبأبعاد لا تقل عن ٣٢ × ٣٢ بكسل.',
       );
     }
-    return raw;
+    return presentErrorText(context, error);
   }
 
   Future<void> _run(Future<void> Function() action) async {

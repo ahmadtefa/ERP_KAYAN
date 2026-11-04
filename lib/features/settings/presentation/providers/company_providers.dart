@@ -1,6 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/error/failure.dart';
 import '../../../../core/platform/picked_file.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../data/company_data_source.dart';
@@ -25,42 +24,36 @@ class CompanyProfileController extends AsyncNotifier<Map<String, dynamic>> {
     );
   }
 
-  /// Returns an error message, or null on success.
-  Future<String?> updateProfile(Map<String, dynamic> patch) async {
+  /// Returns the original failure, or null on success.
+  Future<Object?> updateProfile(Map<String, dynamic> patch) async {
     try {
       final updated = await ref
           .read(companyDataSourceProvider)
           .updateProfile(patch);
       state = AsyncValue.data(updated);
       return null;
-    } on Failure catch (failure) {
-      return failure.message;
     } catch (error) {
-      return '$error';
+      return error;
     }
   }
 
-  Future<String?> uploadLogo(PickedFile file) async {
+  Future<Object?> uploadLogo(PickedFile file) async {
     try {
       await ref.read(companyDataSourceProvider).uploadLogo(file);
       await refresh();
       return null;
-    } on Failure catch (failure) {
-      return failure.message;
     } catch (error) {
-      return '$error';
+      return error;
     }
   }
 
-  Future<String?> removeLogo() async {
+  Future<Object?> removeLogo() async {
     try {
       await ref.read(companyDataSourceProvider).removeLogo();
       await refresh();
       return null;
-    } on Failure catch (failure) {
-      return failure.message;
     } catch (error) {
-      return '$error';
+      return error;
     }
   }
 }
@@ -86,28 +79,26 @@ class BranchesController extends AsyncNotifier<List<Map<String, dynamic>>> {
     );
   }
 
-  Future<String?> create(Map<String, dynamic> body) =>
+  Future<Object?> create(Map<String, dynamic> body) =>
       _mutate(() => ref.read(companyDataSourceProvider).createBranch(body));
 
-  Future<String?> updateBranch(String id, Map<String, dynamic> body) =>
+  Future<Object?> updateBranch(String id, Map<String, dynamic> body) =>
       _mutate(() => ref.read(companyDataSourceProvider).updateBranch(id, body));
 
-  Future<String?> remove(String id) => _mutate(() async {
+  Future<Object?> remove(String id) => _mutate(() async {
     await ref.read(companyDataSourceProvider).deleteBranch(id);
     return <String, dynamic>{};
   });
 
-  Future<String?> _mutate(
+  Future<Object?> _mutate(
     Future<Map<String, dynamic>> Function() action,
   ) async {
     try {
       await action();
       ref.invalidateSelf();
       return null;
-    } on Failure catch (failure) {
-      return failure.message;
     } catch (error) {
-      return '$error';
+      return error;
     }
   }
 }

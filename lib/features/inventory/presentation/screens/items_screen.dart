@@ -140,7 +140,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       invalidateDashboardAndReports(ref);
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

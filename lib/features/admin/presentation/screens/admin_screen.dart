@@ -132,7 +132,7 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       await ref.read(usersListProvider.notifier).reload();
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -157,7 +157,7 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       await ref.read(usersListProvider.notifier).reload();
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -187,7 +187,7 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
           .post('/admin/users/${row['id']}/password', body: values);
       if (mounted) showMessage(context, l10n.passwordChanged);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -218,7 +218,7 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       await ref.read(usersListProvider.notifier).reload();
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -379,7 +379,7 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
       await ref.read(rolesListProvider.notifier).reload();
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -406,7 +406,7 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
       await ref.read(rolesListProvider.notifier).reload();
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -429,7 +429,7 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
       await ref.read(rolesListProvider.notifier).reload();
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -543,7 +543,7 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
         child: async.when(
           loading: () => const LoadingView(),
           error: (error, _) => ErrorView(
-            message: describeError(context, error),
+            message: error,
             onRetry: () => ref.invalidate(permissionsProvider),
           ),
           data: (catalogue) {

@@ -790,7 +790,7 @@ class _AccountStatement extends ConsumerWidget {
 
     return statement.when(
       loading: () => const LoadingView(),
-      error: (error, _) => ErrorView(message: error.toString()),
+      error: (error, _) => ErrorView(message: error),
       data: (rows) => rows.isEmpty
           ? EmptyView(message: l10n.noMovements)
           : RecordsTable(
@@ -884,7 +884,7 @@ class _VoucherDetails extends ConsumerWidget {
     final detail = ref.watch(cashVoucherProvider(id));
     return detail.when(
       loading: () => const LoadingView(),
-      error: (error, _) => ErrorView(message: error.toString()),
+      error: (error, _) => ErrorView(message: error),
       data: (voucher) => VoucherDetailsView(voucher: voucher, onOpen: onOpen),
     );
   }

@@ -91,7 +91,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
     } on Failure catch (e) {
       if (mounted) {
         ref.invalidate(invoiceListProvider(widget.kind));
-        showMessage(context, e.message, error: true);
+        showMessage(context, e, error: true);
       }
     } catch (error) {
       if (mounted) {
@@ -130,7 +130,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
     } on Failure catch (e) {
       if (mounted) {
         ref.invalidate(invoiceListProvider(widget.kind));
-        showMessage(context, e.message, error: true);
+        showMessage(context, e, error: true);
       }
     } catch (error) {
       if (mounted) {

@@ -89,7 +89,7 @@ class _DocumentSettingsCardState extends ConsumerState<DocumentSettingsCard> {
       }
     } on Failure catch (error) {
       if (mounted) {
-        showMessage(context, error.message, error: true);
+        showMessage(context, error, error: true);
       }
     } catch (error) {
       if (mounted) {

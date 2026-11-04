@@ -89,7 +89,7 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
         if (text(candidate, 'lineId') == text(line, 'id')) offered = candidate;
       }
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
       return;
     }
     if (!mounted) return;
@@ -134,7 +134,7 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
           if (snapshot.hasError) {
             final error = snapshot.error!;
             return ErrorView(
-              message: error is Failure ? error.message : '$error',
+              message: error,
               onRetry: () => setState(() { _future = _load(); }),
             );
           }

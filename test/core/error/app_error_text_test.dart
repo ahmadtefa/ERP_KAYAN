@@ -64,6 +64,28 @@ void main() {
       expect(arabic.resolve('فشل الحفظ: Prisma SQL error', statusCode: 400).hasBusinessMessage, isFalse);
     });
 
+    test('server 4xx Arabic text is not trusted merely for being Arabic', () {
+      const remote = ApiFailure('بيانات خاصة اصطناعية لا تعرض', statusCode: 400);
+      expect(arabic.resolve(remote).hasBusinessMessage, isFalse);
+      expect(english.resolve(remote).hasBusinessMessage, isFalse);
+      expect(arabic.resolve('بيانات خاصة اصطناعية لا تعرض', statusCode: 400).hasBusinessMessage, isFalse);
+      expect(arabic.resolve(const ValidationFailure('اختر حسابًا أولاً')).businessMessage, 'اختر حسابًا أولاً');
+    });
+
+    test('unmapped remote English text is not displayed in English inline views', () {
+      const remote = ApiFailure('Synthetic private record is not available', statusCode: 400);
+      expect(english.resolve(remote).hasBusinessMessage, isFalse);
+      expect(english.resolve(const ApiFailure('Account not found', statusCode: 404)).businessMessage, 'Account not found');
+    });
+
+    test('all 5xx failures use the uncertain server-result wording', () {
+      for (final status in [500, 501, 503, 505, 599]) {
+        final result = arabic.resolve(ApiFailure('سر مصطنع', statusCode: status));
+        expect(result.reason, AppErrorReason.server);
+        expect(result.hasBusinessMessage, isFalse);
+      }
+    });
+
     test('a raw exception object is not forwarded', () {
       final text = arabic.resolve(StateError('Bad state: no element'));
       expect(text.hasBusinessMessage, isFalse);

@@ -71,9 +71,9 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
           .post('/accounting/opening-balances/$id/post');
       if (mounted) showMessage(context, l10n.entryPosted);
     } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) showMessage(context, error, error: true);
     } catch (error) {
-      if (mounted) showMessage(context, describeError(context, error), error: true);
+      if (mounted) showMessage(context, error, error: true);
     } finally {
       if (mounted) {
         // A failed response can arrive after the server committed the post.

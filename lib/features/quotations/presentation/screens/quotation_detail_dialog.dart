@@ -59,7 +59,7 @@ class _QuotationDetailDialogState extends ConsumerState<QuotationDetailDialog> {
       ref.invalidate(quotationsProvider);
       if (mounted) showMessage(context, successMessage);
     } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) showMessage(context, error, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

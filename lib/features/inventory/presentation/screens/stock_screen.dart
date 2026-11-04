@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
-import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/data_dialog.dart';
 import '../../../../shared/widgets/download_feedback.dart';
@@ -336,7 +335,7 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
                 if (snapshot.hasError) {
                   final error = snapshot.error!;
                   return ErrorView(
-                    message: error is Failure ? error.message : '$error',
+                    message: error,
                     onRetry: () => setState(() { _future = _load(); }),
                   );
                 }

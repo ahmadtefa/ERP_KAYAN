@@ -85,7 +85,7 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
         _dirty = true;
       }
       if (mounted) setState(() { _store = store; _scope = scope; _pending = pending; });
-    } catch (error) { if (mounted) showMessage(context, error.toString(), error: true); }
+    } catch (error) { if (mounted) showMessage(context, error, error: true); }
   }
 
   @override
@@ -130,7 +130,7 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
     try {
       final request = await _store!.begin(_scope!, method: 'PUT', path: _path, body: body);
       if (mounted) await _send(request);
-    } catch (error) { if (mounted) showMessage(context, error.toString(), error: true); }
+    } catch (error) { if (mounted) showMessage(context, error, error: true); }
     finally { if (mounted) setState(() => _busy = false); }
   }
 
@@ -151,8 +151,8 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
         await _store!.complete(_scope!);
         if (mounted) setState(() { _pending = null; _stale = error.code == 'ORDER_EDIT_STALE'; });
       }
-      if (mounted) showMessage(context, error.message, error: true);
-    } catch (error) { if (mounted) showMessage(context, error.toString(), error: true); }
+      if (mounted) showMessage(context, error, error: true);
+    } catch (error) { if (mounted) showMessage(context, error, error: true); }
     finally { if (mounted) setState(() => _busy = false); }
   }
 

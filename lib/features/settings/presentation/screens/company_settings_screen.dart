@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/error/failure.dart';
+
 import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/image/company_logo_image.dart';
@@ -389,7 +391,7 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
       );
     } catch (error) {
       if (!mounted) return;
-      showMessage(context, '$error', error: true);
+      showMessage(context, error, error: true);
       return;
     }
     if (picked == null || !mounted || widget.profileSaving) return;
@@ -434,12 +436,15 @@ class _LogoRowState extends ConsumerState<_LogoRow> {
     }
   }
 
-  String _localizedLogoError(
-    String error, {
+  Object _localizedLogoError(
+    Object error, {
     required String tooLarge,
     required String invalid,
   }) {
-    final lower = error.toLowerCase();
+    // Image validation is a 4xx business refusal, not a substitute for a
+    // network or server failure where the result may be uncertain.
+    if (error is! ApiFailure || error.statusCode == null || error.statusCode! >= 500) return error;
+    final lower = error.message.toLowerCase();
     if (lower.contains('larger than') || lower.contains('too large')) {
       return tooLarge;
     }

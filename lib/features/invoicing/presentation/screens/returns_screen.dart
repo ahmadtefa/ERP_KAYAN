@@ -40,7 +40,7 @@ Future<void> showReturnDetail(
       ),
     );
   } on Failure catch (error) {
-    if (context.mounted) showMessage(context, error.message, error: true);
+    if (context.mounted) showMessage(context, error, error: true);
   }
 }
 
@@ -85,7 +85,7 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
     } on Failure catch (error) {
       if (mounted) {
         ref.invalidate(returnListProvider(widget.kind));
-        showMessage(context, error.message, error: true);
+        showMessage(context, error, error: true);
       }
     } catch (error) {
       if (mounted) {
@@ -123,7 +123,7 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
     } on Failure catch (error) {
       if (mounted) {
         ref.invalidate(returnListProvider(widget.kind));
-        showMessage(context, error.message, error: true);
+        showMessage(context, error, error: true);
       }
     } catch (error) {
       if (mounted) {

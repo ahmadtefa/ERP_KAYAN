@@ -92,6 +92,7 @@ class AppErrorMessageResolver {
         error.message,
         statusCode: code,
         preferred: preferred,
+        untrusted: error is! ValidationFailure,
       );
       final reason = text.reason;
       return AppErrorText(
@@ -101,7 +102,9 @@ class AppErrorMessageResolver {
       );
     }
 
-    if (error is String) return _resolveText(error, statusCode: statusCode);
+    if (error is String) {
+      return _resolveText(error, statusCode: statusCode, untrusted: statusCode != null);
+    }
 
     // Anything else (FormatException, TypeError, ...) is by definition not
     // written for a person.
@@ -146,6 +149,7 @@ class AppErrorMessageResolver {
     String raw, {
     int? statusCode,
     AppErrorReason? preferred,
+    bool untrusted = false,
   }) {
     var text = _clean(raw);
 
@@ -167,7 +171,9 @@ class AppErrorMessageResolver {
     // the message is safe: it can also contain a stack trace, SQL, a URL or a
     // credential assignment. Filter those before preserving a business reason.
     if (_containsArabic(text)) {
-      if (_looksTechnical(text)) {
+      // Local validation may be Arabic already, but a server response must
+      // not become trusted just because it contains Arabic characters.
+      if (untrusted || _looksTechnical(text)) {
         return _fallback(statusCode: statusCode, preferred: preferred);
       }
       final reason = _reasonFor(statusCode, preferred);
@@ -221,7 +227,8 @@ class AppErrorMessageResolver {
     //    written; in Arabic it is not, because an English sentence is no
     //    more readable than a generic Arabic one and it may still be a
     //    technical detail we did not recognise.
-    if (!isArabic && _looksLikeSentence(body)) {
+    if (!isArabic && _looksLikeSentence(body) &&
+        (!untrusted || _exactArLower.containsKey(body.toLowerCase()))) {
       final reason = _reasonFor(statusCode, preferred);
       return AppErrorText(
         reason: reason,
@@ -252,6 +259,7 @@ class AppErrorMessageResolver {
       : AppErrorSeverity.error;
 
   static AppErrorReason _reasonForStatus(int? status) {
+    if (status != null && status >= 500) return AppErrorReason.server;
     switch (status) {
       case 400:
       case 422:
@@ -264,11 +272,6 @@ class AppErrorMessageResolver {
         return AppErrorReason.notFound;
       case 409:
         return AppErrorReason.conflict;
-      case 500:
-      case 502:
-      case 503:
-      case 504:
-        return AppErrorReason.server;
       default:
         return AppErrorReason.unknown;
     }

@@ -2107,7 +2107,7 @@ class _CostCentersTab extends ConsumerWidget {
         query: {'from': period.from, 'to': period.to, 'pageSize': '200'},
       );
     } on Failure catch (error) {
-      if (context.mounted) showMessage(context, error.message, error: true);
+      if (context.mounted) showMessage(context, error, error: true);
       return;
     }
     if (!context.mounted) return;

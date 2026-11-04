@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/error/failure.dart';
+
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../data/datasources/chart_of_accounts_data_source.dart';
 import '../../data/repositories/chart_of_accounts_repository_impl.dart';
@@ -72,7 +74,7 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
   }
 
   /// Creates, then reloads so the tree shows the server's answer.
-  Future<String?> create(AccountInput input) async {
+  Future<Failure?> create(AccountInput input) async {
     final result = await ref
         .read(chartOfAccountsRepositoryProvider)
         .createAccount(input);
@@ -84,12 +86,12 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
       failure: (failure) {
         // The server may have committed before the response was lost.
         ref.invalidateSelf();
-        return failure.message;
+        return failure;
       },
     );
   }
 
-  Future<String?> updateAccount(String id, AccountInput input) async {
+  Future<Failure?> updateAccount(String id, AccountInput input) async {
     final result = await ref
         .read(chartOfAccountsRepositoryProvider)
         .updateAccount(id, input);
@@ -101,14 +103,14 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
       failure: (failure) {
         // The server may have committed before the response was lost.
         ref.invalidateSelf();
-        return failure.message;
+        return failure;
       },
     );
   }
 
   /// Activates or deactivates an account, then reloads so the tree shows
   /// the server's answer rather than an optimistic guess.
-  Future<String?> setActive(String id, {required bool isActive}) async {
+  Future<Failure?> setActive(String id, {required bool isActive}) async {
     final result = await ref
         .read(chartOfAccountsRepositoryProvider)
         .setAccountActive(id, isActive: isActive);
@@ -120,12 +122,12 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
       failure: (failure) {
         // The server may have committed before the response was lost.
         ref.invalidateSelf();
-        return failure.message;
+        return failure;
       },
     );
   }
 
-  Future<String?> remove(String id) async {
+  Future<Failure?> remove(String id) async {
     final result = await ref
         .read(chartOfAccountsRepositoryProvider)
         .deleteAccount(id);
@@ -137,7 +139,7 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
       failure: (failure) {
         // The server may have committed before the response was lost.
         ref.invalidateSelf();
-        return failure.message;
+        return failure;
       },
     );
   }

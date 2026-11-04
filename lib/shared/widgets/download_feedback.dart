@@ -31,9 +31,8 @@ Future<void> runDownload(
     if (!context.mounted) return;
     _say(
       context,
-      _message(error),
+      _classify(error),
       isError: true,
-      statusCode: error is DioException ? error.response?.statusCode : null,
     );
   } finally {
     onDone?.call();
@@ -62,18 +61,27 @@ Future<void> runPrint(
     if (!context.mounted) return;
     _say(
       context,
-      _message(error),
+      _classify(error),
       isError: true,
-      statusCode: error is DioException ? error.response?.statusCode : null,
     );
   } finally {
     onDone?.call();
   }
 }
 
-/// The server's own sentence where there is one, and never a raw stack.
+Object _classify(Object error) {
+  if (error is DownloadFailure) {
+    return ApiFailure(error.message, statusCode: error.statusCode);
+  }
+  if (error is DioException) {
+    return ApiFailure(_message(error), statusCode: error.response?.statusCode);
+  }
+  return error;
+}
+
+/// Extract a candidate sentence only for the resolver; it is not trusted
+/// or displayed without classification.
 String _message(Object error) {
-  if (error is Failure) return error.message;
   if (error is DownloadFailure) return error.message;
   if (error is DioException) {
     final data = error.response?.data;
@@ -89,17 +97,17 @@ String _message(Object error) {
 
 void _say(
   BuildContext context,
-  String message, {
+  Object message, {
   required bool isError,
-  int? statusCode,
 }) {
   // A failed download is an error: it is not a note to glance at on the way
   // to something else, and its reason (no permission, server unreachable)
   // has to be read. Successes stay as a light note at the bottom.
   if (isError) {
-    showAppError(context, message, statusCode: statusCode);
+    showAppError(context, message);
     return;
   }
+  assert(message is String, 'Success messages must be strings');
   final scheme = Theme.of(context).colorScheme;
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
@@ -111,7 +119,7 @@ void _say(
             size: 20,
           ),
           const SizedBox(width: 8),
-          Expanded(child: Text(message)),
+          Expanded(child: Text(message is String ? message : '')),
         ],
       ),
       backgroundColor: isError

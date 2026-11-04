@@ -73,7 +73,7 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
         setState(() { _store = store; _scope = scope; _pending = pending; });
       }
     } catch (error) {
-      if (mounted) showMessage(context, error.toString(), error: true);
+      if (mounted) showMessage(context, error, error: true);
     }
   }
 
@@ -162,7 +162,7 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
       final request = await _store!.begin(_scope!, method: 'POST', path: _path, body: body);
       if (mounted) await _send(request);
     } catch (error) {
-      if (mounted) showMessage(context, error.toString(), error: true);
+      if (mounted) showMessage(context, error, error: true);
     } finally { if (mounted) setState(() => _busy = false); }
   }
 
@@ -183,9 +183,9 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
         await _store!.complete(_scope!);
         if (mounted) setState(() => _pending = null);
       }
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) showMessage(context, error, error: true);
     } catch (error) {
-      if (mounted) showMessage(context, error.toString(), error: true);
+      if (mounted) showMessage(context, error, error: true);
     } finally { if (mounted) setState(() => _busy = false); }
   }
 

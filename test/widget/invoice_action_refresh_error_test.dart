@@ -1,4 +1,5 @@
 import 'package:erp_kayan/core/config/app_config.dart';
+import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/data/presentation/providers/data_providers.dart' show exportCapabilitiesProvider, ExportCapabilities;
@@ -17,6 +18,7 @@ class _CommittedThenFailedApi extends ApiClient {
   String status;
   int loads=0, posts=0;
   bool responseLost=true;
+  bool serverFailure=false;
   @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async {
     loads++;
@@ -28,6 +30,7 @@ class _CommittedThenFailedApi extends ApiClient {
   Future<Map<String,dynamic>> post(String path,{Object? body,String? idempotencyKey}) async {
     posts++;
     status = path.endsWith('/reverse') ? 'reversed' : 'posted';
+    if (responseLost && serverFailure) throw const ApiFailure('بيانات مصطنعة خاصة لا تعرض', statusCode: 503);
     if (responseLost) throw StateError('INTERNAL_INVOICE_ACTION_DIAGNOSTIC');
     return {'status':status};
   }
@@ -50,6 +53,23 @@ void main() {
     expect(api.posts,1);
     expect((await container.read(reportProvider('/reports/trial-balance').future))['status'],'posted');
     expect(tester.takeException(),isNull);
+  });
+  testWidgets('invoice action keeps a server failure status and hides its Arabic body', (tester) async {
+    tester.view.physicalSize=const Size(1700,1000); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final api=_CommittedThenFailedApi('draft')..serverFailure=true;
+    await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+      exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
+      child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:InvoiceListScreen(kind:InvoiceKind.sales)))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Post')); await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton,'Post')); await tester.pumpAndSettle();
+    expect(find.textContaining('بيانات مصطنعة خاصة'), findsNothing);
+    expect(find.textContaining('تعذّر تأكيد نتيجة العملية'), findsOneWidget);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(find.text('Posted'), findsOneWidget);
+    expect(api.posts,1);
   });
   for (final kind in InvoiceKind.values) {
     for (final reverse in [false,true]) {

@@ -1,3 +1,7 @@
+import 'package:erp_kayan/core/error/failure.dart';
+import 'package:erp_kayan/core/platform/download_request.dart';
+import 'package:erp_kayan/features/common/presentation/screens/module_scaffold.dart';
+import 'package:erp_kayan/shared/widgets/download_feedback.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:erp_kayan/shared/widgets/app_error_dialog.dart';
 import 'package:flutter/material.dart';
@@ -49,6 +53,31 @@ void main() {
     expect(find.text('حسنًا'), findsOneWidget);
     await tester.tap(find.text('حسنًا'));
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('message and print failures retain HTTP status and hide server bodies', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(body: Builder(builder: (context) => Column(children: [
+        TextButton(onPressed: () => showMessage(context,
+          const ApiFailure('تفاصيل مصطنعة خاصة لا تعرض', statusCode: 503), error: true),
+          child: const Text('Message failure')),
+        TextButton(onPressed: () => runPrint(context,
+          Future<String>.error(const DownloadFailure('تفاصيل مصطنعة خاصة لا تعرض', statusCode: 503))),
+          child: const Text('Print failure')),
+      ]))),
+    ));
+    for (final button in ['Message failure', 'Print failure']) {
+      await tester.tap(find.text(button));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('تفاصيل مصطنعة خاصة'), findsNothing);
+      expect(find.textContaining('تعذّر تأكيد نتيجة العملية'), findsOneWidget);
+      expect(find.text('حسنًا'), findsOneWidget);
+      await tester.tap(find.text('حسنًا'));
+      await tester.pumpAndSettle();
+    }
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('different concurrent errors are acknowledged in order', (tester) async {

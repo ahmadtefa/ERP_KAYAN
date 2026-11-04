@@ -82,7 +82,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
     body: FutureBuilder<List<Json>>(
       future: _future,
       builder: (context, snapshot) {
-        if (snapshot.hasError) return ErrorView(message: snapshot.error.toString(), onRetry: _refresh);
+        if (snapshot.hasError) return ErrorView(message: snapshot.error!, onRetry: _refresh);
         if (!snapshot.hasData) return const LoadingView();
         final orders = snapshot.data!;
         if (orders.isEmpty) return EmptyView(message: tr('لا توجد أوامر', 'No orders'));
@@ -148,7 +148,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
       final pending = store.read(scope);
       if (mounted) setState(() { _store = store; _scope = scope; _pending = pending; });
     } catch (error) {
-      if (mounted) showMessage(context, error.toString(), error: true);
+      if (mounted) showMessage(context, error, error: true);
     }
   }
 
@@ -178,9 +178,9 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
         await _store!.complete(_scope!);
         if (mounted) setState(() => _pending = null);
       }
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) showMessage(context, error, error: true);
     } catch (error) {
-      if (mounted) showMessage(context, error.toString(), error: true);
+      if (mounted) showMessage(context, error, error: true);
     } finally {
       if (mounted) {
         // Even an uncertain conversion may have created or amended an invoice.
@@ -221,7 +221,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
       final request = await _store!.begin(_scope!, method: invoice == null ? 'POST' : 'PUT', path: path, body: payload);
       if (mounted) await _runPending(request);
     } catch (error) {
-      if (mounted) showMessage(context, error.toString(), error: true);
+      if (mounted) showMessage(context, error, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -246,7 +246,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
       // again rather than leaving a stale draft on screen.
       if (mounted) {
         _refresh();
-        showMessage(context, error.toString(), error: true);
+        showMessage(context, error, error: true);
       }
     } finally {
       if (mounted) {
@@ -265,7 +265,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
     appBar: AppBar(title: Text(tr('تفاصيل الأمر', 'Order details')),
       actions: [IconButton(tooltip: tr('تحديث', 'Refresh'), onPressed: _busy ? null : _refresh, icon: const Icon(Icons.refresh))]),
     body: FutureBuilder<Json>(future: _future, builder: (context, snapshot) {
-      if (snapshot.hasError) return ErrorView(message: snapshot.error.toString(), onRetry: _refresh);
+      if (snapshot.hasError) return ErrorView(message: snapshot.error!, onRetry: _refresh);
       if (!snapshot.hasData) return const LoadingView();
       final order = snapshot.data!;
       final status = text(order, 'status');

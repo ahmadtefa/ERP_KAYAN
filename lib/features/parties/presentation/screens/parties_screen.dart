@@ -126,7 +126,7 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
       ref.invalidate(suppliersProvider);
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

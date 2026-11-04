@@ -525,7 +525,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         showMessage(context, l10n.invoiceSaved);
       }
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     } catch (error) {
       if (mounted) showAppError(context, error);
     } finally {

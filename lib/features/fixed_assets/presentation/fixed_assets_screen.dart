@@ -253,7 +253,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
       await ref.read(fixedAssetsListProvider.notifier).reload();
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -381,7 +381,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
         ),
       );
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     }
   }
 
@@ -431,7 +431,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
     } on Failure catch (e) {
       // A refused run says why in the message — already depreciated,
       // closed period — and changed nothing.
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -509,7 +509,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
         ),
       );
     } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+      if (mounted) showMessage(context, e, error: true);
     }
   }
 

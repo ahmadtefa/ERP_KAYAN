@@ -167,7 +167,7 @@ class ApiClient {
       _log.warning('Could not renew the access token: ${e.type}');
       return const _RefreshOutcome.unavailable();
     } catch (error) {
-      _log.warning('Could not renew the access token: $error');
+      _log.warning('Could not renew the access token (${error.runtimeType})');
       return const _RefreshOutcome.unavailable();
     }
   }

@@ -680,7 +680,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       ref.invalidate(quotationTermsProvider);
       if (mounted) showMessage(context, l10n.termsSaved);
     } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) showMessage(context, error, error: true);
     }
   }
 
@@ -1264,9 +1264,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       ref.invalidate(quotationDesignTemplatesProvider);
       if (mounted) showMessage(context, 'تم حفظ قالب التصميم');
     } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) showMessage(context, error, error: true);
     } catch (error) {
-      if (mounted) showMessage(context, 'تعذر حفظ قالب التصميم: $error', error: true);
+      if (mounted) showMessage(context, error, error: true);
     }
   }
 
@@ -1337,7 +1337,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                                       Navigator.of(dialogContext).pop();
                                     }
                                   } on Failure catch (error) {
-                                    if (dialogContext.mounted) showMessage(dialogContext, error.message, error: true);
+                                    if (dialogContext.mounted) showMessage(dialogContext, error, error: true);
                                   }
                                 },
                               ),
@@ -1357,9 +1357,9 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         ),
       );
     } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) showMessage(context, error, error: true);
     } catch (error) {
-      if (mounted) showMessage(context, 'تعذر تحميل قوالب التصميم: $error', error: true);
+      if (mounted) showMessage(context, error, error: true);
     }
   }
 
@@ -2056,7 +2056,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       if (mounted) showMessage(context, l10n.templateSaved);
       return created;
     } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+      if (mounted) showMessage(context, error, error: true);
       return null;
     }
   }
@@ -2532,7 +2532,7 @@ class _QuotationTermsDialog extends ConsumerWidget {
         height: 380,
         child: terms.when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, _) => Text(error is Failure ? error.message : '$error'),
+          error: (error, _) => Text(presentErrorText(context, error)),
           data: (rows) {
             if (rows.isEmpty) return Center(child: Text(l10n.noSavedTerms));
             return ListView.separated(
@@ -2586,7 +2586,7 @@ class _QuotationTermsDialog extends ConsumerWidget {
                             ref.invalidate(quotationTermsProvider);
                           } on Failure catch (error) {
                             if (context.mounted) {
-                              showMessage(context, error.message, error: true);
+                              showMessage(context, error, error: true);
                             }
                           }
                         },

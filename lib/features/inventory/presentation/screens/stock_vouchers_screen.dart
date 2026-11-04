@@ -44,7 +44,7 @@ class _VoucherLoadErrorState extends State<_VoucherLoadError> {
     });
   }
   @override
-  Widget build(BuildContext context) => ErrorView(message:presentErrorText(context,widget.error),onRetry:widget.onRetry);
+  Widget build(BuildContext context) => ErrorView(message:widget.error,onRetry:widget.onRetry);
 }
 
 /// The list is sourced from the server after every action, not an optimistic
