@@ -300,6 +300,44 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'fiscal_periods',entityId:rollbackYear.id,action:'fiscal_year.close'}}),0);
     } finally { audit.recordRequired = closeAudit; }
     console.log('PASS: real PostgreSQL serializes concurrent closes and posting before close; audit failure rolls back empty and nonempty closes. Draft creation races remain outside this test.');
+    // Application-mediated create/update ranges serialize per company. A
+    // database-wide exclusion constraint is not added to an existing migration.
+    const periodDto = (code,startDate,endDate) => ({code,nameEn:'Synthetic period',nameAr:'فترة تجريبية',startDate,endDate});
+    const overlapCreate = await Promise.allSettled([
+      periods.create(company,user,periodDto('SYN-RACE-A','2300-01-01','2300-12-31')),
+      periods.create(company,user,periodDto('SYN-RACE-B','2300-01-01','2300-12-31')),
+    ]);
+    assert.equal(overlapCreate.filter(x => x.status === 'fulfilled').length,1);
+    assert.equal(overlapCreate.filter(x => x.status === 'rejected').length,1);
+    const racePeriod = overlapCreate.find(x => x.status === 'fulfilled').value;
+    const adjacent = await periods.create(company,user,periodDto('SYN-NEXT','2301-01-01','2301-12-31'));
+    await assert.rejects(periods.update(company,user,racePeriod.id,{endDate:'2301-01-01'}),/overlaps/);
+    assert.equal((await prisma.fiscalPeriod.findUniqueOrThrow({where:{id:racePeriod.id}})).endDate.toISOString().slice(0,10),'2300-12-31');
+
+    const periodAudit = audit.recordRequired.bind(audit);
+    audit.recordRequired = async (input,tx) => {
+      if (input.action === 'fiscal_period.create' || input.action === 'fiscal_period.update' || input.action === 'fiscal_period.close') {
+        throw new Error('injected fiscal period audit failure');
+      }
+      return periodAudit(input,tx);
+    };
+    try {
+      await assert.rejects(periods.create(company,user,periodDto('SYN-FAIL','2302-01-01','2302-12-31')),/injected fiscal period audit failure/);
+      assert.equal(await prisma.fiscalPeriod.count({where:{companyId:company,code:'SYN-FAIL'}}),0);
+      await assert.rejects(periods.update(company,user,adjacent.id,{nameEn:'Changed'}),/injected fiscal period audit failure/);
+      assert.equal((await prisma.fiscalPeriod.findUniqueOrThrow({where:{id:adjacent.id}})).nameEn,'Synthetic period');
+      await assert.rejects(periods.close(company,user,adjacent.id),/injected fiscal period audit failure/);
+      assert.equal((await prisma.fiscalPeriod.findUniqueOrThrow({where:{id:adjacent.id}})).status,'OPEN');
+    } finally { audit.recordRequired = periodAudit; }
+    const closeBoth = await Promise.allSettled([
+      periods.close(company,user,adjacent.id), yearClose.close(company,user,adjacent.id),
+    ]);
+    assert.equal(closeBoth.filter(x => x.status === 'fulfilled').length,1);
+    assert.equal(closeBoth.filter(x => x.status === 'rejected').length,1);
+    assert.equal((await prisma.fiscalPeriod.findUniqueOrThrow({where:{id:adjacent.id}})).status,'CLOSED');
+    await assert.rejects(periods.update(company,user,adjacent.id,{nameEn:'Changed after close'}),/closed period cannot be changed/i);
+    console.log('PASS: PostgreSQL application period create races, overlap edits, audit rollback and period/year close competition. Draft creation and direct SQL range changes remain outside this test.');
+
 
     const failStockAudit = async (action, operation) => {
       const original = audit.recordRequired.bind(audit);
