@@ -59,7 +59,7 @@ for (const line of lines) {
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
   // Invoice navigation tests use only checked-in synthetic widget data.
-  if (event.type === 'print' && /^(?:sales|purchase) invoice remains guarded when its routed list leaves$/.test(tests.get(event.testID) ?? '')) {
+  if (event.type === 'print' && /^(?:sales|purchase) invoice (?:remains guarded when its routed list leaves|unexpected save error is acknowledged without losing inputs)$/.test(tests.get(event.testID) ?? '')) {
     const details = String(event.message ?? '').split(/\r?\n/).map(line =>
       line.match(/^\s*(?:Expected:|Actual:)\s*(?:<\d+>|exactly \d+ matching candidates|no matching candidates)/)?.[0]?.trim() ??
       line.match(/test\/widget\/invoice_unsaved_guard_test\.dart:\d+:\d+/)?.[0] ??

@@ -21,6 +21,12 @@ import 'test_harness.dart';
 class _InvoiceApi extends ApiClient {
   _InvoiceApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'), FakeTokenStore());
   bool failLoad = false;
+  bool failSave = false;
+  @override
+  Future<Map<String,dynamic>> post(String path,{Object? body,String? idempotencyKey}) async {
+    if (failSave) throw StateError('INTERNAL_INVOICE_DIAGNOSTIC');
+    return {};
+  }
   @override
   Future<Map<String, dynamic>> get(String path, {Map<String,dynamic>? query}) async => {'blocked':false};
   String status = 'draft';
@@ -34,6 +40,30 @@ class _InvoiceApi extends ApiClient {
 }
 
 void main() {
+  for (final kind in InvoiceKind.values) {
+    testWidgets('${kind.name} invoice unexpected save error is acknowledged without losing inputs', (tester) async {
+      tester.view.physicalSize = const Size(1600,1000); tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _InvoiceApi()..failSave = true;
+      final parties = [{'id':'party','code':'P-1','nameEn':'Synthetic party','nameAr':'جهة تجريبية','isActive':true}];
+      await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+        activeItemsProvider.overrideWith((ref) async => []),
+        activeCustomersProvider.overrideWith((ref) async => parties),
+        activeSuppliersProvider.overrideWith((ref) async => parties)],
+        child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+          supportedLocales:AppLocalizations.supportedLocales,home:InvoiceEditorScreen(kind:kind))));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<String>).first); await tester.pumpAndSettle();
+      await tester.tap(find.text('P-1 — Synthetic party').last); await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('line-quantity-0')),'2');
+      await tester.enterText(find.byKey(const ValueKey('line-price-0')),'5');
+      await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
+      expect(find.text('حسنًا'),findsOneWidget);
+      expect(find.textContaining('INTERNAL_INVOICE_DIAGNOSTIC'),findsNothing);
+      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+      expect(tester.widget<TextFormField>(find.byKey(const ValueKey('line-quantity-0'))).controller!.text,'2');
+    });
+  }
   for (final kind in InvoiceKind.values) {
     testWidgets('${kind.name} invoice remains guarded when its routed list leaves', (tester) async {
       tester.view.physicalSize = const Size(1600,1000); tester.view.devicePixelRatio = 1;
