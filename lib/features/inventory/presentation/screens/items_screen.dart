@@ -81,17 +81,28 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         FieldSpec('notes', l10n.description, kind: FieldKind.multiline, maxLines: 2),
       ],
       initial: existing,
+      onSubmit: (draft) async {
+        final client = ref.read(apiClientProvider);
+        try {
+          if (isEdit) {
+            await client.patch('/inventory/items/${existing['id']}', body: draft);
+          } else {
+            await client.post('/inventory/items', body: draft);
+          }
+        } catch (_) {
+          // The server may have committed before a transport error. Reload
+          // the source instead of leaving dependent screens confidently stale.
+          ref.invalidate(itemsListProvider);
+          ref.invalidate(itemsProvider);
+          ref.invalidate(stockListProvider);
+          rethrow;
+        }
+      },
     );
     if (values == null || !mounted) return;
 
     setState(() => _busy = true);
     try {
-      final client = ref.read(apiClientProvider);
-      if (isEdit) {
-        await client.patch('/inventory/items/${existing['id']}', body: values);
-      } else {
-        await client.post('/inventory/items', body: values);
-      }
       await ref.read(itemsListProvider.notifier).reload();
       ref.invalidate(itemsProvider);
       // Opening stock is written in the same transaction as the item, so the

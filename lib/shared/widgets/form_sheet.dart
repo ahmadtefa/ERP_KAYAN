@@ -1,8 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../../app/theme/design_tokens.dart';
 import '../../core/json/json_utils.dart';
 import '../extensions/l10n_extension.dart';
+import 'confirm_dialog.dart';
+import 'app_error_dialog.dart';
 
 /// What kind of input a field collects.
 enum FieldKind { text, multiline, decimal, integer, date, toggle, select, multiSelect }
@@ -54,15 +58,18 @@ Future<Json?> showFormSheet(
   Json? initial,
   String? submitLabel,
   bool readOnly = false,
+  Future<void> Function(Json values)? onSubmit,
 }) {
   return showDialog<Json>(
     context: context,
+    barrierDismissible: false,
     builder: (context) => _FormSheet(
       title: title,
       fields: fields,
       initial: initial ?? const {},
       submitLabel: submitLabel,
       readOnly: readOnly,
+      onSubmit: onSubmit,
     ),
   );
 }
@@ -74,6 +81,7 @@ class _FormSheet extends StatefulWidget {
     required this.initial,
     this.submitLabel,
     this.readOnly = false,
+    this.onSubmit,
   });
 
   final String title;
@@ -81,6 +89,7 @@ class _FormSheet extends StatefulWidget {
   final Json initial;
   final String? submitLabel;
   final bool readOnly;
+  final Future<void> Function(Json values)? onSubmit;
 
   @override
   State<_FormSheet> createState() => _FormSheetState();
@@ -92,6 +101,8 @@ class _FormSheetState extends State<_FormSheet> {
   final _toggles = <String, bool>{};
   final _selections = <String, String?>{};
   final _multiSelections = <String, Set<String>>{};
+  late final String _initialSnapshot;
+  bool _confirmingExit = false, _saving = false;
 
   @override
   void initState() {
@@ -117,6 +128,30 @@ class _FormSheetState extends State<_FormSheet> {
           );
       }
     }
+    _initialSnapshot = _snapshot();
+  }
+
+  String _snapshot() => jsonEncode({
+    'text': {for (final entry in _controllers.entries) entry.key: entry.value.text},
+    'toggles': _toggles,
+    'selections': _selections,
+    'multi': {for (final entry in _multiSelections.entries) entry.key: (entry.value.toList()..sort())},
+  });
+
+  Future<void> _close() async {
+    if (_confirmingExit || _saving) return;
+    if (!widget.readOnly && _snapshot() != _initialSnapshot) {
+      _confirmingExit = true;
+      try {
+        final arabic = Localizations.localeOf(context).languageCode == 'ar';
+        final discard = await confirmAction(context,
+          title: arabic ? 'تغييرات غير محفوظة' : 'Unsaved changes',
+          message: arabic ? 'الخروج دون حفظ المدخلات؟' : 'Leave without saving your changes?',
+          confirmLabel: arabic ? 'الخروج دون حفظ' : 'Discard changes',destructive:true);
+        if (!discard || !mounted) return;
+      } finally { _confirmingExit = false; }
+    }
+    if (mounted) Navigator.of(context).pop();
   }
 
   @override
@@ -166,8 +201,8 @@ class _FormSheetState extends State<_FormSheet> {
     }
   }
 
-  void _submit() {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
+  Future<void> _submit() async {
+    if (_saving || _confirmingExit || !(_formKey.currentState?.validate() ?? false)) return;
     final result = <String, dynamic>{};
     for (final field in widget.fields) {
       switch (field.kind) {
@@ -190,19 +225,32 @@ class _FormSheetState extends State<_FormSheet> {
           }
       }
     }
-    Navigator.of(context).pop(result);
+    if (widget.onSubmit == null) {
+      Navigator.of(context).pop(result);
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await widget.onSubmit!(result);
+      if (mounted) Navigator.of(context).pop(result);
+    } catch (error) {
+      if (mounted) await showAppError(context,error);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    return AlertDialog(
+    return PopScope(canPop:false,onPopInvokedWithResult:(didPop,_) { if (!didPop) _close(); },
+      child:AlertDialog(
       title: Text(widget.title),
       content: SizedBox(
         width: 440,
         child: SingleChildScrollView(
           padding: const EdgeInsets.only(top: AppSpacing.xs),
-          child: Form(
+          child: AbsorbPointer(absorbing:_saving,child:Form(
             key: _formKey,
             autovalidateMode: AutovalidateMode.onUserInteraction,
             child: Column(
@@ -211,21 +259,21 @@ class _FormSheetState extends State<_FormSheet> {
                 for (final field in widget.fields) _buildField(field),
               ],
             ),
-          ),
+          )),
         ),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: _saving ? null : _close,
           child: Text(widget.readOnly ? l10n.close : l10n.cancel),
         ),
         if (!widget.readOnly)
           FilledButton(
-            onPressed: _submit,
+            onPressed: _saving ? null : _submit,
             child: Text(widget.submitLabel ?? l10n.save),
           ),
       ],
-    );
+    ));
   }
 
   Widget _buildField(FieldSpec field) {

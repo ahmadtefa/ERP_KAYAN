@@ -14,6 +14,8 @@ class _ItemTaxApi extends ApiClient {
   _ItemTaxApi({required this.existing}) : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),FakeTokenStore());
   final bool existing;
   Map<String,dynamic>? submitted;
+  bool failFirst=false;
+  int posts=0;
   @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async => existing ? [
     {'id':'item','code':'I-1','nameEn':'Item','nameAr':'صنف','unit':'piece',
@@ -21,7 +23,9 @@ class _ItemTaxApi extends ApiClient {
   ] : [];
   @override
   Future<Map<String,dynamic>> post(String path,{Object? body,String? idempotencyKey}) async {
-    submitted=Map<String,dynamic>.from(body! as Map); return {'id':'item'};
+    submitted=Map<String,dynamic>.from(body! as Map); posts++;
+    if (failFirst && posts == 1) throw StateError('INTERNAL_DO_NOT_SHOW');
+    return {'id':'item'};
   }
   @override
   Future<Map<String,dynamic>> patch(String path,{Object? body}) async {
@@ -59,4 +63,29 @@ void main() {
       expect(api.submitted,containsPair('taxRate','0'));
     });
   }
+  testWidgets('item save failure keeps the form and its tax input', (tester) async {
+    tester.view.physicalSize=const Size(1600,1200); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final api=_ItemTaxApi(existing:false)..failFirst=true;
+    await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+      appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1')),
+      exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
+      child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,home:const ItemsScreen())));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New item').first); await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField,'Code'),'I-1');
+    await tester.enterText(find.widgetWithText(TextFormField,'Name (English)'),'Item');
+    await tester.enterText(find.widgetWithText(TextFormField,'الاسم (عربي)'),'صنف');
+    await tester.ensureVisible(find.widgetWithText(TextFormField,'Tax %'));
+    await tester.enterText(find.widgetWithText(TextFormField,'Tax %'),'7');
+    await tester.tap(find.text('Save').last); await tester.pumpAndSettle();
+    expect(find.textContaining('INTERNAL_DO_NOT_SHOW'),findsNothing);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Tax %')).controller!.text,'7');
+    expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Code')).controller!.text,'I-1');
+    await tester.tap(find.text('Save').last); await tester.pumpAndSettle();
+    expect(api.posts,2); expect(api.submitted,containsPair('taxRate','7'));
+  });
+
 }
