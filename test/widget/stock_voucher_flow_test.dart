@@ -109,6 +109,7 @@ void main() {
       expect(find.textContaining('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW'),findsNothing);
       await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
       api.fail=false;
+      await tester.ensureVisible(find.text('Retry'));
       await tester.tap(find.text('Retry')); await tester.pumpAndSettle();
       expect(find.text('حسنًا'),findsNothing);
       expect(find.textContaining('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW'),findsNothing);
