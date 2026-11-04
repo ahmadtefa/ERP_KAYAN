@@ -67,21 +67,21 @@ final itemsProvider = FutureProvider<List<Json>>((ref) async {
 });
 
 final activeItemsProvider = FutureProvider<List<Json>>((ref) async {
-  final items = await ref.read(itemsProvider.future);
+  final items = await ref.watch(itemsProvider.future);
   return items
       .where((item) => flag(item, 'isActive', fallback: true))
       .toList(growable: false);
 });
 
 final activeCustomersProvider = FutureProvider<List<Json>>((ref) async {
-  final rows = await ref.read(customersProvider.future);
+  final rows = await ref.watch(customersProvider.future);
   return rows
       .where((row) => flag(row, 'isActive', fallback: true))
       .toList(growable: false);
 });
 
 final activeSuppliersProvider = FutureProvider<List<Json>>((ref) async {
-  final rows = await ref.read(suppliersProvider.future);
+  final rows = await ref.watch(suppliersProvider.future);
   return rows
       .where((row) => flag(row, 'isActive', fallback: true))
       .toList(growable: false);

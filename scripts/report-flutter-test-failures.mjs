@@ -89,7 +89,7 @@ for (const line of lines) {
   }
   // These UI/refresh fixtures contain only synthetic constants. Restrict
   // diagnostics to locations, numeric counts and known framework errors.
-  if (event.type === 'print' && /^(?:blank item tax sends zero when (?:creating|editing)|item save failure keeps the form and its tax input|both Home buttons preserve a return draft when navigation is cancelled|cancel and system back protect text until explicit discard|a changed switch is protected and an unchanged form closes directly|a failed submit keeps the entered fields until a successful retry|overlapping refreshes keep the latest result, not the last response|a stale failure does not overwrite a newer successful refresh)$/.test(tests.get(event.testID) ?? '')) {
+  if (event.type === 'print' && /^(?:blank item tax sends zero when (?:creating|editing)|item save failure keeps the form and its tax input|both Home buttons preserve a return draft when navigation is cancelled|cancel and system back protect text until explicit discard|a changed switch is protected and an unchanged form closes directly|a failed submit keeps the entered fields until a successful retry|active pickers rebuild from each invalidated source|overlapping refreshes keep the latest result, not the last response|a stale failure does not overwrite a newer successful refresh)$/.test(tests.get(event.testID) ?? '')) {
     const details = String(event.message ?? '').split(/\r?\n/).map(line =>
       line.match(/^\s*(?:Expected:|Actual:)\s*(?:<\d+>|exactly \d+ matching candidates|no matching candidates)/)?.[0]?.trim() ??
       line.match(/test\/(?:widget\/(?:item_blank_tax|form_sheet_unsaved|return_unsaved_guard)_test|features\/common\/resource_refresh_race_test)\.dart:\d+:\d+/)?.[0] ??

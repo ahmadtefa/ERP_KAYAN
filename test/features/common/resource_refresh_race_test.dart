@@ -19,6 +19,12 @@ class _ListApi extends ApiClient {
     final next=Completer<List<Map<String,dynamic>>>(); pending.add(next); return next.future;
   }
 }
+class _MutableSourcesApi extends ApiClient {
+  _MutableSourcesApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),FakeTokenStore());
+  final rows=<String,List<Map<String,dynamic>>>{};
+  @override
+  Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async => rows[path] ?? [];
+}
 class _ListController extends JsonListController {
   @override
   String get resourcePath => '/synthetic';
@@ -26,6 +32,26 @@ class _ListController extends JsonListController {
 final _provider=AsyncNotifierProvider<JsonListController,List<Map<String,dynamic>>>(_ListController.new);
 
 void main() {
+  test('active pickers rebuild from each invalidated source', () async {
+    final api=_MutableSourcesApi();
+    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api)]);
+    addTearDown(container.dispose);
+    for (final entry in [
+      (path:'/inventory/items',source:itemsProvider,active:activeItemsProvider),
+      (path:'/parties/customers',source:customersProvider,active:activeCustomersProvider),
+      (path:'/parties/suppliers',source:suppliersProvider,active:activeSuppliersProvider),
+    ]) {
+      api.rows[entry.path]=[{'id':'old','isActive':true}];
+      final sub=container.listen(entry.active,(_,_) {});
+      expect((await container.read(entry.active.future)).single['id'],'old');
+      api.rows[entry.path]=[{'id':'old','isActive':false},{'id':'new','isActive':true}];
+      container.invalidate(entry.source);
+      await container.read(entry.source.future);
+      await container.pump();
+      expect((await container.read(entry.active.future)).map((row) => row['id']).toList(),['new']);
+      sub.close();
+    }
+  });
   test('overlapping refreshes keep the latest result, not the last response', () async {
     final api=_ListApi();
     final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api)]);
