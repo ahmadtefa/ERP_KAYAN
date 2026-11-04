@@ -24,6 +24,8 @@ class _ChartSource implements ChartOfAccountsDataSource {
   int loads = 0;
   AccountInput? createdInput;
   bool failCreate = false;
+  bool commitBeforeFailure = false;
+  int createAttempts = 0;
 
   @override
   Future<List<Account>> fetchAccounts() async { loads++; return [...accounts]; }
@@ -31,11 +33,13 @@ class _ChartSource implements ChartOfAccountsDataSource {
   Future<String> suggestCode({String? parentId}) async => '3';
   @override
   Future<Account> createAccount(AccountInput input) async {
+    createAttempts++;
     createdInput = input;
-    if (failCreate) throw StateError('Synthetic save failure');
+    if (failCreate && !commitBeforeFailure) throw StateError('Synthetic save failure');
     final account = Account(id: 'new', companyId: 'c', code: input.code ?? '3',
         name: input.nameEn, nameEn: input.nameEn, nameAr: input.nameAr, type: input.type);
     accounts.add(account);
+    if (failCreate) throw StateError('Synthetic response lost after commit');
     return account;
   }
   @override
@@ -106,8 +110,8 @@ void main() {
     expect(source.createdInput!.toCreateJson().containsKey('isActive'), isFalse);
     expect(find.textContaining('3  New asset'), findsOneWidget);
   });
-  testWidgets('a failed save preserves the entered account fields for retry', (tester) async {
-    final source = _ChartSource()..failCreate = true;
+  testWidgets('an uncertain save preserves the draft and refuses blind retry', (tester) async {
+    final source = _ChartSource()..failCreate = true..commitBeforeFailure = true;
     await _open(tester, source);
     await tester.tap(find.text('New account'));
     await tester.pumpAndSettle();
@@ -120,10 +124,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Name in English *')).controller!.text,
         'New asset');
-    source.failCreate = false;
-    await tester.tap(find.text('Save'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('3  New asset'), findsOneWidget);
+    expect(find.textContaining('The save result is uncertain'), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save')).onPressed, isNull);
+    expect(source.createAttempts, 1);
+    expect(source.loads, greaterThan(1));
+    expect(source.accounts.where((account) => account.nameEn == 'New asset'), hasLength(1));
   });
 
   testWidgets('cancel and system back ask before discarding edited fields', (tester) async {

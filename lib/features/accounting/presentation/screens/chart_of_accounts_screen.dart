@@ -330,6 +330,9 @@ Future<void> _editAccount(
     isActive, selectedCashFlow,
   );
   bool saving = false;
+  // The API can commit before its response is lost. Until the server supports
+  // idempotency/version checks, keep the draft but do not blindly resubmit it.
+  bool uncertain = false;
   bool confirmingDiscard = false;
   bool hasChanges() => initial != (
     codeController.text, nameArController.text, nameEnController.text,
@@ -386,6 +389,12 @@ Future<void> _editAccount(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (uncertain) ...[
+                    Text(arabic
+                        ? 'تعذّر تأكيد نتيجة الحفظ. راجع الحسابات بعد تحديثها قبل المحاولة مجددًا.'
+                        : 'The save result is uncertain. Review the refreshed accounts before trying again.'),
+                    const SizedBox(height: 12),
+                  ],
                   TextField(
                     controller: codeController,
                     decoration: InputDecoration(
@@ -564,7 +573,7 @@ Future<void> _editAccount(
               child: Text(dialogL10n.cancel),
             ),
             FilledButton(
-              onPressed: saving ? null : () async {
+              onPressed: saving || uncertain ? null : () async {
                 if (nameArController.text.trim().isEmpty || nameEnController.text.trim().isEmpty) {
                   showMessage(dialogContext, arabic
                       ? 'أدخل اسم الحساب بالعربية والإنجليزية.'
@@ -589,7 +598,10 @@ Future<void> _editAccount(
                     : await controller.updateAccount(existing.id, input);
                 if (!dialogContext.mounted) return;
                 if (error != null) {
-                  setDialogState(() => saving = false);
+                  setDialogState(() {
+                    saving = false;
+                    uncertain = true;
+                  });
                   showMessage(dialogContext, error, error: true);
                 } else {
                   Navigator.of(dialogContext).pop(true);

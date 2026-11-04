@@ -30,6 +30,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AppErrorDialog), findsNothing);
   });
+  testWidgets('a mixed Arabic and technical failure does not expose internals', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      locale: const Locale('en'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(body: Builder(builder: (context) => TextButton(
+        onPressed: () => showAppError(context, 'تعذر الحفظ: Prisma SQL error', statusCode: 500),
+        child: const Text('Show error'),
+      ))),
+    ));
+    await tester.tap(find.text('Show error'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Prisma'), findsNothing);
+    expect(find.textContaining('SQL'), findsNothing);
+    expect(find.byType(AppErrorDialog), findsOneWidget);
+    expect(find.text('حسنًا'), findsOneWidget);
+    await tester.tap(find.text('حسنًا'));
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('a disposed navigator does not suppress errors in its replacement', (tester) async {
     Widget app(Key key) => MaterialApp(
       key: key,

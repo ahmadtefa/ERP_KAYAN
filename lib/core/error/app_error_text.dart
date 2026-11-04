@@ -157,9 +157,19 @@ class AppErrorMessageResolver {
       return _fallback(statusCode: statusCode, preferred: preferred);
     }
 
-    // Something already written in Arabic is a business message by
-    // definition; keep it verbatim.
+    // Never relay the body of a server failure, even when it is written in
+    // Arabic: arbitrary diagnostics or customer data can appear in a 5xx.
+    if (statusCode != null && statusCode >= 500) {
+      return _fallback(statusCode: statusCode, preferred: preferred);
+    }
+
+    // Arabic in a server or exception message is not proof that the rest of
+    // the message is safe: it can also contain a stack trace, SQL, a URL or a
+    // credential assignment. Filter those before preserving a business reason.
     if (_containsArabic(text)) {
+      if (_looksTechnical(text)) {
+        return _fallback(statusCode: statusCode, preferred: preferred);
+      }
       final reason = _reasonFor(statusCode, preferred);
       return AppErrorText(
         reason: reason,
@@ -297,6 +307,10 @@ class AppErrorMessageResolver {
     RegExp(r'\b(json|base64|hex digest|sha-256|encoding)\b', caseSensitive: false),
     RegExp(r'column "|table "|row \d', caseSensitive: false),
     RegExp(r'no such (column|table)', caseSensitive: false),
+    RegExp(r'\b(?:postgres(?:ql)?|https?)://', caseSensitive: false),
+    RegExp(r'\b(?:password|passwd|token|secret|authorization|api[_-]?key)\s*[:=]', caseSensitive: false),
+    RegExp(r'\bbearer\s+\S+', caseSensitive: false),
+    RegExp(r'-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----', caseSensitive: false),
   ];
 
   static bool _looksTechnical(String text) =>

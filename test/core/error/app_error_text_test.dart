@@ -48,6 +48,22 @@ void main() {
       expect(text.hasBusinessMessage, isFalse);
     });
 
+    test('Arabic text cannot bypass technical and credential filters', () {
+      for (final raw in [
+        'تعذر الحفظ: Prisma SQL error',
+        'فشل الاتصال postgres://db.example.invalid/synthetic',
+        'فشل الطلب token=synthetic-value',
+        'خطأ داخلي TypeError: undefined',
+        'تفاصيل عميل اصطناعية لا يجب عرضها',
+      ]) {
+        final result = arabic.resolve(ApiFailure(raw, statusCode: 500));
+        expect(result.reason, AppErrorReason.server);
+        expect(result.hasBusinessMessage, isFalse, reason: raw);
+      }
+      // Technical markers are also rejected on business-error responses.
+      expect(arabic.resolve('فشل الحفظ: Prisma SQL error', statusCode: 400).hasBusinessMessage, isFalse);
+    });
+
     test('a raw exception object is not forwarded', () {
       final text = arabic.resolve(StateError('Bad state: no element'));
       expect(text.hasBusinessMessage, isFalse);
