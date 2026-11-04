@@ -572,7 +572,11 @@ export class StockDocumentsService {
         if (document.voucherKind === 'RECEIPT' && (raw.unitCost === undefined || raw.unitCost === null || raw.unitCost === '')) {
           throw new BadRequestException(`Line ${index + 1}: receipt unit cost is required`);
         }
-        const unitCost = raw.unitCost === undefined ? new Prisma.Decimal(0) : this.decimal(raw.unitCost,`Line ${index + 1} unit cost`);
+        // Issue-only editors may not have cost visibility. Omitted or
+        // unauthorized issue cost never destroys or replaces a saved cost.
+        const unitCost = document.voucherKind === 'ISSUE' && (!mayReadCost || raw.unitCost === undefined)
+          ? (old && old.itemId === item.id ? old.unitCost : new Prisma.Decimal(0))
+          : raw.unitCost === undefined ? new Prisma.Decimal(0) : this.decimal(raw.unitCost,`Line ${index + 1} unit cost`);
         if (unitCost.isNegative() || quantity.abs().mul(unitCost).greaterThanOrEqualTo('1e15')) throw new BadRequestException(`Line ${index + 1}: invalid stock value`);
         if (raw.notes != null && typeof raw.notes !== 'string') throw new BadRequestException(`Line ${index + 1}: notes must be text`);
         lines.push({id:old?.id ?? randomUUID(),itemId:item.id,lineNumber:index + 1,quantity,unitCost,unitName,unitFactor,unitQuantity,notes:raw.notes ?? null});

@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
-import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
@@ -143,6 +142,11 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
   Future<bool> _canLeave() async => !_busy && !_confirming;
   Future<Json> _load() => ref.read(apiClientProvider).getObject('$_base/${widget.id}');
   void _refresh() => setState(() { _future = _load(); });
+  Future<void> _edit(Json doc) async {
+    await Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => StockVoucherCreateScreen(
+      kind:text(doc,'voucherKind'),initialDocument:doc,exitRelay:widget.exitRelay)));
+    if (mounted) _refresh();
+  }
   Future<void> _action(String action) async {
     if (_busy || _confirming) return;
     setState(() => _confirming = true);
@@ -157,7 +161,7 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
       await ref.read(apiClientProvider).post('$_base/${widget.id}/$action',body:{});
       if (mounted) { _refresh(); showMessage(context,_label(context,'تم تحديث الإذن','Voucher refreshed')); }
     } catch (error) {
-      if (mounted) { _refresh(); showMessage(context,error is Failure ? error.message : '$error',error:true); }
+      if (mounted) { _refresh(); showAppError(context,error); }
     } finally {
       if (mounted) {
         if (action == 'post' || action == 'reverse') {
@@ -199,6 +203,9 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
           if (can('admin.audit.read')) _VoucherHistory(key:ValueKey('${widget.id}:$status:$reviewed:$approved'),id:widget.id),
           if (can('inventory.export')) DocumentExportActions(kind:'stock-voucher',id:widget.id),
           Wrap(spacing:8,children:[
+            if (status == 'draft' && can('inventory.stock.adjust') && can('inventory.items.read') &&
+                can('inventory.warehouses.read') && (text(doc,'voucherKind') != 'RECEIPT' || can('inventory.cost.read')) && doc['editVersion'] is int)
+              OutlinedButton(onPressed:_busy || _confirming ? null : () => _edit(doc),child:Text(_label(context,'تعديل المسودة','Edit draft'))),
             if (status == 'draft' && !reviewed && can('inventory.stock.review'))
               OutlinedButton(onPressed:_busy || _confirming ? null : () => _action('review'),child:Text(_label(context,'مراجعة','Review'))),
             if (status == 'draft' && reviewed && !approved && can('inventory.stock.approve'))
@@ -247,6 +254,7 @@ class _VoucherHistoryState extends ConsumerState<_VoucherHistory> {
 }
 
 class _VoucherLine {
+  String? id, originalItemId, originalUnitName, notes;
   String? itemId;
   String? unitName;
   final quantity=TextEditingController();
@@ -257,8 +265,9 @@ class _VoucherLine {
 /// A retained request always keeps the original body/key until a successful
 /// replay. Ambiguous failures, including conflicts, are never discarded.
 class StockVoucherCreateScreen extends ConsumerStatefulWidget {
-  const StockVoucherCreateScreen({super.key,required this.kind,this.exitRelay});
+  const StockVoucherCreateScreen({super.key,required this.kind,this.exitRelay,this.initialDocument});
   final String kind;
+  final Json? initialDocument;
   final DraftExitRelay? exitRelay;
   @override
   ConsumerState<StockVoucherCreateScreen> createState() => _StockVoucherCreateScreenState();
@@ -268,6 +277,9 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
   final _date=TextEditingController(), _reason=TextEditingController(), _party=TextEditingController(), _notes=TextEditingController();
   final _lines=<_VoucherLine>[_VoucherLine()];
   String? _warehouse, _center, _scope;
+  int? _editVersion;
+  bool get _editing => widget.initialDocument != null;
+  String get _path => _editing ? '$_base/${text(widget.initialDocument!, 'id')}/voucher-draft' : _base;
   OrderRetryStore? _store;
   Map<String,dynamic>? _pending;
   late Future<List<List<Json>>> _options;
@@ -279,6 +291,7 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
     super.initState();
     final now=DateTime.now();
     _date.text='${now.year.toString().padLeft(4,'0')}-${now.month.toString().padLeft(2,'0')}-${now.day.toString().padLeft(2,'0')}';
+    if (_editing) _restoreDocument(widget.initialDocument!);
     widget.exitRelay?.attach(_confirmExit);
     _options=_loadOptions(); _loadPending();
   }
@@ -312,7 +325,7 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
         _options=Future.value(updated);
       });
     } catch (error) {
-      if (mounted) showMessage(context,error is Failure ? error.message : '$error',error:true);
+      if (mounted) showAppError(context,error);
     } finally { if (mounted) setState(() => _loadingMore=false); }
   }
   Future<void> _loadPending() async {
@@ -320,23 +333,52 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
       final user=ref.read(currentUserProvider); if (user?.branchId == null) throw StateError('No user branch');
       final config=ref.read(appConfigProvider);
       final scope=orderRetryScope(apiBaseUrl:config.apiBaseUrl,embeddedLocalServer:config.embeddedLocalServer,
-        companyId:user!.companyId,branchId:user.branchId!,userId:user.id,kind:'stock-voucher',orderId:widget.kind);
+        companyId:user!.companyId,branchId:user.branchId!,userId:user.id,kind:_editing ? 'stock-voucher-edit' : 'stock-voucher',
+        orderId:_editing ? text(widget.initialDocument!,'id') : widget.kind);
       final store=OrderRetryStore(await SharedPreferences.getInstance());
       final pending=store.read(scope);
       if (!mounted) return;
       if (pending != null) _restore(pending);
       setState(() { _store=store; _scope=scope; _pending=pending; });
-    } catch (error) { if (mounted) showMessage(context,'$error',error:true); }
+    } catch (error) { if (mounted) showAppError(context,error); }
+  }
+  void _restoreDocument(Json doc) {
+    if (text(doc,'id').isEmpty || text(doc,'voucherKind') != widget.kind || doc['editVersion'] is! int) {
+      throw const FormatException('Invalid voucher draft');
+    }
+    _editVersion=doc['editVersion'] as int;
+    final raw=listOf(doc['lines']);
+    if (raw.isEmpty) throw const FormatException('Invalid voucher lines');
+    final old=List<_VoucherLine>.from(_lines); _lines.clear();
+    for (final row in raw) {
+      final line=_VoucherLine()..id=asString(row['id'])..itemId=asString(row['itemId'])
+        ..unitName=asString(row['unitName'])..notes=asString(row['notes']);
+      line.originalItemId=line.itemId; line.originalUnitName=line.unitName;
+      line.quantity.text=text(row,'unitQuantity',fallback:text(row,'quantity')).replaceFirst(RegExp(r'^-'),'');
+      line.cost.text=text(row,'unitCost'); _lines.add(line);
+    }
+    _warehouse=asString(doc['toWarehouseId']); _center=asString(doc['costCenterId']);
+    _date.text=text(doc,'documentDate'); _reason.text=text(doc,'reason');
+    _party.text=text(doc,'counterpartyName'); _notes.text=text(doc,'notes');
+    for (final line in old) { line.dispose(); }
   }
   void _restore(Map<String,dynamic> request) {
-    if (request['method'] != 'POST' || request['path'] != _base || request['body'] is! Map) throw const FormatException('Invalid pending voucher');
+    if (request['method'] != (_editing ? 'PUT' : 'POST') || request['path'] != _path || request['body'] is! Map) throw const FormatException('Invalid pending voucher');
     final body=Map<String,dynamic>.from(request['body'] as Map);
-    if (body['voucherKind'] != widget.kind) throw const FormatException('Invalid pending voucher kind');
+    if (!_editing && body['voucherKind'] != widget.kind) throw const FormatException('Invalid pending voucher kind');
+    if (_editing && body['expectedVersion'] is! int) throw const FormatException('Invalid voucher version');
+    if (_editing) _editVersion=body['expectedVersion'] as int;
     final raw=listOf(body['lines']); if (raw.isEmpty) throw const FormatException('Invalid pending voucher lines');
     final old=List<_VoucherLine>.from(_lines);
     _lines.clear();
     for (final row in raw) {
-      final line=_VoucherLine()..itemId=asString(row['itemId'])..unitName=asString(row['unitName']);
+      final line=_VoucherLine()..id=asString(row['id'])..itemId=asString(row['itemId'])
+        ..unitName=asString(row['unitName'])..notes=asString(row['notes']);
+      if (_editing) {
+        final original=listOf(widget.initialDocument!['lines']).where((entry) => text(entry,'id') == line.id).firstOrNull;
+        line.originalItemId=original == null ? null : asString(original['itemId']);
+        line.originalUnitName=original == null ? null : asString(original['unitName']);
+      }
       line.quantity.text=text(row,'quantity').replaceFirst(RegExp(r'^-'),'');
       line.cost.text=text(row,'unitCost'); _lines.add(line);
     }
@@ -370,35 +412,58 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
   }
   Future<void> _save() async {
     if (_busy || _pending != null || _store == null || _scope == null || !(_form.currentState?.validate() ?? false)) return;
-    final body=<String,dynamic>{'kind':'ADJUSTMENT','voucherKind':widget.kind,'documentDate':_date.text.trim(),
+    final body=<String,dynamic>{if (!_editing) ...{'kind':'ADJUSTMENT','voucherKind':widget.kind},
+      if (_editing) 'expectedVersion':_editVersion, 'documentDate':_date.text.trim(),
       'toWarehouseId':_warehouse,'counterpartyName':_party.text.trim(),'reason':_reason.text.trim(),
       if (_center != null) 'costCenterId':_center,
       if (_notes.text.trim().isNotEmpty) 'notes':_notes.text.trim(),
       'lines':[for (final line in _lines) {'itemId':line.itemId,
+        if (_editing && line.id != null) 'id':line.id,
+        if (_editing && line.notes != null) 'notes':line.notes,
         if (line.unitName != null) 'unitName':line.unitName,
         'quantity':widget.kind == 'ISSUE' ? '-${line.quantity.text.trim()}' : line.quantity.text.trim(),
         if (widget.kind == 'RECEIPT') 'unitCost':line.cost.text.trim()}]};
     setState(() => _busy=true);
-    try { final request=await _store!.begin(_scope!,method:'POST',path:_base,body:body); if (mounted) await _send(request); }
-    catch (error) { if (mounted) showMessage(context,'$error',error:true); }
+    try { final request=await _store!.begin(_scope!,method:_editing ? 'PUT' : 'POST',path:_path,body:body); if (mounted) await _send(request); }
+    catch (error) { if (mounted) showAppError(context,error); }
     finally { if (mounted) setState(() => _busy=false); }
   }
   Future<void> _send(Map<String,dynamic> request) async {
     setState(() { _busy=true; _pending=request; });
     try {
-      if (request['method'] != 'POST' || request['path'] != _base || request['body'] is! Map) throw const FormatException('Invalid pending voucher');
+      if (request['method'] != (_editing ? 'PUT' : 'POST') || request['path'] != _path || request['body'] is! Map) throw const FormatException('Invalid pending voucher');
       final body=Map<String,dynamic>.from(request['body'] as Map);
-      if (body['voucherKind'] != widget.kind) throw const FormatException('Invalid pending voucher kind');
-      final result=await ref.read(apiClientProvider).post(_base,body:body); final id=text(result,'id');
+      if (!_editing && body['voucherKind'] != widget.kind) throw const FormatException('Invalid pending voucher kind');
+      final api=ref.read(apiClientProvider);
+      final result=_editing ? await api.put(_path,body:body) : await api.post(_path,body:body);
+      final id=text(result,'id');
+      if (_editing && id != text(widget.initialDocument!,'id')) throw const FormatException('Unexpected voucher response');
       if (id.isEmpty) throw const FormatException('Voucher response has no id');
       await _store!.complete(_scope!);
       if (mounted) { _dirty=false; Navigator.of(context).pop(id); }
-    } catch (error) { if (mounted) showMessage(context,error is Failure ? error.message : '$error',error:true); }
+    } catch (error) { if (mounted) showAppError(context,error); }
+    finally { if (mounted) setState(() => _busy=false); }
+  }
+  Future<void> _discardPendingAndReload() async {
+    if (!_editing || _busy || _confirming || _pending == null || _store == null || _scope == null) return;
+    setState(() => _confirming=true);
+    final ok=await confirmAction(context,title:_label(context,'طلب غير محسوم','Unresolved request'),
+      message:_label(context,'قد يكون التعديل تم حفظه. سيتم تجاهل إعادة المحاولة وإعادة تحميل الإذن من الخادم. متابعة؟',
+        'The edit may have been saved. Discard the retry and reload the voucher from the server?'),
+      confirmLabel:_label(context,'إعادة التحميل','Reload'),destructive:true);
+    if (!mounted) return;
+    setState(() => _confirming=false);
+    if (!ok) return;
+    setState(() => _busy=true);
+    try {
+      await _store!.complete(_scope!);
+      if (mounted) { _dirty=false; Navigator.of(context).pop(); }
+    } catch (error) { if (mounted) showAppError(context,error); }
     finally { if (mounted) setState(() => _busy=false); }
   }
   @override
   Widget build(BuildContext context) {
-    final disabled=_busy || _pending != null || _store == null;
+    final disabled=_busy || _confirming || _pending != null || _store == null;
     return PopScope(canPop:false,onPopInvokedWithResult:(didPop,_) { if (!didPop) _close(); },
       child:Scaffold(appBar:AppBar(title:Text(widget.kind == 'RECEIPT' ? _label(context,'إذن إضافة','Receipt voucher') : _label(context,'إذن صرف','Issue voucher'))),
         body:FutureBuilder<List<List<Json>>>(future:_options,builder:(context,snapshot) {
@@ -413,7 +478,8 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
           final items=snapshot.data![0], warehouses=snapshot.data![1], centers=snapshot.data![2];
           return ListView(padding:const EdgeInsets.all(20),children:[
             if (_pending != null) Card(child:ListTile(title:Text(_label(context,'طلب الإذن غير محسوم؛ أعد المحاولة بنفس الطلب','Voucher request is unresolved; retry the same request')),
-              trailing:FilledButton(onPressed:_busy ? null : () => _send(_pending!),child:Text(_label(context,'إعادة المحاولة','Retry'))))),
+              trailing:Wrap(spacing:8,children:[FilledButton(onPressed:_busy ? null : () => _send(_pending!),child:Text(_label(context,'إعادة المحاولة','Retry'))),
+                if (_editing) TextButton(onPressed:_busy ? null : _discardPendingAndReload,child:Text(_label(context,'إعادة التحميل','Reload')))]))),
             Form(key:_form,child:IgnorePointer(ignoring:disabled,child:Column(children:[
               DropdownButtonFormField<String>(initialValue:warehouses.any((x) => text(x,'id') == _warehouse) ? _warehouse : null,
                 decoration:InputDecoration(labelText:_label(context,'المخزن','Warehouse')),
@@ -439,6 +505,12 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
                 final units=(rawUnits is List && rawUnits.isNotEmpty
                     ? rawUnits.cast<Json>().where((unit) => flag(unit,'isActive',fallback:true))
                     : lineUnitsOf(item)).where((unit) => text(unit,'unit').isNotEmpty).toList();
+                // An unchanged saved line retains its frozen unit, even if the
+                // catalogue later disabled it. New selections remain active-only.
+                if (line.id != null && line.itemId == line.originalItemId && line.unitName != null &&
+                    line.unitName == line.originalUnitName && !units.any((unit) => text(unit,'unit') == line.unitName)) {
+                  units.add({'unit':line.unitName});
+                }
                 return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
                 DropdownButtonFormField<String>(initialValue:items.any((x) => text(x,'id') == line.itemId) ? line.itemId : null,
                   decoration:InputDecoration(labelText:_label(context,'الصنف','Item')),

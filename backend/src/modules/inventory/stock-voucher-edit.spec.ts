@@ -14,7 +14,7 @@ function harness() {
   const original = doc();
   const tx = {$queryRaw:jest.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([{id:'doc'}]).mockResolvedValueOnce([]),
     $executeRaw:jest.fn(),stockDocument:{findUniqueOrThrow:jest.fn().mockResolvedValue(original),update:jest.fn(async (_arg:unknown) => undefined)},
-    stockDocumentLine:{deleteMany:jest.fn(),createMany:jest.fn(async (_arg:{data:Array<{id?:string;quantity:Prisma.Decimal;unitFactor:Prisma.Decimal | null}>}) => undefined)},
+    stockDocumentLine:{deleteMany:jest.fn(),createMany:jest.fn(async (_arg:{data:Array<{id?:string;quantity:Prisma.Decimal;unitCost:Prisma.Decimal;unitFactor:Prisma.Decimal | null}>}) => undefined)},
     warehouse:{findFirst:jest.fn().mockResolvedValue({id:'warehouse'})},
     item:{findFirst:jest.fn().mockResolvedValue({id:'item',isStockTracked:true,unit:'piece',units:[{unit:'box',factor:D('5'),isActive:false}]})}};
   const prisma = {$transaction:jest.fn(async (fn:(arg:typeof tx)=>Promise<void>) => fn(tx))};
@@ -39,6 +39,14 @@ describe('stock voucher draft edit', () => {
     const h2 = harness();
     await expect(h2.service.updateVoucher('company','branch','user','doc',input(),false)).rejects.toBeInstanceOf(ForbiddenException);
     expect(h2.tx.stockDocumentLine.deleteMany).not.toHaveBeenCalled();
+  });
+  it('does not let an issue editor without cost access overwrite a saved cost', async () => {
+    const h = harness();
+    Object.assign(h.original,{voucherKind:'ISSUE'});
+    const request = input(); request.lines[0].quantity='-3'; request.lines[0].unitCost='999';
+    await h.service.updateVoucher('company','branch','user','doc',request,false);
+    const line = h.tx.stockDocumentLine.createMany.mock.calls[0][0].data[0];
+    expect(line.unitCost.toString()).toBe('3');
   });
   it('rejects an inconsistent historical snapshot and inactive newly selected units', async () => {
     const h = harness(); h.original.lines[0].quantity = D('5');

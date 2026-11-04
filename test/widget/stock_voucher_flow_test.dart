@@ -68,6 +68,29 @@ class _VoucherApi extends ApiClient {
     return {'id':'document'};
   }
 }
+class _EditVoucherApi extends _VoucherApi {
+  _EditVoucherApi(this.kind);
+  final String kind;
+  final edits=<Map<String,dynamic>>[];
+  bool committed=false;
+  @override
+  Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async {
+    if (path != '/inventory/stock-documents/document') return super.getObject(path,query:query);
+    return {'id':'document','documentNumber':'SA-1','documentDate':'2026-11-04','voucherKind':kind,
+      'status':'draft','counterpartyName':'Department','reason':'Synthetic','toWarehouseId':'warehouse',
+      'editVersion':committed ? 3 : 2,'reviewedAt':committed ? null : '2026-11-04T12:00:00Z',
+      'approvedAt':committed ? null : '2026-11-04T12:01:00Z',
+      'lines':[{'id':'line','itemId':'item','itemCode':'IT','itemNameEn':'Item','quantity':kind == 'ISSUE' ? '-4' : '4',
+        'unit':'box','unitName':'box','unitFactor':'2.000000','unitQuantity':kind == 'ISSUE' ? '-2' : '2','unitCost':'7.5'}]};
+  }
+  @override
+  Future<Map<String,dynamic>> put(String path,{Object? body}) async {
+    expect(path,'/inventory/stock-documents/document/voucher-draft');
+    edits.add(Map<String,dynamic>.from(body! as Map));
+    if (!committed) { committed=true; throw const NetworkFailure(); }
+    return {'id':'document','editVersion':3};
+  }
+}
 class _FailingLoadApi extends _VoucherApi {
   _FailingLoadApi(this.target);
   final String target;
@@ -195,6 +218,37 @@ void main() {
       expect(api.requests,hasLength(2)); expect(api.requests.last,api.requests.first);
       expect(api.requests.first['idempotencyKey'],isA<String>());
       expect(find.text('Open voucher'),findsOneWidget);
+    });
+  }
+  for (final kind in ['RECEIPT','ISSUE']) {
+    testWidgets('$kind saved draft keeps the same edit retry after an uncertain response', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize=const Size(1400,1200); tester.view.devicePixelRatio=1;
+      addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+      final api=_EditVoucherApi(kind);
+      await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+        currentUserProvider.overrideWithValue(_user),
+        appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1')),
+        exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
+        child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+          supportedLocales:AppLocalizations.supportedLocales,home:const StockVoucherDetailScreen(id:'document'))));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Edit draft')); await tester.tap(find.text('Edit draft')); await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextFormField,'Quantity in selected unit'),'3');
+      await tester.ensureVisible(find.text('Save draft')); await tester.tap(find.text('Save draft')); await tester.pumpAndSettle();
+      expect(api.edits,hasLength(1));
+      expect(api.edits.first['expectedVersion'],2);
+      expect((api.edits.first['lines'] as List).single['id'],'line');
+      expect((api.edits.first['lines'] as List).single['quantity'],kind == 'ISSUE' ? '-3' : '3');
+      expect((api.edits.first['lines'] as List).single['unitName'],'box');
+      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+      await tester.pageBack(); await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Edit draft')); await tester.tap(find.text('Edit draft')); await tester.pumpAndSettle();
+      expect(find.textContaining('Voucher request is unresolved'),findsOneWidget);
+      await tester.tap(find.text('Retry')); await tester.pumpAndSettle();
+      expect(api.edits,hasLength(2)); expect(api.edits.last,api.edits.first);
+      expect(api.edits.first['idempotencyKey'],isA<String>());
+      expect(find.text('Voucher details'),findsOneWidget);
     });
   }
   testWidgets('voucher item picker loads beyond the first 200 entries', (tester) async {
