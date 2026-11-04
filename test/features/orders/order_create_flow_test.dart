@@ -59,6 +59,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('I — Synthetic item').last);
       await tester.pumpAndSettle();
+      final quantity = find.widgetWithText(TextFormField, 'Quantity');
+      await tester.ensureVisible(quantity);
+      await tester.enterText(quantity, '2');
       await tester.ensureVisible(find.text('Save draft order'));
       await tester.tap(find.text('Save draft order'));
       await tester.pumpAndSettle();
@@ -72,6 +75,9 @@ void main() {
       await tester.tap(find.text('Open order'));
       await tester.pumpAndSettle();
       expect(find.text('Order creation is unresolved; retry the same request.'), findsOneWidget);
+      await tester.ensureVisible(find.widgetWithText(TextFormField, 'Quantity'));
+      expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField, 'Quantity')).controller!.text, '2');
+      await tester.ensureVisible(find.text('Retry'));
       await tester.tap(find.text('Retry'));
       await tester.pumpAndSettle();
       expect(api.requests, hasLength(2));

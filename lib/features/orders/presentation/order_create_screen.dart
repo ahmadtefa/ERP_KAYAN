@@ -65,10 +65,42 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
         branchId: user.branchId!, userId: user.id, kind: widget.kind.name, orderId: 'new-order');
       final store = OrderRetryStore(await SharedPreferences.getInstance());
       final pending = store.read(scope);
-      if (mounted) setState(() { _store = store; _scope = scope; _pending = pending; });
+      if (mounted) {
+        if (pending != null) _restoreDraft(pending);
+        setState(() { _store = store; _scope = scope; _pending = pending; });
+      }
     } catch (error) {
       if (mounted) showMessage(context, error.toString(), error: true);
     }
+  }
+
+  // Reconstruct the draft as well as the request. If a later retry is
+  // definitively rejected, the user can correct it without retyping it.
+  void _restoreDraft(Map<String, dynamic> request) {
+    if (request['method'] != 'POST' || request['path'] != _path || request['body'] is! Map) {
+      throw const FormatException('Invalid pending order request');
+    }
+    final body = Map<String, dynamic>.from(request['body'] as Map);
+    final rawLines = listOf(body['lines']);
+    if (rawLines.isEmpty) throw const FormatException('Invalid pending order lines');
+    final restored = <_OrderLine>[];
+    for (final raw in rawLines) {
+      final line = _OrderLine()
+        ..itemId = asString(raw['itemId'])
+        ..unitName = asString(raw['unitName']);
+      line.quantity.text = text(raw, 'quantity');
+      line.price.text = text(raw, 'unitPrice');
+      line.discount.text = text(raw, 'discountPercent', fallback: '0');
+      line.tax.text = text(raw, 'taxRate');
+      restored.add(line);
+    }
+    final old = List<_OrderLine>.from(_lines);
+    _lines..clear()..addAll(restored);
+    _party = asString(body[widget.kind.isSales ? 'customerId' : 'supplierId']);
+    _date.text = text(body, 'orderDate');
+    _notes.text = text(body, 'notes');
+    _dirty = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) { for (final line in old) { line.dispose(); } });
   }
 
   @override
@@ -171,7 +203,8 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
           if (parties.isLoading || items.isLoading) const LinearProgressIndicator(),
           Form(key: _form, child: IgnorePointer(ignoring: disabled, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             DropdownButtonFormField<String>(
-              initialValue: _party, isExpanded: true,
+              key: ValueKey('party-$_party-${parties.hasValue}'),
+              initialValue: (parties.value ?? <Json>[]).any((row) => text(row, 'id') == _party) ? _party : null, isExpanded: true,
               decoration: InputDecoration(labelText: widget.kind.isSales ? tr('العميل', 'Customer') : tr('المورد', 'Supplier')),
               items: [for (final party in parties.value ?? <Json>[])
                 DropdownMenuItem(value: text(party, 'id'), child: Text('${text(party, 'code')} — ${text(party, _ar ? 'nameAr' : 'nameEn')}', overflow: TextOverflow.ellipsis))],
@@ -208,14 +241,19 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
     final item = items.where((row) => text(row, 'id') == line.itemId).firstOrNull;
     final units = lineUnitsOf(item);
     return Card(key: ObjectKey(line), child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
-      DropdownButtonFormField<String>(initialValue: line.itemId, isExpanded: true,
+      DropdownButtonFormField<String>(
+        key: ValueKey('item-${line.itemId}-${items.isNotEmpty}'),
+        initialValue: items.any((row) => text(row, 'id') == line.itemId) ? line.itemId : null, isExpanded: true,
         decoration: InputDecoration(labelText: tr('الصنف', 'Item')),
         items: [for (final row in items) DropdownMenuItem(value: text(row, 'id'),
           child: Text('${text(row, 'code')} — ${text(row, _ar ? 'nameAr' : 'nameEn')}', overflow: TextOverflow.ellipsis))],
         onChanged: (value) { setState(() { line.itemId = value; line.unitName = null; }); _changed(); },
         validator: (value) => value == null ? tr('مطلوب', 'Required') : null),
       if (item != null) DropdownButtonFormField<String>(
-        key: ValueKey('unit-${line.itemId}'), initialValue: line.unitName,
+        key: ValueKey('unit-${line.itemId}-${line.unitName}'),
+        initialValue: units.any((unit) => text(unit, 'unit') == line.unitName) ? line.unitName : null,
+        validator: (_) => line.unitName != null && !units.any((unit) => text(unit, 'unit') == line.unitName)
+          ? tr('اختر وحدة صالحة', 'Select an active unit') : null,
         decoration: InputDecoration(labelText: tr('الوحدة (الافتراضية إن تُركت فارغة)', 'Unit (default if blank)')),
         items: [for (final unit in units) DropdownMenuItem(value: text(unit, 'unit'), child: Text(text(unit, 'unit')))],
         onChanged: (value) { setState(() => line.unitName = value); _changed(); }),
