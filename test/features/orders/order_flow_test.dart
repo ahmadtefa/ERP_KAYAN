@@ -36,7 +36,7 @@ class _OrderApi extends ApiClient {
   @override
   Future<Map<String, dynamic>> post(String path, {Object? body, String? idempotencyKey}) async {
     requests.add(Map<String, dynamic>.from(body! as Map));
-    if (requests.length == 1) throw const NetworkFailure();
+    if (requests.length == 1) { converted = true; throw const NetworkFailure(); }
     converted = true;
     return {'invoice': {'id': 'invoice-1'}};
   }
@@ -73,6 +73,8 @@ void main() {
       await tester.tap(find.text('حسنًا'));
       await tester.pumpAndSettle();
       expect(find.text('An earlier request is unresolved; retry the same request.'), findsOneWidget);
+      expect(api.loads, greaterThan(1));
+      expect(find.textContaining('Remaining: 3'), findsOneWidget);
       await tester.tap(find.text('Retry'));
       await tester.pumpAndSettle();
       expect(api.requests.length, 2);

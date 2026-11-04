@@ -11,6 +11,8 @@ import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../accounting/presentation/screens/journal_entries_screen.dart';
+import '../../../dashboard/presentation/providers/dashboard_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
@@ -92,9 +94,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         } catch (_) {
           // The server may have committed before a transport error. Reload
           // the source instead of leaving dependent screens confidently stale.
-          ref.invalidate(itemsListProvider);
-          ref.invalidate(itemsProvider);
-          ref.invalidate(stockListProvider);
+          if (mounted) {
+            ref.invalidate(itemsListProvider);
+            ref.invalidate(itemsProvider);
+            ref.invalidate(stockListProvider);
+            ref.invalidate(journalEntriesProvider);
+            invalidateDashboardFigures(ref);
+          }
           rethrow;
         }
       },
@@ -108,6 +114,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       // Opening stock is written in the same transaction as the item, so the
       // cached stock table must be refreshed as well.
       ref.invalidate(stockListProvider);
+      ref.invalidate(journalEntriesProvider);
+      invalidateDashboardFigures(ref);
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
       if (mounted) showMessage(context, e.message, error: true);

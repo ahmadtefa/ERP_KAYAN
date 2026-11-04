@@ -169,7 +169,6 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
       await _store!.complete(_scope!);
       if (!mounted) return;
       setState(() => _pending = null);
-      _refresh();
       showMessage(context, tr('تم حفظ العملية وتحديث البيانات', 'Saved and refreshed'));
     } on Failure catch (error) {
       // A conflict may mean that this key already has a result which was
@@ -183,7 +182,13 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
     } catch (error) {
       if (mounted) showMessage(context, error.toString(), error: true);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        // Even an uncertain conversion may have created or amended an invoice.
+        // Re-read the order and invalidate the invoice list, while retaining
+        // the exact pending key/body until the server confirms the result.
+        _refresh();
+        setState(() => _busy = false);
+      }
     }
   }
 
