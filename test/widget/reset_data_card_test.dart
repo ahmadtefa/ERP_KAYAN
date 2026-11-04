@@ -91,8 +91,9 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton,'Reset program')); await tester.pumpAndSettle();
     await tester.tap(find.text('Confirm')); await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).first,'synthetic-password');
-    await tester.enterText(find.byType(TextField).last,'RESET');
+    await tester.enterText(find.byType(TextField).last,'RESET'); await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton,'Reset program').last); await tester.pump();
+    expect(source.calls,1);
     await tester.binding.handlePopRoute(); await tester.pump();
     expect(find.text('This cannot be undone'),findsOneWidget);
     source.result.completeError(StateError('PRIVATE_RESET_DIAGNOSTIC'));
