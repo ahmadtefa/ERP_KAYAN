@@ -39,12 +39,6 @@ for (const line of lines) {
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
-  // Only these checked-in widget tests are allowed to emit assertion text:
-  // they use an in-memory fake with no credentials or real business data.
-  if (event.type === 'print' && /^(sales|purchase): (?:approval and cancellation refresh the order|uncertain post refreshes before reversal)$/.test(tests.get(event.testID) ?? '') &&
-      /EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK|The following assertion|pumpAndSettle timed out|pending timer/i.test(event.message ?? '')) {
-    printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${String(event.message).slice(0, 5000)}`.slice(0, 7000));
-  }
   if (event.type === 'error') {
     errors.push(`${tests.get(event.testID) ?? `test ${event.testID ?? 'unknown'}`}: ${event.error ?? 'unknown error'} ${event.stackTrace ?? ''} ${printed.get(event.testID) ?? ''}`);
   }

@@ -30,7 +30,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   @override
   void initState() { super.initState(); _future = _load(); }
   Future<List<Json>> _load() => ref.read(apiClientProvider).getList(_path);
-  void _refresh() => setState(() => _future = _load());
+  void _refresh() => setState(() { _future = _load(); });
 
   Future<void> _create() async {
     final id = await Navigator.of(context).push<String>(MaterialPageRoute(
@@ -108,7 +108,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
   void initState() { super.initState(); _future = _load(); _loadPending(); }
   Future<Json> _load() => ref.read(apiClientProvider).get('$_base/${widget.orderId}');
   void _refresh() {
-    setState(() => _future = _load());
+    setState(() { _future = _load(); });
     ref.invalidate(invoiceListProvider(widget.kind));
   }
 
