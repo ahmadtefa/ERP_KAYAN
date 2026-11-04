@@ -42,6 +42,32 @@ class _ListController extends JsonListController {
 final _provider=AsyncNotifierProvider<JsonListController,List<Map<String,dynamic>>>(_ListController.new);
 
 void main() {
+  test('initial result waits for a newer refresh still in flight', () async {
+    final api=_DeferredInitialApi();
+    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api)]);
+    addTearDown(container.dispose);
+    final sub=container.listen(_provider,(_,_) {});
+    addTearDown(sub.close);
+    final controller=container.read(_provider.notifier);
+    final refresh=controller.reload();
+    api.pending[0].complete([{'id':'old'}]); await container.pump();
+    expect(container.read(_provider).isLoading,isTrue);
+    api.pending[1].complete([{'id':'new'}]); await refresh;
+    await container.pump();
+    expect(container.read(_provider).requireValue.single['id'],'new');
+  });
+  test('a newer refresh error is not hidden by a stale initial result', () async {
+    final api=_DeferredInitialApi();
+    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api)]);
+    addTearDown(container.dispose);
+    final sub=container.listen(_provider,(_,_) {});
+    addTearDown(sub.close);
+    final controller=container.read(_provider.notifier);
+    final refresh=controller.reload();
+    api.pending[1].completeError(StateError('new request failed')); await refresh;
+    api.pending[0].complete([{'id':'old'}]); await container.pump();
+    expect(container.read(_provider).hasError,isTrue);
+  });
   test('initial load cannot overwrite a newer successful refresh', () async {
     final api=_DeferredInitialApi();
     final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api)]);

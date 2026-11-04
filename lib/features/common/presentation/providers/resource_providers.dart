@@ -10,16 +10,30 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 /// lives.
 abstract class JsonListController extends AsyncNotifier<List<Json>> {
   int _loadGeneration = 0;
+  Future<AsyncValue<List<Json>>>? _latestLoad;
   String get resourcePath;
 
   Map<String, dynamic> get resourceQuery => const {};
 
   @override
-  Future<List<Json>> build() {
-    // Invalidate any in-flight manual refresh if this provider is disposed or
-    // rebuilt, so it cannot publish a result into a replacement lifecycle.
-    ref.onDispose(() { _loadGeneration++; });
-    return _load();
+  Future<List<Json>> build() async {
+    // Riverpod publishes the value returned by build independently of state
+    // assigned by reload. If a refresh starts while this first request is in
+    // flight, build must follow the newest request instead of returning its
+    // obsolete result (or error) later.
+    ref.onDispose(() {
+      _loadGeneration++;
+      _latestLoad = null;
+    });
+    var request = _startLoad();
+    while (true) {
+      final generation = _loadGeneration;
+      final result = await request;
+      if (generation == _loadGeneration || _latestLoad == null) {
+        return result.requireValue;
+      }
+      request = _latestLoad!;
+    }
   }
 
   Future<List<Json>> _load() async {
@@ -28,20 +42,28 @@ abstract class JsonListController extends AsyncNotifier<List<Json>> {
         .getList(resourcePath, query: resourceQuery.isEmpty ? null : resourceQuery);
   }
 
+  Future<AsyncValue<List<Json>>> _startLoad() {
+    _loadGeneration++;
+    return _latestLoad = AsyncValue.guard(_load);
+  }
+
   /// Re-reads the collection, showing the loading state again.
   Future<void> reload() async {
-    final generation = ++_loadGeneration;
+    final request = _startLoad();
+    final generation = _loadGeneration;
     state = const AsyncValue.loading();
-    final result = await AsyncValue.guard(_load);
+    final result = await request;
     if (generation == _loadGeneration) state = result;
   }
 
   /// Re-reads quietly, keeping the current rows on screen meanwhile.
   Future<void> refreshQuietly() async {
-    final generation = ++_loadGeneration;
-    final result = await AsyncValue.guard(_load);
+    final request = _startLoad();
+    final generation = _loadGeneration;
+    final result = await request;
     if (generation == _loadGeneration) state = result;
   }
+
 }
 
 /// A collection that is refetched from scratch each time it is asked for.
