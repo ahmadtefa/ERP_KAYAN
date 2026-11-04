@@ -39,6 +39,13 @@ for (const line of lines) {
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
+  if (event.type === 'print' && /^(an invoice detail retry reloads after a transient error|stock ledger retry reloads after a transient error)$/.test(tests.get(event.testID) ?? '')) {
+    const details = String(event.message ?? '').split(/\r?\n/).map(line =>
+      line.match(/^\s*(?:Expected:|Actual:)\s*(?:<\d+>|exactly \d+ matching candidates|no matching candidates)/)?.[0]?.trim() ??
+      line.match(/test\/widget\/(?:responsive_tables_test|stock_ledger_retry_test)\.dart:\d+:\d+/)?.[0] ?? ''
+    ).filter(Boolean).join(' ');
+    if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
+  }
   if (event.type === 'error') {
     errors.push(`${tests.get(event.testID) ?? `test ${event.testID ?? 'unknown'}`}: ${event.error ?? 'unknown error'} ${event.stackTrace ?? ''} ${printed.get(event.testID) ?? ''}`);
   }

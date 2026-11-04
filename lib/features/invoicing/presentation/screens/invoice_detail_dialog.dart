@@ -135,7 +135,7 @@ class _InvoiceDetailDialogState extends ConsumerState<InvoiceDetailDialog> {
             final error = snapshot.error!;
             return ErrorView(
               message: error is Failure ? error.message : '$error',
-              onRetry: () => setState(() => _future = _load()),
+              onRetry: () => setState(() { _future = _load(); }),
             );
           }
           if (!snapshot.hasData) return const LoadingView();
