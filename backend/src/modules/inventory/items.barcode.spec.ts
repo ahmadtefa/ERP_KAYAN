@@ -98,11 +98,13 @@ describe('ItemsService barcode lookup', () => {
     expect(noCost.purchasePrice).toBeNull();
   });
 
-  it('rejects a barcode scan whose base quantity would be rounded', async () => {
+  it('rounds a precise unit factor for the barcode scan display quantity', async () => {
     const { service, prisma } = build();
     const preciseUnit = { ...carton, factor: new Prisma.Decimal('1.234567') };
     prisma.itemUnit.findFirst.mockResolvedValue({ ...preciseUnit, item: { ...baseItem, units: [preciseUnit] } });
-    await expect(service.findByBarcode('company-1', '2000000000505')).rejects.toThrow(/cannot be represented/);
+    const result = await service.findByBarcode('company-1', '2000000000505');
+    expect(result.factor).toBe('1.234567');
+    expect(result.quantityPerScan).toBe('1.2346');
   });
 
   it('says so when no item or unit carries the code', async () => {

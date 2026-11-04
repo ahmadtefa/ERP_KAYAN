@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { defaultUnitPrice } from '../../common/units/unit-math';
 import { PdfService } from '../export/pdf.service';
 import { encodeCode128B, QUIET_ZONE_MODULES } from './barcode-code128';
 
@@ -113,12 +115,13 @@ export class BarcodeLabelsService {
     item: {
       nameAr: string;
       nameEn: string;
-      salePrice: { toFixed(fractionDigits?: number): string };
+      salePrice: Prisma.Decimal;
       units: Array<{
         id: string;
         unit: string;
+        factor: Prisma.Decimal;
         barcode: string | null;
-        salePrice: { toFixed(fractionDigits?: number): string } | null;
+        salePrice: Prisma.Decimal | null;
         isActive: boolean;
       }>;
     },
@@ -137,7 +140,7 @@ export class BarcodeLabelsService {
         );
       }
       const price = options.showPrice
-        ? (unit.salePrice ?? item.salePrice).toFixed(2)
+        ? defaultUnitPrice('sale', unit, new Prisma.Decimal(item.salePrice.toString())).toFixed(2)
         : null;
       const label: PreparedLabel = {
         itemName: options.lang === 'ar' ? item.nameAr || item.nameEn : item.nameEn || item.nameAr,

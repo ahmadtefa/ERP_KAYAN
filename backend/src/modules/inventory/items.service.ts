@@ -119,7 +119,7 @@ export class ItemsService {
       factor: unit.factor.toFixed(6),
       // A scan of a unit barcode is one of that unit, expressed in the base
       // unit the stock ledger keeps.
-      quantityPerScan: exactBaseQuantity(new Prisma.Decimal(1), unit.factor).toFixed(MONEY_SCALE),
+      quantityPerScan: new Prisma.Decimal(unit.factor).toDecimalPlaces(MONEY_SCALE).toFixed(MONEY_SCALE),
       salePrice: defaultUnitPrice('sale', unit, owner.salePrice).toFixed(MONEY_SCALE),
       purchasePrice: mayReadCost
         ? defaultUnitPrice('purchase', unit, owner.purchasePrice).toFixed(MONEY_SCALE)

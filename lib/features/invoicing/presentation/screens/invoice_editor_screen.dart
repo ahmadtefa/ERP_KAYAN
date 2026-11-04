@@ -83,7 +83,7 @@ class _LineDraft {
   _LineDraft({
     String quantity = '1',
     String unitPrice = '0',
-    String taxRate = '0',
+    String taxRate = '',
     String discountValue = '',
   }) : quantity = TextEditingController(text: quantity),
       unitPrice = TextEditingController(text: unitPrice),
@@ -103,6 +103,7 @@ class _LineDraft {
   final TextEditingController quantity;
   final TextEditingController unitPrice;
   final TextEditingController taxRate;
+  bool taxRateEdited = false;
   bool unitPriceAutomatic = false;
   bool unitPriceEdited = false;
 
@@ -193,7 +194,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
     'discountKind': _documentDiscountKind.name, 'discount': _documentDiscount.text,
     'costs': [for (final cost in _landedCosts) [cost.description.text, cost.amount.text]],
     'lines': [for (final line in _lines) [line.itemId, line.unitName, line.costCenterId,
-      line.quantity.text, line.unitPrice.text, line.taxRate.text, line.discountKind.name, line.discountValue.text]],
+      line.quantity.text, line.unitPrice.text, line.taxRate.text, line.taxRateEdited, line.discountKind.name, line.discountValue.text]],
   });
 
   Future<bool> _confirmExit() async {
@@ -274,7 +275,7 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
             fallback: text(row, 'quantity', fallback: '1'),
           ),
           unitPrice: text(row, 'unitPrice', fallback: '0'),
-          taxRate: text(row, 'taxRate', fallback: '0'),
+          taxRate: text(row, 'taxRate', fallback: ''),
         )
           ..itemId = text(row, 'itemId').isEmpty ? null : text(row, 'itemId')
           ..unitName =
@@ -395,8 +396,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   }
 
   void _applyItemDefaults(_LineDraft line, Json item) {
-    // A blank tax field means zero, including when an item has a nonzero
-    // default. Never replace a blank or explicitly entered rate on selection.
+    // An untouched blank tax field lets the server apply the item or company
+    // default. Never replace an explicitly entered rate on selection.
     final units = lineUnitsOf(item);
     // A fractional pack can sort before the base unit; use the item's actual
     // base label rather than assuming the smallest factor is the base.
@@ -474,7 +475,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           'unitName': line.unitName!.trim(),
         'quantity': quantity,
         'unitPrice': price,
-        'taxRate': line.taxRate.text.trim().isEmpty ? '0' : line.taxRate.text.trim(),
+        if (line.taxRateEdited || line.taxRate.text.trim().isNotEmpty)
+          'taxRate': line.taxRate.text.trim().isEmpty ? '0' : line.taxRate.text.trim(),
         if (line.costCenterId != null) 'costCenterId': line.costCenterId,
         if (line.discountKind != DiscountKind.none)
           'discountType': discountTypeOf(line.discountKind),
@@ -1148,7 +1150,10 @@ class _LinesTable extends StatelessWidget {
                           isDense: true,
                           border: const OutlineInputBorder(),
                         ),
-                        onChanged: (_) => onChanged(),
+                        onChanged: (_) {
+                          lines[index].taxRateEdited = true;
+                          onChanged();
+                        },
                       ),
                     ),
                     const SizedBox(width: 8),
