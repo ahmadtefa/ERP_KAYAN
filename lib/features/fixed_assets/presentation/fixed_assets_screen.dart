@@ -1,18 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/router/draft_exit_guard.dart';
 import '../../../app/theme/design_tokens.dart';
 import '../../../core/error/failure.dart';
 import '../../../core/json/amount_format.dart';
 import '../../../core/json/json_utils.dart';
 import '../../../shared/extensions/l10n_extension.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
+import '../../../shared/widgets/app_error_dialog.dart';
 import '../../../shared/widgets/form_sheet.dart';
 import '../../../shared/widgets/records_table.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../common/presentation/providers/resource_providers.dart';
 import '../../common/presentation/screens/module_scaffold.dart';
+import '../../accounting/presentation/screens/journal_entries_screen.dart' show journalEntriesProvider;
+import '../../dashboard/presentation/providers/dashboard_providers.dart';
 
 /// The fixed-asset register.
 ///
@@ -59,7 +63,9 @@ final assetPrefillProvider = NotifierProvider<AssetPrefillNotifier, Json?>(
 );
 
 class FixedAssetsScreen extends ConsumerStatefulWidget {
-  const FixedAssetsScreen({super.key});
+  const FixedAssetsScreen({super.key, this.navigationKey});
+
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<FixedAssetsScreen> createState() => _FixedAssetsScreenState();
@@ -67,6 +73,10 @@ class FixedAssetsScreen extends ConsumerStatefulWidget {
 
 class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
   bool _busy = false;
+  bool _actionUncertain = false;
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+  Future<bool> _canLeave() => _busy ? Future.value(false) : _exitRelay.canLeave();
   final _search = TextEditingController();
   String? _statusFilter;
   String? _categoryFilter;
@@ -77,6 +87,9 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
   @override
   void initState() {
     super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _canLeave);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final prefill = ref.read(assetPrefillProvider.notifier).take();
       if (prefill != null && mounted) {
@@ -87,12 +100,27 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
 
   @override
   void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _canLeave);
     _search.dispose();
     super.dispose();
   }
 
-  Future<List<Json>> _accounts() =>
-      ref.read(apiClientProvider).getList('/accounting/chart-of-accounts');
+  Future<List<Json>?> _accounts() async {
+    try {
+      return await ref.read(apiClientProvider).getList('/accounting/chart-of-accounts');
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+      return null;
+    }
+  }
+
+  void _refreshAffectedViews() {
+    ref.invalidate(fixedAssetsListProvider);
+    ref.invalidate(fixedAssetsSummaryProvider);
+    ref.invalidate(journalEntriesProvider);
+    invalidateDashboardAndReports(ref);
+  }
 
   List<FieldOption> _options(List<Json> accounts, {String? type}) {
     return accounts
@@ -114,6 +142,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
     final l10n = context.l10n;
     final isEdit = existing != null;
     final accounts = await _accounts();
+    if (!mounted || accounts == null) return;
     // Purchase lines that can still be capitalised. The list comes from
     // the server already net of returns and of other assets, so what
     // can be picked here is exactly what the create guard will accept.
@@ -152,6 +181,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
     if (!mounted) return;
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: isEdit ? l10n.editAsset : l10n.newAsset,
       fields: [
         if (!isEdit) FieldSpec('code', l10n.assetCode),
@@ -223,48 +253,43 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
         ),
       ],
       initial: existing ?? prefill,
+      onSubmit: (draft) async {
+        final values = Map<String, dynamic>.from(draft);
+        final chosenLine = values['purchaseInvoiceLineId']?.toString() ?? '';
+        values.removeWhere(
+          (key, value) => value == null || (value is String && value.trim().isEmpty),
+        );
+        if (isEdit && chosenLine.isEmpty &&
+            (existing['purchaseInvoiceLineId']?.toString() ?? '').isNotEmpty) {
+          values['purchaseInvoiceLineId'] = null;
+          values['purchaseInvoiceId'] = null;
+          values['purchaseQuantity'] = null;
+        }
+        try {
+          final client = ref.read(apiClientProvider);
+          if (isEdit) {
+            await client.patch('/fixed-assets/${existing['id']}', body: values);
+          } else {
+            await client.post('/fixed-assets', body: values);
+          }
+        } catch (error) {
+          // These endpoints do not yet carry a reliable idempotency key.
+          throw UncertainFormSubmission(error);
+        } finally {
+          if (mounted) _refreshAffectedViews();
+        }
+      },
     );
-    if (values == null || !mounted) return;
-    // Captured before the cleanup below: on an edit, choosing "No link"
-    // is an instruction to unlink, which must travel as explicit nulls
-    // (absence would mean "keep the old link").
-    final chosenLine = values['purchaseInvoiceLineId']?.toString() ?? '';
-    // Empty optionals travel as absence, not as empty strings the API
-    // would have to guess at.
-    values.removeWhere(
-      (key, value) => value == null || (value is String && value.trim().isEmpty),
-    );
-    if (isEdit &&
-        chosenLine.isEmpty &&
-        (existing['purchaseInvoiceLineId']?.toString() ?? '').isNotEmpty) {
-      values['purchaseInvoiceLineId'] = null;
-      values['purchaseInvoiceId'] = null;
-      values['purchaseQuantity'] = null;
-    }
-
-    setState(() => _busy = true);
-    try {
-      final client = ref.read(apiClientProvider);
-      if (isEdit) {
-        await client.patch('/fixed-assets/${existing['id']}', body: values);
-      } else {
-        await client.post('/fixed-assets', body: values);
-      }
-      await ref.read(fixedAssetsListProvider.notifier).reload();
-      if (mounted) showMessage(context, l10n.createdSuccessfully);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e, error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    if (values != null && mounted) showMessage(context, l10n.createdSuccessfully);
   }
 
   Future<void> _activate(Json asset) async {
     final l10n = context.l10n;
     final accounts = await _accounts();
-    if (!mounted) return;
+    if (!mounted || accounts == null) return;
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: l10n.activateAsset,
       fields: [
         FieldSpec(
@@ -293,9 +318,10 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
   Future<void> _dispose(Json asset) async {
     final l10n = context.l10n;
     final accounts = await _accounts();
-    if (!mounted) return;
+    if (!mounted || accounts == null) return;
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: l10n.disposeAsset,
       fields: [
         FieldSpec(
@@ -392,6 +418,7 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
         '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}';
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: l10n.runDepreciation,
       fields: [
         FieldSpec('period', l10n.depreciationPeriod, required: true),
@@ -426,14 +453,18 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
     setState(() => _busy = true);
     try {
       await run();
-      await ref.read(fixedAssetsListProvider.notifier).reload();
       if (mounted) showMessage(context, l10n.createdSuccessfully);
-    } on Failure catch (e) {
-      // A refused run says why in the message — already depreciated,
-      // closed period — and changed nothing.
-      if (mounted) showMessage(context, e, error: true);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _actionUncertain = true);
+        showAppError(context, error);
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        // A failed response may follow a committed accounting entry.
+        _refreshAffectedViews();
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -555,13 +586,13 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
           ),
           const SizedBox(width: 4),
           OutlinedButton.icon(
-            onPressed: _busy ? null : _runDepreciation,
+            onPressed: _busy || _actionUncertain ? null : _runDepreciation,
             icon: const Icon(Icons.trending_down_outlined),
             label: Text(l10n.runDepreciation),
           ),
           const SizedBox(width: 8),
           FilledButton.icon(
-            onPressed: _busy ? null : () => _save(),
+            onPressed: _busy || _actionUncertain ? null : () => _save(),
             icon: const Icon(Icons.add),
             label: Text(l10n.newAsset),
           ),
@@ -569,6 +600,14 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
       ),
       body: Column(
         children: [
+          if (_actionUncertain)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Text(_t(
+                'قد تكون العملية قد اكتملت. راجع الأصول والقيود والتقارير قبل إعادة فتح الشاشة أو تكرار العملية.',
+                'The action may have completed. Review assets, journal entries and reports before reopening this screen or repeating it.',
+              )),
+            ),
           summary.maybeWhen(
             data: (data) {
               final totals = data['totals'] is Map
@@ -784,19 +823,19 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
                       IconButton(
                         tooltip: l10n.edit,
                         icon: const Icon(Icons.edit_outlined, size: 20),
-                        onPressed: _busy ? null : () => _save(existing: row),
+                        onPressed: _busy || _actionUncertain ? null : () => _save(existing: row),
                       ),
                     if (status == 'DRAFT')
                       IconButton(
                         tooltip: l10n.activateAsset,
                         icon: const Icon(Icons.play_circle_outline, size: 20),
-                        onPressed: _busy ? null : () => _activate(row),
+                        onPressed: _busy || _actionUncertain ? null : () => _activate(row),
                       ),
                     if (status == 'ACTIVE' || status == 'FULLY_DEPRECIATED')
                       IconButton(
                         tooltip: l10n.disposeAsset,
                         icon: const Icon(Icons.outbox_outlined, size: 20),
-                        onPressed: _busy ? null : () => _dispose(row),
+                        onPressed: _busy || _actionUncertain ? null : () => _dispose(row),
                       ),
                   ];
                 },

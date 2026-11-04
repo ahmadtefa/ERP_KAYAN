@@ -1,3 +1,8 @@
+import 'package:erp_kayan/app/router/draft_exit_guard.dart';
+import 'package:erp_kayan/features/accounting/presentation/screens/journal_entries_screen.dart';
+import 'package:erp_kayan/features/dashboard/presentation/providers/dashboard_providers.dart';
+import 'package:erp_kayan/features/reports/presentation/report_providers.dart';
+import 'package:go_router/go_router.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/json/json_utils.dart';
@@ -36,6 +41,8 @@ class _FakeApiClient extends ApiClient {
   final List<({String path, Object? body})> posts = [];
   final List<({String path, Object? body})> patches = [];
   final Set<String> depreciatedMonths = {};
+  bool losePatchResponse = false;
+  bool loseActivationResponse = false;
 
   List<Json> assets = [
     {
@@ -81,6 +88,7 @@ class _FakeApiClient extends ApiClient {
     Map<String, dynamic>? query,
   }) async {
     if (path == '/fixed-assets') return assets;
+    if (path == '/accounting/journal-entries') return [{'status':assets.last['status']}];
     if (path == '/accounting/chart-of-accounts') {
       return [
         {
@@ -115,6 +123,10 @@ class _FakeApiClient extends ApiClient {
     }
     return [];
   }
+
+  @override
+  Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async =>
+      {'status':assets.last['status']};
 
   @override
   Future<Map<String, dynamic>> get(
@@ -186,6 +198,7 @@ class _FakeApiClient extends ApiClient {
         for (final asset in assets)
           if (asset['id'] == id) {...asset, 'status': 'ACTIVE'} else asset,
       ];
+      if (loseActivationResponse) throw StateError('SYNTHETIC_PRIVATE_ASSET');
       return {'id': id, 'status': 'ACTIVE'};
     }
     if (path.endsWith('/dispose')) {
@@ -202,6 +215,11 @@ class _FakeApiClient extends ApiClient {
   @override
   Future<Map<String, dynamic>> patch(String path, {Object? body}) async {
     patches.add((path: path, body: body));
+    if (losePatchResponse) {
+      assets = [for (final asset in assets)
+        if (asset['id'] == 'asset-tool') {...asset, ...Map<String,dynamic>.from(body! as Map)} else asset];
+      throw const ApiFailure('Synthetic private asset error',statusCode:503);
+    }
     return {};
   }
 }
@@ -231,6 +249,7 @@ class _Prefilled extends AssetPrefillNotifier {
 Future<_FakeApiClient> _pump(
   WidgetTester tester, {
   Json? prefill,
+  _FakeApiClient? injectedApi,
   Size size = const Size(1500, 950),
 }) async {
   tester.view.physicalSize = size;
@@ -238,7 +257,7 @@ Future<_FakeApiClient> _pump(
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
 
-  final api = _FakeApiClient();
+  final api = injectedApi ?? _FakeApiClient();
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
@@ -514,6 +533,78 @@ void main() {
     expect(body.containsKey('purchaseInvoiceLineId'), isTrue);
     expect(body['purchaseInvoiceLineId'], isNull);
     expect(body['purchaseQuantity'], isNull);
+  });
+
+  testWidgets('uncertain asset edit keeps values and prevents a blind retry', (tester) async {
+    final api = _FakeApiClient()..losePatchResponse = true;
+    await _pump(tester,injectedApi:api);
+    await tester.ensureVisible(find.byTooltip('Edit')); await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Edit')); await tester.pumpAndSettle();
+    final field = find.widgetWithText(TextFormField,'Name in English');
+    await tester.ensureVisible(field); await tester.enterText(field,'Edited synthetic tool');
+    await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
+    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.textContaining('Synthetic private asset error'),findsNothing);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(tester.widget<TextFormField>(field).controller!.text,'Edited synthetic tool');
+    expect(find.textContaining('The operation may have completed'),findsOneWidget);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
+    expect(api.patches,hasLength(1));
+    expect(api.assets.last['nameEn'],'Edited synthetic tool');
+  });
+
+  testWidgets('asset activation with lost response refreshes journal dashboard and reports', (tester) async {
+    final api = _FakeApiClient()..loseActivationResponse = true;
+    await _pump(tester,injectedApi:api);
+    final container = ProviderScope.containerOf(tester.element(find.byType(FixedAssetsScreen)));
+    expect((await container.read(journalEntriesProvider.future)).single['status'],'DRAFT');
+    expect((await container.read(dashboardSummaryProvider.future))['status'],'DRAFT');
+    expect((await container.read(dashboardMonthlyProvider.future))['status'],'DRAFT');
+    expect((await container.read(reportProvider('/reports/trial-balance').future))['status'],'DRAFT');
+    final activate = find.byTooltip('Activate (post acquisition)');
+    await tester.ensureVisible(activate); await tester.tap(activate); await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first); await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('1101.REC — Lifecycle cash').last); await tester.pumpAndSettle();
+    await tester.tap(find.text('Save')); await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton,'Activate (post acquisition)')); await tester.pumpAndSettle();
+    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.textContaining('SYNTHETIC_PRIVATE_ASSET'),findsNothing);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect((await container.read(journalEntriesProvider.future)).single['status'],'ACTIVE');
+    expect((await container.read(dashboardSummaryProvider.future))['status'],'ACTIVE');
+    expect((await container.read(dashboardMonthlyProvider.future))['status'],'ACTIVE');
+    expect((await container.read(reportProvider('/reports/trial-balance').future))['status'],'ACTIVE');
+    expect(api.posts.where((p)=>p.path.endsWith('/activate')),hasLength(1));
+    expect(find.textContaining('The action may have completed'),findsOneWidget);
+    expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton,'Run depreciation')).onPressed,isNull);
+  });
+
+  testWidgets('asset draft guards routed navigation', (tester) async {
+    tester.view.physicalSize=const Size(1700,1200); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeApiClient();
+    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWithValue(_user)]);
+    addTearDown(container.dispose);
+    final router=GoRouter(initialLocation:'/assets',routes:[
+      GoRoute(path:'/assets',onExit:(_,state) => container.read(draftExitGuardProvider).canLeave(state.pageKey),
+        builder:(_,state) => Scaffold(body:FixedAssetsScreen(navigationKey:state.pageKey))),
+      GoRoute(path:'/home',builder:(_,_) => const Scaffold(body:Text('Home destination'))),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp.router(locale:const Locale('en'),
+      localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,routerConfig:router)));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Edit')); await tester.tap(find.byTooltip('Edit')); await tester.pumpAndSettle();
+    final field=find.widgetWithText(TextFormField,'Name in English');
+    await tester.ensureVisible(field); await tester.enterText(field,'Unsaved tool');
+    router.go('/home'); await tester.pumpAndSettle();
+    expect(find.text('Unsaved changes'),findsOneWidget);
+    await tester.tap(find.text('Cancel').last); await tester.pumpAndSettle();
+    expect(tester.widget<TextFormField>(field).controller!.text,'Unsaved tool');
+    router.go('/home'); await tester.pumpAndSettle();
+    await tester.tap(find.text('Discard changes')); await tester.pumpAndSettle();
+    expect(find.text('Home destination'),findsOneWidget);
+    expect(api.patches,isEmpty);
   });
 
   for (final size in [const Size(390, 844), const Size(320, 700)]) {

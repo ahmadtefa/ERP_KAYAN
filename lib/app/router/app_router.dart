@@ -174,6 +174,8 @@ final routerProvider = Provider<GoRouter>((ref) {
               ? BudgetsScreen(navigationKey:state.pageKey)
               : route.path == AppRoutes.fiscalPeriods
               ? FiscalPeriodsScreen(navigationKey:state.pageKey)
+              : route.path == AppRoutes.fixedAssets
+              ? FixedAssetsScreen(navigationKey:state.pageKey)
               : route.path == AppRoutes.costCenters
               ? CostCentersScreen(navigationKey:state.pageKey)
               : route.path == AppRoutes.items
@@ -205,7 +207,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 });
 
 const _guardedShellPaths = <String>{
-  AppRoutes.chartOfAccounts, AppRoutes.budgets, AppRoutes.fiscalPeriods, AppRoutes.costCenters, AppRoutes.items, AppRoutes.customers, AppRoutes.suppliers, AppRoutes.cash, AppRoutes.companySettings, AppRoutes.journalEntries, AppRoutes.salesInvoices, AppRoutes.purchaseInvoices,
+  AppRoutes.chartOfAccounts, AppRoutes.budgets, AppRoutes.fiscalPeriods, AppRoutes.fixedAssets, AppRoutes.costCenters, AppRoutes.items, AppRoutes.customers, AppRoutes.suppliers, AppRoutes.cash, AppRoutes.companySettings, AppRoutes.journalEntries, AppRoutes.salesInvoices, AppRoutes.purchaseInvoices,
   AppRoutes.salesOrders, AppRoutes.purchaseOrders, AppRoutes.stock,
 };
 
