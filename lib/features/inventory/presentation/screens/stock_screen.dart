@@ -44,6 +44,7 @@ class _StockScreenState extends ConsumerState<StockScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final async = ref.watch(stockListProvider);
+    final canReadCost = ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
 
     return ModuleScaffold(
       title: l10n.stockBalances,
@@ -61,7 +62,7 @@ class _StockScreenState extends ConsumerState<StockScreen> {
           final visible = _filter(rows);
           return Column(
             children: [
-              _Totals(rows: visible),
+              _Totals(rows: visible, canReadCost: canReadCost),
               Expanded(
                 child: RecordsTable(
                   rows: visible,
@@ -80,12 +81,12 @@ class _StockScreenState extends ConsumerState<StockScreen> {
                       numeric: true,
                       value: (r) => formatQuantity(asString(r['quantity'])),
                     ),
-                    ColumnSpec(
+                    if (canReadCost) ColumnSpec(
                       l10n.averageCost,
                       numeric: true,
                       value: (r) => formatAmount(asString(r['averageCost'])),
                     ),
-                    ColumnSpec(
+                    if (canReadCost) ColumnSpec(
                       l10n.stockValue,
                       numeric: true,
                       value: (r) => formatAmount(asString(r['value'])),
@@ -132,12 +133,13 @@ class _StockScreenState extends ConsumerState<StockScreen> {
 }
 
 class _Totals extends StatelessWidget {
-  const _Totals({required this.rows});
+  const _Totals({required this.rows, required this.canReadCost});
 
   /// The number of decimals the API sends amounts with.
   static const scale = 4;
 
   final List<Json> rows;
+  final bool canReadCost;
 
   @override
   Widget build(BuildContext context) {
@@ -157,11 +159,13 @@ class _Totals extends StatelessWidget {
             '${l10n.totalQuantity}: ${_show(quantity, scale)}',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
-          const SizedBox(width: 24),
-          Text(
-            '${l10n.totalValue}: ${_show(value, scale)}',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
+          if (canReadCost) ...[
+            const SizedBox(width: 24),
+            Text(
+              '${l10n.totalValue}: ${rows.every((row) => RegExp(r'^-?\d+(?:\.\d{1,4})?$').hasMatch(asString(row['value']) ?? '')) ? _show(value, scale) : '—'}',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
         ],
       ),
     );
@@ -225,6 +229,7 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final language = Localizations.localeOf(context).languageCode;
+    final canReadCost = ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
     final links = ref.read(reportLinkProvider);
     final filters = {'itemId': widget.itemId};
 
@@ -238,8 +243,8 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
             runSpacing: 8,
             children: [
               _stat(l10n.onHand, formatQuantity(asString(widget.row['quantity']))),
-              _stat(l10n.averageCost, formatAmount(asString(widget.row['averageCost']))),
-              _stat(l10n.stockValue, formatAmount(asString(widget.row['value']))),
+              if (canReadCost) _stat(l10n.averageCost, formatAmount(asString(widget.row['averageCost']))),
+              if (canReadCost) _stat(l10n.stockValue, formatAmount(asString(widget.row['value']))),
               _stat(l10n.branch, text(widget.row, 'branchCode')),
             ],
           ),
@@ -346,13 +351,13 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
                         numeric: true,
                         value: (r) => formatQuantity(asString(r['quantity'])),
                       ),
-                      ResizableColumn(
+                      if (canReadCost) ResizableColumn(
                         l10n.unitPrice,
                         width: 120,
                         numeric: true,
                         value: (r) => formatAmount(asString(r['unitCost'])),
                       ),
-                      ResizableColumn(
+                      if (canReadCost) ResizableColumn(
                         l10n.lineTotal,
                         width: 120,
                         numeric: true,
@@ -362,9 +367,9 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
                         l10n.runningBalance,
                         width: 190,
                         numeric: true,
-                        value: (r) =>
-                            '${formatQuantity(asString(r['runningQuantity']))} / '
-                            '${formatAmount(asString(r['runningValue']))}',
+                        value: (r) => canReadCost
+                            ? '${formatQuantity(asString(r['runningQuantity']))} / ${formatAmount(asString(r['runningValue']))}'
+                            : formatQuantity(asString(r['runningQuantity'])),
                       ),
                     ],
                   ),
