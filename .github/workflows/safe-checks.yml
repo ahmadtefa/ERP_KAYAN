@@ -61,6 +61,7 @@ jobs:
           src/modules/admin/permissions.catalogue.spec.ts
           src/modules/accounting/account-update-contract.spec.ts
           src/modules/accounting/chart-of-accounts.service.spec.ts
+          src/modules/accounting/cost-center-dates.spec.ts
           src/modules/inventory/stock-document-response-permissions.spec.ts
           src/modules/inventory/stock-voucher-permissions.spec.ts
           src/modules/inventory/stock-voucher-edit.spec.ts

@@ -330,13 +330,12 @@ export class CostCentersService {
       return new Date(date.toISOString().slice(0, 10));
     };
 
-    const startDate =
-      parse(dto.startDate, 'startDate') ?? existing?.startDate ?? null;
-    const endDate = parse(dto.endDate, 'endDate') ?? existing?.endDate ?? null;
-    if (dto.startDate === null) {
-      // An explicit clear must survive the `?? existing` above.
-      return { startDate: null, endDate };
-    }
+    const parsedStart = parse(dto.startDate, 'startDate');
+    const parsedEnd = parse(dto.endDate, 'endDate');
+    // Omission keeps the existing date; explicit null or an empty string
+    // clears it. Null-coalescing here would accidentally restore cleared dates.
+    const startDate = parsedStart === undefined ? existing?.startDate ?? null : parsedStart;
+    const endDate = parsedEnd === undefined ? existing?.endDate ?? null : parsedEnd;
     if (startDate && endDate && endDate < startDate) {
       throw new BadRequestException('endDate cannot be before startDate');
     }

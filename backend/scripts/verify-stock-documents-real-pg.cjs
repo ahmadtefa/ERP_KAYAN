@@ -110,6 +110,23 @@ let difference = '70000000-0000-4000-8000-000000000005';
       new PostingService(numbers, periods, costCenters), new AccountMapService(), audit,
       new CompanySettingsService(prisma, audit), new WarehouseService(prisma, audit), costCenters);
     const date = '2026-10-28';
+    // Date clear semantics on the real service and isolated PostgreSQL. This
+    // centre is separate from the centre used by stock posting below.
+    const datesCenter = await costCenters.create(company,user,{
+      code:'SYN-DATES',nameEn:'Dates',nameAr:'تواريخ',type:'DEPARTMENT',
+      startDate:'2026-01-01',endDate:'2026-12-31'});
+    let dateResult = await costCenters.update(company,user,datesCenter.id,{endDate:null});
+    assert.equal(dateResult.startDate,'2026-01-01'); assert.equal(dateResult.endDate,null);
+    dateResult = await costCenters.update(company,user,datesCenter.id,{endDate:'2026-12-31'});
+    assert.equal(dateResult.endDate,'2026-12-31');
+    dateResult = await costCenters.update(company,user,datesCenter.id,{startDate:'',endDate:null});
+    assert.equal(dateResult.startDate,null); assert.equal(dateResult.endDate,null);
+    await costCenters.update(company,user,datesCenter.id,{startDate:'2026-01-01',endDate:'2026-12-31'});
+    await assert.rejects(costCenters.update(company,user,datesCenter.id,{startDate:'2027-01-01'}),/endDate cannot be before startDate/);
+    const persistedDates = await prisma.costCenter.findUniqueOrThrow({where:{id:datesCenter.id}});
+    assert.equal(persistedDates.startDate.toISOString().slice(0,10),'2026-01-01');
+    assert.equal(persistedDates.endDate.toISOString().slice(0,10),'2026-12-31');
+    console.log('PASS: real PostgreSQL cost center dates retain omitted values and clear explicit null/empty.');
     // Real chart operations, not an HTTP or Flutter test. The fixture uses
     // unique synthetic codes and keeps historical journal rows untouched.
     const chart = new ChartOfAccountsService(prisma, audit);
