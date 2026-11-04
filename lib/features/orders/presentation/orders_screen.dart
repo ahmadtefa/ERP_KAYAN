@@ -12,6 +12,7 @@ import '../../common/presentation/screens/module_scaffold.dart';
 import '../../invoicing/presentation/providers/invoice_providers.dart';
 import 'order_retry_store.dart';
 import 'order_create_screen.dart';
+import 'order_edit_screen.dart';
 
 /// Sales and purchase order monitoring, conversion and linked draft actions.
 class OrdersScreen extends ConsumerStatefulWidget {
@@ -135,7 +136,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
       final method = request['method'];
       final body = Map<String, dynamic>.from(request['body'] as Map);
       final amendmentPath = RegExp('^${RegExp.escape(_invoiceBase)}/[0-9a-fA-F-]{36}/order-allocation\$');
-      if (method == 'PUT' && amendmentPath.hasMatch(path)) {
+      if (method == 'PUT' && (amendmentPath.hasMatch(path) || path == '$_base/${widget.orderId}')) {
         await ref.read(apiClientProvider).put(path, body: body);
       } else if (method == 'POST' && path == '$_base/${widget.orderId}/invoice') {
         await ref.read(apiClientProvider).post(path, body: body);
@@ -161,6 +162,15 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _editDraft(Json order) async {
+    await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) => OrderEditScreen(kind: widget.kind, order: order),
+    ));
+    if (!mounted) return;
+    await _loadPending();
+    if (mounted) _refresh();
   }
 
   Future<void> _selection(Json order, {Json? invoice}) async {
@@ -234,6 +244,9 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
           trailing: FilledButton(onPressed: _busy ? null : () => _runPending(_pending!), child: Text(tr('إعادة المحاولة', 'Retry'))),
         )),
         Wrap(spacing: 8, children: [
+          if (status == 'DRAFT' && _can('$_permissions.orders.manage'))
+            OutlinedButton(onPressed: _busy || _pending != null || _store == null ? null : () => _editDraft(order),
+              child: Text(tr('تعديل المسودة', 'Edit draft'))),
           if (status == 'DRAFT' && _can('$_permissions.orders.approve'))
             OutlinedButton(onPressed: _busy || _pending != null ? null : () => _action('$_base/${widget.orderId}/approve'), child: Text(tr('اعتماد', 'Approve'))),
           if (status != 'CANCELLED' && _can('$_permissions.orders.create'))

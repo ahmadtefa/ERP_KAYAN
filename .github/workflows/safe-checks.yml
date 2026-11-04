@@ -62,6 +62,7 @@ jobs:
           src/modules/backup/full-backup.service.spec.ts
           src/modules/backup/full-backup-recovery-safety.spec.ts
           src/modules/backup/pg-backup-connection.spec.ts
+          src/modules/sales/order-draft-edit-permissions.spec.ts
           src/modules/sales/sales-orders.pricing-tax.spec.ts
           src/modules/purchases/purchase-orders.units.spec.ts
           src/common/units/unit-math.spec.ts

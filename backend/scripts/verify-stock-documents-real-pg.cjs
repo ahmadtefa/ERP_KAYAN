@@ -231,8 +231,21 @@ let difference = '70000000-0000-4000-8000-000000000005';
       await orders.approve(company,user,draft.id);
       await assert.rejects(orders.updateDraft(company,branch,user,draft.id,{...fail,idempotencyKey:`draft-${kind}-approved-0001`}),/Only draft/);
       await prisma.itemUnit.update({where:{itemId_unit:{itemId:first.id,unit:'carton'}},data:{factor:'10',isActive:true}});
+      const race = await orders.create(company,branch,user,{[partyField]:party,orderDate:date,
+        lines:[{itemId:second.id,quantity:'3',unitPrice:'2',taxRate:'0'}]});
+      const base = {expectedUpdatedAt:race.updatedAt,lines:[{orderLineId:race.lines[0].id,
+        quantity:'2',unitPrice:'2',discountPercent:'0',taxRate:'0'}]};
+      const competing = await Promise.allSettled([
+        orders.updateDraft(company,branch,user,race.id,{...base,idempotencyKey:`draft-${kind}-race-key-0001`}),
+        orders.updateDraft(company,branch,user,race.id,{...base,idempotencyKey:`draft-${kind}-race-key-0002`}),
+      ]);
+      assert.equal(competing.filter(result => result.status === 'fulfilled').length,1);
+      assert.equal(competing.filter(result => result.status === 'rejected').length,1);
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:`${kind}_orders`,entityId:race.id,action:'UPDATE'}}),1);
+      const raceAfter = await orders.findOne(company,race.id);
+      assert.equal(raceAfter.lines[0].baseQuantity,'2.0000');
     }
-    console.log('PASS: draft order edit, historical factors, retry, stale update and audit rollback for both types.');
+    console.log('PASS: draft order edit, historical factors, retry, concurrency, stale update and audit rollback for both types.');
     const lines = [{itemId:first.id,quantity:'3',unitName:'carton',unitPrice:'100',discountPercent:'5',taxRate:'14'},
       {itemId:second.id,quantity:'5',unitPrice:'2',taxRate:'0'}];
     const so = await sales.create(company,branch,user,{customerId:customer.id,orderDate:date,lines});
