@@ -108,10 +108,10 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
               ),
         ],
       ),
-      FieldSpec('responsiblePerson', l10n.responsiblePerson),
+      FieldSpec('responsiblePerson', l10n.responsiblePerson, emptyValue: ''),
       FieldSpec('startDate', l10n.startDate, kind: FieldKind.date, clearable: true),
       FieldSpec('endDate', l10n.endDate, kind: FieldKind.date, clearable: true),
-      FieldSpec('description', l10n.description, kind: FieldKind.multiline, maxLines: 2),
+      FieldSpec('description', l10n.description, kind: FieldKind.multiline, maxLines: 2, emptyValue: ''),
       if (isEdit) FieldSpec('isActive', l10n.active, kind: FieldKind.toggle),
     ];
 

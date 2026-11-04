@@ -221,11 +221,17 @@ class _FormSheetState extends State<_FormSheet> {
     final controller = _controllers[field.key]!;
     final now = DateTime.now();
     final initial = DateTime.tryParse(controller.text) ?? now;
+    final defaultFirst = DateTime(now.year - 5);
+    final defaultLast = DateTime(now.year + 5, 12, 31);
+    // Historical or future records must remain editable; showDatePicker
+    // asserts when its initial value lies outside the supplied range.
+    final first = initial.isBefore(defaultFirst) ? DateTime(initial.year) : defaultFirst;
+    final last = initial.isAfter(defaultLast) ? DateTime(initial.year, 12, 31) : defaultLast;
     final picked = await showDatePicker(
       context: context,
       initialDate: initial,
-      firstDate: DateTime(now.year - 5),
-      lastDate: DateTime(now.year + 5),
+      firstDate: first,
+      lastDate: last,
     );
     if (picked != null && mounted) {
       setState(() {

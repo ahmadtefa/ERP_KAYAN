@@ -79,4 +79,21 @@ void main() {
     expect(calls,1);
   });
 
+  testWidgets('date picker opens historical and distant future values without changing them', (tester) async {
+    final year=DateTime.now().year;
+    for (final date in ['${year - 20}-06-15','${year + 20}-06-15']) {
+      await tester.pumpWidget(MaterialApp(locale:const Locale('en'),
+        localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,
+        home:Scaffold(body:Builder(builder:(context) => TextButton(onPressed:() => showFormSheet(context,title:'Edit record',
+          fields:const [FieldSpec('date','Date',kind:FieldKind.date)],initial:{'date':date}),child:const Text('Open'))))));
+      await tester.tap(find.text('Open')); await tester.pumpAndSettle();
+      final field=find.widgetWithText(TextFormField,'Date');
+      await tester.tap(field); await tester.pumpAndSettle();
+      expect(find.byType(DatePickerDialog),findsOneWidget);
+      expect(tester.takeException(),isNull);
+      await tester.tap(find.text('Cancel').last); await tester.pumpAndSettle();
+      expect(tester.widget<TextFormField>(field).controller!.text,date);
+      await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
+    }
+  });
 }

@@ -19,7 +19,7 @@ class _CostCenterApi extends ApiClient {
   @override
   Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async => {'items':[
     {'id':'center','code':'CC','nameEn':'Synthetic','nameAr':'تجريبي','type':'DEPARTMENT',
-      'isActive':true,'startDate':'2026-01-01','endDate':'2026-12-31'}]};
+      'isActive':true,'startDate':'2026-01-01','endDate':'2026-12-31','responsiblePerson':'Person','description':'Description'}]};
   @override
   Future<Map<String,dynamic>> patch(String path,{Object? body}) async {
     attempts++; submitted=body;
@@ -42,6 +42,12 @@ void main() {
     final end=find.widgetWithText(TextFormField,'End date');
     await tester.ensureVisible(end); await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Clear date').last); await tester.pumpAndSettle();
+    final person=find.widgetWithText(TextFormField,'Responsible person');
+    final description=find.widgetWithText(TextFormField,'Description');
+    await tester.ensureVisible(person); await tester.pumpAndSettle();
+    await tester.enterText(person,'');
+    await tester.ensureVisible(description); await tester.pumpAndSettle();
+    await tester.enterText(description,'');
     expect(tester.widget<TextFormField>(end).controller!.text,'');
     await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
     expect(find.text('حسنًا'),findsOneWidget);
@@ -50,6 +56,8 @@ void main() {
     expect((api.submitted as Map)['startDate'],'2026-01-01');
     expect((api.submitted as Map).containsKey('endDate'),isTrue);
     expect((api.submitted as Map)['endDate'],isNull);
+    expect((api.submitted as Map)['responsiblePerson'],'');
+    expect((api.submitted as Map)['description'],'');
     expect(tester.widget<TextFormField>(end).controller!.text,'');
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
     expect(api.attempts,1);
