@@ -833,6 +833,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       return;
     }
 
+    // The submitted snapshot must not be edited while it is in flight.
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _saving = true);
     try {
       final body = <String, dynamic>{
@@ -926,7 +928,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                       key:const Key('quotation-retry-load'),
                       onPressed:_retryLoad,
                       child:Text(Localizations.localeOf(context).languageCode == 'ar' ? 'إعادة المحاولة' : 'Retry')))
-                  : ListView(
+                  : AbsorbPointer(key:const Key('quotation-edit-lock'),absorbing:_saving,child: ListView(
                     padding: const EdgeInsets.all(AppSpacing.xl),
                     children: [
                 Text(
@@ -1156,7 +1158,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 const SizedBox(height: 8),
                 _summary(context),
                     ],
-                  ),
+                  )),
           ),
         ],
       ),

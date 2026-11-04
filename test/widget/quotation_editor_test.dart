@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:erp_kayan/app/router/app_router.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
@@ -27,6 +29,7 @@ class _FakeApiClient extends ApiClient {
   String? postPath;
   Map<String, dynamic>? postBody;
   Map<String, dynamic>? objectResponse;
+  Completer<Map<String, dynamic>>? pendingPost;
 
   @override
   Future<Map<String, dynamic>> getObject(
@@ -42,7 +45,7 @@ class _FakeApiClient extends ApiClient {
   }) async {
     postPath = path;
     postBody = Map<String, dynamic>.from(body! as Map);
-    return {'id': 'quotation-id'};
+    return pendingPost == null ? {'id': 'quotation-id'} : await pendingPost!.future;
   }
 
   @override
@@ -63,7 +66,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final api = _FakeApiClient();
+    final api = _FakeApiClient()..pendingPost = Completer<Map<String, dynamic>>();
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -177,6 +180,11 @@ void main() {
     await tester.pump();
 
     await tester.tap(find.text('Save'));
+    await tester.pump();
+    final formLock = find.byKey(const Key('quotation-edit-lock'));
+    expect(tester.widget<AbsorbPointer>(formLock).absorbing,isTrue);
+    expect(api.postPath, '/sales/quotations');
+    api.pendingPost!.complete({'id':'quotation-id'});
     await tester.pumpAndSettle();
 
     expect(api.postPath, '/sales/quotations');
