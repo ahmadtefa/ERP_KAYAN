@@ -254,7 +254,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => PopScope(canPop:!_busy,child:Scaffold(
     appBar: AppBar(title: Text(tr('تفاصيل الأمر', 'Order details')),
       actions: [IconButton(tooltip: tr('تحديث', 'Refresh'), onPressed: _busy ? null : _refresh, icon: const Icon(Icons.refresh))]),
     body: FutureBuilder<Json>(future: _future, builder: (context, snapshot) {
@@ -320,7 +320,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
         )),
       ]);
     }),
-  );
+  ));
 }
 
 /// Explicit base quantities prevent unselected lines from being invoiced.

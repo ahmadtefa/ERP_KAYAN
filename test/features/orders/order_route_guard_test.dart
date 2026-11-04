@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:erp_kayan/app/router/app_router.dart';
 import 'package:erp_kayan/app/router/draft_exit_guard.dart';
 import 'package:erp_kayan/app/shell/erp_shell.dart';
@@ -22,6 +24,10 @@ const order = <String,dynamic>{'id':'order-1','orderNumber':'SO-1','status':'DRA
   'invoices':<Object>[]};
 class _Api extends ApiClient {
   _Api() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),FakeTokenStore());
+  Completer<Map<String,dynamic>>? pendingAction;
+  @override
+  Future<Map<String,dynamic>> post(String path,{Object? body,String? idempotencyKey}) async =>
+      pendingAction == null ? {} : await pendingAction!.future;
   @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async =>
       path.endsWith('/orders') ? [order] : [];
@@ -30,6 +36,35 @@ class _Api extends ApiClient {
       path.endsWith('/order-1') ? order : {'blocked':false};
 }
 void main() {
+  testWidgets('order action blocks routed and system back until its response', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(1600,1100); tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final api=_Api()..pendingAction=Completer<Map<String,dynamic>>();
+    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),
+      currentUserProvider.overrideWithValue(const AppUser(id:'u',username:'u',fullName:'User',companyId:'company',branchId:'branch',isSuperAdmin:true)),
+      appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'))]);
+    addTearDown(container.dispose);
+    final router=GoRouter(initialLocation:AppRoutes.salesOrders,routes:[
+      GoRoute(path:AppRoutes.dashboard,builder:(_,_) => const Scaffold(body:Text('Dashboard destination'))),
+      GoRoute(path:AppRoutes.salesOrders,onExit:(_,state) => container.read(draftExitGuardProvider).canLeave(state.pageKey),
+        builder:(context,state) => ErpShell(currentPath:AppRoutes.salesOrders,child:OrdersScreen(kind:InvoiceKind.sales,navigationKey:state.pageKey))),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp.router(locale:const Locale('en'),
+      localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,routerConfig:router)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SO-1')); await tester.pumpAndSettle();
+    await tester.tap(find.text('Approve')); await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm')); await tester.pump();
+    router.go(AppRoutes.dashboard); await tester.pump();
+    expect(find.text('Dashboard destination'),findsNothing);
+    await tester.binding.handlePopRoute(); await tester.pump();
+    expect(find.text('Order details'),findsOneWidget);
+    api.pendingAction!.complete({}); await tester.pumpAndSettle();
+    router.go(AppRoutes.dashboard); await tester.pumpAndSettle();
+    expect(find.text('Dashboard destination'),findsOneWidget);
+  });
   for (final kind in InvoiceKind.values) {
     for (final editing in [false,true]) {
       testWidgets('${kind.name} ${editing ? 'edit' : 'create'} order protects the routed list exit', (tester) async {
