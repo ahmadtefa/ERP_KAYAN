@@ -386,6 +386,9 @@ let difference = '70000000-0000-4000-8000-000000000005';
       await orders.convertToInvoice(company,branch,user,order.id,{idempotencyKey:'amend-other-request-0001',invoiceDate:date,
         lines:[{orderLineId:orderLines[1].id,quantity:'2'}]});
       const old = await model.findUniqueOrThrow({where:{id:initial.invoice.id},include:{lines:true}});
+      // Simulate a later order edit: the existing invoice keeps its own agreed
+      // price and tax snapshot when its quantity is amended.
+      await linesModel.update({where:{id:orderLines[0].id},data:{unitPrice:'9',taxRate:'0'}});
       const request = {expectedUpdatedAt:old.updatedAt.toISOString(),idempotencyKey:'amend-request-00000001',
         lines:[{orderLineId:orderLines[0].id,quantity:'6'},{orderLineId:orderLines[1].id,quantity:'3'}]};
       const failureAudit = audit.recordRequired.bind(audit);

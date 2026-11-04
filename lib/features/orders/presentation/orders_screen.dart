@@ -100,7 +100,9 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
       final user = ref.read(currentUserProvider);
       if (user == null || user.branchId == null) return;
       final store = OrderRetryStore(await SharedPreferences.getInstance());
-      final scope = '${user.companyId}.${user.branchId}.${user.id}.${widget.kind.name}.${widget.orderId}';
+      final scope = orderRetryScope(apiBaseUrl: ref.read(appConfigProvider).apiBaseUrl,
+        companyId: user.companyId, branchId: user.branchId!, userId: user.id,
+        kind: widget.kind.name, orderId: widget.orderId);
       final pending = store.read(scope);
       if (mounted) setState(() { _store = store; _scope = scope; _pending = pending; });
     } catch (error) {
@@ -139,7 +141,8 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
   }
 
   Future<void> _selection(Json order, {Json? invoice}) async {
-    if (_store == null || _scope == null || _pending != null) return;
+    if (_busy || _store == null || _scope == null || _pending != null) return;
+    setState(() => _busy = true);
     Json? fullInvoice;
     try {
       if (invoice != null) fullInvoice = await ref.read(apiClientProvider).get('$_invoiceBase/${text(invoice, 'id')}');
@@ -158,6 +161,8 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
       if (mounted) await _runPending(request);
     } catch (error) {
       if (mounted) showMessage(context, error.toString(), error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 

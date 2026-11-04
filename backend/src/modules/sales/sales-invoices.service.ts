@@ -491,16 +491,29 @@ export class SalesInvoicesService {
         throw new BadRequestException('This invoice has additional charges or discounts; manual review required');
       }
       const counters = planOrderReallocation(order.lines, invoice.lines, requested);
+      const prior = new Map<string, typeof invoice.lines[number]>();
+      for (const old of invoice.lines) {
+        if (!old.orderLineId || prior.has(old.orderLineId) || old.discountType === 'AMOUNT' || !old.returnedQuantity.isZero()) {
+          throw new BadRequestException('Historical invoice lines require manual review');
+        }
+        prior.set(old.orderLineId, old);
+      }
       const selected = order.lines.filter((line) => requested.has(line.id));
       const units: TrustedOrderUnit[] = [];
       const rawLines = selected.map((line) => {
-        const historical = historicalOrderUnit({ label: `Line ${line.lineNumber}`, unitName: line.unitName,
-          unitFactor: line.unitFactor, baseQuantity: requested.get(line.id)! });
+        const existing = prior.get(line.id);
+        if (existing && existing.itemId !== line.itemId) throw new BadRequestException('Historical order item changed; manual review required');
+        // Existing lines keep the invoice snapshot even if the order was
+        // changed later. Newly selected lines use the agreed order snapshot.
+        const source = existing ?? line;
+        const historical = historicalOrderUnit({ label: `Line ${line.lineNumber}`, unitName: source.unitName,
+          unitFactor: source.unitFactor, baseQuantity: requested.get(line.id)! });
         units.push({ itemId: line.itemId, resolved: historical });
-        return { itemId: line.itemId, description: line.description,
+        return { itemId: line.itemId, description: source.description,
           quantity: (historical.snapshot.unitQuantity ?? historical.baseQuantity).toFixed(MONEY_SCALE),
-          unitPrice: line.unitPrice.toFixed(MONEY_SCALE), taxRate: line.taxRate.toFixed(MONEY_SCALE),
-          discountPercent: line.discountPercent.toFixed(MONEY_SCALE), unitName: line.unitName ?? undefined };
+          unitPrice: source.unitPrice.toFixed(MONEY_SCALE), taxRate: source.taxRate.toFixed(MONEY_SCALE),
+          discountPercent: source.discountPercent.toFixed(MONEY_SCALE), unitName: source.unitName ?? undefined,
+          costCenterId: existing?.costCenterId ?? undefined };
       });
       const prepared = await this.prepareLines(companyId, rawLines, invoice.customerId, {}, units, tx);
       const totals = this.totalsOf(prepared.lines);
