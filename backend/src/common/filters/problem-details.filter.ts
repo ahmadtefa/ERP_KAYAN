@@ -101,10 +101,17 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         }
       }
     } else {
-      this.logger.error(
-        'Unhandled exception',
-        exception instanceof Error ? exception.stack : String(exception),
-      );
+      // Database/HTTP stacks and arbitrary thrown values may contain query
+      // arguments, connection strings or file contents. Keep only a bounded
+      // diagnostic category/code; never pass the object or stack to Logger.
+      const databaseCode = exception instanceof Prisma.PrismaClientKnownRequestError &&
+        /^P[0-9]{4}$/.test(exception.code) ? exception.code : null;
+      const category = databaseCode ? `Prisma ${databaseCode}`
+        : exception instanceof TypeError ? 'TypeError'
+        : exception instanceof RangeError ? 'RangeError'
+        : exception instanceof SyntaxError ? 'SyntaxError'
+        : 'unclassified';
+      this.logger.error(`Unhandled server error (${category})`);
     }
 
     response.status(status).json({

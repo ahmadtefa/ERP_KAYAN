@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus } from '@nestjs/common';
+import { HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ProblemDetailsFilter } from './problem-details.filter';
 
@@ -33,6 +33,29 @@ describe('ProblemDetailsFilter', () => {
         detail: 'Too many attempts. Try again shortly.',
       }),
     );
+  });
+
+  it('does not log an unexpected error message, stack or raw thrown object', () => {
+    const response={status:jest.fn().mockReturnThis(),json:jest.fn()};
+    const host={switchToHttp:()=>({getResponse:()=>response})} as any;
+    const log=jest.spyOn(Logger.prototype,'error').mockImplementation(()=>undefined);
+    try {
+      const error=new TypeError('synthetic sensitive marker');
+      error.stack='synthetic private stack';
+      new ProblemDetailsFilter().catch(error,host);
+      new ProblemDetailsFilter().catch({message:'synthetic object marker'},host);
+      const database=new Prisma.PrismaClientKnownRequestError('synthetic database marker',{
+        code:'P2025',clientVersion:'test',meta:{note:'synthetic private metadata'},
+      });
+      new ProblemDetailsFilter().catch(database,host);
+      expect(log.mock.calls).toEqual([
+        ['Unhandled server error (TypeError)'],
+        ['Unhandled server error (unclassified)'],
+        ['Unhandled server error (Prisma P2025)'],
+      ]);
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/marker|stack|metadata/);
+      expect(response.json.mock.calls.every(([body])=>body.detail==='Unexpected server error')).toBe(true);
+    } finally {log.mockRestore();}
   });
 
   it('maps Prisma unique violations to HTTP 409 without leaking database details', () => {
