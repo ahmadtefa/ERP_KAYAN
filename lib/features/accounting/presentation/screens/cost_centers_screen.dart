@@ -3,10 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
-import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
@@ -181,8 +181,11 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
       );
       await _refresh();
       if (mounted) showMessage(context, l10n.costCenterSaved);
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+    } catch (error) {
+      if (mounted) {
+        ref.invalidate(costCentersProvider);
+        await showAppError(context, error);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -203,9 +206,11 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
       await ref.read(apiClientProvider).delete('/accounting/cost-centers/${row['id']}');
       await _refresh();
       if (mounted) showMessage(context, l10n.costCenterDeleted);
-    } on Failure catch (error) {
-      // The server refuses to delete a referenced centre and says why.
-      if (mounted) showMessage(context, error.message, error: true);
+    } catch (error) {
+      if (mounted) {
+        ref.invalidate(costCentersProvider);
+        await showAppError(context, error);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -217,8 +222,8 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
     Json detail;
     try {
       detail = await client.getObject('/accounting/cost-centers/${row['id']}');
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+    } catch (error) {
+      if (mounted) await showAppError(context, error);
       return;
     }
     if (!mounted) return;
