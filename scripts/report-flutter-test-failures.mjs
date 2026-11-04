@@ -49,7 +49,7 @@ for (const line of lines) {
   // The voucher load-retry tests contain only checked-in synthetic data.
   // Report assertion counts, source locations and fixed framework diagnostics,
   // never arbitrary exception text or request payloads.
-  if (event.type === 'print' && /^(?:list|detail|create) voucher load shows a safe acknowledged error and retries$/.test(tests.get(event.testID) ?? '')) {
+  if (event.type === 'print' && /^(?:(?:list|detail|create) voucher load shows a safe acknowledged error and retries|(?:RECEIPT|ISSUE) voucher retains exact request across an uncertain create)$/.test(tests.get(event.testID) ?? '')) {
     const details = String(event.message ?? '').split(/\r?\n/).map(line =>
       line.match(/^\s*(?:Expected:|Actual:)\s*(?:<\d+>|exactly \d+ matching candidates|no matching candidates)/)?.[0]?.trim() ??
       line.match(/test\/widget\/stock_voucher_flow_test\.dart:\d+:\d+/)?.[0] ??

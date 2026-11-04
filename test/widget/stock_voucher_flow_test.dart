@@ -29,7 +29,7 @@ class _VoucherApi extends ApiClient {
         return page == 1 ? [for (var i=1;i<=200;i++) {'id':'item-$i','code':'IT-$i','nameEn':'Item $i'}]
           : [{'id':'item-201','code':'IT-201','nameEn':'Item 201'}];
       }
-      return [{'id':'item','code':'IT','nameEn':'Item'}];
+      return [{'id':'item','code':'IT','nameEn':'Item','unit':'piece','units':[{'unit':'piece','factor':'1','isActive':true},{'unit':'box','factor':'2','isActive':true}]}];
     }
     if (path == '/inventory/warehouses') return [{'id':'warehouse','code':'WH','nameEn':'Warehouse'}];
     return [];
@@ -130,15 +130,20 @@ void main() {
       await tester.enterText(find.widgetWithText(TextFormField,'Reason'),'Synthetic reason');
       await tester.ensureVisible(find.text('Item').first); await tester.tap(find.text('Item').first); await tester.pumpAndSettle();
       await tester.tap(find.text('IT • Item').last); await tester.pumpAndSettle();
-      await tester.enterText(find.widgetWithText(TextFormField,'Quantity in base units'),'2');
+      await tester.ensureVisible(find.text('Unit (base by default)')); await tester.tap(find.text('Unit (base by default)')); await tester.pumpAndSettle();
+      await tester.tap(find.text('box').last); await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextFormField,'Quantity in selected unit'),'2');
       if (kind == 'RECEIPT') await tester.enterText(find.widgetWithText(TextFormField,'Base unit cost'),'7.5');
       await tester.ensureVisible(find.text('Save draft')); await tester.tap(find.text('Save draft')); await tester.pumpAndSettle();
       expect(api.requests,hasLength(1));
       expect((api.requests.single['lines'] as List).single['quantity'],kind == 'ISSUE' ? '-2' : '2');
+      expect((api.requests.single['lines'] as List).single['unitName'],'box');
       await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
       await tester.pageBack(); await tester.pumpAndSettle();
       await tester.tap(find.text('Open voucher')); await tester.pumpAndSettle();
       expect(find.textContaining('Voucher request is unresolved'),findsOneWidget);
+      expect(find.text('box'),findsOneWidget);
+      expect(find.widgetWithText(TextFormField,'Quantity in selected unit'),findsOneWidget);
       await tester.tap(find.text('Retry')); await tester.pumpAndSettle();
       expect(api.requests,hasLength(2)); expect(api.requests.last,api.requests.first);
       expect(api.requests.first['idempotencyKey'],isA<String>());

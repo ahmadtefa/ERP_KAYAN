@@ -11,6 +11,7 @@ import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../orders/presentation/order_retry_store.dart';
+import '../../../invoicing/presentation/screens/invoice_editor_screen.dart' show lineUnitsOf;
 import '../../../data/presentation/widgets/document_export_actions.dart';
 import '../providers/stock_providers.dart';
 import '../../../accounting/presentation/screens/journal_entries_screen.dart';
@@ -222,7 +223,7 @@ class _VoucherHistoryState extends ConsumerState<_VoucherHistory> {
   Widget build(BuildContext context) => ExpansionTile(title:Text(_label(context,'السجل','History')),
     children:[FutureBuilder<List<Json>>(future:_future,builder:(context,snapshot) {
       if (snapshot.connectionState != ConnectionState.done) return const CircularProgressIndicator();
-      if (snapshot.hasError) return _VoucherLoadError(error:snapshot.error!,onRetry:() => setState(() => _future = _load()));
+      if (snapshot.hasError) return _VoucherLoadError(error:snapshot.error!,onRetry:() => setState(() { _future = _load(); }));
       if (!snapshot.hasData) return const CircularProgressIndicator();
       return Column(children:[for (final event in snapshot.data!) ListTile(
         title:Text(text(event,'action')),subtitle:Text('${text(event,'createdAt')} • ${text(event,'userId')}'))]);
@@ -231,6 +232,7 @@ class _VoucherHistoryState extends ConsumerState<_VoucherHistory> {
 
 class _VoucherLine {
   String? itemId;
+  String? unitName;
   final quantity=TextEditingController();
   final cost=TextEditingController();
   void dispose() { quantity.dispose(); cost.dispose(); }
@@ -316,7 +318,7 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
     final old=List<_VoucherLine>.from(_lines);
     _lines.clear();
     for (final row in raw) {
-      final line=_VoucherLine()..itemId=asString(row['itemId']);
+      final line=_VoucherLine()..itemId=asString(row['itemId'])..unitName=asString(row['unitName']);
       line.quantity.text=text(row,'quantity').replaceFirst(RegExp(r'^-'),'');
       line.cost.text=text(row,'unitCost'); _lines.add(line);
     }
@@ -352,6 +354,7 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
       if (_center != null) 'costCenterId':_center,
       if (_notes.text.trim().isNotEmpty) 'notes':_notes.text.trim(),
       'lines':[for (final line in _lines) {'itemId':line.itemId,
+        if (line.unitName != null) 'unitName':line.unitName,
         'quantity':widget.kind == 'ISSUE' ? '-${line.quantity.text.trim()}' : line.quantity.text.trim(),
         if (widget.kind == 'RECEIPT') 'unitCost':line.cost.text.trim()}]};
     setState(() => _busy=true);
@@ -381,7 +384,7 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
           if (snapshot.connectionState != ConnectionState.done) return const Center(child:CircularProgressIndicator());
           if (snapshot.hasError) {
             return ListView(padding:const EdgeInsets.all(20),children:[
-              _VoucherLoadError(error:snapshot.error!,onRetry:() => setState(() => _options = _loadOptions())),
+              _VoucherLoadError(error:snapshot.error!,onRetry:() => setState(() { _options = _loadOptions(); })),
               if (_pending != null) FilledButton(onPressed:_busy ? null : () => _send(_pending!),child:Text(_label(context,'إعادة المحاولة','Retry'))),
             ]);
           }
@@ -409,20 +412,37 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
               if (_moreCenters) TextButton(onPressed:_loadingMore ? null : () => _loadMore(snapshot.data!,items:false),
                 child:Text(_label(context,'تحميل المزيد من مراكز التكلفة','Load more cost centers'))),
               TextFormField(controller:_notes,onChanged:(_) => _changed(),decoration:InputDecoration(labelText:_label(context,'ملاحظات','Notes'))),
-              for (final line in _lines) Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
+              for (final line in _lines) Builder(key:ObjectKey(line),builder:(context) {
+                final item=items.where((row) => text(row,'id') == line.itemId).firstOrNull;
+                final rawUnits=item?['units'];
+                final units=(rawUnits is List && rawUnits.isNotEmpty
+                    ? rawUnits.cast<Json>().where((unit) => flag(unit,'isActive',fallback:true))
+                    : lineUnitsOf(item)).where((unit) => text(unit,'unit').isNotEmpty).toList();
+                return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
                 DropdownButtonFormField<String>(initialValue:items.any((x) => text(x,'id') == line.itemId) ? line.itemId : null,
                   decoration:InputDecoration(labelText:_label(context,'الصنف','Item')),
                   items:[for (final row in items) DropdownMenuItem(value:text(row,'id'),child:Text('${text(row,'code')} • ${text(row,'nameAr',fallback:text(row,'nameEn'))}'))],
-                  onChanged:(v) { setState(() => line.itemId=v); _changed(); },validator:(v) => v == null ? _label(context,'مطلوب','Required') : null),
+                  onChanged:(v) { setState(() { line.itemId=v; line.unitName=null; }); _changed(); },validator:(v) => v == null ? _label(context,'مطلوب','Required') : null),
+                if (item != null && (units.isNotEmpty || line.unitName != null)) DropdownButtonFormField<String>(
+                  key:ValueKey('voucher-unit-${line.itemId}-${line.unitName}'),
+                  initialValue:units.any((unit) => text(unit,'unit') == line.unitName) ? line.unitName : null,
+                  decoration:InputDecoration(labelText:_label(context,'الوحدة (الأساسية افتراضيًا)','Unit (base by default)')),
+                  items:[for (final unit in units) DropdownMenuItem(value:text(unit,'unit'),child:Text(text(unit,'unit')))],
+                  onChanged:(v) { setState(() => line.unitName=v); _changed(); },
+                  validator:(_) => line.unitName != null && !units.any((unit) => text(unit,'unit') == line.unitName)
+                    ? _label(context,'اختر وحدة صالحة','Select an active unit') : null),
                 TextFormField(controller:line.quantity,onChanged:(_) => _changed(),keyboardType:TextInputType.number,
-                  decoration:InputDecoration(labelText:_label(context,'الكمية بالوحدة الأساسية','Quantity in base units')),validator:(v) => _number(v,positive:true)),
+                  decoration:InputDecoration(labelText:line.unitName == null
+                    ? _label(context,'الكمية بالوحدة الأساسية','Quantity in base units')
+                    : _label(context,'الكمية بالوحدة المختارة','Quantity in selected unit')),validator:(v) => _number(v,positive:true)),
                 if (widget.kind == 'RECEIPT') TextFormField(controller:line.cost,onChanged:(_) => _changed(),keyboardType:TextInputType.number,
                   decoration:InputDecoration(labelText:_label(context,'تكلفة الوحدة الأساسية','Base unit cost')),validator:_number),
                 if (_lines.length > 1) TextButton(onPressed:() {
                   setState(() => _lines.remove(line)); _changed();
                   WidgetsBinding.instance.addPostFrameCallback((_) => line.dispose());
                 },child:Text(_label(context,'حذف السطر','Remove line'))),
-              ]))),
+              ])));
+              }),
               TextButton.icon(onPressed:() { setState(() => _lines.add(_VoucherLine())); _changed(); },icon:const Icon(Icons.add),label:Text(_label(context,'إضافة صنف','Add item'))),
               if (_moreItems) TextButton(onPressed:_loadingMore ? null : () => _loadMore(snapshot.data!,items:true),
                 child:Text(_label(context,'تحميل المزيد من الأصناف','Load more items'))),

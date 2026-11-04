@@ -317,6 +317,41 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:voucher.id}})).status,'REVERSED');
       assert.equal(await warehouseBalance(secondWarehouse),10);
     }
+    // Selected non-base units are frozen at creation, including an uncertain
+    // retry after the catalogue changes. Cost entered on receipts is per base
+    // unit; posting and reversal must use the snapshotted base quantity.
+    const voucherUnit = await prisma.itemUnit.create({data:{itemId:item,unit:'synthetic-voucher-box',factor:'2'}});
+    for (const [voucherKind, quantity, baseQuantity] of [['RECEIPT','2','4.0000'],['ISSUE','-2','-4.0000']]) {
+      const input = {idempotencyKey:`voucher-unit-${voucherKind.toLowerCase()}-0001`,kind:'ADJUSTMENT',voucherKind,
+        documentDate:date,toWarehouseId:secondWarehouse,reason:'Synthetic unit',counterpartyName:'Synthetic party',
+        lines:[{itemId:item,quantity,unitName:'synthetic-voucher-box',unitCost:'7.5'}]};
+      const before = await warehouseBalance(secondWarehouse);
+      const voucher = await service.create(company,branch,user,input,true);
+      const line = await prisma.stockDocumentLine.findFirstOrThrow({where:{documentId:voucher.id}});
+      assert.equal(line.quantity.toFixed(4),baseQuantity);
+      assert.equal(line.unitQuantity.toFixed(4),Number(quantity).toFixed(4));
+      assert.equal(line.unitFactor.toFixed(6),'2.000000');
+      assert.equal(line.unitName,'synthetic-voucher-box');
+      await prisma.itemUnit.update({where:{id:voucherUnit.id},data:{factor:'3',isActive:false}});
+      assert.equal((await service.create(company,branch,user,input,true)).id,voucher.id);
+      await assert.rejects(service.create(company,branch,user,{...input,idempotencyKey:`voucher-inactive-${voucherKind.toLowerCase()}-0001`},true),/inactive/);
+      await service.transitionVoucher(company,branch,user,voucher.id,'REVIEW',true);
+      await service.transitionVoucher(company,branch,user,voucher.id,'APPROVE',true);
+      await service.post(company,user,voucher.id,true,branch);
+      const movement = await prisma.stockMovement.findFirstOrThrow({where:{referenceId:voucher.id}});
+      assert.equal(movement.quantity.toFixed(4),'4.0000');
+      assert.equal(movement.direction,voucherKind === 'RECEIPT' ? 'IN' : 'OUT');
+      const posted = await prisma.stockDocument.findUniqueOrThrow({where:{id:voucher.id}});
+      const journal = await prisma.journalEntry.findUniqueOrThrow({where:{id:posted.journalEntryId}});
+      assert.equal(journal.totalDebit.toFixed(4),journal.totalCredit.toFixed(4));
+      if (voucherKind === 'RECEIPT') assert.equal(movement.totalCost.toFixed(4),'30.0000');
+      assert.equal(await warehouseBalance(secondWarehouse),before + Number(baseQuantity));
+      await service.reverse(company,user,voucher.id,true,branch);
+      assert.equal(await warehouseBalance(secondWarehouse),before);
+      assert.equal((await prisma.stockDocumentLine.findUniqueOrThrow({where:{id:line.id}})).unitFactor.toFixed(6),'2.000000');
+      await prisma.itemUnit.update({where:{id:voucherUnit.id},data:{factor:'2',isActive:true}});
+    }
+    console.log('PASS: voucher selected-unit snapshot, inactive-unit retry, base-cost posting and reversal on real PostgreSQL.');
     console.log('PASS: stock vouchers, atomic review/approval, permissions-independent workflow, posting/reversal concurrency and rollback.');
     console.log('PASS: real PostgreSQL + Prisma stock receipt, issue, audit rollback, warehouse count, concurrency, journal and reversal.');
 
