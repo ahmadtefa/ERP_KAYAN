@@ -293,7 +293,9 @@ let difference = '70000000-0000-4000-8000-000000000005';
       const afterReversalStock = await prisma.stockBalance.findUniqueOrThrow({where:{companyId_branchId_itemId:{companyId:company,branchId:branch,itemId:first.id}}});
       assert.equal(afterReversalStock.quantity.toFixed(4),beforeReversalStock.quantity.toFixed(4));
       assert.equal(afterReversalStock.value.toFixed(4),beforeReversalStock.value.toFixed(4));
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:`${kind}_invoices`,entityId:target.invoiceId,action:'REVERSE'}}),0);
       await svc.reverse(company,user,target.invoiceId);
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:`${kind}_invoices`,entityId:target.invoiceId,action:'REVERSE'}}),1);
       assert.equal((await invoiceModel.findUniqueOrThrow({where:{id:target.invoiceId}})).status,'REVERSED');
       assert.equal((await orderLineModel.findUniqueOrThrow({where:{id:target.orderLineId}})).invoicedQuantity.toFixed(4),'10.0000');
       await assert.rejects(svc.reverse(company,user,target.invoiceId),/Only posted/);
@@ -405,6 +407,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
       const postingFailureDto = {[field]:party,invoiceDate:date,
         lines:[{itemId:second.id,quantity:'1',unitPrice:'2',taxRate:'0'}]};
       const postingFailure = await invoices.create(company,branch,user,postingFailureDto);
+      const stockBeforeFailedPost = await prisma.stockBalance.findUniqueOrThrow({where:{companyId_branchId_itemId:{companyId:company,branchId:branch,itemId:second.id}}});
       const postingAudit = audit.recordRequired.bind(audit);
       audit.recordRequired = async (input, tx) => {
         if (input.entity === `${kind}_invoices` && input.action === 'POST') throw new Error('injected post audit failure');
@@ -415,6 +418,10 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal((await prisma[model].findUniqueOrThrow({where:{id:postingFailure.id}})).status,'DRAFT');
       assert.equal(await prisma.stockMovement.count({where:{companyId:company,referenceId:postingFailure.id}}),0);
       assert.equal(await prisma.journalEntry.count({where:{companyId:company,sourceId:postingFailure.id}}),0);
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:`${kind}_invoices`,entityId:postingFailure.id,action:'POST'}}),0);
+      const stockAfterFailedPost = await prisma.stockBalance.findUniqueOrThrow({where:{companyId_branchId_itemId:{companyId:company,branchId:branch,itemId:second.id}}});
+      assert.equal(stockAfterFailedPost.quantity.toFixed(4),stockBeforeFailedPost.quantity.toFixed(4));
+      assert.equal(stockAfterFailedPost.value.toFixed(4),stockBeforeFailedPost.value.toFixed(4));
       await invoices.cancelDraft(company,branch,user,postingFailure.id);
 
       // Pause a real post just after its first header read, edit the unrelated
@@ -452,6 +459,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
           lines:[{itemId:second.id,quantity:'3',unitPrice:'2',taxRate:'0'}]});
       } finally { resumePost(); }
       await pendingPost;
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:`${kind}_invoices`,entityId:draft.id,action:'POST'}}),1);
       const movements = await prisma.stockMovement.findMany({where:{companyId:company,referenceId:draft.id}});
       assert.equal(movements.length,1);
       assert.equal(movements[0].quantity.toFixed(4),'3.0000');
