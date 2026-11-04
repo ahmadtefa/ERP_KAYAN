@@ -24,7 +24,9 @@ class _BalanceApi extends ApiClient {
   Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async {
     if (path == '/cash/accounts/balances') {
       balanceLoads++;
-      if (balanceLoads==1) throw const NetworkFailure('PRIVATE_BALANCE_DIAGNOSTIC');
+      if (balanceLoads==1) {
+        throw const NetworkFailure('PRIVATE_BALANCE_DIAGNOSTIC');
+      }
       return {'rows':[{'cashAccountId':'a','code':'A','balance':'12.5000'},{'cashAccountId':'c','code':'C','balance':'0.0000'}]};
     }
     return {};

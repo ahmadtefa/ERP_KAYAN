@@ -16,7 +16,9 @@ class _VoucherApi extends ApiClient {
   Object? submitted;
   @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async {
-    if (path == '/cash/accounts') return [{'id':'box','code':'A','nameEn':'Box A','isActive':true}];
+    if (path == '/cash/accounts') {
+      return [{'id':'box','code':'A','nameEn':'Box A','isActive':true}];
+    }
     if (path == '/parties/customers' || path == '/parties/suppliers') {
       return [{'id':'party','code':'P','nameEn':'Partner','isActive':true}];
     }
@@ -26,7 +28,9 @@ class _VoucherApi extends ApiClient {
   Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async {
     if (path.startsWith('/cash/open-invoices/')) {
       invoiceLoads++;
-      if (invoiceLoads == 1) throw StateError('PRIVATE_LOOKUP_ERROR');
+      if (invoiceLoads == 1) {
+        throw StateError('PRIVATE_LOOKUP_ERROR');
+      }
       return {'items':[{'id':'invoice','balance':'20.0000'}]};
     }
     return {'items':<Object>[],'rows':<Object>[]};

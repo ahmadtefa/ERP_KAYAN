@@ -18,13 +18,17 @@ class _CommittedTransferApi extends ApiClient {
   Object? submitted;
   @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async {
-    if (path == '/cash/accounts') return [
+    if (path == '/cash/accounts') {
+      return [
       {'id':'a','code':'A','nameEn':'Box A','isActive':true},
       {'id':'b','code':'B','nameEn':'Box B','isActive':true},
-    ];
-    if (path == '/cash/transfers' && committed) return [
+      ];
+    }
+    if (path == '/cash/transfers' && committed) {
+      return [
       {'id':'transfer','transferNumber':'T-1','status':'DRAFT','amount':'12.5'}
-    ];
+      ];
+    }
     return [];
   }
   @override
@@ -104,7 +108,9 @@ class _CashAccountApi extends ApiClient {
   Object? submitted;
   @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async {
-    if (path == '/accounting/chart-of-accounts') return [{'id':'ledger','code':'111','nameEn':'Ledger','isPostable':true}];
+    if (path == '/accounting/chart-of-accounts') {
+      return [{'id':'ledger','code':'111','nameEn':'Ledger','isPostable':true}];
+    }
     return [];
   }
   @override
