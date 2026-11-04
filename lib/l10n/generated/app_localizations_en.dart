@@ -2199,7 +2199,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get readOnlySettings =>
-      'Changing these needs the company administration permission.';
+      'Only the super administrator can change these settings.';
 
   @override
   String get invalidSetting => 'Enter a value between 0 and 100.';

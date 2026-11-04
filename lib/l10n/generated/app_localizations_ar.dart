@@ -2186,7 +2186,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get readOnlySettings =>
-      'تعديل هذه الإعدادات يتطلب صلاحية إدارة الشركة.';
+      'تعديل هذه الإعدادات متاح للمسؤول الأعلى فقط.';
 
   @override
   String get invalidSetting => 'أدخل قيمة بين 0 و100.';

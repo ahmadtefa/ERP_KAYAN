@@ -4283,7 +4283,7 @@ abstract class AppLocalizations {
   /// No description provided for @readOnlySettings.
   ///
   /// In en, this message translates to:
-  /// **'Changing these needs the company administration permission.'**
+  /// **'Only the super administrator can change these settings.'**
   String get readOnlySettings;
 
   /// No description provided for @invalidSetting.

@@ -697,7 +697,7 @@
   "salesManagerPhone": "هاتف مدير المبيعات",
   "settingsSaved": "تم حفظ الإعدادات",
   "saveSettings": "حفظ الإعدادات",
-  "readOnlySettings": "تعديل هذه الإعدادات يتطلب صلاحية إدارة الشركة.",
+  "readOnlySettings": "تعديل هذه الإعدادات متاح للمسؤول الأعلى فقط.",
   "invalidSetting": "أدخل قيمة بين 0 و100.",
   "networkAccessTitle": "الاتصال بالشبكة والوصول عن بُعد",
   "networkUnavailable": "لم يستجب الخادم لتقرير الشبكة. تحقق من أنه يعمل.",

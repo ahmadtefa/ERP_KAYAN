@@ -697,7 +697,7 @@
   "salesManagerPhone": "Sales manager telephone",
   "settingsSaved": "Settings saved",
   "saveSettings": "Save settings",
-  "readOnlySettings": "Changing these needs the company administration permission.",
+  "readOnlySettings": "Only the super administrator can change these settings.",
   "invalidSetting": "Enter a value between 0 and 100.",
   "networkAccessTitle": "Network and remote access",
   "networkUnavailable": "The server did not answer its network report. Check that it is running.",

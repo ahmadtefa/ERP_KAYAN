@@ -53,90 +53,92 @@ export class CompanySettingsService {
     userId: string,
     dto: Record<string, unknown>,
   ): Promise<CompanySettings & { companyId: string }> {
-    const before = await this.get(companyId);
-    const data: Prisma.CompanySettingUpdateInput = { updatedBy: userId };
+    return this.prisma.$transaction(async (tx) => {
+      const before = await this.get(companyId, tx);
+      const data: Prisma.CompanySettingUpdateInput = { updatedBy: userId };
 
-    if (dto.taxRate !== undefined) {
-      data.taxRate = this.rate(dto.taxRate, 'taxRate', 0, 100);
-    }
-    if (dto.maxDiscountPercent !== undefined) {
-      data.maxDiscountPercent = this.rate(dto.maxDiscountPercent, 'maxDiscountPercent', 0, 100);
-    }
-    if (dto.showTaxIdOnQuotations !== undefined) {
-      data.showTaxIdOnQuotations = this.flag(
-        dto.showTaxIdOnQuotations,
-        'showTaxIdOnQuotations',
-      );
-    }
-    for (const field of ['managerName', 'salesManagerName', 'salesManagerPhone'] as const) {
-      if (dto[field] !== undefined) {
-        data[field] = this.optionalText(dto[field], field);
+      if (dto.taxRate !== undefined) {
+        data.taxRate = this.rate(dto.taxRate, 'taxRate', 0, 100);
       }
-    }
-    if (dto.pricesIncludeTax !== undefined) {
-      data.pricesIncludeTax = this.flag(dto.pricesIncludeTax, 'pricesIncludeTax');
-    }
-    if (dto.approvalRequiredForJournal !== undefined) {
-      data.approvalRequiredForJournal = this.flag(
-        dto.approvalRequiredForJournal,
-        'approvalRequiredForJournal',
-      );
-    }
-    if (dto.segregationOfDuties !== undefined) {
-      data.segregationOfDuties = this.flag(dto.segregationOfDuties, 'segregationOfDuties');
-    }
-    if (dto.allowNegativeStock !== undefined) {
-      const value = this.flag(dto.allowNegativeStock, 'allowNegativeStock');
-      // Turning this on changes what the system guarantees about stock, so it
-      // is written down loudly in the audit trail rather than silently saved.
-      data.allowNegativeStock = value;
-    }
-    if (dto.inventoryValuation !== undefined) {
-      const method = String(dto.inventoryValuation).toUpperCase();
-      if (!VALUATION_METHODS.includes(method as ValuationMethod)) {
-        throw new BadRequestException(
-          `Unsupported valuation method "${dto.inventoryValuation}". This installation supports: ${VALUATION_METHODS.join(', ')}`,
+      if (dto.maxDiscountPercent !== undefined) {
+        data.maxDiscountPercent = this.rate(dto.maxDiscountPercent, 'maxDiscountPercent', 0, 100);
+      }
+      if (dto.showTaxIdOnQuotations !== undefined) {
+        data.showTaxIdOnQuotations = this.flag(
+          dto.showTaxIdOnQuotations,
+          'showTaxIdOnQuotations',
         );
       }
-      // Switching method on a company that already holds stock would make
-      // every figure before today incomparable with every figure after it.
-      if (method !== before.inventoryValuation) {
-        const stock = await this.prisma.stockBalance.count({
-          where: { companyId, quantity: { not: 0 } },
-        });
-        if (stock > 0) {
-          throw new BadRequestException(
-            'The valuation method cannot be changed while there is stock on hand: ' +
-              'the figures before and after the change would not be comparable.',
-          );
+      for (const field of ['managerName', 'salesManagerName', 'salesManagerPhone'] as const) {
+        if (dto[field] !== undefined) {
+          data[field] = this.optionalText(dto[field], field);
         }
       }
-      data.inventoryValuation = method;
-    }
-    if (dto.backupRetentionCount !== undefined) {
-      data.backupRetentionCount = this.count(dto.backupRetentionCount, 'backupRetentionCount', 0, 3650);
-    }
-    if (dto.backupIntervalHours !== undefined) {
-      data.backupIntervalHours = this.count(dto.backupIntervalHours, 'backupIntervalHours', 0, 8760);
-    }
+      if (dto.pricesIncludeTax !== undefined) {
+        data.pricesIncludeTax = this.flag(dto.pricesIncludeTax, 'pricesIncludeTax');
+      }
+      if (dto.approvalRequiredForJournal !== undefined) {
+        data.approvalRequiredForJournal = this.flag(
+          dto.approvalRequiredForJournal,
+          'approvalRequiredForJournal',
+        );
+      }
+      if (dto.segregationOfDuties !== undefined) {
+        data.segregationOfDuties = this.flag(dto.segregationOfDuties, 'segregationOfDuties');
+      }
+      if (dto.allowNegativeStock !== undefined) {
+        const value = this.flag(dto.allowNegativeStock, 'allowNegativeStock');
+        // Turning this on changes what the system guarantees about stock, so it
+        // is written down loudly in the audit trail rather than silently saved.
+        data.allowNegativeStock = value;
+      }
+      if (dto.inventoryValuation !== undefined) {
+        const method = String(dto.inventoryValuation).toUpperCase();
+        if (!VALUATION_METHODS.includes(method as ValuationMethod)) {
+          throw new BadRequestException(
+            `Unsupported valuation method "${dto.inventoryValuation}". This installation supports: ${VALUATION_METHODS.join(', ')}`,
+          );
+        }
+        // Switching method on a company that already holds stock would make
+        // every figure before today incomparable with every figure after it.
+        if (method !== before.inventoryValuation) {
+          const stock = await tx.stockBalance.count({
+            where: { companyId, quantity: { not: 0 } },
+          });
+          if (stock > 0) {
+            throw new BadRequestException(
+              'The valuation method cannot be changed while there is stock on hand: ' +
+                'the figures before and after the change would not be comparable.',
+            );
+          }
+        }
+        data.inventoryValuation = method;
+      }
+      if (dto.backupRetentionCount !== undefined) {
+        data.backupRetentionCount = this.count(dto.backupRetentionCount, 'backupRetentionCount', 0, 3650);
+      }
+      if (dto.backupIntervalHours !== undefined) {
+        data.backupIntervalHours = this.count(dto.backupIntervalHours, 'backupIntervalHours', 0, 8760);
+      }
 
-    const updated = await this.prisma.companySetting.upsert({
-      where: { companyId },
-      create: { companyId, ...(data as Prisma.CompanySettingCreateInput) } as never,
-      update: data,
-    });
+      const updated = await tx.companySetting.upsert({
+        where: { companyId },
+        create: { companyId, ...(data as Prisma.CompanySettingCreateInput) } as never,
+        update: data,
+      });
 
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'UPDATE',
-      entity: 'company_settings',
-      entityId: companyId,
-      before,
-      after: this.toResponse(updated),
-    });
+      await this.audit.recordRequired({
+        companyId,
+        userId,
+        action: 'UPDATE',
+        entity: 'company_settings',
+        entityId: companyId,
+        before,
+        after: this.toResponse(updated),
+      }, tx);
 
-    return this.toResponse(updated);
+      return this.toResponse(updated);
+    }, { isolationLevel: 'Serializable' });
   }
 
   private flag(value: unknown, field: string): boolean {

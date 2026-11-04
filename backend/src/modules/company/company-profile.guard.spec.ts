@@ -4,6 +4,8 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { CompanyController } from './company.controller';
 import { CompaniesController } from './companies.controller';
 import { CompanyService } from './company.service';
+import { CompanySettingsService } from '../../common/settings/company-settings.module';
+import { AccountingSettingsController } from '../accounting/settings.controller';
 
 const companyService = {
   updateProfile: jest.fn().mockResolvedValue({ updated: true }),
@@ -12,9 +14,12 @@ const companyService = {
   getProfile: jest.fn().mockResolvedValue({ id: 'fixture-company' }),
 };
 
+const companySettingsService = {update:jest.fn().mockResolvedValue({updated:true})};
+
 @Module({
-  controllers: [CompanyController, CompaniesController],
-  providers: [{ provide: CompanyService, useValue: companyService }],
+  controllers: [CompanyController, CompaniesController, AccountingSettingsController],
+  providers: [{ provide: CompanyService, useValue: companyService },
+    {provide:CompanySettingsService,useValue:companySettingsService}],
 })
 class FixtureModule {}
 
@@ -56,6 +61,14 @@ describe('company profile HTTP authorization', () => {
           expect((await send(true)).status).toBe(method === 'POST' ? 201 : 200);
         }
       }
+      const settingsUrl = base + '/accounting/settings';
+      const settingsPatch = (superAdmin: boolean) => fetch(settingsUrl, {method:'PATCH',
+        headers:{'content-type':'application/json','x-fixture-super':superAdmin ? 'yes' : 'no'},
+        body:JSON.stringify({managerName:'Synthetic manager'})});
+      expect((await settingsPatch(false)).status).toBe(403);
+      expect(companySettingsService.update).not.toHaveBeenCalled();
+      expect((await settingsPatch(true)).status).toBe(200);
+      expect(companySettingsService.update).toHaveBeenCalledTimes(1);
       expect(companyService.updateProfile).toHaveBeenCalledTimes(2);
       expect(companyService.setLogo).toHaveBeenCalledTimes(2);
       expect(companyService.deleteLogo).toHaveBeenCalledTimes(2);

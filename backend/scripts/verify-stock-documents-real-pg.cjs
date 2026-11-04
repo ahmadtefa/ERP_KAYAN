@@ -47,7 +47,12 @@ const { PurchaseInvoicesService } = require('../src/modules/purchases/purchase-i
 const { ProfilePhotoService } = require('../src/modules/auth/profile-photo.service');
 const { RolesService } = require('../src/modules/admin/roles.service');
 const { UsersService } = require('../src/modules/admin/users.service');
-const { normalizeLogo } = require('../src/modules/company/company.service');
+const { normalizeLogo, CompanyService } = require('../src/modules/company/company.service');
+const { CompanyController } = require('../src/modules/company/company.controller');
+const { CompaniesController } = require('../src/modules/company/companies.controller');
+const { AccountingSettingsController } = require('../src/modules/accounting/settings.controller');
+const { PermissionsGuard } = require('../src/common/guards/permissions.guard');
+const { Reflector } = require('@nestjs/core');
 const sharp = require('sharp');
 
 const company = '10000000-0000-4000-8000-000000000001';
@@ -112,6 +117,73 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(photoAudit.length,2);
     assert.ok(!JSON.stringify(photoAudit).includes(savedPhoto.data));
     console.log('PASS: real PostgreSQL profile photo persistence, tenant isolation and audit rollback.');
+    // Real HTTP controllers, real guards and actual PostgreSQL. Authentication
+    // is intentionally a synthetic injected principal; JWT and installed
+    // product/license behavior are not exercised by this fixture.
+    const companies = new CompanyService(prisma,audit);
+    const companySettings = new CompanySettingsService(prisma,audit);
+    const companyBefore = await prisma.company.findUniqueOrThrow({where:{id:company}});
+    assert.equal(companyBefore.logoPath,null);
+    assert.equal(companyBefore.logoData,null);
+    const settingsBefore = await companySettings.get(company);
+    class CompanyHttpFixtureModule {}
+    Module({controllers:[CompanyController,CompaniesController,AccountingSettingsController],providers:[
+      {provide:CompanyService,useValue:companies},{provide:CompanySettingsService,useValue:companySettings},
+    ]})(CompanyHttpFixtureModule);
+    const companyHttp = await NestFactory.create(CompanyHttpFixtureModule,{logger:false});
+    try {
+      companyHttp.use((req,_res,next)=>{req.user={userId:user,companyId:company,branchId:branch,username:'synthetic',
+        isSuperAdmin:req.headers['x-fixture-super']==='yes',permissions:['admin.company.manage','company.profile.manage','reports.read']};next();});
+      companyHttp.useGlobalGuards(new PermissionsGuard(new Reflector()));
+      companyHttp.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
+      companyHttp.useGlobalFilters(new ProblemDetailsFilter());
+      await companyHttp.listen(0,'127.0.0.1');
+      const base=`http://127.0.0.1:${companyHttp.getHttpServer().address().port}`;
+      const patch=(path,body,superAdmin)=>fetch(base+path,{method:'PATCH',headers:{'content-type':'application/json',
+        'x-fixture-super':superAdmin?'yes':'no'},body:JSON.stringify(body)});
+      for (const prefix of ['/company','/companies']) {
+        const beforeName=(await prisma.company.findUniqueOrThrow({where:{id:company}})).nameEn;
+        const auditBefore=await prisma.auditLog.count({where:{companyId:company,entity:'companies'}});
+        assert.equal((await patch(`${prefix}/profile`,{nameEn:'Unauthorized change'},false)).status,403);
+        assert.equal((await prisma.company.findUniqueOrThrow({where:{id:company}})).nameEn,beforeName);
+        assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'companies'}}),auditBefore);
+        assert.equal((await patch(`${prefix}/profile`,{nameEn:'Synthetic company updated'},true)).status,200);
+        assert.equal((await prisma.company.findUniqueOrThrow({where:{id:company}})).nameEn,'Synthetic company updated');
+        const upload=superAdmin=>{
+          const form=new FormData();form.set('file',new Blob([image],{type:'image/png'}),'synthetic.png');
+          return fetch(base+prefix+'/logo',{method:'POST',headers:{'x-fixture-super':superAdmin?'yes':'no'},body:form});
+        };
+        assert.equal((await upload(false)).status,403);
+        assert.equal((await prisma.company.findUniqueOrThrow({where:{id:company}})).logoData,null);
+        assert.equal((await upload(true)).status,201);
+        const stored=(await prisma.company.findUniqueOrThrow({where:{id:company}})).logoData;
+        assert.ok(stored?.length);
+        assert.equal((await fetch(base+prefix+'/logo',{method:'DELETE',headers:{'x-fixture-super':'no'}})).status,403);
+        assert.deepEqual((await prisma.company.findUniqueOrThrow({where:{id:company}})).logoData,stored);
+        assert.equal((await fetch(base+prefix+'/logo',{method:'DELETE',headers:{'x-fixture-super':'yes'}})).status,200);
+        assert.equal((await prisma.company.findUniqueOrThrow({where:{id:company}})).logoData,null);
+      }
+      const policyAudits=await prisma.auditLog.count({where:{companyId:company,entity:'company_settings'}});
+      assert.equal((await patch('/accounting/settings',{managerName:'Unauthorized manager'},false)).status,403);
+      assert.equal((await companySettings.get(company)).managerName,settingsBefore.managerName);
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'company_settings'}}),policyAudits);
+      assert.equal((await patch('/accounting/settings',{managerName:'Synthetic manager'},true)).status,200);
+      assert.equal((await companySettings.get(company)).managerName,'Synthetic manager');
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'company_settings'}}),policyAudits+1);
+      const realSettingsAudit=audit.recordRequired.bind(audit);
+      audit.recordRequired=async (entry,tx)=>{
+        if(entry.entity==='company_settings') throw new Error('injected company settings audit failure');
+        return realSettingsAudit(entry,tx);
+      };
+      try {
+        await assert.rejects(companySettings.update(company,user,{managerName:'Must roll back'}),/injected company settings audit failure/);
+        assert.equal((await companySettings.get(company)).managerName,'Synthetic manager');
+        assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'company_settings'}}),policyAudits+1);
+      } finally {audit.recordRequired=realSettingsAudit;}
+      assert.equal((await patch('/accounting/settings',{managerName:settingsBefore.managerName},true)).status,200);
+      assert.equal((await patch('/company/profile',{nameEn:companyBefore.nameEn},true)).status,200);
+    } finally { await companyHttp.close(); }
+    console.log('PASS: real HTTP and PostgreSQL profile/logo/settings: delegated admin denied, super admin allowed, settings audit failure rolls back. Test-injected principal: JWT and license guards not tested.');
     // Competing UI permission edits start from the same snapshot. The role
     // lock and expected set permit exactly one and retain an atomic audit.
     const roles = new RolesService(prisma,audit);
