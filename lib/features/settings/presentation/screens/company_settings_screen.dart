@@ -130,7 +130,7 @@ class _CompanySettingsScreenState extends ConsumerState<CompanySettingsScreen> {
 }
 
 class _ProfileCard extends ConsumerStatefulWidget {
-  const _ProfileCard({required this.profile});
+  const _ProfileCard({super.key, required this.profile});
 
   final Map<String, dynamic> profile;
 
@@ -348,6 +348,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
 
 class _LogoRow extends ConsumerStatefulWidget {
   const _LogoRow({
+    super.key,
     required this.hasLogo,
     required this.canEdit,
     required this.profileSaving,
