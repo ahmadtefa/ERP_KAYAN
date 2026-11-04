@@ -38,7 +38,9 @@ void main() {
         localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,
         home:const Scaffold(body:CostCentersScreen()))));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip(initialActive ? 'Deactivate' : 'Reactivate')); await tester.pumpAndSettle();
+      final statusButton=find.byTooltip(initialActive ? 'Deactivate' : 'Reactivate');
+      await tester.ensureVisible(statusButton); await tester.pumpAndSettle();
+      await tester.tap(statusButton); await tester.pumpAndSettle();
       if (initialActive) {
         await tester.tap(find.widgetWithText(FilledButton,'Deactivate')); await tester.pumpAndSettle();
       }
