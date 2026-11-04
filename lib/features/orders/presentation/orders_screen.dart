@@ -11,6 +11,7 @@ import '../../auth/presentation/providers/auth_providers.dart';
 import '../../common/presentation/screens/module_scaffold.dart';
 import '../../invoicing/presentation/providers/invoice_providers.dart';
 import 'order_retry_store.dart';
+import 'order_create_screen.dart';
 
 /// Sales and purchase order monitoring, conversion and linked draft actions.
 class OrdersScreen extends ConsumerStatefulWidget {
@@ -31,6 +32,18 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   Future<List<Json>> _load() => ref.read(apiClientProvider).getList(_path);
   void _refresh() => setState(() => _future = _load());
 
+  Future<void> _create() async {
+    final id = await Navigator.of(context).push<String>(MaterialPageRoute(
+      builder: (_) => OrderCreateScreen(kind: widget.kind),
+    ));
+    if (!mounted) return;
+    _refresh();
+    final user = ref.read(currentUserProvider);
+    if (id != null && (user?.can(widget.kind.isSales ? 'sales.orders.read' : 'purchases.orders.read') ?? false)) {
+      await _open({'id': id});
+    }
+  }
+
   Future<void> _open(Json row) async {
     await Navigator.of(context).push<void>(MaterialPageRoute(
       builder: (_) => OrderDetailScreen(kind: widget.kind, orderId: text(row, 'id')),
@@ -41,7 +54,11 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   @override
   Widget build(BuildContext context) => ModuleScaffold(
     title: widget.kind.isSales ? tr('أوامر البيع', 'Sales orders') : tr('أوامر الشراء', 'Purchase orders'),
-    actions: [IconButton(tooltip: tr('تحديث', 'Refresh'), onPressed: _refresh, icon: const Icon(Icons.refresh))],
+    actions: [
+      if (ref.watch(currentUserProvider)?.can(widget.kind.isSales ? 'sales.orders.create' : 'purchases.orders.create') ?? false)
+        IconButton(tooltip: tr('أمر جديد', 'New order'), onPressed: _create, icon: const Icon(Icons.add)),
+      IconButton(tooltip: tr('تحديث', 'Refresh'), onPressed: _refresh, icon: const Icon(Icons.refresh)),
+    ],
     body: FutureBuilder<List<Json>>(
       future: _future,
       builder: (context, snapshot) {
