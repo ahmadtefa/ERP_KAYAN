@@ -1,19 +1,10 @@
 name: Product installer candidate verification (not a release)
 
 # No automatic product build: the size and payload investigation is open.
+# Retained for historical review. This legacy workflow includes key generation,
+# signing-related tests, or a stale installer; do not dispatch it in GitHub CI.
+# It is not release evidence and its jobs and history remain preserved.
 on:
-  push:
-    branches: ['fix/windows-installer-inspection-20261029']
-    paths:
-      - 'distribution/windows/**'
-      - 'backend/**'
-      - 'lib/**'
-      - 'windows/**'
-      - 'pubspec.yaml'
-      - 'pubspec.lock'
-      - 'scripts/inspect-windows-pe.mjs'
-      - 'scripts/windows-release-policy.mjs'
-      - 'scripts/license-build-policy.mjs'
   workflow_dispatch:
 
 permissions:

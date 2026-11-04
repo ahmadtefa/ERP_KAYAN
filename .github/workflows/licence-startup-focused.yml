@@ -1,14 +1,10 @@
 name: Licence startup and payload focused checks
 
+# Retained for historical review. This legacy workflow includes key generation,
+# signing-related tests, or a stale installer; do not dispatch it in GitHub CI.
+# It is not release evidence and its jobs and history remain preserved.
 on:
-  push:
-    branches: ['arena/2d794f08-erp-kayan']
-    paths:
-      - '.github/workflows/licence-startup-focused.yml'
-      - 'lib/core/backend/local_backend_io.dart'
-      - 'test/core/backend/local_backend_io_test.dart'
-      - 'scripts/verify-extracted-windows-installer.mjs'
-      - 'scripts/verify-extracted-windows-installer.test.mjs'
+  workflow_dispatch:
 
 permissions:
   contents: read

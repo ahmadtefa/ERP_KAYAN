@@ -43,7 +43,8 @@ void main() {
     await tester.ensureVisible(end); await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Clear date').last); await tester.pumpAndSettle();
     final person=find.widgetWithText(TextFormField,'Responsible person');
-    final description=find.widgetWithText(TextFormField,'Description');
+    final description=find.byWidgetPredicate((widget) =>
+        widget is TextFormField && widget.decoration?.labelText == 'Description');
     await tester.ensureVisible(person); await tester.pumpAndSettle();
     await tester.enterText(person,'');
     await tester.ensureVisible(description); await tester.pumpAndSettle();

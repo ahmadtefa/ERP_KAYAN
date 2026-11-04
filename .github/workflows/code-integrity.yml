@@ -1,0 +1,89 @@
+name: PR accounting and Windows build (no installer)
+
+# Independent code checks. No secrets, signing, installation or publication.
+# These checks deliberately do not replace the blocked release evidence gate.
+on:
+  pull_request:
+    branches: [main, 'arena/**']
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  accounting-and-packaging-policy:
+    name: Accounting and non-signing packaging policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://synthetic@127.0.0.1:5432/kayan_unused?schema=public
+      NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify checkout is the exact source head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked backend dependencies without scripts
+        working-directory: backend
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npx prisma generate
+      - name: Run accounting and posting tests
+        working-directory: backend
+        run: >-
+          npm test -- --runInBand
+          src/modules/accounting/opening-balances.controller.spec.ts
+          src/modules/accounting/opening-balances.service.spec.ts
+          src/modules/accounting/posting.service.spec.ts
+          src/modules/accounting/year-end-close.service.spec.ts
+      - name: Test migration exit handling and non-signing payload policy
+        run: node --test backend/scripts/migrate-deploy.test.mjs scripts/windows-policy-non-signing.test.mjs
+
+  windows-build:
+    name: Build Windows application from exact head (no installer)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify checkout is the exact source head
+        shell: pwsh
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_HEAD) { throw 'Checkout does not match the event source head.' }
+          Write-Host "Source commit: $actual"
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - name: Build Windows application (not Setup)
+        run: flutter build windows --release --no-pub
+      - name: Verify output exists and record its hash
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'build/windows/x64/runner/Release/erp_kayan.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Windows executable not found.' }
+          $file = Get-Item -LiteralPath $exe
+          if ($file.Length -eq 0) { throw 'Windows executable is empty.' }
+          Write-Host "Application executable bytes: $($file.Length)"
+          Write-Host "Application executable SHA256: $((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant())"
+          Write-Host 'Not an installer, not an installed-product test, and not release evidence.'

@@ -1,10 +1,9 @@
 name: Windows installer candidate offline runtime smoke (pinned candidate)
 
+# Retained for historical review. This legacy workflow includes key generation,
+# signing-related tests, or a stale installer; do not dispatch it in GitHub CI.
+# It is not release evidence and its jobs and history remain preserved.
 on:
-  push:
-    branches: ['fix/windows-installer-inspection-20261029']
-    paths:
-      - 'scripts/smoke-test-installed-windows.ps1'
   workflow_dispatch:
 
 permissions:

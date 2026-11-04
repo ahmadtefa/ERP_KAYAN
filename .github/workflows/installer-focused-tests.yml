@@ -1,25 +1,16 @@
 name: Installer safety focused tests (no installer build)
 
+# Retained for historical review. This legacy workflow includes key generation,
+# signing-related tests, or a stale installer; do not dispatch it in GitHub CI.
+# It is not release evidence and its jobs and history remain preserved.
 on:
-  push:
-    branches: ['arena/2d794f08-erp-kayan']
-    paths:
-      - '.github/workflows/installer-focused-tests.yml'
-      - 'backend/scripts/migrate-deploy.mjs'
-      - 'backend/scripts/migrate-deploy.test.mjs'
-      - 'backend/scripts/prepare-database.mjs'
-      - 'distribution/windows/build-installer.ps1'
-      - 'scripts/windows-release-policy.test.mjs'
-      - 'lib/features/data/presentation/screens/backup_screen.dart'
-      - 'test/features/data/backup_demo_visibility_test.dart'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   migration-safety:
-    # This follow-up changes only Flutter diagnostic invocation.
-    if: ${{ !startsWith(github.event.head_commit.message, 'Fix focused Flutter diagnostics') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
