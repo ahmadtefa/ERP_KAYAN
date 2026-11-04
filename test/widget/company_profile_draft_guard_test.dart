@@ -24,7 +24,11 @@ class _Profile extends CompanyProfileController {
   Future<void> refresh() async {
     pending = Completer<Map<String,dynamic>>();
     state = const AsyncValue.loading();
-    state = AsyncValue.data(await pending!.future);
+    try {
+      state = AsyncValue.data(await pending!.future);
+    } catch (error, stack) {
+      state = AsyncValue.error(error,stack);
+    }
   }
 }
 class _Branches extends BranchesController {
@@ -78,7 +82,15 @@ void main() {
     final controller = container.read(companyProfileProvider.notifier) as _Profile;
     final refreshing = controller.refresh(); await tester.pump();
     expect(tester.widget<TextField>(englishName).controller!.text,'Local changes');
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
     controller.pending!.complete(_profile('Original')); await refreshing; await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(englishName).controller!.text,'Local changes');
+    final failedRefresh = controller.refresh(); await tester.pump();
+    controller.pending!.completeError(StateError('synthetic refresh failure')); await failedRefresh; await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(englishName).controller!.text,'Local changes');
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
+    await tester.tap(find.text('Refresh failed — retry')); await tester.pump();
+    controller.pending!.complete(_profile('Original')); await tester.pumpAndSettle();
     expect(tester.widget<TextField>(englishName).controller!.text,'Local changes');
     final conflicting = controller.refresh(); await tester.pump();
     controller.pending!.complete(_profile('Remote changes')); await conflicting; await tester.pumpAndSettle();

@@ -99,7 +99,7 @@ class _CompanySettingsScreenState extends ConsumerState<CompanySettingsScreen> {
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     if (shown != null) ...[
-                      _ProfileCard(key:_profileKey,profile:shown),
+                      _ProfileCard(key:_profileKey,profile:shown,canCommit:!profile.isLoading && !profile.hasError),
                       if (profile.hasError) TextButton(
                         onPressed:() => ref.read(companyProfileProvider.notifier).refresh(),
                         child:Text(Localizations.localeOf(context).languageCode == 'ar'
@@ -109,7 +109,7 @@ class _CompanySettingsScreenState extends ConsumerState<CompanySettingsScreen> {
                       onRetry: () => ref.read(companyProfileProvider.notifier).refresh(),
                       isEmpty: (map) => map.isEmpty || user == null || map['id'] != user.companyId,
                       emptyMessage: l10n.noData,
-                      data: (data) => _ProfileCard(key:_profileKey,profile:data),
+                      data: (data) => _ProfileCard(key:_profileKey,profile:data,canCommit:true),
                     ),
                     const SizedBox(height: AppSpacing.xxl),
                     Text(
@@ -130,9 +130,10 @@ class _CompanySettingsScreenState extends ConsumerState<CompanySettingsScreen> {
 }
 
 class _ProfileCard extends ConsumerStatefulWidget {
-  const _ProfileCard({super.key, required this.profile});
+  const _ProfileCard({super.key, required this.profile, required this.canCommit});
 
   final Map<String, dynamic> profile;
+  final bool canCommit;
 
   @override
   ConsumerState<_ProfileCard> createState() => _ProfileCardState();
@@ -210,7 +211,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
   }
 
   Future<void> _save() async {
-    if (busy || _externalChange) return;
+    if (busy || _externalChange || !widget.canCommit) return;
     setState(() => _saving = true);
     final error = await ref.read(companyProfileProvider.notifier).updateProfile(
       {
@@ -247,7 +248,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
           children: [
             _LogoRow(
               key:_logoKey,
-              profileSaving:_saving,
+              profileSaving:_saving || !widget.canCommit,
               onBusyChanged:() { if (mounted) setState(() {}); },
               hasLogo: widget.profile['hasLogo'] == true,
               logoUrl: widget.profile['logoUrl'] as String?,
@@ -317,7 +318,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
               Text(Localizations.localeOf(context).languageCode == 'ar'
                 ? 'تغيرت بيانات الشركة على الخادم. احتفظ بمدخلاتك أو أعد تحميل البيانات قبل الحفظ.'
                 : 'The company profile changed on the server. Keep your input or reload before saving.'),
-              TextButton(key:const Key('company-profile-reload-conflict'),onPressed:() async {
+              TextButton(key:const Key('company-profile-reload-conflict'),onPressed:!widget.canCommit ? null : () async {
                 final ar = Localizations.localeOf(context).languageCode == 'ar';
                 final accepted = await confirmAction(context,
                   title: ar ? 'تغييرات غير محفوظة' : 'Unsaved changes',
@@ -329,7 +330,7 @@ class _ProfileCardState extends ConsumerState<_ProfileCard> {
             if (canEdit) Align(
               alignment: AlignmentDirectional.centerEnd,
               child: FilledButton(
-                onPressed: busy || _externalChange ? null : _save,
+                onPressed: busy || _externalChange || !widget.canCommit ? null : _save,
                 child: _saving
                     ? const SizedBox(
                         height: 18,
