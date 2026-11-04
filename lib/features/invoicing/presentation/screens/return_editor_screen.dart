@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../app/router/return_exit_guard.dart';
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
@@ -69,7 +69,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
   bool _saving = false;
   bool _confirmingExit = false;
   bool _saved = false;
-  late final ReturnExitGuard _exitGuard;
+  late final DraftExitGuard _exitGuard;
 
   Future<bool> _confirmExit() async {
     if (_saved) return true;
@@ -89,7 +89,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
   void initState() {
     super.initState();
     _returnDate = _formatDate(DateTime.now());
-    _exitGuard = ref.read(returnExitGuardProvider);
+    _exitGuard = ref.read(draftExitGuardProvider);
     _exitGuard.register(widget.navigationKey, _confirmExit);
   }
 

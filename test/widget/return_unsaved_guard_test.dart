@@ -1,4 +1,4 @@
-import 'package:erp_kayan/app/router/return_exit_guard.dart';
+import 'package:erp_kayan/app/router/draft_exit_guard.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
@@ -28,7 +28,7 @@ class _ReturnApi extends ApiClient {
 
 void main() {
   test('an unregistered route fails closed and unregistering an old callback keeps the new one', () async {
-    final guard = ReturnExitGuard();
+    final guard = DraftExitGuard();
     const key = ValueKey('route');
     Future<bool> first() async => false;
     Future<bool> second() async => true;
@@ -51,7 +51,7 @@ void main() {
       final router = GoRouter(initialLocation:'/',routes:[
         GoRoute(path:'/',builder:(context,state) => Scaffold(body:TextButton(
           onPressed:() => context.push('/return'),child:const Text('Open return')))),
-        GoRoute(path:'/return',onExit:(_,state) => container.read(returnExitGuardProvider).canLeave(state.pageKey),
+        GoRoute(path:'/return',onExit:(_,state) => container.read(draftExitGuardProvider).canLeave(state.pageKey),
           builder:(context,state) => Scaffold(body:Column(children:[
             TextButton(key:const Key('navigate-home'),onPressed:() => context.go('/'),child:const Text('Home')),
             Expanded(child:ReturnEditorScreen(kind:kind,navigationKey:state.pageKey)),

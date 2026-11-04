@@ -1,4 +1,4 @@
-import 'return_exit_guard.dart';
+import 'draft_exit_guard.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -109,7 +109,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.salesReturnNew,
         onExit: (context, state) => ref.read(currentUserProvider) == null
-            ? true : ref.read(returnExitGuardProvider).canLeave(state.pageKey),
+            ? true : ref.read(draftExitGuardProvider).canLeave(state.pageKey),
         builder: (context, state) => ErpShell(
           currentPath: AppRoutes.salesReturns,
           child: ReturnEditorScreen(kind: InvoiceKind.sales, navigationKey: state.pageKey),
@@ -118,7 +118,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.purchaseReturnNew,
         onExit: (context, state) => ref.read(currentUserProvider) == null
-            ? true : ref.read(returnExitGuardProvider).canLeave(state.pageKey),
+            ? true : ref.read(draftExitGuardProvider).canLeave(state.pageKey),
         builder: (context, state) => ErpShell(
           currentPath: AppRoutes.purchaseReturns,
           child: ReturnEditorScreen(kind: InvoiceKind.purchase, navigationKey: state.pageKey),
@@ -126,16 +126,21 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.quotationNew,
-        builder: (context, state) => const ErpShell(
+        onExit: (context, state) => ref.read(currentUserProvider) == null
+            ? true : ref.read(draftExitGuardProvider).canLeave(state.pageKey),
+        builder: (context, state) => ErpShell(
           currentPath: AppRoutes.quotations,
-          child: QuotationEditorScreen(),
+          child: QuotationEditorScreen(navigationKey: state.pageKey),
         ),
       ),
       GoRoute(
         path: '${AppRoutes.quotations}/:id/edit',
+        onExit: (context, state) => ref.read(currentUserProvider) == null
+            ? true : ref.read(draftExitGuardProvider).canLeave(state.pageKey),
         builder: (context, state) => ErpShell(
           currentPath: AppRoutes.quotations,
           child: QuotationEditorScreen(
+            navigationKey: state.pageKey,
             quotationId: state.pathParameters['id'],
           ),
         ),
