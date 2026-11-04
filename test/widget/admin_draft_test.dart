@@ -111,6 +111,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
     expect(api.patches,1);
     expect(api.submitted!.containsKey('roleIds'),isFalse);
+    expect(api.submitted!.containsKey('isActive'),isFalse);
     expect(tester.takeException(),isNull);
   });
 
@@ -205,6 +206,15 @@ void main() {
     });
   }
 
+  testWidgets('unchanged permissions are not sent over newer server grants', (tester) async {
+    final api=_AdminApi(); await _screen(tester,api);
+    final action=find.byTooltip('Extra permissions');
+    await tester.ensureVisible(action); await tester.pumpAndSettle();
+    await tester.tap(action); await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
+    expect(api.patches,0);
+  });
+
   testWidgets('malformed permission sources never save an empty grant list', (tester) async {
     final api=_AdminApi()..malformedPermissions=true;
     await _screen(tester,api);
@@ -263,7 +273,7 @@ void main() {
     expect(find.text('حسنًا'),findsOneWidget);
     expect(find.textContaining('PRIVATE_DEACTIVATE_RESPONSE'),findsNothing);
     await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
-    expect(find.byTooltip('Activate'),findsOneWidget);
+    expect(find.byTooltip('Reactivate'),findsOneWidget);
     expect(api.userReads,greaterThanOrEqualTo(2));
     expect(api.posts,1);
   });

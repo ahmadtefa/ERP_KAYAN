@@ -195,6 +195,9 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
             // overwriting a concurrent role change on a name-only edit.
             payload.remove('roleIds');
           }
+          if (isEdit && payload['isActive'] == existing['isActive']) {
+            payload.remove('isActive');
+          }
           if (isEdit) {
             await client.patch('/admin/users/${existing['id']}', body: payload);
           } else {
@@ -566,7 +569,10 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
             ColumnSpec(
               l10n.permissions,
               numeric: true,
-              value: (r) => '${_permissionCodes(r['permissions'])?.length ?? 0}',
+              value: (r) {
+                final permissions = _permissionCodes(r['permissions']);
+                return permissions == null ? '—' : '${permissions.length}';
+              },
             ),
             ColumnSpec(
               l10n.status,
@@ -672,6 +678,11 @@ class _PermissionsDialogState extends ConsumerState<_PermissionsDialog> {
 
   Future<void> _submit() async {
     if (_saving || _uncertain || _confirmingExit || !_validCatalogue(ref.read(permissionsProvider).asData?.value)) return;
+    if (_selected.length == widget.selected.length && widget.selected.containsAll(_selected)) {
+      // A no-op must not replace newer grants read by another administrator.
+      Navigator.of(context).pop(true);
+      return;
+    }
     setState(() => _saving = true);
     try {
       await widget.onSubmit(Set<String>.from(_selected));
