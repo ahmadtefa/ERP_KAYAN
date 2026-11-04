@@ -89,12 +89,15 @@ void main() {
       userPhotoNormalizerProvider.overrideWithValue((source) async => source),
     ],child:wrapWithApp(child:const Scaffold(body:UserPhotoCard()))));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('user-photo-upload'))); await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('user-photo-upload')));
+    // Busy remains true until the error is acknowledged; its spinner cannot settle.
+    await tester.pump(); await tester.pump(const Duration(seconds: 1));
     expect(find.text('حسنًا'),findsOneWidget);
     expect(find.textContaining('SYNTHETIC_UPLOAD_DIAGNOSTIC'),findsNothing);
     await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
     expect(find.byKey(const Key('user-photo-remove')),findsOneWidget);
-    await tester.tap(find.byKey(const Key('user-photo-remove'))); await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('user-photo-remove')));
+    await tester.pump(); await tester.pump(const Duration(seconds: 1));
     expect(find.text('حسنًا'),findsOneWidget);
     expect(find.textContaining('SYNTHETIC_REMOVE_DIAGNOSTIC'),findsNothing);
     await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
