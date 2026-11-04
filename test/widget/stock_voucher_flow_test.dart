@@ -4,7 +4,7 @@ import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/inventory/presentation/screens/stock_vouchers_screen.dart';
-import 'package:erp_kayan/features/invoicing/presentation/providers/invoice_providers.dart';
+import 'package:erp_kayan/features/data/presentation/providers/data_providers.dart' show exportCapabilitiesProvider, ExportCapabilities;
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,11 +16,18 @@ class _VoucherApi extends ApiClient {
   _VoucherApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'), FakeTokenStore());
   final requests=<Map<String,dynamic>>[];
   final actions=<String>[];
-  bool reviewed=false, approved=false;
+  bool reviewed=false, approved=false, paged=false;
+  final itemPages=<int>[];
   String status='draft';
   @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async {
-    if (path == '/inventory/items') return [{'id':'item','code':'IT','nameEn':'Item'}];
+    if (path == '/inventory/items') {
+      final page=(query?['page'] as int?) ?? 1;
+      itemPages.add(page);
+      if (paged) return page == 1 ? [for (var i=1;i<=200;i++) {'id':'item-$i','code':'IT-$i','nameEn':'Item $i'}]
+        : [{'id':'item-201','code':'IT-201','nameEn':'Item 201'}];
+      return [{'id':'item','code':'IT','nameEn':'Item'}];
+    }
     if (path == '/inventory/warehouses') return [{'id':'warehouse','code':'WH','nameEn':'Warehouse'}];
     return [];
   }
@@ -85,12 +92,29 @@ void main() {
       expect(find.text('Open voucher'),findsOneWidget);
     });
   }
+  testWidgets('voucher item picker loads beyond the first 200 entries', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize=const Size(1400,1200); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final api=_VoucherApi()..paged=true;
+    await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWithValue(_user),
+      appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'))],
+      child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,home:const StockVoucherCreateScreen(kind:'ISSUE'))));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Load more items'));
+    await tester.tap(find.text('Load more items')); await tester.pumpAndSettle();
+    expect(api.itemPages,[1,2]);
+    final dropdowns=tester.widgetList<DropdownButton<String>>(find.byType(DropdownButton<String>));
+    expect(dropdowns.any((dropdown) => dropdown.items?.any((item) => item.value == 'item-201') ?? false),isTrue);
+  });
   testWidgets('voucher workflow refreshes after review approval posting and reversal', (tester) async {
     tester.view.physicalSize=const Size(1400,1000); tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
     final api=_VoucherApi();
     await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWithValue(_user),
-      appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'))],
+      appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1')),
+      exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
       child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
         supportedLocales:AppLocalizations.supportedLocales,home:const StockVoucherDetailScreen(id:'document'))));
     await tester.pumpAndSettle();
@@ -103,7 +127,6 @@ void main() {
       expect(find.text(action),findsOneWidget);
       await tester.tap(find.text(action)); await tester.pumpAndSettle();
       await tester.tap(find.text('Confirm')); await tester.pumpAndSettle();
-      await tester.tap(find.text('OK')); await tester.pumpAndSettle();
     }
     expect(api.actions,['review','approve','post','reverse']);
     expect(find.textContaining('reversed'),findsOneWidget);

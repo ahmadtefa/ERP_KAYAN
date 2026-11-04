@@ -8,7 +8,6 @@ import '../../../../core/json/json_utils.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
-import '../../../invoicing/presentation/providers/invoice_providers.dart';
 import '../../../orders/presentation/order_retry_store.dart';
 import '../../../data/presentation/widgets/document_export_actions.dart';
 
@@ -198,7 +197,9 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
   OrderRetryStore? _store;
   Map<String,dynamic>? _pending;
   late Future<List<List<Json>>> _options;
-  bool _busy=false, _dirty=false, _confirming=false;
+  bool _busy=false, _dirty=false, _confirming=false, _loadingMore=false;
+  bool _moreItems=false, _moreCenters=false;
+  int _itemPage=1, _centerPage=1;
   @override
   void initState() {
     super.initState();
@@ -209,9 +210,35 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
   Future<List<List<Json>>> _loadOptions() async {
     final user=ref.read(currentUserProvider); final api=ref.read(apiClientProvider);
     if (user?.branchId == null) throw StateError('No user branch');
-    final centers=(user?.can('accounting.costcenters.read') ?? false) ? api.getList('/accounting/cost-centers') : Future.value(<Json>[]);
-    return Future.wait([api.getList('/inventory/items',query:{'pageSize':200}),
+    final centers=(user?.can('accounting.costcenters.read') ?? false)
+      ? api.getList('/accounting/cost-centers',query:{'pageSize':100,'page':1}) : Future.value(<Json>[]);
+    final options=await Future.wait([api.getList('/inventory/items',query:{'pageSize':200,'page':1}),
       api.getList('/inventory/warehouses',query:{'branchId':user!.branchId}),centers]);
+    _moreItems=options[0].length == 200;
+    _moreCenters=options[2].length == 100;
+    return options;
+  }
+  Future<void> _loadMore(List<List<Json>> options,{required bool items}) async {
+    if (_loadingMore) return;
+    setState(() => _loadingMore=true);
+    try {
+      final page=(items ? _itemPage : _centerPage) + 1;
+      final rows=await ref.read(apiClientProvider).getList(items ? '/inventory/items' : '/accounting/cost-centers',
+        query:{'pageSize':items ? 200 : 100,'page':page});
+      if (!mounted) return;
+      setState(() {
+        if (items) { _itemPage=page; _moreItems=rows.length == 200; }
+        else { _centerPage=page; _moreCenters=rows.length == 100; }
+        final index=items ? 0 : 2;
+        final ids=options[index].map((row) => text(row,'id')).toSet();
+        final additions=rows.where((row) => ids.add(text(row,'id')));
+        final updated=[...options];
+        updated[index]=[...options[index],...additions];
+        _options=Future.value(updated);
+      });
+    } catch (error) {
+      if (mounted) showMessage(context,error is Failure ? error.message : '$error',error:true);
+    } finally { if (mounted) setState(() => _loadingMore=false); }
   }
   Future<void> _loadPending() async {
     try {
@@ -296,10 +323,12 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
     return PopScope(canPop:false,onPopInvokedWithResult:(didPop,_) { if (!didPop) _close(); },
       child:Scaffold(appBar:AppBar(title:Text(widget.kind == 'RECEIPT' ? _label(context,'إذن إضافة','Receipt voucher') : _label(context,'إذن صرف','Issue voucher'))),
         body:FutureBuilder<List<List<Json>>>(future:_options,builder:(context,snapshot) {
-          if (snapshot.hasError) return ListView(padding:const EdgeInsets.all(20),children:[
-            Text('${snapshot.error}'),
-            if (_pending != null) FilledButton(onPressed:_busy ? null : () => _send(_pending!),child:Text(_label(context,'إعادة المحاولة','Retry'))),
-          ]);
+          if (snapshot.hasError) {
+            return ListView(padding:const EdgeInsets.all(20),children:[
+              Text('${snapshot.error}'),
+              if (_pending != null) FilledButton(onPressed:_busy ? null : () => _send(_pending!),child:Text(_label(context,'إعادة المحاولة','Retry'))),
+            ]);
+          }
           if (!snapshot.hasData) return const Center(child:CircularProgressIndicator());
           final items=snapshot.data![0], warehouses=snapshot.data![1], centers=snapshot.data![2];
           return ListView(padding:const EdgeInsets.all(20),children:[
@@ -321,6 +350,8 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
                 decoration:InputDecoration(labelText:_label(context,'مركز التكلفة (اختياري)','Cost center (optional)')),
                 items:[for (final row in centers) DropdownMenuItem(value:text(row,'id'),child:Text('${text(row,'code')} • ${text(row,'nameAr',fallback:text(row,'nameEn'))}'))],
                 onChanged:(v) { setState(() => _center=v); _changed(); }),
+              if (_moreCenters) TextButton(onPressed:_loadingMore ? null : () => _loadMore(snapshot.data!,items:false),
+                child:Text(_label(context,'تحميل المزيد من مراكز التكلفة','Load more cost centers'))),
               TextFormField(controller:_notes,onChanged:(_) => _changed(),decoration:InputDecoration(labelText:_label(context,'ملاحظات','Notes'))),
               for (final line in _lines) Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
                 DropdownButtonFormField<String>(initialValue:items.any((x) => text(x,'id') == line.itemId) ? line.itemId : null,
@@ -337,6 +368,8 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
                 },child:Text(_label(context,'حذف السطر','Remove line'))),
               ]))),
               TextButton.icon(onPressed:() { setState(() => _lines.add(_VoucherLine())); _changed(); },icon:const Icon(Icons.add),label:Text(_label(context,'إضافة صنف','Add item'))),
+              if (_moreItems) TextButton(onPressed:_loadingMore ? null : () => _loadMore(snapshot.data!,items:true),
+                child:Text(_label(context,'تحميل المزيد من الأصناف','Load more items'))),
               FilledButton(onPressed:disabled ? null : _save,child:Text(_label(context,'حفظ المسودة','Save draft'))),
             ]))),
           ]);
