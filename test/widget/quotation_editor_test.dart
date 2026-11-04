@@ -186,8 +186,17 @@ void main() {
     final formLock = find.byKey(const Key('quotation-edit-lock'));
     expect(tester.widget<AbsorbPointer>(formLock).absorbing,isTrue);
     expect(api.postPath, '/sales/quotations');
-    api.pendingPost!.complete({'id':'quotation-id'});
+    // The fake transport throws before sending; a real unknown outcome still
+    // requires reconciliation rather than assuming a retry is safe.
+    api.pendingPost!.completeError(StateError('internal diagnostic must not be displayed'));
     await tester.pumpAndSettle();
+    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.textContaining('internal diagnostic'),findsNothing);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(tester.widget<AbsorbPointer>(formLock).absorbing,isFalse);
+    expect(find.byType(QuotationEditorScreen),findsOneWidget);
+    api.pendingPost = null;
+    await tester.tap(find.text('Save')); await tester.pumpAndSettle();
 
     expect(find.text('quotation list'),findsOneWidget);
     expect(api.postPath, '/sales/quotations');

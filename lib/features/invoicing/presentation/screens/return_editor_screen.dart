@@ -5,10 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
-import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/state_views.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
@@ -135,10 +135,10 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
           _returnDate = _formatDate(invoiceDate);
         }
       });
-    } on Failure catch (error) {
+    } catch (error) {
       if (!mounted) return;
       setState(() => _loadingSource = false);
-      showMessage(context, error.message, error: true);
+      showAppError(context, error);
     }
   }
 
@@ -222,8 +222,8 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
       } else {
         context.go(widget.kind.returnsRoute);
       }
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
     } finally {
       if (mounted) setState(() => _saving = false);
     }

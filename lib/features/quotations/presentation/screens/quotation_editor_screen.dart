@@ -875,8 +875,8 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
         showMessage(context, l10n.quotationSaved);
         context.go(AppRoutes.quotations);
       }
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
