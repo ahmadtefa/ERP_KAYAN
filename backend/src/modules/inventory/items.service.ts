@@ -524,7 +524,7 @@ export class ItemsService {
     if (dto.purchasePrice !== undefined) data.purchasePrice = this.money(dto.purchasePrice, 'purchasePrice');
     if (dto.reorderLevel !== undefined) data.reorderLevel = this.money(dto.reorderLevel, 'reorderLevel');
     if (dto.taxRate !== undefined) {
-      data.taxRate = dto.taxRate === null || dto.taxRate === '' ? null : this.rate(dto.taxRate, 'taxRate');
+      data.taxRate = this.rate(dto.taxRate, 'taxRate');
     }
     if (dto.categoryId !== undefined) {
       data.category = dto.categoryId ? { connect: { id: String(dto.categoryId) } } : { disconnect: true };
@@ -615,7 +615,7 @@ export class ItemsService {
   }
 
   private rate(value: unknown, field: string): Prisma.Decimal {
-    if (value === undefined || value === null || value === '') {
+    if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {
       return new Prisma.Decimal(0);
     }
     try {

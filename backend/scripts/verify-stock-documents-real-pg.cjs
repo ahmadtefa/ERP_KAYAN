@@ -27,6 +27,7 @@ const { DocumentNumberService } = require('../src/modules/accounting/document-nu
 const { AccountMapService } = require('../src/modules/accounting/account-map.service');
 const { PostingService } = require('../src/modules/accounting/posting.service');
 const { StockDocumentsService } = require('../src/modules/inventory/stock-documents.service');
+const { ItemsService } = require('../src/modules/inventory/items.service');
 const { DocumentsService } = require('../src/modules/export/documents.service');
 const { ChartOfAccountsService } = require('../src/modules/accounting/chart-of-accounts.service');
 const { StockService } = require('../src/modules/inventory/stock.service');
@@ -517,6 +518,19 @@ let difference = '70000000-0000-4000-8000-000000000005';
     // Explicitly cleared, zero, entered and omitted taxes on both order and
     // invoice services. Historical snapshots must survive subsequent changes
     // to the item's tax and the company default, on real Prisma/PostgreSQL.
+    // Item creation and updates distinguish explicit blank/null zero from
+    // omitted inherited tax; historical invoice/order lines remain snapshots.
+    const itemService = new ItemsService(prisma,audit,service.accounts,service.posting,service.warehouses);
+    for (const [suffix,rate,expected] of [['EMPTY','','0.0000'],['NULL',null,'0.0000'],['SPACE','   ','0.0000'],['EXPLICIT','7','7.0000'],['OMIT',undefined,null]]) {
+      const saved = await itemService.create(company,user,{code:`SYN-ITEM-TAX-${suffix}`,nameEn:'Synthetic tax item',nameAr:'صنف تجريبي',
+        ...(rate === undefined ? {} : {taxRate:rate})},branch,true);
+      assert.equal(saved.taxRate,expected);
+      if (suffix === 'EXPLICIT') {
+        assert.equal((await itemService.update(company,user,saved.id,{nameEn:'Changed'},true)).taxRate,'7.0000');
+        assert.equal((await itemService.update(company,user,saved.id,{taxRate:''},true)).taxRate,'0.0000');
+      }
+    }
+    console.log('PASS: real item blank/null/omitted/explicit tax on create and update.');
     const taxItem = await prisma.item.create({data:{companyId:company,code:'SYN-TAX-HISTORY',
       nameEn:'Synthetic tax history',nameAr:'ضريبة تجريبية',unit:'piece',salePrice:'100',purchasePrice:'100',taxRate:'14'}});
     const taxLines = [
@@ -534,7 +548,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
       const invoiceModel=kind === 'sales' ? prisma.salesInvoice : prisma.purchaseInvoice;
       snapshots.push({kind,orderId:order.id,invoiceId:invoice.id,orderModel,invoiceModel});
     }
-    await prisma.item.update({where:{id:taxItem.id},data:{taxRate:'5'}});
+    assert.equal((await itemService.update(company,user,taxItem.id,{taxRate:''},true)).taxRate,'0.0000');
     await prisma.companySetting.update({where:{companyId:company},data:{taxRate:'3'}});
     for (const snapshot of snapshots) {
       const order=await snapshot.orderModel.findUniqueOrThrow({where:{id:snapshot.orderId},include:{lines:{orderBy:{lineNumber:'asc'}}}});

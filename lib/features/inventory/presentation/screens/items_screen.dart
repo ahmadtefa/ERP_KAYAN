@@ -56,6 +56,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           'taxRate',
           l10n.taxRate,
           kind: FieldKind.decimal,
+          emptyValue: '0',
           helper: '0 - 100',
         ),
         FieldSpec(

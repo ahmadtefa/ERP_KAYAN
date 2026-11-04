@@ -28,6 +28,7 @@ class FieldSpec {
     this.helper,
     this.options = const [],
     this.maxLines = 1,
+    this.emptyValue,
   });
 
   final String key;
@@ -37,6 +38,8 @@ class FieldSpec {
   final String? helper;
   final List<FieldOption> options;
   final int maxLines;
+  /// Explicit payload when an optional field is blank; null keeps omission.
+  final String? emptyValue;
 }
 
 /// Opens a modal form built from [fields].
@@ -180,7 +183,11 @@ class _FormSheetState extends State<_FormSheet> {
               .toList(growable: false);
         default:
           final text = _controllers[field.key]!.text.trim();
-          if (text.isNotEmpty) result[field.key] = text;
+          if (text.isNotEmpty) {
+            result[field.key] = text;
+          } else if (field.emptyValue != null) {
+            result[field.key] = field.emptyValue;
+          }
       }
     }
     Navigator.of(context).pop(result);
