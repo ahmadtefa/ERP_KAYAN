@@ -17,7 +17,7 @@ describe('sales order prices and tax', () => {
     const prices = { resolvePrice: jest.fn(async () => ({ price: D(20) })) };
     const service = new SalesOrdersService(prisma as never, { next: async () => 'SO-1' } as never,
       { get: async () => ({ taxRate: '14' }) } as never, prices as never, {} as never,
-      { record: async () => {} } as never);
+      { record: async () => {}, recordRequired: async () => {} } as never);
     jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'order' } as never);
     await service.create('company', 'branch', 'user', { customerId: 'customer', orderDate: '2026-01-01',
       lines: [

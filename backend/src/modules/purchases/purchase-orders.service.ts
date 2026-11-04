@@ -10,6 +10,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { selectedOrderLineQuantities } from '../../common/units/order-conversion-selection';
 import { orderConversionIdentity } from '../../common/units/order-conversion-identity';
+import { orderCreationIdentity, OrderCreationDuplicateError } from '../../common/units/order-creation-identity';
 import { historicalOrderUnit, TrustedOrderUnit } from '../../common/units/order-conversion-unit';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import {
@@ -172,6 +173,21 @@ export class PurchaseOrdersService {
 
   async create(companyId: string, branchId: string | null, userId: string, dto: Record<string, unknown>) {
     if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    const identity = orderCreationIdentity(dto);
+    const findReplay = async (): Promise<string | null> => {
+      if (!identity) return null;
+      const rows = await this.prisma.$queryRaw<Array<{ orderId: string; requestHash: string }>>(Prisma.sql`
+        SELECT "orderId", "requestHash" FROM order_creation_requests
+        WHERE "companyId" = ${companyId}::uuid AND "branchId" = ${branchId}::uuid
+          AND kind = 'purchase' AND "requestKey" = ${identity.key}
+      `);
+      const previous = rows[0];
+      if (!previous) return null;
+      if (previous.requestHash !== identity.hash) throw new ConflictException('The idempotency key was used for a different request');
+      return previous.orderId;
+    };
+    const previousId = await findReplay();
+    if (previousId) return this.findOne(companyId, previousId);
     const supplierId = this.text(dto.supplierId, 'supplierId');
     const supplier = await this.prisma.supplier.findFirst({
       where: { id: supplierId, companyId, deletedAt: null },
@@ -186,9 +202,11 @@ export class PurchaseOrdersService {
 
     const prepared = await this.prepareLines(companyId, supplierId, rawLines);
 
-    const created = await this.prisma.$transaction(async (tx) => {
+    let created: { id: string };
+    try {
+      created = await this.prisma.$transaction(async (tx) => {
       const orderNumber = await this.numbers.next(tx, companyId, 'purchase_order', 'PO');
-      return tx.purchaseOrder.create({
+      const row = await tx.purchaseOrder.create({
         data: {
           companyId,
           branchId,
@@ -220,17 +238,29 @@ export class PurchaseOrdersService {
           },
         },
       });
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'CREATE',
-      entity: 'purchase_orders',
-      entityId: created.id,
-      after: { orderNumber: created.orderNumber, total: created.totalAmount.toFixed(MONEY_SCALE) },
-    });
-
+      if (identity) {
+        const inserted = await tx.$queryRaw<Array<{ orderId: string }>>(Prisma.sql`
+          INSERT INTO order_creation_requests ("companyId", "branchId", kind, "requestKey", "requestHash", "orderId")
+          VALUES (${companyId}::uuid, ${branchId}::uuid, 'purchase', ${identity.key}, ${identity.hash}, ${row.id}::uuid)
+          ON CONFLICT ("companyId", "branchId", kind, "requestKey") DO NOTHING RETURNING "orderId"
+        `);
+        if (inserted.length !== 1) throw new OrderCreationDuplicateError();
+      }
+      await this.audit.recordRequired({
+        companyId, userId, action: 'CREATE', entity: 'purchase_orders', entityId: row.id,
+        after: { orderNumber: row.orderNumber, total: row.totalAmount.toFixed(MONEY_SCALE) },
+      }, tx);
+      return row;
+      });
+    } catch (error) {
+      // A concurrent request may have committed the unique key while this
+      // transaction was waiting. Never reinterpret other failures as success.
+      if (identity && error instanceof OrderCreationDuplicateError) {
+        const replayId = await findReplay();
+        if (replayId) return this.findOne(companyId, replayId);
+      }
+      throw error;
+    }
     return this.findOne(companyId, created.id);
   }
 

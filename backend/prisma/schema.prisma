@@ -2412,3 +2412,18 @@ model LicenseEvent {
   @@index([licenseId, occurredAt])
   @@map("license_events")
 }
+
+/// Durable identities for retrying order creation; old clients may omit a key.
+model OrderCreationRequest {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String @db.Uuid
+  branchId  String @db.Uuid
+  kind      String @db.VarChar(8)
+  requestKey String @db.VarChar(128)
+  requestHash String @db.VarChar(64)
+  orderId   String @db.Uuid
+  createdAt DateTime @default(now())
+
+  @@unique([companyId, branchId, kind, requestKey])
+  @@map("order_creation_requests")
+}

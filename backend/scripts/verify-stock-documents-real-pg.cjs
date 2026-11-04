@@ -169,6 +169,34 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const pi = new PurchaseInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit);
     const sales = new SalesOrdersService(prisma,numbers,settings,prices,si,audit);
     const purchases = new PurchaseOrdersService(prisma,numbers,settings,prices,pi,audit);
+    // Creation retries: a real unique ledger, order and required audit must
+    // commit together; both concurrent callers receive the same order.
+    for (const [kind, orders, party] of [['sales',sales,customer.id],['purchase',purchases,supplier.id]]) {
+      const partyField = kind === 'sales' ? 'customerId' : 'supplierId';
+      const orderModel = kind === 'sales' ? prisma.salesOrder : prisma.purchaseOrder;
+      const key = `create-${kind}-concurrent-00001`;
+      const payload = {[partyField]:party,orderDate:date,idempotencyKey:key,lines:[{itemId:second.id,quantity:'2',unitPrice:'2'}]};
+      const before = await orderModel.count({where:{companyId:company}});
+      const [a,b] = await Promise.all([orders.create(company,branch,user,payload),orders.create(company,branch,user,payload)]);
+      assert.equal(a.id,b.id);
+      assert.equal(await orderModel.count({where:{companyId:company}}),before+1);
+      assert.equal((await sql.query('SELECT count(*)::int AS n FROM order_creation_requests WHERE "companyId"=$1 AND kind=$2 AND "requestKey"=$3',[company,kind,key])).rows[0].n,1);
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:`${kind}_orders`,entityId:a.id,action:'CREATE'}}),1);
+      await assert.rejects(orders.create(company,branch,user,{...payload,lines:[{itemId:second.id,quantity:'3'}]}),/different request/);
+      const failKey = `create-${kind}-audit-failure-01`;
+      const originalAudit = audit.recordRequired.bind(audit);
+      audit.recordRequired = async (input,tx) => {
+        if (input.entity === `${kind}_orders` && input.action === 'CREATE') throw new Error('injected order creation audit failure');
+        return originalAudit(input,tx);
+      };
+      try { await assert.rejects(orders.create(company,branch,user,{...payload,idempotencyKey:failKey}),/injected order creation audit failure/); }
+      finally { audit.recordRequired = originalAudit; }
+      assert.equal(await orderModel.count({where:{companyId:company}}),before+1);
+      assert.equal((await sql.query('SELECT count(*)::int AS n FROM order_creation_requests WHERE "companyId"=$1 AND kind=$2 AND "requestKey"=$3',[company,kind,failKey])).rows[0].n,0);
+      const recovered = await orders.create(company,branch,user,{...payload,idempotencyKey:failKey});
+      assert.ok(recovered.id);
+    }
+    console.log('PASS: order creation idempotency, conflicting payloads, concurrency and audit rollback for both types.');
     const lines = [{itemId:first.id,quantity:'3',unitName:'carton',unitPrice:'100',discountPercent:'5',taxRate:'14'},
       {itemId:second.id,quantity:'5',unitPrice:'2',taxRate:'0'}];
     const so = await sales.create(company,branch,user,{customerId:customer.id,orderDate:date,lines});
