@@ -60,6 +60,12 @@ class ApiClient {
             if (renewed != null) {
               try {
                 options.headers['Authorization'] = 'Bearer $renewed';
+                // Dio finalizes multipart streams on the first attempt. A
+                // byte-backed file needs a fresh FormData instance for the
+                // authenticated retry; replaying the consumed object fails.
+                if (options.data is FormData) {
+                  options.data = (options.data as FormData).clone();
+                }
                 options.extra[_retriedKey] = true;
                 handler.resolve(await _dio.fetch<dynamic>(options));
                 return;

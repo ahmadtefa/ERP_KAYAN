@@ -24,7 +24,7 @@ export class ProfilePhotoController {
     return this.photos.get(user.companyId,user.userId);
   }
   @Post()
-  @UseInterceptors(FileInterceptor('file',{limits:{fileSize:LOGO_UPLOAD_MAX_BYTES,files:1}}))
+  @UseInterceptors(FileInterceptor('file',{limits:{fileSize:LOGO_UPLOAD_MAX_BYTES,files:1,fields:1,fieldSize:128,parts:2}}))
   set(@CurrentUser() user: AuthUser, @Body('expectedUserId') expectedUserId: string, @UploadedFile() file?: Upload) {
     this.assertSession(user,expectedUserId);
     if (!file?.buffer?.length) throw new BadRequestException('No photo file was uploaded');

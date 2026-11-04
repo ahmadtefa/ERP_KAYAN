@@ -33,6 +33,10 @@ describe('profile photo HTTP contract', () => {
       form.append('file',new Blob(['fixture'],{type:'image/png'}),'photo.png');
       expect((await fetch(base,{method:'POST',headers,body:form})).status).toBe(403);
       expect(photos.set).not.toHaveBeenCalled();
+      const oversizedField = new FormData(); oversizedField.append('expectedUserId','x'.repeat(256));
+      oversizedField.append('file',new Blob(['fixture'],{type:'image/png'}),'photo.png');
+      expect((await fetch(base,{method:'POST',headers,body:oversizedField})).status).toBeGreaterThanOrEqual(400);
+      expect(photos.set).not.toHaveBeenCalled();
       const valid = new FormData(); valid.append('expectedUserId','self');
       valid.append('file',new Blob(['fixture'],{type:'image/png'}),'photo.png');
       expect((await fetch(base,{method:'POST',headers,body:valid})).status).toBe(201);
