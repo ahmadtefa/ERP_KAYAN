@@ -328,6 +328,16 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(outcomes.filter(outcome => outcome.status === 'fulfilled').length,1);
       assert.equal(outcomes.filter(outcome => outcome.status === 'rejected').length,1);
     }
+    async function waitForBarrier(reached, pending) {
+      let timer;
+      try {
+        await Promise.race([
+          reached,
+          pending.then(() => { throw new Error('Operation finished before the test barrier'); }),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Timed out waiting for race barrier')),15000); }),
+        ]);
+      } finally { clearTimeout(timer); }
+    }
     // Seed enough stock for the synthetic sales posting races below.
     const raceStock = await service.create(company,branch,user,{kind:'ADJUSTMENT',documentDate:date,
       toWarehouseId:warehouse,reason:'Synthetic race stock',lines:[{itemId:second.id,quantity:'20',unitCost:'2'}]});
@@ -391,8 +401,8 @@ let difference = '70000000-0000-4000-8000-000000000005';
       const PostingClass = kind === 'sales' ? SalesInvoicesService : PurchaseInvoicesService;
       const instrumented = new PostingClass(wrappedPrisma,numbers,posting,map,settings,warehouses,prices,audit);
       const pendingPost = instrumented.post(company,user,draft.id);
-      await readBarrier;
       try {
+        await waitForBarrier(readBarrier,pendingPost);
         await invoices.updateDraft(company,branch,user,draft.id,{...dto,
           lines:[{itemId:second.id,quantity:'3',unitPrice:'2',taxRate:'0'}]});
       } finally { resumePost(); }
@@ -404,8 +414,35 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(postedInvoice.totalAmount.toFixed(4),'6.0000');
       const postedJournal = await prisma.journalEntry.findUniqueOrThrow({where:{id:postedInvoice.journalEntryId}});
       assert.equal(postedJournal.totalDebit.toFixed(4),postedJournal.totalCredit.toFixed(4));
+
+      // A draft edit prepared before cancellation must re-check deletedAt
+      // while acquiring its row lock, not rewrite a cancelled document.
+      const cancelTarget = await invoices.create(company,branch,user,dto);
+      let editReached, resumeEdit;
+      const editBarrier = new Promise(resolve => { editReached = resolve; });
+      const resumeEditBarrier = new Promise(resolve => { resumeEdit = resolve; });
+      const editPrisma = new Proxy(prisma,{get(target,key) {
+        if (key === '$transaction') return async (...args) => {
+          editReached(); await resumeEditBarrier;
+          return target.$transaction(...args);
+        };
+        const value = target[key];
+        return typeof value === 'function' ? value.bind(target) : value;
+      }});
+      const delayedEditor = new PostingClass(editPrisma,numbers,posting,map,settings,warehouses,prices,audit);
+      const pendingEdit = delayedEditor.updateDraft(company,branch,user,cancelTarget.id,{...dto,
+        lines:[{itemId:second.id,quantity:'3',unitPrice:'2',taxRate:'0'}]});
+      try {
+        await waitForBarrier(editBarrier,pendingEdit);
+        await invoices.cancelDraft(company,branch,user,cancelTarget.id);
+      } finally { resumeEdit(); }
+      await assert.rejects(pendingEdit,/posted or changed/);
+      const cancelled = await prisma[model].findUniqueOrThrow({where:{id:cancelTarget.id},include:{lines:true}});
+      assert.ok(cancelled.deletedAt);
+      assert.equal(cancelled.lines[0].quantity.toFixed(4),'1.0000');
+      assert.equal(await prisma.stockMovement.count({where:{companyId:company,referenceId:cancelTarget.id}}),0);
     }
-    console.log('PASS: real Prisma/PostgreSQL post/edit stale-read, post/cancel race, cancel audit rollback and stock/journal invariants for sales and purchases.');
+    console.log('PASS: real Prisma/PostgreSQL post/edit stale-read, edit/cancel, post/cancel, cancel audit rollback and stock/journal invariants for sales and purchases.');
     console.log('PASS: PostgreSQL + Prisma order conversion full/partial, historical values, audit rollback, retry/competition, post/reverse, draft cancel and order-cancel race. No HTTP, Flutter or installed Windows test.');
   } finally {
     await prisma.$disconnect();
