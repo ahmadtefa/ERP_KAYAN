@@ -144,12 +144,8 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       for (const company of companies) {
         try {
           await this.runForCompany(company);
-        } catch (error) {
-          this.logger.error(
-            `Scheduled backup for ${company.code} failed: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
+        } catch {
+          this.logger.error('A scheduled backup failed.');
         }
       }
     } finally {
@@ -223,11 +219,11 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       const verification = await this.full.verify(fileName);
       status = 'VERIFIED';
       message = `${message}; the dump was read back and holds ${verification.entries} objects`;
-    } catch (error) {
-      status = 'SUCCESS';
-      message = `${message}; verification could not run: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
+    } catch {
+      // The file may exist, but it has not passed verification and must not
+      // be reported as a successful scheduled backup or drive retention.
+      status = 'FAILED';
+      message = `${message}; verification could not run`;
     }
 
     const run = await this.record({
@@ -238,13 +234,13 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       companyId: company.id,
     });
 
-    await this.pruneRetention(settings.backupRetentionCount, run.id).catch((error) => {
-      this.logger.warn(
-        `Retention could not prune old backups: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    });
+    // A failed verification must never trigger automatic retention. The
+    // verification checks archive metadata only; it is not a full restore.
+    if (status === 'VERIFIED') {
+      await this.pruneRetention(settings.backupRetentionCount, run.id).catch(() => {
+        this.logger.warn('Retention could not prune old backups.');
+      });
+    }
 
     return { fileName, status, message };
   }

@@ -86,6 +86,7 @@ jobs:
           src/modules/inventory/original-stock-movement.spec.ts
           src/modules/backup/full-backup.service.spec.ts
           src/modules/backup/full-backup-recovery-safety.spec.ts
+          src/modules/backup/backup-schedule-safety.spec.ts
           src/modules/backup/pg-backup-connection.spec.ts
           src/modules/sales/order-draft-edit-permissions.spec.ts
           src/modules/sales/sales-orders.pricing-tax.spec.ts
