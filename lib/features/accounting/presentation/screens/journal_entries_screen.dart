@@ -432,7 +432,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
     final l10n = context.l10n;
     final accounts = ref.watch(chartOfAccountsProvider);
     final postable = (accounts.value ?? const [])
-        .where((account) => account.isPostable)
+        .where((account) => account.isPostable && account.isActive)
         .toList(growable: false);
     final costCenters = ref.watch(activeCostCentersProvider).value ?? const <Json>[];
     final language = Localizations.localeOf(context).languageCode;
@@ -531,6 +531,15 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
                                 border: const OutlineInputBorder(),
                               ),
                               items: [
+                                if (_lines[index].accountId != null &&
+                                    !postable.any((account) => account.id == _lines[index].accountId))
+                                  DropdownMenuItem(
+                                    value: _lines[index].accountId,
+                                    enabled: false,
+                                    child: Text(language == 'ar'
+                                        ? 'الحساب المحدد غير متاح'
+                                        : 'Selected account unavailable'),
+                                  ),
                                 for (final account in postable)
                                   DropdownMenuItem(
                                     value: account.id,

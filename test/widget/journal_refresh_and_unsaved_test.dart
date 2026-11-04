@@ -3,6 +3,7 @@ import 'package:erp_kayan/app/router/draft_exit_guard.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/accounting/presentation/screens/journal_entries_screen.dart';
+import 'package:erp_kayan/features/accounting/presentation/providers/chart_of_accounts_providers.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/dashboard/presentation/providers/dashboard_providers.dart';
@@ -18,8 +19,9 @@ class _JournalApi extends ApiClient {
   _JournalApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),FakeTokenStore());
   String status='draft';
   int posts=0;
+  List<Map<String,dynamic>> accounts=[];
   @override
-  Future<Map<String,dynamic>> get(String path,{Map<String,dynamic>? query}) async => {'items':<Object>[]};
+  Future<Map<String,dynamic>> get(String path,{Map<String,dynamic>? query}) async => {'items':accounts};
   @override
   Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async => {'status':status,'items':<Object>[]};
   @override
@@ -62,6 +64,34 @@ void main() {
     router.go(AppRoutes.dashboard); await tester.pumpAndSettle();
     await tester.tap(find.text('Discard')); await tester.pumpAndSettle();
     expect(find.text('Destination'),findsOneWidget);
+  });
+
+  testWidgets('journal retains unavailable account on refresh and permits replacement', (tester) async {
+    tester.view.physicalSize=const Size(1600,1000); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final api=_JournalApi()..accounts=[
+      {'id':'a','code':'1','name':'Old','nameEn':'Old','type':'asset','isActive':true,'isPostable':true},
+      {'id':'b','code':'2','name':'New','nameEn':'New','type':'asset','isActive':true,'isPostable':true},
+    ];
+    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),
+      appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'))]);
+    addTearDown(container.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp(
+      locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+      supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:JournalEntriesScreen()))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New journal entry')); await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first); await tester.pumpAndSettle();
+    await tester.tap(find.text('1 — Old').last); await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first,'draft description');
+    api.accounts[0]['isActive']=false;
+    container.invalidate(chartOfAccountsProvider); await tester.pumpAndSettle();
+    expect(find.text('Selected account unavailable'),findsOneWidget);
+    expect(find.text('draft description'),findsOneWidget);
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first); await tester.pumpAndSettle();
+    await tester.tap(find.text('2 — New').last); await tester.pumpAndSettle();
+    expect(find.text('Selected account unavailable'),findsNothing);
+    expect(tester.takeException(),isNull);
   });
 
   for (final action in ['Post','Reverse']) {
