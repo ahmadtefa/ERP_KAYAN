@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BranchKind } from '@prisma/client';
+import { BranchKind, Prisma } from '@prisma/client';
 import { readFile, unlink } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import sharp, { type Metadata } from 'sharp';
@@ -86,6 +86,20 @@ export class CompanyService {
     private readonly audit: AuditService,
   ) {}
 
+  private async serializable<T>(
+    work: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(work, {
+          isolationLevel: 'Serializable',
+        });
+      } catch (e) {
+        if ((e as { code?: string }).code !== 'P2034' || attempt >= 2) throw e;
+      }
+    }
+  }
+
   /// ────────────────────────────────────────────────────────────── profile
 
   async getProfile(companyId: string) {
@@ -134,7 +148,7 @@ export class CompanyService {
     userId: string,
     dto: UpdateCompanyProfileDto,
   ) {
-    await this.prisma.$transaction(async (tx) => {
+    await this.serializable(async (tx) => {
       const before = await tx.company.findUnique({
         where: { id: companyId },
       });
@@ -194,7 +208,7 @@ export class CompanyService {
         before: this.auditProfile(before),
         after: this.auditProfile(updated),
       }, tx);
-    }, { isolationLevel: 'Serializable' });
+    });
 
     return this.getProfile(companyId);
   }
@@ -208,7 +222,7 @@ export class CompanyService {
     mime: string,
   ): Promise<Record<string, unknown>> {
     const checked = await normalizeLogo(data, mime);
-    const legacyPath = await this.prisma.$transaction(async (tx) => {
+    const legacyPath = await this.serializable(async (tx) => {
       const before = await tx.company.findUnique({
         where: { id: companyId },
         select: { id: true, logoPath: true, deletedAt: true },
@@ -238,7 +252,7 @@ export class CompanyService {
         after: { logo: checked.mime, size: checked.data.length },
       }, tx);
       return before.logoPath;
-    }, { isolationLevel: 'Serializable' });
+    });
     await this.removeLegacyFile(legacyPath);
 
     const profile = await this.getProfile(companyId);
@@ -278,7 +292,7 @@ export class CompanyService {
   }
 
   async deleteLogo(companyId: string, userId: string): Promise<void> {
-    const legacyPath = await this.prisma.$transaction(async (tx) => {
+    const legacyPath = await this.serializable(async (tx) => {
       const before = await tx.company.findUnique({
         where: { id: companyId },
         select: { id: true, logoPath: true },
@@ -304,7 +318,7 @@ export class CompanyService {
         after: { logo: null },
       }, tx);
       return before.logoPath;
-    }, { isolationLevel: 'Serializable' });
+    });
     await this.removeLegacyFile(legacyPath);
   }
 

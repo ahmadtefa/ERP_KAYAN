@@ -285,6 +285,21 @@ describe('CompanyService', () => {
       expect(prisma.company.update).not.toHaveBeenCalled();
     });
 
+    it('retries a serializable update after a serialization conflict', async () => {
+      (prisma.company.findUnique as jest.Mock)
+        .mockResolvedValueOnce(existing)
+        .mockResolvedValueOnce({ ...existing, nameEn: 'Retried Name' });
+      (prisma.company.update as jest.Mock).mockResolvedValue({
+        ...existing,
+        nameEn: 'Retried Name',
+      });
+      (prisma.$transaction as jest.Mock).mockRejectedValueOnce({ code: 'P2034' });
+
+      await service.updateProfile('comp-1', 'user-1', { nameEn: 'Retried Name' });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    });
+
     it('updates the profile and audits it without any logo bytes', async () => {
       (prisma.company.findUnique as jest.Mock)
         .mockResolvedValueOnce(existing)

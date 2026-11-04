@@ -134,8 +134,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester.widget<TextFormField>(find.byKey(const ValueKey('line-tax-rate-0'))).controller!.text,
-      '0',
-      reason: 'selecting a taxable item must not override an explicit zero',
+      '',
+      reason: 'a blank tax rate lets the server apply the item default',
     );
     await tester.enterText(find.byKey(const ValueKey('line-tax-rate-0')), '7');
     await tester.tap(find.byKey(const ValueKey('item-choice-item-1')));
@@ -196,5 +196,86 @@ void main() {
     expect(lines.single['discountPercent'], '10');
     expect(api.postBody?['discountType'], 'AMOUNT');
     expect(api.postBody?['discountAmount'], '20');
+  });
+
+  testWidgets('an untouched blank tax rate is omitted for the server default', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeApiClient();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(api),
+          activeItemsProvider.overrideWith((ref) async => [
+            {
+              'id': 'item-1',
+              'code': 'ITEM-1',
+              'nameEn': 'Tracked item',
+              'nameAr': 'صنف مخزني',
+              'unit': 'piece',
+              'isActive': true,
+              'isStockTracked': true,
+              'taxRate': null,
+              'salePrice': '100.0000',
+            },
+          ]),
+          activeCustomersProvider.overrideWith((ref) async => [
+            {
+              'id': 'customer-1',
+              'code': 'CUS-1',
+              'nameEn': 'Test customer',
+              'nameAr': 'عميل تجريبي',
+              'isActive': true,
+            },
+          ]),
+        ],
+        child: MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          const InvoiceEditorScreen(kind: InvoiceKind.sales),
+                    ),
+                  ),
+                  child: const Text('Open editor'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open editor'));
+    await tester.pumpAndSettle();
+    final dropdowns = find.byType(DropdownButtonFormField<String>);
+    await tester.tap(dropdowns.at(0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('CUS-1 — Test customer').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('item-choice-null')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ITEM-1 — Tracked item').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormField>(find.byKey(const ValueKey('line-tax-rate-0'))).controller!.text,
+      '',
+    );
+
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final lines = (api.postBody?['lines'] as List).cast<Map>();
+    expect(lines.single.containsKey('taxRate'), isFalse);
   });
 }

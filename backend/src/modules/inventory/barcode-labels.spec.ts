@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 import oracle from './test-fixtures/code128-oracle.json';
 import {
@@ -82,7 +83,7 @@ describe('BarcodeLabelsService spec parsing', () => {
 
 /// ───────────────────────────────────────────── rendered label sheets
 
-const D = (v: string) => ({ toFixed: (digits = 2) => Number(v).toFixed(digits) });
+const D = (v: string) => new Prisma.Decimal(v);
 
 function makeItem() {
   return {
@@ -92,9 +93,9 @@ function makeItem() {
     nameEn: 'Milk',
     salePrice: D('10'),
     units: [
-      { id: 'unit-piece', unit: 'علبة', barcode: '62210001', salePrice: D('10'), purchasePrice: D('7'), isActive: true },
-      { id: 'unit-carton', unit: 'كرتونة', barcode: '62210010', salePrice: D('97'), purchasePrice: D('55.55'), isActive: true },
-      { id: 'unit-nobarcode', unit: 'صندوق', barcode: null, salePrice: null, purchasePrice: null, isActive: true },
+      { id: 'unit-piece', unit: 'علبة', factor: '1', barcode: '62210001', salePrice: D('10'), purchasePrice: D('7'), isActive: true },
+      { id: 'unit-carton', unit: 'كرتونة', factor: '12', barcode: '62210010', salePrice: D('97'), purchasePrice: D('55.55'), isActive: true },
+      { id: 'unit-nobarcode', unit: 'صندوق', factor: '24', barcode: null, salePrice: null, purchasePrice: null, isActive: true },
     ],
   };
 }
@@ -140,6 +141,16 @@ describe('BarcodeLabelsService HTML rendering', () => {
     expect(html).toContain('97.00');
     expect(html).not.toContain('55.55');
     expect(html).not.toContain('purchasePrice');
+  });
+
+  it('scales the item price by the selected unit factor when that unit has no price', async () => {
+    const item = makeItem();
+    item.units[1].salePrice = null;
+    const { service } = makeService(item);
+    const html = await service.buildHtml('company-1', 'item-1', [
+      { unitId: 'unit-carton', copies: 1 },
+    ], baseOptions);
+    expect(html).toContain('120.00');
   });
 
   it('hides the price entirely when asked, and falls back to the item price', async () => {
