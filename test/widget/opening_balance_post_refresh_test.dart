@@ -62,5 +62,6 @@ void main() {
     expect((await container.read(journalEntriesProvider.future)).single['status'],'posted');
     expect((await container.read(dashboardSummaryProvider.future))['status'],'posted');
     expect((await container.read(dashboardMonthlyProvider.future))['status'],'posted');
+    expect(tester.takeException(),isNull);
   });
 }

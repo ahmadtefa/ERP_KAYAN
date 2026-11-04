@@ -49,7 +49,9 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
   }
 
   void _refresh() {
-    setState(() => _load = _fetch());
+    setState(() {
+      _load = _fetch();
+    });
   }
 
   Future<void> _post(String id) async {
