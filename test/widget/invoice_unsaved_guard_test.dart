@@ -15,10 +15,11 @@ import 'test_harness.dart';
 class _InvoiceApi extends ApiClient {
   _InvoiceApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'), FakeTokenStore());
   bool failLoad = false;
+  String status = 'draft';
   @override
   Future<Map<String, dynamic>> getObject(String path, {Map<String, dynamic>? query}) async {
     if (failLoad) throw const NetworkFailure();
-    return {'status':'draft','lines':<Object>[],'invoiceDate':'2026-11-04'};
+    return {'status':status,'lines':<Object>[],'invoiceDate':'2026-11-04'};
   }
   @override
   Future<List<Map<String, dynamic>>> getList(String path, {Map<String, dynamic>? query}) async => [];
@@ -52,6 +53,22 @@ void main() {
       expect(find.text('Open invoice'),findsOneWidget);
     });
   }
+  testWidgets('posted invoice closes the editor after acknowledging the error', (tester) async {
+    tester.view.physicalSize = const Size(1600, 1000); tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _InvoiceApi()..status = 'posted';
+    await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+      activeItemsProvider.overrideWith((ref) async => []),activeCustomersProvider.overrideWith((ref) async => [])],
+      child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,home:Builder(builder:(context) => Scaffold(body:TextButton(
+          onPressed:() => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) =>
+            const InvoiceEditorScreen(kind:InvoiceKind.sales,invoiceId:'invoice-1'))),child:const Text('Open invoice')))))));
+    await tester.tap(find.text('Open invoice')); await tester.pumpAndSettle();
+    expect(find.text('حسنًا'),findsOneWidget);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(find.text('Open invoice'),findsOneWidget);
+    expect(find.byType(InvoiceEditorScreen),findsNothing);
+  });
   testWidgets('failed draft load cannot be overwritten and can be retried', (tester) async {
     tester.view.physicalSize = const Size(1600, 1000); tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);

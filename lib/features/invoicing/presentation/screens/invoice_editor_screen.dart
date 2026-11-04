@@ -300,10 +300,10 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
         _loadingExisting = false;
       });
       _savedSnapshot = _snapshot();
-    } on Failure catch (error) {
+    } catch (error) {
       if (mounted) {
         setState(() { _loadingExisting = false; _loadFailed = true; });
-        showMessage(context, error.message, error: true);
+        showAppError(context, error);
       }
     }
   }
