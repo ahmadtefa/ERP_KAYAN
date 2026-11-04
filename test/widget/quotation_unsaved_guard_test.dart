@@ -16,13 +16,40 @@ class _Api extends ApiClient {
   _Api() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),FakeTokenStore());
   @override
   Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async => {
-    'quotationDate':'2026-01-01','subject':'stored subject','tables':<Object>[],
+    'quotationDate':'2026-01-01','subject':'stored ${path.split('/').last}','tables':<Object>[],
   };
   @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async => [];
 }
 
 void main() {
+  testWidgets('switching quotation IDs asks before discarding and then loads the other draft', (tester) async {
+    tester.view.physicalSize = const Size(1500,1000); tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final container = ProviderContainer(overrides:[apiClientProvider.overrideWithValue(_Api()),
+      itemsProvider.overrideWith((ref) async => []),customersProvider.overrideWith((ref) async => [])]);
+    addTearDown(container.dispose);
+    final router = GoRouter(initialLocation:'/quote/a',routes:[
+      GoRoute(path:'/quote/:id',onExit:(_,state) => container.read(draftExitGuardProvider).canLeave(state.pageKey),
+        builder:(context,state) => QuotationEditorScreen(key:ValueKey('quotation-edit-${state.pathParameters['id']}'),
+          quotationId:state.pathParameters['id'],navigationKey:state.pageKey)),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp.router(
+      locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+      supportedLocales:AppLocalizations.supportedLocales,routerConfig:router)));
+    await tester.pumpAndSettle();
+    final subject = find.byKey(const ValueKey('quotation-subject'));
+    expect(tester.widget<TextField>(subject).controller!.text,'stored a');
+    await tester.enterText(subject,'do not lose');
+    router.go('/quote/b'); await tester.pumpAndSettle();
+    expect(find.text('Unsaved changes'),findsOneWidget);
+    await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(subject).controller!.text,'do not lose');
+    router.go('/quote/b'); await tester.pumpAndSettle();
+    await tester.tap(find.text('Discard')); await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(subject).controller!.text,'stored b');
+  });
   for (final editing in [false,true]) {
     testWidgets('${editing ? 'existing' : 'new'} quotation preserves dirty values across navigation cancellation', (tester) async {
       tester.view.physicalSize = const Size(1500,1000); tester.view.devicePixelRatio = 1;

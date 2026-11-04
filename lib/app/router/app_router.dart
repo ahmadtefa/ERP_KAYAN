@@ -140,6 +140,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => ErpShell(
           currentPath: AppRoutes.quotations,
           child: QuotationEditorScreen(
+            key: ValueKey('quotation-edit-${state.pathParameters['id']}'),
             navigationKey: state.pageKey,
             quotationId: state.pathParameters['id'],
           ),
