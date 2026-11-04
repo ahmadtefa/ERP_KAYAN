@@ -50,6 +50,35 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('different concurrent errors are acknowledged in order', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(body: Builder(builder: (context) => TextButton(
+        onPressed: () {
+          showAppError(context, 'الخطأ الأول');
+          showAppError(context, 'الخطأ الثاني');
+        },
+        child: const Text('Show both'),
+      ))),
+    ));
+    await tester.tap(find.text('Show both'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AppErrorDialog), findsOneWidget);
+    expect(find.text('الخطأ الأول'), findsOneWidget);
+    expect(find.text('الخطأ الثاني'), findsNothing);
+    await tester.tap(find.text('حسنًا'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AppErrorDialog), findsOneWidget);
+    expect(find.text('الخطأ الثاني'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('الخطأ الثاني'), findsOneWidget);
+    await tester.tap(find.text('حسنًا'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AppErrorDialog), findsNothing);
+  });
+
   testWidgets('a disposed navigator does not suppress errors in its replacement', (tester) async {
     Widget app(Key key) => MaterialApp(
       key: key,

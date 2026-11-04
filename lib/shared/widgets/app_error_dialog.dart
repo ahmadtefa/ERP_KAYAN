@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/design_tokens.dart';
 import '../../core/error/app_error_text.dart';
-import '../../core/logging/app_logger.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../../l10n/generated/app_localizations_ar.dart';
 import '../extensions/l10n_extension.dart';
@@ -18,11 +17,10 @@ import '../extensions/l10n_extension.dart';
 ///
 /// Rules it enforces:
 ///  * never auto-dismisses — the person must acknowledge it with "حسنًا";
-///  * never stacks: a second error arriving while one is open is dropped
-///    and logged, so the person is not asked to dismiss five identical
-///    dialogs after a retry storm;
-///  * never shows a stack trace, an SQL fragment or a field name from the
-///    API — [AppErrorMessageResolver] decides the wording;
+///  * never stacks: errors for one navigator wait for the preceding dialog
+///    to be acknowledged instead of silently losing a different failure;
+///  * uses [AppErrorMessageResolver] to withhold known technical patterns and
+///    server-error bodies; this is not a complete sensitive-data classifier;
 ///  * uses Arabic and right-to-left direction even if the surrounding screen
 ///    is in another language, as required for central error dialogs.
 class AppErrorDialog extends StatelessWidget {
@@ -169,9 +167,9 @@ String presentErrorText(
   return defaultErrorMessage(context.l10n, text.reason);
 }
 
-/// Coalesce errors within each navigator without leaving a global flag stuck
-/// when a navigator is disposed while its error dialog is still open.
-final Expando<bool> _errorDialogVisible = Expando<bool>();
+/// Serialize dialogs per navigator. An Expando does not keep a disposed
+/// navigator alive and a replacement navigator has its own independent queue.
+final Expando<Future<void>> _errorDialogTails = Expando<Future<void>>();
 
 /// Opens the central error dialog for [error].
 ///
@@ -188,13 +186,6 @@ Future<void> showAppError(
   // better than an exception inside an error handler.
   final navigator = Navigator.maybeOf(context, rootNavigator: true);
   if (navigator == null) return;
-  if (_errorDialogVisible[navigator] == true) {
-    // Dropping it is deliberate: the person is already looking at an
-    // explanation, and a queue of identical dialogs is worse than one.
-    _log.warning('A second error arrived while the dialog was open; dropped');
-    return;
-  }
-
   final resolved = const AppErrorMessageResolver(
     isArabic: true,
   ).resolve(error, statusCode: statusCode);
@@ -203,10 +194,15 @@ Future<void> showAppError(
       ? business
       : defaultErrorMessage(AppLocalizationsAr(), resolved.reason);
 
-  _errorDialogVisible[navigator] = true;
-  try {
+  final previous = _errorDialogTails[navigator];
+  final ready = previous == null
+      ? Future<void>.value()
+      // The previous caller still receives its error; do not poison the queue.
+      : previous.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+  final next = ready.then<void>((_) async {
+    if (!navigator.mounted) return;
     await showDialog<void>(
-      context: context,
+      context: navigator.context,
       barrierDismissible: false,
       useRootNavigator: true,
       builder: (_) => PopScope(
@@ -214,13 +210,17 @@ Future<void> showAppError(
         child: AppErrorDialog(message: message, severity: resolved.severity),
       ),
     );
+  });
+  _errorDialogTails[navigator] = next;
+  try {
+    await next;
   } finally {
-    _errorDialogVisible[navigator] = null;
+    if (identical(_errorDialogTails[navigator], next)) {
+      _errorDialogTails[navigator] = null;
+    }
   }
 }
 
 /// Convenience for the many call sites that already hold a message string.
 Future<void> showAppErrorMessage(BuildContext context, String message) =>
     showAppError(context, message);
-
-final _log = AppLogger.of('AppErrorDialog');
