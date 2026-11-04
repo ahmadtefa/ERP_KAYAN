@@ -40,6 +40,11 @@ const integrity = read('code-integrity.yml');
 assert.deepEqual(integrity.on, safe.on, 'Additional code checks must run on the same PR and main events');
 assert.deepEqual(integrity.permissions, { contents: 'read' });
 assert.deepEqual(Object.keys(integrity.jobs).sort(), ['accounting-and-packaging-policy', 'windows-build']);
+const accounting = integrity.jobs['accounting-and-packaging-policy'];
+assert.ok(!accounting.env?.NODE_OPTIONS, 'preload guard cannot run before checkout provides it');
+for (const step of accounting.steps.filter((step) => step.run && /npm ci|prisma generate|npm test|node --test/.test(step.run))) {
+  assert.match(step.env?.NODE_OPTIONS || '', /ci-no-signing\.cjs/, `missing non-signing guard: ${step.name}`);
+}
 const integritySource = fs.readFileSync(path.join(workflows, 'code-integrity.yml'), 'utf8');
 assert.doesNotMatch(integritySource, /secrets\.|contents:\s*write|generateKeyPair|createPrivateKey|publish-verified-windows|smoke-test-installed-windows/);
 assert.match(integritySource, /ci-no-signing\.cjs/);

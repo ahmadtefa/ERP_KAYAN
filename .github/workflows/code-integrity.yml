@@ -18,7 +18,6 @@ jobs:
     timeout-minutes: 20
     env:
       DATABASE_URL: postgresql://synthetic@127.0.0.1:5432/kayan_unused?schema=public
-      NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -34,12 +33,18 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - name: Install locked backend dependencies without scripts
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         working-directory: backend
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Generate Prisma client
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         working-directory: backend
         run: npx prisma generate
       - name: Run accounting and posting tests
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         working-directory: backend
         run: >-
           npm test -- --runInBand
@@ -48,6 +53,8 @@ jobs:
           src/modules/accounting/posting.service.spec.ts
           src/modules/accounting/year-end-close.service.spec.ts
       - name: Test migration exit handling and non-signing payload policy
+        env:
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
         run: node --test backend/scripts/migrate-deploy.test.mjs scripts/windows-policy-non-signing.test.mjs
 
   windows-build:
