@@ -81,7 +81,7 @@ export class DocumentsService {
     return DOCUMENT_SPECS[kind as DocumentKind];
   }
 
-  async build(kind: DocumentKind, companyId: string, id: string, lang: 'ar' | 'en'): Promise<ReportTable> {
+  async build(kind: DocumentKind, companyId: string, id: string, lang: 'ar' | 'en', voucherBranchId?: string | null): Promise<ReportTable> {
     switch (kind) {
       case 'sales-invoice':
         return this.salesInvoice(companyId, id, lang);
@@ -96,15 +96,16 @@ export class DocumentsService {
       case 'cash-voucher':
         return this.cashVoucher(companyId, id, lang);
       case 'stock-voucher':
-        return this.stockVoucher(companyId, id, lang);
+        return this.stockVoucher(companyId, id, lang, voucherBranchId);
       case 'journal-entry':
         return this.journalEntry(companyId, id, lang);
     }
   }
 
-  private async stockVoucher(companyId: string, id: string, lang: 'ar' | 'en'): Promise<ReportTable> {
+  private async stockVoucher(companyId: string, id: string, lang: 'ar' | 'en', voucherBranchId?: string | null): Promise<ReportTable> {
+    if (voucherBranchId === null) throw new NotFoundException('Stock voucher not found');
     const doc = await this.prisma.stockDocument.findFirst({
-      where: { id, companyId, deletedAt:null, voucherKind:{not:null} },
+      where: { id, companyId, deletedAt:null, voucherKind:{not:null}, ...(voucherBranchId !== undefined ? {branchId:voucherBranchId} : {}) },
       include: { toWarehouse:true, costCenter:true, branch:true,
         lines:{orderBy:{lineNumber:'asc'},include:{item:true}} },
     });

@@ -16,6 +16,9 @@ describe('stock voucher print and cost redaction', () => {
     const table=await service.build('stock-voucher','company','doc','ar');
     expect(findFirst.mock.calls[0][0].where).toEqual({id:'doc',companyId:'company',deletedAt:null,voucherKind:{not:null}});
     expect(table.rows[0]).toEqual(expect.objectContaining({unit:'carton',quantity:'-2.0000',unitCost:'7.5000'}));
+    await service.build('stock-voucher','company','doc','ar','branch');
+    expect(findFirst.mock.calls[1][0].where).toEqual({id:'doc',companyId:'company',deletedAt:null,voucherKind:{not:null},branchId:'branch'});
+    await expect(service.build('stock-voucher','company','doc','ar',null)).rejects.toThrow(/not found/i);
     const hidden=applyPriceVisibility(table,{showCost:false});
     expect(hidden.columns.some(column => column.key === 'unitCost')).toBe(false);
     expect(hidden.rows[0]).not.toHaveProperty('unitCost');

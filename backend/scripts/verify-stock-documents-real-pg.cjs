@@ -27,6 +27,7 @@ const { DocumentNumberService } = require('../src/modules/accounting/document-nu
 const { AccountMapService } = require('../src/modules/accounting/account-map.service');
 const { PostingService } = require('../src/modules/accounting/posting.service');
 const { StockDocumentsService } = require('../src/modules/inventory/stock-documents.service');
+const { DocumentsService } = require('../src/modules/export/documents.service');
 const { ChartOfAccountsService } = require('../src/modules/accounting/chart-of-accounts.service');
 const { StockService } = require('../src/modules/inventory/stock.service');
 const { FinancialStatementsService } = require('../src/modules/reports/financial-statements.service');
@@ -423,8 +424,44 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:editable.id}})).status,'DRAFT');
     assert.equal(await prisma.stockMovement.count({where:{referenceId:editable.id}}),0);
     assert.equal(await prisma.journalEntry.count({where:{sourceId:editable.id}}),0);
+    await service.transitionVoucher(company,branch,user,editable.id,'REVIEW',true);
+    await service.transitionVoucher(company,branch,user,editable.id,'APPROVE',true);
+    await service.post(company,user,editable.id,true,branch);
+    const editedMovements = await prisma.stockMovement.findMany({where:{referenceId:editable.id},orderBy:{quantity:'desc'}});
+    assert.equal(editedMovements.length,2); assert.equal(editedMovements[0].quantity.toFixed(4),'6.0000');
+    assert.equal(editedMovements[1].quantity.toFixed(4),'1.0000');
+    assert.equal(await warehouseBalance(secondWarehouse),17);
+    await service.reverse(company,user,editable.id,true,branch);
+    assert.equal(await warehouseBalance(secondWarehouse),10);
+
+    const editableIssue = await service.create(company,branch,user,{idempotencyKey:'editable-issue-create-0001',kind:'ADJUSTMENT',
+      voucherKind:'ISSUE',documentDate:date,toWarehouseId:secondWarehouse,reason:'Issue',counterpartyName:'Synthetic department',
+      lines:[{itemId:item,quantity:'-1',unitCost:'7'}]},true);
+    const issueEdit = {idempotencyKey:'editable-issue-change-0001',expectedVersion:0,documentDate:date,
+      toWarehouseId:secondWarehouse,reason:'Issue revised',counterpartyName:'Synthetic department',
+      lines:[{id:editableIssue.lines[0].id,itemId:item,quantity:'-2',unitCost:'999'}]};
+    const redactedIssue = await service.updateVoucher(company,branch,user,editableIssue.id,issueEdit,false);
+    assert.equal(redactedIssue.lines[0].unitCost,null);
+    assert.equal((await service.findOne(company,editableIssue.id,true)).lines[0].unitCost,'7.0000');
+    const anotherBranch = '70000000-0000-4000-8000-000000000009';
+    const anotherWarehouse = '70000000-0000-4000-8000-000000000010';
+    await prisma.branch.create({data:{id:anotherBranch,companyId:company,code:'OTHER-SYN',nameEn:'Other branch',nameAr:'فرع آخر'}});
+    await prisma.warehouse.create({data:{id:anotherWarehouse,companyId:company,branchId:anotherBranch,code:'OTHER-SYN',nameEn:'Other warehouse',nameAr:'مخزن آخر'}});
+    const otherVoucher = await service.create(company,anotherBranch,user,{idempotencyKey:'voucher-other-branch-0001',kind:'ADJUSTMENT',
+      voucherKind:'ISSUE',documentDate:date,toWarehouseId:anotherWarehouse,reason:'Other branch',counterpartyName:'Synthetic party',
+      lines:[{itemId:item,quantity:'-1'}]},false);
+    assert.equal((await service.findAll(company,{voucherOnly:true,q:otherVoucher.documentNumber},branch)).total,0);
+    assert.equal((await service.findAll(company,{q:otherVoucher.documentNumber},branch)).total,0);
+    assert.equal((await service.findAll(company,{voucherOnly:true,q:otherVoucher.documentNumber},anotherBranch)).total,1);
+    await assert.rejects(service.findOne(company,otherVoucher.id,true,branch),/not found/i);
+    await assert.rejects(service.findOne(company,otherVoucher.id,true,null),/not found/i);
+    assert.equal((await service.findOne(company,otherVoucher.id,false,anotherBranch)).id,otherVoucher.id);
+    const documents = new DocumentsService(prisma);
+    await assert.rejects(documents.build('stock-voucher',company,otherVoucher.id,'ar',branch),/not found/i);
+    await assert.rejects(documents.build('stock-voucher',company,otherVoucher.id,'ar',null),/not found/i);
+    assert.equal((await documents.build('stock-voucher',company,otherVoucher.id,'ar',anotherBranch)).slug,'stock-voucher');
     await prisma.itemUnit.update({where:{id:voucherUnit.id},data:{factor:'2',isActive:true}});
-    console.log('PASS: real voucher edit, historical unit, approval reset, concurrent retry, audit rollback and edit/post race.');
+    console.log('PASS: real voucher edit, historical unit, approval reset, concurrent retry, audit rollback, post race and branch-scoped read/export.');
     for (const invalidateApproval of [false,true]) {
       const voucher = await service.create(company,branch,user,{idempotencyKey:`voucher-locked-post-${invalidateApproval ? 'approval' : 'lines'}-0001`,
         kind:'ADJUSTMENT',voucherKind:'RECEIPT',documentDate:date,toWarehouseId:secondWarehouse,

@@ -71,11 +71,18 @@ export class StockDocumentsService {
   async findAll(
     companyId: string,
     query: { kind?: string; q?: string; voucherOnly?: boolean; branchId?: string; from?: string; to?: string; page?: number; pageSize?: number } = {},
+    voucherBranchId?: string | null,
   ) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
 
     const where: Prisma.StockDocumentWhereInput = { companyId, deletedAt: null };
+    // Ordinary stock documents retain their existing company-wide policy;
+    // vouchers are visible only in the signed-in user's own branch.
+    // Undefined is reserved for internal trusted service callers.
+    if (voucherBranchId !== undefined) where.AND = [{OR:[
+      {voucherKind:null}, ...(voucherBranchId ? [{branchId:voucherBranchId}] : []),
+    ]}];
     if (query.kind) {
       const kind = query.kind.toUpperCase();
       if (!Object.values(StockDocumentKind).includes(kind as StockDocumentKind)) {
@@ -131,7 +138,7 @@ export class StockDocumentsService {
     };
   }
 
-  async findOne(companyId: string, id: string, mayReadCost = true) {
+  async findOne(companyId: string, id: string, mayReadCost = true, voucherBranchId?: string | null) {
     const document = await this.prisma.stockDocument.findFirst({
       where: { id, companyId, deletedAt: null },
       include: {
@@ -144,7 +151,9 @@ export class StockDocumentsService {
         },
       },
     });
-    if (!document) throw new NotFoundException('Stock document not found');
+    if (!document || (document.voucherKind && voucherBranchId !== undefined && document.branchId !== voucherBranchId)) {
+      throw new NotFoundException('Stock document not found');
+    }
 
     return {
       ...this.toSummary(document),

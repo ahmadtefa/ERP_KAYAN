@@ -23,13 +23,13 @@ export class StockDocumentsController {
       to: query.to,
       page: query.page ? Number(query.page) : undefined,
       pageSize: query.pageSize ? Number(query.pageSize) : undefined,
-    });
+    }, user.branchId ?? null);
   }
 
   @Get(':id')
   @RequirePermissions('inventory.stock.read')
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.findOne(user.companyId, id, canReadCost(user));
+    return this.service.findOne(user.companyId, id, canReadCost(user), user.branchId ?? null);
   }
 
   @Post()

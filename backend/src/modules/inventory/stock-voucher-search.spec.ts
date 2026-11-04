@@ -13,7 +13,12 @@ describe('stock voucher search scope', () => {
       {counterpartyName:{contains:'Department',mode:'insensitive'}},
       {reason:{contains:'Department',mode:'insensitive'}},
     ]});
+    await service.findAll('company',{branchId:'other',voucherOnly:true},'branch');
+    expect(findMany.mock.calls[1][0].where).toEqual(expect.objectContaining({branchId:'other',voucherKind:{not:null},
+      AND:[{OR:[{voucherKind:null},{branchId:'branch'}]}]}));
+    await service.findAll('company',{},null);
+    expect(findMany.mock.calls[2][0].where).toEqual(expect.objectContaining({AND:[{OR:[{voucherKind:null}]}]}));
     await expect(service.findAll('company',{q:'x'.repeat(121)})).rejects.toThrow(/at most 120/);
-    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledTimes(3);
   });
 });

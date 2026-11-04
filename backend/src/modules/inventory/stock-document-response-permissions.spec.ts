@@ -34,6 +34,7 @@ describe('stock document response cost visibility', () => {
             .toBe(allowed ? '11.0000' : null);
         }
       }
+      expect(calls.findOne).toHaveBeenLastCalledWith('company','doc',true,'branch');
       expect(calls.create).toHaveBeenLastCalledWith('company','branch','user',{},true);
       expect(calls.post).toHaveBeenLastCalledWith('company','user','doc',true,'branch');
       expect(calls.reverse).toHaveBeenLastCalledWith('company','user','doc',true,'branch');

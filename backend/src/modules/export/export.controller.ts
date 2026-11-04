@@ -125,7 +125,7 @@ export class ExportController {
     // Spreadsheet downloads must obey the same server-side redaction as the
     // PDF/print routes: a hand-crafted download link cannot restore costs.
     const table = applyPriceVisibility(
-      await this.documents.build(spec.kind, user.companyId, id, lang),
+      await this.documents.build(spec.kind, user.companyId, id, lang, user.branchId ?? null),
       this.visibility(user, query),
     );
     const header = await this.companyHeader(user.companyId, lang);
@@ -154,7 +154,7 @@ export class ExportController {
     const spec = this.documents.spec(kind);
     this.allowedExport(user, spec.readPermission, spec.exportPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = applyPriceVisibility(await this.documents.build(spec.kind, user.companyId, id, lang), this.visibility(user, query));
+    const table = applyPriceVisibility(await this.documents.build(spec.kind, user.companyId, id, lang, user.branchId ?? null), this.visibility(user, query));
     const header = await this.companyHeader(user.companyId, lang);
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: false,
@@ -176,7 +176,7 @@ export class ExportController {
     const spec = this.documents.spec(kind);
     this.allowed(user, spec.readPermission);
     const lang: Lang = query.lang === 'ar' ? 'ar' : 'en';
-    const table = applyPriceVisibility(await this.documents.build(spec.kind, user.companyId, id, lang), this.visibility(user, query));
+    const table = applyPriceVisibility(await this.documents.build(spec.kind, user.companyId, id, lang, user.branchId ?? null), this.visibility(user, query));
     const header = await this.companyHeader(user.companyId, lang);
     const html = toPrintHtml(table, lang, header.name, {
       autoPrint: query.auto === '1' || query.auto === 'true',
