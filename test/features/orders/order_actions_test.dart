@@ -56,7 +56,8 @@ void main() {
       await tester.tap(find.text('Cancel order')); await tester.pumpAndSettle();
       await tester.tap(find.text('Confirm').last); await tester.pumpAndSettle();
       expect(find.textContaining('CANCELLED'), findsOneWidget);
-      expect(api.paths, hasLength(2));
+      final base = kind.isSales ? '/sales/orders' : '/purchases/orders';
+      expect(api.paths, ['$base/order-1/approve', '$base/order-1/cancel']);
       expect(api.loads, greaterThanOrEqualTo(3));
     });
 
@@ -80,7 +81,7 @@ void main() {
       await tester.tap(find.byTooltip('Reverse')); await tester.pumpAndSettle();
       await tester.tap(find.text('Confirm').last); await tester.pumpAndSettle();
       expect(find.textContaining('REVERSED'), findsOneWidget);
-      expect(api.paths, hasLength(2));
+      expect(api.paths, ['${kind.basePath}/invoice-1/post', '${kind.basePath}/invoice-1/reverse']);
       expect(api.loads, greaterThanOrEqualTo(3));
     });
   }

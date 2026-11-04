@@ -33,7 +33,9 @@ for (const line of lines) {
   if (event.type === 'print' && /^(sales|purchase): (?:uncertain conversion reuses the key and refreshes|order creation preserves an uncertain request across reopening|approval and cancellation refresh the order|uncertain post refreshes before reversal)$/.test(tests.get(event.testID) ?? '')) {
     const details = String(event.message ?? '').split(/\r?\n/).map(line =>
       line.match(/^\s*(?:Expected:|Actual:)\s*(?:<\d+>|exactly \d+ matching candidates|no matching candidates)/)?.[0]?.trim() ??
-      line.match(/test\/features\/orders\/order_(?:(?:create_)?flow|actions)_test\.dart:\d+:\d+/)?.[0] ?? ''
+      line.match(/test\/features\/orders\/order_(?:(?:create_)?flow|actions)_test\.dart:\d+:\d+/)?.[0] ??
+      line.match(/(?:Bad state: No element|Bad state: Too many elements|Incorrect use of ParentDataWidget|Cannot hit test a render box that has never been laid out|No Material widget found|RenderFlex overflowed|A Timer is still pending|Multiple exceptions|No ScaffoldMessenger widget found)/)?.[0] ??
+      line.match(/^The following [A-Za-z]+ (?:was thrown|object was thrown).*$/)?.[0] ?? ''
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
