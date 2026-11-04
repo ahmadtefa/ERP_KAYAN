@@ -146,7 +146,7 @@ function makeService(itemOverrides: Record<string, any> = {}) {
   };
   const warehouses = { resolve: jest.fn(async () => 'warehouse-1') };
   const prices = { resolvePrice: jest.fn(async () => null) };
-  const audit = { record: jest.fn(async () => undefined) };
+  const audit = { record: jest.fn(async () => undefined), recordRequired: jest.fn(async () => undefined) };
 
   const service = new PurchaseInvoicesService(
     prisma as never,

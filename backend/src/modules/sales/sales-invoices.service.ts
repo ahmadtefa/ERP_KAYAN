@@ -468,7 +468,7 @@ export class SalesInvoicesService {
       );
     }
 
-    const result = await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       // Claim the document before anything else happens. Two people pressing
       // Post at the same moment: the row lock lets exactly one of them win, and
       // the other is told the invoice has already been posted - instead of both
@@ -673,7 +673,7 @@ export class SalesInvoicesService {
 
       // The transaction already claimed the invoice as POSTED. Attach the
       // accounting/cost results without repeating the guarded status change.
-      const updated = await tx.salesInvoice.update({
+      await tx.salesInvoice.update({
         where: { id: invoice.id },
         data: {
           costOfGoods,
@@ -681,22 +681,16 @@ export class SalesInvoicesService {
         },
       });
 
-      return { updated, journal, costOfGoods };
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'POST',
-      entity: 'sales_invoices',
-      entityId: id,
-      before: { status: InvoiceStatus.DRAFT },
-      after: {
-        status: InvoiceStatus.POSTED,
-        journalEntryId: result.journal.id,
-        journalNumber: result.journal.entryNumber,
-        costOfGoods: result.costOfGoods.toFixed(MONEY_SCALE),
-      },
+      await this.audit.recordRequired({
+        companyId, userId, action: 'POST', entity: 'sales_invoices', entityId: id,
+        before: { status: InvoiceStatus.DRAFT },
+        after: {
+          status: InvoiceStatus.POSTED,
+          journalEntryId: journal.id,
+          journalNumber: journal.entryNumber,
+          costOfGoods: costOfGoods.toFixed(MONEY_SCALE),
+        },
+      }, tx);
     });
 
     return this.findOne(companyId, id);

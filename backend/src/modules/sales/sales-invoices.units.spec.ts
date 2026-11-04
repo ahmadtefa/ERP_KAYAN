@@ -83,7 +83,7 @@ function makeService(itemOverride: any = milkItem) {
     assertWarehouseAvailable: jest.fn().mockResolvedValue(undefined),
   };
   const prices = { resolvePrice: jest.fn(async () => null) };
-  const audit = { record: jest.fn(async () => undefined) };
+  const audit = { record: jest.fn(async () => undefined), recordRequired: jest.fn(async () => undefined) };
 
   const service = new SalesInvoicesService(
     prisma as never,

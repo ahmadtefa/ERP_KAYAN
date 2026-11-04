@@ -486,7 +486,7 @@ export class PurchaseInvoicesService {
       );
     }
 
-    const result = await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       // Claim the document before anything else happens: two simultaneous
       // posts must not both receive the same goods into stock.
       const claimed = await tx.purchaseInvoice.updateMany({
@@ -628,21 +628,15 @@ export class PurchaseInvoicesService {
         data: { journalEntryId: journal.id },
       });
 
-      return journal;
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'POST',
-      entity: 'purchase_invoices',
-      entityId: id,
-      before: { status: InvoiceStatus.DRAFT },
-      after: {
-        status: InvoiceStatus.POSTED,
-        journalEntryId: result.id,
-        journalNumber: result.entryNumber,
-      },
+      await this.audit.recordRequired({
+        companyId, userId, action: 'POST', entity: 'purchase_invoices', entityId: id,
+        before: { status: InvoiceStatus.DRAFT },
+        after: {
+          status: InvoiceStatus.POSTED,
+          journalEntryId: journal.id,
+          journalNumber: journal.entryNumber,
+        },
+      }, tx);
     });
 
     return this.findOne(companyId, id);

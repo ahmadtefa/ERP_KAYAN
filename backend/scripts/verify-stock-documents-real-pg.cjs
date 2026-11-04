@@ -382,6 +382,23 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(await prisma.stockMovement.count({where:{companyId:company,referenceId:invoiceId}}),posted?1:0);
       assert.equal(await prisma.journalEntry.count({where:{companyId:company,sourceId:invoiceId}}),posted?1:0);
 
+      // A failure in the required POST audit must also roll back stock,
+      // the journal, and the invoice's status transition.
+      const postingFailureDto = {[field]:party,invoiceDate:date,
+        lines:[{itemId:second.id,quantity:'1',unitPrice:'2',taxRate:'0'}]};
+      const postingFailure = await invoices.create(company,branch,user,postingFailureDto);
+      const postingAudit = audit.recordRequired.bind(audit);
+      audit.recordRequired = async (input, tx) => {
+        if (input.entity === `${kind}_invoices` && input.action === 'POST') throw new Error('injected post audit failure');
+        return postingAudit(input, tx);
+      };
+      try { await assert.rejects(invoices.post(company,user,postingFailure.id),/injected post audit failure/); }
+      finally { audit.recordRequired = postingAudit; }
+      assert.equal((await prisma[model].findUniqueOrThrow({where:{id:postingFailure.id}})).status,'DRAFT');
+      assert.equal(await prisma.stockMovement.count({where:{companyId:company,referenceId:postingFailure.id}}),0);
+      assert.equal(await prisma.journalEntry.count({where:{companyId:company,sourceId:postingFailure.id}}),0);
+      await invoices.cancelDraft(company,branch,user,postingFailure.id);
+
       // Pause a real post just after its first header read, edit the unrelated
       // draft with the production service, then resume. Post must claim first
       // and use the newly committed lines for stock and accounting.
