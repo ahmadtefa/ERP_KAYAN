@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../app/router/draft_exit_guard.dart';
 import '../../../core/error/failure.dart';
 import '../../../core/json/json_utils.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
@@ -18,26 +19,41 @@ import 'order_edit_screen.dart';
 
 /// Sales and purchase order monitoring, conversion and linked draft actions.
 class OrdersScreen extends ConsumerStatefulWidget {
-  const OrdersScreen({super.key, required this.kind});
+  const OrdersScreen({super.key, required this.kind, this.navigationKey});
   final InvoiceKind kind;
+  final ValueKey<String>? navigationKey;
   @override
   ConsumerState<OrdersScreen> createState() => _OrdersScreenState();
 }
 
 class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   late Future<List<Json>> _future;
+  late final DraftExitGuard _exitGuard;
+  final _exitRelay = DraftExitRelay();
   String get _path => widget.kind.isSales ? '/sales/orders' : '/purchases/orders';
   bool get _ar => Localizations.localeOf(context).languageCode == 'ar';
   String tr(String ar, String en) => _ar ? ar : en;
 
   @override
-  void initState() { super.initState(); _future = _load(); }
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+    _future = _load();
+  }
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
   Future<List<Json>> _load() => ref.read(apiClientProvider).getList(_path);
   void _refresh() => setState(() { _future = _load(); });
 
   Future<void> _create() async {
     final id = await Navigator.of(context).push<String>(MaterialPageRoute(
-      builder: (_) => OrderCreateScreen(kind: widget.kind),
+      builder: (_) => OrderCreateScreen(kind: widget.kind,exitRelay:_exitRelay),
     ));
     if (!mounted) return;
     _refresh();
@@ -49,7 +65,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
 
   Future<void> _open(Json row) async {
     await Navigator.of(context).push<void>(MaterialPageRoute(
-      builder: (_) => OrderDetailScreen(kind: widget.kind, orderId: text(row, 'id')),
+      builder: (_) => OrderDetailScreen(kind: widget.kind, orderId: text(row, 'id'),exitRelay:_exitRelay),
     ));
     if (mounted) _refresh();
   }
@@ -87,9 +103,10 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
 }
 
 class OrderDetailScreen extends ConsumerStatefulWidget {
-  const OrderDetailScreen({super.key, required this.kind, required this.orderId});
+  const OrderDetailScreen({super.key, required this.kind, required this.orderId, this.exitRelay});
   final InvoiceKind kind;
   final String orderId;
+  final DraftExitRelay? exitRelay;
   @override
   ConsumerState<OrderDetailScreen> createState() => _OrderDetailScreenState();
 }
@@ -108,7 +125,10 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
   bool _can(String permission) => ref.read(currentUserProvider)?.can(permission) ?? false;
 
   @override
-  void initState() { super.initState(); _future = _load(); _loadPending(); }
+  void initState() { super.initState(); widget.exitRelay?.attach(_canLeave); _future = _load(); _loadPending(); }
+  @override
+  void dispose() { widget.exitRelay?.detach(_canLeave); super.dispose(); }
+  Future<bool> _canLeave() async => !_busy;
   Future<Json> _load() => ref.read(apiClientProvider).get('$_base/${widget.orderId}');
   void _refresh() {
     setState(() { _future = _load(); });
@@ -168,7 +188,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
 
   Future<void> _editDraft(Json order, {bool amendApproved = false}) async {
     await Navigator.of(context).push<bool>(MaterialPageRoute(
-      builder: (_) => OrderEditScreen(kind: widget.kind, order: order, amendApproved: amendApproved),
+      builder: (_) => OrderEditScreen(kind: widget.kind, order: order, amendApproved: amendApproved,exitRelay:widget.exitRelay),
     ));
     if (!mounted) return;
     await _loadPending();

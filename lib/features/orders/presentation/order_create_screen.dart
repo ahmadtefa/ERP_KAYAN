@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../app/router/draft_exit_guard.dart';
 import '../../../core/error/failure.dart';
 import '../../../core/json/json_utils.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
@@ -25,8 +26,9 @@ class _OrderLine {
 
 /// Creates a draft; an uncertain POST is retained with its original identity.
 class OrderCreateScreen extends ConsumerStatefulWidget {
-  const OrderCreateScreen({super.key, required this.kind});
+  const OrderCreateScreen({super.key, required this.kind, this.exitRelay});
   final InvoiceKind kind;
+  final DraftExitRelay? exitRelay;
   @override
   ConsumerState<OrderCreateScreen> createState() => _OrderCreateScreenState();
 }
@@ -52,6 +54,7 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
     super.initState();
     final now = DateTime.now();
     _date.text = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    widget.exitRelay?.attach(_confirmExit);
     _loadPending();
   }
 
@@ -105,24 +108,27 @@ class _OrderCreateScreenState extends ConsumerState<OrderCreateScreen> {
 
   @override
   void dispose() {
+    widget.exitRelay?.detach(_confirmExit);
     _date.dispose(); _notes.dispose();
     for (final line in _lines) { line.dispose(); }
     super.dispose();
   }
 
   void _changed() { if (!_dirty) setState(() => _dirty = true); }
-  Future<void> _close() async {
-    if (_busy || _confirming) return;
-    if (_dirty && _pending == null) {
-      _confirming = true;
+  Future<bool> _confirmExit() async {
+    if (_busy || _confirming) return false;
+    if (!_dirty || _pending != null) return true;
+    _confirming = true;
+    try {
       final discard = await confirmAction(context,
         title: tr('تغييرات غير محفوظة', 'Unsaved changes'),
         message: tr('هل تريد الخروج دون حفظ الأمر؟', 'Leave without saving the order?'),
         confirmLabel: tr('الخروج دون حفظ', 'Discard changes'), destructive: true);
-      _confirming = false;
-      if (!discard || !mounted) return;
-    }
-    if (mounted) Navigator.of(context).pop();
+      return discard && mounted;
+    } finally { _confirming = false; }
+  }
+  Future<void> _close() async {
+    if (await _confirmExit() && mounted) Navigator.of(context).pop();
   }
 
   String? _number(String? raw, {bool required = false, bool positive = false, bool percent = false}) {

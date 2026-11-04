@@ -13,3 +13,13 @@ class DraftExitGuard {
   Future<bool> canLeave(ValueKey<String> key) => _guards[key]?.call() ?? Future.value(false);
 }
 final draftExitGuardProvider = Provider<DraftExitGuard>((ref) => DraftExitGuard());
+
+/// An imperative page stack can sit above one routed list. The topmost page
+/// decides whether leaving the parent route is safe; removing an older page
+/// must not remove the newer page's guard.
+class DraftExitRelay {
+  final List<Future<bool> Function()> _guards = [];
+  void attach(Future<bool> Function() guard) => _guards.add(guard);
+  void detach(Future<bool> Function() guard) => _guards.remove(guard);
+  Future<bool> canLeave() => _guards.isEmpty ? Future.value(true) : _guards.last();
+}
