@@ -163,6 +163,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
           'kind',
           l10n.voucherType,
           kind: FieldKind.select,
+          required: true,
           options: [
             FieldOption('RECEIPT', l10n.receipt),
             FieldOption('PAYMENT', l10n.payment),
