@@ -16,6 +16,7 @@ typedef PhotoScope = ({String companyId, String userId});
 /// The picker is injectable for widget tests; no file is saved in preferences.
 final userPhotoPickerProvider = Provider<Future<PickedFile?> Function()>((ref) =>
     () => pickFile(extensions: ['.png', '.jpg', '.jpeg', '.webp']));
+final userPhotoNormalizerProvider = Provider<Future<Uint8List> Function(Uint8List)>((ref) => normalizeCompanyLogo);
 
 /// Separate keys prevent cached data from one account or company appearing in
 /// another. The server also verifies expectedUserId against the live session.
@@ -50,7 +51,7 @@ class _UserPhotoCardState extends ConsumerState<UserPhotoCard> {
     try {
       final picked = await ref.read(userPhotoPickerProvider)();
       if (picked == null || !mounted || !_same(scope)) return;
-      final data = await normalizeCompanyLogo(picked.bytes);
+      final data = await ref.read(userPhotoNormalizerProvider)(picked.bytes);
       if (!mounted || !_same(scope)) return;
       final form = FormData.fromMap({'expectedUserId':scope.userId,
         'file':MultipartFile.fromBytes(data,filename:'profile-photo.png')});

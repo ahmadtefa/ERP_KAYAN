@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:dio/dio.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
@@ -40,25 +39,18 @@ class _PhotoClient extends ApiClient {
   }
 }
 
-Future<Uint8List> _png() async {
-  final recorder = ui.PictureRecorder();
-  final canvas = Canvas(recorder);
-  canvas.drawRect(const Rect.fromLTWH(0,0,32,32),Paint()..color=Colors.teal);
-  final image = await recorder.endRecording().toImage(32,32);
-  final data = await image.toByteData(format:ui.ImageByteFormat.png);
-  image.dispose();
-  return data!.buffer.asUint8List();
-}
 
 void main() {
   testWidgets('photo upload survives a new provider session, isolates accounts and can be removed', (tester) async {
-    final bytes = await _png();
-    final client = _PhotoClient(bytes);
+    // A synthetic PNG; normalization itself has dedicated engine tests.
+    final imageBytes = base64Decode('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAN0lEQVRIie3WuQkAQAwDQZW+pV8VhgsGnAuMnt3q9kYgLxoXJWhTFWnTDE4mM1Qx4BV03M90/QB30QA96QETDgAAAABJRU5ErkJggg==');
+    final client = _PhotoClient(imageBytes);
     AppUser user(String id) => AppUser(id:id,username:id,fullName:id,companyId:'company');
     Widget screen(String id) => ProviderScope(key:ValueKey(id),overrides:[
       currentUserProvider.overrideWithValue(user(id)),
       apiClientProvider.overrideWithValue(client),
-      userPhotoPickerProvider.overrideWithValue(() async => PickedFile(name:'synthetic.png',bytes:bytes,mimeType:'image/png')),
+      userPhotoPickerProvider.overrideWithValue(() async => PickedFile(name:'synthetic.png',bytes:imageBytes,mimeType:'image/png')),
+      userPhotoNormalizerProvider.overrideWithValue((source) async => source),
     ],child:wrapWithApp(child:const Scaffold(body:UserPhotoCard())));
 
     await tester.pumpWidget(screen('one'));
