@@ -163,6 +163,8 @@ export class StockDocumentsService {
     dto: {
       kind: string;
       idempotencyKey?: string;
+      voucherKind?: string;
+      counterpartyName?: string;
       branchId?: string;
       fromBranchId?: string;
       toBranchId?: string;
@@ -186,6 +188,10 @@ export class StockDocumentsService {
     const targetBranch = dto.branchId ?? dto.toBranchId ?? branchId;
     if (!targetBranch) throw new BadRequestException('The signed-in user is not assigned to a branch');
     const identity = orderCreationIdentity(dto as unknown as Record<string, unknown>);
+    const voucherKind = dto.voucherKind === undefined ? null : String(dto.voucherKind).toUpperCase();
+    if (voucherKind !== null && !['RECEIPT', 'ISSUE'].includes(voucherKind)) throw new BadRequestException('Unknown stock voucher kind');
+    if (voucherKind && (!branchId || branchId !== targetBranch)) throw new BadRequestException('Stock voucher must belong to the signed-in branch');
+    if (voucherKind && !identity) throw new BadRequestException('idempotencyKey is required for stock vouchers');
     const created = await this.prisma.$transaction(async (tx) => {
       if (identity) {
         // Serialize retries before reading mutable item/unit data. A lost
@@ -208,6 +214,14 @@ export class StockDocumentsService {
       const kind = String(dto.kind ?? '').toUpperCase() as StockDocumentKind;
     if (!Object.values(StockDocumentKind).includes(kind)) {
       throw new BadRequestException('kind must be ADJUSTMENT, TRANSFER, COUNT or OPENING');
+    }
+    if (voucherKind && kind !== StockDocumentKind.ADJUSTMENT) throw new BadRequestException('Stock vouchers must be adjustments');
+    if (voucherKind && (typeof dto.reason !== 'string' || !dto.reason.trim() || typeof dto.counterpartyName !== 'string' || !dto.counterpartyName.trim() || dto.counterpartyName.trim().length > 200 || !dto.toWarehouseId)) {
+      throw new BadRequestException('A stock voucher needs a warehouse, reason and counterparty');
+    }
+    if (voucherKind) {
+      const warehouse = await tx.warehouse.findFirst({where:{id:dto.toWarehouseId,companyId,branchId:targetBranch,deletedAt:null,isActive:true},select:{id:true}});
+      if (!warehouse) throw new BadRequestException('The voucher warehouse does not belong to this branch or is inactive');
     }
     if (kind === StockDocumentKind.OPENING) {
       throw new BadRequestException(
@@ -326,6 +340,8 @@ export class StockDocumentsService {
       if (kind !== StockDocumentKind.COUNT && quantity.isZero()) {
         throw new BadRequestException(`Line ${index + 1}: a quantity is required`);
       }
+      if (voucherKind === 'RECEIPT' && !quantity.isPositive()) throw new BadRequestException(`Line ${index + 1}: receipt quantity must be positive`);
+      if (voucherKind === 'ISSUE' && !quantity.isNegative()) throw new BadRequestException(`Line ${index + 1}: issue quantity must be negative`);
       if (kind === StockDocumentKind.TRANSFER && quantity.isNegative()) {
         throw new BadRequestException(`Line ${index + 1}: transfer quantity must be positive`);
       }
@@ -399,6 +415,8 @@ export class StockDocumentsService {
           fromWarehouseId: kind === StockDocumentKind.TRANSFER ? fromWarehouseId : null,
           toWarehouseId: kind === StockDocumentKind.TRANSFER ? toWarehouseId : toWarehouseId,
           reason: dto.reason?.trim() || null,
+          voucherKind,
+          counterpartyName: voucherKind ? dto.counterpartyName!.trim() : null,
           notes: dto.notes?.trim() || null,
           costCenterId,
           status: InvoiceStatus.DRAFT,
@@ -435,20 +453,49 @@ export class StockDocumentsService {
     return this.findOne(companyId, created.id, mayReadCost);
   }
 
+  /** Review and approval are idempotent and atomic with their audit record. */
+  async transitionVoucher(companyId: string, branchId: string | null, userId: string, id: string,
+    stage: 'REVIEW' | 'APPROVE', mayReadCost = true) {
+    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    await this.prisma.$transaction(async tx => {
+      const locked = await tx.$queryRaw<Array<{id:string}>>(Prisma.sql`
+        SELECT id FROM stock_documents WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+          AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
+      `);
+      if (locked.length !== 1) throw new NotFoundException('Stock voucher not found');
+      const document = await tx.stockDocument.findUniqueOrThrow({where:{id}});
+      if (!document.voucherKind || document.status !== InvoiceStatus.DRAFT) throw new BadRequestException('Only a draft stock voucher can be reviewed or approved');
+      if (stage === 'REVIEW') {
+        if (document.reviewedAt) return;
+        await tx.stockDocument.update({where:{id},data:{reviewedAt:new Date(),reviewedBy:userId}});
+      } else {
+        if (!document.reviewedAt) throw new BadRequestException('The stock voucher must be reviewed before approval');
+        if (document.approvedAt) return;
+        await tx.stockDocument.update({where:{id},data:{approvedAt:new Date(),approvedBy:userId}});
+      }
+      await this.audit.recordRequired({companyId,userId,action:stage,entity:'stock_documents',entityId:id},tx);
+    });
+    return this.findOne(companyId,id,mayReadCost);
+  }
+
   /**
    * Posts the document: movements, stock balances and - when value changes -
    * one journal entry.
    */
-  async post(companyId: string, userId: string, id: string, mayReadCost = true) {
+  async post(companyId: string, userId: string, id: string, mayReadCost = true, voucherBranchId: string | null = null) {
     const document = await this.prisma.stockDocument.findFirst({
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
     if (!document) throw new NotFoundException('Stock document not found');
+    if (document.voucherKind && document.branchId !== voucherBranchId) throw new NotFoundException('Stock voucher not found');
     if (document.status !== InvoiceStatus.DRAFT) {
       throw new BadRequestException(
         `Only a draft stock document can be posted (current status: ${document.status})`,
       );
+    }
+    if (document.voucherKind && (!document.reviewedAt || !document.approvedAt)) {
+      throw new BadRequestException('Stock voucher must be reviewed and approved before posting');
     }
 
     if (document.kind === StockDocumentKind.TRANSFER &&
@@ -728,12 +775,13 @@ export class StockDocumentsService {
   }
 
   /** Reverses a posted document: opposite movements, and the entry mirror. */
-  async reverse(companyId: string, userId: string, id: string, mayReadCost = true) {
+  async reverse(companyId: string, userId: string, id: string, mayReadCost = true, voucherBranchId: string | null = null) {
     const document = await this.prisma.stockDocument.findFirst({
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
     if (!document) throw new NotFoundException('Stock document not found');
+    if (document.voucherKind && document.branchId !== voucherBranchId) throw new NotFoundException('Stock voucher not found');
     if (document.status !== InvoiceStatus.POSTED) {
       throw new BadRequestException('Only a posted stock document can be reversed');
     }
@@ -1037,6 +1085,13 @@ export class StockDocumentsService {
     branch?: { code: string; nameEn: string; nameAr: string };
     costCenterId?: string | null;
     costCenter?: { id: string; code: string; nameEn: string; nameAr: string } | null;
+    voucherKind?: string | null;
+    counterpartyName?: string | null;
+    toWarehouseId?: string | null;
+    reviewedAt?: Date | null;
+    reviewedBy?: string | null;
+    approvedAt?: Date | null;
+    approvedBy?: string | null;
   }) {
     return {
       id: document.id,
@@ -1046,6 +1101,13 @@ export class StockDocumentsService {
       status: document.status.toLowerCase(),
       reason: document.reason,
       notes: document.notes,
+      voucherKind: document.voucherKind ?? null,
+      counterpartyName: document.counterpartyName ?? null,
+      toWarehouseId: document.toWarehouseId ?? null,
+      reviewedAt: document.reviewedAt?.toISOString() ?? null,
+      reviewedBy: document.reviewedBy ?? null,
+      approvedAt: document.approvedAt?.toISOString() ?? null,
+      approvedBy: document.approvedBy ?? null,
       branch: document.branch,
       costCenterId: document.costCenterId ?? null,
       costCenter: document.costCenter ?? null,

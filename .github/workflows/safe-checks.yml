@@ -54,9 +54,11 @@ jobs:
         run: >-
           npm test -- --runInBand
           src/common/maintenance/maintenance.spec.ts
+          src/modules/admin/permissions.catalogue.spec.ts
           src/modules/accounting/account-update-contract.spec.ts
           src/modules/accounting/chart-of-accounts.service.spec.ts
           src/modules/inventory/stock-document-response-permissions.spec.ts
+          src/modules/inventory/stock-voucher-permissions.spec.ts
           src/modules/inventory/cost-redaction.spec.ts
           src/modules/inventory/stock-documents.warehouse-guard.spec.ts
           src/modules/inventory/stock-documents.units.spec.ts

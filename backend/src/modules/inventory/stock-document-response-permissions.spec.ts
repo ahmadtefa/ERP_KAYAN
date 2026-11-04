@@ -6,7 +6,7 @@ import { StockDocumentsService } from './stock-documents.service';
 
 const calls = { create: jest.fn(), post: jest.fn(), reverse: jest.fn(), findOne: jest.fn() };
 for (const fn of Object.values(calls)) fn.mockImplementation(async (...args: unknown[]) => ({
-  lines: [{ unitCost: args.at(-1) === true ? '11.0000' : null }],
+  lines: [{ unitCost: args.some(arg => arg === true) ? '11.0000' : null }],
 }));
 @Module({ controllers:[StockDocumentsController], providers:[{ provide:StockDocumentsService, useValue:calls }] })
 class FixtureModule {}
@@ -35,8 +35,8 @@ describe('stock document response cost visibility', () => {
         }
       }
       expect(calls.create).toHaveBeenLastCalledWith('company','branch','user',{},true);
-      expect(calls.post).toHaveBeenLastCalledWith('company','user','doc',true);
-      expect(calls.reverse).toHaveBeenLastCalledWith('company','user','doc',true);
+      expect(calls.post).toHaveBeenLastCalledWith('company','user','doc',true,'branch');
+      expect(calls.reverse).toHaveBeenLastCalledWith('company','user','doc',true,'branch');
     } finally { await app.close(); }
   });
 });

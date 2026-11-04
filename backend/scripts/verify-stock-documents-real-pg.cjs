@@ -236,6 +236,38 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(countRace[0].status,'fulfilled');
     assert.equal(await warehouseBalance(warehouse),3);
     assert.equal(await warehouseBalance(secondWarehouse),10);
+    // New receipt/issue voucher workflow: no posting before both stages,
+    // separate atomic audit and retries, then one posting and one reversal.
+    for (const [voucherKind, quantity] of [['RECEIPT','2'],['ISSUE','-1']]) {
+      const input = {idempotencyKey:`voucher-${voucherKind.toLowerCase()}-000001`,kind:'ADJUSTMENT',voucherKind,
+        documentDate:date,toWarehouseId:secondWarehouse,reason:'Synthetic workflow',counterpartyName:'Synthetic party',
+        costCenterId:centre,lines:[{itemId:item,quantity,unitCost:'7.5'}]};
+      const voucher = await service.create(company,branch,user,input,false);
+      assert.equal(voucher.voucherKind,voucherKind);
+      assert.equal(voucher.counterpartyName,'Synthetic party');
+      await assert.rejects(service.post(company,user,voucher.id,false,branch),/reviewed and approved/);
+      await assert.rejects(service.transitionVoucher(company,branch,user,voucher.id,'APPROVE',false),/reviewed before/);
+      await assert.rejects(service.transitionVoucher(company,'99999999-9999-4999-8999-999999999999',user,voucher.id,'REVIEW',false),/not found/i);
+      await failStockAudit('REVIEW', () => service.transitionVoucher(company,branch,user,voucher.id,'REVIEW',false));
+      assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:voucher.id}})).reviewedAt,null);
+      await Promise.all([service.transitionVoucher(company,branch,user,voucher.id,'REVIEW',false),
+        service.transitionVoucher(company,branch,user,voucher.id,'REVIEW',false)]);
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'stock_documents',entityId:voucher.id,action:'REVIEW'}}),1);
+      await failStockAudit('APPROVE', () => service.transitionVoucher(company,branch,user,voucher.id,'APPROVE',false));
+      assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:voucher.id}})).approvedAt,null);
+      await Promise.all([service.transitionVoucher(company,branch,user,voucher.id,'APPROVE',false),
+        service.transitionVoucher(company,branch,user,voucher.id,'APPROVE',false)]);
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'stock_documents',entityId:voucher.id,action:'APPROVE'}}),1);
+      await assert.rejects(service.post(company,user,voucher.id,false,'99999999-9999-4999-8999-999999999999'),/not found/i);
+      const postings = await Promise.allSettled([service.post(company,user,voucher.id,false,branch),service.post(company,user,voucher.id,false,branch)]);
+      assert.equal(postings.filter(result => result.status === 'fulfilled').length,1);
+      assert.equal(await prisma.stockMovement.count({where:{referenceId:voucher.id}}),1);
+      const reversals = await Promise.allSettled([service.reverse(company,user,voucher.id,false,branch),service.reverse(company,user,voucher.id,false,branch)]);
+      assert.equal(reversals.filter(result => result.status === 'fulfilled').length,1);
+      assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:voucher.id}})).status,'REVERSED');
+      assert.equal(await warehouseBalance(secondWarehouse),10);
+    }
+    console.log('PASS: stock vouchers, atomic review/approval, permissions-independent workflow, posting/reversal concurrency and rollback.');
     console.log('PASS: real PostgreSQL + Prisma stock receipt, issue, audit rollback, warehouse count, concurrency, journal and reversal.');
 
     // Real services and Prisma on the guarded disposable database. This is

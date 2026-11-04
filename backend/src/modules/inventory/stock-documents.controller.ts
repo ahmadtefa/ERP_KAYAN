@@ -36,15 +36,27 @@ export class StockDocumentsController {
     return this.service.create(user.companyId, user.branchId, user.userId, body as never, canReadCost(user));
   }
 
+  @Post(':id/review')
+  @RequirePermissions('inventory.stock.read', 'inventory.stock.review')
+  review(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.transitionVoucher(user.companyId, user.branchId, user.userId, id, 'REVIEW', canReadCost(user));
+  }
+
+  @Post(':id/approve')
+  @RequirePermissions('inventory.stock.read', 'inventory.stock.approve')
+  approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.transitionVoucher(user.companyId, user.branchId, user.userId, id, 'APPROVE', canReadCost(user));
+  }
+
   @Post(':id/post')
   @RequirePermissions('inventory.stock.adjust')
   post(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.post(user.companyId, user.userId, id, canReadCost(user));
+    return this.service.post(user.companyId, user.userId, id, canReadCost(user), user.branchId);
   }
 
   @Post(':id/reverse')
   @RequirePermissions('inventory.stock.adjust')
   reverse(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.reverse(user.companyId, user.userId, id, canReadCost(user));
+    return this.service.reverse(user.companyId, user.userId, id, canReadCost(user), user.branchId);
   }
 }

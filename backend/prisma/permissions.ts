@@ -37,6 +37,8 @@ export const PERMISSIONS: Array<[string, string, string, string]> = [
   ['inventory.items.create', 'Add items', 'إضافة أصناف', 'inventory'],
   ['inventory.items.update', 'Edit items', 'تعديل الأصناف', 'inventory'],
   ['inventory.stock.read', 'View stock balances', 'عرض أرصدة المخزون', 'inventory'],
+  ['inventory.stock.review', 'Review stock vouchers', 'مراجعة أذون المخزون', 'inventory'],
+  ['inventory.stock.approve', 'Approve stock vouchers', 'اعتماد أذون المخزون', 'inventory'],
 
   ['sales.invoices.read', 'View sales invoices', 'عرض فواتير البيع', 'sales'],
   ['sales.invoices.create', 'Create sales invoices', 'إنشاء فواتير البيع', 'sales'],
