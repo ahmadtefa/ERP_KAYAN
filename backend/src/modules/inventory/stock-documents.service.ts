@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -9,6 +10,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { parseDocumentQuantity, resolveUnitSelection } from '../../common/units/unit-math';
+import { orderCreationIdentity } from '../../common/units/order-creation-identity';
 import type { ItemUnitLike } from '../../common/units/unit-math';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
 import { AccountMapService } from '../accounting/account-map.service';
@@ -160,6 +162,7 @@ export class StockDocumentsService {
     userId: string,
     dto: {
       kind: string;
+      idempotencyKey?: string;
       branchId?: string;
       fromBranchId?: string;
       toBranchId?: string;
@@ -180,7 +183,29 @@ export class StockDocumentsService {
     },
     mayReadCost = true,
   ) {
-    const kind = String(dto.kind ?? '').toUpperCase() as StockDocumentKind;
+    const targetBranch = dto.branchId ?? dto.toBranchId ?? branchId;
+    if (!targetBranch) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    const identity = orderCreationIdentity(dto as unknown as Record<string, unknown>);
+    const created = await this.prisma.$transaction(async (tx) => {
+      if (identity) {
+        // Serialize retries before reading mutable item/unit data. A lost
+        // response can be replayed even if a unit was later disabled.
+        await tx.$queryRaw(Prisma.sql`SELECT 1 AS locked FROM (
+          SELECT pg_advisory_xact_lock(hashtextextended(${`stock-document:${companyId}:${targetBranch}:${identity.key}`}, 0))
+        ) AS stock_request_lock`);
+        const previous = await tx.$queryRaw<Array<{ documentId:string; requestHash:string }>>(Prisma.sql`
+          SELECT "documentId", "requestHash" FROM stock_document_creation_requests
+           WHERE "companyId" = ${companyId}::uuid AND "branchId" = ${targetBranch}::uuid
+             AND "requestKey" = ${identity.key}
+        `);
+        if (previous.length) {
+          if (previous[0].requestHash !== identity.hash) throw new ConflictException('The idempotency key was used for a different request');
+          return { id: previous[0].documentId };
+        }
+      }
+      const branch = await tx.branch.findFirst({where:{id:targetBranch,companyId,deletedAt:null},select:{id:true}});
+      if (!branch) throw new BadRequestException('Target branch does not belong to this company');
+      const kind = String(dto.kind ?? '').toUpperCase() as StockDocumentKind;
     if (!Object.values(StockDocumentKind).includes(kind)) {
       throw new BadRequestException('kind must be ADJUSTMENT, TRANSFER, COUNT or OPENING');
     }
@@ -194,10 +219,6 @@ export class StockDocumentsService {
       throw new BadRequestException('A stock document needs at least one line');
     }
 
-    const targetBranch = dto.branchId ?? dto.toBranchId ?? branchId;
-    if (!targetBranch) {
-      throw new BadRequestException('The signed-in user is not assigned to a branch');
-    }
     const date = this.date(dto.documentDate, 'documentDate');
 
     // Only the documents whose posting touches a profit-and-loss account can
@@ -216,7 +237,7 @@ export class StockDocumentsService {
         throw new BadRequestException('costCenterId must be a UUID');
       }
       await this.costCenters.assertPostable(
-        this.prisma,
+        tx,
         companyId,
         [costCenterId],
         date,
@@ -234,7 +255,7 @@ export class StockDocumentsService {
       unitQuantity: Prisma.Decimal | null;
     }> = [];
     for (const [index, raw] of dto.lines.entries()) {
-      const item = await this.prisma.item.findFirst({
+      const item = await tx.item.findFirst({
         where: { id: raw.itemId, companyId, deletedAt: null },
         select: { id: true, isStockTracked: true, code: true, unit: true, units: true },
       });
@@ -346,6 +367,8 @@ export class StockDocumentsService {
       if (!fromBranchId) {
         throw new BadRequestException('A transfer needs the branch the stock leaves');
       }
+      const sourceBranch = await tx.branch.findFirst({where:{id:fromBranchId,companyId,deletedAt:null},select:{id:true}});
+      if (!sourceBranch) throw new BadRequestException('Source branch does not belong to this company');
       if (fromBranchId === targetBranch && !movesBetweenWarehouses) {
         throw new BadRequestException(
           'A transfer needs two different branches, or two different warehouses of the same branch',
@@ -357,7 +380,6 @@ export class StockDocumentsService {
       void movesBetweenBranches;
     }
 
-    const created = await this.prisma.$transaction(async (tx) => {
       const prefix =
         kind === StockDocumentKind.TRANSFER
           ? 'ST'
@@ -396,13 +418,19 @@ export class StockDocumentsService {
           },
         },
       });
+      if (identity) {
+        await tx.$executeRaw(Prisma.sql`
+          INSERT INTO stock_document_creation_requests ("companyId", "branchId", "requestKey", "requestHash", "documentId")
+          VALUES (${companyId}::uuid, ${targetBranch}::uuid, ${identity.key}, ${identity.hash}, ${document.id}::uuid)
+        `);
+      }
       await this.audit.recordRequired({
         companyId, userId, action: 'CREATE', entity: 'stock_documents',
         entityId: document.id,
         after: { documentNumber: document.documentNumber, kind, lines: lines.length },
       }, tx);
       return document;
-    });
+    }, { timeout: 30000 });
 
     return this.findOne(companyId, created.id, mayReadCost);
   }

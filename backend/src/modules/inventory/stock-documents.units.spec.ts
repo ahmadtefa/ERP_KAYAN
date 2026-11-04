@@ -21,6 +21,8 @@ const milkItem = {
 
 function makeService(item: any = milkItem) {
   const tx = {
+    branch: { findFirst: jest.fn(async () => ({id: BRANCH})) },
+    item: { findFirst: jest.fn(async () => item) },
     stockDocument: {
       create: jest.fn(async ({ data }: { data: any }) => ({
         id: 'doc-1',

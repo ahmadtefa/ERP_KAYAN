@@ -234,6 +234,8 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
     },
   };
 
+  Object.assign(tx, { branch: { findFirst: jest.fn(async () => ({id:BRANCH})) }, item: prisma.item });
+
   readLatestDocument = async () => {
     const result = prisma.stockDocument.findFirst.mock.results.at(-1);
     return await result?.value as FixtureDocument;

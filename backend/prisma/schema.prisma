@@ -1038,11 +1038,26 @@ model StockDocument {
   toWarehouse   Warehouse?         @relation("StockDocumentToWarehouse", fields: [toWarehouseId], references: [id], onDelete: Restrict)
   costCenter    CostCenter?        @relation("StockDocumentCostCenter", fields: [costCenterId], references: [id], onDelete: Restrict)
   lines         StockDocumentLine[]
+  creationRequests StockDocumentCreationRequest[]
 
   @@unique([companyId, documentNumber])
   @@index([companyId, kind, documentDate])
   @@index([costCenterId])
   @@map("stock_documents")
+}
+
+/// Idempotency records for stock-document creation; legacy clients may omit a key.
+model StockDocumentCreationRequest {
+  companyId   String @db.Uuid
+  branchId    String @db.Uuid
+  requestKey  String @db.VarChar(128)
+  requestHash String @db.VarChar(64)
+  documentId  String @db.Uuid
+  createdAt   DateTime @default(now())
+  document    StockDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+
+  @@id([companyId, branchId, requestKey])
+  @@map("stock_document_creation_requests")
 }
 
 model StockDocumentLine {

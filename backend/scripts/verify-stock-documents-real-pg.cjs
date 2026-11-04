@@ -96,13 +96,26 @@ let difference = '70000000-0000-4000-8000-000000000005';
       try { await assert.rejects(operation(),/injected stock audit failure/); }
       finally { audit.recordRequired = original; }
     };
-    const receiptInput = { kind:'ADJUSTMENT', documentDate:date,
+    const receiptInput = { idempotencyKey:'stock-receipt-request-0001', kind:'ADJUSTMENT', documentDate:date,
       toWarehouseId:warehouse, reason:'Synthetic receipt', lines:[{itemId:item, quantity:'10', unitCost:'7.5'}] };
     const beforeCreate = await prisma.stockDocument.count({where:{companyId:company}});
     await failStockAudit('CREATE', () => service.create(company, branch, user, receiptInput));
     assert.equal(await prisma.stockDocument.count({where:{companyId:company}}),beforeCreate);
-    const receipt = await service.create(company, branch, user, receiptInput, false);
+    assert.equal(await prisma.stockDocumentCreationRequest.count({where:{companyId:company}}),0);
+    const [receipt,retryReceipt] = await Promise.all([
+      service.create(company, branch, user, receiptInput, false),
+      service.create(company, branch, user, receiptInput, false),
+    ]);
+    assert.equal(receipt.id,retryReceipt.id);
+    assert.equal(await prisma.stockDocument.count({where:{companyId:company}}),beforeCreate+1);
+    assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'stock_documents',entityId:receipt.id,action:'CREATE'}}),1);
     assert.equal(receipt.lines[0].unitCost,null);
+    await assert.rejects(service.create(company,branch,user,{...receiptInput,reason:'different'}),/different request/);
+    await prisma.item.update({where:{id:item},data:{isStockTracked:false}});
+    try { assert.equal((await service.create(company,branch,user,receiptInput,false)).id,receipt.id); }
+    finally { await prisma.item.update({where:{id:item},data:{isStockTracked:true}}); }
+    await assert.rejects(service.create(company,branch,user,{...receiptInput,idempotencyKey:'stock-foreign-branch-0001',
+      branchId:'99999999-9999-4999-8999-999999999999'}),/Target branch/);
     await failStockAudit('POST', () => service.post(company, user, receipt.id));
     assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:receipt.id}})).status,'DRAFT');
     assert.equal(await prisma.stockMovement.count({where:{referenceId:receipt.id}}),0);
