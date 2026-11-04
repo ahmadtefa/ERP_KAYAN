@@ -59,6 +59,16 @@ const path = require('node:path');
     await client.query("CREATE TABLE fixture_items(id integer primary key, value text); INSERT INTO fixture_items VALUES(1,'before'); INSERT INTO fixture_items SELECT i, md5(i::text) || md5((i+1)::text) FROM generate_series(2,1002) AS i");
     const before = await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`);
     const backup = await service.createFull('fixture');
+    // Two real concurrent pg_dump operations can complete under distinct
+    // names. A same-instance restore must be refused before its first write.
+    const pendingA = service.createFull('fixture');
+    const pendingB = service.createFull('fixture');
+    await assert.rejects(service.restore({ confirm: true, fileName: backup.file.name }, 'fixture'), /backup is running/i);
+    const [copyA, copyB] = await Promise.all([pendingA, pendingB]);
+    assert.notEqual(copyA.file.name, copyB.file.name);
+    assert.ok((await service.verify(copyA.file.name)).archiveContentReadable);
+    assert.ok((await service.verify(copyB.file.name)).archiveContentReadable);
+    assert.deepEqual((await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows, before.rows);
     const verified = await service.verify(backup.file.name);
     assert.ok(verified.entries > 0);
     assert.equal(verified.archiveContentReadable, true);
@@ -115,7 +125,9 @@ const path = require('node:path');
       else process.env.KAYAN_PG_DUMP = savedDump;
     }
     await client.query("UPDATE fixture_items SET value='changed-after-backup' WHERE id=1");
-    await assert.rejects(service.restore({ confirm: true, fileName: backup.file.name }, 'fixture'), /rehearsal database could not be removed/i);
+    const pendingRestore = service.restore({ confirm: true, fileName: backup.file.name }, 'fixture');
+    await assert.rejects(service.createFull('fixture'), /restore is running/i);
+    await assert.rejects(pendingRestore, /rehearsal database could not be removed/i);
     assert.equal(schemaDestructions, 0);
     assert.equal(maintenance.isActive, false);
     assert.equal((await client.query('SELECT value FROM fixture_items WHERE id = 1')).rows[0].value, 'changed-after-backup');

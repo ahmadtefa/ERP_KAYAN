@@ -116,6 +116,7 @@ export class FullBackupService {
   private canCreateDatabase = true;
   private lastCreateDatabaseFailure: string | null = null;
   private restoreInProgress = false;
+  private activeBackups = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -326,7 +327,17 @@ export class FullBackupService {
   async createFull(
     userId: string | null,
   ): Promise<{ file: FullBackupFile; durationMs: number }> {
-    return this.dump('full', userId);
+    if (this.restoreInProgress || this.maintenance.isActive) {
+      throw new ServiceUnavailableException('A restore is running or the database is in maintenance mode. The backup was not started.');
+    }
+    // Claim before the first await so a restore in this service instance cannot begin
+    // while pg_dump is reading the database. Multiple backups may coexist.
+    this.activeBackups++;
+    try {
+      return await this.dump('full', userId);
+    } finally {
+      this.activeBackups--;
+    }
   }
 
   /// The automatic safety copy taken just before a restore replaces anything.
@@ -639,6 +650,9 @@ export class FullBackupService {
       throw new ServiceUnavailableException(
         'A restore is already running or the database is in maintenance mode.',
       );
+    }
+    if (this.activeBackups > 0) {
+      throw new ServiceUnavailableException('A backup is running. The restore was not started.');
     }
     // Claim synchronously, before the first await: another request in this
     // process must not clear this restore's maintenance flag or staging file.

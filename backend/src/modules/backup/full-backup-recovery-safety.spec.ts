@@ -214,6 +214,35 @@ describe('full restore failure safety', () => {
     }));
   });
 
+  it('does not start restore while a backup is in progress in this service instance', async () => {
+    let release!: () => void;
+    internals.dump = jest.fn().mockImplementation(() => new Promise((resolve) => {
+      release = () => resolve({ file: { name: 'fixture.dump' }, durationMs: 1 });
+    }));
+    const backup = service.createFull('u');
+    await expect(service.restore({ confirm: true, uploaded }, 'u')).rejects.toThrow(/backup is running/i);
+    expect(internals.execSql).not.toHaveBeenCalled();
+    release();
+    await backup;
+    await expect(service.restore({ confirm: true, uploaded }, 'u')).resolves.toMatchObject({ restored: true });
+  });
+
+  it('does not start backup while a restore is in progress in this service instance', async () => {
+    let release!: () => void;
+    internals.verifyUploaded.mockImplementationOnce(() => new Promise<number>((resolve) => { release = () => resolve(1); }));
+    const restore = service.restore({ confirm: true, uploaded }, 'u');
+    while (!release) await new Promise((resolve) => setImmediate(resolve));
+    await expect(service.createFull('u')).rejects.toThrow(/restore is running/i);
+    release();
+    await expect(restore).resolves.toMatchObject({ restored: true });
+  });
+
+  it('releases the local backup claim after a dump failure', async () => {
+    internals.dump = jest.fn().mockRejectedValue(new Error('synthetic dump failure'));
+    await expect(service.createFull('u')).rejects.toThrow('synthetic dump failure');
+    await expect(service.restore({ confirm: true, uploaded }, 'u')).resolves.toMatchObject({ restored: true });
+  });
+
   it('rejects another request even before the first reaches maintenance', async () => {
     let release!: () => void;
     internals.verifyUploaded.mockImplementationOnce(() => new Promise<number>((resolve) => { release = () => resolve(1); }));
