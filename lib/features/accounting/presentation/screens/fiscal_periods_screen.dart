@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
@@ -31,7 +32,8 @@ final fiscalPeriodsListProvider =
     );
 
 class FiscalPeriodsScreen extends ConsumerStatefulWidget {
-  const FiscalPeriodsScreen({super.key});
+  const FiscalPeriodsScreen({super.key, this.navigationKey});
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<FiscalPeriodsScreen> createState() =>
@@ -40,12 +42,30 @@ class FiscalPeriodsScreen extends ConsumerStatefulWidget {
 
 class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
   bool _busy = false;
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
 
   Future<void> _save({Json? existing}) async {
     final l10n = context.l10n;
     final isEdit = existing != null;
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: isEdit ? l10n.editPeriod : l10n.newPeriod,
       fields: [
         if (!isEdit) FieldSpec('code', l10n.periodCode, required: true),
@@ -55,27 +75,23 @@ class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
         FieldSpec('endDate', l10n.endDate, kind: FieldKind.date, required: true),
       ],
       initial: existing,
+      onSubmit: (draft) async {
+        try {
+          final client = ref.read(apiClientProvider);
+          if (isEdit) {
+            await client.patch('/accounting/fiscal-periods/${existing['id']}', body: draft);
+          } else {
+            await client.post('/accounting/fiscal-periods', body: draft);
+          }
+        } catch (error) {
+          if (mounted) ref.read(fiscalPeriodsListProvider.notifier).reload();
+          throw UncertainFormSubmission(error);
+        }
+      },
     );
     if (values == null || !mounted) return;
-
-    setState(() => _busy = true);
-    try {
-      final client = ref.read(apiClientProvider);
-      if (isEdit) {
-        await client.patch(
-          '/accounting/fiscal-periods/${existing['id']}',
-          body: values,
-        );
-      } else {
-        await client.post('/accounting/fiscal-periods', body: values);
-      }
-      await ref.read(fiscalPeriodsListProvider.notifier).reload();
-      if (mounted) showMessage(context, l10n.createdSuccessfully);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    await ref.read(fiscalPeriodsListProvider.notifier).reload();
+    if (mounted) showMessage(context, l10n.createdSuccessfully);
   }
 
   Future<void> _closeYear(Json period) async {
