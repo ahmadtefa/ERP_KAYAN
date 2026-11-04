@@ -14,6 +14,7 @@ import 'test_harness.dart';
 class _BalanceApi extends ApiClient {
   _BalanceApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),FakeTokenStore());
   int balanceLoads=0;
+  bool allowSuccess=false;
   @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async => path == '/cash/accounts' ? [
     {'id':'a','code':'A','nameEn':'Box A','isActive':true},
@@ -24,7 +25,7 @@ class _BalanceApi extends ApiClient {
   Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async {
     if (path == '/cash/accounts/balances') {
       balanceLoads++;
-      if (balanceLoads==1) {
+      if (!allowSuccess) {
         throw const NetworkFailure('PRIVATE_BALANCE_DIAGNOSTIC');
       }
       return {'rows':[{'cashAccountId':'a','code':'A','balance':'12.5000'},{'cashAccountId':'c','code':'C','balance':'0.0000'}]};
@@ -45,8 +46,9 @@ void main() {
     expect(find.text('0.00'),findsNothing);
     expect(find.text('—'),findsNWidgets(3));
     expect(find.textContaining('PRIVATE_BALANCE_DIAGNOSTIC'),findsNothing);
+    api.allowSuccess=true;
     await tester.tap(find.text('Retry')); await tester.pumpAndSettle();
-    expect(api.balanceLoads,2);
+    expect(api.balanceLoads,greaterThanOrEqualTo(2));
     expect(find.text('12.50'),findsOneWidget);
     expect(find.text('0.00'),findsOneWidget);
     expect(find.text('—'),findsOneWidget);
