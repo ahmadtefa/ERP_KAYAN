@@ -35,6 +35,7 @@ function makeService(itemOverride: any = milkItem) {
   const itemFind = jest.fn(async () => itemOverride);
   const tx = {
     salesInvoice: {
+      findFirst: jest.fn(),
       create: jest.fn(async ({ data }: { data: any }) => ({
         id: 'invoice-1',
         invoiceNumber: data.invoiceNumber,
@@ -219,7 +220,16 @@ describe('Sales multi-unit — milk scenario', () => {
       taxAmount: D(0),
       lines: stored,
     });
+    // The header read before claiming the row may be stale. Posting must use
+    // the transaction read, after claiming it, for stock and accounting.
+    tx.salesInvoice.findFirst.mockResolvedValue(await prisma.salesInvoice.findFirst());
+    (prisma.salesInvoice.findFirst as jest.Mock).mockResolvedValueOnce({
+      ...(await tx.salesInvoice.findFirst()),
+      lines: [],
+    });
     await service.post(COMPANY, 'user-1', 'invoice-1');
+    expect(tx.salesInvoice.updateMany.mock.invocationCallOrder[0])
+      .toBeLessThan(tx.salesInvoice.findFirst.mock.invocationCallOrder.at(-1)!);
 
     // Two lines -> exactly two stock OUT movements (one per line), not four.
     const outMoves = tx.stockMovement.create.mock.calls.map((c: any) => c[0].data);

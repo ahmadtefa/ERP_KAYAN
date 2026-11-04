@@ -328,6 +328,84 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(outcomes.filter(outcome => outcome.status === 'fulfilled').length,1);
       assert.equal(outcomes.filter(outcome => outcome.status === 'rejected').length,1);
     }
+    // Seed enough stock for the synthetic sales posting races below.
+    const raceStock = await service.create(company,branch,user,{kind:'ADJUSTMENT',documentDate:date,
+      toWarehouseId:warehouse,reason:'Synthetic race stock',lines:[{itemId:second.id,quantity:'20',unitCost:'2'}]});
+    await service.post(company,user,raceStock.id);
+    for (const [kind, orders, invoices, party] of [['sales',sales,si,customer.id],['purchase',purchases,pi,supplier.id]]) {
+      const field = kind === 'sales' ? 'customerId' : 'supplierId';
+      const model = kind === 'sales' ? 'salesInvoice' : 'purchaseInvoice';
+      const orderLineModel = kind === 'sales' ? prisma.salesOrderLine : prisma.purchaseOrderLine;
+      const order = await orders.create(company,branch,user,{[field]:party,orderDate:date,
+        lines:[{itemId:second.id,quantity:'2',unitPrice:'2',taxRate:'0'}]});
+      await orders.approve(company,user,order.id);
+      const orderLine = await orderLineModel.findFirstOrThrow({where:{orderId:order.id}});
+      const convertedRace = await orders.convertToInvoice(company,branch,user,order.id,
+        {idempotencyKey:'post-cancel-race-000001',invoiceDate:date,lines:[{orderLineId:orderLine.id,quantity:'2'}]});
+      const invoiceId = convertedRace.invoice.id;
+      const originalAudit = audit.recordRequired.bind(audit);
+      audit.recordRequired = async (input, tx) => {
+        if (input.entity === `${kind}_invoices` && input.action === 'CANCEL_DRAFT') throw new Error('injected cancel audit failure');
+        return originalAudit(input, tx);
+      };
+      try { await assert.rejects(invoices.cancelDraft(company,branch,user,invoiceId),/injected cancel audit failure/); }
+      finally { audit.recordRequired = originalAudit; }
+      assert.equal((await orderLineModel.findUniqueOrThrow({where:{id:orderLine.id}})).invoicedQuantity.toFixed(4),'2.0000');
+      assert.equal((await prisma[model].findUniqueOrThrow({where:{id:invoiceId}})).deletedAt,null);
+      const raced = await Promise.allSettled([invoices.post(company,user,invoiceId),invoices.cancelDraft(company,branch,user,invoiceId)]);
+      assert.equal(raced.filter(x => x.status === 'fulfilled').length,1,`${kind}: post/cancel must have one winner`);
+      assert.equal(raced.filter(x => x.status === 'rejected').length,1);
+      const savedRace = await prisma[model].findUniqueOrThrow({where:{id:invoiceId}});
+      const posted = savedRace.status === 'POSTED';
+      assert.equal(Boolean(savedRace.deletedAt),!posted);
+      assert.equal((await orderLineModel.findUniqueOrThrow({where:{id:orderLine.id}})).invoicedQuantity.toFixed(4),posted?'2.0000':'0.0000');
+      assert.equal(await prisma.stockMovement.count({where:{companyId:company,referenceId:invoiceId}}),posted?1:0);
+      assert.equal(await prisma.journalEntry.count({where:{companyId:company,sourceId:invoiceId}}),posted?1:0);
+
+      // Pause a real post just after its first header read, edit the unrelated
+      // draft with the production service, then resume. Post must claim first
+      // and use the newly committed lines for stock and accounting.
+      const dto = {[field]:party,invoiceDate:date,lines:[{itemId:second.id,quantity:'1',unitPrice:'2',taxRate:'0'}]};
+      const draft = await invoices.create(company,branch,user,dto);
+      let readReached, resumePost;
+      const readBarrier = new Promise(resolve => { readReached = resolve; });
+      const resumeBarrier = new Promise(resolve => { resumePost = resolve; });
+      let intercepted = false;
+      const invoiceModel = prisma[model];
+      const wrappedModel = new Proxy(invoiceModel,{get(target, key) {
+        const original = target[key];
+        if (key === 'findFirst') return async (...args) => {
+          const result = await original.apply(target,args);
+          if (!intercepted && args[0]?.where?.id === draft.id && args[0]?.select?.status) {
+            intercepted = true; readReached(); await resumeBarrier;
+          }
+          return result;
+        };
+        return typeof original === 'function' ? original.bind(target) : original;
+      }});
+      const wrappedPrisma = new Proxy(prisma,{get(target,key) {
+        if (key === model) return wrappedModel;
+        const value = target[key];
+        return typeof value === 'function' ? value.bind(target) : value;
+      }});
+      const PostingClass = kind === 'sales' ? SalesInvoicesService : PurchaseInvoicesService;
+      const instrumented = new PostingClass(wrappedPrisma,numbers,posting,map,settings,warehouses,prices,audit);
+      const pendingPost = instrumented.post(company,user,draft.id);
+      await readBarrier;
+      try {
+        await invoices.updateDraft(company,branch,user,draft.id,{...dto,
+          lines:[{itemId:second.id,quantity:'3',unitPrice:'2',taxRate:'0'}]});
+      } finally { resumePost(); }
+      await pendingPost;
+      const movements = await prisma.stockMovement.findMany({where:{companyId:company,referenceId:draft.id}});
+      assert.equal(movements.length,1);
+      assert.equal(movements[0].quantity.toFixed(4),'3.0000');
+      const postedInvoice = await prisma[model].findUniqueOrThrow({where:{id:draft.id}});
+      assert.equal(postedInvoice.totalAmount.toFixed(4),'6.0000');
+      const postedJournal = await prisma.journalEntry.findUniqueOrThrow({where:{id:postedInvoice.journalEntryId}});
+      assert.equal(postedJournal.totalDebit.toFixed(4),postedJournal.totalCredit.toFixed(4));
+    }
+    console.log('PASS: real Prisma/PostgreSQL post/edit stale-read, post/cancel race, cancel audit rollback and stock/journal invariants for sales and purchases.');
     console.log('PASS: PostgreSQL + Prisma order conversion full/partial, historical values, audit rollback, retry/competition, post/reverse, draft cancel and order-cancel race. No HTTP, Flutter or installed Windows test.');
   } finally {
     await prisma.$disconnect();

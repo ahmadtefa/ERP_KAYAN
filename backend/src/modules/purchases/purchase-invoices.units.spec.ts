@@ -101,6 +101,7 @@ function makeService(itemOverrides: Record<string, any> = {}) {
 
   const tx = {
     purchaseInvoice: {
+      findFirst: jest.fn(async () => detail),
       create: jest.fn(async ({ data }: { data: any }) => {
         detail.subTotal = data.subTotal;
         detail.taxAmount = data.taxAmount;
@@ -224,15 +225,19 @@ describe('Purchase multi-unit — milk scenario', () => {
   });
 
   it('posting receives 50 pieces at a weighted unit cost of 7.50 each', async () => {
-    const { service, tx } = makeService();
+    const { service, prisma, tx } = makeService();
     await service.create(COMPANY, BRANCH, 'user-1', {
       invoiceDate: '2026-10-27',
       supplierId: SUPPLIER,
       lines: [{ itemId: MILK, quantity: '5', unitName: 'كرتونة', unitPrice: '75', taxRate: '0' }],
     } as any);
 
-    // The shared detail fixture now holds the decorated lines create() built.
+    // An old pre-claim snapshot is not a valid source for posting.
+    const locked = await tx.purchaseInvoice.findFirst();
+    (prisma.purchaseInvoice.findFirst as jest.Mock).mockResolvedValueOnce({ ...locked, lines: [] });
     await service.post(COMPANY, 'user-1', 'invoice-1');
+    expect(tx.purchaseInvoice.updateMany.mock.invocationCallOrder[0])
+      .toBeLessThan(tx.purchaseInvoice.findFirst.mock.invocationCallOrder.at(-1)!);
 
     const movement = (tx.stockMovement.create.mock.calls as any[])[0][0].data;
     expect(movement.direction).toBe(StockDirection.IN);

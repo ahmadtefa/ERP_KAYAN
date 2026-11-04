@@ -371,7 +371,7 @@ export class PurchaseInvoicesService {
       const locked = await tx.$queryRaw<Array<{ status: InvoiceStatus; purchaseOrderId: string | null }>>(Prisma.sql`
         SELECT status, "purchaseOrderId"
           FROM purchase_invoices
-         WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+         WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL
          FOR UPDATE
       `);
       if (locked.length !== 1 || locked[0].status !== InvoiceStatus.DRAFT) {
@@ -477,10 +477,7 @@ export class PurchaseInvoicesService {
   async post(companyId: string, userId: string, id: string) {
     const invoice = await this.prisma.purchaseInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
-      include: {
-        lines: { orderBy: { lineNumber: 'asc' } },
-        supplier: { select: { code: true, nameEn: true } },
-      },
+      select: { status: true },
     });
     if (!invoice) throw new NotFoundException('Purchase invoice not found');
     if (invoice.status !== InvoiceStatus.DRAFT) {
@@ -493,7 +490,7 @@ export class PurchaseInvoicesService {
       // Claim the document before anything else happens: two simultaneous
       // posts must not both receive the same goods into stock.
       const claimed = await tx.purchaseInvoice.updateMany({
-        where: { id: invoice.id, companyId, status: InvoiceStatus.DRAFT, deletedAt: null },
+        where: { id, companyId, status: InvoiceStatus.DRAFT, deletedAt: null },
         data: { status: InvoiceStatus.POSTED, postedAt: new Date(), postedBy: userId },
       });
       if (claimed.count !== 1) {
@@ -501,6 +498,18 @@ export class PurchaseInvoicesService {
           'This invoice was posted by someone else a moment ago. Reload it to see the current state.',
         );
       }
+
+      // The draft may have been edited while this request waited for the row
+      // lock. Read both the header and lines only after the guarded claim, on
+      // the same transaction, so stock and journal use the committed version.
+      const invoice = await tx.purchaseInvoice.findFirst({
+        where: { id, companyId, deletedAt: null },
+        include: {
+          lines: { orderBy: { lineNumber: 'asc' } },
+          supplier: { select: { code: true, nameEn: true } },
+        },
+      });
+      if (!invoice) throw new NotFoundException('Purchase invoice not found');
 
       const accounts = await this.accounts.resolve(tx, companyId, [
         'accountsPayable',

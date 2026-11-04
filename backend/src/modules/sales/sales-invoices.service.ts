@@ -358,7 +358,7 @@ export class SalesInvoicesService {
       const locked = await tx.$queryRaw<Array<{ status: InvoiceStatus; salesOrderId: string | null }>>(Prisma.sql`
         SELECT status, "salesOrderId"
           FROM sales_invoices
-         WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+         WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL
          FOR UPDATE
       `);
       if (locked.length !== 1 || locked[0].status !== InvoiceStatus.DRAFT) {
@@ -459,10 +459,7 @@ export class SalesInvoicesService {
   async post(companyId: string, userId: string, id: string) {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
-      include: {
-        lines: { orderBy: { lineNumber: 'asc' } },
-        customer: { select: { code: true, nameEn: true } },
-      },
+      select: { status: true },
     });
     if (!invoice) throw new NotFoundException('Sales invoice not found');
     if (invoice.status !== InvoiceStatus.DRAFT) {
@@ -477,7 +474,7 @@ export class SalesInvoicesService {
       // the other is told the invoice has already been posted - instead of both
       // of them issuing the same stock and writing the same revenue twice.
       const claimed = await tx.salesInvoice.updateMany({
-        where: { id: invoice.id, companyId, status: InvoiceStatus.DRAFT, deletedAt: null },
+        where: { id, companyId, status: InvoiceStatus.DRAFT, deletedAt: null },
         data: { status: InvoiceStatus.POSTED, postedAt: new Date(), postedBy: userId },
       });
       if (claimed.count !== 1) {
@@ -485,6 +482,18 @@ export class SalesInvoicesService {
           'This invoice was posted by someone else a moment ago. Reload it to see the current state.',
         );
       }
+
+      // The draft may have been edited while this request waited for the row
+      // lock. Read both the header and lines only after the guarded claim, on
+      // the same transaction, so stock and journal use the committed version.
+      const invoice = await tx.salesInvoice.findFirst({
+        where: { id, companyId, deletedAt: null },
+        include: {
+          lines: { orderBy: { lineNumber: 'asc' } },
+          customer: { select: { code: true, nameEn: true } },
+        },
+      });
+      if (!invoice) throw new NotFoundException('Sales invoice not found');
 
       const accounts = await this.accounts.resolve(tx, companyId, [
         'accountsReceivable',
