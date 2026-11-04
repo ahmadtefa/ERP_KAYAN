@@ -67,7 +67,7 @@ export class StockDocumentsService {
 
   async findAll(
     companyId: string,
-    query: { kind?: string; voucherOnly?: boolean; branchId?: string; from?: string; to?: string; page?: number; pageSize?: number } = {},
+    query: { kind?: string; q?: string; voucherOnly?: boolean; branchId?: string; from?: string; to?: string; page?: number; pageSize?: number } = {},
   ) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
@@ -81,6 +81,17 @@ export class StockDocumentsService {
       where.kind = kind as StockDocumentKind;
     }
     if (query.voucherOnly) where.voucherKind = { not: null };
+    if (query.q !== undefined) {
+      if (typeof query.q !== 'string' || query.q.trim().length > 120) {
+        throw new BadRequestException('Search must be text of at most 120 characters');
+      }
+      const term = query.q.trim();
+      if (term) where.OR = [
+        {documentNumber:{contains:term,mode:'insensitive'}},
+        {counterpartyName:{contains:term,mode:'insensitive'}},
+        {reason:{contains:term,mode:'insensitive'}},
+      ];
+    }
     if (query.branchId) where.branchId = query.branchId;
     if (query.from || query.to) {
       where.documentDate = {};

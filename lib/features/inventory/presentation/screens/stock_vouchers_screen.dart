@@ -27,15 +27,21 @@ class StockVouchersScreen extends ConsumerStatefulWidget {
 
 class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
   int _page = 1;
+  final _search = TextEditingController();
+  String _query = '';
   late Future<Json> _future;
   @override
   void initState() { super.initState(); _future = _load(); }
   Future<Json> _load() {
     final branchId=ref.read(currentUserProvider)?.branchId;
     if (branchId == null) throw StateError('No user branch');
-    return ref.read(apiClientProvider).getObject(_base, query:{'page':_page,'pageSize':50,'branchId':branchId,'voucherOnly':'true'});
+    return ref.read(apiClientProvider).getObject(_base, query:{'page':_page,'pageSize':50,'branchId':branchId,
+      'voucherOnly':'true',if (_query.isNotEmpty) 'q':_query});
   }
   void _refresh() => setState(() { _future = _load(); });
+  void _submitSearch() { _query = _search.text.trim(); _page = 1; _refresh(); }
+  @override
+  void dispose() { _search.dispose(); super.dispose(); }
   Future<void> _create(String kind) async {
     await Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => StockVoucherCreateScreen(kind:kind)));
     if (mounted) _refresh();
@@ -58,6 +64,11 @@ class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
           if (canCreate && !canPrepare) Text(_label(context,'يلزم صلاحية قراءة الأصناف والمخازن لإنشاء إذن','Item and warehouse read permissions are required to create a voucher')),
           IconButton(onPressed:_refresh,icon:const Icon(Icons.refresh),tooltip:_label(context,'تحديث','Refresh')),
         ]),
+        Padding(padding:const EdgeInsets.symmetric(horizontal:16,vertical:8),child:Row(children:[
+          Expanded(child:TextField(controller:_search,maxLength:120,onSubmitted:(_) => _submitSearch(),
+            decoration:InputDecoration(labelText:_label(context,'البحث بالرقم أو الجهة أو السبب','Search by number, counterparty or reason'),counterText:''))),
+          IconButton(tooltip:_label(context,'بحث','Search'),onPressed:_submitSearch,icon:const Icon(Icons.search)),
+        ])),
         Expanded(child:FutureBuilder<Json>(future:_future,builder:(context,snapshot) {
           if (snapshot.hasError) return Center(child:Text('${snapshot.error}'));
           if (!snapshot.hasData) return const Center(child:CircularProgressIndicator());

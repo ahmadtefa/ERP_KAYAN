@@ -18,6 +18,7 @@ class _VoucherApi extends ApiClient {
   final actions=<String>[];
   bool reviewed=false, approved=false, paged=false;
   final itemPages=<int>[];
+  final listQueries=<Map<String,dynamic>>[];
   String status='draft';
   @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async {
@@ -34,14 +35,17 @@ class _VoucherApi extends ApiClient {
     return [];
   }
   @override
-  Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async => path == '/inventory/stock-documents'
-    ? {'items':<Map<String,dynamic>>[],'total':0} : {
-    'id':'document','documentNumber':'SA-1','documentDate':'2026-11-04','voucherKind':'ISSUE',
-    'status':status,'counterpartyName':'Department','reason':'Synthetic','toWarehouseId':'warehouse',
-    'reviewedAt':reviewed ? '2026-11-04T12:00:00Z' : null,
-    'approvedAt':approved ? '2026-11-04T12:01:00Z' : null,
-    'lines':[{'itemCode':'IT','itemNameEn':'Item','quantity':'-2','unit':'piece','unitCost':'7'}],
-  };
+  Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async {
+    if (path == '/inventory/stock-documents') {
+      listQueries.add(Map<String,dynamic>.from(query ?? {}));
+      return {'items':<Map<String,dynamic>>[],'total':0};
+    }
+    return {'id':'document','documentNumber':'SA-1','documentDate':'2026-11-04','voucherKind':'ISSUE',
+      'status':status,'counterpartyName':'Department','reason':'Synthetic','toWarehouseId':'warehouse',
+      'reviewedAt':reviewed ? '2026-11-04T12:00:00Z' : null,
+      'approvedAt':approved ? '2026-11-04T12:01:00Z' : null,
+      'lines':[{'itemCode':'IT','itemNameEn':'Item','quantity':'-2','unit':'piece','unitCost':'7'}]};
+  }
   @override
   Future<Map<String,dynamic>> post(String path,{Object? body,String? idempotencyKey}) async {
     if (path == '/inventory/stock-documents') {
@@ -110,6 +114,19 @@ void main() {
     expect(api.itemPages,[1,2]);
     final dropdowns=tester.widgetList<DropdownButton<String>>(find.byType(DropdownButton<String>));
     expect(dropdowns.any((dropdown) => dropdown.items?.any((item) => item.value == 'item-201') ?? false),isTrue);
+  });
+  testWidgets('voucher search queries the server for the user branch', (tester) async {
+    final api=_VoucherApi();
+    await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWithValue(_user)],
+      child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,home:const StockVouchersScreen())));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), ' SA-1 ');
+    await tester.tap(find.byTooltip('Search')); await tester.pumpAndSettle();
+    expect(api.listQueries.last,containsPair('q','SA-1'));
+    expect(api.listQueries.last,containsPair('branchId','branch'));
+    expect(api.listQueries.last,containsPair('voucherOnly','true'));
+    expect(api.listQueries.last,containsPair('page',1));
   });
   testWidgets('limited role cannot see receipt costs review approval or export', (tester) async {
     const limited=AppUser(id:'limited',username:'tester',fullName:'Tester',companyId:'company',branchId:'branch',
