@@ -22,6 +22,7 @@ const { AuditService } = require('../src/common/audit/audit.service');
 const { CompanySettingsService } = require('../src/common/settings/company-settings.module');
 const { WarehouseService } = require('../src/common/warehouse/warehouse.service');
 const { CostCentersService } = require('../src/modules/accounting/cost-centers.service');
+const { BudgetsService } = require('../src/modules/accounting/budgets.service');
 const { FiscalPeriodsService } = require('../src/modules/accounting/fiscal-periods.service');
 const { DocumentNumberService } = require('../src/modules/accounting/document-number.service');
 const { AccountMapService } = require('../src/modules/accounting/account-map.service');
@@ -127,6 +128,35 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(persistedDates.startDate.toISOString().slice(0,10),'2026-01-01');
     assert.equal(persistedDates.endDate.toISOString().slice(0,10),'2026-12-31');
     console.log('PASS: real PostgreSQL cost center dates retain omitted values and clear explicit null/empty.');
+    // Required audit writes are in the same transaction as each budget change.
+    const budgets = new BudgetsService(prisma,audit);
+    const budgetInput = {costCenterId:datesCenter.id,accountId:difference,
+      periodStart:'2025-01-01',periodEnd:'2025-12-31',amount:'1000'};
+    const originalBudgetAudit = audit.recordRequired.bind(audit);
+    audit.recordRequired = async (input,tx) => {
+      if (input.entity === 'budgets') throw new Error('injected budget audit failure');
+      return originalBudgetAudit(input,tx);
+    };
+    try {
+      await assert.rejects(budgets.create(company,user,budgetInput),/injected budget audit failure/);
+      assert.equal(await prisma.budget.count({where:{companyId:company,costCenterId:datesCenter.id}}),0);
+    } finally { audit.recordRequired = originalBudgetAudit; }
+    const budget = await budgets.create(company,user,budgetInput);
+    audit.recordRequired = async (input,tx) => {
+      if (input.entity === 'budgets') throw new Error('injected budget audit failure');
+      return originalBudgetAudit(input,tx);
+    };
+    try {
+      await assert.rejects(budgets.update(company,user,budget.id,{amount:'2000'}),/injected budget audit failure/);
+      await assert.rejects(budgets.retire(company,user,budget.id),/injected budget audit failure/);
+      const unchanged = await budgets.findOne(company,budget.id);
+      assert.equal(unchanged.amount,'1000.0000'); assert.equal(unchanged.retired,false);
+    } finally { audit.recordRequired = originalBudgetAudit; }
+    assert.equal((await budgets.update(company,user,budget.id,{amount:'2000'})).amount,'2000.0000');
+    assert.equal((await budgets.retire(company,user,budget.id)).retired,true);
+    const budgetAudit = await prisma.auditLog.findMany({where:{companyId:company,entity:'budgets',entityId:budget.id}});
+    assert.deepEqual(budgetAudit.map(x => x.action).sort(),['CREATE','DELETE','UPDATE']);
+    console.log('PASS: real PostgreSQL budget create/update/retire roll back on audit failure.');
     // Real chart operations, not an HTTP or Flutter test. The fixture uses
     // unique synthetic codes and keeps historical journal rows untouched.
     const chart = new ChartOfAccountsService(prisma, audit);
