@@ -234,7 +234,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
     final l10n = context.l10n;
     final user = ref.watch(currentUserProvider);
     final invoices = ref.watch(invoiceListProvider(widget.kind));
-    final canCreate = user?.branchId != null &&
+    final canCreate = !_saved && user?.branchId != null &&
         (user!.can(widget.kind.isSales ? 'sales.invoices.create' : 'purchases.invoices.create'));
 
     return ModuleScaffold(
@@ -299,7 +299,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
                           '${text(partyOf(_invoice!, widget.kind), 'nameEn', fallback: '—')}',
                         ),
                         TextButton.icon(
-                          onPressed: _saving ? null : _chooseDate,
+                          onPressed: _saving || _saved ? null : _chooseDate,
                           icon: const Icon(Icons.calendar_today_outlined),
                           label: Text('${l10n.returnDate}: $_returnDate'),
                         ),
@@ -310,7 +310,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: _reason,
-                  enabled: !_saving,
+                  enabled: !_saving && !_saved,
                   decoration: InputDecoration(
                     labelText: l10n.returnReason,
                     prefixIcon: const Icon(Icons.info_outline),
@@ -387,7 +387,7 @@ class _ReturnEditorScreenState extends ConsumerState<ReturnEditorScreen> {
               width: 150,
               child: TextField(
                 controller: line.quantity,
-                enabled: line.remaining > Decimal.zero && !_saving,
+                enabled: line.remaining > Decimal.zero && !_saving && !_saved,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),

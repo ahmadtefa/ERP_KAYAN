@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:erp_kayan/app/router/app_router.dart';
+import 'package:erp_kayan/app/router/draft_exit_guard.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
@@ -102,7 +103,8 @@ void main() {
             routes: [
               GoRoute(
                 path: '/new',
-                builder: (context, state) => const QuotationEditorScreen(),
+                onExit: (context,state) => ProviderScope.containerOf(context).read(draftExitGuardProvider).canLeave(state.pageKey),
+                builder: (context, state) => QuotationEditorScreen(navigationKey:state.pageKey),
               ),
               GoRoute(
                 path: AppRoutes.quotations,
@@ -187,6 +189,7 @@ void main() {
     api.pendingPost!.complete({'id':'quotation-id'});
     await tester.pumpAndSettle();
 
+    expect(find.text('quotation list'),findsOneWidget);
     expect(api.postPath, '/sales/quotations');
     final body = api.postBody!;
     expect(body['subject'], 'Renewal offer');

@@ -434,7 +434,6 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   bool _loading = false;
   bool _loadFailed = false;
   bool _confirmingExit = false;
-  bool _saved = false;
   late String _savedSnapshot;
   late final DraftExitGuard _exitGuard;
 
@@ -453,7 +452,6 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   });
 
   Future<bool> _confirmExit() async {
-    if (_saved) return true;
     if (_saving || _confirmingExit) return false;
     if (_loading || _loadFailed || _snapshot() == _savedSnapshot) return true;
     _confirmingExit = true;
@@ -871,8 +869,10 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
       }
       ref.invalidate(quotationsProvider);
       if (mounted) {
+        // From this point only the exact submitted snapshot is clean. If a
+        // route transition is delayed, later edits must still be protected.
+        setState(() { _savedSnapshot = _snapshot(); _saving = false; });
         showMessage(context, l10n.quotationSaved);
-        _saved = true;
         context.go(AppRoutes.quotations);
       }
     } on Failure catch (error) {
