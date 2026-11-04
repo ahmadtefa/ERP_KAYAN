@@ -178,6 +178,7 @@ export class StockDocumentsService {
 
       lines: StockDocumentLineInput[];
     },
+    mayReadCost = true,
   ) {
     const kind = String(dto.kind ?? '').toUpperCase() as StockDocumentKind;
     if (!Object.values(StockDocumentKind).includes(kind)) {
@@ -364,7 +365,7 @@ export class StockDocumentsService {
             ? 'SC'
             : 'SA';
       const documentNumber = await this.numbers.next(tx, companyId, `STOCK_${kind}`, prefix);
-      return tx.stockDocument.create({
+      const document = await tx.stockDocument.create({
         data: {
           companyId,
           branchId: targetBranch,
@@ -395,25 +396,22 @@ export class StockDocumentsService {
           },
         },
       });
+      await this.audit.recordRequired({
+        companyId, userId, action: 'CREATE', entity: 'stock_documents',
+        entityId: document.id,
+        after: { documentNumber: document.documentNumber, kind, lines: lines.length },
+      }, tx);
+      return document;
     });
 
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'CREATE',
-      entity: 'stock_documents',
-      entityId: created.id,
-      after: { documentNumber: created.documentNumber, kind, lines: lines.length },
-    });
-
-    return this.findOne(companyId, created.id);
+    return this.findOne(companyId, created.id, mayReadCost);
   }
 
   /**
    * Posts the document: movements, stock balances and - when value changes -
    * one journal entry.
    */
-  async post(companyId: string, userId: string, id: string) {
+  async post(companyId: string, userId: string, id: string, mayReadCost = true) {
     const document = await this.prisma.stockDocument.findFirst({
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
@@ -431,7 +429,7 @@ export class StockDocumentsService {
     }
     const settings = await this.settings.get(companyId);
 
-    const result = await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       const claimed = await tx.stockDocument.updateMany({
         where: { id: document.id, status: InvoiceStatus.DRAFT, deletedAt: null },
         data: { status: InvoiceStatus.POSTED, postedAt: new Date(), postedBy: userId },
@@ -673,28 +671,22 @@ export class StockDocumentsService {
         });
       }
 
-      return { journal, valueChange };
+      await this.audit.recordRequired({
+        companyId, userId, action: 'POST', entity: 'stock_documents', entityId: id,
+        after: {
+          documentNumber: document.documentNumber,
+          kind: document.kind,
+          journalNumber: journal?.entryNumber ?? null,
+          valueChange: valueChange.toFixed(MONEY_SCALE),
+        },
+      }, tx);
     });
 
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'POST',
-      entity: 'stock_documents',
-      entityId: id,
-      after: {
-        documentNumber: document.documentNumber,
-        kind: document.kind,
-        journalNumber: result.journal?.entryNumber ?? null,
-        valueChange: result.valueChange.toFixed(MONEY_SCALE),
-      },
-    });
-
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
   /** Reverses a posted document: opposite movements, and the entry mirror. */
-  async reverse(companyId: string, userId: string, id: string) {
+  async reverse(companyId: string, userId: string, id: string, mayReadCost = true) {
     const document = await this.prisma.stockDocument.findFirst({
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
@@ -848,17 +840,12 @@ export class StockDocumentsService {
           `Reversal of stock document ${document.documentNumber}`,
         );
       }
+      await this.audit.recordRequired({
+        companyId, userId, action: 'REVERSE', entity: 'stock_documents', entityId: id,
+      }, tx);
     });
 
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'REVERSE',
-      entity: 'stock_documents',
-      entityId: id,
-    });
-
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
   // ------------------------------------------------------------------ helpers

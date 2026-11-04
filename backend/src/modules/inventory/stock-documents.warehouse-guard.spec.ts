@@ -251,7 +251,7 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
     {
       resolve: jest.fn(async () => ({ inventory: 'acct-inv', inventoryDifference: 'acct-diff' })),
     } as never,
-    { record: jest.fn(async () => undefined) } as never,
+    { recordRequired: jest.fn(async () => undefined) } as never,
     settings as never,
     warehouses,
     { assertPostable: jest.fn() } as never,

@@ -38,7 +38,7 @@ function makeService(item: any = milkItem) {
     { next: jest.fn(async () => 'ST-0001') } as never,
     {} as never,
     {} as never,
-    { record: jest.fn(async () => undefined) } as never,
+    { recordRequired: jest.fn(async () => undefined) } as never,
     { get: jest.fn() } as never,
     {} as never,
     { assertPostable: jest.fn() } as never,

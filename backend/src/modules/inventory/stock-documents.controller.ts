@@ -33,18 +33,18 @@ export class StockDocumentsController {
   @Post()
   @RequirePermissions('inventory.stock.adjust')
   create(@CurrentUser() user: AuthUser, @Body() body: Record<string, unknown>) {
-    return this.service.create(user.companyId, user.branchId, user.userId, body as never);
+    return this.service.create(user.companyId, user.branchId, user.userId, body as never, canReadCost(user));
   }
 
   @Post(':id/post')
   @RequirePermissions('inventory.stock.adjust')
   post(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.post(user.companyId, user.userId, id);
+    return this.service.post(user.companyId, user.userId, id, canReadCost(user));
   }
 
   @Post(':id/reverse')
   @RequirePermissions('inventory.stock.adjust')
   reverse(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.reverse(user.companyId, user.userId, id);
+    return this.service.reverse(user.companyId, user.userId, id, canReadCost(user));
   }
 }

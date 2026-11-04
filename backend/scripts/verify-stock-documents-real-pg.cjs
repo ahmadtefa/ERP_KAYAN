@@ -87,9 +87,28 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(hierarchy.rows[0].isActive, true);
     console.log('PASS: real PostgreSQL + Prisma chart create, child relationship, duplicate and activation rules.');
 
-    const receipt = await service.create(company, branch, user, { kind:'ADJUSTMENT', documentDate:date,
-      toWarehouseId:warehouse, reason:'Synthetic receipt', lines:[{itemId:item, quantity:'10', unitCost:'7.5'}] });
-    await service.post(company, user, receipt.id);
+    const failStockAudit = async (action, operation) => {
+      const original = audit.recordRequired.bind(audit);
+      audit.recordRequired = async (input,tx) => {
+        if (input.entity === 'stock_documents' && input.action === action) throw new Error('injected stock audit failure');
+        return original(input,tx);
+      };
+      try { await assert.rejects(operation(),/injected stock audit failure/); }
+      finally { audit.recordRequired = original; }
+    };
+    const receiptInput = { kind:'ADJUSTMENT', documentDate:date,
+      toWarehouseId:warehouse, reason:'Synthetic receipt', lines:[{itemId:item, quantity:'10', unitCost:'7.5'}] };
+    const beforeCreate = await prisma.stockDocument.count({where:{companyId:company}});
+    await failStockAudit('CREATE', () => service.create(company, branch, user, receiptInput));
+    assert.equal(await prisma.stockDocument.count({where:{companyId:company}}),beforeCreate);
+    const receipt = await service.create(company, branch, user, receiptInput, false);
+    assert.equal(receipt.lines[0].unitCost,null);
+    await failStockAudit('POST', () => service.post(company, user, receipt.id));
+    assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:receipt.id}})).status,'DRAFT');
+    assert.equal(await prisma.stockMovement.count({where:{referenceId:receipt.id}}),0);
+    assert.equal(await prisma.journalEntry.count({where:{sourceId:receipt.id}}),0);
+    const postedReceipt = await service.post(company, user, receipt.id, false);
+    assert.equal(postedReceipt.lines[0].unitCost,null);
     const issue = await service.create(company, branch, user, { kind:'ADJUSTMENT', documentDate:date,
       toWarehouseId:warehouse, costCenterId:centre, reason:'Synthetic issue',
       lines:[{itemId:item, quantity:'-4', unitCost:'1'}] });
@@ -142,7 +161,17 @@ let difference = '70000000-0000-4000-8000-000000000005';
     // Emulate a legacy draft-line cost that disagrees with the immutable
     // posted movement. Reversal must use the movement's historical valuation.
     await sql.query('UPDATE stock_document_lines SET quantity=-4, "unitCost"=1 WHERE "documentId"=$1', [issue.id]);
-    await service.reverse(company, user, issue.id);
+    const movementsBeforeReverse = await prisma.stockMovement.count({where:{referenceId:issue.id}});
+    const journalsBeforeReverse = await prisma.journalEntry.count({where:{companyId:company}});
+    await failStockAudit('REVERSE', () => service.reverse(company, user, issue.id));
+    assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:issue.id}})).status,'POSTED');
+    assert.equal(await prisma.stockMovement.count({where:{referenceId:issue.id}}),movementsBeforeReverse);
+    assert.equal(await prisma.journalEntry.count({where:{companyId:company}}),journalsBeforeReverse);
+    const afterAuditFailure = await sql.query('SELECT quantity::text, value::text FROM stock_balances WHERE "companyId"=$1 AND "branchId"=$2 AND "itemId"=$3', [company,branch,item]);
+    assert.equal(Number(afterAuditFailure.rows[0].quantity),6);
+    assert.equal(Number(afterAuditFailure.rows[0].value),45);
+    const reversedIssue = await service.reverse(company, user, issue.id, false);
+    assert.equal(reversedIssue.lines[0].unitCost,null);
     const restored = await sql.query('SELECT quantity::text, value::text FROM stock_balances WHERE "companyId"=$1 AND "branchId"=$2 AND "itemId"=$3', [company,branch,item]);
     assert.equal(Number(restored.rows[0].quantity),10);
     assert.equal(Number(restored.rows[0].value),75);

@@ -1,0 +1,42 @@
+import { Module } from '@nestjs/common';
+import { NestFactory, Reflector } from '@nestjs/core';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { StockDocumentsController } from './stock-documents.controller';
+import { StockDocumentsService } from './stock-documents.service';
+
+const calls = { create: jest.fn(), post: jest.fn(), reverse: jest.fn(), findOne: jest.fn() };
+for (const fn of Object.values(calls)) fn.mockImplementation(async (...args: unknown[]) => ({
+  lines: [{ unitCost: args.at(-1) === true ? '11.0000' : null }],
+}));
+@Module({ controllers:[StockDocumentsController], providers:[{ provide:StockDocumentsService, useValue:calls }] })
+class FixtureModule {}
+
+describe('stock document response cost visibility', () => {
+  it('passes cost visibility for every HTTP operation, not only reads', async () => {
+    const app = await NestFactory.create(FixtureModule, { logger:false });
+    app.use((req: { headers: Record<string,string>; user?: object }, _res: unknown, next: () => void) => {
+      req.user = { companyId:'company', branchId:'branch', userId:'user', isSuperAdmin:false,
+        permissions:['inventory.stock.read','inventory.stock.adjust', ...(req.headers['x-cost'] === 'yes' ? ['inventory.cost.read'] : [])] };
+      next();
+    });
+    app.useGlobalGuards(new PermissionsGuard(new Reflector()));
+    await app.listen(0, '127.0.0.1');
+    const port = (app.getHttpServer().address() as {port:number}).port;
+    try {
+      for (const [method,path] of [['GET','/doc'],['POST',''],['POST','/doc/post'],['POST','/doc/reverse']]) {
+        for (const allowed of [false,true]) {
+          const response = await fetch(`http://127.0.0.1:${port}/inventory/stock-documents${path}`, {
+            method, headers:{'content-type':'application/json','x-cost':allowed ? 'yes' : 'no'},
+            ...(method === 'POST' ? {body:'{}'} : {}),
+          });
+          expect(response.ok).toBe(true);
+          expect((await response.json() as {lines:Array<{unitCost:string | null}>}).lines[0].unitCost)
+            .toBe(allowed ? '11.0000' : null);
+        }
+      }
+      expect(calls.create).toHaveBeenLastCalledWith('company','branch','user',{},true);
+      expect(calls.post).toHaveBeenLastCalledWith('company','user','doc',true);
+      expect(calls.reverse).toHaveBeenLastCalledWith('company','user','doc',true);
+    } finally { await app.close(); }
+  });
+});
