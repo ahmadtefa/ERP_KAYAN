@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuditedSuperAdminGuard } from '../../common/guards/audited-super-admin.guard';
 import { AuditModule } from '../../common/audit/audit.module';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { AccountMapService } from './account-map.service';
@@ -33,6 +34,7 @@ import { YearEndCloseService } from './year-end-close.service';
     AccountingSettingsController,
   ],
   providers: [
+    AuditedSuperAdminGuard,
     ChartOfAccountsService,
     JournalEntriesService,
     DocumentNumberService,

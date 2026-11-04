@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 
+import { AuditedSuperAdminGuard } from '../../common/guards/audited-super-admin.guard';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { BackupScheduleService } from './backup-schedule.service';
@@ -15,6 +16,7 @@ import { BackupScheduleService } from './backup-schedule.service';
  */
 @Controller('backup/schedule')
 @RequirePermissions('admin.backup')
+@UseGuards(AuditedSuperAdminGuard)
 export class BackupScheduleController {
   constructor(private readonly schedule: BackupScheduleService) {}
 

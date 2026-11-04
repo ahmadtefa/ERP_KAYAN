@@ -15,6 +15,7 @@ describe('scheduled backup safety', () => {
       verify: jest.fn().mockResolvedValue({ entries: 1 }),
       list: jest.fn().mockResolvedValue([]),
       remove: jest.fn(),
+      assertDeletionSafe: jest.fn().mockRejectedValue(new Error('retention paused')),
     };
     const settings = { get: jest.fn().mockResolvedValue({ backupIntervalHours: 1, backupRetentionCount: 1 }) };
     const service = new BackupScheduleService(prisma as any, full as any, settings as any);
@@ -35,10 +36,22 @@ describe('scheduled backup safety', () => {
     expect(full.remove).not.toHaveBeenCalled();
   });
 
-  it('invokes retention after metadata verification succeeds', async () => {
-    const { service, prune } = setup();
-    expect((await service.runNow('company'))[0].status).toBe('VERIFIED');
-    expect(prune).toHaveBeenCalledWith(1, 'run');
+  it('retains previous backups even after archive content is readable', async () => {
+    const { service, prune, full } = setup();
+    const result = await service.runNow('company');
+    expect(result[0].status).toBe('SUCCESS');
+    expect(result[0].message).toContain('complete restore is not verified');
+    expect(result[0].message).toContain('retention is paused');
+    expect(prune).not.toHaveBeenCalled();
+    expect(full.remove).not.toHaveBeenCalled();
+  });
+
+  it('refuses manual retention before listing or removing any file', async () => {
+    const { service, prune, full } = setup();
+    prune.mockRestore();
+    await expect(service.pruneRetention(1)).rejects.toThrow('retention paused');
+    expect(full.list).not.toHaveBeenCalled();
+    expect(full.remove).not.toHaveBeenCalled();
   });
 
   it('does not log raw scheduled-backup or retention errors', async () => {
@@ -48,9 +61,8 @@ describe('scheduled backup safety', () => {
     full.createFull.mockRejectedValueOnce(new Error(marker));
     await (service as any).tick();
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain(marker);
-    prune.mockRejectedValueOnce(new Error(marker));
     await service.runNow('company');
+    expect(prune).not.toHaveBeenCalled();
     expect(JSON.stringify(warningLog.mock.calls)).not.toContain(marker);
-    expect(warningLog).toHaveBeenCalled();
   });
 });

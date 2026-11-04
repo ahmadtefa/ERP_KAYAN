@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { SuperAdminGuard } from '../../common/guards/super-admin.guard';
+import { AuditedSuperAdminGuard } from '../../common/guards/audited-super-admin.guard';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 
 /// The company's policies: tax, discount cap, stock rules, approval, backup
@@ -20,7 +20,7 @@ export class AccountingSettingsController {
 
   @Patch()
   @RequirePermissions('admin.company.manage')
-  @UseGuards(SuperAdminGuard)
+  @UseGuards(AuditedSuperAdminGuard)
   update(@CurrentUser() user: AuthUser, @Body() body: Record<string, unknown>) {
     return this.settings.update(user.companyId, user.userId, body);
   }

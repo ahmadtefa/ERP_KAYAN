@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -47,8 +48,9 @@ import { pgBackupConnectionEnv } from './pg-backup-connection';
  * It must not be considered safe for production until those gaps are closed.
  * Its present checks include:
  *
- *  1. the file header and table of contents are checked with `pg_restore --list`
- *     (this does not validate every data block);
+ *  1. the header and table of contents are checked, then pg_restore reads the
+ *     archive into the system null device without connecting to a database;
+ *     this detects unreadable blocks, but is not a complete restore proof;
  *  2. it is restored into a scratch database first — a restore that cannot
  *     complete never touches production;
  *  3. the current database is dumped to a safety file; if that fails, the
@@ -91,6 +93,10 @@ export interface BackupVerification {
   /// How many objects `pg_restore --list` found inside the archive. Zero
   /// means the archive is empty, which is never a usable backup.
   entries: number;
+  /// Reading archive content is not a restore rehearsal or a machine backup.
+  archiveContentReadable: true;
+  fullRestoreRehearsed: false;
+  includesExternalFiles: false;
   verifiedAt: string;
   tool: string;
 }
@@ -110,6 +116,7 @@ export class FullBackupService {
   private canCreateDatabase = true;
   private lastCreateDatabaseFailure: string | null = null;
   private restoreInProgress = false;
+  private activeBackups = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -156,6 +163,8 @@ export class FullBackupService {
       serverVersion,
       warning,
       backupDirectory: this.backupDir(),
+      // No archive currently has proof of a complete machine restore.
+      deletionProtected: true,
       // A scratch restore is mandatory before the primary can be touched.
       canRehearseRestore: this.canCreateDatabase,
       rehearsalNote: this.canCreateDatabase
@@ -318,7 +327,17 @@ export class FullBackupService {
   async createFull(
     userId: string | null,
   ): Promise<{ file: FullBackupFile; durationMs: number }> {
-    return this.dump('full', userId);
+    if (this.restoreInProgress || this.maintenance.isActive) {
+      throw new ServiceUnavailableException('A restore is running or the database is in maintenance mode. The backup was not started.');
+    }
+    // Claim before the first await so a restore in this service instance cannot begin
+    // while pg_dump is reading the database. Multiple backups may coexist.
+    this.activeBackups++;
+    try {
+      return await this.dump('full', userId);
+    } finally {
+      this.activeBackups--;
+    }
   }
 
   /// The automatic safety copy taken just before a restore replaces anything.
@@ -361,9 +380,8 @@ export class FullBackupService {
         ...this.connectionArgs(),
       ]);
       file = await this.validateAndDescribe(partial, name, kind);
-      // The header alone is not enough: refuse an unreadable or empty table
-      // of contents before publishing either a user or a safety backup. This
-      // is not a substitute for a full restore rehearsal of the archive data.
+      // Read both the table of contents and the archive data before publishing.
+      // This is not a complete restore rehearsal or a backup of external files.
       await this.verifyUploaded(name, tools.pgRestore as string, partial);
       // Hard-linking within the same directory is atomic and fails if a
       // completed backup already occupies the destination. Never replace it.
@@ -455,10 +473,9 @@ export class FullBackupService {
   }
 
   /**
-   * Checks the archive header and table of contents with `pg_restore --list`.
-   * This catches unreadable or empty archive metadata, but does not read every
-   * data block and does not establish that the archive can be fully restored.
-   * A complete restore rehearsal is needed before relying on that claim.
+   * Checks the header, table of contents, and reads archive content through
+   * pg_restore without connecting to PostgreSQL or writing SQL to disk.
+   * This is not a full restore or a backup of external files and licence state.
    */
   async verify(name: string): Promise<BackupVerification> {
     const tools = this.requireTools();
@@ -520,10 +537,21 @@ export class FullBackupService {
       );
     }
 
+    try {
+      await this.readArchiveContent(tools.pgRestore as string, path);
+    } catch {
+      throw new ServiceUnavailableException(
+        `The backup file "${name}" contains data that pg_restore could not read. Nothing was changed.`,
+      );
+    }
+
     return {
       name,
       sizeBytes: info.size,
       entries,
+      archiveContentReadable: true,
+      fullRestoreRehearsed: false,
+      includesExternalFiles: false,
       verifiedAt: new Date().toISOString(),
       tool: tools.pgRestore as string,
     };
@@ -555,7 +583,32 @@ export class FullBackupService {
           'restored. The current data was not touched.',
       );
     }
+    try {
+      await this.readArchiveContent(pgRestore, stagingPath);
+    } catch {
+      throw new BadRequestException(
+        'The backup archive contains data that pg_restore could not read. The current database was not changed.',
+      );
+    }
     return entries;
+  }
+
+  /** Discard SQL at the OS null device: never persist or log customer rows. */
+  private async readArchiveContent(pgRestore: string, archive: string): Promise<void> {
+    const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null';
+    await runCapture(pgRestore, ['--file', nullDevice, archive], 600_000);
+  }
+
+  /**
+   * Reading a pg_dump is not evidence that database, files and licence can be
+   * restored together. Until such evidence exists, deletion is fail-closed.
+   * This protects the last viable copy in both manual and retention paths.
+   */
+  async assertDeletionSafe(): Promise<void> {
+    throw new ConflictException({
+      code: 'BACKUP_DELETE_PROTECTED',
+      detail: 'Backup deletion is paused until a complete replacement restore can be verified.',
+    });
   }
 
   async remove(name: string, userId: string | null): Promise<void> {
@@ -563,6 +616,7 @@ export class FullBackupService {
     if (!existsSync(path)) {
       throw new NotFoundException(`No backup file named "${name}" on this server`);
     }
+    await this.assertDeletionSafe();
     try {
       await unlink(path);
     } catch (error) {
@@ -596,6 +650,9 @@ export class FullBackupService {
       throw new ServiceUnavailableException(
         'A restore is already running or the database is in maintenance mode.',
       );
+    }
+    if (this.activeBackups > 0) {
+      throw new ServiceUnavailableException('A backup is running. The restore was not started.');
     }
     // Claim synchronously, before the first await: another request in this
     // process must not clear this restore's maintenance flag or staging file.

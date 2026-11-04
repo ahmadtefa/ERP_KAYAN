@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -137,6 +138,11 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     ref.read(reportLinkProvider).fullBackupDownload(name),
   );
 
+  String _deleteProtectionMessage() =>
+      Localizations.localeOf(context).languageCode == 'ar'
+          ? 'حذف النسخ متوقف لحمايتها حتى يثبت استرجاع نسخة بديلة كاملة تشمل البيانات والملفات والترخيص.'
+          : 'Deletion is paused to protect backups until a complete replacement restore, including files and licence, is verified.';
+
   Future<void> _delete(String name) async {
     final l10n = context.l10n;
     final confirmed = await showDialog<bool>(
@@ -162,7 +168,13 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
       await _load();
     } catch (error) {
       if (!mounted) return;
-      setState(() => _failure = describeApiError(error));
+      final protected = error is DioException &&
+          error.response?.statusCode == 409 &&
+          error.response?.data is Map &&
+          (error.response?.data as Map)['code'] == 'BACKUP_DELETE_PROTECTED';
+      setState(() => _failure = protected
+          ? _deleteProtectionMessage()
+          : describeApiError(error));
     }
   }
 
@@ -328,6 +340,14 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
               l10n.fullBackupDescription,
               style: theme.textTheme.bodySmall,
             ),
+            if (capabilities?['deletionProtected'] == true) ...[
+              const SizedBox(height: 8),
+              _Notice(
+                icon: Icons.warning_amber_outlined,
+                color: theme.colorScheme.error,
+                text: _deleteProtectionMessage(),
+              ),
+            ],
             const SizedBox(height: 12),
             // The actions are always on the screen once the first load has
             // answered — success or failure. They used to exist only in the
@@ -443,7 +463,7 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
                       IconButton(
                         tooltip: l10n.deleteBackup,
                         icon: const Icon(Icons.delete_outline, size: 20),
-                        onPressed: _busy
+                        onPressed: _busy || capabilities?['deletionProtected'] == true
                             ? null
                             : () => _delete('${file['name']}'),
                       ),

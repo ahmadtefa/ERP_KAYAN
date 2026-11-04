@@ -1,11 +1,16 @@
 import { Module } from '@nestjs/common';
 import { NestFactory, Reflector } from '@nestjs/core';
+import { AuditedSuperAdminGuard } from '../../common/guards/audited-super-admin.guard';
+import { AuditService } from '../../common/audit/audit.service';
+import { PrismaService } from '../../common/prisma/prisma.service';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { CompanyController } from './company.controller';
 import { CompaniesController } from './companies.controller';
 import { CompanyService } from './company.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
 import { AccountingSettingsController } from '../accounting/settings.controller';
+import { BackupScheduleController } from '../backup/backup-schedule.controller';
+import { BackupScheduleService } from '../backup/backup-schedule.service';
 
 const companyService = {
   updateProfile: jest.fn().mockResolvedValue({ updated: true }),
@@ -14,12 +19,14 @@ const companyService = {
   getProfile: jest.fn().mockResolvedValue({ id: 'fixture-company' }),
 };
 
+const deniedAudit = {recordRequired: jest.fn().mockResolvedValue(undefined)};
+const schedule = {status:jest.fn().mockResolvedValue({retentionCount:1}), history:jest.fn().mockResolvedValue([]), runNow:jest.fn().mockResolvedValue([]), pruneRetention:jest.fn().mockResolvedValue([])};
 const companySettingsService = {update:jest.fn().mockResolvedValue({updated:true})};
 
 @Module({
-  controllers: [CompanyController, CompaniesController, AccountingSettingsController],
-  providers: [{ provide: CompanyService, useValue: companyService },
-    {provide:CompanySettingsService,useValue:companySettingsService}],
+  controllers: [CompanyController, CompaniesController, AccountingSettingsController, BackupScheduleController],
+  providers: [AuditedSuperAdminGuard, {provide:AuditService,useValue:deniedAudit}, {provide:PrismaService,useValue:{}}, { provide: CompanyService, useValue: companyService },
+    {provide:CompanySettingsService,useValue:companySettingsService}, {provide:BackupScheduleService,useValue:schedule}],
 })
 class FixtureModule {}
 
@@ -31,7 +38,7 @@ describe('company profile HTTP authorization', () => {
       req.user = {
         userId: 'fixture-user', companyId: 'fixture-company', username: 'fixture', branchId: null,
         isSuperAdmin: req.headers['x-fixture-super'] === 'yes',
-        permissions: ['admin.company.manage', 'company.profile.manage'],
+        permissions: ['admin.company.manage', 'company.profile.manage', 'admin.backup'],
       };
       next();
     });
@@ -69,6 +76,24 @@ describe('company profile HTTP authorization', () => {
       expect(companySettingsService.update).not.toHaveBeenCalled();
       expect((await settingsPatch(true)).status).toBe(200);
       expect(companySettingsService.update).toHaveBeenCalledTimes(1);
+      for (const [method, path] of [['GET',''],['GET','/history'],['POST','/run'],['POST','/prune']]) {
+        const send = (superAdmin: boolean) => fetch(base + '/backup/schedule' + path, {
+          method, headers:{'x-fixture-super':superAdmin ? 'yes' : 'no','content-type':'application/json'},
+          ...(method === 'POST' ? {body:JSON.stringify({companyId:'another-company'})} : {}),
+        });
+        expect((await send(false)).status).toBe(403);
+        expect((await send(true)).status).toBe(method === 'POST' ? 201 : 200);
+      }
+      expect(schedule.runNow).toHaveBeenCalledTimes(1);
+      expect(schedule.pruneRetention).toHaveBeenCalledTimes(1);
+      // A failed audit does not allow the company update through.
+      deniedAudit.recordRequired.mockRejectedValueOnce(new Error('synthetic audit failure'));
+      const beforeFailure = companyService.updateProfile.mock.calls.length;
+      expect((await settingsPatch(false)).status).toBe(503);
+      expect(companyService.updateProfile.mock.calls.length).toBe(beforeFailure);
+      expect(companySettingsService.update).toHaveBeenCalledTimes(1);
+      expect(deniedAudit.recordRequired).toHaveBeenCalledTimes(12);
+      expect(deniedAudit.recordRequired).toHaveBeenCalledWith(expect.objectContaining({companyId:'fixture-company',userId:'fixture-user',action:'ACCESS_DENIED',entity:'super_admin_access'}), expect.anything());
       expect(companyService.updateProfile).toHaveBeenCalledTimes(2);
       expect(companyService.setLogo).toHaveBeenCalledTimes(2);
       expect(companyService.deleteLogo).toHaveBeenCalledTimes(2);

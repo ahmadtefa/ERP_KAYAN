@@ -135,6 +135,18 @@ for (const line of lines) {
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
+  // The backup deletion-protection widget uses synthetic file names only.
+  // Emit assertion counts and fixed framework diagnostics, never response data.
+  if (event.type === 'print' && tests.get(event.testID) === 'protected backups show why deletion is unavailable') {
+    const details = String(event.message ?? '').split(/\r?\n/).map(line =>
+      line.match(/^\s*(?:Expected:|Actual:)\s*(?:<\d+>|null|not null|exactly \d+ matching candidates|no matching candidates)/)?.[0]?.trim() ??
+      line.match(/test\/widget\/full_backup_section_test\.dart:\d+:\d+/)?.[0] ??
+      line.match(/(?:Bad state: No element|Bad state: Too many elements|Cannot hit test a render box that has never been laid out|pumpAndSettle timed out|A Timer is still pending|Multiple exceptions|RenderFlex overflowed|No ScaffoldMessenger widget found)/)?.[0] ??
+      line.match(/A RenderFlex overflowed by [0-9.]+ pixels on the (?:left|right|top|bottom)/)?.[0] ??
+      line.match(/^The following [A-Za-z]+ (?:was thrown|object was thrown).*$/)?.[0] ?? ''
+    ).filter(Boolean).join(' ');
+    if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
+  }
   if (event.type === 'error') {
     const message = `${tests.get(event.testID) ?? `test ${event.testID ?? 'unknown'}`}: ${event.error ?? 'unknown error'} ${event.stackTrace ?? ''} ${printed.get(event.testID) ?? ''}`;
     if (tests.get(event.testID)?.startsWith('screenshot:')) errors.push(message);

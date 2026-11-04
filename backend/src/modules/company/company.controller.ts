@@ -20,7 +20,7 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
-import { SuperAdminGuard } from '../../common/guards/super-admin.guard';
+import { AuditedSuperAdminGuard } from '../../common/guards/audited-super-admin.guard';
 import {
   CompanyService,
   LOGO_UPLOAD_MAX_BYTES,
@@ -54,7 +54,7 @@ export class CompanyController {
 
   @Patch('profile')
   @RequirePermissions('admin.company.manage')
-  @UseGuards(SuperAdminGuard)
+  @UseGuards(AuditedSuperAdminGuard)
   updateProfile(
     @CurrentUser() user: AuthUser,
     @Body() dto: UpdateCompanyProfileDto,
@@ -76,7 +76,7 @@ export class CompanyController {
 
   @Post('logo')
   @RequirePermissions('admin.company.manage')
-  @UseGuards(SuperAdminGuard)
+  @UseGuards(AuditedSuperAdminGuard)
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: LOGO_UPLOAD_MAX_BYTES, files: 1 } }),
   )
@@ -97,7 +97,7 @@ export class CompanyController {
 
   @Delete('logo')
   @RequirePermissions('admin.company.manage')
-  @UseGuards(SuperAdminGuard)
+  @UseGuards(AuditedSuperAdminGuard)
   async deleteLogo(@CurrentUser() user: AuthUser) {
     await this.service.deleteLogo(user.companyId, user.userId);
     return { deleted: true };

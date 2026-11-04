@@ -217,8 +217,8 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
     let message: string | null = `written in ${Math.round((Date.now() - started) / 1000)}s`;
     try {
       const verification = await this.full.verify(fileName);
-      status = 'VERIFIED';
-      message = `${message}; the dump was read back and holds ${verification.entries} objects`;
+      status = 'SUCCESS';
+      message = `${message}; archive read (${verification.entries} objects), but complete restore is not verified; retention is paused`;
     } catch {
       // The file may exist, but it has not passed verification and must not
       // be reported as a successful scheduled backup or drive retention.
@@ -226,7 +226,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       message = `${message}; verification could not run`;
     }
 
-    const run = await this.record({
+    await this.record({
       kind: 'SCHEDULED',
       fileName,
       status,
@@ -234,14 +234,9 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       companyId: company.id,
     });
 
-    // A failed verification must never trigger automatic retention. The
-    // verification checks archive metadata only; it is not a full restore.
-    if (status === 'VERIFIED') {
-      await this.pruneRetention(settings.backupRetentionCount, run.id).catch(() => {
-        this.logger.warn('Retention could not prune old backups.');
-      });
-    }
-
+    // The API still exposes explicit retention, but automatic deletion cannot
+    // proceed until complete replacement restore evidence exists. Keep all
+    // copies, including after a successful archive read.
     return { fileName, status, message };
   }
 
@@ -255,6 +250,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
    */
   async pruneRetention(count: number, keepRunId?: string): Promise<string[]> {
     if (count <= 0) return [];
+    await this.full.assertDeletionSafe();
 
     const files = await this.full.list();
     const ordered = [...files].sort(
