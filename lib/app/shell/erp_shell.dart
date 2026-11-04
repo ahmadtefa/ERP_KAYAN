@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/providers/auth_providers.dart';
+import '../../features/auth/presentation/widgets/user_photo.dart';
 import '../../features/licensing/presentation/widgets/licence_gate.dart';
 import '../../features/search/presentation/search_dialog.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
@@ -809,6 +810,7 @@ class _SidebarFooter extends ConsumerWidget {
     if (user == null) return const SizedBox.shrink();
     final theme = Theme.of(context);
     final initials = _initials(user.fullName, user.username);
+    final photo = ref.watch(userPhotoProvider((companyId:user.companyId,userId:user.id))).asData?.value;
     final role = user.roles.isEmpty ? user.username : user.roles.first;
     return Container(
       decoration: const BoxDecoration(
@@ -825,14 +827,15 @@ class _SidebarFooter extends ConsumerWidget {
               color: Colors.white.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(AppRadii.sm),
             ),
-            child: Text(
+            child: photo == null ? Text(
               initials,
               style: const TextStyle(
                 color: AppColors.onSidebar,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
               ),
-            ),
+            ) : ClipOval(child:Image.memory(photo,width:30,height:30,fit:BoxFit.cover,
+              errorBuilder:(_, _, _) => Text(initials))),
           ),
           const SizedBox(width: 10),
           Expanded(

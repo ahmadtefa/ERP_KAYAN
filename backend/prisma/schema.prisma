@@ -92,6 +92,8 @@ model Company {
   purchaseOrders PurchaseOrder[]
   salesOrders    SalesOrder[]
 
+  userProfilePhotos UserProfilePhoto[]
+
   @@map("companies")
 }
 
@@ -180,9 +182,23 @@ model User {
   refreshToken RefreshToken[]
   auditLogs    AuditLog[]
   journalEntry JournalEntry[]   @relation("JournalCreatedBy")
+  profilePhoto UserProfilePhoto?
 
   @@index([companyId])
   @@map("users")
+}
+
+model UserProfilePhoto {
+  userId    String   @id @db.Uuid
+  companyId String   @db.Uuid
+  data      Bytes
+  mime      String   @db.VarChar(64)
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@map("user_profile_photos")
 }
 
 model Role {

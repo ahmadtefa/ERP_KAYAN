@@ -7,6 +7,7 @@ import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/page_header.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../auth/presentation/widgets/user_photo.dart';
 import '../providers/company_providers.dart';
 import '../providers/locale_provider.dart';
 import '../widgets/lan_access_card.dart';
@@ -80,6 +81,8 @@ class SettingsScreen extends ConsumerWidget {
             ],
           ),
         ),
+        const SizedBox(height: 16),
+        const UserPhotoCard(),
         const SizedBox(height: 16),
         const TextScaleCard(),
         const SizedBox(height: 16),

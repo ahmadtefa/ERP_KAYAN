@@ -35,6 +35,8 @@ const { SalesOrdersService } = require('../src/modules/sales/sales-orders.servic
 const { PurchaseOrdersService } = require('../src/modules/purchases/purchase-orders.service');
 const { SalesInvoicesService } = require('../src/modules/sales/sales-invoices.service');
 const { PurchaseInvoicesService } = require('../src/modules/purchases/purchase-invoices.service');
+const { ProfilePhotoService } = require('../src/modules/auth/profile-photo.service');
+const sharp = require('sharp');
 
 const company = '10000000-0000-4000-8000-000000000001';
 const user = '20000000-0000-4000-8000-000000000001';
@@ -61,6 +63,31 @@ let difference = '70000000-0000-4000-8000-000000000005';
     difference = accounts.rows.find(row => row.code === '5107').id;
     await prisma.$connect();
     const audit = new AuditService(prisma);
+    // Real database persistence and transaction rollback for a synthetic user's
+    // self-service photo, with tenant and account isolation. No real image data.
+    const photos = new ProfilePhotoService(prisma,audit);
+    const image = await sharp({create:{width:32,height:32,channels:3,background:'#abc123'}}).png().toBuffer();
+    await photos.set(company,user,image,'image/png');
+    const savedPhoto = await photos.get(company,user);
+    assert.equal(savedPhoto.mime,'image/webp'); assert.ok(savedPhoto.data);
+    assert.equal((await photos.get('99999999-9999-4999-8999-999999999999',user)).data,null);
+    assert.equal((await photos.get(company,'99999999-9999-4999-8999-999999999999')).data,null);
+    const realAudit = audit.recordRequired.bind(audit);
+    audit.recordRequired = async (input,tx) => {
+      if (input.action === 'PROFILE_PHOTO_SET' || input.action === 'PROFILE_PHOTO_REMOVE') throw new Error('injected photo audit failure');
+      return realAudit(input,tx);
+    };
+    try {
+      await assert.rejects(photos.set(company,user,image,'image/png'),/injected photo audit failure/);
+      await assert.rejects(photos.remove(company,user),/injected photo audit failure/);
+    } finally { audit.recordRequired = realAudit; }
+    assert.deepEqual(await photos.get(company,user),savedPhoto);
+    await photos.remove(company,user);
+    assert.equal((await photos.get(company,user)).data,null);
+    const photoAudit = await prisma.auditLog.findMany({where:{companyId:company,userId:user,action:{in:['PROFILE_PHOTO_SET','PROFILE_PHOTO_REMOVE']}}});
+    assert.equal(photoAudit.length,2);
+    assert.ok(!JSON.stringify(photoAudit).includes(savedPhoto.data));
+    console.log('PASS: real PostgreSQL profile photo persistence, tenant isolation and audit rollback.');
     const costCenters = new CostCentersService(prisma, audit);
     const numbers = new DocumentNumberService();
     const periods = new FiscalPeriodsService(prisma, audit);
