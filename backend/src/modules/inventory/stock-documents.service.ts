@@ -483,7 +483,9 @@ export class StockDocumentsService {
             warehouseId: fromWarehouseId,
             itemId: line.itemId,
             quantity: line.quantity,
-            allowNegative: settings.allowNegativeStock,
+            // Stock documents never overdraw a warehouse, even if a legacy
+            // company setting permits negative stock in other workflows.
+            allowNegative: false,
             reference: document.documentNumber,
           });
 
@@ -558,6 +560,13 @@ export class StockDocumentsService {
             reference: document.documentNumber,
           });
         }
+        // A count reconciles the selected pile, not every warehouse in the
+        // branch. Lock the warehouse before the branch balance (the same order
+        // as issues and transfers) and read its committed movements only after
+        // that balance lock has serialized competing stock writes.
+        if (document.kind === StockDocumentKind.COUNT && toWarehouseId) {
+          await this.warehouses.lockForPosting(tx, companyId, toWarehouseId);
+        }
         const balance = await this.balance(tx, companyId, document.branchId, line.itemId);
         const onHand = balance?.quantity ?? new Prisma.Decimal(0);
         const onHandValue = balance?.value ?? new Prisma.Decimal(0);
@@ -567,8 +576,13 @@ export class StockDocumentsService {
 
         if (document.kind === StockDocumentKind.COUNT) {
           const counted = line.countedQuantity ?? new Prisma.Decimal(0);
-          quantity = counted.minus(onHand);
-          if (unitCost.isZero()) unitCost = averageCost;
+          const countedPile = toWarehouseId
+            ? await this.warehouses.availableQuantity(tx, companyId, toWarehouseId, line.itemId)
+            : onHand;
+          quantity = counted.minus(countedPile);
+          // Shortfalls consume existing inventory at its locked moving-average
+          // cost; a draft's arbitrary price cannot rewrite that valuation.
+          if (quantity.isNegative() || unitCost.isZero()) unitCost = averageCost;
           await tx.stockDocumentLine.update({
             where: { id: line.id },
             data: { quantity, unitCost },
@@ -587,8 +601,8 @@ export class StockDocumentsService {
         const absoluteQuantity = quantity.abs();
         const totalCost = unitCost.mul(absoluteQuantity).toDecimalPlaces(MONEY_SCALE);
 
-        // COUNT remains a reconciliation to physically counted reality and
-        // retains its existing branch-level-only posting policy.
+        // The warehouse lock and counted quantity above prevent a count from
+        // consuming stock held in another warehouse.
         await this.move(tx, {
           companyId,
           branchId: document.branchId,
@@ -700,7 +714,6 @@ export class StockDocumentsService {
         document.lines.some((line) => line.quantity.isNegative())) {
       throw new BadRequestException('Cannot automatically reverse a transfer with negative quantities; contact support');
     }
-    const settings = await this.settings.get(companyId);
     await this.prisma.$transaction(async (tx) => {
       const claimed = await tx.stockDocument.updateMany({
         where: { id, status: InvoiceStatus.POSTED },
@@ -756,7 +769,7 @@ export class StockDocumentsService {
           warehouseId: check.warehouseId,
           itemId: check.itemId,
           quantity: check.quantity,
-          allowNegative: settings.allowNegativeStock,
+          allowNegative: false,
           reference: document.documentNumber,
         });
       }

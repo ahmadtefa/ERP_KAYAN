@@ -336,17 +336,13 @@ describe('warehouse-level negative stock guard on transfer posting', () => {
     expect(h.state.movementCreates).not.toHaveBeenCalled();
   });
 
-  it('3. allowNegativeStock=true keeps the permissive behaviour at warehouse level', async () => {
-    // The branch holds 5 in another warehouse; the source warehouse is empty.
-    // With negatives permitted the posting succeeds and drives the source to -5.
+  it('3. a transfer cannot overdraw the warehouse even when legacy negatives are enabled', async () => {
     const h = makeHarness([seedMovement(W_DST, BRANCH, 5)], true);
     h.prisma.stockDocument.findFirst.mockResolvedValue(transferDocument());
-
-    await h.service.post(COMPANY, 'user-1', 'doc-1');
-
-    expect(h.state.warehouseQuantity(W_SRC).toFixed(4)).toBe('-5.0000');
-    expect(h.state.warehouseQuantity(W_DST).toFixed(4)).toBe('10.0000');
-    expect(h.state.movements()).toHaveLength(3);
+    await expect(h.service.post(COMPANY, 'user-1', 'doc-1')).rejects.toThrow(/selected warehouse/);
+    expect(h.state.warehouseQuantity(W_SRC).toFixed(4)).toBe('0.0000');
+    expect(h.state.warehouseQuantity(W_DST).toFixed(4)).toBe('5.0000');
+    expect(h.state.movementCreates).not.toHaveBeenCalled();
   });
 
   it('4. two warehouses of the same branch are checked independently (the reported defect)', async () => {
@@ -544,7 +540,7 @@ describe('warehouse-level negative stock guard on transfer posting', () => {
     expect(h.state.movements().at(-1)?.totalCost.toFixed(4)).toBe('37.5000');
   });
 
-  it('12. a COUNT document keeps reconciliation semantics and is not warehouse-gated', async () => {
+  it('12. a COUNT reconciles the selected warehouse, not the branch total', async () => {
     const h = makeHarness([seedMovement(W_DST, BRANCH, 3), seedMovement(W_SRC, BRANCH, 17)], false);
     h.prisma.stockDocument.findFirst.mockResolvedValue({
       ...transferDocument({
@@ -557,7 +553,11 @@ describe('warehouse-level negative stock guard on transfer posting', () => {
     });
 
     await h.service.post(COMPANY, 'user-1', 'doc-1'); // counting 2 where the warehouse shows 3
-    expect(h.state.movements().some((m) => m.referenceType === 'STOCK_COUNT')).toBe(true);
+    const count = h.state.movements().find((m) => m.referenceType === 'STOCK_COUNT');
+    expect(count?.quantity.toFixed(4)).toBe('1.0000');
+    expect(count?.direction).toBe(StockDirection.OUT);
+    expect(h.state.warehouseQuantity(W_DST).toFixed(4)).toBe('2.0000');
+    expect(h.state.warehouseQuantity(W_SRC).toFixed(4)).toBe('17.0000');
   });
 });
 
@@ -628,11 +628,11 @@ describe('warehouse-level stock guard on reversal', () => {
     expect(h.state.branchBalance().toFixed(4)).toBe('20.0000');
   });
 
-  it('respects the existing company setting permitting warehouse-level negatives', async () => {
+  it('refuses a reversal that overdraws the warehouse even with legacy negatives enabled', async () => {
     const h = makeHarness([seedMovement(W_SRC, BRANCH, 17), seedMovement(W_DST, BRANCH, 3)], true);
     h.prisma.stockDocument.findFirst.mockResolvedValue(posted());
-    await h.service.reverse(COMPANY, 'user-1', 'doc-1');
-    expect(h.state.warehouseQuantity(W_DST).toFixed(4)).toBe('-2.0000');
+    await expect(h.service.reverse(COMPANY, 'user-1', 'doc-1')).rejects.toThrow(/selected warehouse/);
+    expect(h.state.warehouseQuantity(W_DST).toFixed(4)).toBe('3.0000');
     expect(h.state.branchBalance().toFixed(4)).toBe('20.0000');
   });
 

@@ -181,7 +181,49 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const reversedReport = await statements.costCenterReport(company, {from: '2026-01-01', to: '2100-12-31', costCenterId: centre});
     assert.equal(reversedReport.items.find(row => row.costCenterId === centre).ownExpenses, '0.0000');
     assert.equal(reversedReport.reconciliation.balanced, true);
-    console.log('PASS: real PostgreSQL + Prisma stock receipt, issue, cost-centre journal, overdraw and duplicate-post rejection, and reversal.');
+    // A physical count belongs to one warehouse, not the branch sum. Seed
+    // another pile so a branch-level reconciliation would visibly overdraw.
+    const secondWarehouse = '70000000-0000-4000-8000-000000000006';
+    await prisma.warehouse.create({data:{id:secondWarehouse,companyId:company,branchId:branch,
+      code:'W2',nameEn:'Second synthetic warehouse',nameAr:'مخزن تجريبي آخر'}});
+    const otherReceipt = await service.create(company,branch,user,{kind:'ADJUSTMENT',documentDate:date,
+      toWarehouseId:secondWarehouse,lines:[{itemId:item,quantity:'10',unitCost:'7.5'}]});
+    await service.post(company,user,otherReceipt.id);
+    const count = await service.create(company,branch,user,{kind:'COUNT',documentDate:date,
+      toWarehouseId:warehouse,lines:[{itemId:item,countedQuantity:'7',unitCost:'1'}]});
+    await service.post(company,user,count.id);
+    const countMovement = await prisma.stockMovement.findFirstOrThrow({where:{referenceId:count.id}});
+    assert.equal(countMovement.direction,'OUT');
+    assert.equal(countMovement.quantity.toFixed(4),'3.0000');
+    assert.equal(countMovement.unitCost.toFixed(4),'7.5000');
+    const warehouseBalance = async id => Number((await sql.query(
+      `SELECT COALESCE(SUM(CASE WHEN direction='IN' THEN quantity ELSE -quantity END),0)::text AS q
+       FROM stock_movements WHERE "companyId"=$1 AND "warehouseId"=$2 AND "itemId"=$3`, [company,id,item])).rows[0].q);
+    assert.equal(await warehouseBalance(warehouse),7);
+    assert.equal(await warehouseBalance(secondWarehouse),10);
+    await prisma.companySetting.update({where:{companyId:company},data:{allowNegativeStock:true}});
+    try {
+      const overdrawnTransfer = await service.create(company,branch,user,{kind:'TRANSFER',documentDate:date,
+        fromBranchId:branch,fromWarehouseId:warehouse,toWarehouseId:secondWarehouse,
+        lines:[{itemId:item,quantity:'8'}]});
+      await assert.rejects(service.post(company,user,overdrawnTransfer.id),/selected warehouse/i);
+      assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:overdrawnTransfer.id}})).status,'DRAFT');
+      assert.equal(await warehouseBalance(warehouse),7);
+      assert.equal(await warehouseBalance(secondWarehouse),10);
+    } finally {
+      await prisma.companySetting.update({where:{companyId:company},data:{allowNegativeStock:false}});
+    }
+    const countedAgain = await service.create(company,branch,user,{kind:'COUNT',documentDate:date,
+      toWarehouseId:warehouse,lines:[{itemId:item,countedQuantity:'3'}]});
+    const concurrentIssue = await service.create(company,branch,user,{kind:'ADJUSTMENT',documentDate:date,
+      toWarehouseId:warehouse,lines:[{itemId:item,quantity:'-5'}]});
+    const countRace = await Promise.allSettled([
+      service.post(company,user,countedAgain.id), service.post(company,user,concurrentIssue.id),
+    ]);
+    assert.equal(countRace[0].status,'fulfilled');
+    assert.equal(await warehouseBalance(warehouse),3);
+    assert.equal(await warehouseBalance(secondWarehouse),10);
+    console.log('PASS: real PostgreSQL + Prisma stock receipt, issue, audit rollback, warehouse count, concurrency, journal and reversal.');
 
     // Real services and Prisma on the guarded disposable database. This is
     // not an HTTP, Flutter, installed-Windows or licensed-product test.
