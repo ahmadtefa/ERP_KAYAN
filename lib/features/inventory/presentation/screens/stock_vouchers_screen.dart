@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
+import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../orders/presentation/order_retry_store.dart';
@@ -16,6 +18,32 @@ import '../../../accounting/presentation/screens/journal_entries_screen.dart';
 const _base = '/inventory/stock-documents';
 String _label(BuildContext context, String ar, String en) =>
     Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
+
+/// Show the required acknowledgement once per failed load, without exposing
+/// transport diagnostics. Retrying fetches the original source again.
+class _VoucherLoadError extends StatefulWidget {
+  const _VoucherLoadError({required this.error,required this.onRetry});
+  final Object error;
+  final VoidCallback onRetry;
+  @override
+  State<_VoucherLoadError> createState() => _VoucherLoadErrorState();
+}
+class _VoucherLoadErrorState extends State<_VoucherLoadError> {
+  @override
+  void initState() { super.initState(); _report(); }
+  @override
+  void didUpdateWidget(covariant _VoucherLoadError oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.error != widget.error) _report();
+  }
+  void _report() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) showAppError(context,widget.error);
+    });
+  }
+  @override
+  Widget build(BuildContext context) => ErrorView(message:presentErrorText(context,widget.error),onRetry:widget.onRetry);
+}
 
 /// The list is sourced from the server after every action, not an optimistic
 /// local status. Pagination prevents old vouchers from silently disappearing.
@@ -32,7 +60,7 @@ class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
   late Future<Json> _future;
   @override
   void initState() { super.initState(); _future = _load(); }
-  Future<Json> _load() {
+  Future<Json> _load() async {
     final branchId=ref.read(currentUserProvider)?.branchId;
     if (branchId == null) throw StateError('No user branch');
     return ref.read(apiClientProvider).getObject(_base, query:{'page':_page,'pageSize':50,'branchId':branchId,
@@ -70,7 +98,8 @@ class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
           IconButton(tooltip:_label(context,'بحث','Search'),onPressed:_submitSearch,icon:const Icon(Icons.search)),
         ])),
         Expanded(child:FutureBuilder<Json>(future:_future,builder:(context,snapshot) {
-          if (snapshot.hasError) return Center(child:Text('${snapshot.error}'));
+          if (snapshot.connectionState != ConnectionState.done) return const Center(child:CircularProgressIndicator());
+          if (snapshot.hasError) return _VoucherLoadError(error:snapshot.error!,onRetry:_refresh);
           if (!snapshot.hasData) return const Center(child:CircularProgressIndicator());
           final data = snapshot.data!;
           final rows = listOf(data['items']).where((row) => text(row,'voucherKind').isNotEmpty).toList();
@@ -139,7 +168,8 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
     bool can(String permission) => user?.can(permission) ?? false;
     return Scaffold(appBar:AppBar(title:Text(_label(context,'تفاصيل الإذن','Voucher details'))),
       body:FutureBuilder<Json>(future:_future,builder:(context,snapshot) {
-        if (snapshot.hasError) return Center(child:Text('${snapshot.error}'));
+        if (snapshot.connectionState != ConnectionState.done) return const Center(child:CircularProgressIndicator());
+        if (snapshot.hasError) return _VoucherLoadError(error:snapshot.error!,onRetry:_refresh);
         if (!snapshot.hasData) return const Center(child:CircularProgressIndicator());
         final doc=snapshot.data!; final status=text(doc,'status').toLowerCase();
         final reviewed=asString(doc['reviewedAt']) != null, approved=asString(doc['approvedAt']) != null;
@@ -191,7 +221,8 @@ class _VoucherHistoryState extends ConsumerState<_VoucherHistory> {
   @override
   Widget build(BuildContext context) => ExpansionTile(title:Text(_label(context,'السجل','History')),
     children:[FutureBuilder<List<Json>>(future:_future,builder:(context,snapshot) {
-      if (snapshot.hasError) return Text('${snapshot.error}');
+      if (snapshot.connectionState != ConnectionState.done) return const CircularProgressIndicator();
+      if (snapshot.hasError) return _VoucherLoadError(error:snapshot.error!,onRetry:() => setState(() => _future = _load()));
       if (!snapshot.hasData) return const CircularProgressIndicator();
       return Column(children:[for (final event in snapshot.data!) ListTile(
         title:Text(text(event,'action')),subtitle:Text('${text(event,'createdAt')} • ${text(event,'userId')}'))]);
@@ -347,9 +378,10 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
     return PopScope(canPop:false,onPopInvokedWithResult:(didPop,_) { if (!didPop) _close(); },
       child:Scaffold(appBar:AppBar(title:Text(widget.kind == 'RECEIPT' ? _label(context,'إذن إضافة','Receipt voucher') : _label(context,'إذن صرف','Issue voucher'))),
         body:FutureBuilder<List<List<Json>>>(future:_options,builder:(context,snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) return const Center(child:CircularProgressIndicator());
           if (snapshot.hasError) {
             return ListView(padding:const EdgeInsets.all(20),children:[
-              Text('${snapshot.error}'),
+              _VoucherLoadError(error:snapshot.error!,onRetry:() => setState(() => _options = _loadOptions())),
               if (_pending != null) FilledButton(onPressed:_busy ? null : () => _send(_pending!),child:Text(_label(context,'إعادة المحاولة','Retry'))),
             ]);
           }

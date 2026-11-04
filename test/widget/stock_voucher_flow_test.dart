@@ -61,9 +61,55 @@ class _VoucherApi extends ApiClient {
     return {'id':'document'};
   }
 }
+class _FailingLoadApi extends _VoucherApi {
+  _FailingLoadApi(this.target);
+  final String target;
+  bool fail = true;
+  @override
+  Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async {
+    if (fail && ((target == 'list' && path == '/inventory/stock-documents') ||
+        (target == 'detail' && path == '/inventory/stock-documents/document'))) {
+      throw StateError('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW');
+    }
+    return super.getObject(path,query:query);
+  }
+  @override
+  Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async {
+    if (fail && target == 'create' && path == '/inventory/items') throw StateError('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW');
+    return super.getList(path,query:query);
+  }
+}
 const _user=AppUser(id:'user',username:'tester',fullName:'Tester',companyId:'company',branchId:'branch',isSuperAdmin:true);
 
 void main() {
+  for (final target in ['list','detail','create']) {
+    testWidgets('$target voucher load shows a safe acknowledged error and retries', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize=const Size(1400,1200); tester.view.devicePixelRatio=1;
+      addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+      final api=_FailingLoadApi(target);
+      final screen = target == 'list' ? const StockVouchersScreen()
+        : target == 'detail' ? const StockVoucherDetailScreen(id:'document')
+        : const StockVoucherCreateScreen(kind:'ISSUE');
+      await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+        currentUserProvider.overrideWithValue(_user),
+        appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1')),
+        exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
+        child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+          supportedLocales:AppLocalizations.supportedLocales,home:screen)));
+      await tester.pumpAndSettle();
+      expect(find.text('حسنًا'),findsOneWidget);
+      expect(find.textContaining('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW'),findsNothing);
+      await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+      api.fail=false;
+      await tester.tap(find.text('Retry')); await tester.pumpAndSettle();
+      expect(find.text('حسنًا'),findsNothing);
+      expect(find.textContaining('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW'),findsNothing);
+      if (target == 'list') expect(find.text('No vouchers on this page'),findsOneWidget);
+      if (target == 'detail') expect(find.textContaining('SA-1'),findsOneWidget);
+      if (target == 'create') expect(find.text('Save draft'),findsOneWidget);
+    });
+  }
   for (final kind in ['RECEIPT','ISSUE']) {
     testWidgets('$kind voucher retains exact request across an uncertain create', (tester) async {
       SharedPreferences.setMockInitialValues({});
