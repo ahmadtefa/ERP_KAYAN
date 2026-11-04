@@ -43,7 +43,7 @@ void main() {
     final router=GoRouter(initialLocation:AppRoutes.journalEntries,routes:[
       GoRoute(path:AppRoutes.dashboard,builder:(_,_) => const Scaffold(body:Text('Destination'))),
       GoRoute(path:AppRoutes.journalEntries,onExit:(_,state) => container.read(draftExitGuardProvider).canLeave(state.pageKey),
-        builder:(_,state) => JournalEntriesScreen(navigationKey:state.pageKey))]);
+        builder:(_,state) => Scaffold(body:JournalEntriesScreen(navigationKey:state.pageKey)))]);
     addTearDown(router.dispose);
     await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp.router(
       locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
@@ -76,7 +76,7 @@ void main() {
       expect((await container.read(dashboardMonthlyProvider.future))['status'],initial);
       await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp(
         locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
-        supportedLocales:AppLocalizations.supportedLocales,home:const JournalEntriesScreen())));
+        supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:JournalEntriesScreen()))));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip(action)); await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton,action)); await tester.pumpAndSettle();
