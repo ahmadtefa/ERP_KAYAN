@@ -6,11 +6,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InvoiceStatus, Prisma, StockDirection, StockDocumentKind } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanySettingsService } from '../../common/settings/company-settings.module';
-import { parseDocumentQuantity, resolveUnitSelection } from '../../common/units/unit-math';
+import { exactBaseQuantity, parseDocumentQuantity, parseFactor, resolveUnitSelection } from '../../common/units/unit-math';
 import { orderCreationIdentity } from '../../common/units/order-creation-identity';
 import type { ItemUnitLike } from '../../common/units/unit-math';
 import { WarehouseService } from '../../common/warehouse/warehouse.service';
@@ -24,6 +25,8 @@ const MONEY_SCALE = 4;
 
 export interface StockDocumentLineInput {
   itemId: string;
+  /** Existing line identity, used only when editing a saved voucher. */
+  id?: string;
   /** Adjustment: signed change. Count: ignored (countedQuantity is used). */
   quantity?: string | number;
   countedQuantity?: string | number;
@@ -474,6 +477,129 @@ export class StockDocumentsService {
     return this.findOne(companyId, created.id, mayReadCost);
   }
 
+  /** Replace a saved voucher draft under its parent row lock. Workflow
+   * approvals are invalidated with the edit; retries have their own ledger.
+   * A line retaining its original item and unit keeps its historical factor.
+   */
+  async updateVoucher(companyId: string, branchId: string | null, userId: string, id: string,
+    dto: { idempotencyKey?: string; expectedVersion: number; documentDate: string; toWarehouseId: string;
+      counterpartyName: string; reason: string; notes?: string | null; costCenterId?: string | null;
+      lines: StockDocumentLineInput[] }, mayReadCost = true) {
+    if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
+    const identity = orderCreationIdentity(dto as unknown as Record<string, unknown>);
+    if (!identity) throw new BadRequestException('idempotencyKey is required');
+    if (!Number.isSafeInteger(dto.expectedVersion) || dto.expectedVersion < 0) {
+      throw new BadRequestException('expectedVersion must be a non-negative integer');
+    }
+    await this.prisma.$transaction(async tx => {
+      // Acquire key before row, consistently for same-key concurrent retries.
+      await tx.$queryRaw(Prisma.sql`SELECT 1 AS locked FROM (
+        SELECT pg_advisory_xact_lock(hashtextextended(${`stock-voucher-edit:${companyId}:${branchId}:${identity.key}`}, 0))
+      ) AS edit_request_lock`);
+      const locked = await tx.$queryRaw<Array<{id:string}>>(Prisma.sql`
+        SELECT id FROM stock_documents WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid
+          AND "branchId" = ${branchId}::uuid AND "deletedAt" IS NULL FOR UPDATE
+      `);
+      if (locked.length !== 1) throw new NotFoundException('Stock voucher not found');
+      const document = await tx.stockDocument.findUniqueOrThrow({where:{id},include:{lines:true}});
+      if (!document.voucherKind) throw new NotFoundException('Stock voucher not found');
+      if (document.voucherKind === 'RECEIPT' && !mayReadCost) throw new ForbiddenException('Receipt vouchers require inventory.cost.read');
+      const previous = await tx.$queryRaw<Array<{documentId:string;requestHash:string;resultVersion:number}>>(Prisma.sql`
+        SELECT "documentId", "requestHash", "resultVersion" FROM stock_voucher_edit_requests
+        WHERE "companyId" = ${companyId}::uuid AND "branchId" = ${branchId}::uuid AND "requestKey" = ${identity.key}
+      `);
+      if (previous.length) {
+        if (previous[0].documentId !== id || previous[0].requestHash !== identity.hash) {
+          throw new ConflictException('The idempotency key was used for a different request');
+        }
+        if (document.editVersion !== previous[0].resultVersion || document.status !== InvoiceStatus.DRAFT) {
+          throw new ConflictException('The voucher has changed since this request; reload the latest version');
+        }
+        return;
+      }
+      if (document.status !== InvoiceStatus.DRAFT) throw new BadRequestException('Only a draft stock voucher can be edited');
+      if (document.editVersion !== dto.expectedVersion) throw new ConflictException('The voucher has changed; reload the latest version');
+      if (typeof dto.reason !== 'string' || !dto.reason.trim() || typeof dto.counterpartyName !== 'string' ||
+          !dto.counterpartyName.trim() || dto.counterpartyName.trim().length > 200 || typeof dto.toWarehouseId !== 'string') {
+        throw new BadRequestException('A stock voucher needs a warehouse, reason and counterparty');
+      }
+      if (dto.notes != null && typeof dto.notes !== 'string') throw new BadRequestException('notes must be text');
+      if (!Array.isArray(dto.lines) || dto.lines.length === 0 || dto.lines.length > 1000) {
+        throw new BadRequestException('A stock voucher needs between 1 and 1000 lines');
+      }
+      const date = this.date(dto.documentDate, 'documentDate');
+      const warehouse = await tx.warehouse.findFirst({where:{id:dto.toWarehouseId,companyId,branchId,deletedAt:null,isActive:true},select:{id:true}});
+      if (!warehouse) throw new BadRequestException('The voucher warehouse does not belong to this branch or is inactive');
+      const costCenterId = dto.costCenterId ? String(dto.costCenterId).trim() : null;
+      if (costCenterId) {
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(costCenterId)) throw new BadRequestException('costCenterId must be a UUID');
+        await this.costCenters.assertPostable(tx,companyId,[costCenterId],date);
+      }
+      const existing = new Map(document.lines.map(line => [line.id,line]));
+      const used = new Set<string>();
+      const lines: Array<{id?:string;itemId:string;lineNumber:number;quantity:Prisma.Decimal;unitCost:Prisma.Decimal;
+        unitName:string|null;unitFactor:Prisma.Decimal|null;unitQuantity:Prisma.Decimal|null;notes:string|null}> = [];
+      for (const [index,raw] of dto.lines.entries()) {
+        if (!raw || typeof raw.itemId !== 'string') throw new BadRequestException(`Line ${index + 1}: item is required`);
+        const old = raw.id ? existing.get(raw.id) : undefined;
+        if (raw.id && (!old || used.has(raw.id))) throw new BadRequestException(`Line ${index + 1}: invalid or duplicate line id`);
+        if (raw.id) used.add(raw.id);
+        if (raw.unitId) throw new BadRequestException(`Line ${index + 1}: use unitName when editing a voucher`);
+        const item = await tx.item.findFirst({where:{id:raw.itemId,companyId,deletedAt:null},select:{id:true,isStockTracked:true,code:true,unit:true,units:true}});
+        if (!item || !item.isStockTracked) throw new BadRequestException(`Line ${index + 1}: the stock item does not exist`);
+        const entered = parseDocumentQuantity(raw.quantity, `Line ${index + 1} quantity`);
+        if ((document.voucherKind === 'RECEIPT' && !entered.isPositive()) ||
+            (document.voucherKind === 'ISSUE' && !entered.isNegative())) throw new BadRequestException(`Line ${index + 1}: invalid voucher quantity`);
+        const name = raw.unitName ?? raw.unit ?? null;
+        let quantity: Prisma.Decimal, unitName: string | null, unitFactor: Prisma.Decimal | null, unitQuantity: Prisma.Decimal | null;
+        if (old && old.itemId === item.id && old.unitName === name) {
+          if (old.unitName === null) {
+            if (old.unitFactor !== null || old.unitQuantity !== null) throw new BadRequestException(`Line ${index + 1}: invalid historic unit snapshot`);
+            quantity = entered; unitName = null; unitFactor = null; unitQuantity = null;
+          } else {
+            if (old.unitFactor === null || old.unitQuantity === null) throw new BadRequestException(`Line ${index + 1}: invalid historic unit snapshot`);
+            unitFactor = parseFactor(old.unitFactor, `Line ${index + 1} historic factor`);
+            if (!exactBaseQuantity(old.unitQuantity,unitFactor).equals(old.quantity)) throw new BadRequestException(`Line ${index + 1}: inconsistent historic unit snapshot`);
+            quantity = exactBaseQuantity(entered,unitFactor);
+            unitName = old.unitName; unitQuantity = entered;
+          }
+        } else if (name) {
+          const resolved = resolveUnitSelection({lineLabel:`Line ${index + 1}`,requestedUnitName:name,
+            enteredQuantity:entered.abs(),baseUnitName:item.unit,units:item.units});
+          quantity = entered.isNegative() ? resolved.baseQuantity.negated() : resolved.baseQuantity;
+          unitName = resolved.snapshot.unitName; unitFactor = resolved.snapshot.unitFactor; unitQuantity = entered;
+        } else { quantity = entered; unitName = null; unitFactor = null; unitQuantity = null; }
+        if (document.voucherKind === 'RECEIPT' && (raw.unitCost === undefined || raw.unitCost === null || raw.unitCost === '')) {
+          throw new BadRequestException(`Line ${index + 1}: receipt unit cost is required`);
+        }
+        const unitCost = raw.unitCost === undefined ? new Prisma.Decimal(0) : this.decimal(raw.unitCost,`Line ${index + 1} unit cost`);
+        if (unitCost.isNegative() || quantity.abs().mul(unitCost).greaterThanOrEqualTo('1e15')) throw new BadRequestException(`Line ${index + 1}: invalid stock value`);
+        if (raw.notes != null && typeof raw.notes !== 'string') throw new BadRequestException(`Line ${index + 1}: notes must be text`);
+        lines.push({id:old?.id ?? randomUUID(),itemId:item.id,lineNumber:index + 1,quantity,unitCost,unitName,unitFactor,unitQuantity,notes:raw.notes ?? null});
+      }
+      await tx.stockDocumentLine.deleteMany({where:{documentId:id}});
+      await tx.stockDocumentLine.createMany({data:lines.map(line => ({...line,documentId:id}))});
+      const version = document.editVersion + 1;
+      await tx.stockDocument.update({where:{id},data:{documentDate:date,toWarehouseId:dto.toWarehouseId,
+        reason:dto.reason.trim(),counterpartyName:dto.counterpartyName.trim(),notes:dto.notes?.trim() || null,costCenterId,
+        reviewedAt:null,reviewedBy:null,approvedAt:null,approvedBy:null,editVersion:version}});
+      await tx.$executeRaw(Prisma.sql`INSERT INTO stock_voucher_edit_requests
+        ("companyId", "branchId", "requestKey", "requestHash", "documentId", "resultVersion")
+        VALUES (${companyId}::uuid,${branchId}::uuid,${identity.key},${identity.hash},${id}::uuid,${version})`);
+      await this.audit.recordRequired({companyId,userId,action:'UPDATE',entity:'stock_documents',entityId:id,
+        before:{version:document.editVersion,reviewed:!!document.reviewedAt,approved:!!document.approvedAt,
+          documentDate:document.documentDate.toISOString(),toWarehouseId:document.toWarehouseId,reason:document.reason,
+          counterpartyName:document.counterpartyName,notes:document.notes,costCenterId:document.costCenterId,
+          lines:document.lines.map(line => ({id:line.id,itemId:line.itemId,quantity:line.quantity.toString(),unitCost:line.unitCost.toString(),
+            unitName:line.unitName,unitFactor:line.unitFactor?.toString() ?? null,unitQuantity:line.unitQuantity?.toString() ?? null,notes:line.notes}))},
+        after:{version,reviewed:false,approved:false,documentDate:date.toISOString(),toWarehouseId:dto.toWarehouseId,reason:dto.reason.trim(),
+          counterpartyName:dto.counterpartyName.trim(),notes:dto.notes?.trim() || null,costCenterId,
+          lines:lines.map(line => ({id:line.id ?? null,itemId:line.itemId,quantity:line.quantity.toString(),unitCost:line.unitCost.toString(),
+            unitName:line.unitName,unitFactor:line.unitFactor?.toString() ?? null,unitQuantity:line.unitQuantity?.toString() ?? null,notes:line.notes}))}},tx);
+    },{timeout:30000});
+    return this.findOne(companyId,id,mayReadCost);
+  }
+
   /** Review and approval are idempotent and atomic with their audit record. */
   async transitionVoucher(companyId: string, branchId: string | null, userId: string, id: string,
     stage: 'REVIEW' | 'APPROVE', mayReadCost = true) {
@@ -488,11 +614,11 @@ export class StockDocumentsService {
       if (!document.voucherKind || document.status !== InvoiceStatus.DRAFT) throw new BadRequestException('Only a draft stock voucher can be reviewed or approved');
       if (stage === 'REVIEW') {
         if (document.reviewedAt) return;
-        await tx.stockDocument.update({where:{id},data:{reviewedAt:new Date(),reviewedBy:userId}});
+        await tx.stockDocument.update({where:{id},data:{reviewedAt:new Date(),reviewedBy:userId,editVersion:{increment:1}}});
       } else {
         if (!document.reviewedAt) throw new BadRequestException('The stock voucher must be reviewed before approval');
         if (document.approvedAt) return;
-        await tx.stockDocument.update({where:{id},data:{approvedAt:new Date(),approvedBy:userId}});
+        await tx.stockDocument.update({where:{id},data:{approvedAt:new Date(),approvedBy:userId,editVersion:{increment:1}}});
       }
       await this.audit.recordRequired({companyId,userId,action:stage,entity:'stock_documents',entityId:id},tx);
     });
@@ -1128,6 +1254,7 @@ export class StockDocumentsService {
     costCenterId?: string | null;
     costCenter?: { id: string; code: string; nameEn: string; nameAr: string } | null;
     voucherKind?: string | null;
+    editVersion?: number;
     counterpartyName?: string | null;
     toWarehouseId?: string | null;
     toWarehouse?: {id:string;code:string;nameEn:string;nameAr:string} | null;
@@ -1145,6 +1272,7 @@ export class StockDocumentsService {
       reason: document.reason,
       notes: document.notes,
       voucherKind: document.voucherKind ?? null,
+      editVersion: document.editVersion ?? 0,
       counterpartyName: document.counterpartyName ?? null,
       toWarehouseId: document.toWarehouseId ?? null,
       toWarehouse: document.toWarehouse ?? null,

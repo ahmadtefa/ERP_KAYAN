@@ -61,6 +61,7 @@ jobs:
           src/modules/accounting/chart-of-accounts.service.spec.ts
           src/modules/inventory/stock-document-response-permissions.spec.ts
           src/modules/inventory/stock-voucher-permissions.spec.ts
+          src/modules/inventory/stock-voucher-edit.spec.ts
           src/modules/inventory/stock-voucher-search.spec.ts
           src/modules/export/stock-voucher-export.spec.ts
           src/modules/inventory/cost-redaction.spec.ts

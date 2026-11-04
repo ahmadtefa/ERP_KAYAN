@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost } from '../../common/auth/cost-visibility';
@@ -36,6 +36,12 @@ export class StockDocumentsController {
   @RequirePermissions('inventory.stock.adjust')
   create(@CurrentUser() user: AuthUser, @Body() body: Record<string, unknown>) {
     return this.service.create(user.companyId, user.branchId, user.userId, body as never, canReadCost(user));
+  }
+
+  @Put(':id/voucher-draft')
+  @RequirePermissions('inventory.stock.read', 'inventory.stock.adjust')
+  updateVoucher(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+    return this.service.updateVoucher(user.companyId, user.branchId, user.userId, id, body as never, canReadCost(user));
   }
 
   @Post(':id/review')

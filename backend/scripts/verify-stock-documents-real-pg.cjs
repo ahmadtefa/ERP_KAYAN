@@ -380,6 +380,51 @@ let difference = '70000000-0000-4000-8000-000000000005';
       try { await waitForBarrier(barrier,pending); } catch (error) { resume(); throw error; }
       return {pending,resume};
     }
+    // Real draft edit, including concurrent retries, immutable unit snapshot,
+    // authorization, optimistic conflicts, audit rollback and a post/edit race.
+    const editable = await service.create(company,branch,user,{idempotencyKey:'editable-voucher-create-0001',kind:'ADJUSTMENT',
+      voucherKind:'RECEIPT',documentDate:date,toWarehouseId:secondWarehouse,reason:'Before edit',counterpartyName:'Synthetic party',
+      lines:[{itemId:item,quantity:'2',unitName:'synthetic-voucher-box',unitCost:'3'}]},true);
+    await service.transitionVoucher(company,branch,user,editable.id,'REVIEW',true);
+    await service.transitionVoucher(company,branch,user,editable.id,'APPROVE',true);
+    const approvedEdit = await service.findOne(company,editable.id,true);
+    assert.equal(approvedEdit.editVersion,2);
+    await prisma.itemUnit.update({where:{id:voucherUnit.id},data:{factor:'5',isActive:false}});
+    const draftEdit = {idempotencyKey:'editable-voucher-change-0001',expectedVersion:approvedEdit.editVersion,
+      documentDate:date,toWarehouseId:secondWarehouse,reason:'After edit',counterpartyName:'Synthetic party',
+      costCenterId:centre,lines:[{id:approvedEdit.lines[0].id,itemId:item,unitName:'synthetic-voucher-box',quantity:'3',unitCost:'3'},
+        {itemId:item,quantity:'1',unitCost:'3'}]};
+    await assert.rejects(service.updateVoucher(company,branch,user,editable.id,draftEdit,false),/inventory.cost.read/);
+    await assert.rejects(service.updateVoucher(company,'99999999-9999-4999-8999-999999999999',user,editable.id,draftEdit,true),/not found/i);
+    await failStockAudit('UPDATE', () => service.updateVoucher(company,branch,user,editable.id,draftEdit,true));
+    assert.equal((await service.findOne(company,editable.id,true)).editVersion,2);
+    assert.equal((await sql.query('SELECT count(*)::int AS n FROM stock_voucher_edit_requests WHERE "documentId"=$1',[editable.id])).rows[0].n,0);
+    const edits = await Promise.all([service.updateVoucher(company,branch,user,editable.id,draftEdit,true),
+      service.updateVoucher(company,branch,user,editable.id,draftEdit,true)]);
+    assert.equal(edits[0].editVersion,3); assert.equal(edits[1].editVersion,3);
+    assert.equal(edits[0].reviewedAt,null); assert.equal(edits[0].approvedAt,null);
+    assert.equal(edits[0].lines[0].id,approvedEdit.lines[0].id);
+    assert.equal(edits[0].lines[0].unitFactor,'2.000000'); assert.equal(edits[0].lines[0].quantity,'6.0000');
+    assert.equal(edits[0].lines[1].quantity,'1.0000');
+    assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'stock_documents',entityId:editable.id,action:'UPDATE'}}),1);
+    await assert.rejects(service.updateVoucher(company,branch,user,editable.id,{...draftEdit,reason:'Different'},true),/idempotency key/);
+    await assert.rejects(service.updateVoucher(company,branch,user,editable.id,{...draftEdit,idempotencyKey:'editable-voucher-stale-0001'},true),/changed/);
+    await assert.rejects(service.post(company,user,editable.id,true,branch),/reviewed and approved/);
+    await service.transitionVoucher(company,branch,user,editable.id,'REVIEW',true);
+    await service.transitionVoucher(company,branch,user,editable.id,'APPROVE',true);
+    const current = await service.findOne(company,editable.id,true);
+    const race = await pauseStockPost(editable);
+    try {
+      await service.updateVoucher(company,branch,user,editable.id,{...draftEdit,idempotencyKey:'editable-voucher-race-0001',
+        expectedVersion:current.editVersion,lines:current.lines.map(line => ({id:line.id,itemId:line.itemId,
+          ...(line.unitName ? {unitName:line.unitName} : {}),quantity:line.unitQuantity,unitCost:line.unitCost}))},true);
+    } finally { race.resume(); }
+    await assert.rejects(race.pending,/reviewed and approved/);
+    assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:editable.id}})).status,'DRAFT');
+    assert.equal(await prisma.stockMovement.count({where:{referenceId:editable.id}}),0);
+    assert.equal(await prisma.journalEntry.count({where:{sourceId:editable.id}}),0);
+    await prisma.itemUnit.update({where:{id:voucherUnit.id},data:{factor:'2',isActive:true}});
+    console.log('PASS: real voucher edit, historical unit, approval reset, concurrent retry, audit rollback and edit/post race.');
     for (const invalidateApproval of [false,true]) {
       const voucher = await service.create(company,branch,user,{idempotencyKey:`voucher-locked-post-${invalidateApproval ? 'approval' : 'lines'}-0001`,
         kind:'ADJUSTMENT',voucherKind:'RECEIPT',documentDate:date,toWarehouseId:secondWarehouse,

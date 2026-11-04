@@ -1031,6 +1031,7 @@ model StockDocument {
   fromWarehouseId String?          @db.Uuid
   toWarehouseId   String?          @db.Uuid
   status         InvoiceStatus     @default(DRAFT)
+  editVersion    Int               @default(0)
   voucherKind    String?           @db.VarChar(10)
   counterpartyName String?          @db.VarChar(200)
   reviewedAt     DateTime?
