@@ -327,6 +327,22 @@ let difference = '70000000-0000-4000-8000-000000000005';
         : await prisma.purchaseOrderLine.findMany({where:{orderId:order.id},orderBy:{lineNumber:'asc'}});
       assert.equal(refreshed[0].invoicedQuantity.toFixed(4),'20.0000');
       assert.equal(refreshed[1].invoicedQuantity.toFixed(4),'0.0000');
+      // No ordinary order edit may change a partially allocated promise or
+      // rewrite the invoice snapshot. A separate approved amendment workflow
+      // is required for that case.
+      const partialOrder = await orders.findOne(company,order.id);
+      assert.equal(partialOrder.status,'PARTIALLY_FULFILLED');
+      await assert.rejects(orders.updateDraft(company,branch,user,order.id,{
+        idempotencyKey:`partial-${kind}-edit-0001`,expectedUpdatedAt:partialOrder.updatedAt,
+        lines:partialOrder.lines.map(line => ({orderLineId:line.id,quantity:line.unitQuantity,
+          unitPrice:'1',discountPercent:'0',taxRate:'0'})),
+      }),/Only draft/);
+      const unchanged = kind === 'sales'
+        ? await prisma.salesInvoice.findUniqueOrThrow({where:{id:saved.id},include:{lines:true}})
+        : await prisma.purchaseInvoice.findUniqueOrThrow({where:{id:saved.id},include:{lines:true}});
+      assert.equal(unchanged.lines[0].unitPrice.toFixed(4),saved.lines[0].unitPrice.toFixed(4));
+      assert.equal(unchanged.lines[0].taxRate.toFixed(4),saved.lines[0].taxRate.toFixed(4));
+      assert.equal(unchanged.lines[0].quantity.toFixed(4),saved.lines[0].quantity.toFixed(4));
       // Two different keys compete for the same remaining ten base units.
       const compete = key => orders.convertToInvoice(company,branch,user,order.id,
         {idempotencyKey:key,invoiceDate:date,lines:[{orderLineId:orderLines[0].id,quantity:'10'}]});

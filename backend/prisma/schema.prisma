@@ -2413,7 +2413,8 @@ model LicenseEvent {
   @@map("license_events")
 }
 
-/// Durable identities for retrying order creation; old clients may omit a key.
+/// Durable identities for retrying order creation and draft edits.
+/// Legacy order-creation clients may omit a key; draft edits require one.
 model OrderCreationRequest {
   id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   companyId String @db.Uuid
