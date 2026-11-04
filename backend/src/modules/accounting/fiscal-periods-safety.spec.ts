@@ -8,7 +8,7 @@ describe('fiscal period locking and range validation', () => {
   const original = {
     id:'one', companyId:'company', code:'2026', nameEn:'Year', nameAr:'سنة',
     startDate:new Date('2026-01-01T00:00:00Z'), endDate:new Date('2026-12-31T00:00:00Z'),
-    status:PeriodStatus.OPEN, closedAt:null,
+    status:PeriodStatus.OPEN as PeriodStatus, closedAt:null,
   };
   function setup() {
     const periods = [original, {...original,id:'two',code:'2027',
