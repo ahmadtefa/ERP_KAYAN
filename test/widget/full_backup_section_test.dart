@@ -203,7 +203,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(LinearProgressIndicator), findsNothing);
-    expect(find.textContaining('could not be created'), findsOneWidget);
+    expect(find.textContaining('The server failed while handling the request'), findsOneWidget);
+    expect(find.textContaining('The request outcome could not be confirmed'), findsOneWidget);
+    expect(find.textContaining('The backup could not be created'), findsNothing);
     // The button is usable again: busy was reset.
     final button = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, 'Create backup now'),

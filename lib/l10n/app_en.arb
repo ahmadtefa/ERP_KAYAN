@@ -791,7 +791,7 @@
   "errorNotFoundBody": "The record could not be found. It may have been deleted or moved, or you may not be allowed to see it. Reload the page and try again.",
   "errorPermissionBody": "You do not have permission to do this. Ask your system administrator if you need it.",
   "errorConflictBody": "Someone else changed this record while you were working on it, so your change was not saved. Reload the page to see the latest version, then try again.",
-  "errorServerBody": "The server failed while carrying out the operation and nothing was saved. Try again shortly, and if it keeps happening tell your system administrator.",
+  "errorServerBody": "The server reported an error and the result could not be confirmed. Refresh and check the data before retrying; contact your system administrator if the error continues.",
   "licence": "Licence",
   "licenceSubtitle": "Licence status, activation and renewal",
   "licenceSettingsSubtitle": "Activation, renewal and user-account limit",

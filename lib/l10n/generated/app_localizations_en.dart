@@ -2497,7 +2497,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get errorServerBody =>
-      'The server failed while carrying out the operation and nothing was saved. Try again shortly, and if it keeps happening tell your system administrator.';
+      'The server reported an error and the result could not be confirmed. Refresh and check the data before retrying; contact your system administrator if the error continues.';
 
   @override
   String get licence => 'Licence';

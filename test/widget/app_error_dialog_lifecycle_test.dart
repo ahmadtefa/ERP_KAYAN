@@ -44,6 +44,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Prisma'), findsNothing);
     expect(find.textContaining('SQL'), findsNothing);
+    expect(find.textContaining('تعذّر تأكيد نتيجة العملية'), findsOneWidget);
     expect(find.byType(AppErrorDialog), findsOneWidget);
     expect(find.text('حسنًا'), findsOneWidget);
     await tester.tap(find.text('حسنًا'));

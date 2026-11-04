@@ -4829,7 +4829,7 @@ abstract class AppLocalizations {
   /// No description provided for @errorServerBody.
   ///
   /// In en, this message translates to:
-  /// **'The server failed while carrying out the operation and nothing was saved. Try again shortly, and if it keeps happening tell your system administrator.'**
+  /// **'The server reported an error and the result could not be confirmed. Refresh and check the data before retrying; contact your system administrator if the error continues.'**
   String get errorServerBody;
 
   /// No description provided for @licence.
