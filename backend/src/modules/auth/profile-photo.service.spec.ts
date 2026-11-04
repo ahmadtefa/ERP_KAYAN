@@ -52,10 +52,15 @@ describe('self profile photo', () => {
   it('rolls back writes and removals when required audit fails, and rejects invalid photos', async () => {
     await expect(service.set(company,user,Buffer.from('not an image'),'image/png')).rejects.toThrow();
     expect(await service.get(company,user)).toEqual({mime:null,data:null});
-    await service.set(company,user,png,'image/png');
-    const before = await service.get(company,user);
     failAudit = true;
     await expect(service.set(company,user,png,'image/png')).rejects.toThrow('audit failed');
+    expect(await service.get(company,user)).toEqual({mime:null,data:null});
+    failAudit = false;
+    await service.set(company,user,png,'image/png');
+    const before = await service.get(company,user);
+    const replacement = await sharp({create:{width:32,height:32,channels:3,background:'#1030c0'}}).png().toBuffer();
+    failAudit = true;
+    await expect(service.set(company,user,replacement,'image/png')).rejects.toThrow('audit failed');
     await expect(service.remove(company,user)).rejects.toThrow('audit failed');
     expect(await service.get(company,user)).toEqual(before);
     await expect(service.set('other',user,png,'image/png')).rejects.toThrow('User not found');

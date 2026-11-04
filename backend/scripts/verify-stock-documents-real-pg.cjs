@@ -36,6 +36,7 @@ const { PurchaseOrdersService } = require('../src/modules/purchases/purchase-ord
 const { SalesInvoicesService } = require('../src/modules/sales/sales-invoices.service');
 const { PurchaseInvoicesService } = require('../src/modules/purchases/purchase-invoices.service');
 const { ProfilePhotoService } = require('../src/modules/auth/profile-photo.service');
+const { normalizeLogo } = require('../src/modules/company/company.service');
 const sharp = require('sharp');
 
 const company = '10000000-0000-4000-8000-000000000001';
@@ -67,9 +68,21 @@ let difference = '70000000-0000-4000-8000-000000000005';
     // self-service photo, with tenant and account isolation. No real image data.
     const photos = new ProfilePhotoService(prisma,audit);
     const image = await sharp({create:{width:32,height:32,channels:3,background:'#abc123'}}).png().toBuffer();
+    const replacementImage = await sharp({create:{width:32,height:32,channels:3,background:'#1234ef'}}).png().toBuffer();
+    const initialAudit = audit.recordRequired.bind(audit);
+    audit.recordRequired = async (input,tx) => {
+      if (input.action === 'PROFILE_PHOTO_SET') throw new Error('injected initial photo audit failure');
+      return initialAudit(input,tx);
+    };
+    try {
+      await assert.rejects(photos.set(company,user,image,'image/png'),/injected initial photo audit failure/);
+      assert.equal((await photos.get(company,user)).data,null);
+    } finally { audit.recordRequired = initialAudit; }
     await photos.set(company,user,image,'image/png');
     const savedPhoto = await photos.get(company,user);
     assert.equal(savedPhoto.mime,'image/webp'); assert.ok(savedPhoto.data);
+    const replacementEncoded = await normalizeLogo(replacementImage,'image/png');
+    assert.notEqual(Buffer.from(replacementEncoded.data).toString('base64'),savedPhoto.data);
     assert.equal((await photos.get('99999999-9999-4999-8999-999999999999',user)).data,null);
     assert.equal((await photos.get(company,'99999999-9999-4999-8999-999999999999')).data,null);
     const realAudit = audit.recordRequired.bind(audit);
@@ -78,7 +91,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
       return realAudit(input,tx);
     };
     try {
-      await assert.rejects(photos.set(company,user,image,'image/png'),/injected photo audit failure/);
+      await assert.rejects(photos.set(company,user,replacementImage,'image/png'),/injected photo audit failure/);
       await assert.rejects(photos.remove(company,user),/injected photo audit failure/);
     } finally { audit.recordRequired = realAudit; }
     assert.deepEqual(await photos.get(company,user),savedPhoto);
