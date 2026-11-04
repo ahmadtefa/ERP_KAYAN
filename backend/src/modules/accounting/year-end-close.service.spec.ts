@@ -60,11 +60,7 @@ describe('YearEndCloseService', () => {
     const period = 'period' in overrides ? overrides.period : openPeriod;
     const balances = overrides.balances ?? [];
 
-    const tx = {
-      fiscalPeriod: {
-        update: jest.fn().mockImplementation(async ({ data }) => ({ ...period, ...data })),
-      },
-    };
+    const tx: any = {};
     const prisma = {
       fiscalPeriod: {
         findFirst: jest.fn().mockResolvedValue(period),
@@ -74,6 +70,7 @@ describe('YearEndCloseService', () => {
       salesInvoice: { count: jest.fn().mockResolvedValue(0) },
       purchaseInvoice: { count: jest.fn().mockResolvedValue(0) },
       cashVoucher: { count: jest.fn().mockResolvedValue(0) },
+      cashTransfer: { count: jest.fn().mockResolvedValue(0) },
       stockDocument: { count: jest.fn().mockResolvedValue(0) },
       openingBalance: { count: jest.fn().mockResolvedValue(0) },
       cashAccount: { findMany: jest.fn().mockResolvedValue([]) },
@@ -90,6 +87,9 @@ describe('YearEndCloseService', () => {
       }),
     } as unknown as PrismaService;
 
+    Object.assign(tx, prisma);
+    tx.$queryRaw = jest.fn().mockResolvedValue(balances);
+
     const posting = {
       post: jest
         .fn()
@@ -100,7 +100,7 @@ describe('YearEndCloseService', () => {
       resolve: jest.fn().mockResolvedValue({ retainedEarnings: retainedId }),
     } as unknown as AccountMapService;
 
-    const audit = { record: jest.fn().mockResolvedValue(undefined) } as unknown as AuditService;
+    const audit = { record: jest.fn().mockResolvedValue(undefined), recordRequired: jest.fn().mockResolvedValue(undefined) } as unknown as AuditService;
 
     const service = new YearEndCloseService(prisma, posting, accounts, audit);
     return { service, prisma, posting, accounts, audit, tx };
@@ -147,8 +147,17 @@ describe('YearEndCloseService', () => {
       await expect(service.close(companyId, userId, periodId)).rejects.toMatchObject({
         message: 'The year cannot be closed yet',
       });
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.$transaction).toHaveBeenCalled();
       expect(prisma.fiscalPeriod.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses a draft cash transfer inside the period', async () => {
+      const { service, prisma, tx } = buildService();
+      (prisma.cashTransfer.count as jest.Mock).mockResolvedValue(1);
+      await expect(service.close(companyId,userId,periodId)).rejects.toMatchObject({
+        message:'The year cannot be closed yet',
+      });
+      expect(tx.fiscalPeriod.update).not.toHaveBeenCalled();
     });
 
     it('refuses an already closed period with the dedicated message', async () => {
@@ -162,7 +171,7 @@ describe('YearEndCloseService', () => {
       await expect(service.close(companyId, userId, periodId)).rejects.toMatchObject({
         message: 'This period is already closed',
       });
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.$transaction).toHaveBeenCalled();
     });
 
     it('throws NotFound when the period does not belong to the company', async () => {
@@ -171,7 +180,7 @@ describe('YearEndCloseService', () => {
       await expect(service.close(companyId, userId, 'missing')).rejects.toBeInstanceOf(
         NotFoundException,
       );
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.$transaction).toHaveBeenCalled();
     });
   });
 
@@ -186,11 +195,27 @@ describe('YearEndCloseService', () => {
       expect(result.note).toContain('no closing entry');
       expect(posting.post).not.toHaveBeenCalled();
       expect(prisma.fiscalPeriod.update).toHaveBeenCalledTimes(1);
-      expect(prisma.$transaction).not.toHaveBeenCalled();
-      expect(audit.record).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'fiscal_year.close_empty' }),
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(audit.recordRequired).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'fiscal_year.close_empty' }), expect.anything(),
       );
     });
+  });
+
+  it('performs empty close and mandatory audit in the locked transaction', async () => {
+    const {service, tx, audit} = buildService({balances:[revenueRow('rev-1','0')]});
+    await service.close(companyId,userId,periodId);
+    expect(tx.$queryRaw).toHaveBeenCalled();
+    expect(tx.fiscalPeriod.update).toHaveBeenCalledTimes(1);
+    expect(audit.recordRequired).toHaveBeenCalledWith(
+      expect.objectContaining({action:'fiscal_year.close_empty'}), tx,
+    );
+  });
+
+  it('propagates a required audit failure rather than reporting success', async () => {
+    const {service, audit} = buildService();
+    (audit.recordRequired as jest.Mock).mockRejectedValue(new Error('injected audit failure'));
+    await expect(service.close(companyId,userId,periodId)).rejects.toThrow('injected audit failure');
   });
 
   describe('closing entry for a profitable year', () => {
@@ -239,8 +264,8 @@ describe('YearEndCloseService', () => {
         result: '850.0000',
       });
       expect(result.period.status).toBe('closed');
-      expect(audit.record).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'fiscal_year.close' }),
+      expect(audit.recordRequired).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'fiscal_year.close' }), expect.anything(),
       );
     });
 
@@ -251,7 +276,7 @@ describe('YearEndCloseService', () => {
       await expect(service.close(companyId, userId, periodId)).rejects.toThrow(failure);
       // No lock outside the transaction, no success audit.
       expect(prisma.fiscalPeriod.update).not.toHaveBeenCalled();
-      expect(audit.record).not.toHaveBeenCalled();
+      expect(audit.recordRequired).not.toHaveBeenCalled();
     });
   });
 

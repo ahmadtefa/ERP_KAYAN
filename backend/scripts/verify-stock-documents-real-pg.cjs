@@ -24,6 +24,7 @@ const { WarehouseService } = require('../src/common/warehouse/warehouse.service'
 const { CostCentersService } = require('../src/modules/accounting/cost-centers.service');
 const { BudgetsService } = require('../src/modules/accounting/budgets.service');
 const { FiscalPeriodsService } = require('../src/modules/accounting/fiscal-periods.service');
+const { YearEndCloseService } = require('../src/modules/accounting/year-end-close.service');
 const { DocumentNumberService } = require('../src/modules/accounting/document-number.service');
 const { AccountMapService } = require('../src/modules/accounting/account-map.service');
 const { PostingService } = require('../src/modules/accounting/posting.service');
@@ -199,6 +200,106 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const accountAudit = await prisma.auditLog.count({where:{companyId:company,entity:'accounts',entityId:leaf.id,action:'CREATE'}});
     assert.equal(accountAudit,1);
     console.log('PASS: real PostgreSQL + Prisma chart relationship, duplicate, activation and atomic audit rollback.');
+
+    // Closing owns the same PostgreSQL period row locked by the posting
+    // triggers. This uses a disposable future period and synthetic accounts;
+    // it is not a test of every draft creation path or installed UI.
+    const yearClose = new YearEndCloseService(prisma,
+      new PostingService(numbers,periods,costCenters), new AccountMapService(), audit);
+    const makePeriod = async (year) => prisma.fiscalPeriod.create({data:{
+      companyId:company,code:`SYN-${year}`,nameEn:'Synthetic year',nameAr:'سنة تجريبية',
+      startDate:new Date(`${year}-01-01T00:00:00Z`),endDate:new Date(`${year}-12-31T00:00:00Z`),
+    }});
+    const emptyYear = await makePeriod(2200);
+    const closeAudit = audit.recordRequired.bind(audit);
+    audit.recordRequired = async (input,tx) => {
+      if (input.action === 'fiscal_year.close_empty') throw new Error('injected year audit failure');
+      return closeAudit(input,tx);
+    };
+    try {
+      await assert.rejects(yearClose.close(company,user,emptyYear.id),/injected year audit failure/);
+      assert.equal((await prisma.fiscalPeriod.findUniqueOrThrow({where:{id:emptyYear.id}})).status,'OPEN');
+    } finally { audit.recordRequired = closeAudit; }
+    const concurrentClose = await Promise.allSettled([
+      yearClose.close(company,user,emptyYear.id), yearClose.close(company,user,emptyYear.id),
+    ]);
+    assert.equal(concurrentClose.filter(x => x.status === 'fulfilled').length,1);
+    assert.equal(concurrentClose.filter(x => x.status === 'rejected').length,1);
+    assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'fiscal_periods',entityId:emptyYear.id,action:'fiscal_year.close_empty'}}),1);
+
+    const revenueAccount = await chart.create(company,user,{code:'SYN-REV',nameEn:'Revenue',nameAr:'إيراد',type:'REVENUE',isPostable:true});
+    const existingRetained = await prisma.account.findUnique({where:{companyId_code:{companyId:company,code:'3102'}}});
+    if (!existingRetained) {
+      await chart.create(company,user,{code:'3102',nameEn:'Retained earnings',nameAr:'أرباح مبقاة',type:'EQUITY',isPostable:true});
+    } else {
+      assert.equal(existingRetained.deletedAt,null);
+      assert.equal(existingRetained.isActive,true);
+      assert.equal(existingRetained.isPostable,true);
+    }
+    const postYear = await makePeriod(2201);
+    const poster = new Client({connectionString:url.toString()});
+    await poster.connect();
+    let pendingClose;
+    try {
+      await poster.query('BEGIN');
+      // The production DB trigger locks the period until this transaction
+      // commits, as a posting that has already started does in production.
+      const ledger = await poster.query(`INSERT INTO journal_entries
+        (id,"companyId","branchId","entryNumber","entryDate",status,"totalDebit","totalCredit","updatedAt")
+        VALUES ('70000000-0000-4000-8000-000000000090',$1,$2,'SYN-PERIOD-POST','2201-05-01','POSTED',50,50,now()) RETURNING id`,[company,branch]);
+      await poster.query(`INSERT INTO journal_lines
+        (id,"journalEntryId","lineNumber","accountId",debit,credit)
+        VALUES ('70000000-0000-4000-8000-000000000091',$1,1,$2,50,0),
+               ('70000000-0000-4000-8000-000000000092',$1,2,$3,0,50)`,[ledger.rows[0].id,inventory,revenueAccount.id]);
+      pendingClose = yearClose.close(company,user,postYear.id);
+      // Attach a rejection observer immediately and prove it reached the DB
+      // lock before letting the posting commit; no database values are logged.
+      const observedClose = pendingClose.then(value => ({value}),error => ({error}));
+      let sawWait = false;
+      for (let attempt=0; attempt<30; attempt++) {
+        const waiting = await sql.query(`SELECT EXISTS (
+          SELECT 1 FROM pg_stat_activity
+           WHERE wait_event_type='Lock' AND query LIKE '%FROM fiscal_periods%'
+             AND query LIKE '%FOR UPDATE%' AND pid <> pg_backend_pid()
+        ) AS waiting`);
+        if (waiting.rows[0].waiting) { sawWait = true; break; }
+        await new Promise(resolve => setTimeout(resolve,50));
+      }
+      assert.equal(sawWait,true,'close must wait for the posting period lock');
+      await poster.query('COMMIT');
+      const settled = await observedClose;
+      if (settled.error) throw settled.error;
+      assert.equal(settled.value.totals.revenue,'50.0000');
+      assert.equal(settled.value.totals.result,'50.0000');
+      assert.equal((await prisma.fiscalPeriod.findUniqueOrThrow({where:{id:postYear.id}})).status,'CLOSED');
+      assert.equal(await prisma.journalEntry.count({where:{companyId:company,sourceType:'YEAR_END_CLOSE',sourceId:postYear.id}}),1);
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'fiscal_periods',entityId:postYear.id,action:'fiscal_year.close'}}),1);
+      await assert.rejects(prisma.journalEntry.create({data:{companyId:company,branchId:branch,
+        entryNumber:'SYN-LATE',entryDate:new Date('2201-06-01T00:00:00Z'),status:'POSTED',totalDebit:1,totalCredit:1}}));
+      assert.equal(await prisma.journalEntry.count({where:{companyId:company,entryNumber:'SYN-LATE'}}),0);
+    } finally {
+      try { await poster.query('ROLLBACK'); } catch { /* already committed or connection closed */ }
+      await poster.end();
+      if (pendingClose) await pendingClose.catch(() => {});
+    }
+    const rollbackYear = await makePeriod(2202);
+    await prisma.journalEntry.create({data:{companyId:company,branchId:branch,
+      entryNumber:'SYN-AUDIT-POST',entryDate:new Date('2202-05-01T00:00:00Z'),
+      status:'POSTED',totalDebit:20,totalCredit:20,lines:{create:[
+        {lineNumber:1,accountId:inventory,debit:20,credit:0},
+        {lineNumber:2,accountId:revenueAccount.id,debit:0,credit:20},
+      ]}}});
+    audit.recordRequired = async (input,tx) => {
+      if (input.action === 'fiscal_year.close') throw new Error('injected year posting audit failure');
+      return closeAudit(input,tx);
+    };
+    try {
+      await assert.rejects(yearClose.close(company,user,rollbackYear.id),/injected year posting audit failure/);
+      assert.equal((await prisma.fiscalPeriod.findUniqueOrThrow({where:{id:rollbackYear.id}})).status,'OPEN');
+      assert.equal(await prisma.journalEntry.count({where:{companyId:company,sourceType:'YEAR_END_CLOSE',sourceId:rollbackYear.id}}),0);
+      assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'fiscal_periods',entityId:rollbackYear.id,action:'fiscal_year.close'}}),0);
+    } finally { audit.recordRequired = closeAudit; }
+    console.log('PASS: real PostgreSQL serializes concurrent closes and posting before close; audit failure rolls back empty and nonempty closes. Draft creation races remain outside this test.');
 
     const failStockAudit = async (action, operation) => {
       const original = audit.recordRequired.bind(audit);
