@@ -123,7 +123,7 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
       }
     } finally {
       if (mounted) {
-        invalidateDashboardFigures(ref);
+        invalidateDashboardAndReports(ref);
         setState(() => _busy = false);
       }
     }

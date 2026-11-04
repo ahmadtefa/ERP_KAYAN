@@ -96,7 +96,7 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
       if (mounted) {
         ref.invalidate(stockListProvider);
         ref.invalidate(journalEntriesProvider);
-        invalidateDashboardFigures(ref);
+        invalidateDashboardAndReports(ref);
         setState(() => _busy = false);
       }
     }
@@ -134,7 +134,7 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
       if (mounted) {
         ref.invalidate(stockListProvider);
         ref.invalidate(journalEntriesProvider);
-        invalidateDashboardFigures(ref);
+        invalidateDashboardAndReports(ref);
         setState(() => _busy = false);
       }
     }

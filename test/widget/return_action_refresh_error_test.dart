@@ -5,6 +5,7 @@ import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/data/presentation/providers/data_providers.dart' show exportCapabilitiesProvider, ExportCapabilities;
 import 'package:erp_kayan/features/invoicing/presentation/providers/invoice_providers.dart';
 import 'package:erp_kayan/features/dashboard/presentation/providers/dashboard_providers.dart';
+import 'package:erp_kayan/features/reports/presentation/report_providers.dart';
 import 'package:erp_kayan/features/invoicing/presentation/screens/returns_screen.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
@@ -43,6 +44,7 @@ void main() {
         addTearDown(container.dispose);
         expect((await container.read(dashboardSummaryProvider.future))['status'],reverse ? 'posted' : 'draft');
         expect((await container.read(dashboardMonthlyProvider.future))['status'],reverse ? 'posted' : 'draft');
+        expect((await container.read(reportProvider('/reports/trial-balance').future))['status'],reverse ? 'posted' : 'draft');
         await tester.pumpWidget(UncontrolledProviderScope(container:container,
           child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
             supportedLocales:AppLocalizations.supportedLocales,home:Scaffold(body:ReturnsScreen(kind:kind)))));
@@ -56,6 +58,7 @@ void main() {
         expect(api.posts,1); expect(api.loads,greaterThanOrEqualTo(2));
         expect((await container.read(dashboardSummaryProvider.future))['status'],reverse ? 'reversed' : 'posted');
         expect((await container.read(dashboardMonthlyProvider.future))['status'],reverse ? 'reversed' : 'posted');
+        expect((await container.read(reportProvider('/reports/trial-balance').future))['status'],reverse ? 'reversed' : 'posted');
         expect(find.text(reverse ? 'Reversed' : 'Posted'),findsOneWidget);
       });
     }

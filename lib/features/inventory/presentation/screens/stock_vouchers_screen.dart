@@ -169,7 +169,7 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
           // A failed network response can still follow a committed transaction.
           ref.invalidate(stockListProvider);
           ref.invalidate(journalEntriesProvider);
-          invalidateDashboardFigures(ref);
+          invalidateDashboardAndReports(ref);
         }
         setState(() => _busy = false);
       }

@@ -103,7 +103,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
       if (mounted) {
         ref.invalidate(stockListProvider);
         ref.invalidate(journalEntriesProvider);
-        invalidateDashboardFigures(ref);
+        invalidateDashboardAndReports(ref);
         setState(() => _busy = false);
       }
     }
@@ -142,7 +142,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
       if (mounted) {
         ref.invalidate(stockListProvider);
         ref.invalidate(journalEntriesProvider);
-        invalidateDashboardFigures(ref);
+        invalidateDashboardAndReports(ref);
         setState(() => _busy = false);
       }
     }

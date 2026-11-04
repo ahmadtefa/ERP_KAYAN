@@ -121,7 +121,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             ref.invalidate(itemsProvider);
             ref.invalidate(stockListProvider);
             ref.invalidate(journalEntriesProvider);
-            invalidateDashboardFigures(ref);
+            invalidateDashboardAndReports(ref);
           }
           throw UncertainFormSubmission(error);
         }
@@ -137,7 +137,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       // cached stock table must be refreshed as well.
       ref.invalidate(stockListProvider);
       ref.invalidate(journalEntriesProvider);
-      invalidateDashboardFigures(ref);
+      invalidateDashboardAndReports(ref);
       if (mounted) showMessage(context, l10n.createdSuccessfully);
     } on Failure catch (e) {
       if (mounted) showMessage(context, e.message, error: true);

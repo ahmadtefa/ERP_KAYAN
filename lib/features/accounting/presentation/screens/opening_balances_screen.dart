@@ -81,7 +81,7 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
         _refresh();
         ref.invalidate(stockListProvider);
         ref.invalidate(journalEntriesProvider);
-        invalidateDashboardFigures(ref);
+        invalidateDashboardAndReports(ref);
         setState(() => _busy = false);
       }
     }

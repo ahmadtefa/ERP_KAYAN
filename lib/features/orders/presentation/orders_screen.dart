@@ -253,7 +253,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
         if (path.startsWith('$_invoiceBase/') && (path.endsWith('/post') || path.endsWith('/reverse'))) {
           ref.invalidate(stockListProvider);
           ref.invalidate(journalEntriesProvider);
-          invalidateDashboardFigures(ref);
+          invalidateDashboardAndReports(ref);
         }
         setState(() => _busy = false);
       }

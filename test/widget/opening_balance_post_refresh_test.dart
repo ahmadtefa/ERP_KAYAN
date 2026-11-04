@@ -5,6 +5,7 @@ import 'package:erp_kayan/features/accounting/presentation/screens/opening_balan
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/dashboard/presentation/providers/dashboard_providers.dart';
 import 'package:erp_kayan/features/inventory/presentation/providers/stock_providers.dart';
+import 'package:erp_kayan/features/reports/presentation/report_providers.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -46,6 +47,8 @@ void main() {
     expect((await container.read(journalEntriesProvider.future)).single['status'],'draft');
     expect((await container.read(dashboardSummaryProvider.future))['status'],'draft');
     expect((await container.read(dashboardMonthlyProvider.future))['status'],'draft');
+    expect((await container.read(reportProvider('/reports/trial-balance?from=2026-01-01').future))['status'],'draft');
+    expect((await container.read(reportProvider('/reports/cash-flow?to=2026-12-31').future))['status'],'draft');
     await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp(
       locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
       supportedLocales:AppLocalizations.supportedLocales,
@@ -62,6 +65,8 @@ void main() {
     expect((await container.read(journalEntriesProvider.future)).single['status'],'posted');
     expect((await container.read(dashboardSummaryProvider.future))['status'],'posted');
     expect((await container.read(dashboardMonthlyProvider.future))['status'],'posted');
+    expect((await container.read(reportProvider('/reports/trial-balance?from=2026-01-01').future))['status'],'posted');
+    expect((await container.read(reportProvider('/reports/cash-flow?to=2026-12-31').future))['status'],'posted');
     expect(tester.takeException(),isNull);
   });
 }

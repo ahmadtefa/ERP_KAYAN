@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/json/json_utils.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../reports/presentation/report_providers.dart';
 
 /// The server-side dashboard figures.
 ///
@@ -21,11 +22,12 @@ final dashboardMonthlyProvider = FutureProvider<Json>((ref) async {
 });
 
 /// A committed transaction (or an unknown response after one) can change
-/// both headline figures and the monthly chart. Invalidate together so a
-/// previously visited dashboard cannot silently show pre-posting numbers.
-void invalidateDashboardFigures(WidgetRef ref) {
+/// headline figures, the monthly chart and cached financial reports. Invalidate
+/// together so previously visited views cannot silently show old figures.
+void invalidateDashboardAndReports(WidgetRef ref) {
   ref.invalidate(dashboardSummaryProvider);
   ref.invalidate(dashboardMonthlyProvider);
+  ref.invalidate(reportProvider);
 }
 
 /// One query box across documents, partners and items.

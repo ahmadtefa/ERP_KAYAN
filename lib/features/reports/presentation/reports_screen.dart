@@ -15,6 +15,7 @@ import '../../accounting/presentation/providers/chart_of_accounts_providers.dart
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../common/presentation/screens/module_scaffold.dart';
 import '../../data/presentation/widgets/export_actions.dart';
+import 'report_providers.dart';
 
 /// The reporting period every tab shares.
 class Period {
@@ -85,12 +86,6 @@ final paymentsKindProvider = NotifierProvider<_FilterController, String>(
 final outstandingKindProvider = NotifierProvider<_FilterController, String>(
   () => _FilterController('ALL'),
 );
-
-/// Reads an endpoint that answers with a `{ rows: [...], totals: {...} }`
-/// object.
-final reportProvider = FutureProvider.family<Json, String>((ref, path) async {
-  return ref.read(apiClientProvider).getObject(path);
-});
 
 /// Trial balance, profit and loss, party balances and the account ledger.
 class ReportsScreen extends ConsumerStatefulWidget {
