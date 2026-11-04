@@ -316,6 +316,13 @@ class _ErpShellState extends ConsumerState<ErpShell> {
         group: _NavGroup.inventory,
       ),
       _NavItem(
+        AppRoutes.salesOrders,
+        Icons.playlist_add_check_outlined,
+        Localizations.localeOf(context).languageCode == 'ar' ? 'أوامر البيع' : 'Sales orders',
+        permissions: const ['sales.orders.read'],
+        group: _NavGroup.sales,
+      ),
+      _NavItem(
         AppRoutes.salesInvoices,
         Icons.point_of_sale_outlined,
         l10n.salesInvoices,
@@ -342,6 +349,13 @@ class _ErpShellState extends ConsumerState<ErpShell> {
           'sales.invoices.create',
         ],
         group: _NavGroup.sales,
+      ),
+      _NavItem(
+        AppRoutes.purchaseOrders,
+        Icons.playlist_add_check_outlined,
+        Localizations.localeOf(context).languageCode == 'ar' ? 'أوامر الشراء' : 'Purchase orders',
+        permissions: const ['purchases.orders.read'],
+        group: _NavGroup.purchases,
       ),
       _NavItem(
         AppRoutes.purchaseInvoices,

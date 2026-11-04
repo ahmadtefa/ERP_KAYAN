@@ -124,7 +124,7 @@ export class SalesOrdersService {
           orderBy: { lineNumber: 'asc' },
           include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } },
         },
-        invoices: { select: { id: true, invoiceNumber: true, status: true, totalAmount: true } },
+        invoices: { where: { deletedAt: null }, select: { id: true, invoiceNumber: true, status: true, totalAmount: true } },
       },
     });
     if (!order) throw new NotFoundException('Sales order not found');

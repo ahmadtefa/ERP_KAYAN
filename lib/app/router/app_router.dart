@@ -24,6 +24,7 @@ import '../../features/invoicing/presentation/screens/invoice_list_screen.dart';
 import '../../features/invoicing/presentation/screens/return_editor_screen.dart';
 import '../../features/invoicing/presentation/screens/returns_screen.dart';
 import '../../features/parties/presentation/screens/parties_screen.dart';
+import '../../features/orders/presentation/orders_screen.dart';
 import '../../features/quotations/presentation/screens/quotation_editor_screen.dart';
 import '../../features/quotations/presentation/screens/quotation_list_screen.dart';
 import '../../features/reports/presentation/reports_screen.dart';
@@ -59,6 +60,8 @@ class AppRoutes {
   static const suppliers = '/parties/suppliers';
   static const items = '/inventory/items';
   static const stock = '/inventory/stock';
+  static const salesOrders = '/sales/orders';
+  static const purchaseOrders = '/purchases/orders';
   static const salesInvoices = '/sales/invoices';
   static const purchaseInvoices = '/purchases/invoices';
   static const quotations = '/sales/quotations';
@@ -169,6 +172,8 @@ const _shellRoutes = <({String path, Widget child})>[
   ),
   (path: AppRoutes.items, child: ItemsScreen()),
   (path: AppRoutes.stock, child: StockScreen()),
+  (path: AppRoutes.salesOrders, child: OrdersScreen(kind: InvoiceKind.sales)),
+  (path: AppRoutes.purchaseOrders, child: OrdersScreen(kind: InvoiceKind.purchase)),
   (
     path: AppRoutes.salesInvoices,
     child: InvoiceListScreen(kind: InvoiceKind.sales),
