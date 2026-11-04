@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
-import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
@@ -33,19 +32,23 @@ class AdminScreen extends ConsumerStatefulWidget {
 class _AdminScreenState extends ConsumerState<AdminScreen> {
   final _exitRelay = DraftExitRelay();
   late final DraftExitGuard _exitGuard;
+  int _pendingActions = 0;
+  void _actionStarted() => _pendingActions++;
+  void _actionFinished() => _pendingActions--;
+  Future<bool> _canLeave() => _pendingActions > 0 ? Future.value(false) : _exitRelay.canLeave();
 
   @override
   void initState() {
     super.initState();
     _exitGuard = ref.read(draftExitGuardProvider);
     final key = widget.navigationKey;
-    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+    if (key != null) _exitGuard.register(key, _canLeave);
   }
 
   @override
   void dispose() {
     final key = widget.navigationKey;
-    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    if (key != null) _exitGuard.unregister(key, _canLeave);
     super.dispose();
   }
 
@@ -65,7 +68,11 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
           ),
           Expanded(
             child: TabBarView(
-              children: [_UsersTab(exitRelay: _exitRelay), _RolesTab(exitRelay: _exitRelay), const _AuditTab()],
+              children: [
+                _UsersTab(exitRelay: _exitRelay, actionStarted: _actionStarted, actionFinished: _actionFinished),
+                _RolesTab(exitRelay: _exitRelay, actionStarted: _actionStarted, actionFinished: _actionFinished),
+                const _AuditTab(),
+              ],
             ),
           ),
         ],
@@ -82,8 +89,9 @@ Set<String>? _permissionCodes(Object? value) {
 // ═════════════════════════════════════════════════════════════ users
 
 class _UsersTab extends ConsumerStatefulWidget {
-  const _UsersTab({required this.exitRelay});
+  const _UsersTab({required this.exitRelay, required this.actionStarted, required this.actionFinished});
   final DraftExitRelay exitRelay;
+  final VoidCallback actionStarted, actionFinished;
 
   @override
   ConsumerState<_UsersTab> createState() => _UsersTabState();
@@ -267,6 +275,8 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       if (!ok || !mounted) return;
     }
 
+    final actionFinished = widget.actionFinished;
+    widget.actionStarted();
     setState(() => _busy = true);
     try {
       final client = ref.read(apiClientProvider);
@@ -275,12 +285,16 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
       } else {
         await client.patch('/admin/users/${row['id']}', body: {'isActive': true});
       }
-      await ref.read(usersListProvider.notifier).reload();
       if (mounted) showMessage(context, l10n.createdSuccessfully);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        // A failed response can follow a committed status change.
+        ref.invalidate(usersListProvider);
+        setState(() => _busy = false);
+      }
+      actionFinished();
     }
   }
 
@@ -404,8 +418,9 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
 // ═════════════════════════════════════════════════════════════ roles
 
 class _RolesTab extends ConsumerStatefulWidget {
-  const _RolesTab({required this.exitRelay});
+  const _RolesTab({required this.exitRelay, required this.actionStarted, required this.actionFinished});
   final DraftExitRelay exitRelay;
+  final VoidCallback actionStarted, actionFinished;
 
   @override
   ConsumerState<_RolesTab> createState() => _RolesTabState();
@@ -490,15 +505,21 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
     );
     if (!ok || !mounted) return;
 
+    final actionFinished = widget.actionFinished;
+    widget.actionStarted();
     setState(() => _busy = true);
     try {
       await ref.read(apiClientProvider).delete('/admin/roles/${role['id']}');
-      await ref.read(rolesListProvider.notifier).reload();
       if (mounted) showMessage(context, l10n.createdSuccessfully);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e, error: true);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        ref.invalidate(rolesListProvider);
+        ref.invalidate(usersListProvider);
+        setState(() => _busy = false);
+      }
+      actionFinished();
     }
   }
 
