@@ -14,10 +14,12 @@ enum FieldKind { text, multiline, decimal, integer, date, toggle, select, multiS
 
 /// One choice in a [FieldKind.select] field.
 class FieldOption {
-  const FieldOption(this.value, this.label);
+  const FieldOption(this.value, this.label, {this.enabled = true});
 
   final String value;
   final String label;
+  /// An existing unavailable value can stay visible without becoming a new choice.
+  final bool enabled;
 }
 
 /// Declarative description of one input in a [showFormSheet].
@@ -351,7 +353,7 @@ class _FormSheetState extends State<_FormSheet> {
             ),
             items: [
               for (final option in field.options)
-                DropdownMenuItem(value: option.value, child: Text(option.label)),
+                DropdownMenuItem(value: option.value, enabled: option.enabled, child: Text(option.label)),
             ],
             validator: field.required
                 ? (value) => (value == null || value.isEmpty)
