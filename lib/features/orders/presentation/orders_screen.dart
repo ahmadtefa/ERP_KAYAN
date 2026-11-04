@@ -100,8 +100,9 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
       final user = ref.read(currentUserProvider);
       if (user == null || user.branchId == null) return;
       final store = OrderRetryStore(await SharedPreferences.getInstance());
-      final scope = orderRetryScope(apiBaseUrl: ref.read(appConfigProvider).apiBaseUrl,
-        companyId: user.companyId, branchId: user.branchId!, userId: user.id,
+      final config = ref.read(appConfigProvider);
+      final scope = orderRetryScope(apiBaseUrl: config.apiBaseUrl,
+        embeddedLocalServer: config.embeddedLocalServer, companyId: user.companyId, branchId: user.branchId!, userId: user.id,
         kind: widget.kind.name, orderId: widget.orderId);
       final pending = store.read(scope);
       if (mounted) setState(() { _store = store; _scope = scope; _pending = pending; });
@@ -114,11 +115,15 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
     setState(() { _busy = true; _pending = request; });
     try {
       final path = request['path'] as String;
+      final method = request['method'];
       final body = Map<String, dynamic>.from(request['body'] as Map);
-      if (request['method'] == 'PUT') {
+      final amendmentPath = RegExp('^${RegExp.escape(_invoiceBase)}/[0-9a-fA-F-]{36}/order-allocation\$');
+      if (method == 'PUT' && amendmentPath.hasMatch(path)) {
         await ref.read(apiClientProvider).put(path, body: body);
-      } else {
+      } else if (method == 'POST' && path == '$_base/${widget.orderId}/invoice') {
         await ref.read(apiClientProvider).post(path, body: body);
+      } else {
+        throw const FormatException('Invalid pending order request');
       }
       await _store!.complete(_scope!);
       if (!mounted) return;

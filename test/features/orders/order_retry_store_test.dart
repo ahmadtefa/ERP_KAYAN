@@ -4,10 +4,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   test('a local restart preserves scope across changing backend ports', () {
-    String scope(String url) => orderRetryScope(apiBaseUrl: url, companyId: 'c',
-      branchId: 'b', userId: 'u', kind: 'sales', orderId: 'o');
+    String scope(String url, {bool embedded = true}) => orderRetryScope(apiBaseUrl: url, companyId: 'c',
+      branchId: 'b', userId: 'u', kind: 'sales', orderId: 'o', embeddedLocalServer: embedded);
     expect(scope('http://127.0.0.1:3000/api/v1'), scope('http://127.0.0.1:3201/api/v1'));
     expect(scope('https://one.example/api/v1'), isNot(scope('https://two.example/api/v1')));
+    expect(scope('http://127.0.0.1:3000/api/v1', embedded: false),
+      isNot(scope('http://127.0.0.1:3201/api/v1', embedded: false)));
   });
   test('keeps the exact key and payload until success, and isolates scope', () async {
     SharedPreferences.setMockInitialValues({});

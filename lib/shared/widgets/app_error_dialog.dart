@@ -167,12 +167,9 @@ String presentErrorText(
   return defaultErrorMessage(context.l10n, text.reason);
 }
 
-/// True while an error dialog is on screen.
-///
-/// A single flag for the whole app on purpose: two errors arriving together
-/// (a save failing and its list reload failing, say) must not put two
-/// dialogs on top of each other.
-bool _errorDialogVisible = false;
+/// Coalesce errors within each navigator without leaving a global flag stuck
+/// when a navigator is disposed while its error dialog is still open.
+final Expando<bool> _errorDialogVisible = Expando<bool>();
 
 /// Opens the central error dialog for [error].
 ///
@@ -187,8 +184,9 @@ Future<void> showAppError(
   if (!context.mounted) return;
   // Nowhere to show it (a screen that is being torn down). Dropping it is
   // better than an exception inside an error handler.
-  if (Navigator.maybeOf(context, rootNavigator: true) == null) return;
-  if (_errorDialogVisible) {
+  final navigator = Navigator.maybeOf(context, rootNavigator: true);
+  if (navigator == null) return;
+  if (_errorDialogVisible[navigator] == true) {
     // Dropping it is deliberate: the person is already looking at an
     // explanation, and a queue of identical dialogs is worse than one.
     _log.warning('A second error arrived while the dialog was open; dropped');
@@ -204,7 +202,7 @@ Future<void> showAppError(
       ? business
       : defaultErrorMessage(context.l10n, resolved.reason);
 
-  _errorDialogVisible = true;
+  _errorDialogVisible[navigator] = true;
   try {
     await showDialog<void>(
       context: context,
@@ -216,7 +214,7 @@ Future<void> showAppError(
           AppErrorDialog(message: message, severity: resolved.severity),
     );
   } finally {
-    _errorDialogVisible = false;
+    _errorDialogVisible[navigator] = null;
   }
 }
 

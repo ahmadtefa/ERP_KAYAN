@@ -7,10 +7,11 @@ import 'package:uuid/uuid.dart';
 /// retry for the same local company must survive that port change; remote
 /// installations stay isolated by origin and base path.
 String orderRetryScope({required String apiBaseUrl, required String companyId,
-  required String branchId, required String userId, required String kind, required String orderId}) {
+  required String branchId, required String userId, required String kind, required String orderId,
+  bool embeddedLocalServer = false}) {
   final base = Uri.parse(apiBaseUrl);
   final loopback = const {'localhost', '127.0.0.1', '::1'}.contains(base.host.toLowerCase());
-  final server = loopback ? 'local-product' : Uri(scheme: base.scheme, host: base.host,
+  final server = loopback && embeddedLocalServer ? 'local-product:${base.scheme}:${base.path}' : Uri(scheme: base.scheme, host: base.host,
     port: base.hasPort ? base.port : null, path: base.path).toString();
   return '$server.$companyId.$branchId.$userId.$kind.$orderId';
 }
