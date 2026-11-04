@@ -517,8 +517,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       // cached stock table must be refreshed as well.
       ref.invalidate(stockListProvider);
       if (mounted) showMessage(context, l10n.createdSuccessfully);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+    } catch (error) {
+      if (mounted) {
+        ref.invalidate(itemsListProvider);
+        ref.invalidate(itemsProvider);
+        ref.invalidate(stockListProvider);
+        await showAppError(context, error);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
