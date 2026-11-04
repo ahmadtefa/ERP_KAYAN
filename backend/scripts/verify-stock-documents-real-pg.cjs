@@ -336,7 +336,40 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(closeBoth.filter(x => x.status === 'rejected').length,1);
     assert.equal((await prisma.fiscalPeriod.findUniqueOrThrow({where:{id:adjacent.id}})).status,'CLOSED');
     await assert.rejects(periods.update(company,user,adjacent.id,{nameEn:'Changed after close'}),/closed period cannot be changed/i);
-    console.log('PASS: PostgreSQL application period create races, overlap edits, audit rollback and period/year close competition. Draft creation and direct SQL range changes remain outside this test.');
+    // Competing closure owns the row while an edit attempts to proceed.
+    // After waiting, the edit must re-read CLOSED, not write stale dates.
+    const editRace = await periods.create(company,user,periodDto('SYN-EDIT-RACE','2303-01-01','2303-12-31'));
+    const closer = new Client({connectionString:url.toString()});
+    await closer.connect();
+    let pendingEdit;
+    try {
+      await closer.query('BEGIN');
+      await closer.query('SELECT id FROM fiscal_periods WHERE id=$1 FOR UPDATE',[editRace.id]);
+      pendingEdit = periods.update(company,user,editRace.id,{endDate:'2303-10-31'});
+      const observedEdit = pendingEdit.then(value => ({value}),error => ({error}));
+      let sawEditWait = false;
+      for (let attempt=0; attempt<30; attempt++) {
+        const waiting = await sql.query(`SELECT EXISTS (
+          SELECT 1 FROM pg_stat_activity WHERE wait_event_type='Lock'
+            AND query LIKE '%FROM fiscal_periods%' AND query LIKE '%FOR UPDATE%'
+            AND pid <> pg_backend_pid()) AS waiting`);
+        if (waiting.rows[0].waiting) { sawEditWait = true; break; }
+        await new Promise(resolve => setTimeout(resolve,50));
+      }
+      assert.equal(sawEditWait,true,'period edit must wait on the period lock');
+      await closer.query(`UPDATE fiscal_periods SET status='CLOSED', "closedAt"=now(), "closedBy"=$2 WHERE id=$1`,[editRace.id,user]);
+      await closer.query('COMMIT');
+      const outcome = await observedEdit;
+      assert.match(String(outcome.error?.message),/closed period cannot be changed/i);
+      const saved = await prisma.fiscalPeriod.findUniqueOrThrow({where:{id:editRace.id}});
+      assert.equal(saved.status,'CLOSED');
+      assert.equal(saved.endDate.toISOString().slice(0,10),'2303-12-31');
+    } finally {
+      try { await closer.query('ROLLBACK'); } catch { /* already committed or connection closed */ }
+      await closer.end();
+      if (pendingEdit) await pendingEdit.catch(() => {});
+    }
+    console.log('PASS: PostgreSQL application period create races, overlap edits, closure/edit lock, audit rollback and period/year close competition. Draft creation and direct SQL range changes remain outside this test.');
 
 
     const failStockAudit = async (action, operation) => {

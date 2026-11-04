@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:erp_kayan/app/router/draft_exit_guard.dart';
+import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/features/accounting/data/datasources/chart_of_accounts_data_source.dart';
 import 'package:erp_kayan/features/accounting/domain/entities/account.dart';
 import 'package:erp_kayan/features/accounting/domain/entities/account_type.dart';
@@ -28,6 +29,7 @@ class _ChartSource implements ChartOfAccountsDataSource {
   int loads = 0;
   AccountInput? createdInput;
   bool failCreate = false;
+  Failure? createError;
   bool commitBeforeFailure = false;
   int createAttempts = 0;
   Completer<Account>? createHold;
@@ -41,6 +43,7 @@ class _ChartSource implements ChartOfAccountsDataSource {
     createAttempts++;
     createdInput = input;
     if (createHold != null) return createHold!.future;
+    if (createError != null) throw createError!;
     if (failCreate && !commitBeforeFailure) throw StateError('Synthetic save failure');
     final account = Account(id: 'new', companyId: 'c', code: input.code ?? '3',
         name: input.nameEn, nameEn: input.nameEn, nameAr: input.nameAr, type: input.type);
@@ -135,6 +138,20 @@ void main() {
     expect(source.createAttempts, 1);
     expect(source.loads, greaterThan(1));
     expect(source.accounts.where((account) => account.nameEn == 'New asset'), hasLength(1));
+  });
+
+  testWidgets('account save preserves HTTP status and hides a 5xx body', (tester) async {
+    final source = _ChartSource()..createError = const ApiFailure('بيانات مصطنعة خاصة لا تعرض',statusCode:503);
+    await _open(tester, source);
+    await tester.tap(find.text('New account')); await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Name in Arabic *'), 'أصل جديد');
+    await tester.enterText(find.widgetWithText(TextField, 'Name in English *'), 'New asset');
+    await tester.tap(find.text('Save')); await tester.pumpAndSettle();
+    expect(find.textContaining('بيانات مصطنعة خاصة'),findsNothing);
+    expect(find.textContaining('تعذّر تأكيد نتيجة العملية'),findsOneWidget);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(find.textContaining('The save result is uncertain'),findsOneWidget);
+    expect(source.createAttempts,1);
   });
 
   testWidgets('cancel and system back ask before discarding edited fields', (tester) async {
