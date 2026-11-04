@@ -124,6 +124,17 @@ for (const line of lines) {
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
+  // Administration widget fixtures contain no real credentials. Emit only
+  // fixed framework failures, numeric assertion counts and source positions.
+  if (event.type === 'print' && /^(?:user edits preserve assigned and unavailable roles|user can explicitly remove an unavailable assigned role|uncertain user edit retains draft and refreshes list|user editor fails safely for (?:incomplete user roles|unavailable roles catalogue)|user creation and password change inputs obscure sensitive text|uncertain role creation retains fields without blind retry|(?:role|extra user) permission editing preserves checked grants|malformed permission sources never save an empty grant list|malformed permission catalogue disables save|permissions draft guards route navigation|user draft guards route navigation)$/.test(tests.get(event.testID) ?? '')) {
+    const details = String(event.message ?? '').split(/\r?\n/).map(line =>
+      line.match(/^\s*(?:Expected:|Actual:)\s*(?:<\d+>|null|not null|exactly \d+ matching candidates|no matching candidates)/)?.[0]?.trim() ??
+      line.match(/test\/widget\/admin_draft_test\.dart:\d+:\d+/)?.[0] ??
+      line.match(/(?:Bad state: No element|Bad state: Too many elements|Cannot hit test a render box that has never been laid out|pumpAndSettle timed out|A Timer is still pending|Multiple exceptions|RenderFlex overflowed|No ScaffoldMessenger widget found)/)?.[0] ??
+      line.match(/^The following [A-Za-z]+ (?:was thrown|object was thrown).*$/)?.[0] ?? ''
+    ).filter(Boolean).join(' ');
+    if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
+  }
   if (event.type === 'error') {
     const message = `${tests.get(event.testID) ?? `test ${event.testID ?? 'unknown'}`}: ${event.error ?? 'unknown error'} ${event.stackTrace ?? ''} ${printed.get(event.testID) ?? ''}`;
     if (tests.get(event.testID)?.startsWith('screenshot:')) errors.push(message);

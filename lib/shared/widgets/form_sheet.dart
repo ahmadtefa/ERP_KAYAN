@@ -37,6 +37,7 @@ class FieldSpec {
     this.maxLines = 1,
     this.emptyValue,
     this.clearable = false,
+    this.obscure = false,
   });
 
   final String key;
@@ -50,6 +51,8 @@ class FieldSpec {
   final String? emptyValue;
   /// Optional date fields can expose a clear button in addition to the picker.
   final bool clearable;
+  /// Sensitive fields must not be shown in clear text or offered to the IME.
+  final bool obscure;
 }
 
 /// The server may have committed a non-idempotent submission despite an
@@ -410,7 +413,8 @@ class _FormSheetState extends State<_FormSheet> {
                     selected:
                         _multiSelections[field.key]?.contains(option.value) ??
                         false,
-                    onSelected: widget.readOnly
+                    onSelected: widget.readOnly ||
+                            (!option.enabled && !(_multiSelections[field.key]?.contains(option.value) ?? false))
                         ? null
                         : (selected) => setState(() {
                             final chosen =
@@ -455,6 +459,10 @@ class _FormSheetState extends State<_FormSheet> {
           child: TextFormField(
             controller: _controllers[field.key],
             readOnly: widget.readOnly,
+            obscureText: field.obscure,
+            enableSuggestions: !field.obscure,
+            autocorrect: !field.obscure,
+            enableIMEPersonalizedLearning: !field.obscure,
             maxLines: field.kind == FieldKind.multiline ? field.maxLines : 1,
             keyboardType: switch (field.kind) {
               FieldKind.decimal => const TextInputType.numberWithOptions(
