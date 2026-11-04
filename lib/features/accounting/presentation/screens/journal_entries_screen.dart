@@ -1,17 +1,21 @@
+import 'dart:convert';
+
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
-import '../../../../core/error/failure.dart';
 import '../../../../shared/widgets/status_pill.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/utils/account_name.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../dashboard/presentation/providers/dashboard_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../providers/chart_of_accounts_providers.dart';
@@ -36,7 +40,8 @@ final journalEntriesProvider =
 /// server, and only then posted. A posted entry is corrected by reversing it,
 /// never by editing it.
 class JournalEntriesScreen extends ConsumerStatefulWidget {
-  const JournalEntriesScreen({super.key});
+  const JournalEntriesScreen({super.key, this.navigationKey});
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<JournalEntriesScreen> createState() =>
@@ -45,10 +50,27 @@ class JournalEntriesScreen extends ConsumerStatefulWidget {
 
 class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
   bool _busy = false;
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
 
   Future<void> _openEditor() async {
     await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const _JournalEditorScreen()),
+      MaterialPageRoute(builder: (_) => _JournalEditorScreen(exitRelay: _exitRelay)),
     );
   }
 
@@ -93,10 +115,17 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
       await action();
       await ref.read(journalEntriesProvider.notifier).reload();
       if (mounted) showMessage(context, success);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+    } catch (error) {
+      if (mounted) {
+        // A response can fail after the ledger action has committed.
+        ref.invalidate(journalEntriesProvider);
+        showAppError(context, error);
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        invalidateDashboardFigures(ref);
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -228,7 +257,8 @@ class _EntryLineDraft {
 }
 
 class _JournalEditorScreen extends ConsumerStatefulWidget {
-  const _JournalEditorScreen();
+  const _JournalEditorScreen({required this.exitRelay});
+  final DraftExitRelay exitRelay;
 
   @override
   ConsumerState<_JournalEditorScreen> createState() =>
@@ -239,7 +269,40 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
   final _lines = <_EntryLineDraft>[_EntryLineDraft(), _EntryLineDraft()];
   final _description = TextEditingController();
   late String _entryDate;
-  bool _saving = false;
+  late String _initialSnapshot;
+  bool _saving = false, _saved = false, _confirmingExit = false;
+
+  String _snapshot() => jsonEncode({
+    'date': _entryDate,
+    'description': _description.text,
+    'lines': [for (final line in _lines) {
+      'account': line.accountId, 'center': line.costCenterId,
+      'debit': line.debit.text, 'credit': line.credit.text,
+      'description': line.description.text,
+      'allocations': [for (final allocation in line.allocations)
+        [allocation.costCenterId, allocation.amount.text]],
+    }],
+  });
+
+  Future<bool> _canLeave() async {
+    if (_saved) return true;
+    if (_saving || _confirmingExit) return false;
+    if (_snapshot() == _initialSnapshot) return true;
+    _confirmingExit = true;
+    try {
+      final ar = Localizations.localeOf(context).languageCode == 'ar';
+      return await confirmAction(context,
+        title: ar ? 'تغييرات غير محفوظة' : 'Unsaved changes',
+        message: ar ? 'الخروج دون حفظ القيد؟' : 'Leave without saving the journal entry?',
+        confirmLabel: ar ? 'خروج' : 'Discard', destructive: true);
+    } finally {
+      _confirmingExit = false;
+    }
+  }
+
+  Future<void> _close() async {
+    if (await _canLeave() && mounted) Navigator.of(context).pop(false);
+  }
 
   @override
   void initState() {
@@ -249,10 +312,13 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
         '${now.year.toString().padLeft(4, '0')}-'
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
+    _initialSnapshot = _snapshot();
+    widget.exitRelay.attach(_canLeave);
   }
 
   @override
   void dispose() {
+    widget.exitRelay.detach(_canLeave);
     _description.dispose();
     for (final line in _lines) {
       line.dispose();
@@ -347,11 +413,15 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
           );
       await ref.read(journalEntriesProvider.notifier).reload();
       if (mounted) {
+        _saved = true;
         Navigator.of(context).pop(true);
         showMessage(context, l10n.createdSuccessfully);
       }
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+    } catch (error) {
+      if (mounted) {
+        ref.invalidate(journalEntriesProvider);
+        showAppError(context, error);
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -367,7 +437,10 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
     final costCenters = ref.watch(activeCostCentersProvider).value ?? const <Json>[];
     final language = Localizations.localeOf(context).languageCode;
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) { if (!didPop) _close(); },
+      child: Scaffold(
       appBar: AppBar(
         title: Text(l10n.newJournalEntry),
         actions: [
@@ -381,7 +454,7 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
           ),
         ],
       ),
-      body: ListView(
+      body: IgnorePointer(ignoring: _saving, child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Card(
@@ -663,8 +736,8 @@ class _JournalEditorScreenState extends ConsumerState<_JournalEditorScreen> {
             ),
           ),
         ],
-      ),
-    );
+      )),
+    ));
   }
 
   /// The controlled split of one line: amounts per centre, the total, and what
