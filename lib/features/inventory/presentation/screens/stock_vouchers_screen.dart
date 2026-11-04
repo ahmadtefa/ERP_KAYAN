@@ -215,9 +215,13 @@ class _VoucherHistory extends ConsumerStatefulWidget {
 }
 class _VoucherHistoryState extends ConsumerState<_VoucherHistory> {
   Future<List<Json>>? _future;
-  Future<List<Json>> _load() async {
-    return ref.read(apiClientProvider).getList('/admin/audit-logs',
-      query:{'entity':'stock_documents','entityId':widget.id,'pageSize':200});
+  Future<List<Json>> _load() {
+    final future = Future<List<Json>>.sync(() => ref.read(apiClientProvider).getList('/admin/audit-logs',
+      query:{'entity':'stock_documents','entityId':widget.id,'pageSize':200}));
+    // The result is still delivered to FutureBuilder. This listener prevents
+    // a fast failure escaping before the expansion has mounted that builder.
+    future.ignore();
+    return future;
   }
   @override
   Widget build(BuildContext context) => ExpansionTile(
