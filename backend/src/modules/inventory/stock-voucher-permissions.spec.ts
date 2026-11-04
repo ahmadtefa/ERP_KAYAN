@@ -25,12 +25,16 @@ describe('stock voucher workflow HTTP permissions', () => {
       for (const [path,permission,stage] of [['review','inventory.stock.review','REVIEW'],['approve','inventory.stock.approve','APPROVE']]) {
         service.transitionVoucher.mockClear();
         const call=(permissions:string) => fetch(`http://127.0.0.1:${port}/inventory/stock-documents/doc/${path}`,
-          {method:'POST',headers:{'x-permissions':permissions}});
+          {method:'POST',headers:{'x-permissions':permissions,'content-type':'application/json'},body:JSON.stringify({expectedVersion:2})});
         expect((await call('inventory.stock.read')).status).toBe(403);
         expect((await call(permission)).status).toBe(403);
         expect(service.transitionVoucher).not.toHaveBeenCalled();
+        const missing = await fetch(`http://127.0.0.1:${port}/inventory/stock-documents/doc/${path}`,
+          {method:'POST',headers:{'x-permissions':`inventory.stock.read,${permission}`,'content-type':'application/json'},body:'{}'});
+        expect(missing.status).toBe(400);
+        expect(service.transitionVoucher).not.toHaveBeenCalled();
         expect((await call(`inventory.stock.read,${permission}`)).status).toBe(201);
-        expect(service.transitionVoucher).toHaveBeenCalledWith('company','branch','user','doc',stage,false);
+        expect(service.transitionVoucher).toHaveBeenCalledWith('company','branch','user','doc',stage,false,2);
       }
     } finally { await app.close(); }
   });

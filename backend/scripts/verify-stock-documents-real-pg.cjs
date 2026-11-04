@@ -404,6 +404,8 @@ let difference = '70000000-0000-4000-8000-000000000005';
       service.updateVoucher(company,branch,user,editable.id,draftEdit,true)]);
     assert.equal(edits[0].editVersion,3); assert.equal(edits[1].editVersion,3);
     assert.equal(edits[0].reviewedAt,null); assert.equal(edits[0].approvedAt,null);
+    await assert.rejects(service.transitionVoucher(company,branch,user,editable.id,'REVIEW',true,approvedEdit.editVersion),/changed/);
+    await assert.rejects(service.post(company,user,editable.id,true,branch,undefined,true),/expectedVersion/);
     assert.equal(edits[0].lines[0].id,approvedEdit.lines[0].id);
     assert.equal(edits[0].lines[0].unitFactor,'2.000000'); assert.equal(edits[0].lines[0].quantity,'6.0000');
     assert.equal(edits[0].lines[1].quantity,'1.0000');
@@ -414,6 +416,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     await service.transitionVoucher(company,branch,user,editable.id,'REVIEW',true);
     await service.transitionVoucher(company,branch,user,editable.id,'APPROVE',true);
     const current = await service.findOne(company,editable.id,true);
+    await assert.rejects(service.post(company,user,editable.id,true,branch,approvedEdit.editVersion,true),/changed/);
     const race = await pauseStockPost(editable);
     try {
       await service.updateVoucher(company,branch,user,editable.id,{...draftEdit,idempotencyKey:'editable-voucher-race-0001',

@@ -147,7 +147,7 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
       kind:text(doc,'voucherKind'),initialDocument:doc,exitRelay:widget.exitRelay)));
     if (mounted) _refresh();
   }
-  Future<void> _action(String action) async {
+  Future<void> _action(String action, int? version) async {
     if (_busy || _confirming) return;
     setState(() => _confirming = true);
     final ok = await confirmAction(context,title:_label(context,'تأكيد العملية','Confirm action'),
@@ -158,7 +158,7 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
     if (!ok) return;
     setState(() => _busy = true);
     try {
-      await ref.read(apiClientProvider).post('$_base/${widget.id}/$action',body:{});
+      await ref.read(apiClientProvider).post('$_base/${widget.id}/$action',body:{if (version != null) 'expectedVersion':version});
       if (mounted) { _refresh(); showMessage(context,_label(context,'تم تحديث الإذن','Voucher refreshed')); }
     } catch (error) {
       if (mounted) { _refresh(); showAppError(context,error); }
@@ -183,6 +183,7 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
         if (snapshot.hasError) return _VoucherLoadError(error:snapshot.error!,onRetry:_refresh);
         if (!snapshot.hasData) return const Center(child:CircularProgressIndicator());
         final doc=snapshot.data!; final status=text(doc,'status').toLowerCase();
+        final version=doc['editVersion'] is int ? doc['editVersion'] as int : null;
         final reviewed=asString(doc['reviewedAt']) != null, approved=asString(doc['approvedAt']) != null;
         return ListView(padding:const EdgeInsets.all(20),children:[
           Text('${text(doc,'documentNumber')} • ${text(doc,'voucherKind')} • $status',style:Theme.of(context).textTheme.titleLarge),
@@ -206,14 +207,14 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
             if (status == 'draft' && can('inventory.stock.adjust') && can('inventory.items.read') &&
                 can('inventory.warehouses.read') && (text(doc,'voucherKind') != 'RECEIPT' || can('inventory.cost.read')) && doc['editVersion'] is int)
               OutlinedButton(onPressed:_busy || _confirming ? null : () => _edit(doc),child:Text(_label(context,'تعديل المسودة','Edit draft'))),
-            if (status == 'draft' && !reviewed && can('inventory.stock.review'))
-              OutlinedButton(onPressed:_busy || _confirming ? null : () => _action('review'),child:Text(_label(context,'مراجعة','Review'))),
-            if (status == 'draft' && reviewed && !approved && can('inventory.stock.approve'))
-              OutlinedButton(onPressed:_busy || _confirming ? null : () => _action('approve'),child:Text(_label(context,'اعتماد','Approve'))),
-            if (status == 'draft' && approved && can('inventory.stock.adjust'))
-              FilledButton(onPressed:_busy || _confirming ? null : () => _action('post'),child:Text(_label(context,'ترحيل','Post'))),
+            if (status == 'draft' && version != null && !reviewed && can('inventory.stock.review'))
+              OutlinedButton(onPressed:_busy || _confirming ? null : () => _action('review',version),child:Text(_label(context,'مراجعة','Review'))),
+            if (status == 'draft' && version != null && reviewed && !approved && can('inventory.stock.approve'))
+              OutlinedButton(onPressed:_busy || _confirming ? null : () => _action('approve',version),child:Text(_label(context,'اعتماد','Approve'))),
+            if (status == 'draft' && version != null && approved && can('inventory.stock.adjust'))
+              FilledButton(onPressed:_busy || _confirming ? null : () => _action('post',version),child:Text(_label(context,'ترحيل','Post'))),
             if (status == 'posted' && can('inventory.stock.adjust'))
-              OutlinedButton(onPressed:_busy || _confirming ? null : () => _action('reverse'),child:Text(_label(context,'عكس','Reverse'))),
+              OutlinedButton(onPressed:_busy || _confirming ? null : () => _action('reverse',version),child:Text(_label(context,'عكس','Reverse'))),
           ]),
         ]);
       })));
@@ -477,6 +478,9 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
           if (!snapshot.hasData) return const Center(child:CircularProgressIndicator());
           final items=snapshot.data![0], warehouses=snapshot.data![1], centers=snapshot.data![2];
           return ListView(padding:const EdgeInsets.all(20),children:[
+            if (_editing && (widget.initialDocument!['reviewedAt'] != null || widget.initialDocument!['approvedAt'] != null))
+              Text(_label(context,'حفظ التعديلات يلغي المراجعة والاعتماد ويتطلب إعادة تنفيذهما.',
+                'Saving changes clears review and approval; both must be repeated.')),
             if (_pending != null) Card(child:ListTile(title:Text(_label(context,'طلب الإذن غير محسوم؛ أعد المحاولة بنفس الطلب','Voucher request is unresolved; retry the same request')),
               trailing:Wrap(spacing:8,children:[FilledButton(onPressed:_busy ? null : () => _send(_pending!),child:Text(_label(context,'إعادة المحاولة','Retry'))),
                 if (_editing) TextButton(onPressed:_busy ? null : _discardPendingAndReload,child:Text(_label(context,'إعادة التحميل','Reload')))]))),

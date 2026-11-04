@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { canReadCost } from '../../common/auth/cost-visibility';
@@ -46,20 +46,26 @@ export class StockDocumentsController {
 
   @Post(':id/review')
   @RequirePermissions('inventory.stock.read', 'inventory.stock.review')
-  review(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.transitionVoucher(user.companyId, user.branchId, user.userId, id, 'REVIEW', canReadCost(user));
+  review(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+    return this.service.transitionVoucher(user.companyId, user.branchId, user.userId, id, 'REVIEW', canReadCost(user), this.voucherVersion(body));
   }
 
   @Post(':id/approve')
   @RequirePermissions('inventory.stock.read', 'inventory.stock.approve')
-  approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.transitionVoucher(user.companyId, user.branchId, user.userId, id, 'APPROVE', canReadCost(user));
+  approve(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+    return this.service.transitionVoucher(user.companyId, user.branchId, user.userId, id, 'APPROVE', canReadCost(user), this.voucherVersion(body));
   }
 
   @Post(':id/post')
   @RequirePermissions('inventory.stock.adjust')
-  post(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.post(user.companyId, user.userId, id, canReadCost(user), user.branchId);
+  post(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+    return this.service.post(user.companyId, user.userId, id, canReadCost(user), user.branchId, body?.expectedVersion, true);
+  }
+
+  private voucherVersion(body: Record<string, unknown> | undefined): number {
+    const version = body?.expectedVersion;
+    if (!Number.isSafeInteger(version) || (version as number) < 0) throw new BadRequestException('expectedVersion is required');
+    return version as number;
   }
 
   @Post(':id/reverse')

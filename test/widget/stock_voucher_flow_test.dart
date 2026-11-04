@@ -23,6 +23,7 @@ class _VoucherApi extends ApiClient {
   Future<Map<String,dynamic>> get(String path,{Map<String,dynamic>? query}) async => {'blocked':false};
   final requests=<Map<String,dynamic>>[];
   final actions=<String>[];
+  final actionVersions=<Object?>[];
   bool reviewed=false, approved=false, paged=false;
   final itemPages=<int>[];
   final listQueries=<Map<String,dynamic>>[];
@@ -48,7 +49,7 @@ class _VoucherApi extends ApiClient {
       return {'items':<Map<String,dynamic>>[],'total':0};
     }
     return {'id':'document','documentNumber':'SA-1','documentDate':'2026-11-04','voucherKind':'ISSUE',
-      'status':status,'counterpartyName':'Department','reason':'Synthetic','toWarehouseId':'warehouse',
+      'status':status,'editVersion':approved ? 2 : reviewed ? 1 : 0,'counterpartyName':'Department','reason':'Synthetic','toWarehouseId':'warehouse',
       'reviewedAt':reviewed ? '2026-11-04T12:00:00Z' : null,
       'approvedAt':approved ? '2026-11-04T12:01:00Z' : null,
       'lines':[{'itemCode':'IT','itemNameEn':'Item','quantity':'-2','unit':'piece','unitCost':'7'}]};
@@ -61,6 +62,7 @@ class _VoucherApi extends ApiClient {
       return {'id':'document'};
     }
     final action=path.split('/').last; actions.add(action);
+    actionVersions.add(body is Map ? body['expectedVersion'] : null);
     if (action == 'review') reviewed=true;
     if (action == 'approve') approved=true;
     if (action == 'post') status='posted';
@@ -320,6 +322,7 @@ void main() {
       await tester.tap(find.text('Confirm')); await tester.pumpAndSettle();
     }
     expect(api.actions,['review','approve','post','reverse']);
+    expect(api.actionVersions,[0,1,2,2]);
     expect(find.textContaining('reversed'),findsOneWidget);
   });
 }

@@ -615,7 +615,7 @@ export class StockDocumentsService {
 
   /** Review and approval are idempotent and atomic with their audit record. */
   async transitionVoucher(companyId: string, branchId: string | null, userId: string, id: string,
-    stage: 'REVIEW' | 'APPROVE', mayReadCost = true) {
+    stage: 'REVIEW' | 'APPROVE', mayReadCost = true, expectedVersion?: number) {
     if (!branchId) throw new BadRequestException('The signed-in user is not assigned to a branch');
     await this.prisma.$transaction(async tx => {
       const locked = await tx.$queryRaw<Array<{id:string}>>(Prisma.sql`
@@ -625,6 +625,7 @@ export class StockDocumentsService {
       if (locked.length !== 1) throw new NotFoundException('Stock voucher not found');
       const document = await tx.stockDocument.findUniqueOrThrow({where:{id}});
       if (!document.voucherKind || document.status !== InvoiceStatus.DRAFT) throw new BadRequestException('Only a draft stock voucher can be reviewed or approved');
+      if (expectedVersion !== undefined && document.editVersion !== expectedVersion) throw new ConflictException('The voucher has changed; reload the latest version');
       if (stage === 'REVIEW') {
         if (document.reviewedAt) return;
         await tx.stockDocument.update({where:{id},data:{reviewedAt:new Date(),reviewedBy:userId,editVersion:{increment:1}}});
@@ -642,13 +643,17 @@ export class StockDocumentsService {
    * Posts the document: movements, stock balances and - when value changes -
    * one journal entry.
    */
-  async post(companyId: string, userId: string, id: string, mayReadCost = true, voucherBranchId: string | null = null) {
+  async post(companyId: string, userId: string, id: string, mayReadCost = true, voucherBranchId: string | null = null,
+    expectedVersion?: unknown, requireVoucherVersion = false) {
     const initialDocument = await this.prisma.stockDocument.findFirst({
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
     if (!initialDocument) throw new NotFoundException('Stock document not found');
     if (initialDocument.voucherKind && initialDocument.branchId !== voucherBranchId) throw new NotFoundException('Stock voucher not found');
+    if (initialDocument.voucherKind && requireVoucherVersion && (!Number.isSafeInteger(expectedVersion) || (expectedVersion as number) < 0)) {
+      throw new BadRequestException('expectedVersion is required for posting a stock voucher');
+    }
     if (initialDocument.status !== InvoiceStatus.DRAFT) {
       throw new BadRequestException(
         `Only a draft stock document can be posted (current status: ${initialDocument.status})`,
@@ -681,6 +686,9 @@ export class StockDocumentsService {
       });
       if (!document) throw new NotFoundException('Stock document not found');
       if (document.voucherKind && document.branchId !== voucherBranchId) throw new NotFoundException('Stock voucher not found');
+      if (document.voucherKind && expectedVersion !== undefined && document.editVersion !== expectedVersion) {
+        throw new ConflictException('The voucher has changed; reload the latest version');
+      }
       if (document.voucherKind && (!document.reviewedAt || !document.approvedAt)) {
         throw new BadRequestException('Stock voucher must be reviewed and approved before posting');
       }
