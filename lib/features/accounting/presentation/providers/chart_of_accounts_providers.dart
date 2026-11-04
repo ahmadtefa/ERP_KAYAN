@@ -28,14 +28,37 @@ final chartOfAccountsRepositoryProvider = Provider<ChartOfAccountsRepository>(
 
 /// Loads the chart of accounts and exposes the standard async states.
 class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
+  int _loadGeneration = 0;
+  Future<AsyncValue<List<Account>>>? _latestLoad;
+
   @override
-  Future<List<Account>> build() {
-    return _load();
+  Future<List<Account>> build() async {
+    ref.onDispose(() {
+      _loadGeneration++;
+      _latestLoad = null;
+    });
+    var request = _startLoad();
+    while (true) {
+      final generation = _loadGeneration;
+      final result = await request;
+      if (generation == _loadGeneration || _latestLoad == null) {
+        return result.requireValue;
+      }
+      request = _latestLoad!;
+    }
+  }
+
+  Future<AsyncValue<List<Account>>> _startLoad() {
+    _loadGeneration++;
+    return _latestLoad = AsyncValue.guard(_load);
   }
 
   Future<void> refresh() async {
+    final request = _startLoad();
+    final generation = _loadGeneration;
     state = const AsyncValue.loading();
-    state = await AsyncValue.guard(_load);
+    final result = await request;
+    if (generation == _loadGeneration) state = result;
   }
 
   Future<List<Account>> _load() async {
@@ -58,7 +81,11 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
         ref.invalidateSelf();
         return null;
       },
-      failure: (failure) => failure.message,
+      failure: (failure) {
+        // The server may have committed before the response was lost.
+        ref.invalidateSelf();
+        return failure.message;
+      },
     );
   }
 
@@ -71,7 +98,11 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
         ref.invalidateSelf();
         return null;
       },
-      failure: (failure) => failure.message,
+      failure: (failure) {
+        // The server may have committed before the response was lost.
+        ref.invalidateSelf();
+        return failure.message;
+      },
     );
   }
 
@@ -86,7 +117,11 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
         ref.invalidateSelf();
         return null;
       },
-      failure: (failure) => failure.message,
+      failure: (failure) {
+        // The server may have committed before the response was lost.
+        ref.invalidateSelf();
+        return failure.message;
+      },
     );
   }
 
@@ -99,7 +134,11 @@ class ChartOfAccountsController extends AsyncNotifier<List<Account>> {
         ref.invalidateSelf();
         return null;
       },
-      failure: (failure) => failure.message,
+      failure: (failure) {
+        // The server may have committed before the response was lost.
+        ref.invalidateSelf();
+        return failure.message;
+      },
     );
   }
 }
