@@ -8,9 +8,11 @@ import '../../../../core/json/json_utils.dart';
 import '../../../../shared/widgets/status_pill.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../dashboard/presentation/providers/dashboard_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../inventory/presentation/providers/stock_providers.dart';
 import '../../../accounting/presentation/screens/journal_entries_screen.dart';
@@ -85,10 +87,16 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
         ref.invalidate(returnListProvider(widget.kind));
         showMessage(context, error.message, error: true);
       }
+    } catch (error) {
+      if (mounted) {
+        ref.invalidate(returnListProvider(widget.kind));
+        showAppError(context, error);
+      }
     } finally {
       if (mounted) {
         ref.invalidate(stockListProvider);
         ref.invalidate(journalEntriesProvider);
+        invalidateDashboardFigures(ref);
         setState(() => _busy = false);
       }
     }
@@ -117,10 +125,16 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
         ref.invalidate(returnListProvider(widget.kind));
         showMessage(context, error.message, error: true);
       }
+    } catch (error) {
+      if (mounted) {
+        ref.invalidate(returnListProvider(widget.kind));
+        showAppError(context, error);
+      }
     } finally {
       if (mounted) {
         ref.invalidate(stockListProvider);
         ref.invalidate(journalEntriesProvider);
+        invalidateDashboardFigures(ref);
         setState(() => _busy = false);
       }
     }

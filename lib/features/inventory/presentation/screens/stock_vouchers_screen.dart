@@ -9,6 +9,7 @@ import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../dashboard/presentation/providers/dashboard_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../orders/presentation/order_retry_store.dart';
 import '../../../invoicing/presentation/screens/invoice_editor_screen.dart' show lineUnitsOf;
@@ -168,6 +169,7 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
           // A failed network response can still follow a committed transaction.
           ref.invalidate(stockListProvider);
           ref.invalidate(journalEntriesProvider);
+          invalidateDashboardFigures(ref);
         }
         setState(() => _busy = false);
       }

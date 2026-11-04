@@ -12,6 +12,7 @@ import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../dashboard/presentation/providers/dashboard_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../inventory/presentation/providers/stock_providers.dart';
 import '../../../accounting/presentation/screens/journal_entries_screen.dart';
@@ -102,6 +103,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
       if (mounted) {
         ref.invalidate(stockListProvider);
         ref.invalidate(journalEntriesProvider);
+        invalidateDashboardFigures(ref);
         setState(() => _busy = false);
       }
     }
@@ -140,6 +142,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
       if (mounted) {
         ref.invalidate(stockListProvider);
         ref.invalidate(journalEntriesProvider);
+        invalidateDashboardFigures(ref);
         setState(() => _busy = false);
       }
     }

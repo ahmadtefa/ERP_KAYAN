@@ -9,6 +9,7 @@ import '../../../core/json/json_utils.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
+import '../../dashboard/presentation/providers/dashboard_providers.dart';
 import '../../common/presentation/screens/module_scaffold.dart';
 import '../../invoicing/presentation/providers/invoice_providers.dart';
 import '../../inventory/presentation/providers/stock_providers.dart';
@@ -247,6 +248,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
         if (path.startsWith('$_invoiceBase/') && (path.endsWith('/post') || path.endsWith('/reverse'))) {
           ref.invalidate(stockListProvider);
           ref.invalidate(journalEntriesProvider);
+          invalidateDashboardFigures(ref);
         }
         setState(() => _busy = false);
       }

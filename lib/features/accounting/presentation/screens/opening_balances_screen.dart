@@ -7,6 +7,8 @@ import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
 import '../../../../shared/widgets/download_feedback.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../dashboard/presentation/providers/dashboard_providers.dart';
+import 'journal_entries_screen.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/providers/data_providers.dart';
 import '../../../inventory/presentation/screens/stock_screen.dart';
@@ -65,20 +67,21 @@ class _OpeningBalancesScreenState extends ConsumerState<OpeningBalancesScreen> {
       await ref
           .read(apiClientProvider)
           .post('/accounting/opening-balances/$id/post');
-      // Posting writes stock balances as well as the ledger. The stock
-      // screen caches its rows, so it would otherwise keep showing the
-      // quantities from before the opening balance until a restart.
-      ref.invalidate(stockListProvider);
-      if (mounted) {
-        showMessage(context, l10n.entryPosted);
-        _refresh();
-      }
+      if (mounted) showMessage(context, l10n.entryPosted);
     } on Failure catch (error) {
       if (mounted) showMessage(context, error.message, error: true);
     } catch (error) {
       if (mounted) showMessage(context, describeError(context, error), error: true);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        // A failed response can arrive after the server committed the post.
+        // Reload the document and all dependent ledger/stock/dashboard views.
+        _refresh();
+        ref.invalidate(stockListProvider);
+        ref.invalidate(journalEntriesProvider);
+        invalidateDashboardFigures(ref);
+        setState(() => _busy = false);
+      }
     }
   }
 

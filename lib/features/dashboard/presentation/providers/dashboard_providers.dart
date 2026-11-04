@@ -20,6 +20,14 @@ final dashboardMonthlyProvider = FutureProvider<Json>((ref) async {
       );
 });
 
+/// A committed transaction (or an unknown response after one) can change
+/// both headline figures and the monthly chart. Invalidate together so a
+/// previously visited dashboard cannot silently show pre-posting numbers.
+void invalidateDashboardFigures(WidgetRef ref) {
+  ref.invalidate(dashboardSummaryProvider);
+  ref.invalidate(dashboardMonthlyProvider);
+}
+
 /// One query box across documents, partners and items.
 final globalSearchProvider =
     FutureProvider.family<Json, String>((ref, query) async {
