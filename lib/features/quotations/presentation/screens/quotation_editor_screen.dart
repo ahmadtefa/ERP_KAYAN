@@ -11,6 +11,7 @@ import '../../../../core/json/discount_math.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/item_picker_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/page_header.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
@@ -426,6 +427,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   String? _validUntil;
   bool _saving = false;
   bool _loading = false;
+  bool _loadFailed = false;
 
   @override
   void initState() {
@@ -437,6 +439,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
     _tables.add(_QTableDraft());
     if (widget.quotationId != null) {
       _loading = true;
+      _loadFailed = true;
       _load();
     }
   }
@@ -524,12 +527,19 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
           );
         }
         _loading = false;
+        _loadFailed = false;
       });
-    } on Failure catch (error) {
+    } catch (error) {
       if (!mounted) return;
-      setState(() => _loading = false);
-      showMessage(context, error.message, error: true);
+      setState(() { _loading = false; _loadFailed = true; });
+      showAppError(context, error);
     }
+  }
+
+  void _retryLoad() {
+    if (_loading || widget.quotationId == null) return;
+    setState(() { _loading = true; _loadFailed = true; });
+    _load();
   }
 
   /// The column catalogue, in the order the picker offers it.
@@ -713,6 +723,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
   }
 
   Future<void> _save() async {
+    if (_saving || _loading || _loadFailed) return;
     final l10n = context.l10n;
     if (_customerId == null) {
       showMessage(context, l10n.selectCustomer, error: true);
@@ -848,7 +859,7 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
                 : l10n.editQuotation,
             actions: [
               FilledButton.icon(
-                onPressed: _saving || _loading ? null : _save,
+                onPressed: _saving || _loading || _loadFailed ? null : _save,
                 icon: const Icon(Icons.save_outlined, size: 17),
                 label: Text(l10n.save),
               ),
@@ -861,7 +872,12 @@ class _QuotationEditorScreenState extends ConsumerState<QuotationEditorScreen> {
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : ListView(
+                : _loadFailed
+                  ? Center(child:OutlinedButton(
+                      key:const Key('quotation-retry-load'),
+                      onPressed:_retryLoad,
+                      child:Text(Localizations.localeOf(context).languageCode == 'ar' ? 'إعادة المحاولة' : 'Retry')))
+                  : ListView(
                     padding: const EdgeInsets.all(AppSpacing.xl),
                     children: [
                 Text(
