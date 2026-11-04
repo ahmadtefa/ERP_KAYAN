@@ -8,6 +8,7 @@ import '../../../../core/json/json_utils.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
@@ -173,15 +174,28 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     }
 
     Future<void> reload() async {
-      ref.read(itemsListProvider.notifier).reload();
+      ref.invalidate(itemsProvider);
+      await ref.read(itemsListProvider.notifier).reload();
+    }
+
+    Future<void> submitUnit(Future<void> Function() action) async {
+      try {
+        await action();
+      } catch (error) {
+        if (mounted) {
+          ref.invalidate(itemsListProvider);
+          ref.invalidate(itemsProvider);
+        }
+        throw UncertainFormSubmission(error);
+      }
     }
 
     while (mounted) {
       List<Map<String, dynamic>> units;
       try {
         units = await loadUnits();
-      } on Failure catch (e) {
-        if (mounted) showMessage(context, e.message, error: true);
+      } catch (error) {
+        if (mounted) await showAppError(context, error);
         return;
       }
       if (!mounted) return;
@@ -315,15 +329,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               FieldSpec('purchasePrice', l10n.unitsBarcodesFieldPurchasePrice,
                   kind: FieldKind.decimal),
           ],
+          onSubmit: (draft) => submitUnit(() async {
+            await client.post('/inventory/items/$itemId/units', body: draft);
+          }),
         );
         if (values == null || !mounted) return;
-        try {
-          await client.post('/inventory/items/$itemId/units', body: values);
-          await reload();
-          if (mounted) showMessage(context, l10n.unitsBarcodesAdded);
-        } on Failure catch (e) {
-          if (mounted) showMessage(context, e.message, error: true);
-        }
+        await reload();
+        if (mounted) showMessage(context, l10n.unitsBarcodesAdded);
         continue;
       }
 
@@ -365,8 +377,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           await client.post('/inventory/items/$itemId/units/$unitId/barcode', body: const {});
           await reload();
           if (mounted) showMessage(context, l10n.unitsBarcodesBarcodeGenerated);
-        } on Failure catch (e) {
-          if (mounted) showMessage(context, e.message, error: true);
+        } catch (error) {
+          if (mounted) {
+            ref.invalidate(itemsListProvider);
+            ref.invalidate(itemsProvider);
+            await showAppError(context, error);
+          }
         }
         continue;
       }
@@ -378,8 +394,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           );
           await reload();
           if (mounted) showMessage(context, l10n.unitsBarcodesReactivated);
-        } on Failure catch (e) {
-          if (mounted) showMessage(context, e.message, error: true);
+        } catch (error) {
+          if (mounted) {
+            ref.invalidate(itemsListProvider);
+            ref.invalidate(itemsProvider);
+            await showAppError(context, error);
+          }
         }
         continue;
       }
@@ -410,8 +430,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                   : l10n.unitsBarcodesRemoved,
             );
           }
-        } on Failure catch (e) {
-          if (mounted) showMessage(context, e.message, error: true);
+        } catch (error) {
+          if (mounted) {
+            ref.invalidate(itemsListProvider);
+            ref.invalidate(itemsProvider);
+            await showAppError(context, error);
+          }
         }
         continue;
       }
@@ -452,15 +476,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               FieldSpec('purchasePrice', l10n.unitsBarcodesFieldPurchasePrice,
                   kind: FieldKind.decimal),
           ],
+          onSubmit: (draft) => submitUnit(() async {
+            await client.patch('/inventory/items/$itemId/units/$unitId', body: draft);
+          }),
         );
         if (values == null || !mounted) return;
-        try {
-          await client.patch('/inventory/items/$itemId/units/$unitId', body: values);
-          await reload();
-          if (mounted) showMessage(context, l10n.unitsBarcodesUpdated);
-        } on Failure catch (e) {
-          if (mounted) showMessage(context, e.message, error: true);
-        }
+        await reload();
+        if (mounted) showMessage(context, l10n.unitsBarcodesUpdated);
       }
     }
   }
