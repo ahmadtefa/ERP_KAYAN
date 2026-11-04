@@ -9,6 +9,8 @@ import '../../features/licensing/presentation/widgets/licence_gate.dart';
 import '../../features/search/presentation/search_dialog.dart';
 import '../../features/settings/presentation/providers/locale_provider.dart';
 import '../../shared/extensions/l10n_extension.dart';
+import '../../shared/widgets/app_error_dialog.dart';
+import '../router/draft_exit_guard.dart';
 import '../router/app_router.dart';
 import '../theme/design_tokens.dart';
 
@@ -94,10 +96,12 @@ SectionAccent _accentForGroup(_NavGroup group) => switch (group) {
 /// The navigation model itself changes with the available width; this is not
 /// a phone layout stretched across a monitor.
 class ErpShell extends ConsumerStatefulWidget {
-  const ErpShell({super.key, required this.currentPath, required this.child});
+  const ErpShell({super.key, required this.currentPath, required this.child, this.guardKey});
 
   final String currentPath;
   final Widget child;
+  /// Key for the current route when it registers a draft exit guard.
+  final ValueKey<String>? guardKey;
 
   static const _wideBreakpoint = 900.0;
   static const _extendedBreakpoint = 1280.0;
@@ -190,6 +194,7 @@ class _ErpShellState extends ConsumerState<ErpShell> {
                     ),
                     isWide: isWide,
                     isExtended: isExtended,
+                    guardKey: widget.guardKey,
                   ),
                   Expanded(
                     child: LicenceGate(
@@ -923,12 +928,14 @@ class _TopBar extends StatelessWidget {
     required this.sectionLabel,
     required this.isWide,
     required this.isExtended,
+    required this.guardKey,
   });
 
   final _NavItem item;
   final String sectionLabel;
   final bool isWide;
   final bool isExtended;
+  final ValueKey<String>? guardKey;
 
   @override
   Widget build(BuildContext context) {
@@ -1038,7 +1045,7 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: AppSpacing.xs),
           const _LanguageMenu(),
           const SizedBox(width: AppSpacing.xxs),
-          const _SignOutButton(),
+          _SignOutButton(guardKey: guardKey),
         ],
       ),
     );
@@ -1120,17 +1127,38 @@ class _LanguageMenu extends ConsumerWidget {
   }
 }
 
-class _SignOutButton extends ConsumerWidget {
-  const _SignOutButton();
+class _SignOutButton extends ConsumerStatefulWidget {
+  const _SignOutButton({required this.guardKey});
+  final ValueKey<String>? guardKey;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return IconButton(
-      icon: const Icon(Icons.logout_rounded, size: 19),
-      tooltip: context.l10n.signOut,
-      onPressed: () => ref.read(authControllerProvider.notifier).signOut(),
-    );
+  ConsumerState<_SignOutButton> createState() => _SignOutButtonState();
+}
+
+class _SignOutButtonState extends ConsumerState<_SignOutButton> {
+  bool _busy = false;
+
+  Future<void> _signOut() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final key = widget.guardKey;
+      if (key != null && !await ref.read(draftExitGuardProvider).canLeave(key)) return;
+      if (!mounted) return;
+      await ref.read(authControllerProvider.notifier).signOut();
+    } catch (error) {
+      if (mounted) await showAppError(context, error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    icon: const Icon(Icons.logout_rounded, size: 19),
+    tooltip: context.l10n.signOut,
+    onPressed: _busy ? null : _signOut,
+  );
 }
 
 /// The navigation for narrow windows: the same items, the same permissions,

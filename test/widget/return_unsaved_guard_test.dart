@@ -3,6 +3,7 @@ import 'package:erp_kayan/app/router/app_router.dart';
 import 'package:erp_kayan/app/shell/erp_shell.dart';
 import 'package:erp_kayan/core/config/app_config.dart';
 import 'package:erp_kayan/core/network/api_client.dart';
+import 'package:erp_kayan/core/result/result.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/features/invoicing/presentation/providers/invoice_providers.dart';
@@ -32,7 +33,46 @@ class _ReturnApi extends ApiClient {
   }
 }
 
+class _CountingAuthRepository extends FakeAuthRepository {
+  int signOuts = 0;
+  @override
+  Future<Result<void>> signOut() async {
+    signOuts++;
+    return super.signOut();
+  }
+}
+
 void main() {
+  testWidgets('sign out asks before discarding a routed return draft', (tester) async {
+    tester.view.physicalSize=const Size(1500,1000); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final auth=_CountingAuthRepository();
+    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(_ReturnApi()),
+      tokenStoreProvider.overrideWithValue(FakeTokenStore()),authRepositoryProvider.overrideWithValue(auth),
+      currentUserProvider.overrideWithValue(const AppUser(id:'user',username:'user',fullName:'User',companyId:'company',branchId:'branch',isSuperAdmin:true))]);
+    addTearDown(container.dispose);
+    final router=GoRouter(initialLocation:AppRoutes.salesReturnNew,routes:[
+      GoRoute(path:AppRoutes.salesReturnNew,
+        onExit:(_,state) => container.read(draftExitGuardProvider).canLeave(state.pageKey),
+        builder:(context,state) => ErpShell(currentPath:AppRoutes.salesReturns,guardKey:state.pageKey,
+          child:ReturnEditorScreen(kind:InvoiceKind.sales,navigationKey:state.pageKey))),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp.router(locale:const Locale('en'),
+      localizationsDelegates:AppLocalizations.localizationsDelegates,supportedLocales:AppLocalizations.supportedLocales,routerConfig:router)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>)); await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('INV-1').last); await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first,'keep this reason');
+    await tester.tap(find.byTooltip('Sign Out')); await tester.pumpAndSettle();
+    expect(find.text('Unsaved changes'),findsOneWidget);
+    await tester.tap(find.text('Cancel')); await tester.pumpAndSettle();
+    expect(auth.signOuts,0);
+    expect(tester.widget<TextField>(find.byType(TextField).first).controller!.text,'keep this reason');
+    await tester.tap(find.byTooltip('Sign Out')); await tester.pumpAndSettle();
+    await tester.tap(find.text('Discard')); await tester.pumpAndSettle();
+    expect(auth.signOuts,1);
+  });
   test('an unregistered route fails closed and unregistering an old callback keeps the new one', () async {
     final guard = DraftExitGuard();
     const key = ValueKey('route');

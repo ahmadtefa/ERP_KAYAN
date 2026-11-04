@@ -112,6 +112,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             ? true : ref.read(draftExitGuardProvider).canLeave(state.pageKey),
         builder: (context, state) => ErpShell(
           currentPath: AppRoutes.salesReturns,
+          guardKey: state.pageKey,
           child: ReturnEditorScreen(kind: InvoiceKind.sales, navigationKey: state.pageKey),
         ),
       ),
@@ -121,6 +122,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             ? true : ref.read(draftExitGuardProvider).canLeave(state.pageKey),
         builder: (context, state) => ErpShell(
           currentPath: AppRoutes.purchaseReturns,
+          guardKey: state.pageKey,
           child: ReturnEditorScreen(kind: InvoiceKind.purchase, navigationKey: state.pageKey),
         ),
       ),
@@ -130,6 +132,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             ? true : ref.read(draftExitGuardProvider).canLeave(state.pageKey),
         builder: (context, state) => ErpShell(
           currentPath: AppRoutes.quotations,
+          guardKey: state.pageKey,
           child: QuotationEditorScreen(navigationKey: state.pageKey),
         ),
       ),
@@ -139,6 +142,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             ? true : ref.read(draftExitGuardProvider).canLeave(state.pageKey),
         builder: (context, state) => ErpShell(
           currentPath: AppRoutes.quotations,
+          guardKey: state.pageKey,
           child: QuotationEditorScreen(
             key: ValueKey('quotation-edit-${state.pathParameters['id']}'),
             navigationKey: state.pageKey,
@@ -158,11 +162,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       for (final route in _shellRoutes)
         GoRoute(
           path: route.path,
-          onExit: [AppRoutes.companySettings,AppRoutes.salesInvoices,AppRoutes.purchaseInvoices,AppRoutes.salesOrders,AppRoutes.purchaseOrders,AppRoutes.stock].contains(route.path)
+          onExit: _guardedShellPaths.contains(route.path)
             ? (context,state) => ref.read(currentUserProvider) == null
                 ? true : ref.read(draftExitGuardProvider).canLeave(state.pageKey)
             : null,
           builder: (context, state) => ErpShell(currentPath: route.path,
+            guardKey: _guardedShellPaths.contains(route.path) ? state.pageKey : null,
             child:route.path == AppRoutes.companySettings
               ? CompanySettingsScreen(navigationKey:state.pageKey)
               : route.path == AppRoutes.salesInvoices
@@ -180,6 +185,11 @@ final routerProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+const _guardedShellPaths = <String>{
+  AppRoutes.companySettings, AppRoutes.salesInvoices, AppRoutes.purchaseInvoices,
+  AppRoutes.salesOrders, AppRoutes.purchaseOrders, AppRoutes.stock,
+};
 
 /// Every authenticated screen, in the order the navigation shows them.
 const _shellRoutes = <({String path, Widget child})>[
