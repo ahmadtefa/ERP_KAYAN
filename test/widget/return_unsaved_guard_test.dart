@@ -19,6 +19,8 @@ class _ReturnApi extends ApiClient {
   _ReturnApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),FakeTokenStore());
   bool failSource = false;
   @override
+  Future<Map<String,dynamic>> get(String path,{Map<String,dynamic>? query}) async => {'blocked':false};
+  @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async => [
     {'id':'invoice','invoiceNumber':'INV-1','invoiceDate':'2026-01-01','status':'posted','branchId':'branch'},
   ];
