@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../core/error/failure.dart';
 import '../../../../core/json/json_utils.dart';
@@ -19,7 +20,9 @@ import '../providers/cost_center_providers.dart';
 /// deactivating are the server's decisions, so a refusal (a cycle, a duplicate
 /// code) is shown exactly as the server phrased it.
 class CostCentersScreen extends ConsumerStatefulWidget {
-  const CostCentersScreen({super.key});
+  const CostCentersScreen({super.key, this.navigationKey});
+
+  final ValueKey<String>? navigationKey;
 
   @override
   ConsumerState<CostCentersScreen> createState() => _CostCentersScreenState();
@@ -31,6 +34,23 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
   String _status = '';
   String _parent = '';
   bool _busy = false;
+  final _exitRelay = DraftExitRelay();
+  late final DraftExitGuard _exitGuard;
+
+  @override
+  void initState() {
+    super.initState();
+    _exitGuard = ref.read(draftExitGuardProvider);
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
+  }
+
+  @override
+  void dispose() {
+    final key = widget.navigationKey;
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
+    super.dispose();
+  }
 
   String _nameOf(Json row) {
     final arabic = Localizations.localeOf(context).languageCode == 'ar';
@@ -89,14 +109,15 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
         ],
       ),
       FieldSpec('responsiblePerson', l10n.responsiblePerson),
-      FieldSpec('startDate', l10n.startDate, kind: FieldKind.date),
-      FieldSpec('endDate', l10n.endDate, kind: FieldKind.date),
+      FieldSpec('startDate', l10n.startDate, kind: FieldKind.date, clearable: true),
+      FieldSpec('endDate', l10n.endDate, kind: FieldKind.date, clearable: true),
       FieldSpec('description', l10n.description, kind: FieldKind.multiline, maxLines: 2),
       if (isEdit) FieldSpec('isActive', l10n.active, kind: FieldKind.toggle),
     ];
 
     final values = await showFormSheet(
       context,
+      exitRelay: _exitRelay,
       title: isEdit ? l10n.editCostCenter : l10n.newCostCenter,
       fields: fields,
       // A date the user cleared must be sent as a removal; a select left at
@@ -111,32 +132,32 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
               'endDate': text(existing, 'endDate'),
             }
           : {'type': 'DEPARTMENT', 'isActive': true, 'parentId': 'none'},
+      onSubmit: (draft) async {
+        final parentId = draft['parentId'];
+        final body = <String, dynamic>{
+          ...draft,
+          if (parentId != null) 'parentId': parentId == 'none' ? null : parentId,
+          // The date inputs are optional; clearing one is explicit, not an
+          // omitted PATCH field that silently preserves the previous date.
+          'startDate': draft['startDate'],
+          'endDate': draft['endDate'],
+        };
+        try {
+          final client = ref.read(apiClientProvider);
+          if (isEdit) {
+            await client.patch('/accounting/cost-centers/${existing['id']}', body: body);
+          } else {
+            await client.post('/accounting/cost-centers', body: body);
+          }
+        } catch (error) {
+          if (mounted) ref.invalidate(costCentersProvider);
+          throw UncertainFormSubmission(error);
+        }
+      },
     );
     if (values == null || !mounted) return;
-
-    final parentId = values.remove('parentId');
-    final body = <String, dynamic>{
-      ...values,
-      // "No parent" is a real choice, not a missing value: it moves the centre
-      // to the root of the tree.
-      if (parentId != null) 'parentId': parentId == 'none' ? null : parentId,
-    };
-
-    setState(() => _busy = true);
-    try {
-      final client = ref.read(apiClientProvider);
-      if (isEdit) {
-        await client.patch('/accounting/cost-centers/${existing['id']}', body: body);
-      } else {
-        await client.post('/accounting/cost-centers', body: body);
-      }
-      await _refresh();
-      if (mounted) showMessage(context, l10n.costCenterSaved);
-    } on Failure catch (error) {
-      if (mounted) showMessage(context, error.message, error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    ref.invalidate(costCentersProvider);
+    showMessage(context, l10n.costCenterSaved);
   }
 
   Future<void> _toggle(Json row) async {

@@ -34,6 +34,7 @@ class FieldSpec {
     this.options = const [],
     this.maxLines = 1,
     this.emptyValue,
+    this.clearable = false,
   });
 
   final String key;
@@ -45,6 +46,8 @@ class FieldSpec {
   final int maxLines;
   /// Explicit payload when an optional field is blank; null keeps omission.
   final String? emptyValue;
+  /// Optional date fields can expose a clear button in addition to the picker.
+  final bool clearable;
 }
 
 /// The server may have committed a non-idempotent submission despite an
@@ -222,11 +225,13 @@ class _FormSheetState extends State<_FormSheet> {
       firstDate: DateTime(now.year - 5),
       lastDate: DateTime(now.year + 5),
     );
-    if (picked != null) {
-      controller.text =
-          '${picked.year.toString().padLeft(4, '0')}-'
-          '${picked.month.toString().padLeft(2, '0')}-'
-          '${picked.day.toString().padLeft(2, '0')}';
+    if (picked != null && mounted) {
+      setState(() {
+        controller.text =
+            '${picked.year.toString().padLeft(4, '0')}-'
+            '${picked.month.toString().padLeft(2, '0')}-'
+            '${picked.day.toString().padLeft(2, '0')}';
+      });
     }
   }
 
@@ -418,7 +423,13 @@ class _FormSheetState extends State<_FormSheet> {
             decoration: InputDecoration(
               labelText: field.label,
               helperText: field.helper,
-              suffixIcon: const Icon(Icons.calendar_today_outlined),
+              suffixIcon: field.clearable && !widget.readOnly && _controllers[field.key]!.text.isNotEmpty
+                  ? IconButton(
+                      tooltip: Localizations.localeOf(context).languageCode == 'ar' ? 'مسح التاريخ' : 'Clear date',
+                      onPressed: () => setState(() => _controllers[field.key]!.clear()),
+                      icon: const Icon(Icons.clear),
+                    )
+                  : const Icon(Icons.calendar_today_outlined),
             ),
             onTap: widget.readOnly ? null : () => _pickDate(field),
             validator: (value) => _validate(field, value),
