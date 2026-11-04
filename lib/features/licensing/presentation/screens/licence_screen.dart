@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../app/router/app_router.dart';
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../data/licence_data_source.dart';
 import '../providers/licence_providers.dart';
@@ -26,7 +27,6 @@ class _LicenceScreenState extends ConsumerState<LicenceScreen> {
   final _keyController = TextEditingController();
   String _operation = 'activation';
   bool _busy = false;
-  String? _error;
   String? _notice;
   List<Map<String, dynamic>>? _events;
 
@@ -40,12 +40,11 @@ class _LicenceScreenState extends ConsumerState<LicenceScreen> {
     final l10n = context.l10n;
     final key = _keyController.text.trim();
     if (key.isEmpty) {
-      setState(() => _error = l10n.licenceKeyHint);
+      showAppError(context, l10n.licenceKeyHint);
       return;
     }
     setState(() {
       _busy = true;
-      _error = null;
       _notice = null;
     });
     final failure = await ref
@@ -57,16 +56,16 @@ class _LicenceScreenState extends ConsumerState<LicenceScreen> {
       if (failure == null) {
         _notice = l10n.licenceApplied;
         _keyController.clear();
-      } else {
-        _error = failure == 'EMPTY' ? l10n.licenceKeyHint : failure;
       }
     });
+    if (failure != null) {
+      showAppError(context, failure == 'EMPTY' ? l10n.licenceKeyHint : failure);
+    }
   }
 
   Future<void> _confirmClock() async {
     setState(() {
       _busy = true;
-      _error = null;
       _notice = null;
     });
     final failure = await ref.read(licenceActionsProvider).confirmClock();
@@ -75,10 +74,9 @@ class _LicenceScreenState extends ConsumerState<LicenceScreen> {
       _busy = false;
       if (failure == null) {
         _notice = context.l10n.licenceApplied;
-      } else {
-        _error = failure;
       }
     });
+    if (failure != null) showAppError(context, failure);
   }
 
   Future<void> _loadEvents() async {
@@ -89,20 +87,24 @@ class _LicenceScreenState extends ConsumerState<LicenceScreen> {
       setState(() {
         _events = rows;
         _busy = false;
-        _error = null;
       });
     } catch (error) {
       if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = '$error';
-      });
+      setState(() => _busy = false);
+      showAppError(context, error);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    ref.listen(licenceStatusProvider, (previous, next) {
+      if (next.hasError && next.error != previous?.error) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) showAppError(context, next.error);
+        });
+      }
+    });
     final statusAsync = ref.watch(licenceStatusProvider);
 
     return ModuleScaffold(
@@ -125,7 +127,7 @@ class _LicenceScreenState extends ConsumerState<LicenceScreen> {
             _MessageCard(
               icon: Icons.error_outline,
               title: l10n.errorDialogTitle,
-              body: '${statusAsync.error}',
+              body: presentErrorText(context, statusAsync.error),
               tone: _Tone.error,
             )
           else if (statusAsync.hasValue) ...[
@@ -158,7 +160,6 @@ class _LicenceScreenState extends ConsumerState<LicenceScreen> {
               controller: _keyController,
               operation: _operation,
               busy: _busy,
-              error: _error,
               notice: _notice,
               canApply: statusAsync.value!.configured,
               onOperation: (value) => setState(() => _operation = value),
@@ -468,7 +469,6 @@ class _ApplyCard extends StatelessWidget {
     required this.canApply,
     required this.onOperation,
     required this.onApply,
-    this.error,
     this.notice,
   });
 
@@ -476,7 +476,6 @@ class _ApplyCard extends StatelessWidget {
   final String operation;
   final bool busy;
   final bool canApply;
-  final String? error;
   final String? notice;
   final ValueChanged<String> onOperation;
   final VoidCallback onApply;
@@ -527,15 +526,6 @@ class _ApplyCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: AppSpacing.md),
-            if (error != null) ...[
-              _MessageCard(
-                icon: Icons.block,
-                title: l10n.warningDialogTitle,
-                body: error!,
-                tone: _Tone.error,
-              ),
-              const SizedBox(height: AppSpacing.md),
-            ],
             if (notice != null) ...[
               _MessageCard(
                 icon: Icons.check_circle_outline,

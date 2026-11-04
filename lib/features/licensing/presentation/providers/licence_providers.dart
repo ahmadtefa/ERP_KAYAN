@@ -1,6 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/error/failure.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../data/licence_data_source.dart';
 
@@ -28,7 +27,7 @@ class LicenceActions {
 
   final Ref _ref;
 
-  Future<String?> apply(String operation, String key) async {
+  Future<Object?> apply(String operation, String key) async {
     final trimmed = key.trim();
     if (trimmed.isEmpty) {
       return 'EMPTY';
@@ -37,22 +36,18 @@ class LicenceActions {
       await _ref.read(licenceDataSourceProvider).apply(operation, trimmed);
       _ref.invalidate(licenceStatusProvider);
       return null;
-    } on Failure catch (failure) {
-      return failure.message;
     } catch (error) {
-      return '$error';
+      return error;
     }
   }
 
-  Future<String?> confirmClock() async {
+  Future<Object?> confirmClock() async {
     try {
       await _ref.read(licenceDataSourceProvider).confirmClock();
       _ref.invalidate(licenceStatusProvider);
       return null;
-    } on Failure catch (failure) {
-      return failure.message;
     } catch (error) {
-      return '$error';
+      return error;
     }
   }
 
