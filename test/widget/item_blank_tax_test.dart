@@ -84,8 +84,9 @@ void main() {
     await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
     expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Tax %')).controller!.text,'7');
     expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Code')).controller!.text,'I-1');
-    await tester.tap(find.text('Save').last); await tester.pumpAndSettle();
-    expect(api.posts,2); expect(api.submitted,containsPair('taxRate','7'));
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
+    expect(find.textContaining('operation may have completed'),findsOneWidget);
+    expect(api.posts,1); expect(api.submitted,containsPair('taxRate','7'));
   });
 
 }

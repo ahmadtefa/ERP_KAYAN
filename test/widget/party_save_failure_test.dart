@@ -85,8 +85,9 @@ void main() {
         expect(find.textContaining('INTERNAL_PARTY_DIAGNOSTIC'),findsNothing);
         await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
         expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Name (English)')).controller!.text,'Kept name');
-        await tester.tap(find.text('Save').last); await tester.pumpAndSettle();
-        expect(api.attempts,2);
+        expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
+        expect(find.textContaining('operation may have completed'),findsOneWidget);
+        expect(api.attempts,1);
         expect(api.submitted,containsPair('nameEn','Kept name'));
       });
     }

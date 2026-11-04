@@ -91,7 +91,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           } else {
             await client.post('/inventory/items', body: draft);
           }
-        } catch (_) {
+        } catch (error) {
           // The server may have committed before a transport error. Reload
           // the source instead of leaving dependent screens confidently stale.
           if (mounted) {
@@ -101,7 +101,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             ref.invalidate(journalEntriesProvider);
             invalidateDashboardFigures(ref);
           }
-          rethrow;
+          throw UncertainFormSubmission(error);
         }
       },
     );

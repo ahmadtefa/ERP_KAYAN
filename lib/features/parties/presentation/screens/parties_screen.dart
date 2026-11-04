@@ -81,7 +81,7 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
           } else {
             await client.post(_path, body: draft);
           }
-        } catch (_) {
+        } catch (error) {
           // The server may have committed before a transport failure. Re-read
           // the lists, while keeping the draft open for the user to inspect.
           if (mounted) {
@@ -89,7 +89,7 @@ class _PartiesScreenState extends ConsumerState<PartiesScreen> {
             ref.invalidate(customersProvider);
             ref.invalidate(suppliersProvider);
           }
-          rethrow;
+          throw UncertainFormSubmission(error);
         }
       },
     );
