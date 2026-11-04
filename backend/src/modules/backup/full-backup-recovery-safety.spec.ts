@@ -1,4 +1,4 @@
-import { ServiceUnavailableException } from '@nestjs/common';
+import { Logger, ServiceUnavailableException } from '@nestjs/common';
 import * as childProcess from 'child_process';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -140,6 +140,78 @@ describe('full restore failure safety', () => {
     licensing.reconcile.mockRejectedValue(new Error('synthetic failure'));
     await expect(service.restore({ confirm: true, uploaded }, 'u')).rejects.toBeInstanceOf(ServiceUnavailableException);
     expect(maintenance.isActive).toBe(true);
+  });
+
+  it('does not retain database errors in scratch rehearsal status', async () => {
+    const marker = 'synthetic-private-marker';
+    internals.execSql.mockRejectedValueOnce(new Error(marker));
+    await expect(service.restore({ confirm: true, uploaded }, 'u')).rejects.toThrow(/rehearsal/);
+    const reason = (service as unknown as { lastCreateDatabaseFailure: string }).lastCreateDatabaseFailure;
+    expect(reason).toBe('unclassified failure');
+    expect(reason).not.toContain(marker);
+    expect(internals.cleanDatabaseSchema).not.toHaveBeenCalled();
+  });
+
+  it('does not include raw database errors in post-restore validation', async () => {
+    const marker = 'synthetic-private-marker';
+    const instance = new FullBackupService(
+      { $disconnect: jest.fn().mockRejectedValue(new Error(marker)) } as unknown as ConstructorParameters<typeof FullBackupService>[0],
+      {} as ConstructorParameters<typeof FullBackupService>[1],
+      maintenance,
+      licensing as unknown as ConstructorParameters<typeof FullBackupService>[3],
+    );
+    const check = await (instance as unknown as { postRestoreCheck(): Promise<{ ok: boolean; detail: string }> }).postRestoreCheck();
+    expect(check.ok).toBe(false);
+    expect(check.detail).toContain('unclassified failure');
+    expect(check.detail).not.toContain(marker);
+  });
+
+  it('does not expose tool stderr or exception text when rehearsal fails', async () => {
+    const marker = 'synthetic-private-marker';
+    const log = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    jest.mocked(childProcess.execFile).mockImplementation(((_, __, ___, callback) => {
+      const error = Object.assign(new Error(marker), { code: 7 });
+      (callback as (e: Error | null, stdout: string, stderr: string) => void)(error, '', marker);
+      return {} as childProcess.ChildProcess;
+    }) as typeof childProcess.execFile);
+    const failure = await service.restore({ confirm: true, uploaded }, 'u').catch((error) => error);
+    expect(failure.message).toContain('tool exit 7');
+    expect(failure.message).not.toContain(marker);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(marker);
+    expect(internals.cleanDatabaseSchema).not.toHaveBeenCalled();
+    expect(maintenance.isActive).toBe(false);
+  });
+
+  it('hides primary restore error details after a successful recovery', async () => {
+    const marker = 'synthetic-private-marker';
+    const log = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    let calls = 0;
+    jest.mocked(childProcess.execFile).mockImplementation(((_, __, ___, callback) => {
+      calls++;
+      const error = calls === 2 ? Object.assign(new Error(marker), { code: 4 }) : null;
+      (callback as (e: Error | null, stdout: string, stderr: string) => void)(error, '', marker);
+      return {} as childProcess.ChildProcess;
+    }) as typeof childProcess.execFile);
+    const failure = await service.restore({ confirm: true, uploaded }, 'u').catch((error) => error);
+    expect(failure.message).toMatch(/safety backup.*restored/i);
+    expect(failure.message).toContain('tool exit 4');
+    expect(failure.message).not.toContain(marker);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(marker);
+    expect(maintenance.isActive).toBe(false);
+  });
+
+  it('does not persist access-repair errors containing sensitive data in audit', async () => {
+    const marker = 'synthetic-private-marker';
+    const log = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    internals.reconcileRestoredCompanies.mockRejectedValue(new Error(marker));
+    const result = await service.restore({ confirm: true, uploaded }, 'u');
+    const audit = (service as unknown as { audit: { record: jest.Mock } }).audit;
+    expect(result.restored).toBe(true);
+    expect(JSON.stringify(audit.record.mock.calls)).not.toContain(marker);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(marker);
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+      after: expect.objectContaining({ accessReconciled: { error: 'unclassified failure' } }),
+    }));
   });
 
   it('rejects another request even before the first reaches maintenance', async () => {

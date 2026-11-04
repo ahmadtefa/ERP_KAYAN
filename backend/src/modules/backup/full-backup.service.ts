@@ -372,12 +372,9 @@ export class FullBackupService {
       // Only remove the staging file if this operation created it; in
       // particular, a collision must not delete another process's file.
       if (reserved) await unlink(partial).catch(() => {});
-      // The command line is not logged: it carries the database name, and the
-      // password travels in the child's environment. Only what pg_dump itself
-      // said, and the shape of the command, reach the log.
-      this.logger.error(
-        `pg_dump of database "${database}" failed: ${(error as Error).message}`,
-      );
+      // Tool stderr and exception messages may contain connection data or
+      // customer values. Keep only a bounded diagnostic category.
+      this.logger.error(`pg_dump failed (${safeBackupFailure(error)}).`);
       throw new ServiceUnavailableException(
         'The backup could not be created. The database tools on this machine ' +
           'reported a problem; the details are in the server log. ' +
@@ -417,7 +414,7 @@ export class FullBackupService {
         // A folder the program cannot read is a machine problem with a name.
         throw new ServiceUnavailableException(
           `The backup folder "${dir}" could not be read ` +
-            `(${(error as Error).message}).`,
+            `(${safeBackupFailure(error)}).`,
         );
       }
 
@@ -452,7 +449,7 @@ export class FullBackupService {
     } catch (error) {
       throw new ServiceUnavailableException(
         `The backup file "${name}" could not be read ` +
-          `(${(error as Error).message}). The database was not changed.`,
+          `(${safeBackupFailure(error)}). The database was not changed.`,
       );
     }
   }
@@ -481,7 +478,7 @@ export class FullBackupService {
     } catch (error) {
       throw new ServiceUnavailableException(
         `The backup file "${name}" could not be read back for checking ` +
-          `(${(error as Error).message}). Nothing was changed.`,
+          `(${safeBackupFailure(error)}). Nothing was changed.`,
       );
     } finally {
       await handle?.close();
@@ -503,7 +500,7 @@ export class FullBackupService {
     } catch (error) {
       throw new ServiceUnavailableException(
         `The backup file "${name}" could not be read by pg_restore ` +
-          `(${(error as Error).message}). It may be damaged, or written by a ` +
+          `(${safeBackupFailure(error)}). It may be damaged, or written by a ` +
           'newer PostgreSQL than this machine has. Nothing was changed.',
       );
     }
@@ -544,7 +541,7 @@ export class FullBackupService {
     } catch (error) {
       throw new BadRequestException(
         `The file "${label}" is not a PostgreSQL archive pg_restore can read ` +
-          `(${(error as Error).message}). It may be damaged, or made by a ` +
+          `(${safeBackupFailure(error)}). It may be damaged, or made by a ` +
           'different PostgreSQL version. The current data was not touched.',
       );
     }
@@ -571,7 +568,7 @@ export class FullBackupService {
     } catch (error) {
       throw new ServiceUnavailableException(
         `The backup file "${name}" could not be deleted ` +
-          `(${(error as Error).message}). Nothing else was changed.`,
+          `(${safeBackupFailure(error)}). Nothing else was changed.`,
       );
     }
     await this.audit.record({
@@ -650,7 +647,7 @@ export class FullBackupService {
     } catch (error) {
       throw new ServiceUnavailableException(
         `The upload could not be written to "${dir}" ` +
-          `(${(error as Error).message}). Set KAYAN_BACKUP_DIR to a folder ` +
+          `(${safeBackupFailure(error)}). Set KAYAN_BACKUP_DIR to a folder ` +
           'this program may write to, then try again.',
       );
     }
@@ -668,7 +665,7 @@ export class FullBackupService {
         tools.pgRestore as string,
         staging,
       );
-      this.logger.log(`Backup "${label}" lists ${entries} objects`);
+      this.logger.log(`Uploaded backup lists ${entries} objects`);
 
       // 2. Rehearse in a new database. If CREATE fails, never continue to the
       // primary: an archive listing alone cannot establish a usable restore.
@@ -679,9 +676,7 @@ export class FullBackupService {
         this.canCreateDatabase = true;
       } catch (error) {
         this.canCreateDatabase = false;
-        this.lastCreateDatabaseFailure = String(
-          (error as Error).message ?? error,
-        );
+        this.lastCreateDatabaseFailure = safeBackupFailure(error);
         this.logger.warn('A restore could not be rehearsed in a scratch database.');
         throw new ServiceUnavailableException(
           'The restore rehearsal database could not be created. The current database was not changed.',
@@ -721,8 +716,7 @@ export class FullBackupService {
           throw new BadRequestException(
             'This file did not restore cleanly into a test database, so the ' +
               'current data was not touched. It may be damaged, or made by a ' +
-              'different PostgreSQL version. Details: ' +
-              String((rehearsalFailure as Error | null | undefined)?.message ?? rehearsalFailure).slice(0, 300),
+              `different PostgreSQL version. Diagnostic: ${safeBackupFailure(rehearsalFailure)}.`,
           );
         }
       }
@@ -754,14 +748,14 @@ export class FullBackupService {
         ]);
         restored = true;
       } catch (error) {
-        this.logger.error(`pg_restore failed: ${(error as Error).message}`);
+        this.logger.error(`pg_restore failed (${safeBackupFailure(error)}).`);
         // The database may be half-replaced. Put the safety copy back.
         await this.recoverFrom(safety.name, tools.pgRestore as string);
         safeToReleaseMaintenance = true;
         throw new ServiceUnavailableException(
           'The restore failed part way through. The safety backup taken just ' +
             `before (${safety.name}) was restored back automatically. ` +
-            `Details: ${String((error as Error).message ?? error).slice(0, 300)}`,
+            `Diagnostic: ${safeBackupFailure(error)}.`,
         );
       }
 
@@ -769,13 +763,12 @@ export class FullBackupService {
       if (restored) {
         const check = await this.postRestoreCheck();
         if (!check.ok) {
-          this.logger.error(`Post-restore check failed: ${check.detail}`);
+          this.logger.error('Post-restore validation failed.');
           await this.recoverFrom(safety.name, tools.pgRestore as string);
           safeToReleaseMaintenance = true;
           throw new ServiceUnavailableException(
             'The restore finished but the data did not pass the checks that ' +
-              'follow one. The safety backup was restored back automatically. ' +
-              `Details: ${check.detail}`,
+              'follow one. The safety backup was restored back automatically.',
           );
         }
       }
@@ -792,10 +785,8 @@ export class FullBackupService {
       try {
         accessRepair = await this.reconcileRestoredCompanies();
       } catch (repairError) {
-        this.logger.error(
-          `Post-restore access repair failed: ${(repairError as Error).message}`,
-        );
-        accessRepair = { error: String((repairError as Error).message ?? repairError) };
+        this.logger.error(`Post-restore access repair failed (${safeBackupFailure(repairError)}).`);
+        accessRepair = { error: safeBackupFailure(repairError) };
       }
 
       await this.audit.record({
@@ -885,7 +876,7 @@ export class FullBackupService {
         path,
       ]);
       const check = await this.postRestoreCheck();
-      if (!check.ok) throw new Error(check.detail);
+      if (!check.ok) throw new Error('Recovery validation failed');
       await this.licensing.reconcile();
     } catch (error) {
       this.maintenance.begin(
@@ -893,9 +884,7 @@ export class FullBackupService {
           `from ${name} also failed. Do not enter data. ` +
           'Restore manually from the backup files in the backup folder.',
       );
-      this.logger.error(
-        `Recovery from ${name} failed: ${(error as Error).message}`,
-      );
+      this.logger.error(`Recovery from safety backup failed (${safeBackupFailure(error)}).`);
       throw new ServiceUnavailableException(
         `The restore and automatic recovery both failed. Maintenance remains active. Restore manually from ${name}.`,
       );
@@ -943,9 +932,7 @@ export class FullBackupService {
     } catch (error) {
       return {
         ok: false,
-        detail: `the database did not answer the checks: ${
-          (error as Error).message
-        }`,
+        detail: `the database did not answer the checks (${safeBackupFailure(error)})`,
       };
     }
   }
@@ -980,26 +967,23 @@ export class FullBackupService {
           'to back up. Set DATABASE_URL and restart the server.',
       );
     }
+    let name: string;
     try {
       const url = new URL(raw);
-      const name = decodeURI(url.pathname.replace(/^\//, ''));
-      if (!name) {
-        throw new Error('the address names no database');
-      }
-      // libpq interprets these names as connection strings, not database
-      // names. Reject them rather than allow a different target or credentials
-      // to enter the command line.
-      if (name.includes('=') || /^postgres(?:ql)?:\/\//i.test(name)) {
-        throw new Error('the database name is ambiguous for backup tools');
-      }
-      return name;
-    } catch (error) {
+      name = decodeURI(url.pathname.replace(/^\//, ''));
+    } catch {
       throw new ServiceUnavailableException(
-        `The DATABASE_URL this server was started with cannot be read ` +
-          `(${(error as Error).message}). Fix it and restart the server. ` +
-          'Nothing was changed.',
+        'The DATABASE_URL this server was started with cannot be read. Fix it and restart the server. Nothing was changed.',
       );
     }
+    if (!name) {
+      throw new ServiceUnavailableException('The database address names no database. Nothing was changed.');
+    }
+    // libpq interprets these as connection strings rather than database names.
+    if (name.includes('=') || /^postgres(?:ql)?:\/\//i.test(name)) {
+      throw new ServiceUnavailableException('The database name is ambiguous for backup tools. Nothing was changed.');
+    }
+    return name;
   }
 
   public backupDir(): string {
@@ -1037,12 +1021,10 @@ export class FullBackupService {
       // A folder the program cannot create (a read-only install directory,
       // a missing drive, a permission) is a machine problem with an obvious
       // fix worth naming - not a mystery "unexpected server error".
-      this.logger.error(
-        `Could not create the backup folder ${dir}: ${(error as Error).message}`,
-      );
+      this.logger.error(`Could not create the backup folder (${safeBackupFailure(error)}).`);
       throw new ServiceUnavailableException(
         `Backups cannot be written to "${dir}" on this machine ` +
-          `(${(error as Error).message}). Set KAYAN_BACKUP_DIR to a folder ` +
+          `(${safeBackupFailure(error)}). Set KAYAN_BACKUP_DIR to a folder ` +
           'this program may write to, then try again.',
       );
     }
@@ -1091,7 +1073,7 @@ export class FullBackupService {
     } catch (error) {
       throw new ServiceUnavailableException(
         `The backup file "${name}" could not be read back for checking ` +
-          `(${(error as Error).message}). The database was not changed.`,
+          `(${safeBackupFailure(error)}). The database was not changed.`,
       );
     } finally {
       await handle?.close();
@@ -1150,9 +1132,7 @@ export class FullBackupService {
     try {
       await this.execSql('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
     } catch (error) {
-      this.logger.error(
-        `Could not drop public schema with CASCADE: ${(error as Error).message}`,
-      );
+      this.logger.error(`Could not drop public schema (${safeBackupFailure(error)}).`);
       throw error;
     }
   }
@@ -1166,8 +1146,27 @@ function connectionEnv(): NodeJS.ProcessEnv {
   return raw ? pgBackupConnectionEnv(raw) : {};
 }
 
-/// Runs a command and resolves when it exits cleanly; rejects with the tool's
-/// own words when it does not. The password is never part of those words.
+class BackupToolFailure extends Error {
+  constructor(readonly diagnostic: string) {
+    super(`database tool failed (${diagnostic})`);
+  }
+}
+
+/** Keep diagnostics useful without exposing paths, connection values or data. */
+function safeBackupFailure(error: unknown): string {
+  if (error instanceof BackupToolFailure) return error.diagnostic;
+  if (typeof error !== 'object' || error === null) return 'unclassified failure';
+  const code = 'code' in error ? (error as {code?: unknown}).code : undefined;
+  if (typeof code === 'number' && Number.isInteger(code) && code >= 0 && code <= 255) {
+    return `tool exit ${code}`;
+  }
+  if (typeof code === 'string' && ['EACCES','EPERM','ENOENT','ENOSPC','ETIMEDOUT','ECONNREFUSED'].includes(code)) {
+    return code;
+  }
+  return 'unclassified failure';
+}
+
+/// Runs a command without copying its stderr or arguments into exceptions.
 function run(command: string, args: string[], timeout = 600_000): Promise<string> {
   return runCapture(command, args, timeout);
 }
@@ -1186,13 +1185,11 @@ function runCapture(
         maxBuffer: 16 * 1024 * 1024,
         env: { ...process.env, ...connectionEnv() },
       },
-      (error, stdout, stderr) => {
+      (error, stdout) => {
         if (error) {
           const killed = (error as { killed?: boolean }).killed;
-          const message = killed
-            ? `the command was still running after ${timeout} ms`
-            : String(stderr || (error as Error).message).slice(0, 2000);
-          reject(new Error(message));
+          const diagnostic = killed ? 'timeout' : safeBackupFailure(error);
+          reject(new BackupToolFailure(diagnostic));
           return;
         }
         resolvePromise(String(stdout ?? ''));
