@@ -19,6 +19,16 @@ class _ListApi extends ApiClient {
     final next=Completer<List<Map<String,dynamic>>>(); pending.add(next); return next.future;
   }
 }
+class _DeferredInitialApi extends ApiClient {
+  _DeferredInitialApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),FakeTokenStore());
+  final pending=<Completer<List<Map<String,dynamic>>>>[];
+  @override
+  Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) {
+    final request=Completer<List<Map<String,dynamic>>>();
+    pending.add(request);
+    return request.future;
+  }
+}
 class _MutableSourcesApi extends ApiClient {
   _MutableSourcesApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),FakeTokenStore());
   final rows=<String,List<Map<String,dynamic>>>{};
@@ -32,6 +42,32 @@ class _ListController extends JsonListController {
 final _provider=AsyncNotifierProvider<JsonListController,List<Map<String,dynamic>>>(_ListController.new);
 
 void main() {
+  test('initial load cannot overwrite a newer successful refresh', () async {
+    final api=_DeferredInitialApi();
+    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api)]);
+    addTearDown(container.dispose);
+    final sub=container.listen(_provider,(_,_) {});
+    addTearDown(sub.close);
+    final controller=container.read(_provider.notifier);
+    expect(api.pending.length,1);
+    final refresh=controller.reload();
+    expect(api.pending.length,2);
+    api.pending[1].complete([{'id':'new'}]); await refresh;
+    api.pending[0].complete([{'id':'old'}]); await container.pump();
+    expect(container.read(_provider).requireValue.single['id'],'new');
+  });
+  test('an initial load failure cannot replace a newer successful refresh', () async {
+    final api=_DeferredInitialApi();
+    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api)]);
+    addTearDown(container.dispose);
+    final sub=container.listen(_provider,(_,_) {});
+    addTearDown(sub.close);
+    final controller=container.read(_provider.notifier);
+    final refresh=controller.reload();
+    api.pending[1].complete([{'id':'new'}]); await refresh;
+    api.pending[0].completeError(StateError('stale initial failure')); await container.pump();
+    expect(container.read(_provider).requireValue.single['id'],'new');
+  });
   test('active pickers rebuild from each invalidated source', () async {
     final api=_MutableSourcesApi();
     final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api)]);
