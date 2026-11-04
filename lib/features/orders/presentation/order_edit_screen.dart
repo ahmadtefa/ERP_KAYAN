@@ -106,8 +106,9 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
     if (await _confirmExit() && mounted) Navigator.of(context).pop();
   }
 
-  String? _number(String? raw, {bool positive = false, bool percent = false}) {
+  String? _number(String? raw, {bool positive = false, bool percent = false, bool allowEmpty = false}) {
     final value = (raw ?? '').trim();
+    if (allowEmpty && value.isEmpty) return null;
     if (!RegExp(r'^\d+(?:\.\d{1,4})?$').hasMatch(value)) return tr('رقم غير صالح', 'Invalid number');
     final parsed = Decimal.tryParse(value);
     if (parsed == null || (positive && parsed <= Decimal.zero) || (percent && parsed > Decimal.fromInt(100))) {
@@ -122,7 +123,8 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
     final body = <String, dynamic>{'expectedUpdatedAt': text(widget.order, 'updatedAt'),
       'lines': [for (final line in _lines) <String, dynamic>{
         'orderLineId': line.id, 'quantity': line.quantity.text.trim(), 'unitPrice': line.price.text.trim(),
-        'discountPercent': line.discount.text.trim(), 'taxRate': line.tax.text.trim(),
+        'discountPercent': line.discount.text.trim(),
+        'taxRate': line.tax.text.trim().isEmpty ? '0' : line.tax.text.trim(),
       }]};
     setState(() => _busy = true);
     try {
@@ -185,7 +187,7 @@ class _OrderEditScreenState extends ConsumerState<OrderEditScreen> {
                 decoration: InputDecoration(labelText: tr('الخصم %', 'Discount %')), validator: (v) => _number(v, percent: true)),
               TextFormField(controller: line.tax, enabled: !widget.amendApproved || (line.allocated != null && line.allocated == Decimal.zero),
                 onChanged: (_) => _changed(), keyboardType: TextInputType.number,
-                decoration: InputDecoration(labelText: tr('الضريبة %', 'Tax %')), validator: (v) => _number(v, percent: true)),
+                decoration: InputDecoration(labelText: tr('الضريبة %', 'Tax %')), validator: (v) => _number(v, percent: true, allowEmpty: true)),
             ]))),
             FilledButton(onPressed: disabled || _stale || _lines.isEmpty || text(widget.order, 'updatedAt').isEmpty ? null : _save,
               child: Text(tr('حفظ التعديلات', 'Save changes'))),

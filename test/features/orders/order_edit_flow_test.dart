@@ -50,6 +50,35 @@ void main() {
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save changes')).onPressed, isNull);
   });
   for (final kind in InvoiceKind.values) {
+    for (final raw in ['0', '7', '101', '-1']) {
+      testWidgets('${kind.name}: tax edit validates $raw', (tester) async {
+        SharedPreferences.setMockInitialValues({});
+        tester.view.physicalSize = const Size(1400, 1000); tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+        final api = _EditApi();
+        const user = AppUser(id:'user',username:'tester',fullName:'Tester',companyId:'company',branchId:'branch',isSuperAdmin:true);
+        final order = <String, dynamic>{'id':'order-1', 'updatedAt':'2026-11-04T12:00:00.000Z',
+          'lines':[{'id':'line-1','itemNameEn':'Synthetic item','unit':'piece','unitQuantity':'3',
+            'unitPrice':'10','discountPercent':'0','taxRate':'14'}]};
+        await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+          currentUserProvider.overrideWith((ref) => user),
+          appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'))],
+          child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+            supportedLocales:AppLocalizations.supportedLocales,home:OrderEditScreen(kind:kind,order:order))));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.widgetWithText(TextFormField, 'Tax %'), raw);
+        await tester.tap(find.text('Save changes')); await tester.pumpAndSettle();
+        if (raw == '0' || raw == '7') {
+          expect(api.requests, hasLength(1));
+          expect((api.requests.single['lines'] as List).single['taxRate'], raw);
+          await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+        } else {
+          expect(api.requests, isEmpty);
+          expect(find.text('Invalid number'), findsOneWidget);
+        }
+        expect(tester.takeException(), isNull);
+      });
+    }
     testWidgets('${kind.name}: partially fulfilled amendment locks allocated terms and replays exactly', (tester) async {
       SharedPreferences.setMockInitialValues({});
       tester.view.physicalSize = const Size(1400, 1000); tester.view.devicePixelRatio = 1;
@@ -100,8 +129,10 @@ void main() {
           child: const Text('Open editor')))))));
       await tester.tap(find.text('Open editor')); await tester.pumpAndSettle();
       await tester.enterText(find.widgetWithText(TextFormField, 'Quantity'), '2');
+      await tester.enterText(find.widgetWithText(TextFormField, 'Tax %'), '');
       await tester.tap(find.text('Save changes')); await tester.pumpAndSettle();
       expect(api.requests, hasLength(1));
+      expect((api.requests.single['lines'] as List).single['taxRate'], '0');
       expect((api.requests.single['lines'] as List).single['quantity'], '2');
       await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
       await tester.pageBack(); await tester.pumpAndSettle();
