@@ -60,6 +60,12 @@ class UncertainFormSubmission implements Exception {
   final Object cause;
 }
 
+/// A nested confirmation was cancelled before a request was sent. Leave the
+/// form open without treating the cancellation as a server error.
+class FormSubmissionCancelled implements Exception {
+  const FormSubmissionCancelled();
+}
+
 /// Opens a modal form built from [fields].
 ///
 /// Returns the entered values keyed by [FieldSpec.key], or null if the user
@@ -276,7 +282,7 @@ class _FormSheetState extends State<_FormSheet> {
       await widget.onSubmit!(result);
       if (mounted) Navigator.of(context).pop(result);
     } catch (error) {
-      if (mounted) {
+      if (mounted && error is! FormSubmissionCancelled) {
         if (error is UncertainFormSubmission) setState(() => _uncertain = true);
         await showAppError(context, error is UncertainFormSubmission ? error.cause : error);
       }

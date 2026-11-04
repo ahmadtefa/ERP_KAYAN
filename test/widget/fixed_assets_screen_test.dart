@@ -43,6 +43,8 @@ class _FakeApiClient extends ApiClient {
   final Set<String> depreciatedMonths = {};
   bool losePatchResponse = false;
   bool loseActivationResponse = false;
+  bool loseDepreciationResponse = false;
+  bool loseDisposalResponse = false;
 
   List<Json> assets = [
     {
@@ -207,6 +209,7 @@ class _FakeApiClient extends ApiClient {
         for (final asset in assets)
           if (asset['id'] == id) {...asset, 'status': 'DISPOSED'} else asset,
       ];
+      if (loseDisposalResponse) throw const ApiFailure('private disposal',statusCode:503);
       return {'id': id, 'status': 'DISPOSED'};
     }
     return {};
@@ -570,6 +573,11 @@ void main() {
     expect(find.text('حسنًا'),findsOneWidget);
     expect(find.textContaining('SYNTHETIC_PRIVATE_ASSET'),findsNothing);
     await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(find.textContaining('The operation may have completed'),findsOneWidget);
+    expect(find.textContaining('1101.REC — Lifecycle cash'),findsOneWidget);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
+    await tester.tap(find.text('Cancel').last); await tester.pumpAndSettle();
+    await tester.tap(find.text('Discard changes')); await tester.pumpAndSettle();
     expect((await container.read(journalEntriesProvider.future)).single['status'],'ACTIVE');
     expect((await container.read(dashboardSummaryProvider.future))['status'],'ACTIVE');
     expect((await container.read(dashboardMonthlyProvider.future))['status'],'ACTIVE');
@@ -577,6 +585,54 @@ void main() {
     expect(api.posts.where((p)=>p.path.endsWith('/activate')),hasLength(1));
     expect(find.textContaining('The action may have completed'),findsOneWidget);
     expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton,'Run depreciation')).onPressed,isNull);
+  });
+
+  testWidgets('cancelled activation confirmation preserves inputs without sending', (tester) async {
+    final api=await _pump(tester);
+    final activate=find.byTooltip('Activate (post acquisition)');
+    await tester.ensureVisible(activate); await tester.pumpAndSettle();
+    await tester.tap(activate); await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first); await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('1101.REC — Lifecycle cash').last); await tester.pumpAndSettle();
+    await tester.tap(find.text('Save')); await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel').last); await tester.pumpAndSettle();
+    expect(find.textContaining('1101.REC — Lifecycle cash'),findsOneWidget);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNotNull);
+    expect(api.posts.where((p)=>p.path.endsWith('/activate')),isEmpty);
+    expect(find.text('حسنًا'),findsNothing);
+  });
+
+  testWidgets('lost depreciation response preserves period and blocks a second request', (tester) async {
+    final api=_FakeApiClient()..loseDepreciationResponse=true;
+    await _pump(tester,injectedApi:api);
+    await tester.tap(find.text('Run depreciation')); await tester.pumpAndSettle();
+    final period=find.widgetWithText(TextFormField,'Month (YYYY-MM)');
+    await tester.enterText(period,'2024-01');
+    await tester.tap(find.text('Save')); await tester.pumpAndSettle();
+    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.textContaining('private depreciation'),findsNothing);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(tester.widget<TextFormField>(period).controller!.text,'2024-01');
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
+    expect(api.posts.where((p)=>p.path == '/fixed-assets/depreciation-runs'),hasLength(1));
+  });
+
+  testWidgets('lost disposal response preserves proceeds and blocks a second request', (tester) async {
+    final api=_FakeApiClient()..loseDisposalResponse=true;
+    await _pump(tester,injectedApi:api);
+    final dispose=find.byTooltip('Dispose of asset');
+    await tester.ensureVisible(dispose); await tester.pumpAndSettle();
+    await tester.tap(dispose); await tester.pumpAndSettle();
+    final proceeds=find.widgetWithText(TextFormField,'Proceeds');
+    await tester.enterText(proceeds,'1000');
+    await tester.tap(find.text('Save')); await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton,'Dispose of asset')); await tester.pumpAndSettle();
+    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.textContaining('private disposal'),findsNothing);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(tester.widget<TextFormField>(proceeds).controller!.text,'1000');
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
+    expect(api.posts.where((p)=>p.path.endsWith('/dispose')),hasLength(1));
   });
 
   testWidgets('asset draft guards routed navigation', (tester) async {

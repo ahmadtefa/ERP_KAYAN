@@ -301,18 +301,14 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
         ),
         FieldSpec('date', l10n.purchaseDate, kind: FieldKind.date),
       ],
+      onSubmit: (values) => _postFromForm(
+        confirm: l10n.confirmActivateAsset,
+        title: l10n.activateAsset,
+        run: () => ref.read(apiClientProvider)
+            .post('/fixed-assets/${asset['id']}/activate', body: values),
+      ),
     );
-    if (values == null || !mounted) return;
-    values.removeWhere(
-      (key, value) => value == null || (value is String && value.trim().isEmpty),
-    );
-    await _act(
-      confirm: l10n.confirmActivateAsset,
-      title: l10n.activateAsset,
-      run: () => ref
-          .read(apiClientProvider)
-          .post('/fixed-assets/${asset['id']}/activate', body: values),
-    );
+    if (values != null && mounted) showMessage(context, l10n.createdSuccessfully);
   }
 
   Future<void> _dispose(Json asset) async {
@@ -344,19 +340,15 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
           options: _options(accounts),
         ),
       ],
+      onSubmit: (values) => _postFromForm(
+        confirm: l10n.confirmDisposeAsset,
+        title: l10n.disposeAsset,
+        destructive: true,
+        run: () => ref.read(apiClientProvider)
+            .post('/fixed-assets/${asset['id']}/dispose', body: values),
+      ),
     );
-    if (values == null || !mounted) return;
-    values.removeWhere(
-      (key, value) => value == null || (value is String && value.trim().isEmpty),
-    );
-    await _act(
-      confirm: l10n.confirmDisposeAsset,
-      title: l10n.disposeAsset,
-      destructive: true,
-      run: () => ref
-          .read(apiClientProvider)
-          .post('/fixed-assets/${asset['id']}/dispose', body: values),
-    );
+    if (values != null && mounted) showMessage(context, l10n.createdSuccessfully);
   }
 
   Future<void> _showRuns() async {
@@ -424,44 +416,34 @@ class _FixedAssetsScreenState extends ConsumerState<FixedAssetsScreen> {
         FieldSpec('period', l10n.depreciationPeriod, required: true),
       ],
       initial: {'period': current},
+      onSubmit: (values) => _postFromForm(
+        run: () => ref.read(apiClientProvider)
+            .post('/fixed-assets/depreciation-runs', body: values),
+      ),
     );
-    if (values == null || !mounted) return;
-    await _act(
-      run: () => ref
-          .read(apiClientProvider)
-          .post('/fixed-assets/depreciation-runs', body: values),
-    );
+    if (values != null && mounted) showMessage(context, l10n.createdSuccessfully);
   }
 
-  Future<void> _act({
+  Future<void> _postFromForm({
     String? confirm,
     String? title,
     bool destructive = false,
     required Future<void> Function() run,
   }) async {
-    final l10n = context.l10n;
     if (confirm != null) {
-      final ok = await confirmAction(
-        context,
-        title: title ?? '',
-        message: confirm,
-        confirmLabel: title ?? l10n.confirm,
-        destructive: destructive,
-      );
-      if (!ok || !mounted) return;
+      final ok = await confirmAction(context, title: title ?? '', message: confirm,
+        confirmLabel: title, destructive: destructive);
+      if (!ok || !mounted) throw const FormSubmissionCancelled();
     }
     setState(() => _busy = true);
     try {
       await run();
-      if (mounted) showMessage(context, l10n.createdSuccessfully);
     } catch (error) {
-      if (mounted) {
-        setState(() => _actionUncertain = true);
-        showAppError(context, error);
-      }
+      if (mounted) setState(() => _actionUncertain = true);
+      throw UncertainFormSubmission(error);
     } finally {
       if (mounted) {
-        // A failed response may follow a committed accounting entry.
+        // The response can fail after the accounting entry committed.
         _refreshAffectedViews();
         setState(() => _busy = false);
       }
