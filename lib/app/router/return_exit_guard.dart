@@ -9,6 +9,7 @@ class ReturnExitGuard {
   void unregister(ValueKey<String> key, Future<bool> Function() guard) {
     if (_guards[key] == guard) _guards.remove(key);
   }
-  Future<bool> canLeave(ValueKey<String> key) => _guards[key]?.call() ?? Future.value(true);
+  // A missing registration is not evidence that a draft is clean.
+  Future<bool> canLeave(ValueKey<String> key) => _guards[key]?.call() ?? Future.value(false);
 }
 final returnExitGuardProvider = Provider<ReturnExitGuard>((ref) => ReturnExitGuard());

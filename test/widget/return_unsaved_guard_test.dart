@@ -27,6 +27,17 @@ class _ReturnApi extends ApiClient {
 }
 
 void main() {
+  test('an unregistered route fails closed and unregistering an old callback keeps the new one', () async {
+    final guard = ReturnExitGuard();
+    const key = ValueKey('route');
+    Future<bool> first() async => false;
+    Future<bool> second() async => true;
+    expect(await guard.canLeave(key),isFalse);
+    guard.register(key,first); guard.register(key,second); guard.unregister(key,first);
+    expect(await guard.canLeave(key),isTrue);
+    guard.unregister(key,second);
+    expect(await guard.canLeave(key),isFalse);
+  });
   for (final kind in InvoiceKind.values) {
     testWidgets('${kind.name} return protects shell navigation and back, preserving cancelled input', (tester) async {
       tester.view.physicalSize = const Size(1500,1000); tester.view.devicePixelRatio = 1;
