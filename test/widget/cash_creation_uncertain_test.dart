@@ -37,6 +37,31 @@ class _CommittedTransferApi extends ApiClient {
   }
 }
 void main() {
+  testWidgets('cash account creation preserves draft and blocks an uncertain retry', (tester) async {
+    tester.view.physicalSize=const Size(1700,1000); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final api=_CashAccountApi();
+    await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+      exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
+      child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:CashScreen()))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton,'New box or bank')); await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField,'Code'),'SYN');
+    await tester.enterText(find.widgetWithText(TextFormField,'Name in English'),'Synthetic name');
+    await tester.enterText(find.widgetWithText(TextFormField,'Name in Arabic'),'تجريبي');
+    await tester.tap(find.byType(DropdownButtonFormField<String>).last); await tester.pumpAndSettle();
+    await tester.tap(find.text('111 — Ledger').last); await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
+    expect(find.text('حسنًا'),findsOneWidget);
+    expect(find.textContaining('PRIVATE_ACCOUNT_ERROR'),findsNothing);
+    await tester.tap(find.text('حسنًا')); await tester.pumpAndSettle();
+    expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Code')).controller!.text,'SYN');
+    expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField,'Name in English')).controller!.text,'Synthetic name');
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton,'Save')).onPressed,isNull);
+    expect(api.posts,1); expect((api.submitted as Map)['accountId'],'ledger');
+    expect(tester.takeException(),isNull);
+  });
   testWidgets('cash transfer retains values and disables retry when POST outcome is unknown', (tester) async {
     tester.view.physicalSize=const Size(1700,1000); tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
@@ -71,4 +96,22 @@ void main() {
     expect((await container.read(cashTransfersProvider.future)).single['transferNumber'],'T-1');
     expect(tester.takeException(),isNull);
   });
+}
+
+class _CashAccountApi extends ApiClient {
+  _CashAccountApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),FakeTokenStore());
+  int posts = 0;
+  Object? submitted;
+  @override
+  Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async {
+    if (path == '/accounting/chart-of-accounts') return [{'id':'ledger','code':'111','nameEn':'Ledger','isPostable':true}];
+    return [];
+  }
+  @override
+  Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async => {'rows':<Object>[]};
+  @override
+  Future<Map<String,dynamic>> post(String path,{Object? body,String? idempotencyKey}) async {
+    expect(path,'/cash/accounts'); posts++; submitted=body;
+    throw StateError('PRIVATE_ACCOUNT_ERROR');
+  }
 }
