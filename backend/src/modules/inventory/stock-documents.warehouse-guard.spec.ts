@@ -234,6 +234,15 @@ function makeHarness(seed: Movement[], allowNegativeStock: boolean) {
     },
   };
 
+  // The locked read observes the selected synthetic document rather than
+  // consuming the preliminary findFirst mock a second time.
+  Object.assign(tx.stockDocument, { findFirst: jest.fn(async ({ where }: { where: { id: string } }) => {
+    for (const result of prisma.stockDocument.findFirst.mock.results) {
+      const document = await result.value as { id?: string } | null;
+      if (document?.id === where.id) return { ...document, status: InvoiceStatus.POSTED };
+    }
+    return null;
+  }) });
   Object.assign(tx, { branch: { findFirst: jest.fn(async () => ({id:BRANCH})) }, item: prisma.item });
 
   readLatestDocument = async () => {
@@ -405,6 +414,7 @@ describe('warehouse-level negative stock guard on transfer posting', () => {
     const h2 = makeHarness([seedMovement(W_SRC, BRANCH, 20)], false);
     h2.prisma.stockDocument.findFirst.mockResolvedValue(
       transferDocument({
+        id: 'doc-9',
         documentNumber: 'ST-000009',
         lines: [
           { id: 'l1', itemId: MILK, quantity: D(25), unitCost: D(7.5), unitName: 'كرتونة', unitFactor: D(10), unitQuantity: D(2.5) },
@@ -413,6 +423,29 @@ describe('warehouse-level negative stock guard on transfer posting', () => {
     );
     await expect(h2.service.post(COMPANY, 'user-1', 'doc-9')).rejects.toBeInstanceOf(BadRequestException);
     expect(h2.state.warehouseQuantity(W_SRC).toFixed(4)).toBe('20.0000');
+  });
+
+  it('posts the locked version of the lines rather than the preliminary read', async () => {
+    const h = makeHarness([seedMovement(W_SRC, BRANCH, 20)], false);
+    h.prisma.stockDocument.findFirst.mockResolvedValue(transferDocument());
+    const lockedFind = (h.tx.stockDocument as unknown as {findFirst: jest.Mock}).findFirst;
+    lockedFind.mockResolvedValueOnce(transferDocument({status:InvoiceStatus.POSTED,
+      lines:[{id:'l1',itemId:MILK,quantity:D(7),unitCost:D(7.5)}]}));
+    await h.service.post(COMPANY,'user-1','doc-1');
+    expect(h.state.warehouseQuantity(W_SRC).toFixed(4)).toBe('13.0000');
+    expect(h.state.warehouseQuantity(W_DST).toFixed(4)).toBe('7.0000');
+  });
+
+  it('rolls back the claim if a voucher is no longer approved under lock', async () => {
+    const h = makeHarness([seedMovement(W_DST, BRANCH, 20)], false);
+    const doc = transferDocument({kind:StockDocumentKind.ADJUSTMENT,fromBranchId:null,
+      fromWarehouseId:null,toWarehouseId:W_DST,voucherKind:'ISSUE',reviewedAt:new Date(),approvedAt:new Date(),
+      lines:[{id:'l1',itemId:MILK,quantity:D(-2),unitCost:D(0)}]});
+    h.prisma.stockDocument.findFirst.mockResolvedValue(doc);
+    const lockedFind = (h.tx.stockDocument as unknown as {findFirst: jest.Mock}).findFirst;
+    lockedFind.mockResolvedValueOnce({...doc,status:InvoiceStatus.POSTED,reviewedAt:null,approvedAt:null});
+    await expect(h.service.post(COMPANY,'user-1','doc-1',true,BRANCH)).rejects.toThrow(/reviewed and approved/);
+    expect(h.state.movementCreates).not.toHaveBeenCalled();
   });
 
   it('7. a transfer onto the same warehouse is refused at creation (no movements)', async () => {

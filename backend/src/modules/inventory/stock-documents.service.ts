@@ -504,34 +504,50 @@ export class StockDocumentsService {
    * one journal entry.
    */
   async post(companyId: string, userId: string, id: string, mayReadCost = true, voucherBranchId: string | null = null) {
-    const document = await this.prisma.stockDocument.findFirst({
+    const initialDocument = await this.prisma.stockDocument.findFirst({
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
     });
-    if (!document) throw new NotFoundException('Stock document not found');
-    if (document.voucherKind && document.branchId !== voucherBranchId) throw new NotFoundException('Stock voucher not found');
-    if (document.status !== InvoiceStatus.DRAFT) {
+    if (!initialDocument) throw new NotFoundException('Stock document not found');
+    if (initialDocument.voucherKind && initialDocument.branchId !== voucherBranchId) throw new NotFoundException('Stock voucher not found');
+    if (initialDocument.status !== InvoiceStatus.DRAFT) {
       throw new BadRequestException(
-        `Only a draft stock document can be posted (current status: ${document.status})`,
+        `Only a draft stock document can be posted (current status: ${initialDocument.status})`,
       );
     }
-    if (document.voucherKind && (!document.reviewedAt || !document.approvedAt)) {
+    if (initialDocument.voucherKind && (!initialDocument.reviewedAt || !initialDocument.approvedAt)) {
       throw new BadRequestException('Stock voucher must be reviewed and approved before posting');
     }
 
-    if (document.kind === StockDocumentKind.TRANSFER &&
-        document.lines.some((line) => !line.quantity.greaterThan(0))) {
+    if (initialDocument.kind === StockDocumentKind.TRANSFER &&
+        initialDocument.lines.some((line) => !line.quantity.greaterThan(0))) {
       throw new BadRequestException('Transfer quantities must be positive before posting');
     }
     const settings = await this.settings.get(companyId);
 
     await this.prisma.$transaction(async (tx) => {
+      // Claim the row before reading the lines used for posting. An edit or
+      // workflow transition may have committed after the preliminary read;
+      // all financial work must use the version protected by this row lock.
       const claimed = await tx.stockDocument.updateMany({
-        where: { id: document.id, status: InvoiceStatus.DRAFT, deletedAt: null },
+        where: { id, companyId, status: InvoiceStatus.DRAFT, deletedAt: null },
         data: { status: InvoiceStatus.POSTED, postedAt: new Date(), postedBy: userId },
       });
       if (claimed.count !== 1) {
         throw new BadRequestException('This document has just been posted by someone else.');
+      }
+      const document = await tx.stockDocument.findFirst({
+        where: { id, companyId, deletedAt: null },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      if (!document) throw new NotFoundException('Stock document not found');
+      if (document.voucherKind && document.branchId !== voucherBranchId) throw new NotFoundException('Stock voucher not found');
+      if (document.voucherKind && (!document.reviewedAt || !document.approvedAt)) {
+        throw new BadRequestException('Stock voucher must be reviewed and approved before posting');
+      }
+      if (document.kind === StockDocumentKind.TRANSFER &&
+          document.lines.some((line) => !line.quantity.greaterThan(0))) {
+        throw new BadRequestException('Transfer quantities must be positive before posting');
       }
 
       // Where the goods are: named on the document, or the branch's default

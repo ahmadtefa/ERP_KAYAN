@@ -351,6 +351,65 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal((await prisma.stockDocumentLine.findUniqueOrThrow({where:{id:line.id}})).unitFactor.toFixed(6),'2.000000');
       await prisma.itemUnit.update({where:{id:voucherUnit.id},data:{factor:'2',isActive:true}});
     }
+    // Pause after the preliminary read, commit a concurrent change under the
+    // same parent lock, then verify posting re-reads the locked version.
+    async function pauseStockPost(doc) {
+      let arrived, resume;
+      const barrier = new Promise(resolve => { arrived = resolve; });
+      const continuation = new Promise(resolve => { resume = resolve; });
+      let captured = false;
+      const wrappedModel = new Proxy(prisma.stockDocument,{get(target,key) {
+        const original = target[key];
+        if (key === 'findFirst') return async (...args) => {
+          const result = await original.apply(target,args);
+          if (!captured && args[0]?.where?.id === doc.id) {
+            captured = true; arrived(); await continuation;
+          }
+          return result;
+        };
+        return typeof original === 'function' ? original.bind(target) : original;
+      }});
+      const wrappedPrisma = new Proxy(prisma,{get(target,key) {
+        if (key === 'stockDocument') return wrappedModel;
+        const value = target[key];
+        return typeof value === 'function' ? value.bind(target) : value;
+      }});
+      const guarded = new StockDocumentsService(wrappedPrisma,service.numbers,service.posting,service.accounts,
+        service.audit,service.settings,service.warehouses,service.costCenters);
+      const pending = guarded.post(company,user,doc.id,true,branch);
+      try { await waitForBarrier(barrier,pending); } catch (error) { resume(); throw error; }
+      return {pending,resume};
+    }
+    for (const invalidateApproval of [false,true]) {
+      const voucher = await service.create(company,branch,user,{idempotencyKey:`voucher-locked-post-${invalidateApproval ? 'approval' : 'lines'}-0001`,
+        kind:'ADJUSTMENT',voucherKind:'RECEIPT',documentDate:date,toWarehouseId:secondWarehouse,
+        reason:'Synthetic race',counterpartyName:'Synthetic party',lines:[{itemId:item,quantity:'2',unitCost:'3'}]},true);
+      await service.transitionVoucher(company,branch,user,voucher.id,'REVIEW',true);
+      await service.transitionVoucher(company,branch,user,voucher.id,'APPROVE',true);
+      const gate = await pauseStockPost(voucher);
+      try {
+        await prisma.$transaction(async tx => {
+          await tx.stockDocument.update({where:{id:voucher.id},data:invalidateApproval
+            ? {reviewedAt:null,reviewedBy:null,approvedAt:null,approvedBy:null}
+            : {notes:'Synthetic concurrent change'}});
+          await tx.stockDocumentLine.updateMany({where:{documentId:voucher.id},data:{quantity:'3'}});
+        });
+      } finally { gate.resume(); }
+      if (invalidateApproval) {
+        await assert.rejects(gate.pending,/reviewed and approved/);
+        assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:voucher.id}})).status,'DRAFT');
+        assert.equal(await prisma.stockMovement.count({where:{referenceId:voucher.id}}),0);
+        assert.equal(await prisma.journalEntry.count({where:{sourceId:voucher.id}}),0);
+      } else {
+        await gate.pending;
+        const movement = await prisma.stockMovement.findFirstOrThrow({where:{referenceId:voucher.id}});
+        assert.equal(movement.quantity.toFixed(4),'3.0000');
+        assert.equal(movement.totalCost.toFixed(4),'9.0000');
+        await service.reverse(company,user,voucher.id,true,branch);
+        assert.equal(await warehouseBalance(secondWarehouse),10);
+      }
+    }
+    console.log('PASS: stock post reads locked current lines and rejects invalidated approval after a concurrent change.');
     console.log('PASS: voucher selected-unit snapshot, inactive-unit retry, base-cost posting and reversal on real PostgreSQL.');
     console.log('PASS: stock vouchers, atomic review/approval, permissions-independent workflow, posting/reversal concurrency and rollback.');
     console.log('PASS: real PostgreSQL + Prisma stock receipt, issue, audit rollback, warehouse count, concurrency, journal and reversal.');
