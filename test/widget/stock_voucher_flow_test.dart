@@ -76,7 +76,9 @@ class _FailingLoadApi extends _VoucherApi {
   @override
   Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async {
     if (fail && ((target == 'create' && path == '/inventory/items') ||
-      (target == 'history' && path == '/admin/audit-logs'))) throw StateError('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW');
+      (target == 'history' && path == '/admin/audit-logs'))) {
+      throw StateError('INTERNAL_DIAGNOSTIC_DO_NOT_SHOW');
+    }
     return super.getList(path,query:query);
   }
 }
