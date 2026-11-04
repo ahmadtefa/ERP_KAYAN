@@ -8,14 +8,15 @@ const target={id:'user-id',companyId:'company-id',username:'synthetic-user',full
   isActive:true,isSuperAdmin:false,createdAt:new Date(),userRoles:[],branches:[],userPermissions:[]};
 function setup({roles=['role-1'],permissions=['synthetic.read']} = {}) {
   const tx={
-    user:{update:jest.fn().mockResolvedValue(target)},
+    user:{update:jest.fn().mockResolvedValue(target),findFirst:jest.fn().mockResolvedValue(target)},
+    $queryRaw:jest.fn().mockResolvedValue([]),
     userRole:{findMany:jest.fn().mockResolvedValue(roles.map(roleId=>({roleId}))),deleteMany:jest.fn().mockResolvedValue({})},
     userPermission:{findMany:jest.fn().mockResolvedValue(permissions.map(code=>({permission:{code}}))),deleteMany:jest.fn().mockResolvedValue({})},
     refreshToken:{updateMany:jest.fn().mockResolvedValue({})},
   };
   const prisma={user:{findFirst:jest.fn().mockResolvedValue(target)},
     $transaction:jest.fn().mockImplementation(async (fn)=>fn(tx))};
-  const audit={record:jest.fn().mockResolvedValue(undefined)};
+  const audit={record:jest.fn().mockResolvedValue(undefined),recordRequired:jest.fn().mockResolvedValue(undefined)};
   const service=new UsersService(prisma as any,audit as any,{} as any);
   return {service,tx,audit};
 }
@@ -32,14 +33,21 @@ describe('user role and extra grant replacement safety', () => {
     expect(tx.userPermission.deleteMany).not.toHaveBeenCalled();
   });
   it('replaces both sets when the snapshots match and keeps the old-client path', async () => {
-    const {service,tx}=setup();
+    const {service,tx,audit}=setup();
     await service.update('company-id','actor','user-id',{
       roleIds:[],expectedRoleIds:['role-1'],extraPermissions:[],expectedExtraPermissions:['synthetic.read'],
     },[],true);
     expect(tx.userRole.deleteMany).toHaveBeenCalledTimes(1);
     expect(tx.userPermission.deleteMany).toHaveBeenCalledTimes(1);
+    expect(audit.recordRequired).toHaveBeenCalledWith(expect.objectContaining({action:'user.update'}),tx);
     await service.update('company-id','actor','user-id',{roleIds:[]},[],true);
     expect(tx.userRole.deleteMany).toHaveBeenCalledTimes(2);
+  });
+  it('propagates required audit failure instead of claiming the update succeeded', async () => {
+    const {service,tx,audit}=setup();
+    audit.recordRequired.mockRejectedValueOnce(new Error('synthetic audit failure'));
+    await expect(service.update('company-id','actor','user-id',{roleIds:[],expectedRoleIds:['role-1']},[],true)).rejects.toThrow('synthetic audit failure');
+    expect(tx.userRole.deleteMany).toHaveBeenCalledTimes(1);
   });
   it('rejects a snapshot without the matching replacement', async () => {
     const {service,tx}=setup();

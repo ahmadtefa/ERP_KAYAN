@@ -182,19 +182,19 @@ export class UsersService {
           );
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id },
-        data: {
-          fullNameEn: dto.fullNameEn?.trim(),
-          fullNameAr: dto.fullNameAr?.trim(),
-          email: dto.email === undefined ? undefined : dto.email.trim() || null,
-          isActive: dto.isActive,
-          updatedBy: actorId,
-        },
-      });
-      // The UPDATE above owns the user row lock. All application-mediated
-      // user updates take the same lock, so the expected sets are read after
-      // any prior replacement commits. A conflict rolls back the user update.
+      // Serialize all application-mediated updates to this user before
+      // checking snapshots, and recheck the protected identity under lock.
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${id}::uuid AND "companyId" = ${companyId}::uuid AND "deletedAt" IS NULL FOR UPDATE`;
+      const lockedBefore = await tx.user.findFirst({where:{id,companyId,deletedAt:null}});
+      if (!lockedBefore) throw new NotFoundException('User not found');
+      if (lockedBefore.isSuperAdmin && !isSuperAdmin) {
+        throw new ForbiddenException('Only a super administrator can modify a super administrator account');
+      }
+      if (lockedBefore.username === SYSTEM_USERNAME && dto.isActive === false) {
+        throw new BadRequestException('The system administrator cannot be deactivated');
+      }
+      // The sets are read after prior updates of this user commit. A conflict
+      // must abort the whole transaction, including identity field updates.
       const matches = (actual: string[], expected: string[]) => {
         const sortedActual = [...actual].sort(), sortedExpected = [...expected].sort();
         return sortedActual.length === sortedExpected.length &&
@@ -212,6 +212,16 @@ export class UsersService {
           throw new ConflictException('User permissions changed since they were loaded. Refresh and review them before saving.');
         }
       }
+      await tx.user.update({
+        where: { id },
+        data: {
+          fullNameEn: dto.fullNameEn?.trim(),
+          fullNameAr: dto.fullNameAr?.trim(),
+          email: dto.email === undefined ? undefined : dto.email.trim() || null,
+          isActive: dto.isActive,
+          updatedBy: actorId,
+        },
+      });
       if (dto.roleIds) await this.replaceRoles(tx, companyId, id, dto.roleIds);
       if (dto.branchIds) await this.replaceBranches(tx, id, dto.branchIds);
       if (extraPermissions) await this.replaceExtraPermissions(tx, id, extraPermissions);
@@ -221,20 +231,15 @@ export class UsersService {
           data: { revokedAt: new Date() },
         });
       }
-    });
-
-    await this.audit.record({
-      companyId,
-      userId: actorId,
-      action: 'user.update',
-      entity: 'users',
-      entityId: id,
-      before: { fullNameEn: before.fullNameEn, isActive: before.isActive },
-      after: {
-      fullNameEn: dto.fullNameEn,
-      isActive: dto.isActive,
-      extraPermissions,
-    },
+      await this.audit.recordRequired({
+        companyId,
+        userId: actorId,
+        action: 'user.update',
+        entity: 'users',
+        entityId: id,
+        before: { fullNameEn: lockedBefore.fullNameEn, isActive: lockedBefore.isActive },
+        after: { fullNameEn: dto.fullNameEn, isActive: dto.isActive, extraPermissions },
+      }, tx);
     });
     return this.findOne(companyId, id);
   }

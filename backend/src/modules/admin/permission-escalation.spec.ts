@@ -150,14 +150,15 @@ describe('permission escalation protections', () => {
     };
     const revokeSessions = jest.fn().mockResolvedValue({ count: 1 });
     const tx = {
-      user: { update: jest.fn().mockResolvedValue(userRecord) },
+      user: { update: jest.fn().mockResolvedValue(userRecord), findFirst: jest.fn().mockResolvedValue(userRecord) },
+      $queryRaw: jest.fn().mockResolvedValue([]),
       refreshToken: { updateMany: revokeSessions },
     };
     const prisma = {
       user: { findFirst: jest.fn().mockResolvedValue(userRecord) },
       $transaction: jest.fn(async (callback: (tx: any) => Promise<unknown>) => callback(tx)),
     };
-    const service = new UsersService(prisma as any, { record: jest.fn() } as any, licensingStub);
+    const service = new UsersService(prisma as any, { record: jest.fn(), recordRequired: jest.fn() } as any, licensingStub);
 
     await service.update(companyId, actorId, 'target-user', { isActive: false }, [], false);
 
@@ -213,7 +214,8 @@ describe('direct permission grants', () => {
 
   function buildService(permissionRows: Array<{ id: string; code: string }>) {
     const tx = {
-      user: { update: jest.fn().mockResolvedValue(target) },
+      user: { update: jest.fn().mockResolvedValue(target), findFirst: jest.fn().mockResolvedValue(target) },
+      $queryRaw: jest.fn().mockResolvedValue([]),
       permission: {
         findMany: jest.fn().mockResolvedValue(permissionRows),
       },
@@ -228,7 +230,7 @@ describe('direct permission grants', () => {
       permission: { findMany: jest.fn().mockResolvedValue(permissionRows) },
       $transaction: jest.fn(async (callback: (tx: any) => Promise<unknown>) => callback(tx)),
     };
-    const service = new UsersService(prisma as any, { record: jest.fn() } as any, licensingStub);
+    const service = new UsersService(prisma as any, { record: jest.fn(), recordRequired: jest.fn() } as any, licensingStub);
     return { service, prisma, tx };
   }
 
