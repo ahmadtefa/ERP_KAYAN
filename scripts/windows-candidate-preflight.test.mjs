@@ -79,3 +79,16 @@ test('Flutter test diagnostics associate failures with test names and escape wor
   assert.equal(summarize('postgresql://user:dummy@127.0.0.1/db'), 'postgresql://[redacted]@127.0.0.1/db');
   assert.match(workflow, /test\/screenshots\/design_screenshots_test\.dart --update-goldens/);
 });
+
+
+test('photo diagnostics include only safe assertion shape and file location', () => {
+  const log = [
+    {type:'testStart',test:{id:17,name:'photo refreshes after upload and delete commit with lost responses'}},
+    {type:'print',testID:17,message:'Expected: exactly 1 matching candidates\nActual: private synthetic payload\ntest/widget/user_photo_test.dart:91:5'},
+    {type:'error',testID:17,error:'Test failed.'},
+  ].map(JSON.stringify).join('\n');
+  const summary = summarize(log);
+  assert.match(summary,/Expected: exactly 1 matching candidates/);
+  assert.match(summary,/test\/widget\/user_photo_test\.dart:91:5/);
+  assert.doesNotMatch(summary,/private synthetic payload/);
+});

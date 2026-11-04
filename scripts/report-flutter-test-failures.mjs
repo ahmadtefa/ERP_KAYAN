@@ -101,6 +101,18 @@ for (const line of lines) {
     ).filter(Boolean).join(' ');
     if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
   }
+  // The following widget tests contain synthetic data only. Preserve fixed
+  // framework diagnostics, assertion counts and source locations, never
+  // arbitrary error messages, image bytes or application payloads.
+  if (event.type === 'print' && /^(?:photo refreshes after upload and delete commit with lost responses|routed chart navigation (?:preserves or discards its open draft|waits for a pending save)|an uncertain save preserves the draft and refuses blind retry|different concurrent errors are acknowledged in order|(?:sales|purchase): tax edit validates (?:0|7|101|-1)|successful invoice posting refreshes previously cached reports)$/.test(tests.get(event.testID) ?? '')) {
+    const details = String(event.message ?? '').split(/\r?\n/).map(line =>
+      line.match(/^\s*(?:Expected:|Actual:)\s*(?:<\d+>|exactly \d+ matching candidates|no matching candidates)/)?.[0]?.trim() ??
+      line.match(/test\/(?:widget\/(?:user_photo|chart_of_accounts_interaction|app_error_dialog_lifecycle|invoice_action_refresh_error)|features\/orders\/order_edit_flow)_test\.dart:\d+:\d+/)?.[0] ??
+      line.match(/(?:Bad state: No element|Bad state: Too many elements|pumpAndSettle timed out|A Timer is still pending|Multiple exceptions|RenderFlex overflowed|No ScaffoldMessenger widget found)/)?.[0] ??
+      line.match(/^The following [A-Za-z]+ (?:was thrown|object was thrown).*$/)?.[0] ?? ''
+    ).filter(Boolean).join(' ');
+    if (details) printed.set(event.testID, `${printed.get(event.testID) ?? ''} ${details}`.slice(0, 1000));
+  }
   if (event.type === 'error') {
     const message = `${tests.get(event.testID) ?? `test ${event.testID ?? 'unknown'}`}: ${event.error ?? 'unknown error'} ${event.stackTrace ?? ''} ${printed.get(event.testID) ?? ''}`;
     if (tests.get(event.testID)?.startsWith('screenshot:')) errors.push(message);
