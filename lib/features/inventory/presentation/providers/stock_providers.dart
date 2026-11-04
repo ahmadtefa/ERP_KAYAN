@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/json/json_utils.dart';
+
 import '../../../common/presentation/providers/resource_providers.dart';
 
 class StockController extends JsonListController {

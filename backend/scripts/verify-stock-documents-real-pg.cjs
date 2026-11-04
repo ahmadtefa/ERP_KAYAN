@@ -290,6 +290,39 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const pi = new PurchaseInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit);
     const sales = new SalesOrdersService(prisma,numbers,settings,prices,si,audit);
     const purchases = new PurchaseOrdersService(prisma,numbers,settings,prices,pi,audit);
+    // Explicitly cleared, zero, entered and omitted taxes on both order and
+    // invoice services. Historical snapshots must survive subsequent changes
+    // to the item's tax and the company default, on real Prisma/PostgreSQL.
+    const taxItem = await prisma.item.create({data:{companyId:company,code:'SYN-TAX-HISTORY',
+      nameEn:'Synthetic tax history',nameAr:'ضريبة تجريبية',unit:'piece',salePrice:'100',purchasePrice:'100',taxRate:'14'}});
+    const taxLines = [
+      {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:''},
+      {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:'0'},
+      {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:'7'},
+      {itemId:taxItem.id,quantity:'1',unitPrice:'100'},
+    ];
+    const snapshots = [];
+    for (const [kind,orders,invoices,party] of [['sales',sales,si,customer.id],['purchase',purchases,pi,supplier.id]]) {
+      const partyField=kind === 'sales' ? 'customerId' : 'supplierId';
+      const order=await orders.create(company,branch,user,{[partyField]:party,orderDate:date,lines:taxLines});
+      const invoice=await invoices.create(company,branch,user,{[partyField]:party,invoiceDate:date,lines:taxLines});
+      const orderModel=kind === 'sales' ? prisma.salesOrder : prisma.purchaseOrder;
+      const invoiceModel=kind === 'sales' ? prisma.salesInvoice : prisma.purchaseInvoice;
+      snapshots.push({kind,orderId:order.id,invoiceId:invoice.id,orderModel,invoiceModel});
+    }
+    await prisma.item.update({where:{id:taxItem.id},data:{taxRate:'5'}});
+    await prisma.companySetting.update({where:{companyId:company},data:{taxRate:'3'}});
+    for (const snapshot of snapshots) {
+      const order=await snapshot.orderModel.findUniqueOrThrow({where:{id:snapshot.orderId},include:{lines:{orderBy:{lineNumber:'asc'}}}});
+      const invoice=await snapshot.invoiceModel.findUniqueOrThrow({where:{id:snapshot.invoiceId},include:{lines:{orderBy:{lineNumber:'asc'}}}});
+      for (const document of [order,invoice]) {
+        assert.deepEqual(document.lines.map(line => line.taxRate.toFixed(4)),['0.0000','0.0000','7.0000','14.0000'],snapshot.kind);
+        assert.equal(document.taxAmount.toFixed(4),'21.0000');
+        assert.equal(document.totalAmount.toFixed(4),'421.0000');
+      }
+    }
+    await prisma.companySetting.update({where:{companyId:company},data:{taxRate:'14'}});
+    console.log('PASS: real PG tax empty, zero, explicit and inherited rates; historical order and invoice snapshots for both types.');
     // Creation retries: a real unique ledger, order and required audit must
     // commit together; both concurrent callers receive the same order.
     for (const [kind, orders, party] of [['sales',sales,customer.id],['purchase',purchases,supplier.id]]) {
