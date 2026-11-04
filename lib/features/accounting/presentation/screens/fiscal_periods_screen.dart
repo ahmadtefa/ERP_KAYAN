@@ -3,11 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/draft_exit_guard.dart';
 import '../../../../app/theme/design_tokens.dart';
-import '../../../../core/error/failure.dart';
 import '../../../../core/json/amount_format.dart';
 import '../../../../core/json/json_utils.dart';
 import '../../../../shared/extensions/l10n_extension.dart';
 import '../../../../shared/widgets/confirm_dialog.dart';
+import '../../../../shared/widgets/app_error_dialog.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/records_table.dart';
 import '../../../../shared/widgets/state_views.dart';
@@ -97,7 +97,8 @@ class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
   Future<void> _closeYear(Json period) async {
     final closed = await showDialog<bool>(
       context: context,
-      builder: (context) => _YearEndCloseDialog(period: period),
+      barrierDismissible: false,
+      builder: (context) => _YearEndCloseDialog(period: period, exitRelay: _exitRelay),
     );
     if (closed == true && mounted) {
       await ref.read(fiscalPeriodsListProvider.notifier).reload();
@@ -122,8 +123,11 @@ class _FiscalPeriodsScreenState extends ConsumerState<FiscalPeriodsScreen> {
           .post('/accounting/fiscal-periods/${period['id']}/close');
       await ref.read(fiscalPeriodsListProvider.notifier).reload();
       if (mounted) showMessage(context, l10n.periodClosed);
-    } on Failure catch (e) {
-      if (mounted) showMessage(context, e.message, error: true);
+    } catch (error) {
+      if (mounted) {
+        await ref.read(fiscalPeriodsListProvider.notifier).reload();
+        if (mounted) await showAppError(context, error);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -230,9 +234,10 @@ String _t(BuildContext context, String ar, String en) =>
 /// close itself is the existing year-end mechanism (result to retained
 /// earnings, then the lock), and its entry number is reported back.
 class _YearEndCloseDialog extends ConsumerStatefulWidget {
-  const _YearEndCloseDialog({required this.period});
+  const _YearEndCloseDialog({required this.period, required this.exitRelay});
 
   final Json period;
+  final DraftExitRelay exitRelay;
 
   @override
   ConsumerState<_YearEndCloseDialog> createState() =>
@@ -243,6 +248,9 @@ class _YearEndCloseDialogState extends ConsumerState<_YearEndCloseDialog> {
   final _reason = TextEditingController();
   bool _loading = true;
   bool _closing = false;
+  bool _uncertain = false;
+  bool _confirming = false;
+  bool _reconciliationUnavailable = false;
   String? _error;
   Json _preview = const {};
   Json _centre = const {};
@@ -251,44 +259,82 @@ class _YearEndCloseDialogState extends ConsumerState<_YearEndCloseDialog> {
   @override
   void initState() {
     super.initState();
+    widget.exitRelay.attach(_leaveForRoute);
     _load();
   }
 
   @override
   void dispose() {
+    widget.exitRelay.detach(_leaveForRoute);
     _reason.dispose();
     super.dispose();
+  }
+
+  Future<bool> _canLeave() async {
+    if (_closing || _confirming) return false;
+    if (_result == null && (_uncertain || _reason.text.trim().isNotEmpty)) {
+      _confirming = true;
+      try {
+        final discard = await confirmAction(context,
+          title: _t(context, 'تغييرات غير محفوظة', 'Unsaved changes'),
+          message: _uncertain
+              ? _t(context, 'قد تكون عملية الإقفال اكتملت. راجع حالة الفترة قبل المحاولة مجددًا.', 'The close may have completed. Review the period before retrying.')
+              : _t(context, 'الخروج دون حفظ المدخلات؟', 'Leave without saving your changes?'),
+          confirmLabel: _t(context, 'الخروج دون حفظ', 'Discard changes'), destructive: true);
+        if (!discard || !mounted) return false;
+      } finally {
+        _confirming = false;
+      }
+    }
+    return mounted;
+  }
+
+  Future<void> _requestClose() async {
+    if (await _canLeave() && mounted) Navigator.of(context).pop(_uncertain || _result != null);
+  }
+
+  Future<bool> _leaveForRoute() async {
+    if (!await _canLeave() || !mounted) return false;
+    Navigator.of(context).pop(_uncertain || _result != null);
+    return true;
   }
 
   Future<void> _load() async {
     try {
       final client = ref.read(apiClientProvider);
+      var reconciliationUnavailable = false;
       final results = await Future.wait([
         client.getObject(
           '/accounting/fiscal-periods/${widget.period['id']}/closing-preview',
         ),
         client
             .getObject('/reports/reconciliation-center')
-            .catchError((_) => <String, dynamic>{}),
+            .catchError((_) {
+              reconciliationUnavailable = true;
+              return <String, dynamic>{};
+            }),
       ]);
       if (mounted) {
         setState(() {
           _preview = results[0];
           _centre = results[1];
+          _reconciliationUnavailable = reconciliationUnavailable;
           _loading = false;
         });
       }
-    } on Failure catch (e) {
+    } catch (error) {
       if (mounted) {
         setState(() {
-          _error = e.message;
+          _error = _t(context, 'تعذر تحميل معاينة الإقفال.', 'Could not load the closing preview.');
           _loading = false;
         });
+        await showAppError(context, error);
       }
     }
   }
 
   Future<void> _closeYear() async {
+    if (_closing || _uncertain) return;
     setState(() => _closing = true);
     try {
       final body = await ref
@@ -300,17 +346,27 @@ class _YearEndCloseDialogState extends ConsumerState<_YearEndCloseDialog> {
                 'reason': _reason.text.trim(),
             },
           );
-      if (mounted) setState(() => _result = body);
-    } on Failure catch (e) {
       if (mounted) {
-        setState(() => _closing = false);
-        showMessage(context, e.message, error: true);
+        ref.invalidate(fiscalPeriodsListProvider);
+        setState(() { _result = body; _closing = false; });
+      }
+    } catch (error) {
+      if (mounted) {
+        ref.invalidate(fiscalPeriodsListProvider);
+        setState(() { _closing = false; _uncertain = true; });
+        await showAppError(context, error);
       }
     }
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PopScope(
+    canPop: false,
+    onPopInvokedWithResult: (didPop, _) { if (!didPop) _requestClose(); },
+    child: _buildDialog(context),
+  );
+
+  Widget _buildDialog(BuildContext context) {
     final l10n = context.l10n;
     final title =
         '${_t(context, 'إقفال السنة المالية', 'Year-end close')} — ${text(widget.period, 'code')}';
@@ -332,7 +388,7 @@ class _YearEndCloseDialogState extends ConsumerState<_YearEndCloseDialog> {
         ),
         actions: [
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: _requestClose,
             child: Text(l10n.close),
           ),
         ],
@@ -343,6 +399,8 @@ class _YearEndCloseDialogState extends ConsumerState<_YearEndCloseDialog> {
         ? (_preview['blockers'] as List).map((e) => '$e').toList()
         : <String>[];
     final warnings = <String>[
+      if (_reconciliationUnavailable)
+        _t(context, 'تعذر تحميل مركز التسوية؛ تحقق منه قبل الإقفال.', 'Reconciliation center could not be loaded; review it before closing.'),
       if (_preview['warnings'] is List)
         ...(_preview['warnings'] as List).map((e) => '$e'),
     ];
@@ -455,8 +513,11 @@ class _YearEndCloseDialogState extends ConsumerState<_YearEndCloseDialog> {
                         ),
                     ],
                     const SizedBox(height: 16),
+                    if (_uncertain)
+                      Text(_t(context, 'قد تكون العملية اكتملت. أغلق النافذة وراجع الفترة قبل المحاولة مجددًا.', 'The close may have completed. Close this dialog and review the period before retrying.')),
                     TextField(
                       controller: _reason,
+                      enabled: !_closing && !_uncertain,
                       decoration: InputDecoration(
                         labelText: _t(
                           context,
@@ -472,12 +533,12 @@ class _YearEndCloseDialogState extends ConsumerState<_YearEndCloseDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: _closing ? null : () => Navigator.of(context).pop(false),
+          onPressed: _closing ? null : _requestClose,
           child: Text(l10n.cancel),
         ),
         FilledButton(
           onPressed:
-              (_loading || _closing || _error != null || blockers.isNotEmpty)
+              (_loading || _closing || _uncertain || _error != null || blockers.isNotEmpty)
               ? null
               : _closeYear,
           child: Text(
