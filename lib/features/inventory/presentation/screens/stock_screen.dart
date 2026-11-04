@@ -15,6 +15,7 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../common/presentation/providers/resource_providers.dart';
 import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
+import 'stock_vouchers_screen.dart';
 
 class StockController extends JsonListController {
   @override
@@ -48,7 +49,12 @@ class _StockScreenState extends ConsumerState<StockScreen> {
 
     return ModuleScaffold(
       title: l10n.stockBalances,
-      actions: const [ListExportActions(list: 'stock')],
+      actions: [
+        OutlinedButton.icon(onPressed:() => Navigator.of(context).push<void>(MaterialPageRoute(builder:(_) => const StockVouchersScreen())),
+          icon:const Icon(Icons.inventory_2_outlined),
+          label:Text(Localizations.localeOf(context).languageCode == 'ar' ? 'أذون المخزون' : 'Stock vouchers')),
+        const ListExportActions(list: 'stock'),
+      ],
       trailing: SearchField(
         hint: l10n.searchItems,
         onChanged: (value) => setState(() => _query = value.trim()),

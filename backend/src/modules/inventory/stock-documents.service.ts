@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -66,7 +67,7 @@ export class StockDocumentsService {
 
   async findAll(
     companyId: string,
-    query: { kind?: string; branchId?: string; from?: string; to?: string; page?: number; pageSize?: number } = {},
+    query: { kind?: string; voucherOnly?: boolean; branchId?: string; from?: string; to?: string; page?: number; pageSize?: number } = {},
   ) {
     const page = Math.max(query.page ?? 1, 1);
     const pageSize = Math.min(Math.max(query.pageSize ?? 50, 1), 200);
@@ -79,6 +80,7 @@ export class StockDocumentsService {
       }
       where.kind = kind as StockDocumentKind;
     }
+    if (query.voucherOnly) where.voucherKind = { not: null };
     if (query.branchId) where.branchId = query.branchId;
     if (query.from || query.to) {
       where.documentDate = {};
@@ -121,6 +123,7 @@ export class StockDocumentsService {
       include: {
         branch: { select: { code: true, nameEn: true, nameAr: true } },
         costCenter: { select: { id: true, code: true, nameEn: true, nameAr: true } },
+        toWarehouse: { select: { id: true, code: true, nameEn: true, nameAr: true } },
         lines: {
           orderBy: { lineNumber: 'asc' },
           include: { item: { select: { code: true, nameEn: true, nameAr: true, unit: true } } },
@@ -192,6 +195,7 @@ export class StockDocumentsService {
     if (voucherKind !== null && !['RECEIPT', 'ISSUE'].includes(voucherKind)) throw new BadRequestException('Unknown stock voucher kind');
     if (voucherKind && (!branchId || branchId !== targetBranch)) throw new BadRequestException('Stock voucher must belong to the signed-in branch');
     if (voucherKind && !identity) throw new BadRequestException('idempotencyKey is required for stock vouchers');
+    if (voucherKind === 'RECEIPT' && !mayReadCost) throw new ForbiddenException('Receipt vouchers require inventory.cost.read');
     const created = await this.prisma.$transaction(async (tx) => {
       if (identity) {
         // Serialize retries before reading mutable item/unit data. A lost
@@ -292,6 +296,9 @@ export class StockDocumentsService {
         raw.countedQuantity === undefined
           ? null
           : parseDocumentQuantity(raw.countedQuantity, `Line ${index + 1} counted quantity`);
+      if (voucherKind === 'RECEIPT' && (raw.unitCost === undefined || raw.unitCost === null || raw.unitCost === '')) {
+        throw new BadRequestException(`Line ${index + 1}: receipt unit cost is required`);
+      }
       const unitCost =
         raw.unitCost === undefined
           ? new Prisma.Decimal(0)
@@ -352,6 +359,9 @@ export class StockDocumentsService {
       }
       if (unitCost.isNegative()) {
         throw new BadRequestException(`Line ${index + 1}: the unit cost cannot be negative`);
+      }
+      if (quantity.abs().mul(unitCost).greaterThanOrEqualTo('1e15')) {
+        throw new BadRequestException(`Line ${index + 1}: stock value exceeds the supported range`);
       }
 
       lines.push({
@@ -1058,16 +1068,21 @@ export class StockDocumentsService {
   // also honours the stock-document `unit` field via requestedUnitName.
 
   private decimal(value: unknown, field: string): Prisma.Decimal {
-    try {
-      return new Prisma.Decimal(String(value)).toDecimalPlaces(MONEY_SCALE);
-    } catch {
-      throw new BadRequestException(`${field} is not a valid number`);
+    let parsed: Prisma.Decimal;
+    try { parsed = new Prisma.Decimal(String(value)); }
+    catch { throw new BadRequestException(`${field} is not a valid number`); }
+    if (!parsed.isFinite() || parsed.abs().greaterThanOrEqualTo('1e15') || !parsed.equals(parsed.toDecimalPlaces(MONEY_SCALE))) {
+      throw new BadRequestException(`${field} is outside the supported range or precision`);
     }
+    return parsed;
   }
 
   private date(value: string, field: string): Date {
-    const parsed = new Date(`${String(value).slice(0, 10)}T00:00:00.000Z`);
-    if (Number.isNaN(parsed.getTime())) throw new BadRequestException(`${field} is not a valid date`);
+    const day = String(value).slice(0, 10);
+    const parsed = new Date(`${day}T00:00:00.000Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0,10) !== day) {
+      throw new BadRequestException(`${field} is not a valid date`);
+    }
     return parsed;
   }
 
@@ -1088,6 +1103,7 @@ export class StockDocumentsService {
     voucherKind?: string | null;
     counterpartyName?: string | null;
     toWarehouseId?: string | null;
+    toWarehouse?: {id:string;code:string;nameEn:string;nameAr:string} | null;
     reviewedAt?: Date | null;
     reviewedBy?: string | null;
     approvedAt?: Date | null;
@@ -1104,6 +1120,7 @@ export class StockDocumentsService {
       voucherKind: document.voucherKind ?? null,
       counterpartyName: document.counterpartyName ?? null,
       toWarehouseId: document.toWarehouseId ?? null,
+      toWarehouse: document.toWarehouse ?? null,
       reviewedAt: document.reviewedAt?.toISOString() ?? null,
       reviewedBy: document.reviewedBy ?? null,
       approvedAt: document.approvedAt?.toISOString() ?? null,

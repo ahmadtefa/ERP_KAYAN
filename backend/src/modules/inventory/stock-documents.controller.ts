@@ -16,6 +16,7 @@ export class StockDocumentsController {
   findAll(@CurrentUser() user: AuthUser, @Query() query: Record<string, string>) {
     return this.service.findAll(user.companyId, {
       kind: query.kind,
+      voucherOnly: query.voucherOnly === 'true',
       branchId: query.branchId,
       from: query.from,
       to: query.to,

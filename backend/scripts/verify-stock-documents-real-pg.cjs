@@ -242,7 +242,12 @@ let difference = '70000000-0000-4000-8000-000000000005';
       const input = {idempotencyKey:`voucher-${voucherKind.toLowerCase()}-000001`,kind:'ADJUSTMENT',voucherKind,
         documentDate:date,toWarehouseId:secondWarehouse,reason:'Synthetic workflow',counterpartyName:'Synthetic party',
         costCenterId:centre,lines:[{itemId:item,quantity,unitCost:'7.5'}]};
-      const voucher = await service.create(company,branch,user,input,false);
+      if (voucherKind === 'RECEIPT') {
+        await assert.rejects(service.create(company,branch,user,input,false),/inventory.cost.read/);
+        const missingCost = {...input,idempotencyKey:'voucher-receipt-no-cost-01',lines:[{itemId:item,quantity}]};
+        await assert.rejects(service.create(company,branch,user,missingCost,true),/unit cost is required/);
+      }
+      const voucher = await service.create(company,branch,user,input,true);
       assert.equal(voucher.voucherKind,voucherKind);
       assert.equal(voucher.counterpartyName,'Synthetic party');
       await assert.rejects(service.post(company,user,voucher.id,false,branch),/reviewed and approved/);

@@ -123,3 +123,18 @@ describe('stock documents with multiple units', () => {
     expect(line.unitQuantity).toBeNull();
   });
 });
+
+describe('stock document numeric and date integrity', () => {
+  it('rejects non-finite, over-precise or overflowing cost without creating a document', async () => {
+    for (const unitCost of ['NaN','Infinity','1.00001','1000000000000000']) {
+      const {service,tx}=makeService();
+      await expect(service.create(COMPANY,BRANCH,'user-1',{kind:'ADJUSTMENT',documentDate:'2026-11-04',
+        lines:[{itemId:MILK,quantity:'1',unitCost}]})).rejects.toThrow(/range or precision/);
+      expect(tx.stockDocument.create).not.toHaveBeenCalled();
+    }
+    const {service,tx}=makeService();
+    await expect(service.create(COMPANY,BRANCH,'user-1',{kind:'ADJUSTMENT',documentDate:'2026-02-30',
+      lines:[{itemId:MILK,quantity:'1',unitCost:'1'}]})).rejects.toThrow(/valid date/);
+    expect(tx.stockDocument.create).not.toHaveBeenCalled();
+  });
+});
