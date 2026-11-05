@@ -401,6 +401,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     // Real chart operations, not an HTTP or Flutter test. The fixture uses
     // unique synthetic codes and keeps historical journal rows untouched.
     const chart = new ChartOfAccountsService(prisma, audit);
+    await require('./verify-account-posting-races.cjs')({prisma,chart,posting:service.posting,company,branch,user});
     const stockReports = new StockService(prisma);
     const statements = new FinancialStatementsService(prisma);
     const root = await chart.create(company, user, { code:'SYN-ROOT', nameEn:'Synthetic root',

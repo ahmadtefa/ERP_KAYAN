@@ -364,6 +364,15 @@ export class ChartOfAccountsService {
     companyId: string,
     parentId: string,
   ): Promise<void> {
+    // Wait for an in-flight posting before deciding whether the parent has
+    // journal history. The posting service holds a conflicting shared lock
+    // until its journal line commits. Checking first then updating can demote
+    // a parent while its first journal is being inserted.
+    await tx.$queryRaw(Prisma.sql`
+      SELECT id FROM accounts
+      WHERE id = ${parentId}::uuid AND "companyId" = ${companyId}::uuid
+      FOR UPDATE
+    `);
     const parent = await tx.account.findFirst({
       where: { id: parentId, companyId, deletedAt: null },
       select: { isPostable: true },
