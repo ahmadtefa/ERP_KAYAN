@@ -93,6 +93,17 @@ describe('stock documents with multiple units', () => {
     expect(line.unitQuantity.toFixed(4)).toBe('-1.0000');
   });
 
+  it('requires a cost center for a negative stock adjustment', async () => {
+    const { service, tx } = makeService();
+    await expect(service.create(COMPANY, BRANCH, 'user-1', {
+      kind: StockDocumentKind.ADJUSTMENT,
+      branchId: BRANCH,
+      documentDate: '2026-10-27',
+      lines: [{ itemId: MILK, quantity: '-1' }],
+    } as any)).rejects.toThrow(/cost center is required/i);
+    expect(tx.stockDocument.create).not.toHaveBeenCalled();
+  });
+
   it('rejects an inactive unit on a new stock document', async () => {
     const { service } = makeService({
       ...milkItem,
