@@ -49,6 +49,7 @@ const { SalesInvoicesService } = require('../src/modules/sales/sales-invoices.se
 const { SalesInvoicesController } = require('../src/modules/sales/sales-invoices.controller');
 const { PurchaseInvoicesService } = require('../src/modules/purchases/purchase-invoices.service');
 const { PurchaseInvoicesController } = require('../src/modules/purchases/purchase-invoices.controller');
+const { ReturnsService } = require('../src/modules/returns/returns.service');
 const { ProfilePhotoService } = require('../src/modules/auth/profile-photo.service');
 const { RolesService } = require('../src/modules/admin/roles.service');
 const { UsersService } = require('../src/modules/admin/users.service');
@@ -1618,7 +1619,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     // reverse both. Legacy/missing line links must abort without stock, journal
     // or order mutations; a successful reversal releases the allocation.
     for (const [code, type] of [['1103','ASSET'],['2101','LIABILITY'],['1104','ASSET'],
-      ['1105','ASSET'],['2103','LIABILITY'],['4101','REVENUE'],['5101','EXPENSE']]) {
+      ['1105','ASSET'],['2103','LIABILITY'],['4101','REVENUE'],['4102','REVENUE'],['5101','EXPENSE']]) {
       await prisma.account.upsert({where:{companyId_code:{companyId:company,code}},
         create:{companyId:company,code,nameEn:`Synthetic ${code}`,nameAr:`تجريبي ${code}`,type,isPostable:true},
         update:{isActive:true,isPostable:true,deletedAt:null}});
@@ -1641,6 +1642,9 @@ let difference = '70000000-0000-4000-8000-000000000005';
       } finally { await app.close(); }
     }
     await pi.post(company,user,converted.purchase.invoiceId);
+    const returns = new ReturnsService(prisma,numbers,posting,map,audit,warehouses);
+    await require('./verify-return-http-real-pg.cjs')({prisma,returns,company,user,branch,item:first.id,date,
+      kind:'purchase',invoiceId:converted.purchase.invoiceId,lineId:converted.purchase.invoiceLineId});
     assert.equal((await salesInvoiceHttp('POST',`${converted.sales.invoiceId}/post`,false,false)).status,403);
     assert.equal((await prisma.salesInvoice.findUniqueOrThrow({where:{id:converted.sales.invoiceId}})).status,'DRAFT');
     const salesPosted=await salesInvoiceHttp('POST',`${converted.sales.invoiceId}/post`,false);
@@ -1651,6 +1655,8 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(salesAllowed.status,200);
     assert.ok(Number(salesAllowed.body.costOfGoods)>0);
     assert.ok(Number(salesAllowed.body.lines[0].unitCost)>0);
+    await require('./verify-return-http-real-pg.cjs')({prisma,returns,company,user,branch,item:first.id,date,
+      kind:'sales',invoiceId:converted.sales.invoiceId,lineId:converted.sales.invoiceLineId});
     let orderStockState = await prisma.stockBalance.findUniqueOrThrow({where:{companyId_branchId_itemId:{companyId:company,branchId:branch,itemId:first.id}}});
     assert.equal(orderStockState.quantity.toFixed(4),'0.0000');
     for (const [kind, svc, orders] of [['sales',si,sales],['purchase',pi,purchases]]) {
