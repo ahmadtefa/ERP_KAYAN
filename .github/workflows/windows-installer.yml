@@ -1,6 +1,17 @@
 name: Windows Installer
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-installer.yml'
+      - 'distribution/windows/**'
+      - 'backend/**'
+      - 'lib/**'
+      - 'windows/**'
+      - 'scripts/**'
+      - 'pubspec.*'
+      - 'assets/**'
   workflow_dispatch:
     inputs:
       build_mode:
@@ -9,8 +20,10 @@ on:
         options: [product, test-signed]
         default: product
         required: true
-  # No automatic PR/push builds, installation, signing or publication.
-  # Do not dispatch before the workflow is revised for the approved test VM.
+  # PRs build with the pinned public verification key only, then install the
+  # exact inspected Setup on a fresh GitHub-hosted Windows VM in RuntimeOnly
+  # mode. No signing private key, customer data, release upload or publication
+  # is available to PR jobs. Product publication remains main-push only.
 
 # Building or inspecting a candidate never needs permission to publish releases.
 # Any future publishing job must request write permission separately, after its
@@ -227,8 +240,11 @@ jobs:
         id: licence
         shell: powershell
         env:
-          # No production signing secret is provided to this job.
-          KAYAN_BUILD_MODE: ${{ github.event_name == 'pull_request' && 'test-signed' || inputs.build_mode || 'product' }}
+          # PR smoke needs an installable product payload, but only the pinned
+          # public verification key is used. No production private key exists
+          # in this job; signed activation and business-operation evidence are
+          # deliberately not claimed by RuntimeOnly smoke.
+          KAYAN_BUILD_MODE: ${{ github.event_name == 'pull_request' && 'product' || inputs.build_mode || 'product' }}
         run: |
           $ErrorActionPreference = 'Stop'
           # Every failure here is reported as an annotation, because the raw
