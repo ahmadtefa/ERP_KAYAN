@@ -32,16 +32,16 @@ assert.ok(safe.on.push && safe.on.pull_request, 'Safe checks must remain active 
 assert.deepEqual(safe.on.push.branches, ['main'], 'Main must retain push checks without duplicating open PR commits');
 assert.ok(safe.on.pull_request.branches.includes('main'), 'PRs targeting main must retain code checks');
 const source = fs.readFileSync(path.join(workflows, 'safe-checks.yml'), 'utf8');
-// HMAC state integration remains an independent, explicitly blocked required
-// check until an approved disposable VM exists. No unrelated job depends on it.
+// HMAC state integration runs on a disposable GitHub-hosted VM with synthetic keys only.
 const isolated = safe.jobs['licence-store-isolation'];
 assert.ok(isolated, 'licence-store integration must remain visible as its own job');
 assert.equal(isolated.if, undefined);
 assert.equal(isolated['continue-on-error'], undefined);
 assert.equal(isolated.needs, undefined);
-assert.match(isolated.steps[1].run, /BLOCKED.*licence store integration not run/);
-assert.match(isolated.steps[1].run, /exit 1/);
-assert.match(isolated.steps[2].run, /src\/modules\/licensing\/license-store\.spec\.ts/);
+assert.deepEqual(isolated.permissions, { contents: 'read' });
+assert.equal(isolated.steps[0].with['persist-credentials'], false);
+assert.ok(isolated.steps.every(s => !(s.with && s.with.cache)), 'no dependency cache');
+assert.ok(isolated.steps.some(s => /src\/modules\/licensing\/license-store\.spec\.ts/.test(String(s.run || ''))));
 const backendSteps = safe.jobs['backend-safe'].steps;
 assert.doesNotMatch(backendSteps.map(step => String(step.run || '')).join('\n'), /license-store\.spec\.ts/);
 const ordinaryJest = backendSteps.find(step => step.name === 'Run reviewed non-signing backend and authorization tests');
