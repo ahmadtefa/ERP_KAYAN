@@ -10,7 +10,7 @@ const dto = {
 function fixture(dormant: any[] = [], activeInside = 0) {
   let committed = false;
   const company = {
-    count: jest.fn().mockResolvedValue(0),
+    count: jest.fn().mockResolvedValue(dormant.length),
     findMany: jest.fn().mockResolvedValue(dormant),
     findFirst: jest.fn().mockResolvedValue(null),
     deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -21,12 +21,17 @@ function fixture(dormant: any[] = [], activeInside = 0) {
     $executeRaw: jest.fn().mockResolvedValue(1), company: txCompany,
     branch: { create: jest.fn().mockResolvedValue({ id: 'branch', code: 'MAIN', nameEn: 'Main', nameAr: 'الرئيسي' }) },
     warehouse: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({}) },
-    user: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn().mockResolvedValue({ id: 'admin', username: dto.adminUsername }) },
+    user: {
+      count: jest.fn().mockResolvedValue(0),
+      findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn().mockResolvedValue({ id: 'admin', username: dto.adminUsername }),
+    },
     userRole: { create: jest.fn().mockResolvedValue({}) },
     userBranch: { create: jest.fn().mockResolvedValue({}) },
   };
   const prisma = {
     company,
+    user: { count: jest.fn().mockResolvedValue(0) },
     $transaction: jest.fn(async (fn: any) => { const result = await fn(tx); committed = true; return result; }),
   };
   const audit = { record: jest.fn().mockResolvedValue(undefined), recordRequired: jest.fn().mockResolvedValue(undefined) };
