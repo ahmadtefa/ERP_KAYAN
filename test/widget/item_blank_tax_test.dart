@@ -35,7 +35,9 @@ class _ItemTaxApi extends ApiClient {
 
 void main() {
   for (final editing in [false,true]) {
-    testWidgets('blank item tax sends zero when ${editing ? 'editing' : 'creating'}', (tester) async {
+    for (final input in ['', '   ', '0', '7']) {
+    final label = input.isEmpty ? 'blank' : input.trim().isEmpty ? 'whitespace' : input;
+    testWidgets('item tax $label sends correct value when ${editing ? 'editing' : 'creating'}', (tester) async {
       tester.view.physicalSize=const Size(1600,1200); tester.view.devicePixelRatio=1;
       addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
       final api=_ItemTaxApi(existing:editing);
@@ -58,10 +60,11 @@ void main() {
       }
       final tax=find.widgetWithText(TextFormField,'Tax %');
       await tester.ensureVisible(tax);
-      await tester.enterText(tax,'');
+      await tester.enterText(tax,input);
       await tester.tap(find.text('Save').last); await tester.pumpAndSettle();
-      expect(api.submitted,containsPair('taxRate','0'));
+      expect(api.submitted,containsPair('taxRate',input.trim().isEmpty ? '0' : input));
     });
+    }
   }
   testWidgets('item save failure keeps the form and its tax input', (tester) async {
     tester.view.physicalSize=const Size(1600,1200); tester.view.devicePixelRatio=1;

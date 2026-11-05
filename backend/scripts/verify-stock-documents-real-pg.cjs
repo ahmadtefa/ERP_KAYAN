@@ -1377,12 +1377,41 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const taxHttp = await NestFactory.create(InvoiceTaxHttpModule,{logger:false});
     try {
       taxHttp.use((req,_res,next)=>{req.user={userId:user,companyId:company,branchId:branch,username:'synthetic',
-        isSuperAdmin:false,permissions:req.headers['x-allowed']==='yes' ? ['sales.invoices.create','purchases.invoices.create','inventory.items.read'] : []};next();});
+        isSuperAdmin:false,permissions:req.headers['x-allowed']==='yes' ? ['sales.invoices.create','purchases.invoices.create','inventory.items.read','inventory.items.create','inventory.items.update'] : []};next();});
       taxHttp.useGlobalGuards(new PermissionsGuard(new Reflector()));
       taxHttp.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
       taxHttp.useGlobalFilters(new ProblemDetailsFilter());
       await taxHttp.listen(0,'127.0.0.1');
       const base=`http://127.0.0.1:${taxHttp.getHttpServer().address().port}`;
+      // Real item HTTP validation, permissions and persistence. An omitted
+      // legacy API field still inherits; an explicitly empty UI field is zero.
+      const itemRequest=(method,path,body,allowed=true)=>fetch(base+'/inventory/items'+path,{method,
+        headers:{'content-type':'application/json','x-allowed':allowed?'yes':'no'},body:JSON.stringify(body)});
+      const itemCount=await prisma.item.count({where:{companyId:company}});
+      assert.equal((await itemRequest('POST','',{code:'SYN-HTTP-TAX-NO',nameEn:'Synthetic',nameAr:'تجريبي',taxRate:''},false)).status,403);
+      assert.equal(await prisma.item.count({where:{companyId:company}}),itemCount);
+      let taxEditId;
+      for (const [suffix,rate,expected] of [['EMPTY','','0.0000'],['NULL',null,'0.0000'],['SPACE','   ','0.0000'],['ZERO','0','0.0000'],['VALUE','7','7.0000'],['OMITTED',undefined,null]]) {
+        const result=await itemRequest('POST','',{code:`SYN-HTTP-TAX-${suffix}`,nameEn:'Synthetic',nameAr:'تجريبي',
+          ...(rate===undefined?{}:{taxRate:rate})});
+        assert.equal(result.status,201,suffix);
+        const body=await result.json();
+        assert.equal(body.taxRate,expected,suffix);
+        const saved=await prisma.item.findUniqueOrThrow({where:{id:body.id}});
+        assert.equal(saved.taxRate?.toFixed(4) ?? null,expected,suffix);
+        if (suffix==='VALUE') taxEditId=body.id;
+      }
+      assert.equal((await itemRequest('PATCH','/'+taxEditId,{taxRate:'0'},false)).status,403);
+      assert.equal((await prisma.item.findUniqueOrThrow({where:{id:taxEditId}})).taxRate.toFixed(4),'7.0000');
+      for (const [rate,expected] of [['','0.0000'],[null,'0.0000'],['   ','0.0000'],['0','0.0000'],['7','7.0000']]) {
+        const updated=await itemRequest('PATCH','/'+taxEditId,{taxRate:rate});
+        assert.equal(updated.status,200);
+        assert.equal((await updated.json()).taxRate,expected);
+        assert.equal((await prisma.item.findUniqueOrThrow({where:{id:taxEditId}})).taxRate.toFixed(4),expected);
+      }
+      assert.equal((await itemRequest('PATCH','/'+taxEditId,{nameEn:'Renamed synthetic'})).status,200);
+      assert.equal((await prisma.item.findUniqueOrThrow({where:{id:taxEditId}})).taxRate.toFixed(4),'7.0000');
+      console.log('PASS: item tax create/update matrix and denied writes through real HTTP and PostgreSQL; principal injected.');
       for (const [kind,route,partyField,party,model] of [
         ['sales','/sales/invoices','customerId',customer.id,prisma.salesInvoice],
         ['purchase','/purchases/invoices','supplierId',supplier.id,prisma.purchaseInvoice],
