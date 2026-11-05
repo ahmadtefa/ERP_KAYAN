@@ -55,6 +55,11 @@ export class InventoryReportsController {
     @Param('itemId') itemId: string,
     @Body() body: Record<string, unknown>,
   ) {
+    if (body?.barcode !== undefined && !this.mayManageBarcodes(user)) {
+      throw new ForbiddenException(
+        'ليس لديك صلاحية تعديل أكواد الباركود. / Missing permission: inventory.barcodes.manage',
+      );
+    }
     return this.service.addUnit(
       user.companyId,
       user.userId,

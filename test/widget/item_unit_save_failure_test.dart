@@ -77,4 +77,39 @@ void main() {
       expect(tester.takeException(),isNull);
     });
   }
+  for (final canManageBarcode in [false,true]) {
+    for (final editing in [false,true]) {
+      testWidgets('unit ${editing ? 'edit' : 'create'} shows and submits barcode only for a barcode manager', (tester) async {
+        tester.view.physicalSize=const Size(1700,1200); tester.view.devicePixelRatio=1;
+        addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+        final api=_UnitApi();
+        await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+          currentUserProvider.overrideWithValue(AppUser(id:'user',username:'user',fullName:'User',companyId:'company',
+            permissions:['inventory.items.read','inventory.items.update',if (canManageBarcode) 'inventory.barcodes.manage'])),
+          exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
+          child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+            supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:ItemsScreen()))));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Units & barcodes')); await tester.pumpAndSettle();
+        if (editing) {
+          await tester.tap(find.byTooltip('Edit unit'));
+        } else {
+          await tester.tap(find.widgetWithText(FilledButton,'Add unit / barcode'));
+        }
+        await tester.pumpAndSettle();
+        final barcode=find.widgetWithText(TextFormField,'Barcode');
+        expect(barcode,canManageBarcode ? findsOneWidget : findsNothing);
+        await tester.enterText(find.widgetWithText(TextFormField,'Unit name'),'Crate');
+        await tester.enterText(find.widgetWithText(TextFormField,'Base units per unit'),'5');
+        if (canManageBarcode) await tester.enterText(barcode,'SYN-CODE-123');
+        await tester.tap(find.widgetWithText(FilledButton,'Save')); await tester.pumpAndSettle();
+        expect(api.attempts,1);
+        final body=api.submitted as Map;
+        expect(body.containsKey('barcode'),canManageBarcode);
+        if (canManageBarcode) expect(body['barcode'],'SYN-CODE-123');
+        expect(tester.takeException(),isNull);
+      });
+    }
+  }
+
 }

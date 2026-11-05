@@ -33,6 +33,9 @@ const { JournalEntriesController } = require('../src/modules/accounting/journal-
 const { StockDocumentsService } = require('../src/modules/inventory/stock-documents.service');
 const { ItemsService } = require('../src/modules/inventory/items.service');
 const { ItemsController } = require('../src/modules/inventory/items.controller');
+const { InventoryReportsController } = require('../src/modules/inventory/inventory-reports.controller');
+const { InventoryReportsService } = require('../src/modules/inventory/inventory-reports.service');
+const { BarcodeLabelsService } = require('../src/modules/inventory/barcode-labels.service');
 const { DocumentsService } = require('../src/modules/export/documents.service');
 const { ChartOfAccountsService } = require('../src/modules/accounting/chart-of-accounts.service');
 const { ChartOfAccountsController } = require('../src/modules/accounting/chart-of-accounts.controller');
@@ -1371,14 +1374,16 @@ let difference = '70000000-0000-4000-8000-000000000005';
     // A test principal is injected: this does not prove JWT or licence checks.
     const httpSnapshots = [];
     class InvoiceTaxHttpModule {}
-    Module({ controllers:[SalesInvoicesController,PurchaseInvoicesController,ItemsController], providers:[
+    Module({ controllers:[SalesInvoicesController,PurchaseInvoicesController,ItemsController,InventoryReportsController], providers:[
       {provide:SalesInvoicesService,useValue:si}, {provide:PurchaseInvoicesService,useValue:pi},
       {provide:ItemsService,useValue:itemService},
+      {provide:InventoryReportsService,useValue:new InventoryReportsService(prisma,audit,settings)},
+      {provide:BarcodeLabelsService,useValue:{}},
     ] })(InvoiceTaxHttpModule);
     const taxHttp = await NestFactory.create(InvoiceTaxHttpModule,{logger:false});
     try {
       taxHttp.use((req,_res,next)=>{req.user={userId:user,companyId:company,branchId:branch,username:'synthetic',
-        isSuperAdmin:false,permissions:req.headers['x-allowed']==='yes' ? ['sales.invoices.create','purchases.invoices.create','inventory.items.read','inventory.items.create','inventory.items.update'] : []};next();});
+        isSuperAdmin:false,permissions:req.headers['x-allowed']==='yes' ? ['sales.invoices.create','purchases.invoices.create','inventory.items.read','inventory.items.create','inventory.items.update',...(req.headers['x-barcode']==='yes'?['inventory.barcodes.manage']:[])] : []};next();});
       taxHttp.useGlobalGuards(new PermissionsGuard(new Reflector()));
       taxHttp.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
       taxHttp.useGlobalFilters(new ProblemDetailsFilter());
@@ -1413,6 +1418,28 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal((await itemRequest('PATCH','/'+taxEditId,{nameEn:'Renamed synthetic'})).status,200);
       assert.equal((await prisma.item.findUniqueOrThrow({where:{id:taxEditId}})).taxRate.toFixed(4),'7.0000');
       console.log('PASS: item tax create/update matrix and denied writes through real HTTP and PostgreSQL; principal injected.');
+      // Unit creation has its own barcode write path. Exercise both the outer
+      // item permission and the separate barcode permission on real HTTP/PG;
+      // the synthetic principal bypasses JWT and is not a licensing test.
+      const unitPath='/inventory/items/'+taxItem.id+'/units';
+      const unitRequest=(method,path,body,allowed,barcode)=>fetch(base+unitPath+path,{method,
+        headers:{'content-type':'application/json','x-allowed':allowed?'yes':'no','x-barcode':barcode?'yes':'no'},body:JSON.stringify(body)});
+      const unitsBefore=await prisma.itemUnit.count({where:{itemId:taxItem.id}});
+      const draft={unit:'synthetic-auth-unit',factor:'2'};
+      assert.equal((await unitRequest('POST','',{...draft,barcode:'SYN-AUTH-123'},false,true)).status,403);
+      assert.equal((await unitRequest('POST','',{...draft,barcode:'SYN-AUTH-123'},true,false)).status,403);
+      assert.equal((await unitRequest('POST','',{...draft,barcode:null},true,false)).status,403);
+      assert.equal(await prisma.itemUnit.count({where:{itemId:taxItem.id}}),unitsBefore);
+      assert.equal((await unitRequest('POST','',draft,true,false)).status,201);
+      const savedUnit=await prisma.itemUnit.findFirstOrThrow({where:{itemId:taxItem.id,unit:draft.unit}});
+      assert.equal(savedUnit.barcode,null);
+      assert.equal((await unitRequest('PATCH','/'+savedUnit.id,{barcode:'SYN-AUTH-123'},true,false)).status,403);
+      assert.equal((await prisma.itemUnit.findUniqueOrThrow({where:{id:savedUnit.id}})).barcode,null);
+      assert.equal((await unitRequest('PATCH','/'+savedUnit.id,{barcode:'SYN-AUTH-123'},true,true)).status,200);
+      assert.equal((await prisma.itemUnit.findUniqueOrThrow({where:{id:savedUnit.id}})).barcode,'SYN-AUTH-123');
+      assert.equal((await unitRequest('POST','',{unit:'synthetic-auth-managed',factor:'3',barcode:'SYN-AUTH-456'},true,true)).status,201);
+      assert.equal((await prisma.itemUnit.findFirstOrThrow({where:{itemId:taxItem.id,unit:'synthetic-auth-managed'}})).barcode,'SYN-AUTH-456');
+      console.log('PASS: unit barcode create/update permission denial and authorized writes via real HTTP/PG; identity injected.');
       for (const [kind,route,partyField,party,model] of [
         ['sales','/sales/invoices','customerId',customer.id,prisma.salesInvoice],
         ['purchase','/purchases/invoices','supplierId',supplier.id,prisma.purchaseInvoice],
