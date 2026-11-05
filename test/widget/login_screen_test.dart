@@ -47,7 +47,7 @@ void main() {
   }
 
   for (final locale in [const Locale('ar'), const Locale('en')]) {
-    testWidgets('existing company without users shows recovery in ${locale.languageCode}', (tester) async {
+    testWidgets('existing company or orphaned users show recovery in ${locale.languageCode}', (tester) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [

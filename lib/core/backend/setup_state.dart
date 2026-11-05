@@ -1,11 +1,11 @@
-/// An existing company without users must never be treated as a fresh install.
-/// Restore access through an authorised recovery process without deleting data.
+/// Existing company or user data without an active company account must
+/// never be treated as a fresh install. Preserve it and use authorised recovery.
 const setupRecoveryMessageAr =
-    'توجد شركة محفوظة لكن لا يوجد حساب مستخدم فعّال لهذه الشركة. '
-    'احتفظ بالبيانات وتواصل مع المسؤول لاستعادة الوصول بطريقة معتمدة.';
+    'توجد بيانات شركة أو حسابات مستخدمين محفوظة، لكن لا يوجد حساب شركة فعّال '
+    'يمكنه تسجيل الدخول. احتفظ بالبيانات واستعد الوصول من خلال إجراء معتمد.';
 const setupRecoveryMessageEn =
-    'An existing company has no active user account. Preserve the data '
-    'and contact your administrator for authorised access recovery.';
+    'Existing company or user data was found, but no active company account '
+    'can sign in. Preserve the data and use the authorised recovery process.';
 
 bool setupRequiresRecovery({String? preparationState, Object? healthValue}) =>
     preparationState == 'recovery_required' || healthValue == true;
