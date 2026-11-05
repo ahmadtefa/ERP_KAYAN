@@ -1367,6 +1367,58 @@ export class LicensingService implements OnModuleInit {
     // before a later database rollback can make them replayable again.
     const knownKeys = await this.prisma.licenseKeyRecord.findMany({ select: { keyId: true } });
 
+    // Compare the exact installation snapshot before applying watermarks:
+    // the asynchronous reads above may overlap a revoke, transfer or renewal.
+    this.assertLicenseIdentity(row?.licenseId);
+    if (row) {
+      const data: { expiresAt?: Date | null; seatLimit?: number } = {};
+      if (store.perpetual && row.expiresAt !== null) {
+        data.expiresAt = null;
+      } else if (row.expiresAt && store.licenseExpiresAt &&
+          new Date(store.licenseExpiresAt).getTime() > row.expiresAt.getTime()) {
+        data.expiresAt = new Date(store.licenseExpiresAt);
+      }
+      if (store.maxSeatLimit > row.seatLimit) data.seatLimit = store.maxSeatLimit;
+
+      const changed = Object.keys(data).length > 0;
+      // Even when no watermark needs reapplication, verify the snapshot before
+      // importing key and seat data. Writing the same limit obtains the same
+      // atomic compare-and-set check without changing an entitlement.
+      if (!changed) data.seatLimit = row.seatLimit;
+      await this.prisma.$transaction(async (tx) => {
+        const result = await tx.licenseInstallation.updateMany({
+          where: {
+            licenseId: row.licenseId,
+            machineId: row.machineId,
+            status: row.status,
+            expiresAt: row.expiresAt,
+            seatLimit: row.seatLimit,
+          },
+          data,
+        });
+        if (result.count !== 1) {
+          throw new ForbiddenException({
+            detail: 'The licence changed during reconciliation. Check its current state and retry.',
+            code: 'LICENSE_RECONCILE_STALE',
+          });
+        }
+        if (changed) {
+          await tx.licenseEvent.create({
+            data: {
+              licenseId: row.licenseId,
+              type: 'RESTORED_FROM_WATERMARK',
+              detail: 'The database was behind the licence watermarks (a restored copy or a reset); the term and seat limit were restored from the protected state file.',
+            },
+          });
+        }
+      });
+      if (changed) this.lastStatus = null;
+    }
+
+    // File and database writes are not a distributed transaction. Import only
+    // after a guarded database write succeeds; this does not claim to solve
+    // cross-process file races or crash recovery.
+    this.assertLicenseIdentity(row?.licenseId);
     this.store.update((state) => {
       state.appliedKeys = [...state.appliedKeys, ...knownKeys.map((key) => key.keyId)];
       state.maxSeatsUsed = Math.max(state.maxSeatsUsed, used);
@@ -1374,9 +1426,7 @@ export class LicensingService implements OnModuleInit {
         state.maxSeatLimit = Math.max(state.maxSeatLimit, row.seatLimit);
         state.licenseId = row.licenseId;
         if (row.expiresAt) {
-          const previous = state.licenseExpiresAt
-            ? new Date(state.licenseExpiresAt)
-            : null;
+          const previous = state.licenseExpiresAt ? new Date(state.licenseExpiresAt) : null;
           if (!previous || row.expiresAt.getTime() > previous.getTime()) {
             state.licenseExpiresAt = row.expiresAt.toISOString();
           }
@@ -1385,50 +1435,6 @@ export class LicensingService implements OnModuleInit {
         }
       }
     });
-
-    if (!row) return;
-
-    let changed = false;
-
-    // The store remembers a longer term than the database: the database came
-    // back from an older backup (or was reset), so the term is restored.
-    if (this.store.current.perpetual && row.expiresAt !== null) {
-      await this.prisma.licenseInstallation.update({
-        where: { licenseId: row.licenseId },
-        data: { expiresAt: null },
-      });
-      changed = true;
-    } else if (
-      row.expiresAt &&
-      this.store.current.licenseExpiresAt &&
-      new Date(this.store.current.licenseExpiresAt).getTime() >
-        row.expiresAt.getTime()
-    ) {
-      await this.prisma.licenseInstallation.update({
-        where: { licenseId: row.licenseId },
-        data: { expiresAt: new Date(this.store.current.licenseExpiresAt) },
-      });
-      changed = true;
-    }
-    if (this.store.current.maxSeatLimit > row.seatLimit) {
-      await this.prisma.licenseInstallation.update({
-        where: { licenseId: row.licenseId },
-        data: { seatLimit: this.store.current.maxSeatLimit },
-      });
-      changed = true;
-    }
-
-    if (changed) {
-      await this.prisma.licenseEvent.create({
-        data: {
-          licenseId: row.licenseId,
-          type: 'RESTORED_FROM_WATERMARK',
-          detail:
-            'The database was behind the licence watermarks (a restored copy or a reset); the term and seat limit were restored from the protected state file.',
-        },
-      });
-      this.lastStatus = null;
-    }
   }
 
   /**

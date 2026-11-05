@@ -94,6 +94,9 @@ export class FakeDb {
       const rows = this.installations.filter((row) =>
         row.licenseId === where.licenseId &&
         (where.machineId === undefined || row.machineId === where.machineId) &&
+        (where.seatLimit === undefined || row.seatLimit === where.seatLimit) &&
+        (!Object.hasOwn(where, 'expiresAt') ||
+          (row.expiresAt?.getTime() ?? null) === (where.expiresAt?.getTime() ?? null)) &&
         (typeof where.status === 'string' ? row.status === where.status :
           where.status?.in?.includes(row.status) ?? true),
       );

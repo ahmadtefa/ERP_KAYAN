@@ -23,7 +23,9 @@ function setup(status = 'ACTIVE') {
       updateMany: jest.fn(async ({ where, data }: any) => {
         const accepted = typeof where.status === 'string' ? row.status === where.status :
           where.status.in.includes(row.status);
-        if (!accepted || row.licenseId !== where.licenseId || row.machineId !== where.machineId) return { count: 0 };
+        if (!accepted || row.licenseId !== where.licenseId || row.machineId !== where.machineId ||
+          (where.seatLimit !== undefined && where.seatLimit !== row.seatLimit) ||
+          (Object.hasOwn(where, 'expiresAt') && (where.expiresAt?.getTime() ?? null) !== (row.expiresAt?.getTime() ?? null))) return { count: 0 };
         Object.assign(row, data); return { count: 1 };
       }),
       create: jest.fn(async () => ({})),
@@ -135,6 +137,81 @@ describe('licence state safety without signing', () => {
     expect(row).toEqual(beforeRow);
     expect(store.current).toEqual(beforeStore);
     expect(db.licenseInstallation.update).not.toHaveBeenCalled();
+  });
+
+  it('reapplies both eligible protected watermarks in one guarded update', async () => {
+    const { service, row, db, store } = setup();
+    db.licenseInstallation.findFirst.mockImplementation(async () => ({...row}));
+    row.expiresAt = new Date('2027-01-01T00:00:00Z');
+    store.current.perpetual = true;
+    store.current.maxSeatLimit = 50;
+    await service.reconcile();
+    expect(row).toMatchObject({status:'ACTIVE',seatLimit:50,expiresAt:null});
+    expect(db.licenseInstallation.updateMany).toHaveBeenCalledTimes(1);
+    expect(db.licenseEvent.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('imports keys after a matching no-change snapshot without a repair event', async () => {
+    const { service, db, store } = setup();
+    db.licenseKeyRecord.findMany.mockResolvedValueOnce([{keyId:'synthetic-key'}]);
+    await service.reconcile();
+    expect(store.current.appliedKeys).toContain('synthetic-key');
+    expect(db.licenseEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('does not apply watermarks after a concurrent revocation', async () => {
+    const { service, row, db, store } = setup();
+    // Return a snapshot just like Prisma: a later write cannot mutate the
+    // already-read JavaScript object.
+    db.licenseInstallation.findFirst.mockImplementation(async () => ({...row}));
+    row.expiresAt = new Date('2027-01-01T00:00:00Z');
+    store.current.perpetual = true;
+    store.current.maxSeatLimit = 50;
+    const protectedBefore = structuredClone(store.current);
+    db.licenseKeyRecord.findMany.mockImplementationOnce(async () => { row.status = 'REVOKED'; return []; });
+    expect(await code(service.reconcile())).toMatchObject({code:'LICENSE_RECONCILE_STALE'});
+    expect(row).toMatchObject({status:'REVOKED',seatLimit:2,expiresAt:new Date('2027-01-01T00:00:00Z')});
+    expect(store.current).toEqual(protectedBefore);
+    expect(db.licenseEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite a concurrent renewal or import a stale snapshot', async () => {
+    const { service, row, db, store } = setup();
+    db.licenseInstallation.findFirst.mockImplementation(async () => ({...row}));
+    row.expiresAt = new Date('2027-01-01T00:00:00Z');
+    store.current.licenseExpiresAt = '2027-06-01T00:00:00.000Z';
+    store.current.maxSeatLimit = 50;
+    const protectedBefore = structuredClone(store.current);
+    db.licenseKeyRecord.findMany.mockImplementationOnce(async () => {
+      row.expiresAt = new Date('2028-01-01T00:00:00Z'); return [];
+    });
+    expect(await code(service.reconcile())).toMatchObject({code:'LICENSE_RECONCILE_STALE'});
+    expect(row).toMatchObject({seatLimit:2,expiresAt:new Date('2028-01-01T00:00:00Z')});
+    expect(store.current).toEqual(protectedBefore);
+    expect(db.licenseEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('does not import keys from a snapshot revoked when no watermark repair was needed', async () => {
+    const { service, row, db, store } = setup();
+    db.licenseInstallation.findFirst.mockImplementation(async () => ({...row}));
+    const protectedBefore = structuredClone(store.current);
+    db.licenseKeyRecord.findMany.mockImplementationOnce(async () => {
+      row.status = 'REVOKED'; return [{keyId:'synthetic-key'}];
+    });
+    expect(await code(service.reconcile())).toMatchObject({code:'LICENSE_RECONCILE_STALE'});
+    expect(store.current).toEqual(protectedBefore);
+    expect(db.licenseEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('does not update protected state if the reconciliation audit fails', async () => {
+    const { service, row, db, store } = setup();
+    db.licenseInstallation.findFirst.mockImplementation(async () => ({...row}));
+    store.current.maxSeatLimit = 50;
+    const protectedBefore = structuredClone(store.current);
+    db.licenseEvent.create.mockRejectedValueOnce(new Error('synthetic audit failure'));
+    await expect(service.reconcile()).rejects.toThrow('synthetic audit failure');
+    expect(store.current).toEqual(protectedBefore);
+    // This fake transaction cannot prove rollback: real PostgreSQL is required.
   });
 
   it('blocks status and clock confirmation on a conflicting protected licence', async () => {
