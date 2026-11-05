@@ -278,12 +278,14 @@ class _ModeCard extends ConsumerWidget {
                 children: [
                   RadioListTile<ImportMode>(
                     value: ImportMode.insert,
+                    enabled: !state.busy,
                     title: Text(l10n.importModeSkip),
                     subtitle: Text(l10n.importModeSkipHint),
                     contentPadding: EdgeInsets.zero,
                   ),
                   RadioListTile<ImportMode>(
                     value: ImportMode.upsert,
+                    enabled: !state.busy,
                     title: Text(l10n.importModeUpdate),
                     subtitle: Text(l10n.importModeUpdateHint),
                     contentPadding: EdgeInsets.zero,
