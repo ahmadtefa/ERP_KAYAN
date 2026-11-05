@@ -1260,6 +1260,8 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const pi = new PurchaseInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit);
     const sales = new SalesOrdersService(prisma,numbers,settings,prices,si,audit);
     const purchases = new PurchaseOrdersService(prisma,numbers,settings,prices,pi,audit);
+    await require('./verify-order-http-real-pg.cjs')({prisma,audit,sales,purchases,company,branch,user,
+      item:second.id,customer:customer.id,supplier:supplier.id,date});
     // Explicitly cleared, zero, entered and omitted taxes on both order and
     // invoice services. Historical snapshots must survive subsequent changes
     // to the item's tax and the company default, on real Prisma/PostgreSQL.
