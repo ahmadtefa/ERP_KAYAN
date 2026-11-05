@@ -73,15 +73,22 @@ assert.deepEqual(Object.keys(gate.jobs), ['licence-evidence-required']);
 const gateJob = gate.jobs['licence-evidence-required'];
 assert.equal(gateJob.if, undefined, 'Evidence gate must not be conditional');
 assert.equal(gateJob['continue-on-error'], undefined, 'Evidence gate must not ignore a failure');
-assert.equal(gateJob.steps.length, 1, 'Evidence gate changes require security review');
-assert.match(gateJob.steps[0].run, /Signed licence, generator and installed product tests require the approved isolated VM/);
-assert.match(gateJob.steps[0].run, /exit 1/);
-assert.equal(gateJob.steps[0].if, undefined);
-assert.equal(gateJob.steps[0]['continue-on-error'], undefined);
+assert.equal(gateJob.steps.length, 2, 'PR notice and main blocker require review');
+const [prNotice, mainBlocker] = gateJob.steps;
+assert.equal(prNotice.if, "github.event_name == 'pull_request'");
+assert.match(prNotice.run, /BLOCKED.*APPROVED RELEASE ENVIRONMENT \/ EVIDENCE NOT AVAILABLE/);
+assert.match(prNotice.run, /not release approval/);
+assert.doesNotMatch(prNotice.run, /exit\s+[1-9]|continue-on-error/);
+assert.equal(mainBlocker.if, "github.event_name == 'push'");
+assert.match(mainBlocker.run, /Approved isolated Windows VM/);
+assert.match(mainBlocker.run, /exit 1/);
+for (const step of gateJob.steps) {
+  assert.equal(step['continue-on-error'], undefined);
+}
 const publish = read('windows-installer.yml').jobs['publish-windows'];
 assert.ok(publish.steps.some(step => String(step.run ?? '').includes('verify-release-evidence.mjs')),
   'Moving the CI evidence signal must not remove the independent publisher evidence check');
 assert.equal(publish.environment, 'windows-production');
 const publisher = fs.readFileSync(path.join(root, 'scripts/publish-verified-windows.mjs'), 'utf8');
 assert.match(publisher, /verify-release-evidence\.mjs/, 'Publisher must independently verify evidence');
-console.log('PASS: workflow trigger inventory, independent blocked evidence gate and publisher checks');
+console.log('PASS: workflow trigger inventory, PR evidence notice, main blocker and independent publisher checks');

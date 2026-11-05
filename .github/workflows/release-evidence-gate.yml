@@ -1,9 +1,10 @@
-name: Release security evidence (not release approval)
+name: Release evidence status (not release approval)
 
-# Independent from code CI; this gate remains explicitly failing until the
-# separately approved VM evidence can be authenticated for the exact artifact.
-# It does not publish or modify releases and does not replace the checks in
-# the publisher. Both PR and push receive the same missing-evidence signal.
+# Ordinary code CI does not require access to an approved release VM. A
+# successful PR notice means only that the notice ran: it is NOT evidence or
+# approval. Main pushes remain blocked until independently authenticated
+# evidence exists; the publisher has separate checks for the exact artifact.
+# This workflow cannot publish or modify releases.
 on:
   pull_request:
     branches: [main, 'arena/**']
@@ -15,11 +16,16 @@ permissions:
 
 jobs:
   licence-evidence-required:
-    name: Signed licence and installed-product evidence required
+    name: Release evidence status (not approval)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Explicitly report missing approved-VM security evidence
+      - name: Report evidence blocked without failing ordinary PR checks
+        if: github.event_name == 'pull_request'
         run: |
-          echo '::error title=Security and installed-product tests blocked::Signed licence, generator and installed product tests require the approved isolated VM. They have not run and this PR is not release-approved.'
+          echo '::notice title=BLOCKED — APPROVED RELEASE ENVIRONMENT / EVIDENCE NOT AVAILABLE::Signed production-licence and installed-product evidence has not been established by this PR. Do not publish; this notice is not release approval.'
+      - name: Block main release pending independently verified evidence
+        if: github.event_name == 'push'
+        run: |
+          echo '::error title=Release approval blocked::Approved isolated Windows VM and signed production-licence evidence for the exact artifact are required. No release is approved.'
           exit 1
