@@ -4,6 +4,7 @@
 import 'dart:io';
 
 import 'package:erp_kayan/core/config/app_config.dart';
+import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/core/storage/token_store.dart';
 import 'package:erp_kayan/features/accounting/presentation/screens/chart_of_accounts_screen.dart';
 import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
@@ -54,9 +55,12 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    final config = AppConfig.forLocalServer(origin.toString());
+    final client = ApiClient(config, TokenStore(backend: _EmptySecureBackend()));
+    addTearDown(() => client.raw.close(force:true));
     await tester.pumpWidget(ProviderScope(overrides: [
-      appConfigProvider.overrideWithValue(AppConfig.forLocalServer(origin.toString())),
-      tokenStoreProvider.overrideWithValue(TokenStore(backend: _EmptySecureBackend())),
+      appConfigProvider.overrideWithValue(config),
+      apiClientProvider.overrideWithValue(client),
       currentUserProvider.overrideWithValue(const AppUser(id:'synthetic',username:'synthetic',
         fullName:'Synthetic',companyId:'synthetic',isSuperAdmin:true)),
       exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown),
@@ -79,5 +83,10 @@ void main() {
     await tester.pump();
     await _waitFor(tester,find.textContaining('SYN-UI-ACCOUNT-1  Integration asset'));
     expect(tester.takeException(),isNull);
+    // Dispose the page and close Dio before the binding checks for fake-async
+    // timers; a kept-alive socket otherwise leaves a three-second idle timer.
+    await tester.pumpWidget(const SizedBox.shrink());
+    client.raw.close(force:true);
+    await tester.pump(const Duration(seconds:4));
   });
 }
