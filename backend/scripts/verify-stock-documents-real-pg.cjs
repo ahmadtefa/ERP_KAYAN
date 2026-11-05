@@ -1337,10 +1337,10 @@ let difference = '70000000-0000-4000-8000-000000000005';
     // Explicitly cleared, zero, entered and omitted taxes on both order and
     // invoice services. Historical snapshots must survive subsequent changes
     // to the item's tax and the company default, on real Prisma/PostgreSQL.
-    // Item creation and updates distinguish explicit blank/null zero from
-    // omitted inherited tax; historical invoice/order lines remain snapshots.
+    // On create, blank/null/omitted item tax is zero. PATCH omission preserves
+    // the stored value; historical invoice/order lines remain snapshots.
     const itemService = new ItemsService(prisma,audit,service.accounts,service.posting,service.warehouses);
-    for (const [suffix,rate,expected] of [['EMPTY','','0.0000'],['NULL',null,'0.0000'],['SPACE','   ','0.0000'],['EXPLICIT','7','7.0000'],['OMIT',undefined,null]]) {
+    for (const [suffix,rate,expected] of [['EMPTY','','0.0000'],['NULL',null,'0.0000'],['SPACE','   ','0.0000'],['EXPLICIT','7','7.0000'],['OMIT',undefined,'0.0000']]) {
       const saved = await itemService.create(company,user,{code:`SYN-ITEM-TAX-${suffix}`,nameEn:'Synthetic tax item',nameAr:'صنف تجريبي',
         ...(rate === undefined ? {} : {taxRate:rate})},branch,true);
       assert.equal(saved.taxRate,expected);
@@ -1385,14 +1385,14 @@ let difference = '70000000-0000-4000-8000-000000000005';
       await taxHttp.listen(0,'127.0.0.1');
       const base=`http://127.0.0.1:${taxHttp.getHttpServer().address().port}`;
       // Real item HTTP validation, permissions and persistence. An omitted
-      // legacy API field still inherits; an explicitly empty UI field is zero.
+      // create field is zero; an omitted PATCH field preserves the value.
       const itemRequest=(method,path,body,allowed=true)=>fetch(base+'/inventory/items'+path,{method,
         headers:{'content-type':'application/json','x-allowed':allowed?'yes':'no'},body:JSON.stringify(body)});
       const itemCount=await prisma.item.count({where:{companyId:company}});
       assert.equal((await itemRequest('POST','',{code:'SYN-HTTP-TAX-NO',nameEn:'Synthetic',nameAr:'تجريبي',taxRate:''},false)).status,403);
       assert.equal(await prisma.item.count({where:{companyId:company}}),itemCount);
       let taxEditId;
-      for (const [suffix,rate,expected] of [['EMPTY','','0.0000'],['NULL',null,'0.0000'],['SPACE','   ','0.0000'],['ZERO','0','0.0000'],['VALUE','7','7.0000'],['OMITTED',undefined,null]]) {
+      for (const [suffix,rate,expected] of [['EMPTY','','0.0000'],['NULL',null,'0.0000'],['SPACE','   ','0.0000'],['ZERO','0','0.0000'],['VALUE','7','7.0000'],['OMITTED',undefined,'0.0000']]) {
         const result=await itemRequest('POST','',{code:`SYN-HTTP-TAX-${suffix}`,nameEn:'Synthetic',nameAr:'تجريبي',
           ...(rate===undefined?{}:{taxRate:rate})});
         assert.equal(result.status,201,suffix);
@@ -1499,6 +1499,27 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(invoice.taxAmount.toFixed(4),'21.0000',snapshot.kind);
     }
     await prisma.companySetting.update({where:{companyId:company},data:{taxRate:'14'}});
+    // Historical catalogue rows can still contain null. With a 14% company
+    // rate and an omitted line rate, a *new* document must use zero rather
+    // than inheriting 14%; this does not rewrite existing document lines.
+    const legacyNullItem = await prisma.item.create({data:{companyId:company,code:'SYN-LEGACY-NULL-TAX',
+      nameEn:'Legacy null tax',nameAr:'صنف تجريبي قديم',unit:'piece',salePrice:'100',purchasePrice:'100',taxRate:null}});
+    for (const [kind,orders,invoices,party] of [['sales',sales,si,customer.id],['purchase',purchases,pi,supplier.id]]) {
+      const partyField = kind === 'sales' ? 'customerId' : 'supplierId';
+      const lines = [{itemId:legacyNullItem.id,quantity:'1',unitPrice:'100'}];
+      const order = await orders.create(company,branch,user,{[partyField]:party,orderDate:date,lines});
+      const invoice = await invoices.create(company,branch,user,{[partyField]:party,invoiceDate:date,lines});
+      for (const [model,id] of [
+        [kind === 'sales' ? prisma.salesOrder : prisma.purchaseOrder, order.id],
+        [kind === 'sales' ? prisma.salesInvoice : prisma.purchaseInvoice, invoice.id],
+      ]) {
+        const stored = await model.findUniqueOrThrow({where:{id},include:{lines:true}});
+        assert.equal(stored.lines[0].taxRate.toFixed(4),'0.0000',kind);
+        assert.equal(stored.taxAmount.toFixed(4),'0.0000',kind);
+      }
+    }
+    assert.equal((await prisma.item.findUniqueOrThrow({where:{id:legacyNullItem.id}})).taxRate,null);
+    console.log('PASS: legacy null item tax yields zero in new sales/purchase orders and invoices; old catalogue row is not rewritten.');
     console.log('PASS: real HTTP/PG sale and purchase invoices preserve blank/null/space/zero versus explicit and omitted tax; historical snapshots persist after defaults change. Principal injected; JWT and licence guards untested.');
     // Creation retries: a real unique ledger, order and required audit must
     // commit together; both concurrent callers receive the same order.

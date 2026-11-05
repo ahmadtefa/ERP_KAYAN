@@ -14,8 +14,8 @@ function harness() {
   return {service,prisma,create,update};
 }
 describe('item blank tax', () => {
-  it.each([[undefined,null],[null,'0'],['','0'],['   ','0'],['0','0'],['7','7']])
-    ('creates with %s as %s, preserving omission as inherited', async (tax,expected) => {
+  it.each([[undefined,'0'],[null,'0'],['','0'],['   ','0'],['0','0'],['7','7']])
+    ('creates with %s as %s, defaulting an omitted tax to zero', async (tax,expected) => {
       const h=harness(); h.prisma.item.findFirst.mockResolvedValue(null);
       await h.service.create('company','user',{code:'SYN',nameEn:'Item',nameAr:'صنف',...(tax === undefined ? {} : {taxRate:tax})});
       const actual=h.create.mock.calls[0][0].data.taxRate as Prisma.Decimal | null;

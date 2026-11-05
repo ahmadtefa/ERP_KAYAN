@@ -131,6 +131,14 @@ describe('Sales multi-unit — milk scenario', () => {
     expect(line.taxAmount.toFixed(4)).toBe('21.0000');
   });
 
+  it('does not turn a null item tax into company tax for a new invoice', async () => {
+    const { service, tx, settings } = makeService({ ...milkItem, taxRate: null });
+    settings.get.mockResolvedValue({ taxRate: '14', maxDiscountPercent: '100', pricesIncludeTax: false });
+    await service.create(COMPANY, BRANCH, 'user-1', { ...baseDto,
+      lines: [{ itemId: MILK, quantity: '1' }] } as any);
+    expect(tx.salesInvoice.create.mock.calls[0][0].data.lines.create[0].taxRate.toFixed(4)).toBe('0.0000');
+  });
+
   it('treats an explicit blank tax as zero while retaining an omitted item rate', async () => {
     const { service, tx } = makeService({ ...milkItem, taxRate: D(14) });
     await service.create(COMPANY, BRANCH, 'user-1', { ...baseDto,

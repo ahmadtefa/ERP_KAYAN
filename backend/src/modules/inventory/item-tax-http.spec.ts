@@ -32,6 +32,9 @@ describe('item blank tax HTTP DTO', () => {
     const request=(method:string,path:string,body:object) => fetch(`http://127.0.0.1:${port}/inventory/items${path}`,
       {method,headers:{'content-type':'application/json'},body:JSON.stringify(body)});
     try {
+      const omitted=await request('POST','',{code:'I-2',nameEn:'Item 2',nameAr:'صنف ٢'});
+      expect(omitted.status).toBe(201);
+      expect((await omitted.json() as {taxRate:string}).taxRate).toBe('0.0000');
       const created=await request('POST','',{code:'I-1',nameEn:'Item',nameAr:'صنف',taxRate:''});
       expect(created.status).toBe(201);
       expect((await created.json() as {taxRate:string}).taxRate).toBe('0.0000');

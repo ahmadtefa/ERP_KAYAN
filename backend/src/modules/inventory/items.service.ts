@@ -355,7 +355,7 @@ export class ItemsService {
           salePrice: this.money(dto.salePrice, 'salePrice'),
           purchasePrice: this.money(dto.purchasePrice, 'purchasePrice'),
           reorderLevel: this.money(dto.reorderLevel, 'reorderLevel'),
-          taxRate: dto.taxRate === undefined ? null : this.rate(dto.taxRate, 'taxRate'),
+          taxRate: this.rate(dto.taxRate, 'taxRate'),
           isStockTracked,
           categoryId: (dto.categoryId as string) ?? null,
           countryOfOrigin: (dto.countryOfOrigin as string | undefined)?.trim() || null,

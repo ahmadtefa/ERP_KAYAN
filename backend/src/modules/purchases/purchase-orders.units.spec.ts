@@ -55,6 +55,15 @@ function makeService() {
 }
 
 describe('purchase orders with multiple units', () => {
+  it('does not inherit company tax when the item rate is null', async () => {
+    const { service, tx } = makeService();
+    (service as any).prisma.item.findFirst.mockResolvedValue({ ...item, taxRate: null });
+    (service as any).settings.get.mockResolvedValue({ taxRate: '14', maxDiscountPercent: '100' });
+    await service.create(COMPANY, BRANCH, 'user-1', { supplierId: 'supplier-1', orderDate: '2026-10-27',
+      lines: [{ itemId: ITEM, quantity: '1' }] } as any);
+    expect(tx.purchaseOrder.create.mock.calls[0][0].data.lines.create[0].taxRate.toFixed(4)).toBe('0.0000');
+  });
+
   it('orders 5 cartons: stores 50 base pieces with the carton snapshot', async () => {
     const { service, tx } = makeService();
     await service.create(COMPANY, BRANCH, 'user-1', {

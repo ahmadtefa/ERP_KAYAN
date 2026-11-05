@@ -1071,14 +1071,15 @@ export class PurchaseInvoicesService {
           : defaultUnitPrice('purchase', resolved.row, item.purchasePrice);
       }
 
-      // Line, then item, then the company's own rate - an item with no rate
-      // of its own follows the company rather than silently becoming exempt.
+      // Explicit line tax wins, including a cleared value (zero). An omitted
+      // line rate uses the item's rate; a legacy null item rate is zero, never
+      // an implicit company rate. Existing document snapshots are unchanged.
       const taxRate: Prisma.Decimal =
         raw.taxRate !== undefined
           ? (raw.taxRate === null || raw.taxRate.trim() === ''
               ? new Prisma.Decimal(0)
               : this.rate(raw.taxRate, `Line ${index + 1} taxRate`))
-          : (item.taxRate ?? new Prisma.Decimal(settings.taxRate));
+          : (item.taxRate ?? new Prisma.Decimal(0));
 
       // The discount is taken from the goods value, before tax, and the tax
       // is then charged on what is actually being paid for the goods. Money

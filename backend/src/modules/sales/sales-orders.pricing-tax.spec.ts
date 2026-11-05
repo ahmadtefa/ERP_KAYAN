@@ -4,6 +4,23 @@ import { SalesOrdersService } from './sales-orders.service';
 const D = (value: number) => new Prisma.Decimal(value);
 
 describe('sales order prices and tax', () => {
+  it('does not inherit the company rate from a null item tax on a new order', async () => {
+    const orderCreate = jest.fn(async ({ data }: { data: any }) => ({ id: 'order', orderNumber: data.orderNumber, totalAmount: data.totalAmount }));
+    const prisma = {
+      customer: { findFirst: jest.fn(async () => ({ id: 'customer', code: 'C', isActive: true })) },
+      item: { findFirst: jest.fn(async () => ({ id: 'item', code: 'I', nameEn: 'Item', unit: 'piece',
+        isActive: true, salePrice: D(9), taxRate: null, units: [] })) },
+      $transaction: jest.fn(async (fn: (tx: unknown) => unknown) => fn({ salesOrder: { create: orderCreate } })),
+    };
+    const service = new SalesOrdersService(prisma as never, { next: async () => 'SO-1' } as never,
+      { get: async () => ({ taxRate: '14' }) } as never, { resolvePrice: async () => null } as never,
+      {} as never, { record: async () => {}, recordRequired: async () => {} } as never);
+    jest.spyOn(service, 'findOne').mockResolvedValue({ id: 'order' } as never);
+    await service.create('company', 'branch', 'user', { customerId: 'customer', orderDate: '2026-01-01',
+      lines: [{ itemId: 'item', quantity: '1' }] });
+    expect(orderCreate.mock.calls[0][0].data.lines.create[0].taxRate.toFixed(4)).toBe('0.0000');
+  });
+
   it('uses customer pricing and distinguishes cleared and omitted tax', async () => {
     const orderCreate = jest.fn(async ({ data }: { data: any }) => ({
       id: 'order', orderNumber: data.orderNumber, totalAmount: data.totalAmount,

@@ -548,7 +548,9 @@ export class PurchaseOrdersService {
     supplierId: string,
     rawLines: OrderLineInput[],
   ) {
-    const settings = await this.settings.get(companyId);
+    // Preserve settings initialization even though item tax no longer inherits
+    // the company rate when the item's stored value is null.
+    await this.settings.get(companyId);
     const lines: Array<{
       itemId: string;
       description: string;
@@ -605,10 +607,10 @@ export class PurchaseOrdersService {
           : defaultUnitPrice('purchase', resolved.row, item.purchasePrice);
       }
 
-      // An explicitly cleared rate means zero; omission still inherits the
-      // item or company setting. Keep this consistent with invoice lines.
+      // A cleared rate is zero. An omitted line uses the item rate, and a
+      // legacy null item rate is zero rather than the company default.
       const taxRate = raw.taxRate === undefined
-        ? item.taxRate ?? new Prisma.Decimal(settings.taxRate)
+        ? item.taxRate ?? new Prisma.Decimal(0)
         : raw.taxRate === null || (typeof raw.taxRate === 'string' && raw.taxRate.trim() === '')
           ? new Prisma.Decimal(0)
           : this.percent(raw.taxRate, `Line ${index + 1} taxRate`);
