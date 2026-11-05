@@ -73,6 +73,71 @@ const machineId = 'synthetic-status-machine';
     service.store.current.maxSeatLimit=0;
     await db.licenseInstallation.update({where:{licenseId},data:{expiresAt:null}});
 
+    // Exercise reconciliation through two actual Prisma clients, using an
+    // in-memory synthetic trust store: no HMAC or signature is created.
+    const term = new Date('2032-01-01T00:00:00Z');
+    for (const kind of ['revoke', 'renew', 'no-repair-revoke']) {
+      await db.licenseInstallation.update({where:{licenseId},data:{status:'ACTIVE',expiresAt:term,seatLimit:2}});
+      service.store.current = {...service.store.current, perpetual:kind !== 'no-repair-revoke',
+        maxSeatLimit:kind === 'no-repair-revoke' ? 0 : 50, licenseExpiresAt:null};
+      const protectedBefore = structuredClone(service.store.current);
+      const eventsBefore = await db.licenseEvent.count({where:{licenseId}});
+      const laterExpiry = new Date('2035-01-01T00:00:00Z');
+      service.prisma = new Proxy(db, { get(target, property) {
+        if (property === 'licenseKeyRecord') return new Proxy(target.licenseKeyRecord, {
+          get(delegate, name) {
+            if (name === 'findMany') return async args => {
+              const keys = await delegate.findMany(args);
+              await other.licenseInstallation.update({where:{licenseId},data:
+                kind === 'renew' ? {expiresAt:laterExpiry} : {status:'REVOKED'}});
+              return keys;
+            };
+            return delegate[name];
+          },
+        });
+        const value = target[property];
+        return typeof value === 'function' ? value.bind(target) : value;
+      }});
+      await assert.rejects(service.reconcile(), error => error.getResponse?.().code === 'LICENSE_RECONCILE_STALE');
+      const after = await db.licenseInstallation.findUnique({where:{licenseId}});
+      assert.equal(after.status, kind === 'renew' ? 'ACTIVE' : 'REVOKED');
+      assert.equal(after.expiresAt.getTime(), (kind === 'renew' ? laterExpiry : term).getTime());
+      assert.equal(after.seatLimit,2);
+      assert.deepEqual(service.store.current,protectedBefore);
+      assert.equal(await db.licenseEvent.count({where:{licenseId}}),eventsBefore);
+    }
+    service.prisma = db;
+    await db.licenseInstallation.update({where:{licenseId},data:{status:'ACTIVE',expiresAt:term,seatLimit:2}});
+    service.store.current = {...service.store.current, perpetual:true, maxSeatLimit:50, licenseExpiresAt:null};
+    await service.reconcile();
+    let repaired = await db.licenseInstallation.findUnique({where:{licenseId}});
+    assert.equal(repaired.expiresAt,null);
+    assert.equal(repaired.seatLimit,50);
+
+    // Simulate an audit insert failure inside the actual PG transaction. The
+    // entitlement update must roll back and the protected state remain intact.
+    await db.licenseInstallation.update({where:{licenseId},data:{expiresAt:term,seatLimit:2}});
+    const protectedBeforeAuditFailure = structuredClone(service.store.current);
+    service.prisma = new Proxy(db, { get(target, property) {
+      if (property === '$transaction') return callback => target.$transaction(tx => callback(new Proxy(tx, {
+        get(inner, name) {
+          if (name === 'licenseEvent') return {create:async () => { throw new Error('synthetic audit failure'); }};
+          return inner[name];
+        },
+      })));
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    }});
+    await assert.rejects(service.reconcile(), /synthetic audit failure/);
+    repaired = await db.licenseInstallation.findUnique({where:{licenseId}});
+    assert.equal(repaired.expiresAt.getTime(),term.getTime());
+    assert.equal(repaired.seatLimit,2);
+    assert.deepEqual(service.store.current,protectedBeforeAuditFailure);
+    service.prisma = db;
+    service.store.current.perpetual=false;
+    service.store.current.maxSeatLimit=0;
+    await db.licenseInstallation.update({where:{licenseId},data:{expiresAt:null}});
+
     for (const type of ['RENEWAL','SEATS','TRANSFER']) {
       await db.licenseInstallation.update({where:{licenseId},data:{status:'ACTIVE'}});
       const stale = await db.licenseInstallation.findFirst({where:{licenseId}});
@@ -110,6 +175,6 @@ const machineId = 'synthetic-status-machine';
     service.prisma = proxy;
     await assert.rejects(service.confirmClock({}));
     assert.equal((await db.licenseInstallation.findUnique({where:{licenseId}})).status,'REVOKED');
-    console.log('PASS: real Prisma/PostgreSQL licence status, protected identity mismatch and unbound watermarks, conditional revocation races and synthetic key-row rollback (no signing).');
+    console.log('PASS: real Prisma/PostgreSQL licence status, protected identity mismatch and unbound watermarks, conditional reconciliation and revocation races, audit rollback and synthetic key-row rollback (no signing).');
   } finally { await other.$disconnect(); await db.$disconnect(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
