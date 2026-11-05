@@ -466,6 +466,7 @@ class AppErrorMessageResolver {
     'Sales order not found': 'لم يتم العثور على أمر البيع.',
     'Purchase order not found': 'لم يتم العثور على أمر الشراء.',
     'Only a draft quotation can be edited': 'لا يمكن تعديل عرض السعر إلا وهو مسودة.',
+    'Only a draft quotation can be deleted': 'لم يُحذف عرض السعر لأنه لم يعد مسودة. حدّث البيانات وحاول مرة أخرى.',
     'Only a draft quotation can be issued': 'لا يمكن إصدار عرض السعر إلا وهو مسودة.',
     'A converted quotation can no longer change status': 'عرض السعر المحوّل إلى فاتورة لا يمكنه تغيير حالته.',
     'This quotation has already been converted to an invoice': 'تم تحويل عرض السعر إلى فاتورة بالفعل.',

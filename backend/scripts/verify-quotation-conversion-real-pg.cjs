@@ -105,6 +105,68 @@ module.exports = async ({prisma,numbers,settings,invoices,audit,company,branch,u
     retained = await prisma.quotation.findUniqueOrThrow({where:{id:rollback.id}});
     assert.ok(retained.deletedAt);
     assert.equal(await prisma.auditLog.count({where:{entity:'quotations',entityId:rollback.id,action:'DELETE'}}),1);
+
+    const defer = () => { let resolve; const promise=new Promise(r=>{resolve=r;}); return {promise,resolve}; };
+    for (const action of ['send','accept','reject']) {
+      const draft = await accepted(`SYN-QUOTE-ISSUE-${action.toUpperCase()}`);
+      await prisma.quotation.update({where:{id:draft.id},data:{status:'DRAFT'}});
+      const entered=defer(), release=defer(), attempted=defer();
+      const snapshot = service.snapshotContent.bind(service);
+      service.snapshotContent = async (...args) => {
+        const content=await snapshot(...args);
+        entered.resolve();
+        await release.promise;
+        return content;
+      };
+      const observedOther=new Proxy(other,{get(target,key) {
+        if (key === '$transaction') return (work,options) => target.$transaction(tx => work(new Proxy(tx,{get(inner,property) {
+          if (property !== 'quotation') return Reflect.get(inner,property,inner);
+          return new Proxy(inner.quotation,{get(delegate,method) {
+            if (method !== 'updateMany') return Reflect.get(delegate,method,delegate);
+            return (...args) => { attempted.resolve(); return delegate.updateMany(...args); };
+          }});
+        }})),options);
+        const value=Reflect.get(target,key,target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      }});
+      const editor=new QuotationsService(observedOther,numbers,settings,invoices,audit);
+      let editSettled=false, issuing, editing;
+      try {
+        issuing=service[action](company,user,draft.id);
+        await Promise.race([entered.promise,issuing.then(()=>{throw new Error('issuance skipped snapshot barrier');},err=>{throw err;})]);
+        editing=editor.update(company,user,draft.id,{
+          quotationDate:date,customerId:customer,subject:'Competing edit',
+          tables:[{title:'Synthetic',lines:[{description:'Changed service',quantity:'1',unitPrice:'200'}]}],
+        }).then(value=>{editSettled=true;return {value};},error=>{editSettled=true;return {error};});
+        await Promise.race([attempted.promise,editing.then(()=>{throw new Error('edit did not reach transaction claim');})]);
+        await new Promise(resolve=>setTimeout(resolve,100));
+        assert.equal(editSettled,false,'edit must wait while issued snapshot is being made');
+        release.resolve();
+        const [,result]=await Promise.all([issuing,editing]);
+        assert.match(String(result.error?.message),/Only a draft quotation can be edited/);
+        const frozen=await prisma.quotation.findUniqueOrThrow({where:{id:draft.id},include:{tables:{include:{lines:true}}}});
+        assert.equal(frozen.status,{send:'SENT',accept:'ACCEPTED',reject:'REJECTED'}[action]);
+        assert.equal(frozen.contentSnapshot.tables[0].lines[0].description,'Synthetic service');
+        assert.equal(frozen.tables[0].lines[0].description,'Synthetic service');
+      } finally {
+        release.resolve();
+        service.snapshotContent=snapshot;
+        await Promise.allSettled([issuing,editing].filter(Boolean));
+      }
+    }
+
+    const issueFailure=await accepted('SYN-QUOTE-ISSUE-AUDIT');
+    await prisma.quotation.update({where:{id:issueFailure.id},data:{status:'DRAFT'}});
+    const auditFn=audit.recordRequired;
+    audit.recordRequired=async function(input,tx) {
+      if(input.entityId===issueFailure.id && input.action==='POST') throw new Error('synthetic issue audit failure');
+      return auditFn.call(this,input,tx);
+    };
+    try { await assert.rejects(service.send(company,user,issueFailure.id),/synthetic issue audit failure/); }
+    finally { audit.recordRequired=auditFn; }
+    const afterIssueFailure=await prisma.quotation.findUniqueOrThrow({where:{id:issueFailure.id}});
+    assert.equal(afterIssueFailure.status,'DRAFT'); assert.equal(afterIssueFailure.contentSnapshot,null);
+    assert.equal(await prisma.quotationEvent.count({where:{quotationId:issueFailure.id}}),0);
   } finally { await other.$disconnect(); }
-  console.log('PASS: quotation invoice conversion and deletion audit rollback, stale status and concurrency on real PostgreSQL (no UI or JWT).');
+  console.log('PASS: quotation invoice conversion and deletion and issuance audit rollback, stale status, snapshot and concurrency on real PostgreSQL (no UI or JWT).');
 };

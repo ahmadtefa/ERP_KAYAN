@@ -419,53 +419,46 @@ export class QuotationsService {
   // -------------------------------------------------------------- lifecycle
 
   async send(companyId: string, userId: string, id: string, note?: string) {
-    const quotation = await this.prisma.quotation.findFirst({
-      where: { id, companyId, deletedAt: null },
-      include: QUOTATION_INCLUDE,
-    });
-    if (!quotation) throw new NotFoundException('Quotation not found');
-    if (quotation.status !== QuotationStatus.DRAFT) {
-      throw new BadRequestException('Only a draft quotation can be issued');
-    }
-    const content = await this.snapshotContent(companyId, quotation);
-    const now = new Date();
-    const changed = await this.prisma.$transaction(async (tx) => {
-      const claimed = await tx.quotation.updateMany({
+    await this.prisma.$transaction(async (tx) => {
+      // Claim the draft row before reading the content to freeze. A concurrent
+      // editor is serialized on this row, not allowed to change lines between
+      // the snapshot and the status transition.
+      const claim = await tx.quotation.updateMany({
         where: { id, companyId, status: QuotationStatus.DRAFT, deletedAt: null },
-        data: {
-          status: QuotationStatus.SENT,
-          issuedAt: now,
-          sentAt: now,
-          contentSnapshot: content as unknown as Prisma.InputJsonValue,
-          snapshotAt: now,
-          showTaxId: content.showTaxId,
-          updatedBy: userId,
-        },
+        data: { updatedBy: userId },
       });
-      if (claimed.count !== 1) {
+      if (claim.count !== 1) {
+        const existing = await tx.quotation.findFirst({ where: { id, companyId, deletedAt: null }, select: { id: true } });
+        if (!existing) throw new NotFoundException('Quotation not found');
         throw new BadRequestException('Only a draft quotation can be issued');
       }
-      await tx.quotationEvent.create({
+      const quotation = await tx.quotation.findFirst({
+        where: { id, companyId, deletedAt: null }, include: QUOTATION_INCLUDE,
+      });
+      if (!quotation) throw new NotFoundException('Quotation not found');
+      const content = await this.snapshotContent(companyId, quotation, tx);
+      const now = new Date();
+      await tx.quotation.update({
+        where: { id },
         data: {
-          quotationId: id,
-          type: QuotationEventType.SENT,
-          fromStatus: QuotationStatus.DRAFT,
-          toStatus: QuotationStatus.SENT,
-          note: this.text(note),
-          userId,
+          status: QuotationStatus.SENT, issuedAt: now, sentAt: now,
+          contentSnapshot: content as unknown as Prisma.InputJsonValue,
+          snapshotAt: now, showTaxId: content.showTaxId, updatedBy: userId,
         },
       });
-      return true;
+      await tx.quotationEvent.create({
+        data: {
+          quotationId: id, type: QuotationEventType.SENT,
+          fromStatus: QuotationStatus.DRAFT, toStatus: QuotationStatus.SENT,
+          note: this.text(note), userId,
+        },
+      });
+      await this.audit.recordRequired({
+        companyId, userId, action: 'POST', entity: 'quotations', entityId: id,
+        after: { status: QuotationStatus.SENT, quotationNumber: quotation.quotationNumber },
+      }, tx);
     });
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'POST',
-      entity: 'quotations',
-      entityId: id,
-      after: { status: QuotationStatus.SENT, quotationNumber: quotation.quotationNumber },
-    });
-    return changed ? this.findOne(companyId, id) : null;
+    return this.findOne(companyId, id);
   }
 
   async accept(companyId: string, userId: string, id: string, note?: string) {
@@ -483,39 +476,29 @@ export class QuotationsService {
     outcome: QuotationStatus,
     note?: string,
   ) {
-    const quotation = await this.prisma.quotation.findFirst({
-      where: { id, companyId, deletedAt: null },
-      include: QUOTATION_INCLUDE,
-    });
-    if (!quotation) throw new NotFoundException('Quotation not found');
-    if (quotation.status === QuotationStatus.CONVERTED) {
-      throw new BadRequestException('A converted quotation can no longer change status');
-    }
-    if (
-      quotation.status !== QuotationStatus.DRAFT &&
-      quotation.status !== QuotationStatus.SENT
-    ) {
-      throw new BadRequestException(`This quotation is already ${quotation.status.toLowerCase()}`);
-    }
-
-    // An offer that is being accepted or rejected without having been sent is
-    // still issued: capture what was agreed, not what the draft says later.
-    const snapshot =
-      quotation.contentSnapshot ?? ((await this.snapshotContent(companyId, quotation)) as unknown as Prisma.InputJsonValue);
-    const now = new Date();
-
     await this.prisma.$transaction(async (tx) => {
-      const claimed = await tx.quotation.updateMany({
-        where: {
-          id,
-          companyId,
-          status: { in: [QuotationStatus.DRAFT, QuotationStatus.SENT] },
-          deletedAt: null,
-        },
+      // Lock the row before selecting its status, lines and snapshot. If it
+      // was sent just before this request, reuse that exact issued snapshot.
+      const claim = await tx.quotation.updateMany({
+        where: { id, companyId, status: { in: [QuotationStatus.DRAFT, QuotationStatus.SENT] }, deletedAt: null },
+        data: { updatedBy: userId },
+      });
+      if (claim.count !== 1) {
+        const existing = await tx.quotation.findFirst({ where: { id, companyId, deletedAt: null }, select: { id: true } });
+        if (!existing) throw new NotFoundException('Quotation not found');
+        throw new BadRequestException('This quotation changed while the decision was being saved');
+      }
+      const quotation = await tx.quotation.findFirst({
+        where: { id, companyId, deletedAt: null }, include: QUOTATION_INCLUDE,
+      });
+      if (!quotation) throw new NotFoundException('Quotation not found');
+      const snapshot = quotation.contentSnapshot ??
+        ((await this.snapshotContent(companyId, quotation, tx)) as unknown as Prisma.InputJsonValue);
+      const now = new Date();
+      await tx.quotation.update({
+        where: { id },
         data: {
-          status: outcome,
-          contentSnapshot: snapshot,
-          snapshotAt: quotation.snapshotAt ?? now,
+          status: outcome, contentSnapshot: snapshot, snapshotAt: quotation.snapshotAt ?? now,
           showTaxId: (snapshot as unknown as { showTaxId?: boolean }).showTaxId ?? quotation.showTaxId,
           issuedAt: quotation.issuedAt ?? now,
           acceptedAt: outcome === QuotationStatus.ACCEPTED ? now : quotation.acceptedAt,
@@ -523,28 +506,17 @@ export class QuotationsService {
           updatedBy: userId,
         },
       });
-      if (claimed.count !== 1) {
-        throw new BadRequestException('This quotation changed while the decision was being saved');
-      }
       await tx.quotationEvent.create({
         data: {
           quotationId: id,
           type: outcome === QuotationStatus.ACCEPTED ? QuotationEventType.ACCEPTED : QuotationEventType.REJECTED,
-          fromStatus: quotation.status,
-          toStatus: outcome,
-          note: this.text(note),
-          userId,
+          fromStatus: quotation.status, toStatus: outcome, note: this.text(note), userId,
         },
       });
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'UPDATE',
-      entity: 'quotations',
-      entityId: id,
-      after: { status: outcome },
+      await this.audit.recordRequired({
+        companyId, userId, action: 'UPDATE', entity: 'quotations', entityId: id,
+        after: { status: outcome },
+      }, tx);
     });
     return this.findOne(companyId, id);
   }
@@ -893,8 +865,8 @@ export class QuotationsService {
     return document.html;
   }
 
-  private async companyHeader(companyId: string) {
-    const company = await this.prisma.company.findUnique({
+  private async companyHeader(companyId: string, client: Pick<Prisma.TransactionClient, 'company'> = this.prisma) {
+    const company = await client.company.findUnique({
       where: { id: companyId },
       select: {
         nameEn: true,
@@ -1122,8 +1094,8 @@ export class QuotationsService {
   }
 
   /// The exact content of an issued offer. Built once and stored.
-  private async snapshotContent(companyId: string, quotation: QuotationWithRelations): Promise<QuotationSnapshot> {
-    const company = await this.companyHeader(companyId);
+  private async snapshotContent(companyId: string, quotation: QuotationWithRelations, client: Pick<Prisma.TransactionClient, 'company'> = this.prisma): Promise<QuotationSnapshot> {
+    const company = await this.companyHeader(companyId, client);
     return {
       quotationNumber: quotation.quotationNumber,
       quotationDate: quotation.quotationDate.toISOString().slice(0, 10),
