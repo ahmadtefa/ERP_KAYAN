@@ -12,7 +12,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import {
   LicenseStateError,
@@ -141,7 +141,13 @@ export interface LicenceBackupOptions {
  * never be offered to another installation on the same disk.
  */
 export function defaultLicenceBackupDirectory(licenceDirectory: string): string {
-  return join(dirname(licenceDirectory), LICENCE_BACKUP_DIR_NAME);
+  // Installed Windows state is ...\\KAYAN-ERP\\license; keep its archive
+  // beside that replaceable folder so deleting/recreating the licence folder
+  // does not delete the recovery copies. Development/test directories remain
+  // self-contained and isolated.
+  return basename(licenceDirectory).toLowerCase() === 'license'
+    ? join(dirname(licenceDirectory), LICENCE_BACKUP_DIR_NAME)
+    : join(licenceDirectory, LICENCE_BACKUP_DIR_NAME);
 }
 
 function sha256(body: Buffer): string {
