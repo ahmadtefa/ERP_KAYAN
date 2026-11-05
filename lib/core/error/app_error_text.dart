@@ -470,6 +470,8 @@ class AppErrorMessageResolver {
     'A converted quotation can no longer change status': 'عرض السعر المحوّل إلى فاتورة لا يمكنه تغيير حالته.',
     'This quotation has already been converted to an invoice': 'تم تحويل عرض السعر إلى فاتورة بالفعل.',
     'This quotation has no lines to convert': 'عرض السعر لا يحتوي على سطور لتحويلها.',
+    'Invoice totals differ from the accepted quotation; review tax and discounts before conversion':
+        'إجماليات الفاتورة لا تطابق عرض السعر المقبول. راجع الضريبة والخصومات قبل التحويل؛ لم تُنشأ فاتورة.',
     'This quotation changed while the decision was being saved':
         'تم تعديل عرض السعر أثناء حفظ القرار. أعد تحميل الصفحة وحاول مرة أخرى.',
     'This quotation was converted by someone else a moment ago':
