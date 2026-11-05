@@ -264,3 +264,6 @@ jobs:
           path: test/screenshots/goldens/${{ matrix.screen }}
           if-no-files-found: error
           retention-days: 3
+          retention-days: 3
+      - name: Emit exact PNG bytes for the reviewed screenshot (diagnostic only)
+        run: node scripts/emit-screenshot-png.cjs '${{ matrix.screen }}'
