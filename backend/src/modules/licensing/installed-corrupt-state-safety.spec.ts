@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { LICENCE_BACKUP_DIR_NAME } from './licence-backup-archive';
 import { LicenseStateError, LicenseStore } from './license-store';
 import { LicenseGuard } from './license.guard';
 import { LicensingService } from './licensing.service';
@@ -11,17 +12,14 @@ import { activation, expectCode, harness, MACHINE, PUBLIC_PEM } from './licensin
 // Synthetic keys and FakeDb only. The installed directory below is a fresh
 // test directory, never a customer path or a real database.
 describe('installed licence state corruption safety', () => {
-  it.each(['unreadable-json', 'wrong-mac', 'null-state'])('preserves %s and resumes an active licence after restoring its intact state', async (kind) => {
+  it.each(['unreadable-json', 'wrong-mac', 'null-state'])('restores %s from the authenticated device-bound archive', async (kind) => {
     const h = harness();
     try {
       const before = await activation(h);
-      expect(before.state).toBe('ACTIVE');
       const path = join(h.dir, 'license-state.json');
       const keyPath = join(h.dir, 'state.key');
-      const original = readFileSync(path);
       const keyHash = createHash('sha256').update(readFileSync(keyPath)).digest('hex');
       const dbBefore = structuredClone(h.db.installations);
-      writeFileSync(join(h.dir, 'public-key.pem'), PUBLIC_PEM);
       const corrupt = kind === 'unreadable-json'
         ? 'not JSON'
         : JSON.stringify({ state: kind === 'null-state' ? null : { v: 1 }, mac: '00'.repeat(32) });
@@ -30,38 +28,23 @@ describe('installed licence state corruption safety', () => {
         installedDirectory: h.dir, machineId: MACHINE, clock: () => new Date('2026-05-01T09:00:00.000Z'),
       });
       await installed.onModuleInit();
-      expect(installed.isEnforced()).toBe(true);
-      expect(installed.licenseSummary().stateError).toBe('LICENSE_STATE_DAMAGED');
-      const guard = new LicenseGuard(installed);
-      const context = (path: string) => ({
-        switchToHttp: () => ({ getRequest: () => ({ path }) }),
-      }) as any;
-      expect(await guard.canActivate(context('/api/v1/health'))).toBe(true);
-      await expect(guard.canActivate(context('/api/v1/invoices'))).rejects.toMatchObject({
-        response: expect.objectContaining({ code: 'LICENSE_STATE_DAMAGED' }),
-      });
-      await expect(installed.status({ fresh: true })).rejects.toMatchObject({
-        response: expect.objectContaining({ code: 'LICENSE_STATE_DAMAGED' }),
-      });
-      expect(readFileSync(path, 'utf8')).toBe(corrupt);
-      expect(createHash('sha256').update(readFileSync(keyPath)).digest('hex')).toBe(keyHash);
-      expect(h.db.installations).toEqual(dbBefore);
-      // Preserve this test's corrupt file for diagnosis before restoring its
-      // intact synthetic state. The service itself never moves either file.
-      const diagnostic = join(h.dir, 'diagnostic-corrupt-state.json');
-      renameSync(path, diagnostic);
-      writeFileSync(path, original);
-      expect(readFileSync(diagnostic, 'utf8')).toBe(corrupt);
-      // Health starts a background retry without waiting for the database.
-      expect(installed.licenseSummary().stateError).toBe('LICENSE_STATE_DAMAGED');
-      await new Promise<void>((done) => setImmediate(done));
-      expect(installed.licenseSummary().stateError).toBeUndefined();
       const recovered = await installed.status({ fresh: true });
       expect(recovered.state).toBe('ACTIVE');
       expect(recovered.blocked).toBe(false);
       expect(recovered.licenseId).toBe(before.licenseId);
       expect(recovered.expiresAt).toBe(before.expiresAt);
+      expect(installed.isEnforced()).toBe(true);
       expect(installed.licenseSummary().stateError).toBeUndefined();
+      expect(readFileSync(path, 'utf8')).not.toBe(corrupt);
+      expect(readdirSync(h.dir).some(name => name.includes('.damaged-'))).toBe(true);
+      expect(createHash('sha256').update(readFileSync(keyPath)).digest('hex')).toBe(keyHash);
+      expect(h.db.installations).toEqual(dbBefore);
+      const guard = new LicenseGuard(installed);
+      const context = (route: string) => ({
+        switchToHttp: () => ({ getRequest: () => ({ path: route }) }),
+      }) as any;
+      expect(await guard.canActivate(context('/api/v1/invoices'))).toBe(true);
+      expect(readdirSync(join(h.dir, LICENCE_BACKUP_DIR_NAME)).some(name => name.startsWith('licence-'))).toBe(true);
     } finally {
       h.dispose();
     }
@@ -71,6 +54,8 @@ describe('installed licence state corruption safety', () => {
     const h = harness();
     try {
       await activation(h);
+      // No authenticated archive exists in this scenario: fail closed.
+      rmSync(join(h.dir, LICENCE_BACKUP_DIR_NAME), { recursive: true, force: true });
       const path = join(h.dir, 'license-state.json');
       const original = readFileSync(path);
       writeFileSync(join(h.dir, 'public-key.pem'), PUBLIC_PEM);
@@ -100,6 +85,8 @@ describe('installed licence state corruption safety', () => {
     const h = harness();
     try {
       await activation(h);
+      // An explicit state secret must not manufacture a replacement archive.
+      rmSync(join(h.dir, LICENCE_BACKUP_DIR_NAME), { recursive: true, force: true });
       const path = join(h.dir, 'license-state.json');
       const original = readFileSync(path);
       writeFileSync(join(h.dir, 'public-key.pem'), PUBLIC_PEM);
@@ -122,26 +109,25 @@ describe('installed licence state corruption safety', () => {
     }
   });
 
-  it('rejects a valid backup belonging to another synthetic installation', async () => {
+  it('rejects a foreign state file and restores only this installation’s archive', async () => {
     const h = harness();
     const other = harness();
     try {
-      await activation(h);
+      const before = await activation(h);
       await activation(other);
-      writeFileSync(join(h.dir, 'public-key.pem'), PUBLIC_PEM);
       const path = join(h.dir, 'license-state.json');
       const foreign = readFileSync(join(other.dir, 'license-state.json'));
       writeFileSync(path, foreign);
-      const before = createHash('sha256').update(foreign).digest('hex');
       const dbBefore = structuredClone(h.db.installations);
       const installed = new LicensingService(h.db as any, {} as any, {
         installedDirectory: h.dir, machineId: MACHINE, clock: () => new Date('2026-05-01T09:00:00.000Z'),
       });
-      await expect(installed.status({ fresh: true })).rejects.toMatchObject({
-        response: expect.objectContaining({ code: 'LICENSE_STATE_DAMAGED' }),
-      });
-      expect(createHash('sha256').update(readFileSync(path)).digest('hex')).toBe(before);
+      const status = await installed.status({ fresh: true });
+      expect(status.state).toBe('ACTIVE');
+      expect(status.licenseId).toBe(before.licenseId);
       expect(h.db.installations).toEqual(dbBefore);
+      expect(readFileSync(path, 'utf8')).not.toBe(foreign.toString('utf8'));
+      expect(readdirSync(h.dir).some(name => name.includes('.damaged-'))).toBe(true);
     } finally {
       h.dispose();
       other.dispose();
