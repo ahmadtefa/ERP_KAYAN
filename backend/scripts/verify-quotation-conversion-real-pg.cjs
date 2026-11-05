@@ -167,6 +167,69 @@ module.exports = async ({prisma,numbers,settings,invoices,audit,company,branch,u
     const afterIssueFailure=await prisma.quotation.findUniqueOrThrow({where:{id:issueFailure.id}});
     assert.equal(afterIssueFailure.status,'DRAFT'); assert.equal(afterIssueFailure.contentSnapshot,null);
     assert.equal(await prisma.quotationEvent.count({where:{quotationId:issueFailure.id}}),0);
+
+    // Hold an acceptance transaction open while a second PostgreSQL client
+    // attempts expiry. The losing expiry must not write a phantom event.
+    const raceExpiry=await accepted('SYN-QUOTE-EXPIRY-RACE');
+    await prisma.quotation.update({where:{id:raceExpiry.id},data:{status:'SENT',validUntil:new Date('2000-01-01T00:00:00Z')}});
+    const acceptEntered=defer(), acceptRelease=defer(), expiryAttempted=defer();
+    const originalAudit=audit.recordRequired;
+    audit.recordRequired=async function(input,tx) {
+      await originalAudit.call(this,input,tx);
+      if(input.entityId===raceExpiry.id && input.action==='UPDATE') { acceptEntered.resolve(); await acceptRelease.promise; }
+    };
+    const observedExpiry=new Proxy(other,{get(target,key) {
+      if(key === '$transaction') return (work,options)=>target.$transaction(tx=>work(new Proxy(tx,{get(inner,property) {
+        if(property !== '$queryRaw') return Reflect.get(inner,property,inner);
+        return (...args)=>{expiryAttempted.resolve();return inner.$queryRaw(...args);};
+      }})),options);
+      const value=Reflect.get(target,key,target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    }});
+    const expirer=new QuotationsService(observedExpiry,numbers,settings,invoices,audit);
+    let accepting,expiring,expirySettled=false;
+    try {
+      accepting=service.accept(company,user,raceExpiry.id);
+      await Promise.race([acceptEntered.promise,accepting.then(()=>{throw new Error('acceptance missed barrier');},err=>{throw err;})]);
+      expiring=expirer.expireOverdue(company).finally(()=>{expirySettled=true;});
+      await Promise.race([expiryAttempted.promise,expiring.then(()=>{throw new Error('expiry missed update');})]);
+      await new Promise(resolve=>setTimeout(resolve,100));
+      assert.equal(expirySettled,false,'expiry must wait for the concurrent acceptance');
+      acceptRelease.resolve();
+      await Promise.all([accepting,expiring]);
+      const acceptedRow=await prisma.quotation.findUniqueOrThrow({where:{id:raceExpiry.id}});
+      assert.equal(acceptedRow.status,'ACCEPTED'); assert.equal(acceptedRow.expiredAt,null);
+      assert.equal(await prisma.quotationEvent.count({where:{quotationId:raceExpiry.id,type:'EXPIRED'}}),0);
+      assert.equal(await prisma.quotationEvent.count({where:{quotationId:raceExpiry.id,type:'ACCEPTED'}}),1);
+    } finally {
+      acceptRelease.resolve(); audit.recordRequired=originalAudit;
+      await Promise.allSettled([accepting,expiring].filter(Boolean));
+    }
+
+    const expiry=await accepted('SYN-QUOTE-EXPIRY-SUCCESS');
+    await prisma.quotation.update({where:{id:expiry.id},data:{status:'SENT',validUntil:new Date('2000-01-01T00:00:00Z')}});
+    await service.expireOverdue(company);
+    const expired=await prisma.quotation.findUniqueOrThrow({where:{id:expiry.id}});
+    assert.equal(expired.status,'EXPIRED'); assert.ok(expired.expiredAt);
+    assert.equal(await prisma.quotationEvent.count({where:{quotationId:expiry.id,type:'EXPIRED'}}),1);
+
+    const failedExpiry=await accepted('SYN-QUOTE-EXPIRY-ROLLBACK');
+    await prisma.quotation.update({where:{id:failedExpiry.id},data:{status:'SENT',validUntil:new Date('2000-01-01T00:00:00Z')}});
+    const failingClient=new Proxy(other,{get(target,key) {
+      if(key === '$transaction') return (work,options)=>target.$transaction(tx=>work(new Proxy(tx,{get(inner,property) {
+        if(property !== 'quotationEvent') return Reflect.get(inner,property,inner);
+        return new Proxy(inner.quotationEvent,{get(delegate,method) {
+          if(method === 'createMany') return async ()=>{throw new Error('synthetic expiry event failure');};
+          return Reflect.get(delegate,method,delegate);
+        }});
+      }})),options);
+      const value=Reflect.get(target,key,target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    }});
+    await assert.rejects(new QuotationsService(failingClient,numbers,settings,invoices,audit).expireOverdue(company),/synthetic expiry event failure/);
+    const unexpired=await prisma.quotation.findUniqueOrThrow({where:{id:failedExpiry.id}});
+    assert.equal(unexpired.status,'SENT'); assert.equal(unexpired.expiredAt,null);
+    assert.equal(await prisma.quotationEvent.count({where:{quotationId:failedExpiry.id,type:'EXPIRED'}}),0);
   } finally { await other.$disconnect(); }
-  console.log('PASS: quotation invoice conversion and deletion and issuance audit rollback, stale status, snapshot and concurrency on real PostgreSQL (no UI or JWT).');
+  console.log('PASS: quotation invoice conversion and deletion and issuance audit rollback, stale status, snapshot, expiry and concurrency on real PostgreSQL (no UI or JWT).');
 };

@@ -895,27 +895,28 @@ export class QuotationsService {
   private async expireOverdue(companyId: string) {
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
+    // Avoid a write transaction on the common path with no overdue rows.
     const overdue = await this.prisma.quotation.findMany({
-      where: {
-        companyId,
-        status: QuotationStatus.SENT,
-        validUntil: { lt: today },
-        deletedAt: null,
-      },
+      where: { companyId, status: QuotationStatus.SENT, validUntil: { lt: today }, deletedAt: null },
       select: { id: true },
+      take: 1,
     });
     if (overdue.length === 0) return;
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.quotation.findMany({
-        where: { id: { in: overdue.map((row) => row.id) }, status: QuotationStatus.SENT },
-        select: { id: true },
-      });
+      // The returned ids are exactly the rows PostgreSQL changed. A separate
+      // pre-read can become stale while another transaction accepts a quote,
+      // producing an EXPIRED event for a quotation that was never expired.
+      const updated = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        UPDATE "quotations"
+        SET "status" = 'EXPIRED'::"QuotationStatus", "expiredAt" = ${now}, "updatedAt" = ${now}
+        WHERE "companyId" = ${companyId}::uuid
+          AND "status" = 'SENT'::"QuotationStatus"
+          AND "validUntil" < ${today}
+          AND "deletedAt" IS NULL
+        RETURNING "id"
+      `);
       if (updated.length === 0) return;
-      await tx.quotation.updateMany({
-        where: { id: { in: updated.map((row) => row.id) }, status: QuotationStatus.SENT },
-        data: { status: QuotationStatus.EXPIRED, expiredAt: now },
-      });
       await tx.quotationEvent.createMany({
         data: updated.map((row) => ({
           quotationId: row.id,
