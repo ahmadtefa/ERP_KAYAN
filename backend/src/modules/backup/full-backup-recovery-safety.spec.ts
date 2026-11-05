@@ -21,7 +21,7 @@ describe('full restore failure safety', () => {
     maintenance = new MaintenanceService();
     licensing = { reconcile: jest.fn().mockResolvedValue(undefined) };
     service = new FullBackupService(
-      {} as ConstructorParameters<typeof FullBackupService>[0],
+      { user: { count: jest.fn().mockResolvedValue(0) } } as unknown as ConstructorParameters<typeof FullBackupService>[0],
       { record: jest.fn().mockResolvedValue(undefined), recordRequired: jest.fn().mockResolvedValue(undefined) } as unknown as ConstructorParameters<typeof FullBackupService>[1],
       maintenance,
       licensing as unknown as ConstructorParameters<typeof FullBackupService>[3],
@@ -155,8 +155,8 @@ describe('full restore failure safety', () => {
     expect(licensing.reconcile).toHaveBeenCalledTimes(1);
     expect(maintenance.isActive).toBe(true);
     expect(audit.recordRequired).toHaveBeenCalledWith(expect.objectContaining({
-      action:'RESTORE_DATABASE_ARCHIVE',entity:'backup_database_archive',
-      after:expect.objectContaining({fullRestore:false}),
+      action:'RESTORE_DATABASE_ARCHIVE',entity:'backup_database_archive',userId:null,
+      after:expect.objectContaining({fullRestore:false,actorId:'u'}),
     }),expect.anything());
   });
 

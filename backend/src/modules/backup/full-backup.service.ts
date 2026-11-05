@@ -919,6 +919,9 @@ export class FullBackupService {
       // This is still a legacy engine: required audit is not a cross-resource
       // transaction and the maintenance flag remains local to this process.
       try {
+        const actorExists = userId
+          ? (await this.prisma.user.count({ where: { id: userId } })) > 0
+          : false;
         await this.audit.recordRequired({
           action: 'RESTORE_DATABASE_ARCHIVE',
           entity: 'backup_database_archive',
@@ -930,8 +933,9 @@ export class FullBackupService {
             postRestoreCheck: 'passed',
             accessReconciled: accessRepair,
             fullRestore: false,
+            actorId: userId,
           },
-          userId,
+          userId: actorExists ? userId : null,
         }, this.prisma);
       } catch {
         this.logger.error('Database archive restore audit failed. Maintenance remains active.');
