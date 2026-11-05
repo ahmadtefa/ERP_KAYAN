@@ -1072,7 +1072,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const voucherUnit = await prisma.itemUnit.create({data:{itemId:item,unit:'synthetic-voucher-box',factor:'2'}});
     for (const [voucherKind, quantity, baseQuantity] of [['RECEIPT','2','4.0000'],['ISSUE','-2','-4.0000']]) {
       const input = {idempotencyKey:`voucher-unit-${voucherKind.toLowerCase()}-0001`,kind:'ADJUSTMENT',voucherKind,
-        documentDate:date,toWarehouseId:secondWarehouse,reason:'Synthetic unit',counterpartyName:'Synthetic party',
+        documentDate:date,toWarehouseId:secondWarehouse,costCenterId:centre,reason:'Synthetic unit',counterpartyName:'Synthetic party',
         lines:[{itemId:item,quantity,unitName:'synthetic-voucher-box',unitCost:'7.5'}]};
       const before = await warehouseBalance(secondWarehouse);
       const voucher = await service.create(company,branch,user,input,true);
