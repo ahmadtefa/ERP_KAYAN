@@ -686,7 +686,6 @@ export class LicensingService implements OnModuleInit {
     await this.assertVerificationKey();
     const parsed = this.verify(rawKey);
     const payload = parsed.payload;
-    this.assertLicenseIdentity(payload.licenseId);
 
     // The type is part of what the operator signed. A seats key presented as
     // an activation key (or the reverse) is refused here, before any row is
@@ -760,6 +759,9 @@ export class LicensingService implements OnModuleInit {
         });
       }
     }
+    // Compare the signed key with the protected watermark after the database
+    // identity check, so a wrong-licence key gets the precise refusal reason.
+    this.assertLicenseIdentity(payload.licenseId);
     // A renewal or a seat increase changes something that must already be
     // there. A transfer is the opposite: it arrives on a machine that has no
     // licence precisely because the licence is being moved onto it.
