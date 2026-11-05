@@ -280,8 +280,10 @@ const path = require('node:path');
     // Keep this synthetic audit fixture outside the public schema being
     // replaced. The real AuditService writes through an injected SQL adapter;
     // this is not proof of the installed product's audit DB durability.
-    await client.query('CREATE SCHEMA fixture_audit; CREATE TABLE fixture_audit.events (action text, entity text, after_json jsonb)');
-    const cleanPrisma={$executeRawUnsafe: sql => client.query(sql), auditLog:{create:async ({data})=>{
+    await client.query('CREATE SCHEMA fixture_audit; CREATE TABLE fixture_audit.events (action text, entity text, after_json jsonb); CREATE TABLE fixture_audit.users (id text PRIMARY KEY)');
+    const cleanPrisma={$executeRawUnsafe: sql => client.query(sql),
+      user:{count:async ({where}) => (await client.query('SELECT count(*)::int AS n FROM fixture_audit.users WHERE id=$1',[where.id])).rows[0].n},
+      auditLog:{create:async ({data})=>{
       events.push(data);
       await client.query('INSERT INTO fixture_audit.events(action,entity,after_json) VALUES($1,$2,$3)',
         [data.action,data.entity,JSON.stringify(data.afterJson)]);
@@ -350,7 +352,7 @@ const path = require('node:path');
       assert.deepEqual(await digest(),before.rows);
       assert.deepEqual(await fs.readFile(path.join(dir,backup.file.name)),oldBytes);
       assert.deepEqual(await fs.readFile(path.join(dir,newer.file.name)),newBytes);
-      assert.equal(events.filter(event=>event.action==='RESTORE_DATABASE_ARCHIVE' && event.afterJson.fullRestore===false).length,1);
+      assert.equal(events.filter(event=>event.action==='RESTORE_DATABASE_ARCHIVE' && event.afterJson.fullRestore===false && event.afterJson.actorId==='fixture' && event.userId===null).length,1);
       assert.deepEqual((await client.query("SELECT action,entity,after_json->>'fullRestore' AS full FROM fixture_audit.events WHERE action='RESTORE_DATABASE_ARCHIVE'")).rows,
         [{action:'RESTORE_DATABASE_ARCHIVE',entity:'backup_database_archive',full:'false'}]);
       // Independently restore the safety copy and verify all synthetic rows,
