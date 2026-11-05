@@ -218,6 +218,56 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.ok(!JSON.stringify(denials).includes('Unauthorized manager'));
       assert.equal((await patch('/accounting/settings',{managerName:settingsBefore.managerName},true)).status,200);
       assert.equal((await patch('/company/profile',{nameEn:companyBefore.nameEn},true)).status,200);
+      // Branch authorization and required audit, over HTTP and real PG. The
+      // test principal is injected; JWT and licensing remain out of scope.
+      const branchBody={code:'SYN-SEC-BRANCH',nameEn:'Synthetic secure branch',nameAr:'فرع تجريبي',
+        kind:'BRANCH',parentBranchId:branch};
+      const requestBranch=(method,path,body,allowed)=>fetch(base+path,{method,
+        headers:{'content-type':'application/json','x-fixture-super':allowed?'yes':'no'},
+        ...(body===undefined?{}:{body:JSON.stringify(body)})});
+      const countBranches=()=>prisma.branch.count({where:{companyId:company}});
+      const countWarehouses=()=>prisma.warehouse.count({where:{companyId:company}});
+      const beforeBranches=await countBranches(),beforeWarehouses=await countWarehouses();
+      assert.equal((await requestBranch('POST','/company/branches',branchBody,false)).status,403);
+      assert.equal((await requestBranch('PATCH',`/company/branches/${branch}`,{nameEn:'No'},false)).status,403);
+      assert.equal((await requestBranch('DELETE',`/company/branches/${branch}`,undefined,false)).status,403);
+      assert.equal(await countBranches(),beforeBranches);
+      assert.equal(await countWarehouses(),beforeWarehouses);
+      assert.equal((await prisma.branch.findUniqueOrThrow({where:{id:branch}})).nameEn,'Synthetic branch');
+      const genuineAudit=audit.recordRequired.bind(audit);
+      let failedAction='CREATE';
+      audit.recordRequired=async(entry,tx)=>{
+        if(entry.entity==='branches' && entry.action===failedAction) throw new Error('synthetic branch audit failure');
+        return genuineAudit(entry,tx);
+      };
+      try {
+        assert.equal((await requestBranch('POST','/company/branches',branchBody,true)).status,500);
+        assert.equal(await countBranches(),beforeBranches);
+        assert.equal(await countWarehouses(),beforeWarehouses);
+        failedAction='';
+        const createdBranch=await requestBranch('POST','/company/branches',branchBody,true);
+        assert.equal(createdBranch.status,201);
+        const newBranch=await createdBranch.json();
+        assert.equal(await countBranches(),beforeBranches+1);
+        assert.equal(await countWarehouses(),beforeWarehouses+1);
+        const branchAuditCount=()=>prisma.auditLog.count({where:{companyId:company,entity:'branches',entityId:newBranch.id}});
+        assert.equal(await branchAuditCount(),1);
+        failedAction='UPDATE';
+        assert.equal((await requestBranch('PATCH',`/company/branches/${newBranch.id}`,{nameEn:'Changed'},true)).status,500);
+        assert.equal((await prisma.branch.findUniqueOrThrow({where:{id:newBranch.id}})).nameEn,branchBody.nameEn);
+        assert.equal(await branchAuditCount(),1);
+        failedAction='';
+        assert.equal((await requestBranch('PATCH',`/company/branches/${newBranch.id}`,{nameEn:'Changed'},true)).status,200);
+        failedAction='DELETE';
+        assert.equal((await requestBranch('DELETE',`/company/branches/${newBranch.id}`,undefined,true)).status,500);
+        assert.equal((await prisma.branch.findUniqueOrThrow({where:{id:newBranch.id}})).deletedAt,null);
+        assert.equal(await branchAuditCount(),2);
+        failedAction='';
+        assert.equal((await requestBranch('DELETE',`/company/branches/${newBranch.id}`,undefined,true)).status,200);
+        assert.ok((await prisma.branch.findUniqueOrThrow({where:{id:newBranch.id}})).deletedAt);
+        assert.equal(await branchAuditCount(),3);
+      } finally {audit.recordRequired=genuineAudit;}
+      console.log('PASS: branch mutation HTTP super-admin denial and required-audit rollback of branch and warehouse on real PostgreSQL; injected principal.');
     } finally { await companyHttp.close(); }
     console.log('PASS: real HTTP and PostgreSQL company/settings and scheduled-backup guards: delegated admin denied with audit, super admin allowed, audit failure fails closed. Schedule actions are stubbed and test-injected principal: JWT and license guards not tested.');
     // Competing UI permission edits start from the same snapshot. The role

@@ -345,38 +345,40 @@ export class CompanyService {
     userId: string,
     dto: CreateBranchDto,
   ): Promise<BranchResponse> {
-    const kind: BranchKind = dto.kind ?? 'BRANCH';
+    const created = await this.prisma.$transaction(async (tx) => {
+      const kind: BranchKind = dto.kind ?? 'BRANCH';
 
-    const clash = await this.prisma.branch.findFirst({
-      where: { companyId, code: dto.code, deletedAt: null },
-      select: { id: true },
-    });
-    if (clash) {
-      throw new ConflictException(
-        `Branch code "${dto.code}" already exists in this company`,
-      );
-    }
-
-    if (kind === 'HEADQUARTERS') {
-      const existingHq = await this.prisma.branch.findFirst({
-        where: { companyId, kind: 'HEADQUARTERS', deletedAt: null },
-        select: { id: true, code: true },
+      const clash = await tx.branch.findFirst({
+        where: { companyId, code: dto.code, deletedAt: null },
+        select: { id: true },
       });
-      if (existingHq) {
+      if (clash) {
         throw new ConflictException(
-          `This company already has a headquarters (code "${existingHq.code}"). ` +
-            'A company has exactly one headquarters.',
+          `Branch code "${dto.code}" already exists in this company`,
         );
       }
-    }
 
-    const parentBranchId = await this.resolveParent(
-      companyId,
-      kind,
-      dto.parentBranchId ?? null,
-    );
+      if (kind === 'HEADQUARTERS') {
+        const existingHq = await tx.branch.findFirst({
+          where: { companyId, kind: 'HEADQUARTERS', deletedAt: null },
+          select: { id: true, code: true },
+        });
+        if (existingHq) {
+          throw new ConflictException(
+            `This company already has a headquarters (code "${existingHq.code}"). ` +
+              'A company has exactly one headquarters.',
+          );
+        }
+      }
 
-    const created = await this.prisma.$transaction(async (tx) => {
+      const parentBranchId = await this.resolveParent(
+        companyId,
+        kind,
+        dto.parentBranchId ?? null,
+        undefined,
+        tx,
+      );
+
       const branch = await tx.branch.create({
         data: {
           companyId,
@@ -417,21 +419,16 @@ export class CompanyService {
         },
       });
 
+      await this.audit.recordRequired({
+        companyId,
+        userId,
+        action: 'CREATE',
+        entity: 'branches',
+        entityId: branch.id,
+        after: { code: branch.code, kind: branch.kind, parentBranchId: branch.parentBranchId },
+      }, tx);
       return branch;
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'CREATE',
-      entity: 'branches',
-      entityId: created.id,
-      after: {
-        code: created.code,
-        kind: created.kind,
-        parentBranchId: created.parentBranchId,
-      },
-    });
+    }, { isolationLevel: 'Serializable' });
 
     return toBranchResponse(created);
   }
@@ -442,66 +439,70 @@ export class CompanyService {
     branchId: string,
     dto: UpdateBranchDto,
   ): Promise<BranchResponse> {
-    const branch = await this.findBranch(companyId, branchId);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const branch = await this.findBranch(companyId, branchId, tx);
 
-    if (dto.kind === 'HEADQUARTERS' && branch.kind !== 'HEADQUARTERS') {
-      const otherHq = await this.prisma.branch.findFirst({
-        where: {
+      if (dto.kind === 'HEADQUARTERS' && branch.kind !== 'HEADQUARTERS') {
+        const otherHq = await tx.branch.findFirst({
+          where: {
+            companyId,
+            kind: 'HEADQUARTERS',
+            deletedAt: null,
+            id: { not: branchId },
+          },
+          select: { code: true },
+        });
+        if (otherHq) {
+          throw new ConflictException(
+            `This company already has a headquarters (code "${otherHq.code}")`,
+          );
+        }
+      }
+
+      // A headquarters stands at the top of its tree: giving it a parent would
+      // make the relationship circular by construction.
+      if (dto.kind === 'HEADQUARTERS' || branch.kind === 'HEADQUARTERS') {
+        if (dto.parentBranchId) {
+          throw new BadRequestException(
+            'The headquarters cannot have a parent unit',
+          );
+        }
+      }
+
+      let parentBranchId: string | null | undefined;
+      if (dto.parentBranchId !== undefined) {
+        parentBranchId = await this.resolveParent(
           companyId,
-          kind: 'HEADQUARTERS',
-          deletedAt: null,
-          id: { not: branchId },
+          dto.kind ?? branch.kind,
+          dto.parentBranchId,
+          branchId,
+          tx,
+        );
+      }
+
+      const updated = await tx.branch.update({
+        where: { id: branchId },
+        data: {
+          nameEn: dto.nameEn,
+          nameAr: dto.nameAr,
+          kind: dto.kind,
+          isActive: dto.isActive,
+          parentBranchId,
+          updatedBy: userId,
         },
-        select: { code: true },
       });
-      if (otherHq) {
-        throw new ConflictException(
-          `This company already has a headquarters (code "${otherHq.code}")`,
-        );
-      }
-    }
 
-    // A headquarters stands at the top of its tree: giving it a parent would
-    // make the relationship circular by construction.
-    if (dto.kind === 'HEADQUARTERS' || branch.kind === 'HEADQUARTERS') {
-      if (dto.parentBranchId) {
-        throw new BadRequestException(
-          'The headquarters cannot have a parent unit',
-        );
-      }
-    }
-
-    let parentBranchId: string | null | undefined;
-    if (dto.parentBranchId !== undefined) {
-      parentBranchId = await this.resolveParent(
+      await this.audit.recordRequired({
         companyId,
-        dto.kind ?? branch.kind,
-        dto.parentBranchId,
-        branchId,
-      );
-    }
-
-    const updated = await this.prisma.branch.update({
-      where: { id: branchId },
-      data: {
-        nameEn: dto.nameEn,
-        nameAr: dto.nameAr,
-        kind: dto.kind,
-        isActive: dto.isActive,
-        parentBranchId,
-        updatedBy: userId,
-      },
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'UPDATE',
-      entity: 'branches',
-      entityId: branchId,
-      before: toBranchResponse(branch),
-      after: toBranchResponse(updated),
-    });
+        userId,
+        action: 'UPDATE',
+        entity: 'branches',
+        entityId: branchId,
+        before: toBranchResponse(branch),
+        after: toBranchResponse(updated),
+      }, tx);
+      return updated;
+    }, { isolationLevel: 'Serializable' });
 
     return toBranchResponse(updated);
   }
@@ -516,47 +517,49 @@ export class CompanyService {
     userId: string,
     branchId: string,
   ): Promise<void> {
-    const branch = await this.findBranch(companyId, branchId);
+    await this.prisma.$transaction(async (tx) => {
+      const branch = await this.findBranch(companyId, branchId, tx);
 
-    const [children, entries, stock, users] = await Promise.all([
-      this.prisma.branch.count({
-        where: { parentBranchId: branchId, deletedAt: null },
-      }),
-      this.prisma.journalEntry.count({ where: { branchId } }),
-      this.prisma.stockMovement.count({ where: { branchId } }),
-      this.prisma.userBranch.count({ where: { branchId } }),
-    ]);
+      const [children, entries, stock, users] = await Promise.all([
+        tx.branch.count({
+          where: { parentBranchId: branchId, deletedAt: null },
+        }),
+        tx.journalEntry.count({ where: { branchId } }),
+        tx.stockMovement.count({ where: { branchId } }),
+        tx.userBranch.count({ where: { branchId } }),
+      ]);
 
-    if (children > 0) {
-      throw new BadRequestException(
-        'This unit has sub-units under it. Move or delete them first.',
-      );
-    }
-    if (entries > 0 || stock > 0) {
-      throw new BadRequestException(
-        'This unit already has accounting or stock movements. ' +
-          'Deactivate it instead of deleting it so the history stays intact.',
-      );
-    }
-    if (users > 0) {
-      throw new BadRequestException(
-        'Users are still assigned to this unit. Unassign them first.',
-      );
-    }
+      if (children > 0) {
+        throw new BadRequestException(
+          'This unit has sub-units under it. Move or delete them first.',
+        );
+      }
+      if (entries > 0 || stock > 0) {
+        throw new BadRequestException(
+          'This unit already has accounting or stock movements. ' +
+            'Deactivate it instead of deleting it so the history stays intact.',
+        );
+      }
+      if (users > 0) {
+        throw new BadRequestException(
+          'Users are still assigned to this unit. Unassign them first.',
+        );
+      }
 
-    await this.prisma.branch.update({
-      where: { id: branchId },
-      data: { deletedAt: new Date(), updatedBy: userId },
-    });
+      await tx.branch.update({
+        where: { id: branchId },
+        data: { deletedAt: new Date(), updatedBy: userId },
+      });
 
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'DELETE',
-      entity: 'branches',
-      entityId: branchId,
-      before: toBranchResponse(branch),
-    });
+      await this.audit.recordRequired({
+        companyId,
+        userId,
+        action: 'DELETE',
+        entity: 'branches',
+        entityId: branchId,
+        before: toBranchResponse(branch),
+      }, tx);
+    }, { isolationLevel: 'Serializable' });
   }
 
   /// ────────────────────────────────────────────────────────────── helpers
@@ -638,8 +641,8 @@ export class CompanyService {
     await unlink(join(uploadsDir(), basename(oldPath))).catch(() => {});
   }
 
-  private async findBranch(companyId: string, branchId: string) {
-    const branch = await this.prisma.branch.findFirst({
+  private async findBranch(companyId: string, branchId: string, client: Pick<Prisma.TransactionClient, 'branch'> = this.prisma) {
+    const branch = await client.branch.findFirst({
       where: { id: branchId, companyId, deletedAt: null },
     });
     if (!branch) throw new NotFoundException('Branch not found');
@@ -657,6 +660,7 @@ export class CompanyService {
     kind: BranchKind,
     requested: string | null,
     selfId?: string,
+    client: Pick<Prisma.TransactionClient, 'branch'> = this.prisma,
   ): Promise<string | null> {
     if (kind === 'HEADQUARTERS') {
       if (requested) {
@@ -671,7 +675,7 @@ export class CompanyService {
       if (selfId && requested === selfId) {
         throw new BadRequestException('A unit cannot be its own parent');
       }
-      const parent = await this.prisma.branch.findFirst({
+      const parent = await client.branch.findFirst({
         where: { id: requested, companyId, deletedAt: null },
       });
       if (!parent) {
@@ -693,7 +697,7 @@ export class CompanyService {
           if (seen.has(cursor)) break; // database already inconsistent; stop
           seen.add(cursor);
           const next: { parentBranchId: string | null } | null =
-            await this.prisma.branch.findUnique({
+            await client.branch.findUnique({
               where: { id: cursor },
               select: { parentBranchId: true },
             });
@@ -704,7 +708,7 @@ export class CompanyService {
     }
 
     // No parent named: attach to the headquarters when there is one.
-    const hq = await this.prisma.branch.findFirst({
+    const hq = await client.branch.findFirst({
       where: { companyId, kind: 'HEADQUARTERS', deletedAt: null },
       select: { id: true },
     });
