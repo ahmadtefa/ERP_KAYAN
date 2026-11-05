@@ -746,7 +746,10 @@ class _NavEntry extends StatelessWidget {
       child: Icon(
         item.icon,
         size: iconSize,
-        color: selected ? Colors.white : accentColor,
+        // The selected tile uses the light accent step. A white glyph on
+        // those pastel fills has insufficient contrast; navy remains legible
+        // for every section while retaining the section's colour on the tile.
+        color: selected ? AppColors.navyDeep : accentColor,
       ),
     );
 

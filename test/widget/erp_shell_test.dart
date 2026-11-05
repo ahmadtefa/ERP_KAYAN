@@ -12,6 +12,18 @@ import 'package:go_router/go_router.dart';
 import 'test_harness.dart';
 
 void main() {
+  test('selected navigation glyphs meet contrast on every section accent', () {
+    const accents = [SectionAccents.overview, SectionAccents.accounting,
+      SectionAccents.cash, SectionAccents.parties, SectionAccents.inventory,
+      SectionAccents.sales, SectionAccents.purchases, SectionAccents.insights,
+      SectionAccents.administration];
+    final foreground = AppColors.navyDeep.computeLuminance();
+    for (final accent in accents) {
+      final background = accent.darkBase.computeLuminance();
+      final ratio = (background + 0.05) / (foreground + 0.05);
+      expect(ratio, greaterThanOrEqualTo(4.5));
+    }
+  });
   testWidgets('Home shortcut fits a narrow shell and navigates to the dashboard', (tester) async {
     tester.view.physicalSize=const Size(320,700); tester.view.devicePixelRatio=1;
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
@@ -309,6 +321,11 @@ void main() {
       // step mixed for the navy sidebar, and the (light) top bar names
       // the section in the base step of the same hue.
       expect(titleColorOf('فواتير البيع'), SectionAccents.sales.darkBase);
+      final salesIcon = find.descendant(
+        of: find.widgetWithText(ListTile, 'فواتير البيع', skipOffstage: false),
+        matching: find.byIcon(Icons.point_of_sale_outlined, skipOffstage: false),
+      );
+      expect(tester.widget<Icon>(salesIcon).color, AppColors.navyDeep);
       expect(
         find.byWidgetPredicate(
           (w) =>

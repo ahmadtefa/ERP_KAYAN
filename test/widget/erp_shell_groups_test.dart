@@ -22,7 +22,8 @@ class _Api extends ApiClient {
 
 void main() {
   for (final mobile in [false,true]) {
-    testWidgets('${mobile ? 'drawer' : 'sidebar'} groups collapse and retain navigation permission', (tester) async {
+    for (final arabic in [false,true]) {
+    testWidgets('${mobile ? 'drawer' : 'sidebar'} groups collapse and retain navigation permission in ${arabic ? 'RTL' : 'LTR'}', (tester) async {
       tester.view.physicalSize = Size(mobile ? 800 : 1500,900); tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
       final router = GoRouter(initialLocation:AppRoutes.dashboard,routes:[
@@ -33,14 +34,15 @@ void main() {
       await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(_Api()),
         currentUserProvider.overrideWithValue(const AppUser(id:'u',username:'u',fullName:'u',companyId:'c',
           permissions:['sales.invoices.read']))],
-        child:MaterialApp.router(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        child:MaterialApp.router(locale:Locale(arabic ? 'ar' : 'en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
           supportedLocales:AppLocalizations.supportedLocales,routerConfig:router)));
       await tester.pumpAndSettle();
       if (mobile) {
         await tester.tap(find.byIcon(Icons.menu_rounded)); await tester.pumpAndSettle();
       }
       final group = find.byKey(const ValueKey('nav-group-sales'));
-      final invoice = find.widgetWithText(ListTile,'Sales invoices');
+      final invoice = find.widgetWithText(ListTile,arabic ? 'فواتير البيع' : 'Sales invoices');
+      expect(Directionality.of(tester.element(group)),arabic ? TextDirection.rtl : TextDirection.ltr);
       await tester.ensureVisible(group);
       expect(invoice,findsOneWidget);
       await tester.tap(group); await tester.pumpAndSettle();
@@ -62,5 +64,6 @@ void main() {
       await tester.ensureVisible(group); await tester.tap(group); await tester.pumpAndSettle();
       expect(invoice,findsOneWidget);
     });
+    }
   }
 }
