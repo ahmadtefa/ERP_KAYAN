@@ -167,13 +167,13 @@ describe('Sales multi-unit — milk scenario', () => {
       expect(tx.salesInvoice.create.mock.calls[0][0].data.lines.create[0].taxRate.toFixed(4)).toBe(expected);
     });
 
-  it('treats an explicit blank tax as zero while retaining an omitted item rate', async () => {
+  it('treats both blank and omitted line tax as zero even when the item rate is nonzero', async () => {
     const { service, tx } = makeService({ ...milkItem, taxRate: D(14) });
     await service.create(COMPANY, BRANCH, 'user-1', { ...baseDto,
       lines: [{ itemId: MILK, quantity: '1', taxRate: '' }, { itemId: MILK, quantity: '1' }] } as any);
     const lines = tx.salesInvoice.create.mock.calls[0][0].data.lines.create;
     expect(lines[0].taxRate.toFixed(4)).toBe('0.0000');
-    expect(lines[1].taxRate.toFixed(4)).toBe('14.0000');
+    expect(lines[1].taxRate.toFixed(4)).toBe('0.0000');
   });
 
   it('sells 3 pieces: base qty 3 at 9 each, line total 27', async () => {

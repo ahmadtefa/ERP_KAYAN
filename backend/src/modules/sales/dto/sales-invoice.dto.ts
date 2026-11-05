@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
@@ -36,9 +36,8 @@ export class SalesInvoiceLineDto {
   /// decides, so the same list is not retyped on every invoice.
   @IsOptional() @IsString() unitPrice?: string;
 
-  /// Percent. When omitted the item's own rate is used, or zero for a
-  /// free-text line; null and blank values also mean zero.
-  @IsOptional() @IsString() taxRate?: string;
+  /// Percent. Omitted, null, blank and whitespace-only values mean zero.
+  @IsOptional() @Transform(({ value }) => typeof value === 'number' && Number.isFinite(value) ? String(value) : value) @IsString() taxRate?: string;
 
   /// The department, administrative unit or project this revenue belongs to.
   /// Optional: an invoice that does not need cost analysis stays as it was.

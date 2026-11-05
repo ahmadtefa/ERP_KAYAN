@@ -82,7 +82,7 @@ describe('purchase orders with multiple units', () => {
     expect(line.lineTotal.toFixed(4)).toBe('375.0000');
   });
 
-  it('uses zero for a cleared tax rate and preserves the item rate when omitted', async () => {
+  it('uses zero for a cleared tax rate and uses zero when the rate is omitted', async () => {
     const { service, tx } = makeService();
     (service as any).prisma.item.findFirst.mockResolvedValue({ ...item, taxRate: D(14) });
     await service.create(COMPANY, BRANCH, 'user-1', {
@@ -94,7 +94,7 @@ describe('purchase orders with multiple units', () => {
       ],
     } as any);
     const lines = tx.purchaseOrder.create.mock.calls[0][0].data.lines.create;
-    expect(lines.map((line: any) => line.taxRate.toFixed(4))).toEqual(['0.0000', '0.0000', '14.0000']);
+    expect(lines.map((line: any) => line.taxRate.toFixed(4))).toEqual(['0.0000', '0.0000', '0.0000']);
   });
 
   it('converts the order to an invoice in the chosen unit so no double conversion happens', async () => {

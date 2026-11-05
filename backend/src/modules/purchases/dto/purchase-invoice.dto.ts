@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -35,7 +35,7 @@ export class PurchaseInvoiceLineDto {
   /// price) decides.
   @IsOptional() @IsString() unitPrice?: string;
 
-  @IsOptional() @IsString() taxRate?: string;
+  @IsOptional() @Transform(({ value }) => typeof value === 'number' && Number.isFinite(value) ? String(value) : value) @IsString() taxRate?: string;
 
   /// The department, administrative unit or project the cost was incurred for.
   @IsOptional() @IsUUID() costCenterId?: string;

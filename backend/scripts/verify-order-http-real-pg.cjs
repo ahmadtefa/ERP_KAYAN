@@ -96,14 +96,14 @@ module.exports=async function verifyOrdersHttp({prisma,audit,sales,purchases,com
       const taxItem=await prisma.item.create({data:{companyId:company,code:`SYN-HTTP-TAX-${spec.kind.toUpperCase()}`,
         nameEn:'Synthetic tax conversion item',nameAr:'صنف ضريبة تجريبي',unit:'piece',
         salePrice:'100',purchasePrice:'100',taxRate:'14'}});
-      const taxInputs=[{taxRate:''},{taxRate:null},{taxRate:'   '},{taxRate:'0'},{taxRate:'7'},{}];
+      const taxInputs=[{taxRate:''},{taxRate:null},{taxRate:'   '},{taxRate:0},{taxRate:'7'},{},{taxRate:'14'}];
       const taxOrderResponse=await req('POST','',{[spec.partyField]:spec.party,orderDate:date,
         idempotencyKey:`http-${spec.kind}-tax-order-0001`,lines:taxInputs.map(rate=>({
           itemId:taxItem.id,quantity:'1',unitPrice:'100',...rate,
         }))});
       assert.equal(taxOrderResponse.status,201,`${spec.kind} tax order creation`);
       const taxOrder=await taxOrderResponse.json();
-      const expectedRates=['0.0000','0.0000','0.0000','0.0000','7.0000','14.0000'];
+      const expectedRates=['0.0000','0.0000','0.0000','0.0000','7.0000','0.0000','14.0000'];
       const storedOrderLines=await spec.line.findMany({where:{orderId:taxOrder.id},orderBy:{lineNumber:'asc'}});
       assert.deepEqual(storedOrderLines.map(line=>line.taxRate.toFixed(4)),expectedRates);
       assert.deepEqual(taxOrder.lines.map(line=>Number(line.taxRate).toFixed(4)),expectedRates);
@@ -119,7 +119,7 @@ module.exports=async function verifyOrdersHttp({prisma,audit,sales,purchases,com
       assert.equal(storedInvoiceLines.length,expectedRates.length);
       assert.deepEqual(storedInvoiceLines.map(line=>line.taxRate.toFixed(4)),expectedRates);
       assert.deepEqual(storedInvoiceLines.map(line=>line.taxAmount.toFixed(4)),
-        ['0.0000','0.0000','0.0000','0.0000','7.0000','14.0000']);
+        ['0.0000','0.0000','0.0000','0.0000','7.0000','0.0000','14.0000']);
       assert.deepEqual(taxResult.invoice.lines.map(line=>Number(line.taxRate).toFixed(4)),expectedRates);
       assert.deepEqual(storedInvoiceLines.map(line=>line.orderLineId),storedOrderLines.map(line=>line.id));
       assert.deepEqual((await spec.line.findMany({where:{orderId:taxOrder.id},orderBy:{lineNumber:'asc'}}))

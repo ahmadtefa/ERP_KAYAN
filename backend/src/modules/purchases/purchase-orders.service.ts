@@ -607,13 +607,12 @@ export class PurchaseOrdersService {
           : defaultUnitPrice('purchase', resolved.row, item.purchasePrice);
       }
 
-      // A cleared rate is zero. An omitted line uses the item rate, and a
-      // legacy null item rate is zero rather than the company default.
-      const taxRate = raw.taxRate === undefined
-        ? item.taxRate ?? new Prisma.Decimal(0)
-        : raw.taxRate === null || (typeof raw.taxRate === 'string' && raw.taxRate.trim() === '')
-          ? new Prisma.Decimal(0)
-          : this.percent(raw.taxRate, `Line ${index + 1} taxRate`);
+      // Missing or cleared tax is zero. Stored order rates are passed
+      // explicitly when converting an order to an invoice.
+      const taxRate = raw.taxRate === undefined || raw.taxRate === null ||
+        (typeof raw.taxRate === 'string' && raw.taxRate.trim() === '')
+        ? new Prisma.Decimal(0)
+        : this.percent(raw.taxRate, `Line ${index + 1} taxRate`);
 
       // Money is computed from the quantity the user entered in the chosen unit.
       const net = enteredQuantity.mul(unitPrice).toDecimalPlaces(MONEY_SCALE);

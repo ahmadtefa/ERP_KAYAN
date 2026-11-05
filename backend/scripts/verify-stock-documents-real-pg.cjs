@@ -1360,7 +1360,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
       {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:''},
       {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:'0'},
       {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:'7'},
-      {itemId:taxItem.id,quantity:'1',unitPrice:'100'},
+      {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:'14'},
     ];
     const snapshots = [];
     for (const [kind,orders,invoices,party] of [['sales',sales,si,customer.id],['purchase',purchases,pi,supplier.id]]) {
@@ -1399,7 +1399,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal((await itemRequest('POST','',{code:'SYN-HTTP-TAX-NO',nameEn:'Synthetic',nameAr:'تجريبي',taxRate:''},false)).status,403);
       assert.equal(await prisma.item.count({where:{companyId:company}}),itemCount);
       let taxEditId;
-      for (const [suffix,rate,expected] of [['EMPTY','','0.0000'],['NULL',null,'0.0000'],['SPACE','   ','0.0000'],['ZERO','0','0.0000'],['VALUE','7','7.0000'],['OMITTED',undefined,'0.0000']]) {
+      for (const [suffix,rate,expected] of [['EMPTY','','0.0000'],['NULL',null,'0.0000'],['SPACE','   ','0.0000'],['ZERO',0,'0.0000'],['VALUE','7','7.0000'],['OMITTED',undefined,'0.0000']]) {
         const result=await itemRequest('POST','',{code:`SYN-HTTP-TAX-${suffix}`,nameEn:'Synthetic',nameAr:'تجريبي',
           ...(rate===undefined?{}:{taxRate:rate})});
         assert.equal(result.status,201,suffix);
@@ -1411,7 +1411,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
       }
       assert.equal((await itemRequest('PATCH','/'+taxEditId,{taxRate:'0'},false)).status,403);
       assert.equal((await prisma.item.findUniqueOrThrow({where:{id:taxEditId}})).taxRate.toFixed(4),'7.0000');
-      for (const [rate,expected] of [['','0.0000'],[null,'0.0000'],['   ','0.0000'],['0','0.0000'],['7','7.0000']]) {
+      for (const [rate,expected] of [['','0.0000'],[null,'0.0000'],['   ','0.0000'],[0,'0.0000'],['7','7.0000']]) {
         const updated=await itemRequest('PATCH','/'+taxEditId,{taxRate:rate});
         assert.equal(updated.status,200);
         assert.equal((await updated.json()).taxRate,expected);
@@ -1450,9 +1450,10 @@ let difference = '70000000-0000-4000-8000-000000000005';
           {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:''},
           {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:null},
           {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:'   '},
-          {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:'0'},
+          {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:0},
           {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:'7'},
           {itemId:taxItem.id,quantity:'1',unitPrice:'100'},
+          {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:'14'},
         ];
         const send=(allowed)=>fetch(base+route,{method:'POST',headers:{'content-type':'application/json','x-allowed':allowed?'yes':'no'},
           body:JSON.stringify({[partyField]:party,invoiceDate:date,lines})});
@@ -1466,18 +1467,20 @@ let difference = '70000000-0000-4000-8000-000000000005';
         if (kind === 'sales') {
           assert.equal(body.costOfGoods,null); assert.equal(body.grossProfit,null);
           assert.ok(body.lines.every(line=>line.unitCost===null && line.costTotal===null));
-          const update=await fetch(base+route+'/'+body.id,{method:'PUT',headers:{'content-type':'application/json','x-allowed':'yes'},
-            body:JSON.stringify({[partyField]:party,invoiceDate:date,lines})});
-          assert.equal(update.status,200);
-          const updated=await update.json();
+        }
+        const update=await fetch(base+route+'/'+body.id,{method:'PUT',headers:{'content-type':'application/json','x-allowed':'yes'},
+          body:JSON.stringify({[partyField]:party,invoiceDate:date,lines})});
+        assert.equal(update.status,200,`${kind} update`);
+        const updated=await update.json();
+        if (kind === 'sales') {
           assert.equal(updated.costOfGoods,null); assert.equal(updated.grossProfit,null);
           assert.ok(updated.lines.every(line=>line.unitCost===null && line.costTotal===null));
         }
         assert.equal(await model.count({where:{companyId:company}}),before+1,kind);
         const saved=await model.findUniqueOrThrow({where:{id:body.id},include:{lines:{orderBy:{lineNumber:'asc'}}}});
-        assert.deepEqual(saved.lines.map(line=>line.taxRate.toFixed(4)),['0.0000','0.0000','0.0000','0.0000','7.0000','14.0000'],kind);
+        assert.deepEqual(saved.lines.map(line=>line.taxRate.toFixed(4)),['0.0000','0.0000','0.0000','0.0000','7.0000','0.0000','14.0000'],kind);
         assert.equal(saved.taxAmount.toFixed(4),'21.0000',kind);
-        assert.equal(saved.totalAmount.toFixed(4),'621.0000',kind);
+        assert.equal(saved.totalAmount.toFixed(4),'721.0000',kind);
         httpSnapshots.push({kind,model,id:body.id});
       }
       // With a nonzero company setting, an item-less sales line whose rate
@@ -1548,7 +1551,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     }
     for (const snapshot of httpSnapshots) {
       const invoice=await snapshot.model.findUniqueOrThrow({where:{id:snapshot.id},include:{lines:{orderBy:{lineNumber:'asc'}}}});
-      assert.deepEqual(invoice.lines.map(line=>line.taxRate.toFixed(4)),['0.0000','0.0000','0.0000','0.0000','7.0000','14.0000'],snapshot.kind);
+      assert.deepEqual(invoice.lines.map(line=>line.taxRate.toFixed(4)),['0.0000','0.0000','0.0000','0.0000','7.0000','0.0000','14.0000'],snapshot.kind);
       assert.equal(invoice.taxAmount.toFixed(4),'21.0000',snapshot.kind);
     }
     await prisma.companySetting.update({where:{companyId:company},data:{taxRate:'14'}});

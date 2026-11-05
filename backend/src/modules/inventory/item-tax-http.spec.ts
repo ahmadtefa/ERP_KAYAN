@@ -42,6 +42,14 @@ describe('item blank tax HTTP DTO', () => {
       expect((await response.json() as {taxRate:string}).taxRate).toBe('7.0000');
       response=await request('PATCH','/item',{nameEn:'Updated'});
       expect((await response.json() as {taxRate:string}).taxRate).toBe('7.0000');
+      response=await request('PATCH','/item',{taxRate:0});
+      expect(response.status).toBe(200);
+      expect((await response.json() as {taxRate:string}).taxRate).toBe('0.0000');
+      response=await request('PATCH','/item',{taxRate:14});
+      expect(response.status).toBe(200);
+      expect((await response.json() as {taxRate:string}).taxRate).toBe('14.0000');
+      response=await request('PATCH','/item',{taxRate:{unexpected:'value'}});
+      expect(response.status).toBe(400);
       response=await request('PATCH','/item',{taxRate:null});
       expect((await response.json() as {taxRate:string}).taxRate).toBe('0.0000');
     } finally { await app.close(); }

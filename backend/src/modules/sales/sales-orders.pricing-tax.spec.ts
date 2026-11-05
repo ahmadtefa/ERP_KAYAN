@@ -21,7 +21,7 @@ describe('sales order prices and tax', () => {
     expect(orderCreate.mock.calls[0][0].data.lines.create[0].taxRate.toFixed(4)).toBe('0.0000');
   });
 
-  it('uses customer pricing and distinguishes cleared and omitted tax', async () => {
+  it('uses customer pricing and defaults cleared and omitted tax to zero', async () => {
     const orderCreate = jest.fn(async ({ data }: { data: any }) => ({
       id: 'order', orderNumber: data.orderNumber, totalAmount: data.totalAmount,
     }));
@@ -47,7 +47,7 @@ describe('sales order prices and tax', () => {
       partyId: 'customer', partyKind: 'CUSTOMER', itemId: 'item', unit: 'piece',
     }));
     const lines = orderCreate.mock.calls[0][0].data.lines.create;
-    expect(lines.map((line: any) => line.taxRate.toFixed(4))).toEqual(['0.0000', '0.0000', '14.0000']);
+    expect(lines.map((line: any) => line.taxRate.toFixed(4))).toEqual(['0.0000', '0.0000', '0.0000']);
     expect(lines.map((line: any) => line.unitPrice.toFixed(4))).toEqual(['20.0000', '20.0000', '20.0000']);
   });
 });
