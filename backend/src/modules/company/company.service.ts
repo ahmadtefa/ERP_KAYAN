@@ -345,7 +345,7 @@ export class CompanyService {
     userId: string,
     dto: CreateBranchDto,
   ): Promise<BranchResponse> {
-    const created = await this.prisma.$transaction(async (tx) => {
+    const created = await this.serializable(async (tx) => {
       const kind: BranchKind = dto.kind ?? 'BRANCH';
 
       const clash = await tx.branch.findFirst({
@@ -428,7 +428,7 @@ export class CompanyService {
         after: { code: branch.code, kind: branch.kind, parentBranchId: branch.parentBranchId },
       }, tx);
       return branch;
-    }, { isolationLevel: 'Serializable' });
+    });
 
     return toBranchResponse(created);
   }
@@ -439,7 +439,7 @@ export class CompanyService {
     branchId: string,
     dto: UpdateBranchDto,
   ): Promise<BranchResponse> {
-    const updated = await this.prisma.$transaction(async (tx) => {
+    const updated = await this.serializable(async (tx) => {
       const branch = await this.findBranch(companyId, branchId, tx);
 
       if (dto.kind === 'HEADQUARTERS' && branch.kind !== 'HEADQUARTERS') {
@@ -502,7 +502,7 @@ export class CompanyService {
         after: toBranchResponse(updated),
       }, tx);
       return updated;
-    }, { isolationLevel: 'Serializable' });
+    });
 
     return toBranchResponse(updated);
   }
@@ -517,7 +517,7 @@ export class CompanyService {
     userId: string,
     branchId: string,
   ): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+    await this.serializable(async (tx) => {
       const branch = await this.findBranch(companyId, branchId, tx);
 
       const [children, entries, stock, users] = await Promise.all([
@@ -559,7 +559,7 @@ export class CompanyService {
         entityId: branchId,
         before: toBranchResponse(branch),
       }, tx);
-    }, { isolationLevel: 'Serializable' });
+    });
   }
 
   /// ────────────────────────────────────────────────────────────── helpers
