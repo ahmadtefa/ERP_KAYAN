@@ -72,6 +72,26 @@ class _VoucherApi extends ApiClient {
     return {'id':'document'};
   }
 }
+class _BilingualVoucherApi extends _VoucherApi {
+  @override
+  Future<List<Map<String,dynamic>>> getList(String path,{Map<String,dynamic>? query}) async {
+    if (path == '/inventory/warehouses') return [{'id':'warehouse','code':'WH','nameAr':'مخزن تجريبي','nameEn':'Test warehouse'}];
+    if (path == '/accounting/cost-centers') return [{'id':'center','code':'CC','nameAr':'مركز تجريبي','nameEn':'Test center','isActive':true}];
+    if (path == '/inventory/items') return [{'id':'item','code':'IT','nameAr':'صنف تجريبي','nameEn':'Test item','unit':'piece'}];
+    return super.getList(path,query:query);
+  }
+  @override
+  Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async {
+    final doc = await super.getObject(path,query:query);
+    if (path != '/inventory/stock-documents/document') return doc;
+    return {...doc,
+      'toWarehouse':{'id':'warehouse','nameAr':'مخزن تجريبي','nameEn':'Test warehouse'},
+      'costCenter':{'id':'center','nameAr':'مركز تجريبي','nameEn':'Test center'},
+      'lines':[{'itemCode':'IT','itemNameAr':'صنف تجريبي','itemNameEn':'Test item',
+        'quantity':'-2','unit':'piece','unitCost':'7'}]};
+  }
+}
+
 class _EditVoucherApi extends _VoucherApi {
   _EditVoucherApi(this.kind);
   final String kind;
@@ -120,6 +140,36 @@ class _FailingLoadApi extends _VoucherApi {
 const _user=AppUser(id:'user',username:'tester',fullName:'Tester',companyId:'company',branchId:'branch',isSuperAdmin:true);
 
 void main() {
+  for (final arabic in [false,true]) {
+    testWidgets('voucher detail and selectors use ${arabic ? 'Arabic RTL' : 'English LTR'} names', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize=const Size(1400,1200); tester.view.devicePixelRatio=1;
+      addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _BilingualVoucherApi();
+      Widget screen(Widget child) => ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+        currentUserProvider.overrideWithValue(_user),
+        appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1')),
+        exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)],
+        child:MaterialApp(locale:Locale(arabic ? 'ar' : 'en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+          supportedLocales:AppLocalizations.supportedLocales,home:child));
+      await tester.pumpWidget(screen(const StockVoucherDetailScreen(id:'document'))); await tester.pumpAndSettle();
+      expect(find.text(arabic ? 'المخزن: مخزن تجريبي' : 'Warehouse: Test warehouse'),findsOneWidget);
+      expect(find.text(arabic ? 'مركز التكلفة: مركز تجريبي' : 'Cost center: Test center'),findsOneWidget);
+      expect(find.text(arabic ? 'IT • صنف تجريبي' : 'IT • Test item'),findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(screen(const StockVoucherCreateScreen(kind:'ISSUE'))); await tester.pumpAndSettle();
+      for (final option in [
+        (arabic ? 'المخزن' : 'Warehouse',arabic ? 'WH • مخزن تجريبي' : 'WH • Test warehouse'),
+        (arabic ? 'مركز التكلفة (مطلوب)' : 'Cost center (required)',arabic ? 'CC • مركز تجريبي' : 'CC • Test center'),
+        (arabic ? 'الصنف' : 'Item',arabic ? 'IT • صنف تجريبي' : 'IT • Test item'),
+      ]) {
+        final field=find.text(option.$1).first;
+        await tester.ensureVisible(field); await tester.tap(field); await tester.pumpAndSettle();
+        expect(find.text(option.$2),findsWidgets);
+        await tester.tap(find.text(option.$2).last); await tester.pumpAndSettle();
+      }
+    });
+  }
   for (final kind in ['RECEIPT','ISSUE']) {
     testWidgets('$kind voucher draft protects the routed stock screen exit', (tester) async {
       SharedPreferences.setMockInitialValues({});

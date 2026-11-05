@@ -21,6 +21,11 @@ const _base = '/inventory/stock-documents';
 String _label(BuildContext context, String ar, String en) =>
     Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
 
+String _localizedName(BuildContext context, Json row, {String ar = 'nameAr', String en = 'nameEn'}) {
+  final arabic = Localizations.localeOf(context).languageCode == 'ar';
+  return text(row, arabic ? ar : en, fallback:text(row, arabic ? en : ar));
+}
+
 /// Show the required acknowledgement once per failed load, without exposing
 /// transport diagnostics. Retrying fetches the original source again.
 class _VoucherLoadError extends StatefulWidget {
@@ -195,14 +200,14 @@ class _StockVoucherDetailScreenState extends ConsumerState<StockVoucherDetailScr
           Text('${_label(context,'التاريخ','Date')}: ${text(doc,'documentDate')}'),
           Text('${_label(context,'الجهة','Counterparty')}: ${text(doc,'counterpartyName')}'),
           Text('${_label(context,'السبب','Reason')}: ${text(doc,'reason')}'),
-          Text('${_label(context,'المخزن','Warehouse')}: ${doc['toWarehouse'] is Map ? text(Map<String,dynamic>.from(doc['toWarehouse'] as Map),'nameAr',fallback:text(Map<String,dynamic>.from(doc['toWarehouse'] as Map),'nameEn')) : text(doc,'toWarehouseId')}'),
-          Text('${_label(context,'مركز التكلفة','Cost center')}: ${doc['costCenter'] is Map ? text(Map<String,dynamic>.from(doc['costCenter'] as Map),'nameAr',fallback:text(Map<String,dynamic>.from(doc['costCenter'] as Map),'nameEn')) : '—'}'),
+          Text('${_label(context,'المخزن','Warehouse')}: ${doc['toWarehouse'] is Map ? _localizedName(context,Map<String,dynamic>.from(doc['toWarehouse'] as Map)) : text(doc,'toWarehouseId')}'),
+          Text('${_label(context,'مركز التكلفة','Cost center')}: ${doc['costCenter'] is Map ? _localizedName(context,Map<String,dynamic>.from(doc['costCenter'] as Map)) : '—'}'),
           Text('${_label(context,'ملاحظات','Notes')}: ${text(doc,'notes',fallback:'—')}'),
           Text('${_label(context,'القيد','Journal entry')}: ${text(doc,'journalEntryId',fallback:'—')}'),
           Text('${_label(context,'المراجعة','Reviewed')}: ${text(doc,'reviewedAt',fallback:'—')}'),
           Text('${_label(context,'الاعتماد','Approved')}: ${text(doc,'approvedAt',fallback:'—')}'),
           for (final line in listOf(doc['lines'])) ListTile(
-            title:Text('${text(line,'itemCode')} • ${text(line,'itemNameAr',fallback:text(line,'itemNameEn'))}'),
+            title:Text('${text(line,'itemCode')} • ${_localizedName(context,line,ar:'itemNameAr',en:'itemNameEn')}'),
             subtitle:Text('${_label(context,'الكمية','Quantity')}: ${text(line,'unitQuantity',fallback:text(line,'quantity'))} • ${text(line,'unit')}${text(line,'notes').isEmpty ? '' : ' • ${text(line,'notes')}'}'),
             trailing:can('inventory.cost.read') ? Text('${_label(context,'تكلفة الوحدة الأساسية','Base unit cost')}: ${text(line,'unitCost')}') : null,
           ),
@@ -492,7 +497,7 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
             Form(key:_form,child:IgnorePointer(ignoring:disabled,child:Column(children:[
               DropdownButtonFormField<String>(initialValue:warehouses.any((x) => text(x,'id') == _warehouse) ? _warehouse : null,
                 decoration:InputDecoration(labelText:_label(context,'المخزن','Warehouse')),
-                items:[for (final row in warehouses) DropdownMenuItem(value:text(row,'id'),child:Text('${text(row,'code')} • ${text(row,'nameAr',fallback:text(row,'nameEn'))}'))],
+                items:[for (final row in warehouses) DropdownMenuItem(value:text(row,'id'),child:Text('${text(row,'code')} • ${_localizedName(context,row)}'))],
                 onChanged:(v) { setState(() => _warehouse=v); _changed(); },validator:(v) => v == null ? _label(context,'مطلوب','Required') : null),
               TextFormField(controller:_date,onChanged:(_) => _changed(),decoration:InputDecoration(labelText:_label(context,'التاريخ YYYY-MM-DD','Date YYYY-MM-DD')),
                 validator:(value) { final raw=(value ?? '').trim(); final date=DateTime.tryParse(raw);
@@ -508,7 +513,7 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
                 items:[
                   if (_center != null && !centers.any((x) => text(x,'id') == _center))
                     DropdownMenuItem(value:_center,child:Text(_label(context,'مركز التكلفة المحفوظ','Saved cost center'))),
-                  for (final row in centers) DropdownMenuItem(value:text(row,'id'),child:Text('${text(row,'code')} • ${text(row,'nameAr',fallback:text(row,'nameEn'))}')),
+                  for (final row in centers) DropdownMenuItem(value:text(row,'id'),child:Text('${text(row,'code')} • ${_localizedName(context,row)}')),
                 ],
                 onChanged:(v) { setState(() => _center=v); _changed(); },
                 validator:(_) => widget.kind == 'ISSUE' && _center == null ? _label(context,'مطلوب','Required') : null),
@@ -533,7 +538,7 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
                 return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
                 DropdownButtonFormField<String>(initialValue:items.any((x) => text(x,'id') == line.itemId) ? line.itemId : null,
                   decoration:InputDecoration(labelText:_label(context,'الصنف','Item')),
-                  items:[for (final row in items) DropdownMenuItem(value:text(row,'id'),child:Text('${text(row,'code')} • ${text(row,'nameAr',fallback:text(row,'nameEn'))}'))],
+                  items:[for (final row in items) DropdownMenuItem(value:text(row,'id'),child:Text('${text(row,'code')} • ${_localizedName(context,row)}'))],
                   onChanged:(v) { setState(() { line.itemId=v; line.unitName=null; }); _changed(); },validator:(v) => v == null ? _label(context,'مطلوب','Required') : null),
                 if (item != null && (units.isNotEmpty || line.unitName != null)) DropdownButtonFormField<String>(
                   key:ValueKey('voucher-unit-${line.itemId}-${line.unitName}'),
