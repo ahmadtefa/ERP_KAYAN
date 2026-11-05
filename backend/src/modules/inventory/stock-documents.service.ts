@@ -870,7 +870,7 @@ export class StockDocumentsService {
         }
 
         if (quantity.isZero()) continue;
-        if (quantity.isNegative() && !document.costCenterId) {
+        if (document.voucherKind === 'ISSUE' && quantity.isNegative() && !document.costCenterId) {
           throw new BadRequestException(
             'A cost center is required when issuing stock from a warehouse.',
           );
