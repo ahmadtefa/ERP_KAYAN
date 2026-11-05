@@ -48,6 +48,9 @@ describe('HealthController', () => {
       company: {
         count: jest.fn().mockResolvedValue(1),
       },
+      user: {
+        count: jest.fn().mockResolvedValue(1),
+      },
     };
     controller = new HealthController(mockPrisma);
   });
@@ -66,6 +69,32 @@ describe('HealthController', () => {
     const res = await controller.check();
     expect(res.needsSetup).toBe(false);
     expect(res.recoveryRequired).toBe(true);
+  });
+
+  it('requires recovery when a reset company and its retained user are soft-deleted', async () => {
+    mockPrisma.company.count.mockImplementation((args?: { where?: unknown }) =>
+      Promise.resolve(args?.where ? 0 : 1),
+    );
+    mockPrisma.user.count.mockImplementation((args?: { where?: unknown }) =>
+      Promise.resolve(args?.where ? 0 : 1),
+    );
+
+    const res = await controller.check();
+
+    expect(res.needsSetup).toBe(false);
+    expect(res.recoveryRequired).toBe(true);
+    expect(mockPrisma.company.count).toHaveBeenCalledWith();
+    expect(mockPrisma.user.count).toHaveBeenCalledWith();
+  });
+
+  it('reports setup only when the database has no companies or users', async () => {
+    mockPrisma.company.count.mockResolvedValue(0);
+    mockPrisma.user.count.mockResolvedValue(0);
+
+    const res = await controller.check();
+
+    expect(res.needsSetup).toBe(true);
+    expect(res.recoveryRequired).toBe(false);
   });
 
   it('asks for the database name as text, the one shape Prisma can read', async () => {

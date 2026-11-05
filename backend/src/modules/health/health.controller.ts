@@ -42,16 +42,16 @@ export class HealthController {
       try {
         const counts = await this.withTimeout(
           Promise.all([
-            this.prisma.company.count({ where: { deletedAt: null } }),
-            this.prisma.user
-              ? this.prisma.user.count({ where: { deletedAt: null, isActive: true, company: { deletedAt: null } } })
-              : Promise.resolve(1),
+            this.prisma.company.count(),
+            this.prisma.user.count(),
+            this.prisma.user.count({ where: { deletedAt: null, isActive: true, company: { deletedAt: null } } }),
           ]),
           HealthController.DATABASE_DETAILS_TIMEOUT_MS,
           'database setup-state query',
         );
-        needsSetup = counts[0] === 0;
-        recoveryRequired = counts[0] > 0 && counts[1] === 0;
+        const [companies, users, active] = counts;
+        needsSetup = companies === 0 && users === 0;
+        recoveryRequired = (companies > 0 && active === 0) || (companies === 0 && users > 0);
       } catch (error) {
         HealthController.logger.warn(
           `Database is reachable but setup-state details were not ready: ${(error as Error).message}`,
