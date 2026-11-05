@@ -29,7 +29,7 @@ describe('scheduled backup safety', () => {
     full.verify.mockRejectedValue(new Error(marker));
     const result = await service.runNow('company');
     expect(result[0].status).toBe('FAILED');
-    expect(result[0].message).toContain('verification could not run');
+    expect(result[0].message).toContain('فشل إنشاء أرشيف قاعدة البيانات');
     expect(JSON.stringify(result)).not.toContain(marker);
     expect(JSON.stringify(prisma.backupRun.create.mock.calls, (_, value: unknown) => typeof value === 'bigint' ? value.toString() : value)).not.toContain(marker);
     expect(prune).not.toHaveBeenCalled();
@@ -39,11 +39,49 @@ describe('scheduled backup safety', () => {
   it('retains previous backups even after archive content is readable', async () => {
     const { service, prune, full } = setup();
     const result = await service.runNow('company');
-    expect(result[0].status).toBe('SUCCESS');
-    expect(result[0].message).toContain('complete restore is not verified');
-    expect(result[0].message).toContain('retention is paused');
+    expect(result[0].status).toBe('FAILED');
+    expect(result[0].fileName).toBe('new.dump');
+    expect(result[0].message).toContain('الملفات والترخيص والاستعادة الكاملة لم يتم التحقق منها');
+    expect(result[0].message).toContain('احتُفظ بالنسخ السابقة');
     expect(prune).not.toHaveBeenCalled();
     expect(full.remove).not.toHaveBeenCalled();
+  });
+
+  it('records dump creation failure without exposing tool details or deleting old backups', async () => {
+    const { service, full, prisma, prune } = setup();
+    full.createFull.mockRejectedValue(new Error(marker));
+    const [result] = await service.runNow('company');
+    expect(result).toMatchObject({fileName:'-', status:'FAILED'});
+    expect(result.message).toContain('فشل إنشاء أرشيف قاعدة البيانات');
+    expect(JSON.stringify(result)).not.toContain(marker);
+    expect(prisma.backupRun.create).toHaveBeenCalledWith(expect.objectContaining({
+      data:expect.objectContaining({fileName:'-',status:'FAILED',companyId:'company'})}));
+    expect(prune).not.toHaveBeenCalled();
+    expect(full.remove).not.toHaveBeenCalled();
+  });
+
+  it('records a failed capability probe without leaking details', async () => {
+    const { service, full, prisma } = setup();
+    full.capabilities.mockRejectedValue(new Error(marker));
+    const [result] = await service.runNow('company');
+    expect(result).toMatchObject({fileName:'-',status:'FAILED'});
+    expect(result.message).toContain('أدوات قاعدة البيانات غير متاحة');
+    expect(JSON.stringify(result)).not.toContain(marker);
+    expect(prisma.backupRun.create).toHaveBeenCalledWith(expect.objectContaining({
+      data:expect.objectContaining({fileName:'-',status:'FAILED'})}));
+    expect(full.createFull).not.toHaveBeenCalled();
+  });
+
+  it('backs off after a failed or incomplete attempt, but an explicit retry still works', async () => {
+    const { service, full, prisma } = setup();
+    prisma.backupRun.findFirst.mockResolvedValue({createdAt:new Date(),status:'FAILED',fileName:'new.dump'});
+    await (service as any).tick();
+    expect(full.createFull).not.toHaveBeenCalled();
+    const [result] = await service.runNow('company');
+    expect(result.status).toBe('FAILED');
+    expect(full.createFull).toHaveBeenCalledTimes(1);
+    expect(prisma.backupRun.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where:{status:{in:['SUCCESS','VERIFIED','FAILED']}}}));
   });
 
   it('refuses manual retention before listing or removing any file', async () => {

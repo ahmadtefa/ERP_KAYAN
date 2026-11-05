@@ -13,6 +13,7 @@ require('reflect-metadata');
 require('ts-node/register/transpile-only');
 const { Client } = require('pg');
 const { FullBackupService } = require('../src/modules/backup/full-backup.service');
+const { BackupScheduleService } = require('../src/modules/backup/backup-schedule.service');
 const { pgBackupConnectionEnv } = require('../src/modules/backup/pg-backup-connection');
 const { MaintenanceService } = require('../src/common/maintenance/maintenance');
 const { FullBackupController } = require('../src/modules/backup/full-backup.controller');
@@ -81,6 +82,27 @@ const path = require('node:path');
     assert.equal(verified.archiveContentReadable, true);
     assert.equal(verified.fullRestoreRehearsed, false);
     assert.equal(verified.includesExternalFiles, false);
+
+    // Scheduler uses real archive tools and PG; its company/settings/Prisma
+    // interfaces are deliberately synthetic. A readable DB-only archive is
+    // retained but must never be reported as a verified full backup.
+    await client.query('CREATE TABLE fixture_backup_runs (id serial primary key, filename text, status text, message text)');
+    const schedulerDb={company:{findMany:async()=>[{id:'synthetic',code:'SYN',nameEn:'Synthetic'}]},
+      backupRun:{findFirst:async()=>null,create:async({data})=>{
+        const inserted=await client.query('INSERT INTO fixture_backup_runs(filename,status,message) VALUES($1,$2,$3) RETURNING *',
+          [data.fileName,data.status,data.message]);return inserted.rows[0];
+      }}};
+    const scheduler=new BackupScheduleService(schedulerDb,service,{get:async()=>({backupIntervalHours:1,backupRetentionCount:1})});
+    const originalBytes=await fs.readFile(path.join(dir,backup.file.name));
+    const [scheduled]=await scheduler.runNow('synthetic');
+    assert.equal(scheduled.status,'FAILED');
+    assert.match(scheduled.message,/الملفات والترخيص/);
+    assert.ok((await service.verify(scheduled.fileName)).archiveContentReadable);
+    assert.deepEqual(await fs.readFile(path.join(dir,backup.file.name)),originalBytes);
+    const scheduleRows=await client.query('SELECT filename,status FROM fixture_backup_runs');
+    assert.deepEqual(scheduleRows.rows,[{filename:scheduled.fileName,status:'FAILED'}]);
+    assert.deepEqual((await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows,before.rows);
+    console.log('PASS: real database archive read remains FAILED as a full scheduled backup and preserves prior bytes; synthetic scheduler interface, no licence or full-restore proof.');
 
     // A readable TOC is insufficient: truncate the synthetic data section,
     // retain the original, and prove the real pg_restore can still list it.

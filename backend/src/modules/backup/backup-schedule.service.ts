@@ -81,7 +81,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
 
     const settings = await this.settings.get(first.id);
     const lastRun = await this.prisma.backupRun.findFirst({
-      where: { status: { in: ['SUCCESS', 'VERIFIED'] } },
+      where: { status: { in: ['SUCCESS', 'VERIFIED', 'FAILED'] } },
       orderBy: { createdAt: 'desc' },
       select: { createdAt: true, status: true, fileName: true },
     });
@@ -187,7 +187,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
     if (intervalHours <= 0 && !force) return null;
 
     const lastRun = await this.prisma.backupRun.findFirst({
-      where: { status: { in: ['SUCCESS', 'VERIFIED'] } },
+      where: { status: { in: ['SUCCESS', 'VERIFIED', 'FAILED'] } },
       orderBy: { createdAt: 'desc' },
     });
     const dueAt = lastRun
@@ -195,9 +195,14 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       : new Date(0);
     if (!force && dueAt > new Date()) return null;
 
-    const tools = await this.full.capabilities();
-    if (!tools.available) {
-      const message = `pg_dump/pg_restore not found: ${tools.reason ?? 'unknown reason'}`;
+    let toolsAvailable = false;
+    try {
+      toolsAvailable = (await this.full.capabilities()).available;
+    } catch {
+      // An inaccessible tool or directory must be recorded as a failure too.
+    }
+    if (!toolsAvailable) {
+      const message = 'فشل النسخ: أدوات قاعدة البيانات غير متاحة. لم تُحذف أي نسخة سابقة.';
       await this.record({
         kind: 'SCHEDULED',
         fileName: '-',
@@ -207,24 +212,21 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       return { fileName: '-', status: 'FAILED', message };
     }
 
-    const started = Date.now();
-    const result = await this.full.createFull(null);
-    const fileName = result.file.name;
-
-    // Verify before retention prunes anything: the new file has to be readable
-    // or it is not a backup.
-    let status = 'SUCCESS';
-    let message: string | null = `written in ${Math.round((Date.now() - started) / 1000)}s`;
+    let fileName = '-';
+    let message: string;
     try {
-      const verification = await this.full.verify(fileName);
-      status = 'SUCCESS';
-      message = `${message}; archive read (${verification.entries} objects), but complete restore is not verified; retention is paused`;
+      const result = await this.full.createFull(null);
+      fileName = result.file.name;
+      await this.full.verify(fileName);
+      // A readable PostgreSQL dump is useful, but it does not include or
+      // verify the external files and device-bound licence. It must not be
+      // reported as a successful FULL backup or authorize retention.
+      message = 'فشل اكتمال النسخة: أُنشئ أرشيف قاعدة البيانات وقُرئ، لكن الملفات والترخيص والاستعادة الكاملة لم يتم التحقق منها. احتُفظ بالنسخ السابقة.';
     } catch {
-      // The file may exist, but it has not passed verification and must not
-      // be reported as a successful scheduled backup or drive retention.
-      status = 'FAILED';
-      message = `${message}; verification could not run`;
+      // Never disclose tool stderr, paths or database contents to clients.
+      message = 'فشل إنشاء أرشيف قاعدة البيانات أو التحقق منه. احتُفظ بالنسخ السابقة.';
     }
+    const status = 'FAILED';
 
     await this.record({
       kind: 'SCHEDULED',
@@ -234,9 +236,9 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
       companyId: company.id,
     });
 
-    // The API still exposes explicit retention, but automatic deletion cannot
-    // proceed until complete replacement restore evidence exists. Keep all
-    // copies, including after a successful archive read.
+    // Both failures and incomplete archives remain visible and never trigger
+    // retention. The scheduler counts failed attempts when calculating the
+    // next due time to avoid creating a new incomplete dump every tick.
     return { fileName, status, message };
   }
 
