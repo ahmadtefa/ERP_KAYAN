@@ -1199,6 +1199,18 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const redactedIssue = await service.updateVoucher(company,branch,user,editableIssue.id,issueEdit,false);
     assert.equal(redactedIssue.lines[0].unitCost,null);
     assert.equal((await service.findOne(company,editableIssue.id,true)).lines[0].unitCost,'7.0000');
+    // A cost centre may be disabled after approval. Posting must revalidate
+    // the attribution and roll back the status claim until the centre is valid.
+    await prisma.costCenter.update({where:{id:centre},data:{isActive:false}});
+    await service.transitionVoucher(company,branch,user,editableIssue.id,'REVIEW',true);
+    await service.transitionVoucher(company,branch,user,editableIssue.id,'APPROVE',true);
+    await assert.rejects(service.post(company,user,editableIssue.id,true,branch),/cost center/i);
+    assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:editableIssue.id}})).status,'DRAFT');
+    assert.equal(await prisma.stockMovement.count({where:{referenceId:editableIssue.id}}),0);
+    assert.equal(await prisma.journalEntry.count({where:{sourceId:editableIssue.id}}),0);
+    await prisma.costCenter.update({where:{id:centre},data:{isActive:true}});
+    await service.post(company,user,editableIssue.id,true,branch);
+    await service.reverse(company,user,editableIssue.id,true,branch);
     const anotherBranch = '70000000-0000-4000-8000-000000000009';
     const anotherWarehouse = '70000000-0000-4000-8000-000000000010';
     await prisma.branch.create({data:{id:anotherBranch,companyId:company,code:'OTHER-SYN',nameEn:'Other branch',nameAr:'فرع آخر'}});
