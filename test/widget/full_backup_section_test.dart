@@ -77,7 +77,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Full restore is paused'), findsOneWidget);
     expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Upload a backup file (.dump)')).onPressed, isNull);
-    expect(tester.widget<IconButton>(find.byTooltip('Restore the whole database')).onPressed, isNull);
+    // The list is below the fold on a default test viewport. Match the
+    // disabled button itself, not its Tooltip child or only onstage widgets.
+    final restoreButton = find.ancestor(
+      of: find.byIcon(Icons.restore, skipOffstage: false),
+      matching: find.byType(IconButton, skipOffstage: false),
+      skipOffstage: false,
+    );
+    expect(restoreButton, findsOneWidget);
+    expect(tester.widget<IconButton>(restoreButton).onPressed, isNull);
     expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Create backup now')).onPressed, isNotNull);
   });
 

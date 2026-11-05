@@ -86,6 +86,15 @@ class AppErrorMessageResolver {
     // has no HTTP status at all, and must still be explained as "the server
     // could not be reached" rather than "an unexpected error".
     if (error is Failure) {
+      if (error is ApiFailure && error.statusCode == 403 && error.code == 'LICENSE_STATE_ID_MISMATCH') {
+        return AppErrorText(
+          reason: AppErrorReason.conflict,
+          severity: AppErrorSeverity.warning,
+          businessMessage: isArabic
+              ? 'حالة الترخيص المحمية لا تطابق سجل قاعدة البيانات. احتفظ بالبيانات وتواصل مع الدعم للتحقق من النقل أو الاستعادة.'
+              : 'The protected licence state does not match the database. Preserve the data and contact support for an authorised recovery or transfer.',
+        );
+      }
       final preferred = _reasonOf(error);
       final code = _statusOf(error) ?? statusCode;
       final text = _resolveText(

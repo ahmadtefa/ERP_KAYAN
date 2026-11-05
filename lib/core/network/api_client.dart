@@ -300,12 +300,12 @@ class ApiClient {
           }
           return SessionExpiredFailure(message);
         }
-        if (status == 403) {
-          return PermissionFailure(message);
-        }
         final data = e.response?.data;
         final rawCode = data is Map ? data['code'] : null;
         final code = rawCode is String && RegExp(r'^[A-Z0-9_]{3,64}$').hasMatch(rawCode) ? rawCode : null;
+        if (status == 403 && code != 'LICENSE_STATE_ID_MISMATCH') {
+          return PermissionFailure(message);
+        }
         return ApiFailure(message, statusCode: status, code: code);
       case DioExceptionType.unknown:
         return const NetworkFailure();

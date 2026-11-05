@@ -12,6 +12,14 @@ void main() {
   const arabic = AppErrorMessageResolver(isArabic: true);
   const english = AppErrorMessageResolver(isArabic: false);
 
+  test('licence state mismatch displays fixed guidance, never server details', () {
+    const failure = ApiFailure('synthetic-private-marker', statusCode: 403, code: 'LICENSE_STATE_ID_MISMATCH');
+    expect(arabic.resolve(failure).businessMessage, contains('حالة الترخيص المحمية'));
+    expect(english.resolve(failure).businessMessage, contains('protected licence state'));
+    expect(english.resolve(failure).businessMessage, isNot(contains('synthetic-private-marker')));
+    expect(arabic.resolve(failure).reason, AppErrorReason.conflict);
+  });
+
   group('technical text never reaches the screen', () {
     test('the deactivation failure that started this', () {
       final text = arabic.resolve(
