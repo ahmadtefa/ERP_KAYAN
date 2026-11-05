@@ -9,6 +9,7 @@ describe('document export catalogue', () => {
       'purchase-order',
       'sales-quotation',
       'cash-voucher',
+      'stock-voucher',
       'journal-entry',
     ]);
     for (const kind of DOCUMENT_KINDS) {
