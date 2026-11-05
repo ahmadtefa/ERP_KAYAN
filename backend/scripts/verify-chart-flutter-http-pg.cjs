@@ -26,13 +26,14 @@ module.exports = async function chartFlutterHttpPg({prisma,chart,company,user,br
   class ChartFlutterFixtureModule {}
   Module({controllers:[ChartOfAccountsController],providers:[{provide:ChartOfAccountsService,useValue:chart}]})(ChartFlutterFixtureModule);
   const app=await NestFactory.create(ChartFlutterFixtureModule,{logger:false});
-  const requests={list:0,create:0,suggest:0};
+  const requests={list:0,create:0,update:0,suggest:0};
   app.use((req,_res,next)=>{
     req.user={companyId:company,userId:user,branchId:branch,isSuperAdmin:false,
-      permissions:['accounting.accounts.read','accounting.accounts.create']};
+      permissions:['accounting.accounts.read','accounting.accounts.create','accounting.accounts.update']};
     if (req.method==='GET' && req.path==='/accounting/chart-of-accounts') requests.list++;
     if (req.method==='GET' && req.path==='/accounting/chart-of-accounts/suggest-code') requests.suggest++;
     if (req.method==='POST' && req.path==='/accounting/chart-of-accounts') requests.create++;
+    if (req.method==='PATCH' && req.path.startsWith('/accounting/chart-of-accounts/')) requests.update++;
     next();
   });
   app.useGlobalGuards(new PermissionsGuard(new Reflector()));
@@ -57,14 +58,17 @@ module.exports = async function chartFlutterHttpPg({prisma,chart,company,user,br
     });
     if (result.status!==0) throw new Error(`Flutter chart integration failed (${result.status ?? result.signal}):\n${output}`);
     const saved=await prisma.account.findFirstOrThrow({where:{companyId:company,code}});
-    assert.equal(saved.nameEn,'Integration asset');
+    assert.equal(saved.nameEn,'Integration asset revised');
+    assert.equal(saved.isActive,true);
     assert.equal(saved.nameAr,'حساب تكامل تجريبي');
     assert.equal(saved.type,'ASSET');
     assert.equal(await prisma.account.count({where:{companyId:company,code}}),1);
     assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'accounts',entityId:saved.id,action:'CREATE'}}),1);
     assert.ok(requests.list>=2,`expected initial list and refresh, got ${requests.list}`);
+    assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'accounts',entityId:saved.id,action:'UPDATE'}}),3);
     assert.equal(requests.create,1);
+    assert.equal(requests.update,3);
     assert.ok(requests.suggest>=1);
-    console.log('PASS: Flutter chart widget created and reloaded a real PostgreSQL account over HTTP; principal injected, no JWT/licence/installed UI.');
+    console.log('PASS: Flutter chart widget created, edited, deactivated, activated and reloaded a real PostgreSQL account over HTTP; principal injected, no JWT/licence/installed UI.');
   } finally { await app.close(); }
 };

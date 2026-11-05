@@ -42,7 +42,7 @@ Future<void> _waitFor(WidgetTester tester, Finder finder, {bool absent = false})
 
 void main() {
   _NetworkTestBinding();
-  testWidgets('chart creation and refresh use the real HTTP and PostgreSQL fixture', (tester) async {
+  testWidgets('chart create edit activate and refresh use real HTTP and PostgreSQL', (tester) async {
     final env = Platform.environment;
     final origin = Uri.tryParse(env['KAYAN_CHART_INTEGRATION_ORIGIN'] ?? '');
     if (env['GITHUB_ACTIONS'] != 'true' || env['RUNNER_ENVIRONMENT'] != 'github-hosted' ||
@@ -62,7 +62,8 @@ void main() {
       appConfigProvider.overrideWithValue(config),
       apiClientProvider.overrideWithValue(client),
       currentUserProvider.overrideWithValue(const AppUser(id:'synthetic',username:'synthetic',
-        fullName:'Synthetic',companyId:'synthetic',isSuperAdmin:true)),
+        fullName:'Synthetic',companyId:'synthetic',permissions:['accounting.accounts.read',
+          'accounting.accounts.create','accounting.accounts.update'])),
       exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown),
     ], child: MaterialApp(locale:const Locale('en'),
       localizationsDelegates:AppLocalizations.localizationsDelegates,
@@ -79,9 +80,19 @@ void main() {
     await _waitFor(tester,find.widgetWithText(TextField,'Name in English *'),absent:true);
     await tester.enterText(find.byType(TextField).first, 'SYN-UI-ACCOUNT-1');
     await _waitFor(tester,find.textContaining('SYN-UI-ACCOUNT-1  Integration asset'));
+    await tester.tap(find.byTooltip('Edit account'));
+    await _waitFor(tester,find.widgetWithText(TextField,'Name in English *'));
+    await tester.enterText(find.widgetWithText(TextField,'Name in English *'),'Integration asset revised');
+    await tester.tap(find.text('Save'));
+    await _waitFor(tester,find.widgetWithText(TextField,'Name in English *'),absent:true);
+    await _waitFor(tester,find.textContaining('SYN-UI-ACCOUNT-1  Integration asset revised'));
+    await tester.tap(find.byTooltip('Deactivate account'));
+    await _waitFor(tester,find.byTooltip('Activate account'));
+    await tester.tap(find.byTooltip('Activate account'));
+    await _waitFor(tester,find.byTooltip('Deactivate account'));
     await tester.tap(find.byTooltip('Refresh'));
     await tester.pump();
-    await _waitFor(tester,find.textContaining('SYN-UI-ACCOUNT-1  Integration asset'));
+    await _waitFor(tester,find.textContaining('SYN-UI-ACCOUNT-1  Integration asset revised'));
     expect(tester.takeException(),isNull);
     // Dispose the page and close Dio before the binding checks for fake-async
     // timers; a kept-alive socket otherwise leaves a three-second idle timer.
