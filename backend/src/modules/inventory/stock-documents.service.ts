@@ -707,6 +707,14 @@ export class StockDocumentsService {
       if (document.voucherKind && (!document.reviewedAt || !document.approvedAt)) {
         throw new BadRequestException('Stock voucher must be reviewed and approved before posting');
       }
+      if (document.voucherKind === 'ISSUE' && document.lines.some((line) => line.quantity.isNegative())) {
+        if (!document.costCenterId) {
+          throw new BadRequestException('A cost center is required when issuing stock from a warehouse.');
+        }
+        // Revalidate at posting: a centre can be disabled or its posting
+        // window closed after the draft was created and approved.
+        await this.costCenters.assertPostable(tx,companyId,[document.costCenterId],document.documentDate);
+      }
       if (document.kind === StockDocumentKind.TRANSFER &&
           document.lines.some((line) => !line.quantity.greaterThan(0))) {
         throw new BadRequestException('Transfer quantities must be positive before posting');
