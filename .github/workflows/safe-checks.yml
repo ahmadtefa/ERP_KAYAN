@@ -81,6 +81,7 @@ jobs:
           src/modules/inventory/item-tax-blank.spec.ts
           src/modules/inventory/item-tax-http.spec.ts
           src/modules/export/stock-voucher-export.spec.ts
+          src/modules/export/documents.service.spec.ts
           src/modules/inventory/cost-redaction.spec.ts
           src/modules/sales/cost-redaction.spec.ts
           src/modules/inventory/stock-documents.warehouse-guard.spec.ts
