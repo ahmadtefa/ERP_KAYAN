@@ -198,7 +198,7 @@ export class JournalEntriesService {
         'JV',
       );
 
-      return tx.journalEntry.create({
+      const row = await tx.journalEntry.create({
         data: {
           companyId,
           branchId,
@@ -228,21 +228,13 @@ export class JournalEntriesService {
         },
         include: { lines: LINES_WITH_ACCOUNT },
       });
+      await this.audit.recordRequired({
+        companyId, userId, action: 'CREATE', entity: 'journal_entries', entityId: row.id,
+        after: { entryNumber: row.entryNumber, totalDebit: row.totalDebit.toFixed(MONEY_SCALE),
+          totalCredit: row.totalCredit.toFixed(MONEY_SCALE) },
+      }, tx);
+      return row;
     });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'CREATE',
-      entity: 'journal_entries',
-      entityId: created.id,
-      after: {
-        entryNumber: created.entryNumber,
-        totalDebit: created.totalDebit.toFixed(MONEY_SCALE),
-        totalCredit: created.totalCredit.toFixed(MONEY_SCALE),
-      },
-    });
-
     return this.toResponse(created);
   }
 
@@ -598,18 +590,12 @@ export class JournalEntriesService {
         },
       });
 
+      await this.audit.recordRequired({
+        companyId, userId, action: 'REVERSE', entity: 'journal_entries', entityId: original.id,
+        after: { reversalId: created.id, reversalNumber: created.entryNumber },
+      }, tx);
       return created;
     });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'REVERSE',
-      entity: 'journal_entries',
-      entityId: original.id,
-      after: { reversalId: reversal.id, reversalNumber: reversal.entryNumber },
-    });
-
     return this.toResponse(reversal);
   }
 

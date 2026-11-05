@@ -617,6 +617,44 @@ let difference = '70000000-0000-4000-8000-000000000005';
     await chart.update(company,user,usedLeaf.id,{isActive:true});
     console.log('PASS: journal lines/header mismatch rejected, stale account refused, and deactivation waits for posting account locks on real PG.');
 
+    // Manual entry number allocation, creation and audit share a transaction;
+    // reversal claim, mirror entry, number and audit must do the same.
+    const sequence=async()=>prisma.documentSequence.findUnique({where:{companyId_key:{companyId:company,key:'JOURNAL'}}});
+    const createDto={entryDate:'2190-01-01',description:'synthetic',lines:[
+      {accountId:usedLeaf.id,debit:'10'}, {accountId:inventory,credit:'10'},
+    ]};
+    const beforeCreateCount=await prisma.journalEntry.count({where:{companyId:company}});
+    const beforeCreateSequence=await sequence();
+    const requiredAudit=audit.recordRequired.bind(audit);
+    audit.recordRequired=async (input,tx)=>{
+      if(input.entity==='journal_entries' && input.action==='CREATE') throw new Error('synthetic creation audit failure');
+      return requiredAudit(input,tx);
+    };
+    try {await assert.rejects(manualJournal.create(company,branch,user,createDto),/synthetic creation audit failure/);}
+    finally {audit.recordRequired=requiredAudit;}
+    assert.equal(await prisma.journalEntry.count({where:{companyId:company}}),beforeCreateCount);
+    assert.equal((await sequence())?.nextValue,beforeCreateSequence?.nextValue);
+    const createdManual=await manualJournal.create(company,branch,user,createDto);
+    assert.equal(createdManual.status,'draft');
+    assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'journal_entries',entityId:createdManual.id,action:'CREATE'}}),1);
+    const reversalCount=await prisma.journalEntry.count({where:{companyId:company}});
+    const beforeReverseSequence=await sequence();
+    audit.recordRequired=async (input,tx)=>{
+      if(input.entity==='journal_entries' && input.entityId===lockJournal.id && input.action==='REVERSE') throw new Error('synthetic reversal audit failure');
+      return requiredAudit(input,tx);
+    };
+    try {await assert.rejects(manualJournal.reverse(company,user,lockJournal.id),/synthetic reversal audit failure/);}
+    finally {audit.recordRequired=requiredAudit;}
+    assert.equal((await prisma.journalEntry.findUniqueOrThrow({where:{id:lockJournal.id}})).status,'POSTED');
+    assert.equal(await prisma.journalEntry.count({where:{companyId:company}}),reversalCount);
+    assert.equal((await sequence())?.nextValue,beforeReverseSequence?.nextValue);
+    assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'journal_entries',entityId:lockJournal.id,action:'REVERSE'}}),0);
+    const reversed=await manualJournal.reverse(company,user,lockJournal.id);
+    assert.equal((await prisma.journalEntry.findUniqueOrThrow({where:{id:lockJournal.id}})).status,'REVERSED');
+    assert.equal((await prisma.journalEntry.findUniqueOrThrow({where:{id:reversed.id}})).status,'POSTED');
+    assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'journal_entries',entityId:lockJournal.id,action:'REVERSE'}}),1);
+    console.log('PASS: real PG manual journal creation/reversal required-audit failure rolls back rows, status and document number.');
+
     // Real HTTP + DTO/controller/permission guard/service/PG. Identity is
     // injected and does not establish JWT or licensing enforcement.
     class JournalHttpModule {}

@@ -115,3 +115,61 @@ describe('manual journal state transitions', () => {
     await expect(service.cancel(company,user,id)).rejects.toThrow('synthetic audit failure');
   });
 });
+
+describe('manual journal creation and reversal audit', () => {
+  const debit = new Prisma.Decimal(10);
+  const zero = new Prisma.Decimal(0);
+  function setup() {
+    const original = {id:'entry',companyId:'company',branchId:'branch',entryNumber:'JV-1',
+      entryDate:new Date('2026-01-01'),status:JournalStatus.POSTED,currency:'EGP',
+      totalDebit:debit,totalCredit:debit,lines:[
+        {lineNumber:1,accountId:'a',debit,credit:zero,description:null,costCenterId:null,allocations:[]},
+        {lineNumber:2,accountId:'b',debit:zero,credit:debit,description:null,costCenterId:null,allocations:[]},
+      ]};
+    const created = {id:'new-entry',entryNumber:'JV-2',totalDebit:debit,totalCredit:debit};
+    const tx = {journalEntry:{create:jest.fn().mockResolvedValue(created),updateMany:jest.fn().mockResolvedValue({count:1})}};
+    const prisma = {
+      account:{findMany:jest.fn().mockResolvedValue([
+        {id:'a',code:'1000',isPostable:true,isActive:true},
+        {id:'b',code:'2000',isPostable:true,isActive:true},
+      ])},
+      journalEntry:{findFirst:jest.fn().mockResolvedValueOnce(original).mockResolvedValueOnce(null)},
+      $transaction:jest.fn(async (work:(tx:unknown)=>unknown)=>work(tx)),
+    };
+    const audit = {recordRequired:jest.fn().mockResolvedValue(undefined)};
+    const service = new JournalEntriesService(prisma as never,
+      {next:jest.fn().mockResolvedValue('JV-2')} as never, audit as never,
+      {periodFor:jest.fn().mockResolvedValue(null)} as never, {} as never,
+      {assertPostable:jest.fn().mockResolvedValue(undefined)} as never);
+    jest.spyOn(service as any,'toResponse').mockImplementation((value:unknown)=>value);
+    return {service,prisma,tx,audit};
+  }
+
+  it('writes create audit inside the transaction with the new entry', async () => {
+    const {service,tx,audit}=setup();
+    await service.create('company','branch','user',{entryDate:'2026-01-01',lines:[
+      {accountId:'a',debit:'10'}, {accountId:'b',credit:'10'},
+    ]});
+    expect(audit.recordRequired).toHaveBeenCalledWith(expect.objectContaining({
+      action:'CREATE',entity:'journal_entries',entityId:'new-entry',
+    }),tx);
+  });
+
+  it('requires reversal audit with the claim and mirror entry in one transaction', async () => {
+    const {service,tx,audit}=setup();
+    await service.reverse('company','user','entry');
+    expect(tx.journalEntry.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where:{id:'entry',companyId:'company',status:JournalStatus.POSTED},
+    }));
+    expect(audit.recordRequired).toHaveBeenCalledWith(expect.objectContaining({
+      action:'REVERSE',entity:'journal_entries',entityId:'entry',
+      after:{reversalId:'new-entry',reversalNumber:'JV-2'},
+    }),tx);
+  });
+
+  it('propagates reversal audit failure instead of reporting success', async () => {
+    const {service,audit}=setup();
+    audit.recordRequired.mockRejectedValue(new Error('synthetic audit failure'));
+    await expect(service.reverse('company','user','entry')).rejects.toThrow('synthetic audit failure');
+  });
+});
