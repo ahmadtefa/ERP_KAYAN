@@ -46,3 +46,14 @@ The independent full-resolution synthetic renders from [run 41836178565](https:/
 | dashboard_ar.png | `e9b3c65c1c8c3cfdd20a6950e3617965c7e564e4e4b9c02ca950c0831c8f2669` |
 | customers_ar.png | `6486fff6ea6c1053988fb13dc2725a413480aa17bea786201b3d0f4ecdcb5164` |
 | sales_invoices_ar.png | `2eb540e2d12bf4ed5eb9af8b0a8e1834eac820e1065601fc7efe8dd73ef6bc27` |
+
+## Invoice-list refresh action — a717d43
+
+The sales-invoice screenshot was reviewed against the failed render. Its changed
+header region shows the new manual refresh button and the corresponding shift of
+the new-invoice button; the table, navigation, and remaining screen are
+unchanged. The dashboard and customer baselines remain unchanged.
+
+| File | SHA-256 of updated 1440×900 RGBA pixels |
+| --- | --- |
+| sales_invoices_ar.png | `daf92fd3ce55dc6c01c8f93852e4d2d7d5bf36d42d4b7510a73e63a899e4f00e` |
