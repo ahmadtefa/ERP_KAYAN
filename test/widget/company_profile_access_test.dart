@@ -21,7 +21,7 @@ class _Profile extends CompanyProfileController {
 
 class _Branches extends BranchesController {
   @override
-  Future<List<Map<String, dynamic>>> build() async => [];
+  Future<List<Map<String, dynamic>>> build() async => [{'id':'fixture-branch','code':'B1','nameEn':'Branch','nameAr':'فرع','kind':'BRANCH'}];
 }
 
 class _Client extends ApiClient {
@@ -70,6 +70,10 @@ void main() {
       expect(fields.every((field) => field.enabled == isSuper), isTrue);
       expect(find.widgetWithText(FilledButton, 'Save'), isSuper ? findsOneWidget : findsNothing);
       expect(find.widgetWithText(TextButton, 'Upload logo'), isSuper ? findsOneWidget : findsNothing);
+      expect(find.textContaining('B1 —'), findsOneWidget);
+      expect(find.text('New unit'), isSuper ? findsOneWidget : findsNothing);
+      expect(find.byTooltip('Edit unit'), isSuper ? findsOneWidget : findsNothing);
+      expect(find.byTooltip('Delete unit'), isSuper ? findsOneWidget : findsNothing);
     });
 
     testWidgets('management panel ${isSuper ? 'permits super admin without delegated permission' : 'hides delegated action'}', (tester) async {

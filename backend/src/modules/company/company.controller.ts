@@ -41,8 +41,8 @@ interface UploadedLogo {
 
 /// Company profile, the logo, and the units (headquarters and branches).
 ///
-/// Profile and logo mutations require super admin; branch mutations also
-/// retain their existing permission checks.
+/// Profile, logo and branch mutations require super admin and retain their
+/// existing permission checks.
 @Controller('company')
 export class CompanyController {
   constructor(private readonly service: CompanyService) {}
@@ -110,6 +110,7 @@ export class CompanyController {
 
   @Post('branches')
   @RequirePermissions('admin.company.manage')
+  @UseGuards(AuditedSuperAdminGuard)
   createBranch(
     @CurrentUser() user: AuthUser,
     @Body() dto: CreateBranchDto,
@@ -119,6 +120,7 @@ export class CompanyController {
 
   @Patch('branches/:id')
   @RequirePermissions('admin.company.manage')
+  @UseGuards(AuditedSuperAdminGuard)
   updateBranch(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -129,6 +131,7 @@ export class CompanyController {
 
   @Delete('branches/:id')
   @RequirePermissions('admin.company.manage')
+  @UseGuards(AuditedSuperAdminGuard)
   async deleteBranch(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

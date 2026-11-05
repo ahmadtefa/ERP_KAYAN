@@ -17,6 +17,9 @@ const companyService = {
   setLogo: jest.fn().mockResolvedValue({ updated: true }),
   deleteLogo: jest.fn().mockResolvedValue(undefined),
   getProfile: jest.fn().mockResolvedValue({ id: 'fixture-company' }),
+  createBranch: jest.fn().mockResolvedValue({ id: 'fixture-branch' }),
+  updateBranch: jest.fn().mockResolvedValue({ id: 'fixture-branch' }),
+  deleteBranch: jest.fn().mockResolvedValue(undefined),
 };
 
 const deniedAudit = {recordRequired: jest.fn().mockResolvedValue(undefined)};
@@ -102,4 +105,29 @@ describe('company profile HTTP authorization', () => {
       await app.close();
     }
   });
+  it('requires super admin for all branch mutations even with delegated company permission', async () => {
+    jest.clearAllMocks();
+    const app = await NestFactory.create(FixtureModule, {logger:false});
+    app.use((req: {headers:Record<string,string>;user?:object},_res:unknown,next:()=>void)=>{
+      req.user={userId:'fixture-user',companyId:'fixture-company',branchId:null,username:'fixture',
+        isSuperAdmin:req.headers['x-fixture-super']==='yes',permissions:['admin.company.manage']}; next();
+    });
+    app.useGlobalGuards(new PermissionsGuard(new Reflector()));
+    await app.listen(0,'127.0.0.1');
+    const port=(app.getHttpServer().address() as {port:number}).port;
+    try {
+      for (const [method,path] of [['POST','/company/branches'],['PATCH','/company/branches/fixture-branch'],['DELETE','/company/branches/fixture-branch']]) {
+        const request=(superAdmin:boolean)=>fetch(`http://127.0.0.1:${port}${path}`,{method,
+          headers:{'x-fixture-super':superAdmin?'yes':'no','content-type':'application/json'},
+          ...(method==='DELETE'?{}:{body:JSON.stringify({nameEn:'Fixture'})})});
+        expect((await request(false)).status).toBe(403);
+        expect((await request(true)).status).toBe(method==='POST'?201:200);
+      }
+      expect(deniedAudit.recordRequired).toHaveBeenCalledTimes(3);
+      expect(companyService.createBranch).toHaveBeenCalledTimes(1);
+      expect(companyService.updateBranch).toHaveBeenCalledTimes(1);
+      expect(companyService.deleteBranch).toHaveBeenCalledTimes(1);
+    } finally {await app.close();}
+  });
+
 });

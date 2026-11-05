@@ -545,6 +545,7 @@ class _BranchesCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = context.l10n;
     final branches = ref.watch(branchesProvider);
+    final canEdit = ref.watch(currentUserProvider)?.isSuperAdmin ?? false;
 
     return Card(
       child: Padding(
@@ -552,7 +553,7 @@ class _BranchesCard extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Align(
+            if (canEdit) Align(
               alignment: AlignmentDirectional.centerEnd,
               child: FilledButton.icon(
                 onPressed: () => _editBranch(context, ref, null),
@@ -585,12 +586,12 @@ class _BranchesCard extends ConsumerWidget {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          IconButton(
+                          if (canEdit) IconButton(
                             tooltip: l10n.editBranch,
                             icon: const Icon(Icons.edit_outlined, size: 20),
                             onPressed: () => _editBranch(context, ref, branch),
                           ),
-                          IconButton(
+                          if (canEdit) IconButton(
                             tooltip: l10n.deleteBranch,
                             icon: const Icon(Icons.delete_outline, size: 20),
                             onPressed: () =>
