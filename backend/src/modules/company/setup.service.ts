@@ -39,7 +39,8 @@ export class SetupService {
       // Any company row, including a soft-deleted one, means this is not a
       // pristine installation. Public first-run setup must never revive it.
       this.prisma.company.count(),
-      this.prisma.user.count({ where: { deletedAt: null } }),
+      // Include retired accounts too: the public setup endpoint refuses any user row.
+      this.prisma.user.count(),
       this.prisma.user.count({ where: { deletedAt: null, isActive: true, company: { deletedAt: null } } }),
     ]);
     return {
