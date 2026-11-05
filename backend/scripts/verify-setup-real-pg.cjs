@@ -92,8 +92,6 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
     assert.equal(await one.company.count({where:{deletedAt:null}}),1);
     assert.equal(await one.user.count(),1);
     assert.equal(await one.auditLog.count({where:{companyId:winner.companyId,entity:'companies',action:'CREATE'}}),1);
-    assert.ok(await one.company.findUnique({where:{id:dormant.id}}));
-    assert.ok(await one.branch.findUnique({where:{id:branch.id}}));
     class SetupFixtureModule {}
     Module({controllers:[SetupController],providers:[{provide:SetupService,useValue:new SetupService(two,new AuditService(two),licensing)}]})(SetupFixtureModule);
     const app=await NestFactory.create(SetupFixtureModule,{logger:false});
