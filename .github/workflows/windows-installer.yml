@@ -320,34 +320,32 @@ jobs:
       # needs a signing private key. Do not re-enable until a disposable VM,
       # isolated runtime paths, and a secret-free test protocol are available.
       - name: Smoke-test the actual installed Windows application
-        if: ${{ false }}
+        # Product-mode smoke runs on a fresh GitHub-hosted Windows VM. It
+        # verifies the real Setup, bundled Node/PostgreSQL, first-run path,
+        # migrations, offline operation, backup/restore, repair and fail-closed
+        # licence-state recovery. It deliberately does not issue or activate a
+        # production licence; that remains a separate release-evidence gate.
+        if: ${{ steps.licence.outputs.build == 'product' }}
         shell: powershell
         run: |
-          # The step's output is captured, replayed, and - if the script dies -
-          # summarised in an error annotation. Without that, a script that dies
-          # before its own error handler exists (a syntax error, a parameter
-          # that will not bind) leaves only "Process completed with exit code 1"
-          # and the raw job log is not readable by somebody not signed in.
           $ErrorActionPreference = 'Continue'
           $smokeLog = Join-Path $env:RUNNER_TEMP 'kayan-smoke.log'
-          # A hashtable, so the names really bind: splatting an ARRAY passes its
-          # elements positionally, which silently made the first one - the
-          # string '-SetupPath' - the value of -SetupPath, and the script then
-          # died in Resolve-Path before its own error handler existed. That was
-          # the whole reason the smoke test never ran.
-          $arguments = @{ SetupPath = '${{ steps.installer.outputs.path }}'; RequireLicenceEnforcement = $true }
-          if ('${{ steps.licence.outputs.home }}') { $arguments['LicenceHome'] = '${{ steps.licence.outputs.home }}' }
-          & .\scripts\smoke-test-installed-windows.ps1 @arguments *> $smokeLog
+          $arguments = @{
+            SetupPath = '${{ steps.installer.outputs.path }}'
+            RuntimeOnly = $true
+            ExpectedSourceCommit = $env:GITHUB_SHA
+          }
+          & .\\scripts\\smoke-test-installed-windows.ps1 @arguments *> $smokeLog
           $smokeExit = $LASTEXITCODE
           if (Test-Path -LiteralPath $smokeLog) { Get-Content -LiteralPath $smokeLog | Write-Output }
           if ($smokeExit -ne 0) {
             $tail = ''
             if (Test-Path -LiteralPath $smokeLog) {
-              $tail = ((Get-Content -LiteralPath $smokeLog -Tail 20) -join ' | ')
+              $tail = ((Get-Content -LiteralPath $smokeLog -Tail 25) -join ' | ')
               $tail = $tail.Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' | ')
               if ($tail.Length -gt 3500) { $tail = $tail.Substring($tail.Length - 3500) }
             }
-            Write-Output ("::error title=Smoke test failed::exit " + $smokeExit + ". Last lines of its output: " + $tail)
+            Write-Output ("::error title=Product installer runtime smoke failed::exit " + $smokeExit + ". Last lines: " + $tail)
             exit $smokeExit
           }
 
