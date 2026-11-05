@@ -121,7 +121,7 @@ describe('LicenceBackupArchive', () => {
 
   it('captures and restores from the authenticated mirror when only the primary is damaged', () => {
     fx = fixture();
-    // Model the protected mirror written by an installed licence store.
+    // Model a previously saved authenticated secondary state copy.
     writeFileSync(
       join(fx.licenceDir, 'license-state.backup.json'),
       readFileSync(join(fx.licenceDir, 'license-state.json')),
