@@ -15,6 +15,7 @@ import { FullBackupService } from './full-backup.service';
 const licensingStub = {
   reconcile: jest.fn().mockResolvedValue(undefined),
   reserveSeat: jest.fn(),
+  captureLicenceBackup: jest.fn().mockReturnValue({ id: 'licence-test' }),
 } as any;
 
 jest.mock('child_process', () => ({
@@ -62,6 +63,7 @@ describe('FullBackupService guards', () => {
       process.env.KAYAN_PG_RESTORE = originalPgRestore;
     }
     jest.mocked(childProcess.execFile).mockReset();
+    licensingStub.captureLicenceBackup.mockReset().mockReturnValue({ id: 'licence-test' });
     if (originalDatabaseUrl === undefined) {
       delete process.env.DATABASE_URL;
     } else {
@@ -192,6 +194,7 @@ describe('FullBackupService guards', () => {
       expect(seenArgs[0]).toContain('--format=custom');
       expect(result.file.name).toMatch(/^kayan-full-.*\.dump$/);
       expect(result.file.sizeBytes).toBeGreaterThan(0);
+      expect(licensingStub.captureLicenceBackup).toHaveBeenCalledWith('full-backup');
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'BACKUP', userId: 'user-1' }),
       );
