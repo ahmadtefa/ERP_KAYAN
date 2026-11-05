@@ -590,7 +590,7 @@ try {
   $base = "http://127.0.0.1:$apiPort/api/v1"
   $headers = @{ Authorization = "Bearer $($login.accessToken)" }
   if ($RuntimeOnly) {
-    Write-Host "Runtime-only mode: validating offline startup, local PostgreSQL backup/restore, fail-closed corrupt-state handling, restoration of saved state bytes and public-key recovery. This is not signed-licence reconstruction or activation."
+    Write-Host "Runtime-only diagnostics: offline startup, explicit backup capability/guard checks, and fail-closed licence-state handling. Complete backup/restore and signed-licence reconstruction require independent evidence."
     # Preserve the API authentication boundary: unauthenticated callers must
     # be rejected, while the synthetic administrator can inspect status.
     $anonymousStatus = Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/license/status" -TimeoutSec 15
@@ -601,35 +601,54 @@ try {
     }
     Write-Host "PASS: product mode enforces licensing while allowing local health, login and backup routes."
 
-    # Verify the bundled pg_dump/pg_restore path against the installed runtime,
-    # using only the synthetic SQL sentinel created before upgrade/repair.
-    $full = Invoke-RestMethod -Method Post -Uri "$base/backup/full" -Headers $headers -TimeoutSec 180
-    if (-not $full.file.name -or $full.file.sizeBytes -le 0) { Fail 'Installed runtime did not produce a real PostgreSQL backup archive.' }
-    $verified = Invoke-RestMethod -Method Post -Uri "$base/backup/full/$($full.file.name)/verify" -Headers $headers -TimeoutSec 180
-    if ($verified.entries -le 0) { Fail 'Bundled pg_restore did not verify any archive objects.' }
-    $dumpPath = Join-Path $env:TEMP 'kayan-installed-runtime-full-backup.dump'
-    Invoke-WebRequest -UseBasicParsing -Uri "$base/backup/full/$($full.file.name)/download" -Headers $headers -OutFile $dumpPath -TimeoutSec 60
-    $dumpBytes = [IO.File]::ReadAllBytes($dumpPath)
-    if ($dumpBytes.Length -le 5 -or [Text.Encoding]::ASCII.GetString($dumpBytes, 0, 5) -ne 'PGDMP') { Fail 'Installed full backup download is not a real PostgreSQL custom archive.' }
-    $env:PGPASSWORD = $databasePassword
-    & $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -v ON_ERROR_STOP=1 -c "UPDATE kayan_installer_upgrade_probe SET value='changed' WHERE id=1" *> $null
-    $mutationExit = $LASTEXITCODE
-    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
-    if ($mutationExit -ne 0) { Fail 'Could not mutate the SQL sentinel before full PostgreSQL restore.' }
-    $restoreBody = @{ confirm = $true; fileName = $full.file.name } | ConvertTo-Json -Compress
-    $fullRestored = Invoke-RestMethod -Method Post -Uri "$base/backup/full/restore" -Headers $headers -ContentType 'application/json' -Body $restoreBody -TimeoutSec 300
-    if (-not $fullRestored.restored -or -not $fullRestored.checked -or -not $fullRestored.safetyBackup) { Fail 'Installed full restore did not complete with checked data and a safety backup.' }
-    $login = Invoke-RestMethod -Method Post -Uri "$base/auth/login" -ContentType 'application/json' -Body $loginPayload -TimeoutSec 30
-    if (-not $login.accessToken) { Fail 'Login failed after installed PostgreSQL restore.' }
-    $headers = @{ Authorization = "Bearer $($login.accessToken)" }
-    $env:PGPASSWORD = $databasePassword
-    $sentinelResult = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT value FROM kayan_installer_upgrade_probe WHERE id=1" 2>&1)
-    $sentinelExit = $LASTEXITCODE
-    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
-    if ($sentinelExit -ne 0 -or (($sentinelResult -join '').Trim() -ne 'preserved')) {
-      Fail ("PostgreSQL full restore did not recover the original SQL sentinel: " + ($sentinelResult -join ' '))
+    # A partial runtime diagnostic must not mistake intentionally blocked
+    # complete recovery for a broken PostgreSQL service or a passed restore.
+    $capabilities = Invoke-RestMethod -Uri "$base/backup/full/capabilities" -Headers $headers -TimeoutSec 30
+    if ($capabilities.fullBackupSupported -eq $true -and $capabilities.fullRestoreSupported -eq $true) {
+      # Verify the bundled pg_dump/pg_restore path against the installed runtime,
+      # using only the synthetic SQL sentinel created before upgrade/repair.
+      $full = Invoke-RestMethod -Method Post -Uri "$base/backup/full" -Headers $headers -TimeoutSec 180
+      if (-not $full.file.name -or $full.file.sizeBytes -le 0) { Fail 'Installed runtime did not produce a real PostgreSQL backup archive.' }
+      $verified = Invoke-RestMethod -Method Post -Uri "$base/backup/full/$($full.file.name)/verify" -Headers $headers -TimeoutSec 180
+      if ($verified.entries -le 0) { Fail 'Bundled pg_restore did not verify any archive objects.' }
+      $dumpPath = Join-Path $env:TEMP 'kayan-installed-runtime-full-backup.dump'
+      Invoke-WebRequest -UseBasicParsing -Uri "$base/backup/full/$($full.file.name)/download" -Headers $headers -OutFile $dumpPath -TimeoutSec 60
+      $dumpBytes = [IO.File]::ReadAllBytes($dumpPath)
+      if ($dumpBytes.Length -le 5 -or [Text.Encoding]::ASCII.GetString($dumpBytes, 0, 5) -ne 'PGDMP') { Fail 'Installed full backup download is not a real PostgreSQL custom archive.' }
+      $env:PGPASSWORD = $databasePassword
+      & $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -v ON_ERROR_STOP=1 -c "UPDATE kayan_installer_upgrade_probe SET value='changed' WHERE id=1" *> $null
+      $mutationExit = $LASTEXITCODE
+      Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+      if ($mutationExit -ne 0) { Fail 'Could not mutate the SQL sentinel before full PostgreSQL restore.' }
+      $restoreBody = @{ confirm = $true; fileName = $full.file.name } | ConvertTo-Json -Compress
+      $fullRestored = Invoke-RestMethod -Method Post -Uri "$base/backup/full/restore" -Headers $headers -ContentType 'application/json' -Body $restoreBody -TimeoutSec 300
+      if (-not $fullRestored.restored -or -not $fullRestored.checked -or -not $fullRestored.safetyBackup) { Fail 'Installed full restore did not complete with checked data and a safety backup.' }
+      $login = Invoke-RestMethod -Method Post -Uri "$base/auth/login" -ContentType 'application/json' -Body $loginPayload -TimeoutSec 30
+      if (-not $login.accessToken) { Fail 'Login failed after installed PostgreSQL restore.' }
+      $headers = @{ Authorization = "Bearer $($login.accessToken)" }
+      $env:PGPASSWORD = $databasePassword
+      $sentinelResult = @(& $psql -h 127.0.0.1 -p 5432 -U erp_app -d erp_kayan -t -A -c "SELECT value FROM kayan_installer_upgrade_probe WHERE id=1" 2>&1)
+      $sentinelExit = $LASTEXITCODE
+      Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+      if ($sentinelExit -ne 0 -or (($sentinelResult -join '').Trim() -ne 'preserved')) {
+        Fail ("PostgreSQL full restore did not recover the original SQL sentinel: " + ($sentinelResult -join ' '))
+      }
+      Write-Output '::notice::Installed Windows runtime backup/restore passed: valid PGDMP archive, checked restore, safety backup, re-login and original SQL sentinel verified.'
+    } elseif ($capabilities.fullBackupSupported -eq $false -and $capabilities.fullRestoreSupported -eq $false) {
+      $backupBlocked = Invoke-WebRequest -Method Post -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/backup/full" -Headers $headers -TimeoutSec 30
+      $restoreBlocked = Invoke-WebRequest -Method Post -UseBasicParsing -SkipHttpErrorCheck -Uri "$base/backup/full/restore" -Headers $headers -ContentType 'application/json' -Body '{}' -TimeoutSec 30
+      $backupBody = $backupBlocked.Content | ConvertFrom-Json
+      $restoreBody = $restoreBlocked.Content | ConvertFrom-Json
+      if ([int]$backupBlocked.StatusCode -ne 503 -or $backupBody.code -ne 'FULL_BACKUP_INCOMPLETE') {
+        Fail 'Complete backup did not fail closed with FULL_BACKUP_INCOMPLETE.'
+      }
+      if ([int]$restoreBlocked.StatusCode -ne 503 -or $restoreBody.code -ne 'FULL_RESTORE_UNAVAILABLE') {
+        Fail 'Complete restore did not fail closed with FULL_RESTORE_UNAVAILABLE.'
+      }
+      Write-Output '::warning title=BLOCKED — complete backup and restore not tested::Guard refusal was verified; no complete backup or restore was performed. This is not release evidence.'
+    } else {
+      Fail 'Complete backup/restore capability flags are inconsistent or missing; refusing to infer recovery readiness.'
     }
-    Write-Output '::notice::Installed Windows runtime backup/restore passed: valid PGDMP archive, checked restore, safety backup, re-login and original SQL sentinel verified.'
 
     $licenseDirectory = Join-Path $env:ProgramData "KAYAN-ERP\license"
     $statePath = Join-Path $licenseDirectory "license-state.json"

@@ -24,3 +24,20 @@ test('payload scanner detects split synthetic markers without key material', asy
   assert.equal(await scanPrivateMaterialStream(Readable.from([marker.slice(0, 14), marker.slice(14)])), 'PEM private-key material');
   assert.equal(await scanPrivateMaterialStream(Readable.from(['Example: -----BEGIN PRIVATE KEY-----\\n...'])), null);
 });
+
+test('runtime smoke reports complete recovery as blocked without removing the retained restore exercise', async () => {
+  const smoke = await readFile(new URL('./smoke-test-installed-windows.ps1', import.meta.url), 'utf8');
+  const workflow = await readFile(new URL('../.github/workflows/windows-installer.yml', import.meta.url), 'utf8');
+  const capability = smoke.indexOf('$capabilities = Invoke-RestMethod -Uri "$base/backup/full/capabilities"');
+  const supported = smoke.indexOf('if ($capabilities.fullBackupSupported -eq $true -and $capabilities.fullRestoreSupported -eq $true)', capability);
+  const retainedRestore = smoke.indexOf('$fullRestored = Invoke-RestMethod -Method Post -Uri "$base/backup/full/restore"', supported);
+  const blocked = smoke.indexOf('} elseif ($capabilities.fullBackupSupported -eq $false -and $capabilities.fullRestoreSupported -eq $false)', retainedRestore);
+  assert.ok(capability >= 0 && capability < supported && supported < retainedRestore && retainedRestore < blocked);
+  const guardChecks = smoke.slice(blocked, smoke.indexOf('$licenseDirectory', blocked));
+  assert.match(guardChecks, /FULL_BACKUP_INCOMPLETE/);
+  assert.match(guardChecks, /FULL_RESTORE_UNAVAILABLE/);
+  assert.match(guardChecks, /complete backup and restore not tested/i);
+  assert.match(guardChecks, /not release evidence/i);
+  assert.match(guardChecks, /inconsistent or missing/);
+  assert.match(workflow, /notTested=@\('Complete backup and restore with data, files and licence'/);
+});
