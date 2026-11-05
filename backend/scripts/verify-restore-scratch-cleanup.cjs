@@ -13,6 +13,7 @@ require('reflect-metadata');
 require('ts-node/register/transpile-only');
 const { Client } = require('pg');
 const { FullBackupService } = require('../src/modules/backup/full-backup.service');
+const { pgBackupConnectionEnv } = require('../src/modules/backup/pg-backup-connection');
 const { MaintenanceService } = require('../src/common/maintenance/maintenance');
 const { FullBackupController } = require('../src/modules/backup/full-backup.controller');
 const { PermissionsGuard } = require('../src/common/guards/permissions.guard');
@@ -184,6 +185,49 @@ const path = require('node:path');
     assert.equal((await client.query('SELECT value FROM fixture_items WHERE id = 1')).rows[0].value, 'changed-after-backup');
     assert.equal((await service.list()).filter(f => f.kind === 'safety').length, 0);
     console.log('PASS: real HTTP and pg_restore read a valid archive, reject TOC-readable truncated data and protect deletion without primary changes; scratch cleanup failure leaves synthetic primary unchanged. Prisma and licence checks mocked; external files and full restore not verified.');
+
+    // Now allow a real restore ONLY on this newly created disposable target.
+    // Application postchecks and access/licence repair remain test stubs; this
+    // is not an application, multi-process, crash or licensing proof.
+    await scratchClient.end();
+    scratchClient = null;
+    await admin.query(`DROP DATABASE "${scratchName}"`);
+    scratchName = null;
+    const repairMaintenance = new MaintenanceService();
+    const recorded = [];
+    let licenseCalls = 0;
+    const actual = new FullBackupService({$executeRawUnsafe: sql => client.query(sql)},
+      {record: async row => {recorded.push(row);}}, repairMaintenance,
+      {reconcile: async () => {licenseCalls++;}});
+    actual.postRestoreCheck = async () => ({ok:true,detail:'synthetic-only'});
+    actual.reconcileRestoredCompanies = async () => {throw new Error('synthetic access repair failure');};
+    await assert.rejects(actual.restore({confirm:true,fileName:backup.file.name},'fixture'),/maintenance remains active/i);
+    assert.equal(repairMaintenance.isActive,true);
+    assert.match(repairMaintenance.status.detail,/access repair failed/i);
+    assert.equal(licenseCalls,0);
+    assert.deepEqual(recorded.map(row=>row.action),['RESTORE_ACCESS_REPAIR_FAILED']);
+    assert.equal((await client.query('SELECT value FROM fixture_items WHERE id=1')).rows[0].value,'before');
+    const safety = (await actual.list()).filter(file=>file.kind==='safety');
+    assert.equal(safety.length,1);
+    assert.ok((await actual.verify(safety[0].name)).archiveContentReadable);
+    // Check the pre-restore value by restoring the safety file into a second
+    // disposable database, rather than merely trusting its TOC or a mock.
+    const safetyName=`kayan_safety_check_${randomUUID().replace(/-/g,'')}`;
+    let safetyClient;
+    try {
+      await admin.query(`CREATE DATABASE "${safetyName}"`);
+      execFileSync('pg_restore',['--exit-on-error','--no-owner','--no-privileges','--no-password',
+        `--dbname=${safetyName}`,path.join(dir,safety[0].name)],
+        {env:{...process.env,...pgBackupConnectionEnv(process.env.DATABASE_URL)}});
+      const safetyUrl = new URL(adminUrl); safetyUrl.pathname=`/${safetyName}`;
+      safetyClient = new Client({connectionString:safetyUrl.toString()});
+      await safetyClient.connect();
+      assert.equal((await safetyClient.query('SELECT value FROM fixture_items WHERE id=1')).rows[0].value,'changed-after-backup');
+    } finally {
+      if (safetyClient) await safetyClient.end();
+      await admin.query(`DROP DATABASE IF EXISTS "${safetyName}"`);
+    }
+    console.log('PASS: synthetic PG older backup restored; injected access repair failure holds local maintenance; separate scratch restore confirms safety snapshot contains pre-restore value. Application checks and licensing stubbed; no crash or concurrency proof.');
   } finally {
     if (scratchClient) await scratchClient.end();
     if (scratchName) await admin.query(`DROP DATABASE "${scratchName}"`);

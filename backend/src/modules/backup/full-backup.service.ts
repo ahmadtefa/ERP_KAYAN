@@ -843,20 +843,33 @@ export class FullBackupService {
         }
       }
 
-      // 6. The archive is a snapshot of the program that wrote it. Bring
-      // its access rows up to this version's policy — system-role grants
-      // topped up, and a super administrator guaranteed per company — or
-      // the installation-level screens (program reset, this very backup
-      // screen) stay locked after an otherwise perfect restore. A repair
-      // failure must not un-report a restore whose data already passed
-      // its checks, so it is logged and written into the audit record
-      // instead of failing the request.
-      let accessRepair: unknown = null;
+      // 6. Access repair can commit per company and fail part-way through.
+      // Never report success or reopen business requests with an unknown mix
+      // of access policies. This maintenance flag is process-local and does
+      // not by itself protect against a restart or another backend process.
+      let accessRepair: unknown;
       try {
         accessRepair = await this.reconcileRestoredCompanies();
       } catch (repairError) {
         this.logger.error(`Post-restore access repair failed (${safeBackupFailure(repairError)}).`);
-        accessRepair = { error: safeBackupFailure(repairError) };
+        this.maintenance.begin(
+          'ATTENTION: post-restore access repair failed. Do not enter data; check the safety backup and repair access.',
+        );
+        // Best-effort only: the restored database may not accept an audit row.
+        // Failure to audit must never release maintenance or mask the error.
+        try {
+          await this.audit.record({
+            action: 'RESTORE_ACCESS_REPAIR_FAILED',
+            entity: 'backup_full',
+            after: { safetyBackup: safety.name },
+            userId,
+          });
+        } catch {
+          this.logger.error('Could not record post-restore access repair failure.');
+        }
+        throw new ServiceUnavailableException(
+          'تعذر إصلاح الصلاحيات بعد الاستعادة. يبقى النظام في وضع الصيانة. / Access repair failed after restore; maintenance remains active.',
+        );
       }
 
       await this.audit.record({

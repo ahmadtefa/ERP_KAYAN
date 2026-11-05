@@ -200,18 +200,34 @@ describe('full restore failure safety', () => {
     expect(maintenance.isActive).toBe(false);
   });
 
-  it('does not persist access-repair errors containing sensitive data in audit', async () => {
+  it('holds maintenance and does not expose access-repair errors when repair fails', async () => {
     const marker = 'synthetic-private-marker';
     const log = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     internals.reconcileRestoredCompanies.mockRejectedValue(new Error(marker));
-    const result = await service.restore({ confirm: true, uploaded }, 'u');
+    const failure = await service.restore({ confirm: true, uploaded }, 'u').catch((error) => error);
     const audit = (service as unknown as { audit: { record: jest.Mock } }).audit;
-    expect(result.restored).toBe(true);
+    expect(failure).toBeInstanceOf(ServiceUnavailableException);
+    expect(failure.message).toMatch(/maintenance remains active/i);
+    expect(failure.message).not.toContain(marker);
+    expect(maintenance.isActive).toBe(true);
+    expect(maintenance.status.detail).toMatch(/access repair failed/i);
+    expect(licensing.reconcile).not.toHaveBeenCalled();
     expect(JSON.stringify(audit.record.mock.calls)).not.toContain(marker);
     expect(JSON.stringify(log.mock.calls)).not.toContain(marker);
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
-      after: expect.objectContaining({ accessReconciled: { error: 'unclassified failure' } }),
+      action: 'RESTORE_ACCESS_REPAIR_FAILED',
+      after: { safetyBackup: 'kayan-safety-test.dump' },
     }));
+    expect(audit.record).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'RESTORE' }));
+  });
+
+  it('holds maintenance when recording an access-repair failure also fails', async () => {
+    internals.reconcileRestoredCompanies.mockRejectedValue(new Error('synthetic repair failure'));
+    const audit = (service as unknown as { audit: { record: jest.Mock } }).audit;
+    audit.record.mockRejectedValue(new Error('synthetic audit failure'));
+    await expect(service.restore({ confirm: true, uploaded }, 'u')).rejects.toThrow(/maintenance remains active/i);
+    expect(maintenance.isActive).toBe(true);
+    expect(licensing.reconcile).not.toHaveBeenCalled();
   });
 
   it('does not start restore while a backup is in progress in this service instance', async () => {
