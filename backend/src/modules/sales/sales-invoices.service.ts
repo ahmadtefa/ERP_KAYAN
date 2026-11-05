@@ -73,6 +73,10 @@ interface PreparedInvoice {
   lineDiscountTotal: Prisma.Decimal;
 }
 
+interface SalesInvoicePreparationOptions {
+  pricesExcludeTax?: boolean;
+}
+
 @Injectable()
 export class SalesInvoicesService {
   constructor(
@@ -227,6 +231,7 @@ export class SalesInvoicesService {
     dto: CreateSalesInvoiceDto,
     tx: Prisma.TransactionClient,
     orderUnits?: readonly TrustedOrderUnit[],
+    options: SalesInvoicePreparationOptions = {},
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
@@ -246,6 +251,7 @@ export class SalesInvoicesService {
       { type: dto.discountType, percent: dto.discountPercent, amount: dto.discountAmount },
       orderUnits,
       tx,
+      options,
     );
     const lines = prepared.lines;
     const totals = this.totalsOf(lines);
@@ -1008,6 +1014,7 @@ export class SalesInvoicesService {
     documentDiscount: DiscountInput,
     orderUnits?: readonly TrustedOrderUnit[],
     client: Prisma.TransactionClient = this.prisma,
+    options: SalesInvoicePreparationOptions = {},
   ): Promise<PreparedInvoice> {
     const prepared: PreparedLine[] = [];
     // The company's own policy: the rate to apply when nobody said otherwise,
@@ -1142,7 +1149,7 @@ export class SalesInvoicesService {
       // before tax" means on these documents.
       // Sales orders currently store prices as tax-exclusive when created.
       // Do not reinterpret an old agreed price using today's company setting.
-      const grossLineTotal = !orderUnits && settings.pricesIncludeTax && taxRate.greaterThan(0)
+      const grossLineTotal = !orderUnits && !options.pricesExcludeTax && settings.pricesIncludeTax && taxRate.greaterThan(0)
         ? typedTotal.div(grossUp).toDecimalPlaces(MONEY_SCALE)
         : typedTotal;
 

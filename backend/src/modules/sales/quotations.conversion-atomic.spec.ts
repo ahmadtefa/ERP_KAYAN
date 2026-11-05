@@ -67,6 +67,7 @@ describe('quotation conversion transaction', () => {
     expect(invoices.createInTransaction).toHaveBeenCalledTimes(1);
     expect(invoices.create).not.toHaveBeenCalled();
     expect(invoices.createInTransaction.mock.calls[0][3].lines[0].taxRate).toBe('0.0000');
+    expect(invoices.createInTransaction.mock.calls[0][6]).toEqual({ pricesExcludeTax: true });
     expect(audit.recordRequired).toHaveBeenCalledTimes(2);
     await expect(service.convert('co','branch','user','q1')).rejects.toThrow(/already been converted/);
     expect(state.invoices).toEqual(['i1']);
@@ -79,6 +80,26 @@ describe('quotation conversion transaction', () => {
     quotation.totalAmount = new Prisma.Decimal('114');
     await expect(service.convert('co','branch','user','q1')).rejects.toThrow(/totals differ/);
     expect(state).toEqual({status:'ACCEPTED',convertedInvoiceId:null,invoices:[],events:[]});
+  });
+
+  it('allows per-line tax rounding drift within the line-count tolerance', async () => {
+    const {service,state,quotation,invoices} = setup();
+    quotation.subTotal = new Prisma.Decimal('0.02');
+    quotation.discountTotal = new Prisma.Decimal('0');
+    quotation.taxRate = new Prisma.Decimal('5.5');
+    quotation.taxAmount = new Prisma.Decimal('0.0011');
+    quotation.totalAmount = new Prisma.Decimal('0.0211');
+    quotation.tables[0].lines = [
+      {itemId:null, description:'First service', quantity:new Prisma.Decimal('1'), unitPrice:new Prisma.Decimal('0.01'), lineTotal:new Prisma.Decimal('0.01')},
+      {itemId:null, description:'Second service', quantity:new Prisma.Decimal('1'), unitPrice:new Prisma.Decimal('0.01'), lineTotal:new Prisma.Decimal('0.01')},
+    ];
+    invoices.createInTransaction.mockResolvedValueOnce({
+      id:'i1', invoiceNumber:'SI1', subTotal:new Prisma.Decimal('0.02'),
+      taxAmount:new Prisma.Decimal('0.0012'), totalAmount:new Prisma.Decimal('0.0212'),
+    });
+
+    await expect(service.convert('co','branch','user','q1')).resolves.toMatchObject({invoice:{id:'i1'}});
+    expect(state.status).toBe('CONVERTED');
   });
 
   it.each(['event','audit'] as const)('rolls back the invoice and claim when %s fails', async failure => {

@@ -807,13 +807,15 @@ export class QuotationsService {
         discountPercent: quotation.discountType === 'PERCENT' ? quotation.discountPercent.toFixed(RATE_SCALE) : undefined,
         discountAmount: quotation.discountAmount.toFixed(MONEY_SCALE),
         lines,
-      }, tx);
+      }, tx, undefined, { pricesExcludeTax: true });
       // Do not silently create a different debt if prices-including-tax,
       // discount allocation, or line rounding changes the accepted offer.
       // A discrepancy aborts the entire transaction for explicit correction.
       const acceptedNet = quotation.subTotal.minus(quotation.discountTotal);
-      if (!invoice.subTotal.equals(acceptedNet) || !invoice.taxAmount.equals(quotation.taxAmount) ||
-          !invoice.totalAmount.equals(quotation.totalAmount)) {
+      const tolerance = new Prisma.Decimal('0.0001').mul(lines.length);
+      const off = (a: Prisma.Decimal, b: Prisma.Decimal) => a.minus(b).abs().greaterThan(tolerance);
+      if (!invoice.subTotal.equals(acceptedNet) || off(invoice.taxAmount, quotation.taxAmount) ||
+          off(invoice.totalAmount, quotation.totalAmount)) {
         throw new BadRequestException('Invoice totals differ from the accepted quotation; review tax and discounts before conversion');
       }
       await tx.quotation.update({

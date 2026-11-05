@@ -172,3 +172,33 @@ describe('SalesInvoicesService.reverse', () => {
     );
   });
 });
+
+describe('SalesInvoicesService.prepareLines tax-price options', () => {
+  it('can preserve tax-exclusive quotation prices when the company includes tax in invoice prices', async () => {
+    const settings = {
+      get: jest.fn().mockResolvedValue({ pricesIncludeTax: true, maxDiscountPercent: '100' }),
+    };
+    const service = new SalesInvoicesService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      settings as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const lines = [{ description: 'Taxable service', quantity: '1', unitPrice: '120', taxRate: '20' }];
+    const inclusive = await (service as any).prepareLines(
+      COMPANY_ID, lines, null, {}, undefined, {} as never,
+    );
+    const exclusive = await (service as any).prepareLines(
+      COMPANY_ID, lines, null, {}, undefined, {} as never, { pricesExcludeTax: true },
+    );
+
+    expect(inclusive.lines[0].lineTotal).toEqual(new Prisma.Decimal('100'));
+    expect(inclusive.lines[0].taxAmount).toEqual(new Prisma.Decimal('20'));
+    expect(exclusive.lines[0].lineTotal).toEqual(new Prisma.Decimal('120'));
+    expect(exclusive.lines[0].taxAmount).toEqual(new Prisma.Decimal('24'));
+  });
+});
