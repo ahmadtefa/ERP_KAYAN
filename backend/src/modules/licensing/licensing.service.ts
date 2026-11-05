@@ -1563,6 +1563,19 @@ export class LicensingService implements OnModuleInit {
   }
 }
 
+/** Return a bounded diagnostic without logging paths, key material or licence data. */
+function describeError(error: unknown): string {
+  if (error instanceof LicenseStateError) return error.code;
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string' &&
+        ['EACCES', 'EPERM', 'ENOENT', 'ENOSPC', 'ETIMEDOUT', 'EIO'].includes(code)) {
+      return code;
+    }
+  }
+  return 'unclassified failure';
+}
+
 type LicenseRow = {
   licenseId: string;
   machineId: string;
