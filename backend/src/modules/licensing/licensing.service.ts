@@ -759,6 +759,16 @@ export class LicensingService implements OnModuleInit {
         });
       }
     }
+    // An already-installed licence takes precedence over a mismatch between
+    // this activation key and the protected watermark: activation cannot
+    // replace it, regardless of which licence the key names.
+    if (payload.type === 'ACTIVATION' && existing) {
+      throw new ForbiddenException({
+        detail:
+          'This computer already holds a licence. Use a renewal key to extend it or a seat key to raise the limit; a second activation key would replace nothing.',
+        code: 'LICENSE_ALREADY_ACTIVE',
+      });
+    }
     // Compare the signed key with the protected watermark after the database
     // identity check, so a wrong-licence key gets the precise refusal reason.
     this.assertLicenseIdentity(payload.licenseId);
@@ -773,13 +783,6 @@ export class LicensingService implements OnModuleInit {
         detail:
           'There is no licence on this computer to change. Apply a new activation key first.',
         code: 'LICENSE_NOT_INSTALLED',
-      });
-    }
-    if (payload.type === 'ACTIVATION' && existing) {
-      throw new ForbiddenException({
-        detail:
-          'This computer already holds a licence. Use a renewal key to extend it or a seat key to raise the limit; a second activation key would replace nothing.',
-        code: 'LICENSE_ALREADY_ACTIVE',
       });
     }
     if (payload.type === 'TRANSFER' && !payload.state) {
