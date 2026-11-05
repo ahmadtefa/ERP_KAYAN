@@ -16,7 +16,7 @@ function fixture(dormant: any[] = [], activeInside = 0) {
     deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
     create: jest.fn().mockResolvedValue({ id: 'company', code: dto.companyCode, nameEn: dto.companyNameEn, nameAr: dto.companyNameAr }),
   };
-  const txCompany = { ...company, count: jest.fn().mockResolvedValue(activeInside) };
+  const txCompany = { ...company, count: jest.fn().mockResolvedValue(dormant.length + activeInside) };
   const tx = {
     $executeRaw: jest.fn().mockResolvedValue(1), company: txCompany,
     branch: { create: jest.fn().mockResolvedValue({ id: 'branch', code: 'MAIN', nameEn: 'Main', nameAr: 'الرئيسي' }) },
