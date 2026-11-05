@@ -1,6 +1,8 @@
 'use strict';
-// Defense in depth for the explicitly listed non-signing CI tests. This is not
-// an OS sandbox: never use it to authorize unreviewed tests or child programs.
+// Defense in depth for explicitly reviewed non-signing CI tests. This is NOT
+// an OS sandbox: native addons, WebCrypto, subprocesses without NODE_OPTIONS,
+// and tools in other languages are not contained. Never use this to authorize
+// unreviewed code, production secrets, or a real licence/signature test.
 const crypto = require('node:crypto');
 const { syncBuiltinESMExports } = require('node:module');
 for (const name of ['generateKeyPair', 'generateKeyPairSync', 'createPrivateKey', 'sign', 'createSign']) {

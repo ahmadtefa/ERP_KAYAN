@@ -28,6 +28,7 @@ export const REQUIRED_CHECKS = Object.freeze({
     'eleven-requirements-real-ui-and-integration',
     'approved-offline-licence-generator',
     'twenty-restore-licence-failure-and-recovery-cases',
+    'approved-vm-licence-store-hmac-tests',
   ]),
   android: Object.freeze([
     'approved-licence-key-policy', 'licence-signature-compatibility',

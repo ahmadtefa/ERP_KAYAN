@@ -45,15 +45,17 @@ jobs:
         run: node --require ../scripts/ci-no-signing.cjs --test ../scripts/license-public-key-transition.test.mjs
       - name: Verify release evidence requirements without signing
         run: node --require ../scripts/ci-no-signing.cjs --test ../scripts/release-evidence-requirements.test.mjs
+      - name: Test limited non-HMAC CI guard without creating key material
+        run: node --test ../scripts/ci-no-hmac-policy.test.mjs
       - name: Check signing guard fails closed without creating a key
         run: >-
-          node --require ../scripts/ci-no-signing.cjs -e "const c=require('node:crypto');
-          for(const name of ['generateKeyPairSync','sign','createPrivateKey']) {
+          node --require ../scripts/ci-no-hmac.cjs -e "const c=require('node:crypto');
+          for(const name of ['generateKeyPairSync','sign','createPrivateKey','createSecretKey','createHmac']) {
           let blocked=false; try { c[name](); } catch(e) { blocked=e.message.includes('CI policy forbids'); }
           if(!blocked) throw Error(name+' was not blocked'); }"
       - name: Run reviewed non-signing backend and authorization tests
         env:
-          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-hmac.cjs
         run: >-
           npm test -- --runInBand
           src/common/maintenance/maintenance.spec.ts
@@ -113,12 +115,34 @@ jobs:
           src/modules/purchases/purchase-invoices.service.spec.ts
           src/modules/licensing/license.guard.spec.ts
           src/modules/licensing/license-status-safety.spec.ts
-          src/modules/licensing/license-store.spec.ts
           src/modules/licensing/license-keyring.spec.ts
           src/common/guards/super-admin.guard.spec.ts
           src/modules/company/company-profile.guard.spec.ts
           src/modules/company/company.service.spec.ts
           src/modules/company/company-audit-atomic.spec.ts
+
+  licence-store-isolation:
+    # The original, unmodified license-store.spec.ts requires a real HMAC key
+    # and intentionally is NOT executed on this general-purpose runner. This
+    # independent check fails closed, rather than silently skipping or
+    # reporting the test as passed. Do not replace this gate with a flag or a
+    # self-hosted runner until an independently approved disposable VM and
+    # runner isolation/PR-trust policy exist. It does not block other CI jobs.
+    name: Licence store integration blocked (approved VM required)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Require approved isolated licence-test VM before HMAC test
+        run: |
+          echo '::error title=BLOCKED — licence store integration not run::Approved isolated test VM and runner trust controls are not configured. This is not a test pass or release approval.'
+          exit 1
+      - name: Run the unchanged licence store integration test
+        working-directory: backend
+        run: npm test -- --runInBand src/modules/licensing/license-store.spec.ts
 
   prisma-upgrade:
     name: Native Prisma and PostgreSQL 16 upgrade

@@ -32,6 +32,26 @@ assert.ok(safe.on.push && safe.on.pull_request, 'Safe checks must remain active 
 assert.deepEqual(safe.on.push.branches, ['main'], 'Main must retain push checks without duplicating open PR commits');
 assert.ok(safe.on.pull_request.branches.includes('main'), 'PRs targeting main must retain code checks');
 const source = fs.readFileSync(path.join(workflows, 'safe-checks.yml'), 'utf8');
+// HMAC state integration remains an independent, explicitly blocked required
+// check until an approved disposable VM exists. No unrelated job depends on it.
+const isolated = safe.jobs['licence-store-isolation'];
+assert.ok(isolated, 'licence-store integration must remain visible as its own job');
+assert.equal(isolated.if, undefined);
+assert.equal(isolated['continue-on-error'], undefined);
+assert.equal(isolated.needs, undefined);
+assert.match(isolated.steps[1].run, /BLOCKED.*licence store integration not run/);
+assert.match(isolated.steps[1].run, /exit 1/);
+assert.match(isolated.steps[2].run, /src\/modules\/licensing\/license-store\.spec\.ts/);
+const backendSteps = safe.jobs['backend-safe'].steps;
+assert.doesNotMatch(backendSteps.map(step => String(step.run || '')).join('\n'), /license-store\.spec\.ts/);
+const ordinaryJest = backendSteps.find(step => step.name === 'Run reviewed non-signing backend and authorization tests');
+assert.match(ordinaryJest.env.NODE_OPTIONS, /ci-no-hmac\.cjs/);
+assert.ok(backendSteps.some(step => String(step.run || '').includes('ci-no-hmac-policy.test.mjs')), 'Scoped guard policy test must run');
+for (const [name, job] of Object.entries(safe.jobs)) {
+  assert.notEqual(job.needs, 'licence-store-isolation', `${name} must run independently of VM availability`);
+  assert.ok(!Array.isArray(job.needs) || !job.needs.includes('licence-store-isolation'));
+}
+assert.doesNotMatch(source, /secrets\./, 'ordinary code CI must not receive production secrets');
 for (const forbidden of ['smoke-test-installed-windows', 'memory-flow.test', 'verify-licensing-postgres', 'publish-verified-windows', 'license-generator.spec']) {
   assert.equal(source.includes(forbidden), false, `Safe checks reference forbidden path: ${forbidden}`);
 }

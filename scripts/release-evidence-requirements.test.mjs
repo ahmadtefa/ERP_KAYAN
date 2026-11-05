@@ -24,6 +24,7 @@ test('Windows release claims include the requested product and recovery evidence
     'eleven-requirements-real-ui-and-integration',
     'approved-offline-licence-generator',
     'twenty-restore-licence-failure-and-recovery-cases',
+    'approved-vm-licence-store-hmac-tests',
   ];
   assert.deepEqual(REQUIRED_CHECKS.windows, expected);
   assert.ok(Object.isFrozen(REQUIRED_CHECKS));
