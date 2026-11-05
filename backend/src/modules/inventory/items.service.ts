@@ -12,7 +12,6 @@ import { defaultUnitPrice } from '../../common/units/unit-math';
 import { AccountMapService } from '../accounting/account-map.service';
 import { PostingService } from '../accounting/posting.service';
 import { isValidEan13, randomInternalBarcode } from './barcode';
-import { exactBaseQuantity } from '../../common/units/unit-math';
 
 const MONEY_SCALE = 4;
 const RATE_SCALE = 4;
@@ -95,6 +94,7 @@ export class ItemsService {
         unit: item.unit,
         factor: '1.000000',
         quantityPerScan: '1.0000',
+        quantityPerScanFitsLedgerScale: true,
         salePrice: item.salePrice.toFixed(MONEY_SCALE),
         purchasePrice: mayReadCost ? item.purchasePrice.toFixed(MONEY_SCALE) : null,
         item: this.toResponse(item, mayReadCost),
@@ -113,13 +113,17 @@ export class ItemsService {
     }
 
     const owner = unit.item;
+    const factor = new Prisma.Decimal(unit.factor);
+    const quantityPerScanFitsLedgerScale = factor.equals(factor.toDecimalPlaces(MONEY_SCALE));
     return {
       matched: 'unit' as const,
       unit: unit.unit,
       factor: unit.factor.toFixed(6),
-      // A scan of a unit barcode is one of that unit, expressed in the base
-      // unit the stock ledger keeps.
-      quantityPerScan: new Prisma.Decimal(unit.factor).toDecimalPlaces(MONEY_SCALE).toFixed(MONEY_SCALE),
+      // Keep a lookup usable even when a single unit needs more precision than
+      // the ledger supports. Never present a rounded amount as the exact base
+      // quantity: stock-changing paths must still enforce exact conversion.
+      quantityPerScan: factor.toFixed(quantityPerScanFitsLedgerScale ? MONEY_SCALE : 6),
+      quantityPerScanFitsLedgerScale,
       salePrice: defaultUnitPrice('sale', unit, owner.salePrice).toFixed(MONEY_SCALE),
       purchasePrice: mayReadCost
         ? defaultUnitPrice('purchase', unit, owner.purchasePrice).toFixed(MONEY_SCALE)

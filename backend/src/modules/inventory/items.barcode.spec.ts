@@ -2,6 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { ItemsService } from './items.service';
+import { exactBaseQuantity } from '../../common/units/unit-math';
 
 const baseItem = {
   id: 'item-1',
@@ -66,6 +67,7 @@ describe('ItemsService barcode lookup', () => {
     expect(result.unit).toBe('piece');
     expect(result.factor).toBe('1.000000');
     expect(result.quantityPerScan).toBe('1.0000');
+    expect(result.quantityPerScanFitsLedgerScale).toBe(true);
     expect(result.item.code).toBe('IT-1');
     expect(result.units.map((unit: { unit: string }) => unit.unit)).toEqual(['carton']);
   });
@@ -82,6 +84,7 @@ describe('ItemsService barcode lookup', () => {
     expect(result.factor).toBe('24.000000');
     // One scan of a carton is 24 base units, taken from the saved factor.
     expect(result.quantityPerScan).toBe('24.0000');
+    expect(result.quantityPerScanFitsLedgerScale).toBe(true);
     // The unit's own price wins over the item's.
     expect(result.salePrice).toBe('220.0000');
   });
@@ -98,13 +101,26 @@ describe('ItemsService barcode lookup', () => {
     expect(noCost.purchasePrice).toBeNull();
   });
 
-  it('rounds a precise unit factor for the barcode scan display quantity', async () => {
+  it.each(['1.234567', '0.000001'])('returns the exact factor %s without claiming it fits the ledger scale', async (raw) => {
     const { service, prisma } = build();
-    const preciseUnit = { ...carton, factor: new Prisma.Decimal('1.234567') };
+    const preciseUnit = { ...carton, factor: new Prisma.Decimal(raw) };
     prisma.itemUnit.findFirst.mockResolvedValue({ ...preciseUnit, item: { ...baseItem, units: [preciseUnit] } });
     const result = await service.findByBarcode('company-1', '2000000000505');
-    expect(result.factor).toBe('1.234567');
-    expect(result.quantityPerScan).toBe('1.2346');
+    expect(result.factor).toBe(raw);
+    expect(result.quantityPerScan).toBe(raw);
+    expect(result.quantityPerScanFitsLedgerScale).toBe(false);
+    expect(() => exactBaseQuantity(new Prisma.Decimal(1), preciseUnit.factor)).toThrow(/cannot be represented/);
+  });
+
+  it('preserves four-place output for an exactly representable fractional factor', async () => {
+    const { service, prisma } = build();
+    const exactUnit = { ...carton, factor: new Prisma.Decimal('0.125') };
+    prisma.itemUnit.findFirst.mockResolvedValue({ ...exactUnit, item: { ...baseItem, units: [exactUnit] } });
+    const result = await service.findByBarcode('company-1', '2000000000505');
+    expect(result.factor).toBe('0.125000');
+    expect(result.quantityPerScan).toBe('0.1250');
+    expect(result.quantityPerScanFitsLedgerScale).toBe(true);
+    expect(exactBaseQuantity(new Prisma.Decimal(1), exactUnit.factor).toFixed(4)).toBe(result.quantityPerScan);
   });
 
   it('says so when no item or unit carries the code', async () => {

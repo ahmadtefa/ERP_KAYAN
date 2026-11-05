@@ -30,6 +30,7 @@ const { AccountMapService } = require('../src/modules/accounting/account-map.ser
 const { PostingService } = require('../src/modules/accounting/posting.service');
 const { StockDocumentsService } = require('../src/modules/inventory/stock-documents.service');
 const { ItemsService } = require('../src/modules/inventory/items.service');
+const { ItemsController } = require('../src/modules/inventory/items.controller');
 const { DocumentsService } = require('../src/modules/export/documents.service');
 const { ChartOfAccountsService } = require('../src/modules/accounting/chart-of-accounts.service');
 const { ChartOfAccountsController } = require('../src/modules/accounting/chart-of-accounts.controller');
@@ -1091,13 +1092,14 @@ let difference = '70000000-0000-4000-8000-000000000005';
     // A test principal is injected: this does not prove JWT or licence checks.
     const httpSnapshots = [];
     class InvoiceTaxHttpModule {}
-    Module({ controllers:[SalesInvoicesController,PurchaseInvoicesController], providers:[
+    Module({ controllers:[SalesInvoicesController,PurchaseInvoicesController,ItemsController], providers:[
       {provide:SalesInvoicesService,useValue:si}, {provide:PurchaseInvoicesService,useValue:pi},
+      {provide:ItemsService,useValue:itemService},
     ] })(InvoiceTaxHttpModule);
     const taxHttp = await NestFactory.create(InvoiceTaxHttpModule,{logger:false});
     try {
       taxHttp.use((req,_res,next)=>{req.user={userId:user,companyId:company,branchId:branch,username:'synthetic',
-        isSuperAdmin:false,permissions:req.headers['x-allowed']==='yes' ? ['sales.invoices.create','purchases.invoices.create'] : []};next();});
+        isSuperAdmin:false,permissions:req.headers['x-allowed']==='yes' ? ['sales.invoices.create','purchases.invoices.create','inventory.items.read'] : []};next();});
       taxHttp.useGlobalGuards(new PermissionsGuard(new Reflector()));
       taxHttp.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
       taxHttp.useGlobalFilters(new ProblemDetailsFilter());
@@ -1131,6 +1133,36 @@ let difference = '70000000-0000-4000-8000-000000000005';
         assert.equal(saved.totalAmount.toFixed(4),'621.0000',kind);
         httpSnapshots.push({kind,model,id:body.id});
       }
+      // Barcode lookup must expose the exact factor, even when one scan cannot
+      // be represented by the ledger. The same HTTP-to-service-to-PG path must
+      // reject an inexact invoice quantity rather than silently round stock.
+      for (const [unitName,barcode,factor,exactQuantity] of [
+        ['synthetic-precise','SYN-BARCODE-PRECISE','1.234567','123.4567'],
+        ['synthetic-micro','SYN-BARCODE-MICRO','0.000001','0.0001'],
+      ]) {
+        await prisma.itemUnit.create({data:{itemId:taxItem.id,unit:unitName,barcode,factor}});
+        const barcodeUrl=base+'/inventory/items/by-barcode/'+barcode;
+        assert.equal((await fetch(barcodeUrl)).status,403);
+        const lookup=await fetch(barcodeUrl,{headers:{'x-allowed':'yes'}});
+        assert.equal(lookup.status,200);
+        const resolved=await lookup.json();
+        assert.equal(resolved.factor,factor);
+        assert.equal(resolved.quantityPerScan,factor);
+        assert.equal(resolved.quantityPerScanFitsLedgerScale,false);
+        assert.equal(resolved.purchasePrice,null);
+        const post=(quantity)=>fetch(base+'/sales/invoices',{method:'POST',headers:{'content-type':'application/json','x-allowed':'yes'},
+          body:JSON.stringify({customerId:customer.id,invoiceDate:date,lines:[{itemId:taxItem.id,unitName,quantity,unitPrice:'100',taxRate:'0'}]})});
+        const before=await prisma.salesInvoice.count({where:{companyId:company}});
+        assert.equal((await post('1')).status,400);
+        assert.equal(await prisma.salesInvoice.count({where:{companyId:company}}),before);
+        const accepted=await post('100');
+        assert.equal(accepted.status,201);
+        const result=await accepted.json();
+        const invoice=await prisma.salesInvoice.findUniqueOrThrow({where:{id:result.id},include:{lines:true}});
+        assert.equal(invoice.lines[0].quantity.toFixed(4),exactQuantity);
+        assert.equal(invoice.lines[0].unitFactor.toFixed(6),factor);
+      }
+      console.log('PASS: barcode exact precision, cost redaction and inexact invoice rejection over real HTTP/PG; identity injected.');
     } finally { await taxHttp.close(); }
     assert.equal((await itemService.update(company,user,taxItem.id,{taxRate:''},true)).taxRate,'0.0000');
     await prisma.companySetting.update({where:{companyId:company},data:{taxRate:'3'}});
