@@ -233,3 +233,29 @@ describe('PurchaseInvoicesService landed-cost charges', () => {
     expect(tx.purchaseInvoice.create).not.toHaveBeenCalled();
   });
 });
+
+ 
+describe('PurchaseInvoicesService line tax defaults', () => {
+  it('treats omitted, null, blank and whitespace tax as zero without inheriting item or company tax', async () => {
+    const { service } = makeService();
+    const itemFind = jest.fn().mockResolvedValue({
+      code: 'TAX-1', nameEn: 'Tax test item', nameAr: 'صنف اختبار',
+      taxRate: D(14), isActive: true, purchasePrice: D(100), unit: 'piece', units: [],
+    });
+    (service as any).prisma.item.findFirst = itemFind;
+    const prepared = await (service as any).prepareLines(COMPANY, [
+      { itemId: ITEMS[0], quantity: '1', unitPrice: '100' },
+      { itemId: ITEMS[0], quantity: '1', unitPrice: '100', taxRate: null },
+      { itemId: ITEMS[0], quantity: '1', unitPrice: '100', taxRate: '' },
+      { itemId: ITEMS[0], quantity: '1', unitPrice: '100', taxRate: '   ' },
+      { itemId: ITEMS[0], quantity: '1', unitPrice: '100', taxRate: 0 },
+      { itemId: ITEMS[0], quantity: '1', unitPrice: '100', taxRate: '7' },
+    ], SUPPLIER, D(0), {});
+    expect(prepared.lines.map((line: any) => line.taxRate.toFixed(4))).toEqual([
+      '0.0000', '0.0000', '0.0000', '0.0000', '0.0000', '7.0000',
+    ]);
+    expect(prepared.lines.map((line: any) => line.taxAmount.toFixed(4))).toEqual([
+      '0.0000', '0.0000', '0.0000', '0.0000', '0.0000', '7.0000',
+    ]);
+  });
+});
