@@ -36,7 +36,9 @@ export class SetupService {
 
   async status() {
     const [companies, users, activeCompanyUsers] = await Promise.all([
-      this.prisma.company.count({ where: { deletedAt: null } }),
+      // Any company row, including a soft-deleted one, means this is not a
+      // pristine installation. Public first-run setup must never revive it.
+      this.prisma.company.count(),
       this.prisma.user.count({ where: { deletedAt: null } }),
       this.prisma.user.count({ where: { deletedAt: null, isActive: true, company: { deletedAt: null } } }),
     ]);
@@ -49,11 +51,18 @@ export class SetupService {
   }
 
   async initialSetup(dto: InitialSetupDto, ip?: string, userAgent?: string) {
-    // Cheap early refusal avoids hashing a password for a closed setup route.
-    // This is only an optimization; the locked check below is authoritative.
-    if (await this.prisma.company.count({ where: { deletedAt: null } })) {
+    // This endpoint is public so a genuinely empty installation can be
+    // initialized. It must never become an account-recovery or company-revival
+    // endpoint: even soft-deleted companies and orphaned users close setup.
+    // This preflight avoids hashing on the common closed-route path; the
+    // transaction repeats both checks under the advisory lock.
+    const [companyRows, userRows] = await Promise.all([
+      this.prisma.company.count(),
+      this.prisma.user.count(),
+    ]);
+    if (companyRows > 0 || userRows > 0) {
       throw new ConflictException(
-        'This installation is already set up. Sign in instead, or use the company settings screens to make changes.',
+        'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.',
       );
     }
     let logo: { data: Uint8Array<ArrayBuffer>; mime: string } | null = null;
@@ -68,68 +77,31 @@ export class SetupService {
       // Serialize concurrent first-run requests across application processes;
       // the authoritative company check must occur after acquiring the lock.
       await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(172895144, 485772)`);
-      const existing = await tx.company.count({ where: { deletedAt: null } });
-      if (existing > 0) {
+      // Repeat the pristine-installation check only after acquiring the
+      // transaction-scoped lock. Count soft-deleted rows too: setup is never
+      // allowed to resurrect a tenant or replace an existing administrator.
+      const [existingCompanies, existingUsers] = await Promise.all([
+        tx.company.count(),
+        tx.user.count(),
+      ]);
+      if (existingCompanies > 0 || existingUsers > 0) {
         throw new ConflictException(
-          'This installation is already set up. Sign in instead, or use the company settings screens to make changes.',
+          'This installation already contains company or user data. Initial setup is closed; use the approved recovery process.',
         );
       }
 
-      // A dormant company without users or audit rows can still own branches,
-      // documents, or other history. Never delete it automatically during setup.
-      const dormant = await tx.company.findMany({
-        where: { deletedAt: { not: null } },
-        select: { id: true, code: true, _count: { select: { users: true } } },
-        orderBy: { createdAt: 'asc' },
+      const company = await tx.company.create({
+        data: {
+          code: dto.companyCode,
+          nameEn: dto.companyNameEn,
+          nameAr: dto.companyNameAr,
+          phone: dto.phone ?? null,
+          email: dto.email ?? null,
+          address: dto.address ?? null,
+          logoData: logo?.data ?? null,
+          logoMime: logo?.mime ?? null,
+        },
       });
-      const kept = dormant.filter((company) => company._count.users > 0);
-      if (kept.length > 1) {
-        throw new ConflictException(
-          'This installation holds more than one company that was reset. ' +
-            'Restore one of them from a backup before setting the program up again.',
-        );
-      }
-      const revivedId = kept[0]?.id ?? null;
-      if (revivedId === null || kept[0]!.code !== dto.companyCode) {
-        const clash = await tx.company.findFirst({
-          where: { code: dto.companyCode },
-          select: { id: true },
-        });
-        if (clash) {
-          throw new ConflictException(`A company with the code "${dto.companyCode}" already exists.`);
-        }
-      }
-
-      // Either the company left behind by a reset, brought back, or a brand
-      // new one. Everything after this point is the same either way.
-      const company = revivedId
-        ? await tx.company.update({
-            where: { id: revivedId },
-            data: {
-              code: dto.companyCode,
-              nameEn: dto.companyNameEn,
-              nameAr: dto.companyNameAr,
-              phone: dto.phone ?? null,
-              email: dto.email ?? null,
-              address: dto.address ?? null,
-              logoData: logo?.data ?? null,
-              logoMime: logo?.mime ?? null,
-              isActive: true,
-              deletedAt: null,
-            },
-          })
-        : await tx.company.create({
-            data: {
-              code: dto.companyCode,
-              nameEn: dto.companyNameEn,
-              nameAr: dto.companyNameAr,
-              phone: dto.phone ?? null,
-              email: dto.email ?? null,
-              address: dto.address ?? null,
-              logoData: logo?.data ?? null,
-              logoMime: logo?.mime ?? null,
-            },
-          });
 
       const isBranch = dto.facilityKind === 'BRANCH';
       const unitKind = isBranch ? BranchKind.BRANCH : BranchKind.HEADQUARTERS;
@@ -175,60 +147,18 @@ export class SetupService {
       await this.seedPermissions(tx);
       const roles = await this.seedRoles(tx, company.id);
 
-      // A reset deliberately leaves the administrator behind so nobody is
-      // locked out; a setup run after a reset therefore finds that account
-      // and adopts it rather than creating a second administrator. A fresh
-      // installation finds nobody and creates one.
-      const already = await tx.user.findMany({
-        where: { companyId: company.id },
-        select: { id: true, username: true },
-        orderBy: { createdAt: 'asc' },
+      // A public setup request can only create the first administrator on a
+      // pristine database. Existing accounts are never adopted or overwritten.
+      const admin = await tx.user.create({
+        data: {
+          companyId: company.id,
+          username: dto.adminUsername,
+          fullNameEn: dto.adminFullNameEn ?? 'System Administrator',
+          fullNameAr: dto.adminFullNameAr ?? 'مدير النظام',
+          passwordHash,
+          isSuperAdmin: true,
+        },
       });
-
-      const admin =
-        already.length > 0
-          ? await tx.user.update({
-              where: { id: already[0]!.id },
-              data: {
-                // The requested name, unless another surviving account has it.
-                username: already.some(
-                  (candidate) =>
-                    candidate.id !== already[0]!.id &&
-                    candidate.username === dto.adminUsername,
-                )
-                  ? already[0]!.username
-                  : dto.adminUsername,
-                fullNameEn: dto.adminFullNameEn ?? 'System Administrator',
-                fullNameAr: dto.adminFullNameAr ?? 'مدير النظام',
-                passwordHash,
-                isSuperAdmin: true,
-                isActive: true,
-                deletedAt: null,
-              },
-            })
-          : await tx.user.create({
-              data: {
-                companyId: company.id,
-                username: dto.adminUsername,
-                fullNameEn: dto.adminFullNameEn ?? 'System Administrator',
-                fullNameAr: dto.adminFullNameAr ?? 'مدير النظام',
-                passwordHash,
-                isSuperAdmin: true,
-              },
-            });
-
-      // Only one administrator belongs at the beginning of a company. The
-      // extra accounts are switched off and retired rather than deleted: an
-      // account the audit trail mentions cannot be removed without the trail's
-      // foreign key trying to edit history, which the database refuses — and a
-      // retired account is out of every list, every role and every sign-in
-      // anyway (`deletedAt` and `isActive` are checked at login).
-      if (already.length > 1) {
-        await tx.user.updateMany({
-          where: { companyId: company.id, id: { not: admin.id }, deletedAt: null },
-          data: { isActive: false, deletedAt: new Date() },
-        });
-      }
 
       await tx.userRole.create({
         data: {
@@ -264,20 +194,14 @@ export class SetupService {
         userAgent: userAgent ?? null,
       }, tx);
 
-      // Reserve after the required audit and other database writes. The licence
-      // store has an independent fail-closed watermark, so an audit failure
-      // must not advance it. A later commit failure can still overcount seats.
-      // The first-run administrator is a real account like any other, so it
-      // consumes a seat. An account revived by setup (already exists) is not
-      // created again and therefore reserves nothing.
-      if (already.length === 0) {
-        await this.licensing.reserveSeat(tx, {
-          userId: admin.id,
-          username: admin.username,
-          reason: 'SETUP_ADMIN',
-          idempotencyKey: `setup:${company.id}:${admin.username}`,
-        });
-      }
+      // The first-run administrator is always a newly-created account and
+      // therefore consumes a seat after the required audit record succeeds.
+      await this.licensing.reserveSeat(tx, {
+        userId: admin.id,
+        username: admin.username,
+        reason: 'SETUP_ADMIN',
+        idempotencyKey: `setup:${company.id}:${admin.username}`,
+      });
 
       return { company, hq, admin };
     }, { maxWait: 10000, timeout: 30000 });
