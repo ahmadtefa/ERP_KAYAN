@@ -202,3 +202,33 @@ describe('SalesInvoicesService.prepareLines tax-price options', () => {
     expect(exclusive.lines[0].taxAmount).toEqual(new Prisma.Decimal('24'));
   });
 });
+ 
+
+describe('SalesInvoicesService line tax defaults', () => {
+  it('treats omitted, null, blank and whitespace tax as zero without inheriting item or company tax', async () => {
+    const item = {
+      code: 'TAX-1', nameEn: 'Tax test item', taxRate: new Prisma.Decimal('14'),
+      salePrice: new Prisma.Decimal('100'), unit: 'piece', isActive: true, units: [],
+    };
+    const prisma = { item: { findFirst: jest.fn().mockResolvedValue(item) } };
+    const settings = { get: jest.fn().mockResolvedValue({ pricesIncludeTax: false, maxDiscountPercent: '100', taxRate: '14' }) };
+    const service = new SalesInvoicesService(
+      prisma as never, {} as never, {} as never, {} as never, settings as never,
+      {} as never, { resolvePrice: jest.fn() } as never, {} as never,
+    );
+    const lines = await (service as any).prepareLines(COMPANY_ID, [
+      { itemId: TRACKED_ITEM_ID, quantity: '1', unitPrice: '100' },
+      { itemId: TRACKED_ITEM_ID, quantity: '1', unitPrice: '100', taxRate: null },
+      { itemId: TRACKED_ITEM_ID, quantity: '1', unitPrice: '100', taxRate: '' },
+      { itemId: TRACKED_ITEM_ID, quantity: '1', unitPrice: '100', taxRate: '   ' },
+      { itemId: TRACKED_ITEM_ID, quantity: '1', unitPrice: '100', taxRate: 0 },
+      { itemId: TRACKED_ITEM_ID, quantity: '1', unitPrice: '100', taxRate: '7' },
+    ], null, {});
+    expect(lines.lines.map((line: any) => line.taxRate.toFixed(4))).toEqual([
+      '0.0000', '0.0000', '0.0000', '0.0000', '0.0000', '7.0000',
+    ]);
+    expect(lines.lines.map((line: any) => line.taxAmount.toFixed(4))).toEqual([
+      '0.0000', '0.0000', '0.0000', '0.0000', '0.0000', '7.0000',
+    ]);
+  });
+});
