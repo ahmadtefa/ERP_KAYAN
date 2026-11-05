@@ -13,13 +13,16 @@ describe('full restore failure safety', () => {
   let maintenance: MaintenanceService;
   let service: FullBackupService;
   let internals: { [key: string]: jest.Mock };
-  let licensing: { reconcile: jest.Mock };
+  let licensing: { reconcile: jest.Mock; captureLicenceBackup: jest.Mock };
   const originalDatabaseUrl = process.env.DATABASE_URL;
   const uploaded = { buffer: Buffer.from('PGDMP synthetic archive'), originalName: 'test.dump' };
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'kayan-restore-test-'));
     maintenance = new MaintenanceService();
-    licensing = { reconcile: jest.fn().mockResolvedValue(undefined) };
+    licensing = {
+      reconcile: jest.fn().mockResolvedValue(undefined),
+      captureLicenceBackup: jest.fn().mockReturnValue({ id: 'licence-test' }),
+    };
     service = new FullBackupService(
       {} as ConstructorParameters<typeof FullBackupService>[0],
       { record: jest.fn().mockResolvedValue(undefined) } as unknown as ConstructorParameters<typeof FullBackupService>[1],
