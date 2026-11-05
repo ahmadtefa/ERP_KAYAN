@@ -37,7 +37,10 @@ test('diagnostic Inno setup stays non-installable and production paths stay disa
   assert.match(inno, /function GetCustomSetupExitCode: Integer/);
   assert.match(inno, /RuntimeFailed := True;/);
   const smoke = workflow.match(/- name: Smoke-test the actual installed Windows application([\s\S]*?)(?=\n      - name:|\n  [a-z-]+:|$)/);
-  assert.ok(smoke && /if:\s*\$\{\{ false \}\}/.test(smoke[1]));
+  assert.ok(smoke, 'The Windows installer workflow must define its installed-app smoke step.');
+  assert.match(smoke[1], /if:\s*\$\{\{\s*steps\.licence\.outputs\.build\s*==\s*'product'\s*\}\}/);
+  assert.match(smoke[1], /RuntimeOnly\s*=\s*\$true/);
+  assert.match(smoke[1], /ExpectedSourceCommit\s*=\s*\$env:GITHUB_SHA/);
   assert.doesNotMatch(workflow, /secrets\.LICENSE_PRIVATE_KEY/);
   // The raw same-run transport is not a release candidate. Both build modes
   // must pass the pinned extractor on Linux before the inspected artifact or

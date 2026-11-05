@@ -73,11 +73,16 @@ assert.deepEqual(Object.keys(gate.jobs), ['licence-evidence-required']);
 const gateJob = gate.jobs['licence-evidence-required'];
 assert.equal(gateJob.if, undefined, 'Evidence gate must not be conditional');
 assert.equal(gateJob['continue-on-error'], undefined, 'Evidence gate must not ignore a failure');
-assert.equal(gateJob.steps.length, 1, 'Evidence gate changes require security review');
-assert.match(gateJob.steps[0].run, /Signed licence, generator and installed product tests require the approved isolated VM/);
-assert.match(gateJob.steps[0].run, /exit 1/);
-assert.equal(gateJob.steps[0].if, undefined);
-assert.equal(gateJob.steps[0]['continue-on-error'], undefined);
+assert.equal(gateJob.steps.length, 2, 'PR notice and main release blocker must remain separate');
+assert.match(gateJob.steps[0].if, /github.event_name == 'pull_request'/);
+assert.match(gateJob.steps[0].run, /does not block ordinary pull-request CI/);
+assert.doesNotMatch(gateJob.steps[0].run, /exit 1/);
+assert.match(gateJob.steps[1].if, /github.event_name == 'push'/);
+assert.match(gateJob.steps[1].run, /approved isolated Windows VM/);
+assert.match(gateJob.steps[1].run, /exit 1/);
+for (const step of gateJob.steps) {
+  assert.equal(step['continue-on-error'], undefined);
+}
 const publish = read('windows-installer.yml').jobs['publish-windows'];
 assert.ok(publish.steps.some(step => String(step.run ?? '').includes('verify-release-evidence.mjs')),
   'Moving the CI evidence signal must not remove the independent publisher evidence check');

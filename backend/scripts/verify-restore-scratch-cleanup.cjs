@@ -62,7 +62,7 @@ const path = require('node:path');
       return client.query(sql);
     } };
     const maintenance = new MaintenanceService();
-    const service = new FullBackupService(prisma, { record: async () => {} }, maintenance, { reconcile: async () => {} });
+    const service = new FullBackupService(prisma, { record: async () => {} }, maintenance, { reconcile: async () => {}, captureLicenceBackup: () => ({ id: 'ci-licence-stub' }) });
     await client.query("CREATE TABLE fixture_items(id integer primary key, value text); INSERT INTO fixture_items VALUES(1,'before'); INSERT INTO fixture_items SELECT i, md5(i::text) || md5((i+1)::text) FROM generate_series(2,1002) AS i");
     const before = await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`);
     const backup = await service.createFull('fixture');
@@ -131,7 +131,7 @@ const path = require('node:path');
 
     // Real pg_dump/pg_restore with an injected fsync failure: do not publish
     // a new file or disturb the previous backup/primary when flushing fails.
-    const flushFail = new FullBackupService(prisma, { record: async () => {} }, maintenance, { reconcile: async () => {} });
+    const flushFail = new FullBackupService(prisma, { record: async () => {} }, maintenance, { reconcile: async () => {}, captureLicenceBackup: () => ({ id: 'ci-licence-stub' }) });
     flushFail.syncArchive = async () => { throw new Error('synthetic fsync failure'); };
     const filesBeforeFlush = (await fs.readdir(dir)).filter(name => name.endsWith('.dump')).sort();
     await assert.rejects(flushFail.createFull('fixture'));
@@ -149,7 +149,7 @@ const path = require('node:path');
     process.env.KAYAN_PG_DUMP = corruptDumpTool;
     process.env.KAYAN_CORRUPT_FIXTURE = corruptPath;
     try {
-      const invalid = new FullBackupService(prisma, { record: async () => {} }, maintenance, { reconcile: async () => {} });
+      const invalid = new FullBackupService(prisma, { record: async () => {} }, maintenance, { reconcile: async () => {}, captureLicenceBackup: () => ({ id: 'ci-licence-stub' }) });
       const files = (await fs.readdir(dir)).filter(name => name.endsWith('.dump')).sort();
       await assert.rejects(invalid.createFull('fixture'));
       assert.deepEqual((await fs.readdir(dir)).filter(name => name.endsWith('.dump')).sort(), files);
@@ -167,7 +167,7 @@ const path = require('node:path');
     const savedDump = process.env.KAYAN_PG_DUMP;
     process.env.KAYAN_PG_DUMP = fakeDump;
     try {
-      const invalid = new FullBackupService(prisma, { record: async () => {} }, maintenance, { reconcile: async () => {} });
+      const invalid = new FullBackupService(prisma, { record: async () => {} }, maintenance, { reconcile: async () => {}, captureLicenceBackup: () => ({ id: 'ci-licence-stub' }) });
       const before = (await fs.readdir(dir)).filter(name => name.endsWith('.dump'));
       await assert.rejects(invalid.createSafety());
       assert.deepEqual((await fs.readdir(dir)).filter(name => name.endsWith('.dump')), before);
@@ -198,7 +198,7 @@ const path = require('node:path');
     let licenseCalls = 0;
     const actual = new FullBackupService({$executeRawUnsafe: sql => client.query(sql)},
       {record: async row => {recorded.push(row);}}, repairMaintenance,
-      {reconcile: async () => {licenseCalls++;}});
+      {reconcile: async () => {licenseCalls++;}, captureLicenceBackup: () => ({ id: 'ci-licence-stub' })});
     actual.postRestoreCheck = async () => ({ok:true,detail:'synthetic-only'});
     actual.reconcileRestoredCompanies = async () => {throw new Error('synthetic access repair failure');};
     await assert.rejects(actual.restore({confirm:true,fileName:backup.file.name},'fixture'),/maintenance remains active/i);
@@ -236,7 +236,7 @@ const path = require('node:path');
     let repairCount=0, reconcileCount=0;
     const events=[];
     const clean = new FullBackupService({$executeRawUnsafe: sql => client.query(sql)},
-      {record:async row=>{events.push(row);}},cleanMaintenance,{reconcile:async()=>{reconcileCount++;}});
+      {record:async row=>{events.push(row);}},cleanMaintenance,{reconcile:async()=>{reconcileCount++;},captureLicenceBackup:()=>({id:'ci-licence-stub'})});
     clean.postRestoreCheck=async()=>({ok:true,detail:'synthetic-only'});
     clean.reconcileRestoredCompanies=async()=>{repairCount++;return {companies:0,grantsAdded:0,superAdminPromoted:[]};};
     const digest=async()=> (await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows;

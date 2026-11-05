@@ -89,6 +89,51 @@ function canonical(state: LicenseTrustState): string {
   return JSON.stringify(state, Object.keys(state).sort());
 }
 
+/**
+ * Reads the protected state key without creating or replacing it. Recovery
+ * code must never mint a new trust anchor merely to make an old snapshot pass.
+ */
+export function readStateSecret(directory: string, explicit?: string): Buffer | null {
+  const fromEnv = explicit ?? (process.env.LICENSE_STATE_SECRET ?? '').trim();
+  if (fromEnv) return createHash('sha256').update(fromEnv).digest();
+  try {
+    const text = readFileSync(join(directory, 'state.key'), 'utf8').trim();
+    if (text.length < 32) return null;
+    return createHash('sha256').update(text).digest();
+  } catch {
+    return null;
+  }
+}
+
+/** Verify a detached copy with the same canonical MAC used by LicenseStore. */
+export function verifyStateDocument(
+  text: string,
+  secret: Buffer,
+  label = 'licence state',
+): LicenseTrustState {
+  let parsed: { state?: unknown; mac?: unknown };
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new LicenseStateError(`The ${label} is not readable JSON`, 'UNREADABLE');
+  }
+  if (!parsed || parsed.state === null || typeof parsed.state !== 'object' ||
+      Array.isArray(parsed.state) || typeof parsed.mac !== 'string') {
+    throw new LicenseStateError(`The ${label} has no signed state`, 'TAMPERED');
+  }
+  const state = parsed.state as LicenseTrustState;
+  const expected = createHmac('sha256', secret).update(canonical(state)).digest('hex');
+  const actual = Buffer.from(parsed.mac, 'hex');
+  const wanted = Buffer.from(expected, 'hex');
+  if (actual.length !== wanted.length || !timingSafeEqual(actual, wanted)) {
+    throw new LicenseStateError(`The ${label} failed its integrity check`, 'TAMPERED');
+  }
+  if (state.v !== 1 || !Number.isSafeInteger(state.sequence) || state.sequence < 0) {
+    throw new LicenseStateError(`The ${label} uses an unsupported or invalid format`, 'UNREADABLE');
+  }
+  return state;
+}
+
 export class LicenseStore {
   private state: LicenseTrustState;
   private readonly secret: Buffer;

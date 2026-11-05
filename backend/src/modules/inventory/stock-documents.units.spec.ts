@@ -85,12 +85,24 @@ describe('stock documents with multiple units', () => {
       kind: StockDocumentKind.ADJUSTMENT,
       branchId: BRANCH,
       documentDate: '2026-10-27',
+      costCenterId: '44444444-4444-4444-8444-444444444444',
       lines: [{ itemId: MILK, quantity: '-1', unitName: 'كرتونة' }],
     } as any);
 
     const line = tx.stockDocument.create.mock.calls[0][0].data.lines.create[0];
     expect(line.quantity.toFixed(4)).toBe('-10.0000');
     expect(line.unitQuantity.toFixed(4)).toBe('-1.0000');
+  });
+
+  it('requires a cost center for a negative stock adjustment', async () => {
+    const { service, tx } = makeService();
+    await expect(service.create(COMPANY, BRANCH, 'user-1', {
+      kind: StockDocumentKind.ADJUSTMENT,
+      branchId: BRANCH,
+      documentDate: '2026-10-27',
+      lines: [{ itemId: MILK, quantity: '-1' }],
+    } as any)).rejects.toThrow(/cost center is required/i);
+    expect(tx.stockDocument.create).not.toHaveBeenCalled();
   });
 
   it('rejects an inactive unit on a new stock document', async () => {

@@ -257,3 +257,13 @@ jobs:
       - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 2
       - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 3
       - run: node scripts/emit-screenshot-lossless.cjs '${{ matrix.screen }}' 4
+      - name: Upload the exact rendered screenshot for human review (not golden approval)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: screenshot-review-${{ matrix.screen }}-${{ github.sha }}
+          path: test/screenshots/goldens/${{ matrix.screen }}
+          if-no-files-found: error
+          retention-days: 3
+          retention-days: 3
+      - name: Emit exact PNG bytes for the reviewed screenshot (diagnostic only)
+        run: node scripts/emit-screenshot-png.cjs '${{ matrix.screen }}'

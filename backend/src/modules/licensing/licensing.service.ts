@@ -36,6 +36,10 @@ import {
   LicenseStateError,
   LicenseStore,
 } from './license-store';
+import {
+  LicenceBackupArchive,
+  LicenceBackupRecord,
+} from './licence-backup-archive';
 
 /**
  * The offline licence, as the program enforces it.
@@ -177,6 +181,9 @@ export class LicensingService implements OnModuleInit {
   private lastClockCheck = 0;
   private lastStatus: { at: number; value: LicenseStatus } | null = null;
   private ready: Promise<void> | null = null;
+  private licenceArchiveInstance?: LicenceBackupArchive;
+  private lastLicenceBackup: LicenceBackupRecord | null = null;
+  private lastLicenceBackupError: string | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -265,7 +272,7 @@ export class LicensingService implements OnModuleInit {
     this.logger.log(`Licence subsystem started in ${this.enforcement} mode.`);
   }
 
-  private openStore(): void {
+  private openStore(allowArchiveRestore = true): void {
     // During recovery the damaged file may temporarily be moved aside. Even
     // with an environment-provided secret, never initialize a blank store in
     // that gap; wait for the operator to put the trusted backup in place.
@@ -282,6 +289,12 @@ export class LicensingService implements OnModuleInit {
         error instanceof LicenseStateError &&
         (error.code === 'TAMPERED' || error.code === 'UNREADABLE')
       ) {
+        // Before failing closed, try a verified, machine-bound snapshot. The
+        // archive is outside the replaceable licence state directory.
+        if (allowArchiveRestore && this.restoreFromLicenceArchive()) {
+          this.openStore(false);
+          return;
+        }
         // Do not discard or recreate an installed trust store. It contains
         // anti-rollback watermarks that cannot be reconstructed safely from a
         // possibly older database. Keep the file and key unchanged and fail
@@ -295,6 +308,61 @@ export class LicensingService implements OnModuleInit {
       }
       throw error;
     }
+  }
+
+  /** Restore only a verified archive belonging to this installation. */
+  private restoreFromLicenceArchive(): boolean {
+    if (this.trustStore) return false;
+    try {
+      const outcome = this.licenceArchive().restoreNewestVerified();
+      if (!outcome) {
+        this.logger.error('No authenticated licence backup could be restored; the licence state stays fail-closed.');
+        return false;
+      }
+      this.installedStateError = null;
+      this.logger.warn(`KAYAN-LICENCE-STATE-RESTORED: restored protected state from ${outcome.restored.id}; ${outcome.rejected.length} backup(s) refused; damaged files preserved.`);
+      return true;
+    } catch (error) {
+      this.logger.error(`Licence backup recovery failed: ${describeError(error)}`);
+      return false;
+    }
+  }
+
+  /** Captures a verified timestamped copy; never backs up unauthenticated state. */
+  captureLicenceBackup(reason: string): LicenceBackupRecord | null {
+    try {
+      this.lastLicenceBackupError = null;
+      const safe = reason.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40) || 'manual';
+      const record = this.licenceArchive().capture(safe);
+      this.lastLicenceBackup = record;
+      return record;
+    } catch (error) {
+      this.lastLicenceBackupError = describeError(error);
+      this.logger.warn(`The licence backup was not written: ${this.lastLicenceBackupError}`);
+      return null;
+    }
+  }
+
+  lastLicenceBackupRecord(): LicenceBackupRecord | null {
+    return this.lastLicenceBackup;
+  }
+
+  lastLicenceBackupFailure(): string | null {
+    return this.lastLicenceBackupError;
+  }
+
+  private licenceArchive(): LicenceBackupArchive {
+    if (!this.licenceArchiveInstance) {
+      this.licenceArchiveInstance = new LicenceBackupArchive(this.directory, {
+        machineId: this.machineId(),
+        clock: this.clock,
+        logger: {
+          log: (message: string) => this.logger.log(message),
+          warn: (message: string) => this.logger.warn(message),
+        },
+      });
+    }
+    return this.licenceArchiveInstance;
   }
 
   private loadKey(): void {
@@ -854,6 +922,7 @@ export class LicensingService implements OnModuleInit {
       },
     });
     this.logger.log('A verified licence operation was applied.');
+    this.captureLicenceBackup(`licence-${payload.type.toLowerCase()}`);
     return this.status({ fresh: true });
   }
 
@@ -1492,6 +1561,19 @@ export class LicensingService implements OnModuleInit {
     });
     return row ?? null;
   }
+}
+
+/** Return a bounded diagnostic without logging paths, key material or licence data. */
+function describeError(error: unknown): string {
+  if (error instanceof LicenseStateError) return error.code;
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string' &&
+        ['EACCES', 'EPERM', 'ENOENT', 'ENOSPC', 'ETIMEDOUT', 'EIO'].includes(code)) {
+      return code;
+    }
+  }
+  return 'unclassified failure';
 }
 
 type LicenseRow = {

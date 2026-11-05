@@ -399,6 +399,15 @@ export class StockDocumentsService {
       });
     }
 
+    // Every stock issue is an expense attribution, not an anonymous balance
+    // change. Enforce this in the API so UI omissions cannot bypass accounting.
+    if (kind === StockDocumentKind.ADJUSTMENT &&
+        lines.some((line) => line.quantity.isNegative()) && !costCenterId) {
+      throw new BadRequestException(
+        'A cost center is required when issuing stock from a warehouse.',
+      );
+    }
+
     const fromWarehouseId = dto.fromWarehouseId ? String(dto.fromWarehouseId) : null;
     const toWarehouseId = dto.toWarehouseId ? String(dto.toWarehouseId) : null;
 
@@ -590,6 +599,12 @@ export class StockDocumentsService {
         if (raw.notes != null && typeof raw.notes !== 'string') throw new BadRequestException(`Line ${index + 1}: notes must be text`);
         lines.push({id:old?.id ?? randomUUID(),itemId:item.id,lineNumber:index + 1,quantity,unitCost,unitName,unitFactor,unitQuantity,notes:raw.notes ?? null});
       }
+      if (document.voucherKind === 'ISSUE' &&
+          lines.some((line) => line.quantity.isNegative()) && !costCenterId) {
+        throw new BadRequestException(
+          'A cost center is required when issuing stock from a warehouse.',
+        );
+      }
       await tx.stockDocumentLine.deleteMany({where:{documentId:id}});
       await tx.stockDocumentLine.createMany({data:lines.map(line => ({...line,documentId:id}))});
       const version = document.editVersion + 1;
@@ -691,6 +706,14 @@ export class StockDocumentsService {
       }
       if (document.voucherKind && (!document.reviewedAt || !document.approvedAt)) {
         throw new BadRequestException('Stock voucher must be reviewed and approved before posting');
+      }
+      if (document.voucherKind === 'ISSUE' && document.lines.some((line) => line.quantity.isNegative())) {
+        if (!document.costCenterId) {
+          throw new BadRequestException('A cost center is required when issuing stock from a warehouse.');
+        }
+        // Revalidate at posting: a centre can be disabled or its posting
+        // window closed after the draft was created and approved.
+        await this.costCenters.assertPostable(tx,companyId,[document.costCenterId],document.documentDate);
       }
       if (document.kind === StockDocumentKind.TRANSFER &&
           document.lines.some((line) => !line.quantity.greaterThan(0))) {
@@ -855,6 +878,11 @@ export class StockDocumentsService {
         }
 
         if (quantity.isZero()) continue;
+        if (document.voucherKind === 'ISSUE' && quantity.isNegative() && !document.costCenterId) {
+          throw new BadRequestException(
+            'A cost center is required when issuing stock from a warehouse.',
+          );
+        }
 
         const direction = quantity.greaterThan(0) ? StockDirection.IN : StockDirection.OUT;
         const absoluteQuantity = quantity.abs();

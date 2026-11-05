@@ -1,9 +1,10 @@
 name: Release security evidence (not release approval)
 
-# Independent from code CI; this gate remains explicitly failing until the
-# separately approved VM evidence can be authenticated for the exact artifact.
-# It does not publish or modify releases and does not replace the checks in
-# the publisher. Both PR and push receive the same missing-evidence signal.
+# Release-only evidence must not fail ordinary pull-request CI. PRs receive an
+# explicit notice that this evidence has not been collected. The protected
+# main-branch gate remains failing until evidence from the approved isolated
+# Windows VM is attached and authenticated for the exact release artifact.
+# This workflow never publishes or modifies a release.
 on:
   pull_request:
     branches: [main, 'arena/**']
@@ -19,7 +20,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Explicitly report missing approved-VM security evidence
+      - name: Report release-only evidence is not run on pull requests
+        if: github.event_name == 'pull_request'
         run: |
-          echo '::error title=Security and installed-product tests blocked::Signed licence, generator and installed product tests require the approved isolated VM. They have not run and this PR is not release-approved.'
+          echo '::notice title=Release evidence pending::Signed production-licence and installed-product evidence must be collected in the approved isolated Windows VM before release. This release-only gate does not block ordinary pull-request CI.'
+
+      - name: Block main-branch release without approved evidence
+        if: github.event_name == 'push'
+        run: |
+          echo '::error title=Release approval blocked::Signed production-licence and installed-product evidence from the approved isolated Windows VM is required for the exact release artifact. No release is approved.'
           exit 1

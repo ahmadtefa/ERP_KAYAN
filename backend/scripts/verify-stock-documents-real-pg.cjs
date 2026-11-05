@@ -908,6 +908,9 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(await prisma.journalEntry.count({where:{sourceId:receipt.id}}),0);
     const postedReceipt = await service.post(company, user, receipt.id, false);
     assert.equal(postedReceipt.lines[0].unitCost,null);
+    await assert.rejects(service.create(company,branch,user,{kind:'ADJUSTMENT',documentDate:date,
+      toWarehouseId:warehouse,reason:'Issue missing cost attribution',
+      lines:[{itemId:item,quantity:'-1'}]}),/cost center is required/i);
     const issue = await service.create(company, branch, user, { kind:'ADJUSTMENT', documentDate:date,
       toWarehouseId:warehouse, costCenterId:centre, reason:'Synthetic issue',
       lines:[{itemId:item, quantity:'-4', unitCost:'1'}] });
@@ -1015,7 +1018,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const countedAgain = await service.create(company,branch,user,{kind:'COUNT',documentDate:date,
       toWarehouseId:warehouse,lines:[{itemId:item,countedQuantity:'3'}]});
     const concurrentIssue = await service.create(company,branch,user,{kind:'ADJUSTMENT',documentDate:date,
-      toWarehouseId:warehouse,lines:[{itemId:item,quantity:'-5'}]});
+      toWarehouseId:warehouse,costCenterId:centre,lines:[{itemId:item,quantity:'-5'}]});
     const countRace = await Promise.allSettled([
       service.post(company,user,countedAgain.id), service.post(company,user,concurrentIssue.id),
     ]);
@@ -1069,7 +1072,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const voucherUnit = await prisma.itemUnit.create({data:{itemId:item,unit:'synthetic-voucher-box',factor:'2'}});
     for (const [voucherKind, quantity, baseQuantity] of [['RECEIPT','2','4.0000'],['ISSUE','-2','-4.0000']]) {
       const input = {idempotencyKey:`voucher-unit-${voucherKind.toLowerCase()}-0001`,kind:'ADJUSTMENT',voucherKind,
-        documentDate:date,toWarehouseId:secondWarehouse,reason:'Synthetic unit',counterpartyName:'Synthetic party',
+        documentDate:date,toWarehouseId:secondWarehouse,costCenterId:centre,reason:'Synthetic unit',counterpartyName:'Synthetic party',
         lines:[{itemId:item,quantity,unitName:'synthetic-voucher-box',unitCost:'7.5'}]};
       const before = await warehouseBalance(secondWarehouse);
       const voucher = await service.create(company,branch,user,input,true);
@@ -1182,22 +1185,39 @@ let difference = '70000000-0000-4000-8000-000000000005';
     await service.reverse(company,user,editable.id,true,branch);
     assert.equal(await warehouseBalance(secondWarehouse),10);
 
+    await assert.rejects(service.create(company,branch,user,{idempotencyKey:'issue-without-centre-0001',kind:'ADJUSTMENT',
+      voucherKind:'ISSUE',documentDate:date,toWarehouseId:secondWarehouse,reason:'Issue without centre',counterpartyName:'Synthetic department',
+      lines:[{itemId:item,quantity:'-1',unitCost:'7'}]},true),/cost center is required/i);
     const editableIssue = await service.create(company,branch,user,{idempotencyKey:'editable-issue-create-0001',kind:'ADJUSTMENT',
       voucherKind:'ISSUE',documentDate:date,toWarehouseId:secondWarehouse,reason:'Issue',counterpartyName:'Synthetic department',
-      lines:[{itemId:item,quantity:'-1',unitCost:'7'}]},true);
+      costCenterId:centre,lines:[{itemId:item,quantity:'-1',unitCost:'7'}]},true);
     const issueEdit = {idempotencyKey:'editable-issue-change-0001',expectedVersion:0,documentDate:date,
-      toWarehouseId:secondWarehouse,reason:'Issue revised',counterpartyName:'Synthetic department',
+      toWarehouseId:secondWarehouse,reason:'Issue revised',counterpartyName:'Synthetic department',costCenterId:centre,
       lines:[{id:editableIssue.lines[0].id,itemId:item,quantity:'-2',unitCost:'999'}]};
+    await assert.rejects(service.updateVoucher(company,branch,user,editableIssue.id,{...issueEdit,
+      idempotencyKey:'editable-issue-edit-without-centre-0001',costCenterId:null},true),/cost center is required/i);
     const redactedIssue = await service.updateVoucher(company,branch,user,editableIssue.id,issueEdit,false);
     assert.equal(redactedIssue.lines[0].unitCost,null);
     assert.equal((await service.findOne(company,editableIssue.id,true)).lines[0].unitCost,'7.0000');
+    // A cost centre may be disabled after approval. Posting must revalidate
+    // the attribution and roll back the status claim until the centre is valid.
+    await prisma.costCenter.update({where:{id:centre},data:{isActive:false}});
+    await service.transitionVoucher(company,branch,user,editableIssue.id,'REVIEW',true);
+    await service.transitionVoucher(company,branch,user,editableIssue.id,'APPROVE',true);
+    await assert.rejects(service.post(company,user,editableIssue.id,true,branch),/cost center/i);
+    assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:editableIssue.id}})).status,'DRAFT');
+    assert.equal(await prisma.stockMovement.count({where:{referenceId:editableIssue.id}}),0);
+    assert.equal(await prisma.journalEntry.count({where:{sourceId:editableIssue.id}}),0);
+    await prisma.costCenter.update({where:{id:centre},data:{isActive:true}});
+    await service.post(company,user,editableIssue.id,true,branch);
+    await service.reverse(company,user,editableIssue.id,true,branch);
     const anotherBranch = '70000000-0000-4000-8000-000000000009';
     const anotherWarehouse = '70000000-0000-4000-8000-000000000010';
     await prisma.branch.create({data:{id:anotherBranch,companyId:company,code:'OTHER-SYN',nameEn:'Other branch',nameAr:'فرع آخر'}});
     await prisma.warehouse.create({data:{id:anotherWarehouse,companyId:company,branchId:anotherBranch,code:'OTHER-SYN',nameEn:'Other warehouse',nameAr:'مخزن آخر'}});
     const otherVoucher = await service.create(company,anotherBranch,user,{idempotencyKey:'voucher-other-branch-0001',kind:'ADJUSTMENT',
       voucherKind:'ISSUE',documentDate:date,toWarehouseId:anotherWarehouse,reason:'Other branch',counterpartyName:'Synthetic party',
-      lines:[{itemId:item,quantity:'-1'}]},false);
+      costCenterId:centre,lines:[{itemId:item,quantity:'-1'}]},false);
     assert.equal((await service.findAll(company,{voucherOnly:true,q:otherVoucher.documentNumber},branch)).total,0);
     assert.equal((await service.findAll(company,{q:otherVoucher.documentNumber},branch)).total,0);
     assert.equal((await service.findAll(company,{voucherOnly:true,q:otherVoucher.documentNumber},anotherBranch)).total,1);
