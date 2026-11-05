@@ -431,6 +431,9 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal((await prisma.account.findUniqueOrThrow({where:{id:movable.id}})).parentId,null);
     } finally { await httpApp.close(); }
     console.log('PASS: chart PATCH over real HTTP with permission guard, DTO validation, service and PostgreSQL; injected principal, no JWT or Flutter.');
+    if (process.env.KAYAN_RUN_FLUTTER_PG_TESTS === 'true') {
+      await require('./verify-chart-flutter-http-pg.cjs')({prisma,chart,company,user,branch});
+    }
     const usedGroup = await chart.create(company,user,{code:'SYN-HIST-GROUP',nameEn:'History group',nameAr:'مجموعة تاريخية',type:'ASSET',parentId:root.id,isPostable:false});
     const usedLeaf = await chart.create(company,user,{code:'SYN-HIST-LEAF',nameEn:'History leaf',nameAr:'حساب تاريخي',type:'ASSET',parentId:usedGroup.id,isPostable:true});
     await prisma.journalEntry.create({data:{companyId:company,branchId:branch,entryNumber:'SYN-TREE-HISTORY',

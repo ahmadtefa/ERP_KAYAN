@@ -148,9 +148,19 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Generate production Prisma client for the isolated stock fixture
         run: npx prisma generate
+      - name: Install Flutter for the real HTTP and PostgreSQL widget fixture
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - name: Resolve Flutter integration dependencies from lockfile
+        working-directory: .
+        run: flutter pub get --enforce-lockfile
       - name: Verify populated upgrade and stock posting on isolated PostgreSQL
         env:
           NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-no-signing.cjs
+          KAYAN_RUN_FLUTTER_PG_TESTS: 'true'
         run: python ../scripts/ci-diagnose.py node scripts/verify-prisma-native-upgrade.mjs
       - name: Verify archive content and scratch cleanup against isolated PostgreSQL
         env:
