@@ -39,8 +39,8 @@ const runtimeSmoke = installer.jobs['smoke-final'];
 assert.equal(runtimeSmoke.if, "needs.build.outputs.build_mode == 'product'");
 assert.ok(runtimeSmoke.steps.some(step => String(step.run || '').includes('-RuntimeOnly')),
   'PR Setup must be installed only in the bounded RuntimeOnly smoke');
-const publisher = installer.jobs['publish-windows'];
-assert.match(publisher.if, /github\.event_name == 'push'/);
+const publisherJob = installer.jobs['publish-windows'];
+assert.match(publisherJob.if, /github\.event_name == 'push'/);
 assert.match(publisher.if, /refs\/heads\/main/);
 const safe = read('safe-checks.yml');
 assert.ok(safe.on.push && safe.on.pull_request, 'Safe checks must remain active on push and PR');
