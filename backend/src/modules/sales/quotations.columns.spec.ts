@@ -144,6 +144,24 @@ describe('QuotationsService subject and column layout', () => {
       .toBe(data.totalAmount.toFixed(4));
   });
 
+  it.each([
+    ['NaN', '100'], ['Infinity', '100'], ['1', 'Infinity'], ['1', 'NaN'], ['0.00001', '100'],
+  ])('rejects non-finite or zero-after-rounding quantity/price (%s, %s)', async (quantity, unitPrice) => {
+    const {instance,tx} = service();
+    await expect(instance.create(COMPANY_ID, BRANCH_ID, USER_ID, baseDto({
+      tables:[{title:'Main', lines:[{description:'Line', quantity, unitPrice}]}],
+    }) as never)).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.quotation.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts the smallest positive quantity representable by the quotation line', async () => {
+    const {instance,tx} = service();
+    await instance.create(COMPANY_ID, BRANCH_ID, USER_ID, baseDto({
+      tables:[{title:'Main', lines:[{description:'Line', quantity:'0.0001', unitPrice:'100'}]}],
+    }) as never);
+    expect(tx.quotation.create).toHaveBeenCalledTimes(1);
+  });
+
   it('refuses a layout that lists the same column twice', async () => {
     const { instance } = service();
     await expect(

@@ -6,7 +6,7 @@ The current GitHub-hosted runners are **not established as approved licence-test
 
 * `backend/src/modules/licensing/license-store.spec.ts` requires HMAC state and is deliberately blocked before execution in the independent `licence-store-isolation` job. It has not passed on an approved VM. Ordinary non-HMAC code checks continue independently; the overall workflow is expected to fail on this blocker.
 * The signing/compatibility tests and Windows installer build remain in `.github/workflows/windows-installer.yml`. The first build step **unconditionally blocks**, even on manual dispatch. The workflow therefore cannot currently produce an installer, including on an approved machine. This is an explicit temporary limitation, not a successful test, approved release or proof that setup works. No flag bypasses the block.
-* Runtime-only installed Windows smoke currently expects Full Backup and restore endpoints to succeed although the product deliberately blocks them. This contradiction is untested on installed Windows; do not remove the guard or report the smoke as full recovery evidence.
+* The earlier installed Windows runtime-only smoke failed at Full Backup with HTTP 503 `FULL_BACKUP_INCOMPLETE`. The smoke now checks that complete backup and restore fail closed when unsupported, explicitly reports both as untested, and retains the full restore exercise for when both capabilities are legitimately supported. This diagnostic change has not itself been run on installed Windows; do not remove the guard or report it as full recovery evidence.
 
 ## Requirements before controlled execution
 
