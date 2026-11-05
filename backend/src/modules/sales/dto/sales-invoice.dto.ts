@@ -36,7 +36,8 @@ export class SalesInvoiceLineDto {
   /// decides, so the same list is not retyped on every invoice.
   @IsOptional() @IsString() unitPrice?: string;
 
-  /// Percent. When omitted the item's own rate is used.
+  /// Percent. When omitted the item's own rate is used, or zero for a
+  /// free-text line; null and blank values also mean zero.
   @IsOptional() @IsString() taxRate?: string;
 
   /// The department, administrative unit or project this revenue belongs to.

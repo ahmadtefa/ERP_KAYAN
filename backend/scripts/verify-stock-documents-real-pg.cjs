@@ -1374,6 +1374,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     // Real HTTP controllers and validation, production services and real PG.
     // A test principal is injected: this does not prove JWT or licence checks.
     const httpSnapshots = [];
+    let freeInvoiceId;
     class InvoiceTaxHttpModule {}
     Module({ controllers:[SalesInvoicesController,PurchaseInvoicesController,ItemsController,InventoryReportsController], providers:[
       {provide:SalesInvoicesService,useValue:si}, {provide:PurchaseInvoicesService,useValue:pi},
@@ -1479,6 +1480,27 @@ let difference = '70000000-0000-4000-8000-000000000005';
         assert.equal(saved.totalAmount.toFixed(4),'621.0000',kind);
         httpSnapshots.push({kind,model,id:body.id});
       }
+      // With a nonzero company setting, an item-less sales line whose rate
+      // was omitted or cleared remains zero; explicit nonzero still works.
+      await prisma.companySetting.update({where:{companyId:company},data:{taxRate:'14'}});
+      const serviceLines = [
+        {description:'Synthetic free service',quantity:'1',unitPrice:'100'},
+        ...[null,'','   ','0','7'].map(taxRate => ({description:'Synthetic free service',quantity:'1',unitPrice:'100',taxRate})),
+      ];
+      const freePayload = JSON.stringify({customerId:customer.id,invoiceDate:date,lines:serviceLines});
+      const freeResponse = await fetch(base+'/sales/invoices',{method:'POST',headers:{'content-type':'application/json','x-allowed':'yes'},body:freePayload});
+      assert.equal(freeResponse.status,201);
+      const freeBody = await freeResponse.json();
+      freeInvoiceId = freeBody.id;
+      const freeInvoice = await prisma.salesInvoice.findUniqueOrThrow({where:{id:freeBody.id},include:{lines:{orderBy:{lineNumber:'asc'}}}});
+      assert.deepEqual(freeInvoice.lines.map(line=>line.taxRate.toFixed(4)),['0.0000','0.0000','0.0000','0.0000','0.0000','7.0000']);
+      assert.equal(freeInvoice.taxAmount.toFixed(4),'7.0000');
+      const freeUpdate = await fetch(base+'/sales/invoices/'+freeBody.id,{method:'PUT',headers:{'content-type':'application/json','x-allowed':'yes'},body:freePayload});
+      assert.equal(freeUpdate.status,200);
+      const freeUpdated = await prisma.salesInvoice.findUniqueOrThrow({where:{id:freeBody.id},include:{lines:{orderBy:{lineNumber:'asc'}}}});
+      assert.deepEqual(freeUpdated.lines.map(line=>line.taxRate.toFixed(4)),['0.0000','0.0000','0.0000','0.0000','0.0000','7.0000']);
+      assert.equal(freeUpdated.taxAmount.toFixed(4),'7.0000');
+      console.log('PASS: free-text sales invoice omitted/blank/null/explicit tax over real HTTP and PG, create and update; principal injected.');
       // Barcode lookup must expose the exact factor, even when one scan cannot
       // be represented by the ledger. The same HTTP-to-service-to-PG path must
       // reject an inexact invoice quantity rather than silently round stock.
@@ -1512,6 +1534,9 @@ let difference = '70000000-0000-4000-8000-000000000005';
     } finally { await taxHttp.close(); }
     assert.equal((await itemService.update(company,user,taxItem.id,{taxRate:''},true)).taxRate,'0.0000');
     await prisma.companySetting.update({where:{companyId:company},data:{taxRate:'3'}});
+    const freeAfterChange = await prisma.salesInvoice.findUniqueOrThrow({where:{id:freeInvoiceId},include:{lines:{orderBy:{lineNumber:'asc'}}}});
+    assert.deepEqual(freeAfterChange.lines.map(line=>line.taxRate.toFixed(4)),['0.0000','0.0000','0.0000','0.0000','0.0000','7.0000']);
+    assert.equal(freeAfterChange.taxAmount.toFixed(4),'7.0000');
     for (const snapshot of snapshots) {
       const order=await snapshot.orderModel.findUniqueOrThrow({where:{id:snapshot.orderId},include:{lines:{orderBy:{lineNumber:'asc'}}}});
       const invoice=await snapshot.invoiceModel.findUniqueOrThrow({where:{id:snapshot.invoiceId},include:{lines:{orderBy:{lineNumber:'asc'}}}});

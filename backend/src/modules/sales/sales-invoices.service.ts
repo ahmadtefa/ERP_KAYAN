@@ -1118,15 +1118,15 @@ export class SalesInvoicesService {
 
       // Explicit line tax wins, including a cleared value (zero). An omitted
       // line rate uses the item's rate; a legacy null item rate is zero, never
-      // an implicit company rate. For a free-text line with no item, retain
-      // the existing company default when the line rate is omitted. Stored
+      // an implicit company rate. A free-text line with no item and no rate
+      // is also zero; a user may still enter an explicit nonzero rate. Stored
       // document snapshots are not rewritten.
       const taxRate: Prisma.Decimal =
         raw.taxRate !== undefined
           ? (raw.taxRate === null || raw.taxRate.trim() === ''
               ? new Prisma.Decimal(0)
               : this.rate(raw.taxRate, `Line ${index + 1} taxRate`))
-          : (item ? item.taxRate ?? new Prisma.Decimal(0) : new Prisma.Decimal(settings.taxRate));
+          : (item?.taxRate ?? new Prisma.Decimal(0));
 
       // What the person typed is the price of the goods, unless the company
       // has said its prices already include VAT - in which case the tax is
