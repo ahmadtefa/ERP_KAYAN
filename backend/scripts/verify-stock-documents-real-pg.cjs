@@ -1185,12 +1185,17 @@ let difference = '70000000-0000-4000-8000-000000000005';
     await service.reverse(company,user,editable.id,true,branch);
     assert.equal(await warehouseBalance(secondWarehouse),10);
 
+    await assert.rejects(service.create(company,branch,user,{idempotencyKey:'issue-without-centre-0001',kind:'ADJUSTMENT',
+      voucherKind:'ISSUE',documentDate:date,toWarehouseId:secondWarehouse,reason:'Issue without centre',counterpartyName:'Synthetic department',
+      lines:[{itemId:item,quantity:'-1',unitCost:'7'}]},true),/cost center is required/i);
     const editableIssue = await service.create(company,branch,user,{idempotencyKey:'editable-issue-create-0001',kind:'ADJUSTMENT',
       voucherKind:'ISSUE',documentDate:date,toWarehouseId:secondWarehouse,reason:'Issue',counterpartyName:'Synthetic department',
-      lines:[{itemId:item,quantity:'-1',unitCost:'7'}]},true);
+      costCenterId:centre,lines:[{itemId:item,quantity:'-1',unitCost:'7'}]},true);
     const issueEdit = {idempotencyKey:'editable-issue-change-0001',expectedVersion:0,documentDate:date,
-      toWarehouseId:secondWarehouse,reason:'Issue revised',counterpartyName:'Synthetic department',
+      toWarehouseId:secondWarehouse,reason:'Issue revised',counterpartyName:'Synthetic department',costCenterId:centre,
       lines:[{id:editableIssue.lines[0].id,itemId:item,quantity:'-2',unitCost:'999'}]};
+    await assert.rejects(service.updateVoucher(company,branch,user,editableIssue.id,{...issueEdit,
+      idempotencyKey:'editable-issue-edit-without-centre-0001',costCenterId:null},true),/cost center is required/i);
     const redactedIssue = await service.updateVoucher(company,branch,user,editableIssue.id,issueEdit,false);
     assert.equal(redactedIssue.lines[0].unitCost,null);
     assert.equal((await service.findOne(company,editableIssue.id,true)).lines[0].unitCost,'7.0000');
@@ -1200,7 +1205,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     await prisma.warehouse.create({data:{id:anotherWarehouse,companyId:company,branchId:anotherBranch,code:'OTHER-SYN',nameEn:'Other warehouse',nameAr:'مخزن آخر'}});
     const otherVoucher = await service.create(company,anotherBranch,user,{idempotencyKey:'voucher-other-branch-0001',kind:'ADJUSTMENT',
       voucherKind:'ISSUE',documentDate:date,toWarehouseId:anotherWarehouse,reason:'Other branch',counterpartyName:'Synthetic party',
-      lines:[{itemId:item,quantity:'-1'}]},false);
+      costCenterId:centre,lines:[{itemId:item,quantity:'-1'}]},false);
     assert.equal((await service.findAll(company,{voucherOnly:true,q:otherVoucher.documentNumber},branch)).total,0);
     assert.equal((await service.findAll(company,{q:otherVoucher.documentNumber},branch)).total,0);
     assert.equal((await service.findAll(company,{voucherOnly:true,q:otherVoucher.documentNumber},anotherBranch)).total,1);
