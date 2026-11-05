@@ -410,12 +410,24 @@ export class FullBackupService {
       this.logger.warn('A completed backup has an unremoved staging link.');
     });
 
+    // A full/safety database dump is not a complete recovery point without
+    // its authenticated, machine-bound licence companion.
+    const licenceBackup = this.licensing.captureLicenceBackup(
+      kind === 'full' ? 'full-backup' : 'safety-backup',
+    );
+    if (!licenceBackup) {
+      await unlink(path).catch(() => {});
+      throw new ServiceUnavailableException(
+        'The database archive was created, but its verified licence backup could not be created. The incomplete backup was removed; repair the licence state before retrying.',
+      );
+    }
+
     if (userId) {
       await this.audit.record({
         action: 'BACKUP',
         entity: 'backup_full',
         entityId: name,
-        after: { name, sizeBytes: file.sizeBytes, kind },
+        after: { name, sizeBytes: file.sizeBytes, kind, licenceBackup: licenceBackup.id },
         userId,
       });
     }
@@ -694,6 +706,13 @@ export class FullBackupService {
       );
     }
     this.assertCustomDump(buffer, label);
+
+    // Preserve the current device-bound licence before a destructive restore.
+    if (!this.licensing.captureLicenceBackup('pre-restore')) {
+      throw new ServiceUnavailableException(
+        'The current licence could not be backed up safely. The database was not changed; repair the licence state before restoring.',
+      );
+    }
 
     // Validate the tool connection before creating a scratch database or
     // touching the primary. This rejects libpq-only target overrides.
