@@ -41,7 +41,7 @@ assert.ok(runtimeSmoke.steps.some(step => String(step.run || '').includes('-Runt
   'PR Setup must be installed only in the bounded RuntimeOnly smoke');
 const publisherJob = installer.jobs['publish-windows'];
 assert.match(publisherJob.if, /github\.event_name == 'push'/);
-assert.match(publisher.if, /refs\/heads\/main/);
+assert.match(publisherJob.if, /refs\/heads\/main/);
 const safe = read('safe-checks.yml');
 assert.ok(safe.on.push && safe.on.pull_request, 'Safe checks must remain active on push and PR');
 assert.deepEqual(safe.on.push.branches, ['main'], 'Main must retain push checks without duplicating open PR commits');
