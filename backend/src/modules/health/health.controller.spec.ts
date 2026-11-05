@@ -1,6 +1,8 @@
 import { Request } from 'express';
 import { HealthController } from './health.controller';
 
+const os = jest.requireActual<typeof import('node:os')>('node:os');
+
 /// The parts of the request the network report reads: where it arrived, and
 /// whether the transport was encrypted.
 function fakeRequest(overrides: Partial<Record<string, unknown>> = {}): Request {
@@ -96,7 +98,7 @@ describe('HealthController', () => {
       const net = await controller.network(fakeRequest({ headers: { host: '127.0.0.1:3000' } }));
       expect(net.port).toBeDefined();
       expect(net.host).toBe('0.0.0.0');
-      expect(net.isLanAccessible).toBe(true);
+      expect(net.isLanAccessible).toBe(net.addresses.length > 0);
       expect(net.bindAllInterfaces).toBe(true);
       expect(Array.isArray(net.addresses)).toBe(true);
       expect(typeof net.primaryUrl).toBe('string');
@@ -113,6 +115,68 @@ describe('HealthController', () => {
         expect(address.address.startsWith('127.')).toBe(false);
       }
     } finally {
+      if (previous === undefined) delete process.env.HOST;
+      else process.env.HOST = previous;
+    }
+  });
+
+  it('does not present a public interface as a LAN address', async () => {
+    const previous = process.env.HOST;
+    process.env.HOST = '0.0.0.0';
+    const interfaces = jest.spyOn(os, 'networkInterfaces').mockReturnValue({
+      public: [{ address: '203.0.113.10', family: 'IPv4', internal: false }],
+      local: [{ address: '192.168.1.25', family: 'IPv4', internal: false }],
+    } as any);
+    try {
+      const net = await controller.network(fakeRequest());
+      expect(net.isLanAccessible).toBe(true);
+      expect(net.addresses.map((entry) => entry.address)).toEqual(['192.168.1.25']);
+      expect(net.interfaces.map((entry) => entry.address)).toEqual(['192.168.1.25']);
+      expect(net.primaryUrl).toMatch(/^http:\/\/192\.168\.1\.25:/);
+    } finally {
+      interfaces.mockRestore();
+      if (previous === undefined) delete process.env.HOST;
+      else process.env.HOST = previous;
+    }
+  });
+
+  it('does not imply a LAN candidate when only a public interface exists', async () => {
+    const previous = process.env.HOST;
+    process.env.HOST = '0.0.0.0';
+    const interfaces = jest.spyOn(os, 'networkInterfaces').mockReturnValue({
+      public: [{ address: '203.0.113.10', family: 'IPv4', internal: false }],
+    } as any);
+    try {
+      const net = await controller.network(fakeRequest());
+      expect(net.isLanAccessible).toBe(false);
+      expect(net.addresses).toEqual([]);
+      expect(net.interfaces).toEqual([]);
+      expect(net.primaryUrl).toMatch(/^http:\/\/localhost:/);
+    } finally {
+      interfaces.mockRestore();
+      if (previous === undefined) delete process.env.HOST;
+      else process.env.HOST = previous;
+    }
+  });
+
+  it('keeps RFC1918 and link-local candidates, but excludes public ranges', async () => {
+    const previous = process.env.HOST;
+    process.env.HOST = '0.0.0.0';
+    const make = (address: string) => ({ address, family: 'IPv4', internal: false });
+    const interfaces = jest.spyOn(os, 'networkInterfaces').mockReturnValue({
+      mixed: [
+        make('10.1.2.3'), make('172.16.0.1'), make('172.31.255.255'),
+        make('192.168.0.1'), make('169.254.10.1'), make('172.15.1.1'),
+        make('172.32.1.1'), make('198.51.100.1'), make('10.999.1.1'),
+      ],
+    } as any);
+    try {
+      const net = await controller.network(fakeRequest());
+      expect(net.addresses.map((entry) => entry.address)).toEqual([
+        '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.0.1', '169.254.10.1',
+      ]);
+    } finally {
+      interfaces.mockRestore();
       if (previous === undefined) delete process.env.HOST;
       else process.env.HOST = previous;
     }

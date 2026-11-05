@@ -2199,7 +2199,7 @@ class AppLocalizationsAr extends AppLocalizations {
       'لم يستجب الخادم لتقرير الشبكة. تحقق من أنه يعمل.';
 
   @override
-  String get lanReachable => 'متاح على الشبكة المحلية';
+  String get lanReachable => 'عنوان مرشح للشبكة المحلية (الاتصال غير مختبر)';
 
   @override
   String get localOnly => 'هذا الجهاز فقط';
@@ -2233,11 +2233,11 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get lanNotEnabledHint =>
-      'الخادم مرتبط بهذا الجهاز فقط، لذا لا تستجيب العناوين أدناه من جهاز آخر. للسماح لأجهزة الشبكة، اضبط HOST=0.0.0.0 في ملف إعدادات التثبيت ثم أعد تشغيل البرنامج.';
+      'لا يوجد عنوان شبكة خاصة مُعلن حاليًا. تحقق من واجهة الشبكة وربط الخادم؛ الربط المحلي وحده لا يقبل اتصال الأجهزة الأخرى.';
 
   @override
   String get lanFirewallHint =>
-      'يجب أيضاً أن يسمح جدار حماية Windows للبرنامج على الشبكات الخاصة. منفذ قاعدة البيانات (5432) لا يُفتح أبداً: الأجهزة الأخرى تصل إلى البرنامج فقط، ويجب عليها تسجيل الدخول.';
+      'يجب على المسؤول التحقق من جدار حماية الشبكة الخاصة وتجربة اتصال جهاز مصرح به. لا تفتح منفذ PostgreSQL ‏(5432) للشبكة.';
 
   @override
   String get publicAddressTitle => 'العنوان العام (الإنترنت)';

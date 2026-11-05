@@ -152,8 +152,9 @@ export class HealthController {
       isPrivate: boolean;
     }> = [];
 
-    for (const name of Object.keys(networkInterfaces())) {
-      for (const net of networkInterfaces()[name] ?? []) {
+    const networkSnapshot = networkInterfaces();
+    for (const name of Object.keys(networkSnapshot)) {
+      for (const net of networkSnapshot[name] ?? []) {
         // Loopback and internal interfaces are never offered as a way in: they
         // cannot be reached from another machine, and a link that cannot open
         // is worse than no link.
@@ -191,7 +192,12 @@ export class HealthController {
     // 127.0.0.1 hands out the local address, because that is the one that
     // works; the reason is stated instead of silently hiding the interfaces.
     const bindAllInterfaces = host === '0.0.0.0' || host === '::';
-    const lanAddresses = bindAllInterfaces ? addresses : [];
+    // A public IPv4 interface is not a private LAN candidate, even if the
+    // backend happens to bind to it. Filtering the advertised candidates does
+    // not change the listener or firewall; reachability still needs a real
+    // client-to-host test on the intended network.
+    const privateAddresses = addresses.filter((address) => address.isPrivate);
+    const lanAddresses = bindAllInterfaces ? privateAddresses : [];
     const secure = request.secure || tlsTerminatedByProxy();
     const scheme = secure ? 'https' : 'http';
     const primary = lanAddresses[0]?.url ?? `${scheme}://localhost:${port}`;
@@ -205,7 +211,7 @@ export class HealthController {
         secure || isLoopbackHost(arrivedAt) ? 'durable' : 'memory-only',
       isLanAccessible: bindAllInterfaces && lanAddresses.length > 0,
       addresses: lanAddresses,
-      interfaces: addresses,
+      interfaces: privateAddresses,
       primaryUrl: primary,
       localUrl: `${scheme}://localhost:${port}`,
       apiBasePath: '/api/v1',
@@ -264,7 +270,7 @@ export class HealthController {
 
 function isPrivateIpv4(address: string): boolean {
   const parts = address.split('.').map((part) => Number(part));
-  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) return false;
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
   if (parts[0] === 10) return true;
   if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
   if (parts[0] === 192 && parts[1] === 168) return true;

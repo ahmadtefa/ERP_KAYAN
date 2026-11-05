@@ -1,5 +1,11 @@
 # دليل المورّد — Operator guide
 
+> **غير معتمد للإصدار على PR #70؛ المحتوى التالي تاريخي.** لا تُنشئ مفاتيح
+> أو تشغّل مولّدًا أو توقّع تراخيص أو تغيّر المفتاح العام والإعدادات اعتمادًا
+> على هذا الدليل. مسار التحقق القديم/الجديد غير موصول ومختبر بالكامل، ولا
+> توجد أداة إصدار تنفيذية معتمدة. اختبارات التوقيع محصورة في VM معتمدة.
+> المرجع الحالي `docs/release/LICENCE-KEY-TRANSITION-2026-11-03.md`.
+
 كل الأوامر تُشغَّل على جهاز المورّد، بلا إنترنت:
 
 ```
@@ -8,22 +14,10 @@ node tools/license-generator/kayan-license.mjs <command>
 
 `--home` يحدد مجلد المفاتيح (افتراضيًا `~/.kayan-license-generator`).
 
-## أول مرة / First run
+## التهيئة / First run
 
-```
-node kayan-license.mjs init
-node kayan-license.mjs backup --out D:\kayan-licence-backup
-```
-
-اطبع المفتاح العام وثبّته مع كل عملية تثبيت للبرنامج:
-
-```
-node kayan-license.mjs public-key
-```
-
-القيمة المعروضة كـ `LICENSE_PUBLIC_KEY` تُكتب في `kayan.env` بواسطة المُثبِّت، أو
-تُوضع في ملف `public-key.pem` داخل مجلد حالة الترخيص
-(`%ProgramData%\KAYAN-ERP\license`). راجع `KEY-PROTECTION.md` قبل أي خطوة.
+أزيلت هنا تعليمات إنشاء المفتاح واستبدال المفتاح العام لأنها غير معتمدة
+للمنتج الحالي؛ تاريخها موجود في Git. لا تُهيّئ أو تستبدل حالة موجودة.
 
 ## تسجيل ترخيص / Register a licence
 

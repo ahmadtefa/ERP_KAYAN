@@ -2212,7 +2212,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'The server did not answer its network report. Check that it is running.';
 
   @override
-  String get lanReachable => 'Available on the local network';
+  String get lanReachable => 'LAN address candidate (connection not tested)';
 
   @override
   String get localOnly => 'This computer only';
@@ -2246,11 +2246,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get lanNotEnabledHint =>
-      'The server is bound to this computer only, so the addresses below do not answer from another device. To allow the other computers on the network, set HOST=0.0.0.0 in the installation settings file and restart the program.';
+      'No private LAN address is currently advertised. Check the network interface and the server binding; a local-only binding cannot accept remote connections.';
 
   @override
   String get lanFirewallHint =>
-      'Windows Firewall must also allow the program on private networks. The database port (5432) is never opened: other devices only reach the program, and still have to sign in.';
+      'An administrator must separately verify the private-network firewall and test a permitted client connection. Do not expose PostgreSQL (port 5432).';
 
   @override
   String get publicAddressTitle => 'Public (internet) address';
