@@ -505,9 +505,13 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
                 decoration:InputDecoration(labelText:widget.kind == 'ISSUE'
                   ? _label(context,'مركز التكلفة (مطلوب)','Cost center (required)')
                   : _label(context,'مركز التكلفة (اختياري)','Cost center (optional)')),
-                items:[for (final row in centers) DropdownMenuItem(value:text(row,'id'),child:Text('${text(row,'code')} • ${text(row,'nameAr',fallback:text(row,'nameEn'))}'))],
+                items:[
+                  if (_center != null && !centers.any((x) => text(x,'id') == _center))
+                    DropdownMenuItem(value:_center,child:Text(_label(context,'مركز التكلفة المحفوظ','Saved cost center'))),
+                  for (final row in centers) DropdownMenuItem(value:text(row,'id'),child:Text('${text(row,'code')} • ${text(row,'nameAr',fallback:text(row,'nameEn'))}')),
+                ],
                 onChanged:(v) { setState(() => _center=v); _changed(); },
-                validator:(v) => widget.kind == 'ISSUE' && v == null ? _label(context,'مطلوب','Required') : null),
+                validator:(_) => widget.kind == 'ISSUE' && _center == null ? _label(context,'مطلوب','Required') : null),
               if (widget.kind == 'ISSUE' && centers.isEmpty)
                 Padding(padding:const EdgeInsets.only(top:8),child:Text(
                   _label(context,'لا توجد مراكز تكلفة نشطة متاحة للصرف.','No active cost centres are available for stock issues.'))),
