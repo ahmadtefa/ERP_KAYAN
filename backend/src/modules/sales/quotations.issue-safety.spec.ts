@@ -40,4 +40,16 @@ describe('quotation issuance snapshot isolation', () => {
     expect(tx.quotation.findFirst).toHaveBeenCalled();
     expect(audit.recordRequired).toHaveBeenCalledWith(expect.objectContaining({entity:'quotations'}),tx);
   });
+
+  it.each([
+    ['ACCEPTED','This quotation is already accepted'],
+    ['REJECTED','This quotation is already rejected'],
+    ['CONVERTED','A converted quotation can no longer change status'],
+  ] as const)('reports the existing %s status when a decision cannot be claimed', async (status,message) => {
+    const {service,tx} = fixture();
+    tx.quotation.updateMany.mockResolvedValue({count:0});
+    tx.quotation.findFirst.mockResolvedValue({status} as never);
+
+    await expect(service.accept('co','user','q1')).rejects.toThrow(message);
+  });
 });

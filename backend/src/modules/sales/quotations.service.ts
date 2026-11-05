@@ -484,9 +484,12 @@ export class QuotationsService {
         data: { updatedBy: userId },
       });
       if (claim.count !== 1) {
-        const existing = await tx.quotation.findFirst({ where: { id, companyId, deletedAt: null }, select: { id: true } });
+        const existing = await tx.quotation.findFirst({ where: { id, companyId, deletedAt: null }, select: { status: true } });
         if (!existing) throw new NotFoundException('Quotation not found');
-        throw new BadRequestException('This quotation changed while the decision was being saved');
+        if (existing.status === QuotationStatus.CONVERTED) {
+          throw new BadRequestException('A converted quotation can no longer change status');
+        }
+        throw new BadRequestException(`This quotation is already ${existing.status.toLowerCase()}`);
       }
       const quotation = await tx.quotation.findFirst({
         where: { id, companyId, deletedAt: null }, include: QUOTATION_INCLUDE,
