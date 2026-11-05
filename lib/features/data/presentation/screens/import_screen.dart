@@ -271,7 +271,9 @@ class _ModeCard extends ConsumerWidget {
             const SizedBox(height: 8),
             RadioGroup<ImportMode>(
               groupValue: state.mode,
-              onChanged: state.busy ? null : (value) => controller.chooseMode(value ?? ImportMode.insert),
+              onChanged: (value) {
+                if (!state.busy) controller.chooseMode(value ?? ImportMode.insert);
+              },
               child: Column(
                 children: [
                   RadioListTile<ImportMode>(
