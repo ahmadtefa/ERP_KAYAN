@@ -135,7 +135,7 @@ void main() {
     expect(
       tester.widget<TextFormField>(find.byKey(const ValueKey('line-tax-rate-0'))).controller!.text,
       '',
-      reason: 'a blank tax rate lets the server apply the item default',
+      reason: 'a blank rate stays blank and is saved as zero',
     );
     await tester.enterText(find.byKey(const ValueKey('line-tax-rate-0')), '7');
     await tester.tap(find.byKey(const ValueKey('item-choice-item-1')));
@@ -198,9 +198,9 @@ void main() {
     expect(api.postBody?['discountAmount'], '20');
   });
 
-  testWidgets('an untouched blank tax rate is omitted for the server default', (
-    tester,
-  ) async {
+  for (final kind in [InvoiceKind.sales, InvoiceKind.purchase]) {
+    for (final whitespace in [false, true]) {
+      testWidgets('${kind.name} ${whitespace ? 'whitespace' : 'untouched blank'} tax is sent as zero', (tester) async {
     tester.view.physicalSize = const Size(1600, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -220,8 +220,9 @@ void main() {
               'unit': 'piece',
               'isActive': true,
               'isStockTracked': true,
-              'taxRate': null,
+              'taxRate': '14.0000',
               'salePrice': '100.0000',
+              'purchasePrice': '100.0000',
             },
           ]),
           activeCustomersProvider.overrideWith((ref) async => [
@@ -230,6 +231,15 @@ void main() {
               'code': 'CUS-1',
               'nameEn': 'Test customer',
               'nameAr': 'عميل تجريبي',
+              'isActive': true,
+            },
+          ]),
+          activeSuppliersProvider.overrideWith((ref) async => [
+            {
+              'id': 'customer-1',
+              'code': 'CUS-1',
+              'nameEn': 'Test customer',
+              'nameAr': 'مورد تجريبي',
               'isActive': true,
             },
           ]),
@@ -244,7 +254,7 @@ void main() {
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
                       builder: (_) =>
-                          const InvoiceEditorScreen(kind: InvoiceKind.sales),
+                          InvoiceEditorScreen(kind: kind),
                     ),
                   ),
                   child: const Text('Open editor'),
@@ -272,10 +282,17 @@ void main() {
       '',
     );
 
+    if (whitespace) {
+      await tester.enterText(find.byKey(const ValueKey('line-tax-rate-0')), '   ');
+      await tester.pump();
+    }
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
+    expect(api.postPath, kind == InvoiceKind.sales ? '/sales/invoices' : '/purchases/invoices');
     final lines = (api.postBody?['lines'] as List).cast<Map>();
-    expect(lines.single.containsKey('taxRate'), isFalse);
-  });
+    expect(lines.single['taxRate'], '0');
+      });
+    }
+  }
 }

@@ -43,7 +43,9 @@ const { PriceListsService } = require('../src/modules/sales/price-lists.service'
 const { SalesOrdersService } = require('../src/modules/sales/sales-orders.service');
 const { PurchaseOrdersService } = require('../src/modules/purchases/purchase-orders.service');
 const { SalesInvoicesService } = require('../src/modules/sales/sales-invoices.service');
+const { SalesInvoicesController } = require('../src/modules/sales/sales-invoices.controller');
 const { PurchaseInvoicesService } = require('../src/modules/purchases/purchase-invoices.service');
+const { PurchaseInvoicesController } = require('../src/modules/purchases/purchase-invoices.controller');
 const { ProfilePhotoService } = require('../src/modules/auth/profile-photo.service');
 const { RolesService } = require('../src/modules/admin/roles.service');
 const { UsersService } = require('../src/modules/admin/users.service');
@@ -1085,6 +1087,51 @@ let difference = '70000000-0000-4000-8000-000000000005';
       const invoiceModel=kind === 'sales' ? prisma.salesInvoice : prisma.purchaseInvoice;
       snapshots.push({kind,orderId:order.id,invoiceId:invoice.id,orderModel,invoiceModel});
     }
+    // Real HTTP controllers and validation, production services and real PG.
+    // A test principal is injected: this does not prove JWT or licence checks.
+    const httpSnapshots = [];
+    class InvoiceTaxHttpModule {}
+    Module({ controllers:[SalesInvoicesController,PurchaseInvoicesController], providers:[
+      {provide:SalesInvoicesService,useValue:si}, {provide:PurchaseInvoicesService,useValue:pi},
+    ] })(InvoiceTaxHttpModule);
+    const taxHttp = await NestFactory.create(InvoiceTaxHttpModule,{logger:false});
+    try {
+      taxHttp.use((req,_res,next)=>{req.user={userId:user,companyId:company,branchId:branch,username:'synthetic',
+        isSuperAdmin:false,permissions:req.headers['x-allowed']==='yes' ? ['sales.invoices.create','purchases.invoices.create'] : []};next();});
+      taxHttp.useGlobalGuards(new PermissionsGuard(new Reflector()));
+      taxHttp.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
+      taxHttp.useGlobalFilters(new ProblemDetailsFilter());
+      await taxHttp.listen(0,'127.0.0.1');
+      const base=`http://127.0.0.1:${taxHttp.getHttpServer().address().port}`;
+      for (const [kind,route,partyField,party,model] of [
+        ['sales','/sales/invoices','customerId',customer.id,prisma.salesInvoice],
+        ['purchase','/purchases/invoices','supplierId',supplier.id,prisma.purchaseInvoice],
+      ]) {
+        const lines=[
+          {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:''},
+          {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:null},
+          {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:'   '},
+          {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:'0'},
+          {itemId:taxItem.id,quantity:'1',unitPrice:'100',taxRate:'7'},
+          {itemId:taxItem.id,quantity:'1',unitPrice:'100'},
+        ];
+        const send=(allowed)=>fetch(base+route,{method:'POST',headers:{'content-type':'application/json','x-allowed':allowed?'yes':'no'},
+          body:JSON.stringify({[partyField]:party,invoiceDate:date,lines})});
+        const before=await model.count({where:{companyId:company}});
+        assert.equal((await send(false)).status,403,kind);
+        assert.equal(await model.count({where:{companyId:company}}),before,kind);
+        const response=await send(true);
+        assert.equal(response.status,201,kind);
+        const body=await response.json();
+        assert.ok(body.id,kind);
+        assert.equal(await model.count({where:{companyId:company}}),before+1,kind);
+        const saved=await model.findUniqueOrThrow({where:{id:body.id},include:{lines:{orderBy:{lineNumber:'asc'}}}});
+        assert.deepEqual(saved.lines.map(line=>line.taxRate.toFixed(4)),['0.0000','0.0000','0.0000','0.0000','7.0000','14.0000'],kind);
+        assert.equal(saved.taxAmount.toFixed(4),'21.0000',kind);
+        assert.equal(saved.totalAmount.toFixed(4),'621.0000',kind);
+        httpSnapshots.push({kind,model,id:body.id});
+      }
+    } finally { await taxHttp.close(); }
     assert.equal((await itemService.update(company,user,taxItem.id,{taxRate:''},true)).taxRate,'0.0000');
     await prisma.companySetting.update({where:{companyId:company},data:{taxRate:'3'}});
     for (const snapshot of snapshots) {
@@ -1096,8 +1143,13 @@ let difference = '70000000-0000-4000-8000-000000000005';
         assert.equal(document.totalAmount.toFixed(4),'421.0000');
       }
     }
+    for (const snapshot of httpSnapshots) {
+      const invoice=await snapshot.model.findUniqueOrThrow({where:{id:snapshot.id},include:{lines:{orderBy:{lineNumber:'asc'}}}});
+      assert.deepEqual(invoice.lines.map(line=>line.taxRate.toFixed(4)),['0.0000','0.0000','0.0000','0.0000','7.0000','14.0000'],snapshot.kind);
+      assert.equal(invoice.taxAmount.toFixed(4),'21.0000',snapshot.kind);
+    }
     await prisma.companySetting.update({where:{companyId:company},data:{taxRate:'14'}});
-    console.log('PASS: real PG tax empty, zero, explicit and inherited rates; historical order and invoice snapshots for both types.');
+    console.log('PASS: real HTTP/PG sale and purchase invoices preserve blank/null/space/zero versus explicit and omitted tax; historical snapshots persist after defaults change. Principal injected; JWT and licence guards untested.');
     // Creation retries: a real unique ledger, order and required audit must
     // commit together; both concurrent callers receive the same order.
     for (const [kind, orders, party] of [['sales',sales,customer.id],['purchase',purchases,supplier.id]]) {

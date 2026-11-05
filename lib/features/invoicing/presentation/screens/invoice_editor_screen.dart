@@ -396,8 +396,8 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
   }
 
   void _applyItemDefaults(_LineDraft line, Json item) {
-    // An untouched blank tax field lets the server apply the item or company
-    // default. Never replace an explicitly entered rate on selection.
+    // The visible blank rate means zero, not an omitted server default.
+    // Never replace the entered or blank rate when selecting an item.
     final units = lineUnitsOf(item);
     // A fractional pack can sort before the base unit; use the item's actual
     // base label rather than assuming the smallest factor is the base.
@@ -475,8 +475,9 @@ class _InvoiceEditorScreenState extends ConsumerState<InvoiceEditorScreen> {
           'unitName': line.unitName!.trim(),
         'quantity': quantity,
         'unitPrice': price,
-        if (line.taxRateEdited || line.taxRate.text.trim().isNotEmpty)
-          'taxRate': line.taxRate.text.trim().isEmpty ? '0' : line.taxRate.text.trim(),
+        // The form always shows a tax field: blank or whitespace is an
+        // explicit zero, whereas omitting the API field has distinct meaning.
+        'taxRate': line.taxRate.text.trim().isEmpty ? '0' : line.taxRate.text.trim(),
         if (line.costCenterId != null) 'costCenterId': line.costCenterId,
         if (line.discountKind != DiscountKind.none)
           'discountType': discountTypeOf(line.discountKind),
