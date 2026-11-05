@@ -165,6 +165,10 @@ export class FullBackupService {
       backupDirectory: this.backupDir(),
       // No archive currently has proof of a complete machine restore.
       deletionProtected: true,
+      // A PostgreSQL dump alone cannot restore the installation, attached
+      // files, and device-bound licence as one verified recovery point.
+      fullBackupSupported: false,
+      fullRestoreSupported: false,
       // A scratch restore is mandatory before the primary can be touched.
       canRehearseRestore: this.canCreateDatabase,
       rehearsalNote: this.canCreateDatabase
@@ -340,6 +344,32 @@ export class FullBackupService {
     }
   }
 
+  /** Reject a requested complete backup without reporting a database dump as
+   * success. Preserve prior archives and record the failed request when the
+   * database is reachable. This never produces or purges an archive. */
+  async rejectFullBackup(userId: string, companyId: string | null): Promise<never> {
+    const detail = 'النسخة الكاملة غير متاحة: ربط قاعدة البيانات والملفات والترخيص واستعادتها لم يُثبت بعد. / Complete backup is unavailable: database, files and licence are not yet bound and verified together.';
+    try {
+      await this.prisma.backupRun.create({ data: {
+        companyId,
+        createdBy: userId,
+        kind: 'FULL',
+        fileName: '-',
+        sizeBytes: BigInt(0),
+        status: 'FAILED',
+        message: detail,
+      } });
+    } catch {
+      // Do not claim a persisted failure record if the database is unavailable.
+      this.logger.error('Could not record the rejected complete-backup request.');
+      throw new ServiceUnavailableException({
+        code: 'FULL_BACKUP_FAILURE_NOT_RECORDED',
+        detail: 'Complete backup is unavailable and the failed attempt could not be recorded. No backup was created.',
+      });
+    }
+    throw new ServiceUnavailableException({ code: 'FULL_BACKUP_INCOMPLETE', detail });
+  }
+
   /// The automatic safety copy taken just before a restore replaces anything.
   async createSafety(): Promise<FullBackupFile> {
     return (await this.dump('safety', null)).file;
@@ -413,9 +443,9 @@ export class FullBackupService {
     if (userId) {
       await this.audit.record({
         action: 'BACKUP',
-        entity: 'backup_full',
+        entity: 'backup_database_archive',
         entityId: name,
-        after: { name, sizeBytes: file.sizeBytes, kind },
+        after: { name, sizeBytes: file.sizeBytes, kind, fullBackup: false, includesExternalFiles: false, includesLicence: false },
         userId,
       });
     }

@@ -81,7 +81,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
 
     const settings = await this.settings.get(first.id);
     const lastRun = await this.prisma.backupRun.findFirst({
-      where: { status: { in: ['SUCCESS', 'VERIFIED', 'FAILED'] } },
+      where: { kind: 'SCHEDULED', status: { in: ['SUCCESS', 'VERIFIED', 'FAILED'] } },
       orderBy: { createdAt: 'desc' },
       select: { createdAt: true, status: true, fileName: true },
     });
@@ -187,7 +187,7 @@ export class BackupScheduleService implements OnModuleInit, OnModuleDestroy {
     if (intervalHours <= 0 && !force) return null;
 
     const lastRun = await this.prisma.backupRun.findFirst({
-      where: { status: { in: ['SUCCESS', 'VERIFIED', 'FAILED'] } },
+      where: { kind: 'SCHEDULED', status: { in: ['SUCCESS', 'VERIFIED', 'FAILED'] } },
       orderBy: { createdAt: 'desc' },
     });
     const dueAt = lastRun

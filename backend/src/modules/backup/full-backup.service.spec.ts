@@ -142,6 +142,35 @@ describe('FullBackupService guards', () => {
     });
   });
 
+  describe('complete backup honesty', () => {
+    it('records a failed full backup attempt without creating or deleting an archive', async () => {
+      const dir = temporaryDir('kayan-full-refusal-');
+      writeFileSync(join(dir, 'previous.dump'), 'previous copy');
+      const create = jest.fn().mockResolvedValue({});
+      const service = new FullBackupService({ backupRun: { create } } as any,
+        {} as any, { isActive: false } as any, licensingStub);
+      const error = await service.rejectFullBackup('operator', 'company').catch((e) => e);
+      expect(error.getStatus()).toBe(503);
+      expect(error.getResponse()).toMatchObject({ code: 'FULL_BACKUP_INCOMPLETE' });
+      expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({
+        companyId: 'company', createdBy: 'operator', kind: 'FULL',
+        status: 'FAILED', fileName: '-', sizeBytes: BigInt(0),
+      }) });
+      expect(readdirSync(dir)).toEqual(['previous.dump']);
+      expect(jest.mocked(childProcess.execFile)).not.toHaveBeenCalled();
+    });
+
+    it('does not claim a failure record was saved when the database rejects it', async () => {
+      const marker = 'synthetic-private-marker';
+      const service = new FullBackupService({backupRun: {create: jest.fn().mockRejectedValue(new Error(marker))}} as any,
+        {} as any, {isActive: false} as any, licensingStub);
+      const error = await service.rejectFullBackup('operator', null).catch((e) => e);
+      expect(error.getStatus()).toBe(503);
+      expect(error.getResponse()).toMatchObject({ code: 'FULL_BACKUP_FAILURE_NOT_RECORDED' });
+      expect(JSON.stringify(error.getResponse())).not.toContain(marker);
+    });
+  });
+
   describe('creating a backup', () => {
     function serviceWithTools(dir: string, audit = { record: jest.fn(async () => {}) }) {
       const toolsDir = temporaryDir('kayan-tools-');
@@ -193,7 +222,8 @@ describe('FullBackupService guards', () => {
       expect(result.file.name).toMatch(/^kayan-full-.*\.dump$/);
       expect(result.file.sizeBytes).toBeGreaterThan(0);
       expect(audit.record).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'BACKUP', userId: 'user-1' }),
+        expect.objectContaining({ action: 'BACKUP', entity: 'backup_database_archive', userId: 'user-1',
+          after: expect.objectContaining({fullBackup: false, includesExternalFiles: false, includesLicence: false}) }),
       );
       const listed = await service.list();
       expect(listed.map((f) => f.name)).toContain(result.file.name);
@@ -410,6 +440,8 @@ describe('FullBackupService guards', () => {
 
       const caps = await service.capabilities();
       expect(caps.available).toBe(true);
+      expect(caps.fullBackupSupported).toBe(false);
+      expect(caps.fullRestoreSupported).toBe(false);
       expect(caps.serverVersion).toBe('16.2');
       expect(caps.warning).toContain('version 12');
       expect(caps.warning).toContain('16');

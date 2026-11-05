@@ -50,7 +50,11 @@ const path = require('node:path');
     created = true;
     await client.connect();
     let schemaDestructions = 0;
-    const prisma = { $executeRawUnsafe: async sql => {
+    const prisma = { backupRun: {create: async ({data}) => {
+      const result=await client.query('INSERT INTO fixture_backup_runs(filename,status,message,kind) VALUES($1,$2,$3,$4) RETURNING *',
+        [data.fileName,data.status,data.message,data.kind]);
+      return result.rows[0];
+    }}, $executeRawUnsafe: async sql => {
       if (sql.startsWith('DROP SCHEMA')) schemaDestructions++;
       const drop = sql.match(/^DROP DATABASE IF EXISTS "(kayan_restore_check_[0-9a-f]+)"$/);
       if (drop) {
@@ -86,7 +90,7 @@ const path = require('node:path');
     // Scheduler uses real archive tools and PG; its company/settings/Prisma
     // interfaces are deliberately synthetic. A readable DB-only archive is
     // retained but must never be reported as a verified full backup.
-    await client.query('CREATE TABLE fixture_backup_runs (id serial primary key, filename text, status text, message text)');
+    await client.query('CREATE TABLE fixture_backup_runs (id serial primary key, filename text, status text, message text, kind text)');
     const schedulerDb={company:{findMany:async()=>[{id:'synthetic',code:'SYN',nameEn:'Synthetic'}]},
       backupRun:{findFirst:async()=>null,create:async({data})=>{
         const inserted=await client.query('INSERT INTO fixture_backup_runs(filename,status,message) VALUES($1,$2,$3) RETURNING *',
@@ -137,6 +141,21 @@ const path = require('node:path');
       await http.listen(0, '127.0.0.1');
       const base = `http://127.0.0.1:${http.getHttpServer().address().port}/backup/full`;
       const headers = {'x-fixture-super':'yes'};
+      // Complete manual backup refuses honestly and records FAILED; an explicit
+      // DB-only archive remains available separately and is never a full copy.
+      const fullAttempt=await fetch(base,{method:'POST',headers});
+      assert.equal(fullAttempt.status,503);
+      assert.equal((await fullAttempt.json()).code,'FULL_BACKUP_INCOMPLETE');
+      const rejectedRuns=await client.query("SELECT filename,status,kind FROM fixture_backup_runs WHERE kind='FULL'");
+      assert.deepEqual(rejectedRuns.rows,[{filename:'-',status:'FAILED',kind:'FULL'}]);
+      const dbOnly=await fetch(`${base}/database-archive`,{method:'POST',headers});
+      assert.equal(dbOnly.status,201);
+      const dbOnlyResult=await dbOnly.json();
+      assert.equal(dbOnlyResult.fullBackup,false);
+      assert.equal(dbOnlyResult.includesExternalFiles,false);
+      assert.equal(dbOnlyResult.includesLicence,false);
+      assert.ok((await service.verify(dbOnlyResult.file.name)).archiveContentReadable);
+      assert.deepEqual(await fs.readFile(path.join(dir,backup.file.name)),originalBytes);
       const content = await fetch(`${base}/${backup.file.name}/verify`, {method:'POST',headers});
       assert.equal(content.status, 201);
       assert.deepEqual(Object.fromEntries(Object.entries(await content.json()).filter(([key]) =>
@@ -251,9 +270,9 @@ const path = require('node:path');
     }
     console.log('PASS: synthetic PG older backup restored; injected access repair failure holds local maintenance; separate scratch restore confirms safety snapshot contains pre-restore value. Application checks and licensing stubbed; no crash or concurrency proof.');
 
-    // Exercise a successful older-archive restore through the HTTP controller
-    // on the same strictly disposable target. The access repair, application
-    // postcheck, audit persistence and licensing are stubs, NOT end-to-end.
+    // Verify the production HTTP controller fails closed, then exercise the
+    // legacy restore engine ONLY on this strictly disposable target. The
+    // access repair, postcheck, audit and licensing are stubs, NOT end-to-end.
     const cleanMaintenance = new MaintenanceService();
     let repairCount=0, reconcileCount=0;
     const events=[];
@@ -287,15 +306,33 @@ const path = require('node:path');
       const post=(body,superAdmin=true)=>fetch(endpoint,{method:'POST',headers:{'content-type':'application/json',
         'x-fixture-super':superAdmin?'yes':'no'},body:JSON.stringify(body)});
       assert.equal((await post({confirm:true,fileName:backup.file.name},false)).status,403);
-      assert.equal((await post({confirm:false,fileName:backup.file.name})).status,400);
-      assert.equal((await post({confirm:true,fileName:'synthetic-missing.dump'})).status,404);
-      assert.equal((await post({confirm:true,fileName:'synthetic-corrupt.dump'})).status,400);
+      for (const body of [{confirm:false,fileName:backup.file.name},
+        {confirm:true,fileName:'synthetic-missing.dump'},
+        {confirm:true,fileName:'synthetic-corrupt.dump'},
+        {confirm:true,fileName:backup.file.name}]) {
+        const blocked=await post(body);
+        assert.equal(blocked.status,503);
+        assert.equal((await blocked.json()).code,'FULL_RESTORE_UNAVAILABLE');
+      }
+      const form=new FormData();
+      form.set('file',new Blob([Buffer.from('PGDMP synthetic')]),'test.dump');
+      form.set('confirm','true');
+      const upload=await fetch(endpoint,{method:'POST',headers:{'x-fixture-super':'yes'},body:form});
+      assert.equal(upload.status,503);
+      assert.equal((await upload.json()).code,'FULL_RESTORE_UNAVAILABLE');
+      const concurrent=await Promise.all([post({confirm:true,fileName:backup.file.name}),post({confirm:true,fileName:backup.file.name})]);
+      assert.ok(concurrent.every(response=>response.status===503));
       assert.deepEqual(await digest(),beforeRestore);
+      assert.deepEqual(await fs.readFile(path.join(dir,backup.file.name)),oldBytes);
+      assert.deepEqual(await fs.readFile(path.join(dir,newer.file.name)),newBytes);
       assert.equal(cleanMaintenance.isActive,false);
       assert.equal(repairCount,0); assert.equal(reconcileCount,0);
-      const restored=await post({confirm:true,fileName:backup.file.name});
-      assert.equal(restored.status,201);
-      const result=await restored.json();
+      // Preserve regression coverage of the isolated legacy engine; it is no
+      // longer exposed by the production controller as a complete restore.
+      await assert.rejects(clean.restore({confirm:false,fileName:backup.file.name},'fixture'),e=>e.getStatus?.()===400);
+      await assert.rejects(clean.restore({confirm:true,fileName:'synthetic-missing.dump'},'fixture'),e=>e.getStatus?.()===404);
+      await assert.rejects(clean.restore({confirm:true,fileName:'synthetic-corrupt.dump'},'fixture'),e=>e.getStatus?.()===400);
+      const result=await clean.restore({confirm:true,fileName:backup.file.name},'fixture');
       assert.equal(result.restored,true); assert.equal(result.rehearsed,true); assert.equal(result.checked,true);
       assert.equal(result.source,backup.file.name);
       assert.equal(cleanMaintenance.isActive,false);
@@ -321,7 +358,7 @@ const path = require('node:path');
         await admin.query(`DROP DATABASE IF EXISTS "${checkName}"`);
       }
     } finally { await restoreHttp.close(); }
-    console.log('PASS: HTTP restored older synthetic PG archive, preserves older/newer files and independently restores pre-restore safety copy; application/access/licence checks stubbed, no files/crash/JWT proof.');
+    console.log('PASS: production HTTP refuses incomplete restore without database or archive changes; isolated legacy engine restores synthetic PG and its safety copy; application/access/licence checks stubbed, no files/crash/JWT proof.');
 
   } finally {
     if (scratchClient) await scratchClient.end();

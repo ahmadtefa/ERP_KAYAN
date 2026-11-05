@@ -329,6 +329,8 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     // (capabilities still null after a failed load) leaves them enabled:
     // the server's own reply to the attempt is clearer than a grey button.
     final toolsUnavailable = capabilities != null && !toolsAvailable;
+    // An absent capability must not enable an unproven destructive restore.
+    final restoreAvailable = capabilities?['fullRestoreSupported'] == true;
 
     return Card(
       child: Padding(
@@ -345,6 +347,16 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
               l10n.fullBackupDescription,
               style: theme.textTheme.bodySmall,
             ),
+            if (!restoreAvailable) ...[
+              const SizedBox(height: 8),
+              _Notice(
+                icon: Icons.warning_amber_outlined,
+                color: theme.colorScheme.error,
+                text: Localizations.localeOf(context).languageCode == 'ar'
+                    ? 'الاستعادة الكاملة متوقفة لحماية البيانات حتى يثبت ربط قاعدة البيانات والملفات والترخيص والتعافي من الانقطاع.'
+                    : 'Full restore is paused until database, files and licence recovery and interruption safety are verified.',
+              ),
+            ],
             if (capabilities?['deletionProtected'] == true) ...[
               const SizedBox(height: 8),
               _Notice(
@@ -395,7 +407,7 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
                     label: Text(l10n.createFullBackup),
                   ),
                   OutlinedButton.icon(
-                    onPressed: _busy || toolsUnavailable
+                    onPressed: _busy || toolsUnavailable || !restoreAvailable
                         ? null
                         : _uploadAndRestore,
                     icon: const Icon(Icons.restore),
@@ -461,7 +473,7 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
                       IconButton(
                         tooltip: l10n.restoreFullDatabase,
                         icon: const Icon(Icons.restore, size: 20),
-                        onPressed: _busy
+                        onPressed: _busy || !restoreAvailable
                             ? null
                             : () => _restore(fileName: '${file['name']}'),
                       ),

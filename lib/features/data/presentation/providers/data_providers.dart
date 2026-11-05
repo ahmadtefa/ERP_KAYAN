@@ -643,7 +643,7 @@ class FullBackupService {
     // the default, the request was aborted on the client while the server
     // was still working, which looked like a backup that hangs forever.
     final response = await _dio.post<Map<String, dynamic>>(
-      _path,
+      '$_path/database-archive',
       options: Options(receiveTimeout: const Duration(minutes: 15)),
     );
     return Map<String, dynamic>.from(response.data ?? const {});

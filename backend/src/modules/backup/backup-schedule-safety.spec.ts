@@ -81,7 +81,7 @@ describe('scheduled backup safety', () => {
     expect(result.status).toBe('FAILED');
     expect(full.createFull).toHaveBeenCalledTimes(1);
     expect(prisma.backupRun.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where:{status:{in:['SUCCESS','VERIFIED','FAILED']}}}));
+      where:{kind:'SCHEDULED',status:{in:['SUCCESS','VERIFIED','FAILED']}}}));
   });
 
   it('refuses manual retention before listing or removing any file', async () => {

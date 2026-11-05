@@ -70,6 +70,17 @@ Future<void> _pump(WidgetTester tester, _FakeFullBackupService service, {Locale 
 }
 
 void main() {
+  testWidgets('unverified restore is disabled while database archive remains available', (tester) async {
+    final service = _FakeFullBackupService()
+      ..files = const [{'name': 'previous.dump', 'kind': 'full', 'sizeBytes': 20}];
+    await _pump(tester, service);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Full restore is paused'), findsOneWidget);
+    expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Upload a backup file (.dump)')).onPressed, isNull);
+    expect(tester.widget<IconButton>(find.byTooltip('Restore the whole database')).onPressed, isNull);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Create backup now')).onPressed, isNotNull);
+  });
+
   testWidgets(
     'a failed load ends in an error and a retry button, not an endless bar',
     (tester) async {
