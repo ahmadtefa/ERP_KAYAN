@@ -1087,6 +1087,15 @@ class AppLocalizationsEn extends AppLocalizations {
       'The columns the file carries are written over the record. A blank cell changes nothing.';
 
   @override
+  String get clearBlankImportTax => "Set blank item tax cells to zero";
+
+  @override
+  String get clearBlankImportTaxHint => "Only when the tax column exists: every blank cell on an existing item will clear its tax. Remove the column to leave tax unchanged; enter 0 to clear an individual item. Review the count before importing.";
+
+  @override
+  String get clearedBlankImportTaxCount => "Existing items with blank tax set to zero";
+
+  @override
   String get readResult => 'What the file contains';
 
   @override

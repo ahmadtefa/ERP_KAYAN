@@ -1082,6 +1082,15 @@ class AppLocalizationsAr extends AppLocalizations {
       'الأعمدة اللي في الملف بتتكتب على السجل. الخانة الفاضية مش بتغيّر حاجة.';
 
   @override
+  String get clearBlankImportTax => "تصفير خلايا ضريبة الأصناف الفارغة";
+
+  @override
+  String get clearBlankImportTaxHint => "عند وجود عمود الضريبة، سيُصفّر هذا الخيار كل خلية فارغة لصنف موجود. احذف العمود للإبقاء على الضريبة، أو اكتب 0 لتصفير صنف محدد. راجع العدد قبل الاستيراد.";
+
+  @override
+  String get clearedBlankImportTaxCount => "أصناف موجودة ستُصفّر ضريبتها الفارغة";
+
+  @override
   String get readResult => 'اللي في الملف';
 
   @override

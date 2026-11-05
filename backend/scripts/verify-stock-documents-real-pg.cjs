@@ -1343,6 +1343,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     // to the item's tax and the company default, on real Prisma/PostgreSQL.
     // On create, blank/null/omitted item tax is zero. PATCH omission preserves
     // the stored value; historical invoice/order lines remain snapshots.
+    await require('./verify-import-tax-real-pg.cjs')({prisma,audit,company,branch,user});
     const itemService = new ItemsService(prisma,audit,service.accounts,service.posting,service.warehouses);
     for (const [suffix,rate,expected] of [['EMPTY','','0.0000'],['NULL',null,'0.0000'],['SPACE','   ','0.0000'],['EXPLICIT','7','7.0000'],['OMIT',undefined,'0.0000']]) {
       const saved = await itemService.create(company,user,{code:`SYN-ITEM-TAX-${suffix}`,nameEn:'Synthetic tax item',nameAr:'صنف تجريبي',

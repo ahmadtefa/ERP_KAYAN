@@ -437,6 +437,7 @@ class ImportReport {
   int get created => _int('created');
   int get updated => _int('updated');
   int get skipped => _int('skipped');
+  int get clearedBlankTaxRates => _int('clearedBlankTaxRates');
 
   List<Map<String, dynamic>> get errors => (raw['errors'] as List? ?? const [])
       .whereType<Map>()
@@ -473,10 +474,16 @@ class ImportController extends Notifier<ImportState> {
   void chooseMode(ImportMode mode) {
     // The dry run counted what would happen in the old mode; those numbers
     // cannot vouch for the button that writes in the new one.
-    state = state.copyWith(mode: mode, clearReport: true);
+    state = state.copyWith(mode: mode, clearBlankTaxRates: false, clearReport: true);
   }
 
+  void chooseBlankTaxPolicy(bool clear) => state = state.copyWith(
+    clearBlankTaxRates: clear,
+    clearReport: true,
+  );
+
   void chooseFile(PickedFile? file) => state = state.copyWith(
+    clearBlankTaxRates: false,
     file: file,
     clearFile: file == null,
     clearReport: true,
@@ -498,6 +505,7 @@ class ImportState {
   const ImportState({
     this.kind = ImportKind.customers,
     this.mode = ImportMode.insert,
+    this.clearBlankTaxRates = false,
     this.file,
     this.busy = false,
     this.report,
@@ -506,6 +514,7 @@ class ImportState {
 
   final ImportKind kind;
   final ImportMode mode;
+  final bool clearBlankTaxRates;
   final PickedFile? file;
   final bool busy;
   final ImportReport? report;
@@ -524,6 +533,7 @@ class ImportState {
   ImportState copyWith({
     ImportKind? kind,
     ImportMode? mode,
+    bool? clearBlankTaxRates,
     PickedFile? file,
     bool clearFile = false,
     bool? busy,
@@ -534,6 +544,7 @@ class ImportState {
     return ImportState(
       kind: kind ?? this.kind,
       mode: mode ?? this.mode,
+      clearBlankTaxRates: clearBlankTaxRates ?? this.clearBlankTaxRates,
       file: clearFile ? null : (file ?? this.file),
       busy: busy ?? this.busy,
       // A report can be replaced, and it can be thrown away - but it must
@@ -562,6 +573,7 @@ class DataService {
     required PickedFile file,
     required ImportMode mode,
     required bool dryRun,
+    bool clearBlankTaxRates = false,
   }) async {
     final form = FormData.fromMap({
       'file': MultipartFile.fromBytes(file.bytes, filename: file.name),
@@ -569,7 +581,7 @@ class DataService {
     final response = await _dio.post<Map<String, dynamic>>(
       '/import/${kind.slug}',
       data: form,
-      queryParameters: {'dryRun': dryRun, 'mode': mode.slug},
+      queryParameters: {'dryRun': dryRun, 'mode': mode.slug, 'clearBlankTaxRates': clearBlankTaxRates},
       options: Options(contentType: 'multipart/form-data'),
     );
     return ImportReport(Map<String, dynamic>.from(response.data ?? const {}));

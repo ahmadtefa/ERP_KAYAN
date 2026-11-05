@@ -2192,6 +2192,15 @@ abstract class AppLocalizations {
   /// **'The columns the file carries are written over the record. A blank cell changes nothing.'**
   String get importModeUpdateHint;
 
+  /// Explicit opt-in to clear blank tax cells.
+  String get clearBlankImportTax;
+
+  /// Explains the effect of clearing blank cells.
+  String get clearBlankImportTaxHint;
+
+  /// Number of existing items affected.
+  String get clearedBlankImportTaxCount;
+
   /// No description provided for @readResult.
   ///
   /// In en, this message translates to:

@@ -36,7 +36,7 @@ class ImportScreen extends ConsumerWidget {
       trailing: IconButton(
         tooltip: l10n.startOver,
         icon: const Icon(Icons.restart_alt),
-        onPressed: controller.reset,
+        onPressed: state.busy ? null : controller.reset,
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -62,7 +62,7 @@ class ImportScreen extends ConsumerWidget {
                       DropdownMenuItem(value: ImportKind.chartOfAccounts, child: Text(l10n.chartOfAccounts)),
                       DropdownMenuItem(value: ImportKind.openingBalances, child: Text(l10n.openingBalancesTitle)),
                     ],
-                    onChanged: (choice) {
+                    onChanged: state.busy ? null : (choice) {
                       if (choice != null) controller.chooseKind(choice);
                     },
                   ),
@@ -242,6 +242,7 @@ class _FileCard extends ConsumerWidget {
             file: file,
             mode: state.mode,
             dryRun: dryRun,
+            clearBlankTaxRates: state.clearBlankTaxRates,
           );
       controller.succeeded(report);
     } catch (error) {
@@ -270,7 +271,7 @@ class _ModeCard extends ConsumerWidget {
             const SizedBox(height: 8),
             RadioGroup<ImportMode>(
               groupValue: state.mode,
-              onChanged: (value) => controller.chooseMode(value ?? ImportMode.insert),
+              onChanged: state.busy ? null : (value) => controller.chooseMode(value ?? ImportMode.insert),
               child: Column(
                 children: [
                   RadioListTile<ImportMode>(
@@ -288,6 +289,14 @@ class _ModeCard extends ConsumerWidget {
                 ],
               ),
             ),
+            if (state.kind == ImportKind.items && state.mode == ImportMode.upsert)
+              CheckboxListTile(
+                value: state.clearBlankTaxRates,
+                onChanged: state.busy ? null : (value) => controller.chooseBlankTaxPolicy(value ?? false),
+                contentPadding: EdgeInsets.zero,
+                title: Text(l10n.clearBlankImportTax),
+                subtitle: Text(l10n.clearBlankImportTaxHint),
+              ),
           ],
         ),
       ),
@@ -364,6 +373,8 @@ class _ResultCard extends ConsumerWidget {
                 _Count(label: l10n.willBeAdded, value: report.created),
                 _Count(label: l10n.willBeUpdated, value: report.updated),
                 _Count(label: l10n.willBeSkipped, value: report.skipped),
+                if (state.kind == ImportKind.items && state.clearBlankTaxRates)
+                  _Count(label: l10n.clearedBlankImportTaxCount, value: report.clearedBlankTaxRates),
               ],
             ),
             if (report.unknownColumns.isNotEmpty) ...[
@@ -442,6 +453,7 @@ class _ResultCard extends ConsumerWidget {
             file: file,
             mode: current.mode,
             dryRun: false,
+            clearBlankTaxRates: current.clearBlankTaxRates,
           );
       // An import writes records other screens have already cached. Refresh
       // them now, so a customer, item or opening stock imported here appears
