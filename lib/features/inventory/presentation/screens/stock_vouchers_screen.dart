@@ -86,12 +86,15 @@ class _StockVouchersScreenState extends ConsumerState<StockVouchersScreen> {
     final user = ref.watch(currentUserProvider);
     final canCreate = user?.can('inventory.stock.adjust') ?? false;
     final canPrepare = canCreate && (user?.can('inventory.items.read') ?? false) && (user?.can('inventory.warehouses.read') ?? false);
+    final canAssignCostCenter = user?.can('accounting.costcenters.read') ?? false;
+    final canIssue = canPrepare && canAssignCostCenter;
     final canSeeCost = user?.can('inventory.cost.read') ?? false;
     return Scaffold(appBar:AppBar(title:Text(_label(context,'أذون المخزون','Stock vouchers'))),
       body:Column(children:[
         Wrap(spacing:8,children:[
           if (canPrepare && canSeeCost) FilledButton(onPressed:() => _create('RECEIPT'), child:Text(_label(context,'إذن إضافة','New receipt'))),
-          if (canPrepare) FilledButton(onPressed:() => _create('ISSUE'), child:Text(_label(context,'إذن صرف','New issue'))),
+          if (canIssue) FilledButton(onPressed:() => _create('ISSUE'), child:Text(_label(context,'إذن صرف','New issue'))),
+          if (canPrepare && !canAssignCostCenter) Text(_label(context,'يلزم صلاحية قراءة مراكز التكلفة لإنشاء إذن صرف','Cost-centre read permission is required to issue stock')),
           if (canCreate && !canPrepare) Text(_label(context,'يلزم صلاحية قراءة الأصناف والمخازن لإنشاء إذن','Item and warehouse read permissions are required to create a voucher')),
           IconButton(onPressed:_refresh,icon:const Icon(Icons.refresh),tooltip:_label(context,'تحديث','Refresh')),
         ]),
@@ -498,10 +501,20 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
                 validator:(v) => (v ?? '').trim().isEmpty || (v ?? '').trim().length > 200 ? _label(context,'مطلوب (حتى 200 حرف)','Required (up to 200 characters)') : null),
               TextFormField(controller:_reason,onChanged:(_) => _changed(),decoration:InputDecoration(labelText:_label(context,'السبب','Reason')),
                 validator:(v) => (v ?? '').trim().isEmpty ? _label(context,'مطلوب','Required') : null),
-              if (centers.isNotEmpty) DropdownButtonFormField<String>(initialValue:centers.any((x) => text(x,'id') == _center) ? _center : null,
-                decoration:InputDecoration(labelText:_label(context,'مركز التكلفة (اختياري)','Cost center (optional)')),
-                items:[for (final row in centers) DropdownMenuItem(value:text(row,'id'),child:Text('${text(row,'code')} • ${text(row,'nameAr',fallback:text(row,'nameEn'))}'))],
-                onChanged:(v) { setState(() => _center=v); _changed(); }),
+              if (widget.kind == 'ISSUE' || centers.isNotEmpty) DropdownButtonFormField<String>(initialValue:_center,
+                decoration:InputDecoration(labelText:widget.kind == 'ISSUE'
+                  ? _label(context,'مركز التكلفة (مطلوب)','Cost center (required)')
+                  : _label(context,'مركز التكلفة (اختياري)','Cost center (optional)')),
+                items:[
+                  if (_center != null && !centers.any((x) => text(x,'id') == _center))
+                    DropdownMenuItem(value:_center,child:Text(_label(context,'مركز التكلفة المحفوظ','Saved cost center'))),
+                  for (final row in centers) DropdownMenuItem(value:text(row,'id'),child:Text('${text(row,'code')} • ${text(row,'nameAr',fallback:text(row,'nameEn'))}')),
+                ],
+                onChanged:(v) { setState(() => _center=v); _changed(); },
+                validator:(_) => widget.kind == 'ISSUE' && _center == null ? _label(context,'مطلوب','Required') : null),
+              if (widget.kind == 'ISSUE' && centers.isEmpty)
+                Padding(padding:const EdgeInsets.only(top:8),child:Text(
+                  _label(context,'لا توجد مراكز تكلفة نشطة متاحة للصرف.','No active cost centres are available for stock issues.'))),
               if (_moreCenters) TextButton(onPressed:_loadingMore ? null : () => _loadMore(snapshot.data!,items:false),
                 child:Text(_label(context,'تحميل المزيد من مراكز التكلفة','Load more cost centers'))),
               TextFormField(controller:_notes,onChanged:(_) => _changed(),decoration:InputDecoration(labelText:_label(context,'ملاحظات','Notes'))),

@@ -41,6 +41,7 @@ class _VoucherApi extends ApiClient {
       return [{'id':'item','code':'IT','nameEn':'Item','unit':'piece','units':[{'unit':'piece','factor':'1','isActive':true},{'unit':'box','factor':'2','isActive':true}]}];
     }
     if (path == '/inventory/warehouses') return [{'id':'warehouse','code':'WH','nameEn':'Warehouse'}];
+    if (path == '/accounting/cost-centers') return [{'id':'center','code':'CC','nameEn':'Synthetic center','isActive':true}];
     return [];
   }
   @override
@@ -50,7 +51,7 @@ class _VoucherApi extends ApiClient {
       return {'items':<Map<String,dynamic>>[],'total':0};
     }
     return {'id':'document','documentNumber':'SA-1','documentDate':'2026-11-04','voucherKind':'ISSUE',
-      'status':status,'editVersion':approved ? 2 : reviewed ? 1 : 0,'counterpartyName':'Department','reason':'Synthetic','toWarehouseId':'warehouse',
+      'status':status,'editVersion':approved ? 2 : reviewed ? 1 : 0,'counterpartyName':'Department','reason':'Synthetic','toWarehouseId':'warehouse','costCenterId':'center',
       'reviewedAt':reviewed ? '2026-11-04T12:00:00Z' : null,
       'approvedAt':approved ? '2026-11-04T12:01:00Z' : null,
       'lines':[{'itemCode':'IT','itemNameEn':'Item','quantity':'-2','unit':'piece','unitCost':'7'}]};
@@ -80,7 +81,7 @@ class _EditVoucherApi extends _VoucherApi {
   Future<Map<String,dynamic>> getObject(String path,{Map<String,dynamic>? query}) async {
     if (path != '/inventory/stock-documents/document') return super.getObject(path,query:query);
     return {'id':'document','documentNumber':'SA-1','documentDate':'2026-11-04','voucherKind':kind,
-      'status':'draft','counterpartyName':'Department','reason':'Synthetic','toWarehouseId':'warehouse',
+      'status':'draft','counterpartyName':'Department','reason':'Synthetic','toWarehouseId':'warehouse','costCenterId':'center',
       'editVersion':committed ? 3 : 2,'reviewedAt':committed ? null : '2026-11-04T12:00:00Z',
       'approvedAt':committed ? null : '2026-11-04T12:01:00Z',
       'lines':[{'id':'line','itemId':'item','itemCode':'IT','itemNameEn':'Item','quantity':kind == 'ISSUE' ? '-4' : '4',
@@ -200,6 +201,10 @@ void main() {
       await tester.tap(find.text('Open voucher')); await tester.pumpAndSettle();
       await tester.tap(find.text('Warehouse').first); await tester.pumpAndSettle();
       await tester.tap(find.text('WH • Warehouse').last); await tester.pumpAndSettle();
+      if (kind == 'ISSUE') {
+        await tester.tap(find.text('Cost center (required)')); await tester.pumpAndSettle();
+        await tester.tap(find.text('CC • Synthetic center').last); await tester.pumpAndSettle();
+      }
       await tester.enterText(find.widgetWithText(TextFormField,'Counterparty'),'Synthetic department');
       await tester.enterText(find.widgetWithText(TextFormField,'Reason'),'Synthetic reason');
       await tester.ensureVisible(find.text('Item').first); await tester.tap(find.text('Item').first); await tester.pumpAndSettle();
@@ -272,6 +277,26 @@ void main() {
     final dropdowns=tester.widgetList<DropdownButton<String>>(find.byType(DropdownButton<String>));
     expect(dropdowns.any((dropdown) => dropdown.items?.any((item) => item.value == 'item-201') ?? false),isTrue);
   });
+  testWidgets('editing an issue retains its saved cost center without read permission', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    const limited=AppUser(id:'limited',username:'tester',fullName:'Tester',companyId:'company',branchId:'branch',
+      permissions:['inventory.stock.read','inventory.stock.adjust','inventory.items.read','inventory.warehouses.read']);
+    final api=_VoucherApi();
+    await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),
+      currentUserProvider.overrideWithValue(limited),
+      appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'))],
+      child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,home:StockVoucherCreateScreen(kind:'ISSUE',initialDocument:{
+          'id':'document','voucherKind':'ISSUE','editVersion':2,'documentDate':'2026-11-04',
+          'toWarehouseId':'warehouse','costCenterId':'center','counterpartyName':'Department','reason':'Synthetic',
+          'lines':[{'id':'line','itemId':'item','quantity':'-2','unitQuantity':'-2','unitCost':'7'}],
+        }))));
+    await tester.pumpAndSettle();
+    expect(find.text('Saved cost center'),findsOneWidget);
+    expect(find.text('No active cost centres are available for stock issues.'),findsOneWidget);
+    expect(tester.takeException(),isNull);
+  });
+
   testWidgets('voucher search queries the server for the user branch', (tester) async {
     final api=_VoucherApi();
     await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWithValue(_user)],
@@ -294,7 +319,8 @@ void main() {
         supportedLocales:AppLocalizations.supportedLocales,home:const StockVouchersScreen())));
     await tester.pumpAndSettle();
     expect(find.text('New receipt'),findsNothing);
-    expect(find.text('New issue'),findsOneWidget);
+    expect(find.text('New issue'),findsNothing);
+    expect(find.text('Cost-centre read permission is required to issue stock'),findsOneWidget);
     await tester.pumpWidget(ProviderScope(overrides:[apiClientProvider.overrideWithValue(api),currentUserProvider.overrideWithValue(limited)],
       child:MaterialApp(locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
         supportedLocales:AppLocalizations.supportedLocales,home:const StockVoucherDetailScreen(id:'document'))));

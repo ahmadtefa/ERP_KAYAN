@@ -149,6 +149,11 @@ module.exports = async function verifyVoucherHttp({prisma,audit,service,company,
     const issueInput={idempotencyKey:'http-voucher-issue-create-0001',kind:'ADJUSTMENT',voucherKind:'ISSUE',
       documentDate:date,toWarehouseId:warehouse,costCenterId:centre,reason:'Synthetic HTTP issue',
       counterpartyName:'Synthetic department',lines:[{itemId:item,quantity:'-1'}]};
+    const beforeIssueDocuments=await prisma.stockDocument.count({where:{companyId:company}});
+    const missingCentre={...issueInput,idempotencyKey:'http-voucher-issue-no-centre-0001'};
+    delete missingCentre.costCenterId;
+    assert.equal((await request('POST','',missingCentre)).status,400);
+    assert.equal(await prisma.stockDocument.count({where:{companyId:company}}),beforeIssueDocuments);
     response=await request('POST','',issueInput);
     assert.equal(response.status,201);
     const issue=await response.json();
@@ -171,6 +176,13 @@ module.exports = async function verifyVoucherHttp({prisma,audit,service,company,
     assert.equal((await request('POST',`/${issue.id}/review`,{expectedVersion:3})).status,201);
     assert.equal((await request('POST',`/${issue.id}/approve`,{expectedVersion:4})).status,201);
     const beforeIssueBalance=await warehouseBalance(warehouse);
+    await prisma.costCenter.update({where:{id:centre},data:{isActive:false}});
+    try {
+      assert.equal((await request('POST',`/${issue.id}/post`,{expectedVersion:5})).status,400);
+      assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:issue.id}})).status,'DRAFT');
+      assert.equal(await prisma.stockMovement.count({where:{referenceId:issue.id}}),0);
+      assert.equal(await warehouseBalance(warehouse),beforeIssueBalance);
+    } finally {await prisma.costCenter.update({where:{id:centre},data:{isActive:true}});}
     response=await request('POST',`/${issue.id}/post`,{expectedVersion:5});
     assert.equal(response.status,201);
     assert.equal((await response.json()).lines[0].unitCost,null);
