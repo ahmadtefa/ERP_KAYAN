@@ -8,7 +8,7 @@ const requireBackend = createRequire(path.join(root, 'backend/package.json'));
 const yaml = requireBackend('js-yaml');
 const workflows = path.join(root, '.github/workflows');
 const read = name => yaml.load(fs.readFileSync(path.join(workflows, name), 'utf8'));
-const manualOnly = ['ci.yml', 'key-generator.yml', 'windows-candidate-preflight.yml', 'windows-installer.yml', 'windows-integrated-candidate.yml', '_licence-step-diagnose.yml', 'installer-focused-tests.yml', 'licence-startup-focused.yml', 'windows-packaging-probe.yml', 'windows-installer-runtime-smoke.yml'];
+const manualOnly = ['ci.yml', 'key-generator.yml', 'windows-candidate-preflight.yml', 'windows-integrated-candidate.yml', '_licence-step-diagnose.yml', 'installer-focused-tests.yml', 'licence-startup-focused.yml', 'windows-packaging-probe.yml', 'windows-installer-runtime-smoke.yml'];
 for (const file of manualOnly) {
   const triggers = read(file).on;
   assert.deepEqual(Object.keys(triggers), ['workflow_dispatch'], `${file}: unsafe legacy workflow may only be dispatched manually`);
@@ -27,6 +27,21 @@ for (const name of reviewed) {
     assert.equal(Object.hasOwn(triggers, event), false, `${name}: unreviewed ${event} trigger`);
   }
 }
+const installer = read('windows-installer.yml');
+assert.deepEqual(Object.keys(installer.on).sort(), ['pull_request', 'workflow_dispatch']);
+assert.deepEqual(installer.on.pull_request.branches, ['main']);
+assert.deepEqual(installer.permissions, { contents: 'read' });
+const installerSource = fs.readFileSync(path.join(workflows, 'windows-installer.yml'), 'utf8');
+assert.match(installerSource, /github\.event_name == 'pull_request' && 'product'/,
+  'PRs must build an installable product payload using the pinned public key only');
+assert.doesNotMatch(installerSource, /secrets\.(?:LICENSE_PRIVATE_KEY|KAYAN_PRIVATE_KEY)/);
+const runtimeSmoke = installer.jobs['smoke-final'];
+assert.equal(runtimeSmoke.if, "needs.build.outputs.build_mode == 'product'");
+assert.ok(runtimeSmoke.steps.some(step => String(step.run || '').includes('-RuntimeOnly')),
+  'PR Setup must be installed only in the bounded RuntimeOnly smoke');
+const publisher = installer.jobs['publish-windows'];
+assert.match(publisher.if, /github\.event_name == 'push'/);
+assert.match(publisher.if, /refs\/heads\/main/);
 const safe = read('safe-checks.yml');
 assert.ok(safe.on.push && safe.on.pull_request, 'Safe checks must remain active on push and PR');
 assert.deepEqual(safe.on.push.branches, ['main'], 'Main must retain push checks without duplicating open PR commits');
