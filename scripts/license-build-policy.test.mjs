@@ -98,7 +98,7 @@ test('all release paths fail closed; test artifacts have a distinct path and nam
     assert.match(step, /if: \$\{\{ false \}\}/);
     assert.match(step, /artifacts: build\/windows-installer\/KAYAN-ERP-Setup\.exe/);
   }
-  assert.match(workflow, /github\.event_name == 'pull_request' && 'test-signed'/);
+  assert.match(workflow, /github\.event_name == 'pull_request' && 'product'/);
   assert.match(workflow, /if \(\$env:KAYAN_BUILD_MODE -eq 'product'\)/);
   assert.match(workflow, /if \(\$env:KAYAN_BUILD_MODE -ne 'test-signed'\) \{ throw/);
   assert.match(workflow, /Product build refused: the approved licence public key is missing/);
