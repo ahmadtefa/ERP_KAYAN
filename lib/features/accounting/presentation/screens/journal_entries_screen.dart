@@ -74,39 +74,48 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
     );
   }
 
-  Future<void> _post(Json row) async {
-    final l10n = context.l10n;
-    final ok = await confirmAction(
-      context,
-      title: l10n.post,
-      message: l10n.confirmPost,
-      confirmLabel: l10n.post,
-    );
-    if (!ok || !mounted) return;
-    await _run(
-      () => ref
-          .read(apiClientProvider)
-          .post('/accounting/journal-entries/${row['id']}/post'),
-      l10n.entryPosted,
-    );
-  }
+  String _label(String ar, String en) =>
+      Localizations.localeOf(context).languageCode == 'ar' ? ar : en;
 
-  Future<void> _reverse(Json row) async {
+  Future<void> _transition(Json row, String action) async {
+    if (_busy) return;
     final l10n = context.l10n;
-    final ok = await confirmAction(
-      context,
-      title: l10n.reverse,
-      message: l10n.confirmReverse,
-      confirmLabel: l10n.reverse,
-      destructive: true,
-    );
-    if (!ok || !mounted) return;
-    await _run(
-      () => ref
-          .read(apiClientProvider)
-          .post('/accounting/journal-entries/${row['id']}/reverse'),
-      l10n.entryReversed,
-    );
+    final title = switch (action) {
+      'post' => l10n.post,
+      'reverse' => l10n.reverse,
+      'submit' => _label('إرسال للاعتماد', 'Submit for approval'),
+      'approve' => _label('اعتماد القيد', 'Approve entry'),
+      _ => _label('إلغاء القيد', 'Cancel entry'),
+    };
+    final message = switch (action) {
+      'post' => l10n.confirmPost,
+      'reverse' => l10n.confirmReverse,
+      'submit' => _label('هل تريد إرسال القيد للاعتماد؟', 'Submit this entry for approval?'),
+      'approve' => _label('هل تريد اعتماد هذا القيد؟', 'Approve this entry?'),
+      _ => _label('هل تريد إلغاء هذا القيد؟', 'Cancel this entry?'),
+    };
+    final success = switch (action) {
+      'post' => l10n.entryPosted,
+      'reverse' => l10n.entryReversed,
+      'submit' => _label('أُرسل القيد للاعتماد', 'Entry submitted for approval'),
+      'approve' => _label('تم اعتماد القيد', 'Entry approved'),
+      _ => _label('تم إلغاء القيد', 'Entry cancelled'),
+    };
+    // Claim before opening the confirmation: repeated taps cannot queue
+    // several transitions while the first dialog is still open.
+    setState(() => _busy = true);
+    try {
+      final ok = await confirmAction(context, title: title, message: message,
+          confirmLabel: title, destructive: action == 'reverse' || action == 'cancel');
+      if (!ok || !mounted) return;
+      await _run(
+        () => ref.read(apiClientProvider)
+            .post('/accounting/journal-entries/${row['id']}/$action'),
+        success,
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _run(Future<void> Function() action, String success) async {
@@ -133,15 +142,17 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final async = ref.watch(journalEntriesProvider);
+    final user = ref.watch(currentUserProvider);
+    bool can(String permission) => user?.can(permission) ?? false;
 
     return ModuleScaffold(
       title: l10n.journalEntries,
       actions: const [ListExportActions(list: 'journal-entries')],
-      trailing: FilledButton.icon(
+      trailing: can('accounting.journal.create') ? FilledButton.icon(
         onPressed: _busy ? null : _openEditor,
         icon: const Icon(Icons.add),
         label: Text(l10n.newJournalEntry),
-      ),
+      ) : null,
       body: AsyncStateView<List<Json>>(
         value: async,
         onRetry: () => ref.read(journalEntriesProvider.notifier).reload(),
@@ -161,6 +172,9 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
                 'draft' => l10n.draft,
                 'posted' => l10n.posted,
                 'reversed' => l10n.reversed,
+                'pending_approval' => _label('بانتظار الاعتماد', 'Pending approval'),
+                'approved' => _label('معتمد', 'Approved'),
+                'cancelled' => _label('ملغي', 'Cancelled'),
                 _ => text(r, 'status'),
               },
               tone: (r) => toneForStatus(text(r, 'status')),
@@ -193,17 +207,35 @@ class _JournalEntriesScreenState extends ConsumerState<JournalEntriesScreen> {
                   ),
                 ),
               ),
-              if (status == 'draft')
+              if ((status == 'draft' || status == 'approved') && can('accounting.journal.post'))
                 IconButton(
                   tooltip: l10n.post,
                   icon: const Icon(Icons.check_circle_outline, size: 20),
-                  onPressed: _busy ? null : () => _post(row),
+                  onPressed: _busy ? null : () => _transition(row, 'post'),
                 ),
-              if (status == 'posted')
+              if (status == 'draft' && can('accounting.journal.create'))
+                IconButton(
+                  tooltip: _label('إرسال للاعتماد', 'Submit for approval'),
+                  icon: const Icon(Icons.send_outlined, size: 20),
+                  onPressed: _busy ? null : () => _transition(row, 'submit'),
+                ),
+              if (status == 'pending_approval' && can('accounting.journal.approve'))
+                IconButton(
+                  tooltip: _label('اعتماد القيد', 'Approve entry'),
+                  icon: const Icon(Icons.verified_outlined, size: 20),
+                  onPressed: _busy ? null : () => _transition(row, 'approve'),
+                ),
+              if (['draft', 'pending_approval', 'approved'].contains(status) && can('accounting.journal.create'))
+                IconButton(
+                  tooltip: _label('إلغاء القيد', 'Cancel entry'),
+                  icon: const Icon(Icons.cancel_outlined, size: 20),
+                  onPressed: _busy ? null : () => _transition(row, 'cancel'),
+                ),
+              if (status == 'posted' && can('accounting.journal.post'))
                 IconButton(
                   tooltip: l10n.reverse,
                   icon: const Icon(Icons.undo_outlined, size: 20),
-                  onPressed: _busy ? null : () => _reverse(row),
+                  onPressed: _busy ? null : () => _transition(row, 'reverse'),
                 ),
             ];
           },

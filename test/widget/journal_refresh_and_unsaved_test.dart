@@ -19,6 +19,8 @@ class _JournalApi extends ApiClient {
   _JournalApi() : super(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'),FakeTokenStore());
   String status='draft';
   int posts=0;
+  bool failAfterCommit=true;
+  String? lastPath;
   List<Map<String,dynamic>> accounts=[];
   @override
   Future<Map<String,dynamic>> get(String path,{Map<String,dynamic>? query}) async => {'items':accounts};
@@ -29,8 +31,13 @@ class _JournalApi extends ApiClient {
     ? [{'id':'entry','entryNumber':'JE-1','status':status,'totalDebit':'1','totalCredit':'1'}] : [];
   @override
   Future<Map<String,dynamic>> post(String path,{Object? body,String? idempotencyKey}) async {
-    posts++; status=path.endsWith('/reverse') ? 'reversed' : 'posted';
-    throw StateError('INTERNAL_JOURNAL_DIAGNOSTIC');
+    posts++; lastPath=path;
+    status = switch (path.split('/').last) {
+      'reverse' => 'reversed', 'submit' => 'pending_approval',
+      'approve' => 'approved', 'cancel' => 'cancelled', _ => 'posted',
+    };
+    if (failAfterCommit) throw StateError('INTERNAL_JOURNAL_DIAGNOSTIC');
+    return {'status':status};
   }
 }
 
@@ -74,7 +81,8 @@ void main() {
       {'id':'b','code':'2','name':'New','nameEn':'New','type':'asset','isActive':true,'isPostable':true},
     ];
     final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),
-      appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1'))]);
+      appConfigProvider.overrideWithValue(AppConfig.forLocalServer('http://127.0.0.1:3210/api/v1')),
+      currentUserProvider.overrideWithValue(const AppUser(id:'u',username:'u',fullName:'User',companyId:'c',branchId:'b',isSuperAdmin:true))]);
     addTearDown(container.dispose);
     await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp(
       locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
@@ -94,13 +102,78 @@ void main() {
     expect(tester.takeException(),isNull);
   });
 
+  final cases = [
+    ('draft', 'Submit for approval', 'submit', 'pending_approval', 'accounting.journal.create'),
+    ('pending_approval', 'Approve entry', 'approve', 'approved', 'accounting.journal.approve'),
+    ('approved', 'Post', 'post', 'posted', 'accounting.journal.post'),
+    ('approved', 'Cancel entry', 'cancel', 'cancelled', 'accounting.journal.create'),
+  ];
+  for (final (initial, label, action, expected, permission) in cases) {
+    testWidgets('journal $action offers the permitted state transition', (tester) async {
+      tester.view.physicalSize=const Size(1600,1000); tester.view.devicePixelRatio=1;
+      addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+      final api=_JournalApi()..status=initial..failAfterCommit=false;
+      final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),
+        currentUserProvider.overrideWithValue(AppUser(id:'u',username:'u',fullName:'User',companyId:'c',branchId:'b',permissions:[permission]))]);
+      addTearDown(container.dispose);
+      await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp(
+        locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+        supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:JournalEntriesScreen()))));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip(label)); await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton,label)); await tester.pumpAndSettle();
+      expect(api.lastPath,'/accounting/journal-entries/entry/$action');
+      expect(api.posts,1);
+      expect((await container.read(journalEntriesProvider.future)).single['status'],expected);
+      expect(find.byTooltip(label),findsNothing);
+    });
+  }
+
+  testWidgets('journal hides mutation actions without permissions', (tester) async {
+    tester.view.physicalSize=const Size(1600,1000); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final api=_JournalApi();
+    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),
+      currentUserProvider.overrideWithValue(const AppUser(id:'u',username:'u',fullName:'User',companyId:'c',branchId:'b',permissions:['accounting.journal.read']))]);
+    addTearDown(container.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp(
+      locale:const Locale('en'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+      supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:JournalEntriesScreen()))));
+    await tester.pumpAndSettle();
+    expect(find.text('New journal entry'),findsNothing);
+    expect(find.byTooltip('Post'),findsNothing);
+    expect(find.byTooltip('Submit for approval'),findsNothing);
+    expect(find.byTooltip('Cancel entry'),findsNothing);
+    expect(api.posts,0);
+  });
+
+  testWidgets('journal approval controls and status are Arabic in RTL', (tester) async {
+    tester.view.physicalSize=const Size(1600,1000); tester.view.devicePixelRatio=1;
+    addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
+    final api=_JournalApi()..failAfterCommit=false;
+    final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),
+      currentUserProvider.overrideWithValue(const AppUser(id:'u',username:'u',fullName:'User',companyId:'c',branchId:'b',permissions:['accounting.journal.create']))]);
+    addTearDown(container.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(container:container,child:MaterialApp(
+      locale:const Locale('ar'),localizationsDelegates:AppLocalizations.localizationsDelegates,
+      supportedLocales:AppLocalizations.supportedLocales,home:const Scaffold(body:JournalEntriesScreen()))));
+    await tester.pumpAndSettle();
+    final button=find.byTooltip('إرسال للاعتماد');
+    expect(Directionality.of(tester.element(button)),TextDirection.rtl);
+    await tester.tap(button); await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton,'إرسال للاعتماد')); await tester.pumpAndSettle();
+    expect(find.text('بانتظار الاعتماد'),findsOneWidget);
+    expect(api.lastPath,'/accounting/journal-entries/entry/submit');
+  });
+
   for (final action in ['Post','Reverse']) {
     testWidgets('journal ${action.toLowerCase()} refreshes after uncertain response', (tester) async {
       tester.view.physicalSize=const Size(1600,1000); tester.view.devicePixelRatio=1;
       addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
       final api=_JournalApi()..status=action == 'Post' ? 'draft' : 'posted';
       final initial=api.status;
-      final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api)]);
+      final container=ProviderContainer(overrides:[apiClientProvider.overrideWithValue(api),
+        currentUserProvider.overrideWithValue(const AppUser(id:'u',username:'u',fullName:'User',companyId:'c',branchId:'b',isSuperAdmin:true))]);
       addTearDown(container.dispose);
       expect((await container.read(dashboardSummaryProvider.future))['status'],initial);
       expect((await container.read(dashboardMonthlyProvider.future))['status'],initial);
