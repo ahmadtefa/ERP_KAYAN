@@ -34,14 +34,29 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
     await Promise.all([one.$connect(),two.$connect()]);
     const dormant = await one.company.create({data:{code:'OLD',nameEn:'Historical',nameAr:'قديم',deletedAt:new Date()}});
     const branch = await one.branch.create({data:{companyId:dormant.id,code:'OLD-B',nameEn:'History',nameAr:'تاريخ'}});
+    // A soft-deleted tenant is still data. The public first-run route must
+    // refuse it without reviving, deleting, or changing any historical row.
+    await assert.rejects(
+      new SetupService(one,{recordRequired:async()=>{}},licensing).initialSetup(dto),
+      error => error instanceof ConflictException,
+    );
+    assert.equal(await one.company.count(),1);
+    assert.equal(await one.user.count(),0);
+    assert.ok(await one.company.findUnique({where:{id:dormant.id}}));
+    assert.ok(await one.branch.findUnique({where:{id:branch.id}}));
+    assert.equal(reservations,0,'refusing recovery must not reserve a licence seat');
+
+    // This is a disposable CI-only database: remove only the synthetic fixture
+    // so the independent rollback and concurrent-first-run scenarios can run.
+    await one.branch.delete({where:{id:branch.id}});
+    await one.company.delete({where:{id:dormant.id}});
+
     const failedAudit = { recordRequired: async () => { throw new Error('synthetic audit failure'); } };
     await assert.rejects(new SetupService(one,failedAudit,licensing).initialSetup(dto), /synthetic audit failure/);
-    assert.equal(await one.company.count({where:{deletedAt:null}}),0);
+    assert.equal(await one.company.count(),0);
     assert.equal(reservations,0,'an audit failure must not advance the licence watermark');
     assert.equal(await one.user.count(),0);
     assert.equal(await one.role.count(),0);
-    assert.ok(await one.company.findUnique({where:{id:dormant.id}}));
-    assert.ok(await one.branch.findUnique({where:{id:branch.id}}));
 
     const entered = deferred(), gate = deferred(); release=gate.resolve;
     const realAudit = new AuditService(one);
