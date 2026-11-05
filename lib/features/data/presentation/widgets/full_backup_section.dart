@@ -128,9 +128,14 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     final name = file == null ? '' : '${file['name'] ?? ''}';
     final size = file == null ? null : file['sizeBytes'];
     final directory = '${_capabilities?['backupDirectory'] ?? ''}';
-    return '${l10n.createdSuccessfully}${name.isEmpty ? '' : ': $name'}'
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final archiveLabel = arabic ? 'تم حفظ أرشيف قاعدة البيانات فقط' : 'Database archive saved (not a complete backup)';
+    final warning = arabic
+        ? 'لم تُحفظ الملفات الخارجية والترخيص في هذا الأرشيف، ولم تثبت استعادة كاملة.'
+        : 'External files and the licence are not included, and a complete restore has not been verified.';
+    return '$archiveLabel${name.isEmpty ? '' : ': $name'}'
         '${size == null ? '' : ' · $size ${l10n.sizeLabel}'}'
-        '${directory.isEmpty ? '' : '\n${l10n.backupSavedIn(directory)}'}';
+        '${directory.isEmpty ? '' : '\n${l10n.backupSavedIn(directory)}'}\n$warning';
   }
 
   Future<void> _download(String name) => runDownload(

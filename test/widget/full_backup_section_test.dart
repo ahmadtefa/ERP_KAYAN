@@ -57,11 +57,12 @@ class _FakeFullBackupService extends FullBackupService {
   }) async => const {};
 }
 
-Future<void> _pump(WidgetTester tester, _FakeFullBackupService service) {
+Future<void> _pump(WidgetTester tester, _FakeFullBackupService service, {Locale locale = const Locale('en')}) {
   return tester.pumpWidget(
     ProviderScope(
       overrides: [fullBackupServiceProvider.overrideWithValue(service)],
       child: wrapWithApp(
+        locale: locale,
         child: const Scaffold(body: SingleChildScrollView(child: FullBackupSection())),
       ),
     ),
@@ -148,6 +149,24 @@ void main() {
     expect(find.byType(LinearProgressIndicator), findsNothing);
     expect(find.textContaining('kayan-full-test.dump'), findsWidgets);
   });
+
+  for (final locale in [const Locale('en'), const Locale('ar')]) {
+    testWidgets('database-only backup does not claim complete success in ${locale.languageCode}', (tester) async {
+      final service = _FakeFullBackupService()..filesAfterCreate = const [
+        {'name':'kayan-full-test.dump', 'kind':'full', 'sizeBytes':2048},
+      ];
+      await _pump(tester, service, locale: locale);
+      await tester.pumpAndSettle();
+      final label = locale.languageCode == 'ar' ? 'إنشاء نسخة احتياطية الآن' : 'Create backup now';
+      await tester.tap(find.widgetWithText(FilledButton,label));
+      await tester.pumpAndSettle();
+      expect(find.textContaining(locale.languageCode == 'ar'
+        ? 'لم تُحفظ الملفات الخارجية والترخيص' : 'External files and the licence are not included'),findsOneWidget);
+      expect(find.textContaining(locale.languageCode == 'ar'
+        ? 'أرشيف قاعدة البيانات فقط' : 'Database archive only'),findsWidgets);
+      expect(find.textContaining(locale.languageCode == 'ar' ? 'تم الحفظ بنجاح' : 'Saved successfully'),findsNothing);
+    });
+  }
 
   testWidgets(
     'a timeout does not claim a concurrently created file as this request',

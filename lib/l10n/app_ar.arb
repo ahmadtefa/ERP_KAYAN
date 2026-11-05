@@ -448,7 +448,7 @@
   "fullBackupUnavailable": "أدوات PostgreSQL (pg_dump / pg_restore) غير موجودة على هذا الخادم",
   "maintenanceActive": "النظام في وضع الصيانة — تتم استعادة قاعدة البيانات الآن",
   "safetyBackup": "نسخة أمان",
-  "fullBackupKind": "نسخة كاملة",
+  "fullBackupKind": "أرشيف قاعدة البيانات فقط",
   "createdAtLabel": "تاريخ الإنشاء",
   "sizeLabel": "الحجم",
   "refreshStatus": "تحديث الحالة",

@@ -448,7 +448,7 @@
   "fullBackupUnavailable": "PostgreSQL tools (pg_dump / pg_restore) were not found on this server",
   "maintenanceActive": "The system is under maintenance — a restore is in progress",
   "safetyBackup": "Safety backup",
-  "fullBackupKind": "Full backup",
+  "fullBackupKind": "Database archive only",
   "createdAtLabel": "Created",
   "sizeLabel": "Size",
   "refreshStatus": "Refresh status",

@@ -1403,7 +1403,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get safetyBackup => 'نسخة أمان';
 
   @override
-  String get fullBackupKind => 'نسخة كاملة';
+  String get fullBackupKind => 'أرشيف قاعدة البيانات فقط';
 
   @override
   String get createdAtLabel => 'تاريخ الإنشاء';

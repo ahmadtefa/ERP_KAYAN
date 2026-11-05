@@ -1410,7 +1410,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get safetyBackup => 'Safety backup';
 
   @override
-  String get fullBackupKind => 'Full backup';
+  String get fullBackupKind => 'Database archive only';
 
   @override
   String get createdAtLabel => 'Created';
