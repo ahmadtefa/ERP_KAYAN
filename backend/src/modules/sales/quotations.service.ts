@@ -680,17 +680,24 @@ export class QuotationsService {
 
   async remove(companyId: string, userId: string, id: string) {
     const quotation = await this.draft(companyId, id);
-    await this.prisma.quotation.update({
-      where: { id },
-      data: { deletedAt: new Date(), updatedBy: userId },
-    });
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'DELETE',
-      entity: 'quotations',
-      entityId: id,
-      before: { quotationNumber: quotation.quotationNumber },
+    await this.prisma.$transaction(async (tx) => {
+      // The draft may have been issued after the earlier read. Claim only a
+      // still-live draft, so concurrent send/accept can never be hidden.
+      const deleted = await tx.quotation.updateMany({
+        where: { id, companyId, status: QuotationStatus.DRAFT, deletedAt: null },
+        data: { deletedAt: new Date(), updatedBy: userId },
+      });
+      if (deleted.count !== 1) {
+        throw new BadRequestException('Only a draft quotation can be deleted');
+      }
+      await this.audit.recordRequired({
+        companyId,
+        userId,
+        action: 'DELETE',
+        entity: 'quotations',
+        entityId: id,
+        before: { quotationNumber: quotation.quotationNumber },
+      }, tx);
     });
     return { id, deleted: true };
   }

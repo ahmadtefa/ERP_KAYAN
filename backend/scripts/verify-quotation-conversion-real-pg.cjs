@@ -67,5 +67,44 @@ module.exports = async ({prisma,numbers,settings,invoices,audit,company,branch,u
   assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:'sales_invoices',entityId:saved.convertedInvoiceId,action:'CREATE'}}),1);
   await assert.rejects(service.convert(company,branch,user,competing.id,{invoiceDate:date}), /already been converted/);
   assert.equal(await countInvoices(),beforeInvoices + 1);
-  console.log('PASS: quotation invoice conversion rollback, totals mismatch and concurrent claim on real PostgreSQL (no UI or JWT).');
+  // Simulate a different connection changing status after the draft read and
+  // before the deletion claim. Never hide an issued/accepted quotation.
+  const {PrismaService} = require('../src/common/prisma/prisma.service');
+  const other = new PrismaService();
+  await other.$connect();
+  try {
+    const stale = await accepted('SYN-QUOTE-REMOVE-RACE');
+    await prisma.quotation.update({where:{id:stale.id},data:{status:'DRAFT'}});
+    const readDraft = service.draft.bind(service);
+    service.draft = async (...args) => {
+      const snapshot = await readDraft(...args);
+      await other.quotation.update({where:{id:stale.id},data:{status:'ACCEPTED'}});
+      return snapshot;
+    };
+    try {
+      await assert.rejects(service.remove(company,user,stale.id), /Only a draft quotation can be deleted/);
+    } finally { service.draft = readDraft; }
+    let retained = await prisma.quotation.findUniqueOrThrow({where:{id:stale.id}});
+    assert.equal(retained.status,'ACCEPTED'); assert.equal(retained.deletedAt,null);
+    assert.equal(await prisma.auditLog.count({where:{entity:'quotations',entityId:stale.id,action:'DELETE'}}),0);
+
+    const rollback = await accepted('SYN-QUOTE-REMOVE-AUDIT');
+    await prisma.quotation.update({where:{id:rollback.id},data:{status:'DRAFT'}});
+    const record = audit.recordRequired;
+    audit.recordRequired = async function(input,tx) {
+      if (input.entityId === rollback.id && input.action === 'DELETE') throw new Error('synthetic delete audit failure');
+      return record.call(this,input,tx);
+    };
+    try {
+      await assert.rejects(service.remove(company,user,rollback.id),/synthetic delete audit failure/);
+    } finally { audit.recordRequired = record; }
+    retained = await prisma.quotation.findUniqueOrThrow({where:{id:rollback.id}});
+    assert.equal(retained.status,'DRAFT'); assert.equal(retained.deletedAt,null);
+    assert.equal(await prisma.auditLog.count({where:{entity:'quotations',entityId:rollback.id,action:'DELETE'}}),0);
+    await service.remove(company,user,rollback.id);
+    retained = await prisma.quotation.findUniqueOrThrow({where:{id:rollback.id}});
+    assert.ok(retained.deletedAt);
+    assert.equal(await prisma.auditLog.count({where:{entity:'quotations',entityId:rollback.id,action:'DELETE'}}),1);
+  } finally { await other.$disconnect(); }
+  console.log('PASS: quotation invoice conversion and deletion audit rollback, stale status and concurrency on real PostgreSQL (no UI or JWT).');
 };
