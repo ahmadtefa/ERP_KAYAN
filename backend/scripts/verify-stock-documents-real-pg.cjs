@@ -1235,6 +1235,8 @@ let difference = '70000000-0000-4000-8000-000000000005';
         assert.equal(await warehouseBalance(secondWarehouse),10);
       }
     }
+    await require('./verify-voucher-http-real-pg.cjs')({prisma,audit,service,company,branch,item,centre,
+      warehouse:secondWarehouse,date,otherVoucher,warehouseBalance});
     console.log('PASS: stock post reads locked current lines and rejects invalidated approval after a concurrent change.');
     console.log('PASS: voucher selected-unit snapshot, inactive-unit retry, base-cost posting and reversal on real PostgreSQL.');
     console.log('PASS: stock vouchers, atomic review/approval, permissions-independent workflow, posting/reversal concurrency and rollback.');
