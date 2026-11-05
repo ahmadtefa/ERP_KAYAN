@@ -399,6 +399,15 @@ export class StockDocumentsService {
       });
     }
 
+    // Every stock issue is an expense attribution, not an anonymous balance
+    // change. Enforce this in the API so UI omissions cannot bypass accounting.
+    if (kind === StockDocumentKind.ADJUSTMENT &&
+        lines.some((line) => line.quantity.isNegative()) && !costCenterId) {
+      throw new BadRequestException(
+        'A cost center is required when issuing stock from a warehouse.',
+      );
+    }
+
     const fromWarehouseId = dto.fromWarehouseId ? String(dto.fromWarehouseId) : null;
     const toWarehouseId = dto.toWarehouseId ? String(dto.toWarehouseId) : null;
 
@@ -589,6 +598,12 @@ export class StockDocumentsService {
         if (unitCost.isNegative() || quantity.abs().mul(unitCost).greaterThanOrEqualTo('1e15')) throw new BadRequestException(`Line ${index + 1}: invalid stock value`);
         if (raw.notes != null && typeof raw.notes !== 'string') throw new BadRequestException(`Line ${index + 1}: notes must be text`);
         lines.push({id:old?.id ?? randomUUID(),itemId:item.id,lineNumber:index + 1,quantity,unitCost,unitName,unitFactor,unitQuantity,notes:raw.notes ?? null});
+      }
+      if (document.voucherKind === 'ISSUE' &&
+          lines.some((line) => line.quantity.isNegative()) && !costCenterId) {
+        throw new BadRequestException(
+          'A cost center is required when issuing stock from a warehouse.',
+        );
       }
       await tx.stockDocumentLine.deleteMany({where:{documentId:id}});
       await tx.stockDocumentLine.createMany({data:lines.map(line => ({...line,documentId:id}))});
@@ -855,6 +870,11 @@ export class StockDocumentsService {
         }
 
         if (quantity.isZero()) continue;
+        if (quantity.isNegative() && !document.costCenterId) {
+          throw new BadRequestException(
+            'A cost center is required when issuing stock from a warehouse.',
+          );
+        }
 
         const direction = quantity.greaterThan(0) ? StockDirection.IN : StockDirection.OUT;
         const absoluteQuantity = quantity.abs();
