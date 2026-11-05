@@ -581,11 +581,16 @@ export class QuotationsService {
           terms: quotation.terms,
           subject: quotation.subject,
           columns: quotation.columns === null ? Prisma.DbNull : (quotation.columns as Prisma.InputJsonValue),
+          design: quotation.design == null ? Prisma.DbNull : (quotation.design as Prisma.InputJsonValue),
           discountType: quotation.discountType,
           discountPercent: quotation.discountPercent,
           discountAmount: quotation.discountAmount,
           subTotal: quotation.subTotal,
           discountTotal: quotation.discountTotal,
+          // A revision starts from the issued price snapshot, not today's
+          // company settings. Copy the VAT alongside the total it explains.
+          taxRate: quotation.taxRate,
+          taxAmount: quotation.taxAmount,
           totalAmount: quotation.totalAmount,
           managerName: quotation.managerName,
           responsibleName: quotation.responsibleName,
@@ -702,8 +707,9 @@ export class QuotationsService {
    *
    * Table discounts become line discounts (their exact allocated share), and
    * the quotation-wide discount becomes the invoice's document discount, so
-   * the net the customer accepted is the net the invoice starts from. Tax is
-   * then applied by the invoice's own rules - the quotation is a net offer.
+   * the net the customer accepted is the net the invoice starts from. The
+   * stored offer tax is carried into each line. If invoice pricing, rounding
+   * or discounts cannot reproduce the accepted totals, conversion is refused.
    */
   async convert(
     companyId: string,
@@ -733,120 +739,105 @@ export class QuotationsService {
       throw new BadRequestException('This quotation has no lines to convert');
     }
 
-    // Claim it first. The guard on status and convertedInvoiceId is the whole
-    // duplicate-conversion defence: exactly one caller can win.
-    const claimed = await this.prisma.quotation.updateMany({
-      where: {
-        id,
-        companyId,
-        status: QuotationStatus.ACCEPTED,
-        convertedInvoiceId: null,
-        deletedAt: null,
-      },
-      data: { status: QuotationStatus.CONVERTED, convertedAt: new Date(), updatedBy: userId },
-    });
-    if (claimed.count !== 1) {
-      throw new BadRequestException('This quotation was converted by someone else a moment ago');
-    }
+    const lines: Array<{
+      itemId?: string;
+      description: string;
+      quantity: string;
+      unitPrice: string;
+      taxRate: string;
+      discountType: 'AMOUNT';
+      discountAmount: string;
+    }> = [];
 
-    try {
-      const lines: Array<{
-        itemId?: string;
-        description: string;
-        quantity: string;
-        unitPrice: string;
-        discountType: 'AMOUNT';
-        discountAmount: string;
-      }> = [];
-
-      for (const table of quotation.tables) {
-        const tableDiscount = table.discountAmount;
-        if (tableDiscount.greaterThan(0)) {
-          const shares = allocateDocumentDiscount(
-            table.lines.map((line) => line.lineTotal),
-            { type: 'AMOUNT', amount: tableDiscount.toFixed(MONEY_SCALE) },
-          ).shares;
-          table.lines.forEach((line, index) => {
-            lines.push({
-              itemId: line.itemId ?? undefined,
-              description: line.description,
-              quantity: line.quantity.toFixed(MONEY_SCALE),
-              unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
-              discountType: 'AMOUNT',
-              discountAmount: shares[index].toFixed(MONEY_SCALE),
-            });
+    for (const table of quotation.tables) {
+      const tableDiscount = table.discountAmount;
+      if (tableDiscount.greaterThan(0)) {
+        const shares = allocateDocumentDiscount(
+          table.lines.map((line) => line.lineTotal),
+          { type: 'AMOUNT', amount: tableDiscount.toFixed(MONEY_SCALE) },
+        ).shares;
+        table.lines.forEach((line, index) => {
+          lines.push({
+            itemId: line.itemId ?? undefined,
+            description: line.description,
+            quantity: line.quantity.toFixed(MONEY_SCALE),
+            unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
+            taxRate: quotation.taxRate.toFixed(RATE_SCALE),
+            discountType: 'AMOUNT',
+            discountAmount: shares[index].toFixed(MONEY_SCALE),
           });
-        } else {
-          for (const line of table.lines) {
-            lines.push({
-              itemId: line.itemId ?? undefined,
-              description: line.description,
-              quantity: line.quantity.toFixed(MONEY_SCALE),
-              unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
-              discountType: 'AMOUNT',
-              discountAmount: '0.0000',
-            });
-          }
+        });
+      } else {
+        for (const line of table.lines) {
+          lines.push({
+            itemId: line.itemId ?? undefined,
+            description: line.description,
+            quantity: line.quantity.toFixed(MONEY_SCALE),
+            unitPrice: line.unitPrice.toFixed(MONEY_SCALE),
+            taxRate: quotation.taxRate.toFixed(RATE_SCALE),
+            discountType: 'AMOUNT',
+            discountAmount: '0.0000',
+          });
         }
       }
+    }
 
-      // Free-text lines are allowed on a quotation, and on a sales invoice
-      // too; an item-less line is described by its text.
-      if (lines.length === 0) throw new BadRequestException('This quotation has no lines to convert');
+    // Free-text lines are allowed on a quotation, and on a sales invoice
+    // too; an item-less line is described by its text.
+    if (lines.length === 0) throw new BadRequestException('This quotation has no lines to convert');
 
-      const invoice = await this.invoices.create(companyId, branchId, userId, {
+    // Claim, create the draft invoice, link it, and write both audit records
+    // under one database transaction. In particular, do not release the
+    // claim after a separately committed invoice has already been created.
+    const created = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.quotation.updateMany({
+        where: { id, companyId, status: QuotationStatus.ACCEPTED, convertedInvoiceId: null, deletedAt: null },
+        data: { status: QuotationStatus.CONVERTED, convertedAt: new Date(), updatedBy: userId },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException('This quotation was converted by someone else a moment ago');
+      }
+      const invoice = await this.invoices.createInTransaction(companyId, branchId, userId, {
         invoiceDate: dto.invoiceDate ? this.date(dto.invoiceDate, 'invoiceDate').toISOString() : new Date().toISOString(),
         customerId: quotation.customerId,
         warehouseId: dto.warehouseId,
-        notes:
-          this.text(dto.notes) ??
-          `From quotation ${quotation.quotationNumber}` +
-            (quotation.tables.length
-              ? ` — tables: ${quotation.tables.map((table) => table.title).join(' | ')}`
-              : ''),
+        notes: this.text(dto.notes) ?? `From quotation ${quotation.quotationNumber}` +
+          (quotation.tables.length ? ` — tables: ${quotation.tables.map((table) => table.title).join(' | ')}` : ''),
         discountType: quotation.discountType ?? undefined,
         discountPercent: quotation.discountType === 'PERCENT' ? quotation.discountPercent.toFixed(RATE_SCALE) : undefined,
         discountAmount: quotation.discountAmount.toFixed(MONEY_SCALE),
         lines,
+      }, tx);
+      // Do not silently create a different debt if prices-including-tax,
+      // discount allocation, or line rounding changes the accepted offer.
+      // A discrepancy aborts the entire transaction for explicit correction.
+      const acceptedNet = quotation.subTotal.minus(quotation.discountTotal);
+      if (!invoice.subTotal.equals(acceptedNet) || !invoice.taxAmount.equals(quotation.taxAmount) ||
+          !invoice.totalAmount.equals(quotation.totalAmount)) {
+        throw new BadRequestException('Invoice totals differ from the accepted quotation; review tax and discounts before conversion');
+      }
+      await tx.quotation.update({
+        where: { id },
+        data: { convertedInvoiceId: invoice.id, convertedAt: new Date(), updatedBy: userId },
       });
-
-      await this.prisma.$transaction(async (tx) => {
-        await tx.quotation.update({
-          where: { id },
-          data: { convertedInvoiceId: invoice.id, convertedAt: new Date(), updatedBy: userId },
-        });
-        await tx.quotationEvent.create({
-          data: {
-            quotationId: id,
-            type: QuotationEventType.CONVERTED,
-            note: `Invoice ${invoice.invoiceNumber}`,
-            userId,
-          },
-        });
+      await tx.quotationEvent.create({
+        data: { quotationId: id, type: QuotationEventType.CONVERTED, note: `Invoice ${invoice.invoiceNumber}`, userId },
       });
-
-      await this.audit.record({
-        companyId,
-        userId,
-        action: 'UPDATE',
-        entity: 'quotations',
-        entityId: id,
+      await this.audit.recordRequired({
+        companyId, userId, action: 'CREATE', entity: 'sales_invoices', entityId: invoice.id,
+        after: { invoiceNumber: invoice.invoiceNumber, totalAmount: invoice.totalAmount.toFixed(MONEY_SCALE) },
+      }, tx);
+      await this.audit.recordRequired({
+        companyId, userId, action: 'UPDATE', entity: 'quotations', entityId: id,
         after: { convertedInvoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber },
-      });
-      return {
-        quotation: await this.findOne(companyId, id),
-        invoice,
-        note:
-          'The quotation total is before tax. The invoice applies the company tax rules, so its total may be higher.',
-      };
-    } catch (error) {
-      // Put the offer back so the person can fix the cause and try again.
-      await this.prisma.quotation.updateMany({
-        where: { id, status: QuotationStatus.CONVERTED, convertedInvoiceId: null },
-        data: { status: QuotationStatus.ACCEPTED, convertedAt: null },
-      });
-      throw error;
-    }
+      }, tx);
+      return invoice;
+    });
+    return {
+      quotation: await this.findOne(companyId, id),
+      invoice: await this.invoices.findOne(companyId, created.id),
+      note: 'Draft invoice created. Review its tax and totals before posting.',
+    };
   }
 
   // --------------------------------------------------------------- printing

@@ -1333,6 +1333,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const map = new AccountMapService();
     const si = new SalesInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit);
     const pi = new PurchaseInvoicesService(prisma,numbers,posting,map,settings,warehouses,prices,audit);
+    await require('./verify-quotation-conversion-real-pg.cjs')({prisma,numbers,settings,invoices:si,audit,company,branch,user,customer:customer.id,date});
     const sales = new SalesOrdersService(prisma,numbers,settings,prices,si,audit);
     const purchases = new PurchaseOrdersService(prisma,numbers,settings,prices,pi,audit);
     await require('./verify-order-http-real-pg.cjs')({prisma,audit,sales,purchases,company,branch,user,
