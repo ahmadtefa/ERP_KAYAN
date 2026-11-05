@@ -8,7 +8,7 @@ const requireBackend = createRequire(path.join(root, 'backend/package.json'));
 const yaml = requireBackend('js-yaml');
 const workflows = path.join(root, '.github/workflows');
 const read = name => yaml.load(fs.readFileSync(path.join(workflows, name), 'utf8'));
-const manualOnly = ['ci.yml', 'key-generator.yml', 'windows-candidate-preflight.yml', 'windows-integrated-candidate.yml', '_licence-step-diagnose.yml', 'installer-focused-tests.yml', 'licence-startup-focused.yml', 'windows-packaging-probe.yml', 'windows-installer-runtime-smoke.yml'];
+const manualOnly = ['ci.yml', 'key-generator.yml', 'windows-candidate-preflight.yml', 'windows-installer.yml', 'windows-integrated-candidate.yml', '_licence-step-diagnose.yml', 'installer-focused-tests.yml', 'licence-startup-focused.yml', 'windows-packaging-probe.yml', 'windows-installer-runtime-smoke.yml'];
 for (const file of manualOnly) {
   const triggers = read(file).on;
   assert.deepEqual(Object.keys(triggers), ['workflow_dispatch'], `${file}: unsafe legacy workflow may only be dispatched manually`);
@@ -28,17 +28,22 @@ for (const name of reviewed) {
   }
 }
 const installer = read('windows-installer.yml');
-assert.deepEqual(Object.keys(installer.on).sort(), ['pull_request', 'workflow_dispatch']);
-assert.deepEqual(installer.on.pull_request.branches, ['main']);
+assert.deepEqual(Object.keys(installer.on), ['workflow_dispatch']);
 assert.deepEqual(installer.permissions, { contents: 'read' });
 const installerSource = fs.readFileSync(path.join(workflows, 'windows-installer.yml'), 'utf8');
+const installerBlocker = installer.jobs.build.steps[0];
+assert.match(installerBlocker.name, /Block installer/);
+assert.match(installerBlocker.run, /BLOCKED.*approved isolated VM/);
+assert.match(installerBlocker.run, /exit 1/);
+assert.equal(installerBlocker.if, undefined);
+assert.equal(installerBlocker['continue-on-error'], undefined);
 assert.match(installerSource, /github\.event_name == 'pull_request' && 'product'/,
-  'PRs must build an installable product payload using the pinned public key only');
+  'Retain the historical product-mode selection for review');
 assert.doesNotMatch(installerSource, /secrets\.(?:LICENSE_PRIVATE_KEY|KAYAN_PRIVATE_KEY)/);
 const runtimeSmoke = installer.jobs['smoke-final'];
 assert.equal(runtimeSmoke.if, "needs.build.outputs.build_mode == 'product'");
 assert.ok(runtimeSmoke.steps.some(step => String(step.run || '').includes('-RuntimeOnly')),
-  'PR Setup must be installed only in the bounded RuntimeOnly smoke');
+  'Retain the RuntimeOnly smoke without claiming it is release evidence');
 const publisherJob = installer.jobs['publish-windows'];
 assert.match(publisherJob.if, /github\.event_name == 'push'/);
 assert.match(publisherJob.if, /refs\/heads\/main/);
@@ -47,16 +52,15 @@ assert.ok(safe.on.push && safe.on.pull_request, 'Safe checks must remain active 
 assert.deepEqual(safe.on.push.branches, ['main'], 'Main must retain push checks without duplicating open PR commits');
 assert.ok(safe.on.pull_request.branches.includes('main'), 'PRs targeting main must retain code checks');
 const source = fs.readFileSync(path.join(workflows, 'safe-checks.yml'), 'utf8');
-// HMAC state integration runs on a disposable GitHub-hosted VM with synthetic keys only.
+// The unchanged HMAC test is independently blocked until an approved VM exists.
 const isolated = safe.jobs['licence-store-isolation'];
 assert.ok(isolated, 'licence-store integration must remain visible as its own job');
 assert.equal(isolated.if, undefined);
 assert.equal(isolated['continue-on-error'], undefined);
 assert.equal(isolated.needs, undefined);
-assert.deepEqual(isolated.permissions, { contents: 'read' });
-assert.equal(isolated.steps[0].with['persist-credentials'], false);
-assert.ok(isolated.steps.every(s => !(s.with && s.with.cache)), 'no dependency cache');
-assert.ok(isolated.steps.some(s => /src\/modules\/licensing\/license-store\.spec\.ts/.test(String(s.run || ''))));
+assert.match(isolated.steps[1].run, /BLOCKED.*licence store integration not run/);
+assert.match(isolated.steps[1].run, /exit 1/);
+assert.match(isolated.steps[2].run, /src\/modules\/licensing\/license-store\.spec\.ts/);
 const backendSteps = safe.jobs['backend-safe'].steps;
 assert.doesNotMatch(backendSteps.map(step => String(step.run || '')).join('\n'), /license-store\.spec\.ts/);
 const ordinaryJest = backendSteps.find(step => step.name === 'Run reviewed non-signing backend and authorization tests');

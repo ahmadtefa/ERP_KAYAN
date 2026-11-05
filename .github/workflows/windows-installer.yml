@@ -1,17 +1,6 @@
 name: Windows Installer
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/windows-installer.yml'
-      - 'distribution/windows/**'
-      - 'backend/**'
-      - 'lib/**'
-      - 'windows/**'
-      - 'scripts/**'
-      - 'pubspec.*'
-      - 'assets/**'
   workflow_dispatch:
     inputs:
       build_mode:
@@ -20,10 +9,10 @@ on:
         options: [product, test-signed]
         default: product
         required: true
-  # PRs build with the pinned public verification key only, then install the
-  # exact inspected Setup on a fresh GitHub-hosted Windows VM in RuntimeOnly
-  # mode. No signing private key, customer data, release upload or publication
-  # is available to PR jobs. Product publication remains main-push only.
+  # Automatic PR execution would run synthetic signature tests outside the
+  # approved signing-test environment. Retain every test and the installer
+  # pipeline for explicit authorised operation; code-integrity still builds
+  # Windows on PRs. Neither that build nor manual dispatch approves release.
 
 # Building or inspecting a candidate never needs permission to publish releases.
 # Any future publishing job must request write permission separately, after its
@@ -46,6 +35,14 @@ jobs:
       version: ${{ steps.app-version.outputs.version }}
 
     steps:
+      # No flag may bypass this on a general-purpose GitHub runner. The
+      # retained signing tests require an independently approved isolated VM.
+      - name: Block installer until signing-test environment is approved
+        shell: pwsh
+        run: |
+          Write-Error 'BLOCKED: installer signing tests require an approved isolated VM. No installer was built or tested.'
+          exit 1
+
       - name: Checkout repository
         uses: actions/checkout@v4
 

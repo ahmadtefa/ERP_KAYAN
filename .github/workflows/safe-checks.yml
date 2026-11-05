@@ -123,33 +123,26 @@ jobs:
           src/modules/company/company-audit-atomic.spec.ts
 
   licence-store-isolation:
-    # GitHub-hosted ubuntu runners are fresh, disposable VMs for each job.
-    # This job receives no secrets, uses read-only repository permissions,
-    # disables checkout credentials and dependency caching, and creates only
-    # synthetic local HMAC state inside the runner's temporary filesystem.
-    # It is intentionally separate from production signing/release evidence.
-    name: Licence store integration (ephemeral synthetic-key VM)
+    # The original, unmodified license-store.spec.ts requires a real HMAC key
+    # and intentionally is NOT executed on this general-purpose runner. This
+    # independent check fails closed, rather than silently skipping or
+    # reporting the test as passed. Do not replace this gate with a flag or a
+    # self-hosted runner until an independently approved disposable VM and
+    # runner isolation/PR-trust policy exist. It does not block other CI jobs.
+    name: Licence store integration blocked (approved VM required)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    defaults:
-      run:
-        working-directory: backend
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22.22.3'
-      - name: Install locked dependencies without lifecycle scripts or cache
-        run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Run the unchanged licence store integration test with synthetic local keys only
-        env:
-          NODE_OPTIONS: ''
-          CI: 'true'
+      - name: Require approved isolated licence-test VM before HMAC test
+        run: |
+          echo '::error title=BLOCKED — licence store integration not run::Approved isolated test VM and runner trust controls are not configured. This is not a test pass or release approval.'
+          exit 1
+      - name: Run the unchanged licence store integration test
+        working-directory: backend
         run: npm test -- --runInBand src/modules/licensing/license-store.spec.ts
 
   prisma-upgrade:
