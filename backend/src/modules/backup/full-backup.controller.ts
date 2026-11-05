@@ -77,8 +77,13 @@ export class FullBackupController {
 
   /// The backups sitting in the backup folder on the server.
   @Get()
-  list() {
-    return this.service.list();
+  async list() {
+    // Legacy `kind: full` denotes a whole-database dump, not a complete
+    // machine backup. Preserve the field for old clients but make its scope
+    // explicit for every listed archive (including old and safety dumps).
+    const files = await this.service.list();
+    return files.map((file) => ({ ...file, fullBackup: false,
+      includesExternalFiles: false, includesLicence: false }));
   }
 
   /// A complete backup cannot be honestly produced by the legacy pg_dump path.

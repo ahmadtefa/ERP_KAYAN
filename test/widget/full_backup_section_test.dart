@@ -19,6 +19,7 @@ class _FakeFullBackupService extends FullBackupService {
 
   Object? capabilitiesError;
   bool deletionProtected = false;
+  bool? fullRestoreSupported;
   Completer<Map<String, dynamic>>? createGate;
   Object? createError;
   Map<String, dynamic>? createResult;
@@ -30,7 +31,8 @@ class _FakeFullBackupService extends FullBackupService {
   Future<Map<String, dynamic>> capabilities() async {
     final error = capabilitiesError;
     if (error != null) throw error;
-    return {'available': true, 'deletionProtected': deletionProtected};
+    return {'available': true, 'deletionProtected': deletionProtected,
+      if (fullRestoreSupported != null) 'fullRestoreSupported': fullRestoreSupported};
   }
 
   @override
@@ -70,22 +72,36 @@ Future<void> _pump(WidgetTester tester, _FakeFullBackupService service, {Locale 
 }
 
 void main() {
-  testWidgets('unverified restore is disabled while database archive remains available', (tester) async {
-    final service = _FakeFullBackupService()
-      ..files = const [{'name': 'previous.dump', 'kind': 'full', 'sizeBytes': 20}];
+  for (final locale in [const Locale('en'), const Locale('ar')]) {
+    for (final supported in [false, null]) {
+      testWidgets('unverified restore options are hidden in ${locale.languageCode}, capability $supported', (tester) async {
+        final service = _FakeFullBackupService()
+          ..fullRestoreSupported = supported
+          ..files = const [{'name': 'previous.dump', 'kind': 'full', 'sizeBytes': 20}];
+        await _pump(tester, service, locale: locale);
+        await tester.pumpAndSettle();
+        expect(find.textContaining(locale.languageCode == 'ar'
+            ? 'الاستعادة الكاملة متوقفة' : 'Full restore is paused'), findsOneWidget);
+        expect(find.byIcon(Icons.restore, skipOffstage: false), findsNothing);
+        expect(find.byIcon(Icons.download_outlined, skipOffstage: false), findsOneWidget);
+        expect(find.byType(FilledButton), findsWidgets);
+      });
+    }
+  }
+
+  testWidgets('failed capability refresh hides previously offered restore', (tester) async {
+    final service = _FakeFullBackupService()..fullRestoreSupported = true;
     await _pump(tester, service);
     await tester.pumpAndSettle();
-    expect(find.textContaining('Full restore is paused'), findsOneWidget);
-    expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Upload a backup file (.dump)')).onPressed, isNull);
-    // The list is below the fold on a default test viewport. Match the
-    // disabled button itself, not its Tooltip child or only onstage widgets.
-    final restoreButton = find.ancestor(
-      of: find.byIcon(Icons.restore, skipOffstage: false),
-      matching: find.byType(IconButton, skipOffstage: false),
+    expect(find.byIcon(Icons.restore), findsOneWidget);
+    service.capabilitiesError = DioException(
+      requestOptions: RequestOptions(path:'/backup/full/capabilities'),
+      type:DioExceptionType.connectionError,
     );
-    expect(restoreButton, findsOneWidget);
-    expect(tester.widget<IconButton>(restoreButton).onPressed, isNull);
-    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Create backup now')).onPressed, isNotNull);
+    await tester.tap(find.widgetWithText(OutlinedButton,'Refresh status'));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.restore, skipOffstage:false),findsNothing);
+    expect(find.textContaining('Full restore is paused'),findsOneWidget);
   });
 
   testWidgets(

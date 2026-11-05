@@ -261,6 +261,12 @@ describe('BackupService & BackupController (Company JSON Backup)', () => {
       }).toThrow(
         /هذا الملف هو أرشيف قاعدة بيانات PostgreSQL \(\.dump\) وليس ملف نسخة احتياطية لبيانات الشركة بصيغة JSON/,
       );
+      try {
+        (controller as any).parse(file);
+      } catch (error) {
+        expect((error as Error).message).toContain('الاستعادة الكاملة متوقفة');
+        expect((error as Error).message).not.toContain('/backup/full/restore');
+      }
     });
 
     test('accepts valid JSON file on company restore route', () => {

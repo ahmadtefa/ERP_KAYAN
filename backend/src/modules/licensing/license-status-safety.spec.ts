@@ -119,6 +119,24 @@ describe('licence state safety without signing', () => {
     expect(db.licenseInstallation.update).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['perpetual', {perpetual:true}],
+    ['seat limit', {maxSeatLimit:50}],
+    ['expiry', {licenseExpiresAt:'2027-01-01T00:00:00.000Z'}],
+  ])('does not attach an unbound protected %s watermark to a database licence', async (_label, watermark) => {
+    const { service, db, row, store } = setup();
+    store.current.licenseId = null;
+    Object.assign(store.current, watermark);
+    row.expiresAt = new Date('2026-01-02T00:00:00Z');
+    const beforeRow = structuredClone(row);
+    const beforeStore = structuredClone(store.current);
+    expect(await code(service.reconcile())).toMatchObject({code:'LICENSE_STATE_ID_MISMATCH'});
+    expect(await code(service.status({fresh:true}))).toMatchObject({code:'LICENSE_STATE_ID_MISMATCH'});
+    expect(row).toEqual(beforeRow);
+    expect(store.current).toEqual(beforeStore);
+    expect(db.licenseInstallation.update).not.toHaveBeenCalled();
+  });
+
   it('blocks status and clock confirmation on a conflicting protected licence', async () => {
     const { service, row, store, db } = setup();
     store.current.licenseId = 'different-synthetic-license';

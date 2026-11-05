@@ -479,8 +479,16 @@ export class LicensingService implements OnModuleInit {
    * mismatching row or key needs an explicitly verified transition; blindly
    * merging could make an expired or unrelated licence perpetual. */
   private assertLicenseIdentity(licenseId: string | null | undefined): void {
-    const protectedId = this.store.current.licenseId;
-    if (protectedId && licenseId && protectedId !== licenseId) {
+    const state = this.store.current;
+    const protectedId = state.licenseId;
+    // A legacy or damaged state may contain entitlement watermarks without
+    // their owner. Never attach those grants to an arbitrary database row or
+    // incoming key merely because the protected ID is absent. Preserve both
+    // sides for an authorised recovery; do not infer identity from the device.
+    const unboundEntitlement = !protectedId && Boolean(
+      state.perpetual || state.maxSeatLimit > 0 || state.licenseExpiresAt,
+    );
+    if (licenseId && ((protectedId && protectedId !== licenseId) || unboundEntitlement)) {
       throw new ForbiddenException({
         code: 'LICENSE_STATE_ID_MISMATCH',
         detail: 'حالة الترخيص المحمية لا تطابق سجل قاعدة البيانات. احتفظ بالبيانات وتواصل مع الدعم للتحقق من النقل أو الاستعادة. / The protected licence state does not match the database record. Preserve the data and seek an authorised recovery or transfer.',

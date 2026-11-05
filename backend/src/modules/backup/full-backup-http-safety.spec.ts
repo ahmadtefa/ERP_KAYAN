@@ -57,6 +57,20 @@ describe('complete backup and restore HTTP safety', () => {
     expect(records).toHaveLength(0);
   });
 
+  it('labels legacy and safety dump listings as incomplete machine backups', async () => {
+    const listing = jest.spyOn(service, 'list').mockResolvedValueOnce([
+      {name:'legacy.dump',sizeBytes:10,kind:'full',createdAt:'2026-11-05T00:00:00Z'},
+      {name:'safety.dump',sizeBytes:10,kind:'safety',createdAt:'2026-11-05T00:00:00Z'},
+    ]);
+    const result = await fetch(base, {headers:{'x-fixture-super':'yes'}});
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual([
+      expect.objectContaining({kind:'full',fullBackup:false,includesExternalFiles:false,includesLicence:false}),
+      expect.objectContaining({kind:'safety',fullBackup:false,includesExternalFiles:false,includesLicence:false}),
+    ]);
+    listing.mockRestore();
+  });
+
   it('rejects restore before parsing uploads and never invokes the legacy engine', async () => {
     const result = await fetch(`${base}/restore`, {method:'POST', headers:{'x-fixture-super':'yes',
       'content-type':'multipart/form-data; boundary=invalid'}, body:'not a multipart body'});

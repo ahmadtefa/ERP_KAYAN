@@ -137,7 +137,7 @@ for (const line of lines) {
   }
   // The backup deletion-protection widget uses synthetic file names only.
   // Emit assertion counts and fixed framework diagnostics, never response data.
-  if (event.type === 'print' && ['protected backups show why deletion is unavailable', 'unverified restore is disabled while database archive remains available'].includes(tests.get(event.testID))) {
+  if (event.type === 'print' && ['protected backups show why deletion is unavailable', 'unverified restore options are hidden in en, capability false', 'unverified restore options are hidden in en, capability null', 'unverified restore options are hidden in ar, capability false', 'unverified restore options are hidden in ar, capability null', 'failed capability refresh hides previously offered restore'].includes(tests.get(event.testID))) {
     const details = String(event.message ?? '').split(/\r?\n/).map(line =>
       line.match(/^\s*(?:Expected:|Actual:)\s*(?:<\d+>|null|not null|exactly \d+ matching candidates|no matching candidates)/)?.[0]?.trim() ??
       line.match(/test\/widget\/full_backup_section_test\.dart:\d+:\d+/)?.[0] ??

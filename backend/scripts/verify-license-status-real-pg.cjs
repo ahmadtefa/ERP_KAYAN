@@ -60,6 +60,14 @@ const machineId = 'synthetic-status-machine';
     await assert.rejects(service.status({fresh:true}), error => error.getResponse?.().code === 'LICENSE_STATE_ID_MISMATCH');
     assert.deepEqual(await db.licenseInstallation.findUnique({where:{licenseId}}),beforeMismatch);
     assert.deepEqual(service.store.current,beforeStore);
+    // Missing identity is not proof that old perpetual/seat watermarks belong
+    // to this row. Preserve both sides and fail closed without signing keys.
+    service.store.current.licenseId=null;
+    const beforeUnbound = structuredClone(service.store.current);
+    await assert.rejects(service.reconcile(), error => error.getResponse?.().code === 'LICENSE_STATE_ID_MISMATCH');
+    await assert.rejects(service.status({fresh:true}), error => error.getResponse?.().code === 'LICENSE_STATE_ID_MISMATCH');
+    assert.deepEqual(await db.licenseInstallation.findUnique({where:{licenseId}}),beforeMismatch);
+    assert.deepEqual(service.store.current,beforeUnbound);
     service.store.current.licenseId=licenseId;
     service.store.current.perpetual=false;
     service.store.current.maxSeatLimit=0;
@@ -102,6 +110,6 @@ const machineId = 'synthetic-status-machine';
     service.prisma = proxy;
     await assert.rejects(service.confirmClock({}));
     assert.equal((await db.licenseInstallation.findUnique({where:{licenseId}})).status,'REVOKED');
-    console.log('PASS: real Prisma/PostgreSQL licence status, protected identity mismatch, conditional revocation races and synthetic key-row rollback (no signing).');
+    console.log('PASS: real Prisma/PostgreSQL licence status, protected identity mismatch and unbound watermarks, conditional revocation races and synthetic key-row rollback (no signing).');
   } finally { await other.$disconnect(); await db.$disconnect(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

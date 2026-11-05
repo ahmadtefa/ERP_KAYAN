@@ -157,11 +157,19 @@ const path = require('node:path');
       assert.equal(dbOnlyResult.includesLicence,false);
       assert.ok((await service.verify(dbOnlyResult.file.name)).archiveContentReadable);
       assert.deepEqual(await fs.readFile(path.join(dir,backup.file.name)),originalBytes);
+      const listResponse = await fetch(base, {headers});
+      assert.equal(listResponse.status, 200);
+      const listed = await listResponse.json();
+      const listedArchive = listed.find(file => file.name === backup.file.name);
+      assert.ok(listedArchive);
+      assert.equal(listedArchive.fullBackup, false);
+      assert.equal(listedArchive.includesExternalFiles, false);
+      assert.equal(listedArchive.includesLicence, false);
       const content = await fetch(`${base}/${backup.file.name}/verify`, {method:'POST',headers});
       assert.equal(content.status, 201);
       assert.deepEqual(Object.fromEntries(Object.entries(await content.json()).filter(([key]) =>
-        ['archiveContentReadable','fullRestoreRehearsed','includesExternalFiles'].includes(key))),
-        {archiveContentReadable:true,fullRestoreRehearsed:false,includesExternalFiles:false});
+        ['archiveContentReadable','fullRestoreRehearsed','includesExternalFiles','includesLicence','fullBackup'].includes(key))),
+        {archiveContentReadable:true,fullRestoreRehearsed:false,includesExternalFiles:false,includesLicence:false,fullBackup:false});
       assert.equal((await fetch(`${base}/synthetic-corrupt.dump/verify`, {method:'POST',headers})).status, 503);
       assert.equal((await fetch(`${base}/${backup.file.name}`, {method:'DELETE',headers:{'x-fixture-super':'no'}})).status, 403);
       const denied = await fetch(`${base}/${backup.file.name}`, {method:'DELETE',headers});

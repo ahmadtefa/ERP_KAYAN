@@ -87,6 +87,7 @@ jobs:
           src/modules/inventory/stock-documents.warehouse-guard.spec.ts
           src/modules/inventory/stock-documents.units.spec.ts
           src/modules/inventory/original-stock-movement.spec.ts
+          src/modules/backup/backup.service.spec.ts
           src/modules/backup/full-backup.service.spec.ts
           src/modules/backup/full-backup-http-safety.spec.ts
           src/modules/backup/full-backup-recovery-safety.spec.ts

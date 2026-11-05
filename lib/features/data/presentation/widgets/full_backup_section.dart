@@ -330,7 +330,8 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
     // the server's own reply to the attempt is clearer than a grey button.
     final toolsUnavailable = capabilities != null && !toolsAvailable;
     // An absent capability must not enable an unproven destructive restore.
-    final restoreAvailable = capabilities?['fullRestoreSupported'] == true;
+    final restoreAvailable = !_loading && _failure == null &&
+        capabilities?['fullRestoreSupported'] == true;
 
     return Card(
       child: Padding(
@@ -406,13 +407,12 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
                     icon: const Icon(Icons.save_alt),
                     label: Text(l10n.createFullBackup),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: _busy || toolsUnavailable || !restoreAvailable
-                        ? null
-                        : _uploadAndRestore,
-                    icon: const Icon(Icons.restore),
-                    label: Text(l10n.uploadDumpFile),
-                  ),
+                  if (restoreAvailable)
+                    OutlinedButton.icon(
+                      onPressed: _busy || toolsUnavailable ? null : _uploadAndRestore,
+                      icon: const Icon(Icons.restore),
+                      label: Text(l10n.uploadDumpFile),
+                    ),
                   OutlinedButton.icon(
                     onPressed: _busy ? null : _load,
                     icon: const Icon(Icons.refresh),
@@ -470,13 +470,12 @@ class _FullBackupSectionState extends ConsumerState<FullBackupSection> {
                             ? null
                             : () => _download('${file['name']}'),
                       ),
-                      IconButton(
-                        tooltip: l10n.restoreFullDatabase,
-                        icon: const Icon(Icons.restore, size: 20),
-                        onPressed: _busy || !restoreAvailable
-                            ? null
-                            : () => _restore(fileName: '${file['name']}'),
-                      ),
+                      if (restoreAvailable)
+                        IconButton(
+                          tooltip: l10n.restoreFullDatabase,
+                          icon: const Icon(Icons.restore, size: 20),
+                          onPressed: _busy ? null : () => _restore(fileName: '${file['name']}'),
+                        ),
                       IconButton(
                         tooltip: l10n.deleteBackup,
                         icon: const Icon(Icons.delete_outline, size: 20),

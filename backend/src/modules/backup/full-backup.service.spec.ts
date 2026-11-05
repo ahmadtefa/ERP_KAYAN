@@ -688,7 +688,7 @@ describe('FullBackupService guards', () => {
       );
       expect(verified.entries).toBe(2);
       expect(verified.sizeBytes).toBe(69);
-      expect(verified).toMatchObject({ archiveContentReadable: true, fullRestoreRehearsed: false, includesExternalFiles: false });
+      expect(verified).toMatchObject({ archiveContentReadable: true, fullRestoreRehearsed: false, includesExternalFiles: false, includesLicence: false, fullBackup: false });
     });
 
     it('refuses data corruption even when the table of contents is readable', async () => {

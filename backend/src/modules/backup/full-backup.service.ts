@@ -97,6 +97,8 @@ export interface BackupVerification {
   archiveContentReadable: true;
   fullRestoreRehearsed: false;
   includesExternalFiles: false;
+  includesLicence: false;
+  fullBackup: false;
   verifiedAt: string;
   tool: string;
 }
@@ -595,6 +597,8 @@ export class FullBackupService {
       archiveContentReadable: true,
       fullRestoreRehearsed: false,
       includesExternalFiles: false,
+      includesLicence: false,
+      fullBackup: false,
       verifiedAt: new Date().toISOString(),
       tool: tools.pgRestore as string,
     };
