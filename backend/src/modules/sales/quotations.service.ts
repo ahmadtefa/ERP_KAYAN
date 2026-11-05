@@ -1305,16 +1305,18 @@ export class QuotationsService {
 
   private decimal(value: string, field: string): Prisma.Decimal {
     try {
-      return new Prisma.Decimal(value);
+      const number = new Prisma.Decimal(value);
+      if (!number.isFinite()) throw new Error('non-finite decimal');
+      return number;
     } catch {
       throw new BadRequestException(`${field} must be a number`);
     }
   }
 
   private positive(value: string, field: string): Prisma.Decimal {
-    const number = this.decimal(value, field);
+    const number = this.decimal(value, field).toDecimalPlaces(MONEY_SCALE);
     if (number.lessThanOrEqualTo(0)) throw new BadRequestException(`${field} must be greater than zero`);
-    return number.toDecimalPlaces(MONEY_SCALE);
+    return number;
   }
 
   private nonNegative(value: string, field: string): Prisma.Decimal {
