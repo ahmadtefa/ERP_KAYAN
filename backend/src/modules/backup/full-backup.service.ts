@@ -902,20 +902,6 @@ export class FullBackupService {
         );
       }
 
-      await this.audit.record({
-        action: 'RESTORE',
-        entity: 'backup_full',
-        entityId: label,
-        after: {
-          source: label,
-          safetyBackup: safety.name,
-          rehearsedInScratchDatabase: rehearsed,
-          postRestoreCheck: 'passed',
-          accessReconciled: accessRepair,
-        },
-        userId,
-      });
-
       // The archive is a snapshot: its licence rows are as old as the file.
       // The protected watermarks remember the latest term and seat limit, so
       // a restore is repaired after it lands instead of quietly shrinking the
@@ -926,6 +912,31 @@ export class FullBackupService {
         this.logger.error('The licence could not be reconciled after the restore. Maintenance remains active.');
         throw new ServiceUnavailableException(
           'Licence reconciliation after restore failed. Maintenance remains active; do not enter data.',
+        );
+      }
+      // A successful DB-only restoration must not be recorded as complete
+      // before licence reconciliation, or silently succeed if audit fails.
+      // This is still a legacy engine: required audit is not a cross-resource
+      // transaction and the maintenance flag remains local to this process.
+      try {
+        await this.audit.recordRequired({
+          action: 'RESTORE_DATABASE_ARCHIVE',
+          entity: 'backup_database_archive',
+          entityId: label,
+          after: {
+            source: label,
+            safetyBackup: safety.name,
+            rehearsedInScratchDatabase: rehearsed,
+            postRestoreCheck: 'passed',
+            accessReconciled: accessRepair,
+            fullRestore: false,
+          },
+          userId,
+        }, this.prisma);
+      } catch {
+        this.logger.error('Database archive restore audit failed. Maintenance remains active.');
+        throw new ServiceUnavailableException(
+          'تعذر تسجيل تدقيق الاستعادة؛ يبقى النظام في وضع الصيانة. / Restore audit failed; maintenance remains active.',
         );
       }
       safeToReleaseMaintenance = true;

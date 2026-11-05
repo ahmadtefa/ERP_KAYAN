@@ -22,7 +22,7 @@ describe('full restore failure safety', () => {
     licensing = { reconcile: jest.fn().mockResolvedValue(undefined) };
     service = new FullBackupService(
       {} as ConstructorParameters<typeof FullBackupService>[0],
-      { record: jest.fn().mockResolvedValue(undefined) } as unknown as ConstructorParameters<typeof FullBackupService>[1],
+      { record: jest.fn().mockResolvedValue(undefined), recordRequired: jest.fn().mockResolvedValue(undefined) } as unknown as ConstructorParameters<typeof FullBackupService>[1],
       maintenance,
       licensing as unknown as ConstructorParameters<typeof FullBackupService>[3],
     );
@@ -139,6 +139,32 @@ describe('full restore failure safety', () => {
   it('holds maintenance when licence reconciliation fails after restore', async () => {
     licensing.reconcile.mockRejectedValue(new Error('synthetic failure'));
     await expect(service.restore({ confirm: true, uploaded }, 'u')).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(maintenance.isActive).toBe(true);
+  });
+
+  it('requires audit after licence reconciliation and keeps maintenance if audit fails', async () => {
+    const audit = (service as unknown as { audit: {recordRequired: jest.Mock} }).audit;
+    const marker = 'synthetic-private-marker';
+    const log = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    audit.recordRequired.mockRejectedValue(new Error(marker));
+    const failure = await service.restore({confirm:true,uploaded},'u').catch((error) => error);
+    expect(failure).toBeInstanceOf(ServiceUnavailableException);
+    expect(failure.message).toMatch(/audit failed.*maintenance remains active/i);
+    expect(failure.message).not.toContain(marker);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(marker);
+    expect(licensing.reconcile).toHaveBeenCalledTimes(1);
+    expect(maintenance.isActive).toBe(true);
+    expect(audit.recordRequired).toHaveBeenCalledWith(expect.objectContaining({
+      action:'RESTORE_DATABASE_ARCHIVE',entity:'backup_database_archive',
+      after:expect.objectContaining({fullRestore:false}),
+    }),expect.anything());
+  });
+
+  it('records no successful restore before licence reconciliation succeeds', async () => {
+    const audit = (service as unknown as { audit: {recordRequired: jest.Mock} }).audit;
+    licensing.reconcile.mockRejectedValue(new Error('synthetic failure'));
+    await expect(service.restore({confirm:true,uploaded},'u')).rejects.toThrow(/maintenance remains active/i);
+    expect(audit.recordRequired).not.toHaveBeenCalled();
     expect(maintenance.isActive).toBe(true);
   });
 

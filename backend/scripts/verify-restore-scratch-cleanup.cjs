@@ -17,6 +17,7 @@ const { BackupScheduleService } = require('../src/modules/backup/backup-schedule
 const { pgBackupConnectionEnv } = require('../src/modules/backup/pg-backup-connection');
 const { MaintenanceService } = require('../src/common/maintenance/maintenance');
 const { FullBackupController } = require('../src/modules/backup/full-backup.controller');
+const { AuditService } = require('../src/common/audit/audit.service');
 const { PermissionsGuard } = require('../src/common/guards/permissions.guard');
 const { ProblemDetailsFilter } = require('../src/common/filters/problem-details.filter');
 const { Module: NestModule } = require('@nestjs/common');
@@ -276,8 +277,17 @@ const path = require('node:path');
     const cleanMaintenance = new MaintenanceService();
     let repairCount=0, reconcileCount=0;
     const events=[];
-    const clean = new FullBackupService({$executeRawUnsafe: sql => client.query(sql)},
-      {record:async row=>{events.push(row);}},cleanMaintenance,{reconcile:async()=>{reconcileCount++;}});
+    // Keep this synthetic audit fixture outside the public schema being
+    // replaced. The real AuditService writes through an injected SQL adapter;
+    // this is not proof of the installed product's audit DB durability.
+    await client.query('CREATE SCHEMA fixture_audit; CREATE TABLE fixture_audit.events (action text, entity text, after_json jsonb)');
+    const cleanPrisma={$executeRawUnsafe: sql => client.query(sql), auditLog:{create:async ({data})=>{
+      events.push(data);
+      await client.query('INSERT INTO fixture_audit.events(action,entity,after_json) VALUES($1,$2,$3)',
+        [data.action,data.entity,JSON.stringify(data.afterJson)]);
+    }}};
+    const clean = new FullBackupService(cleanPrisma,new AuditService(cleanPrisma),
+      cleanMaintenance,{reconcile:async()=>{reconcileCount++;}});
     clean.postRestoreCheck=async()=>({ok:true,detail:'synthetic-only'});
     clean.reconcileRestoredCompanies=async()=>{repairCount++;return {companies:0,grantsAdded:0,superAdminPromoted:[]};};
     const digest=async()=> (await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows;
@@ -340,7 +350,9 @@ const path = require('node:path');
       assert.deepEqual(await digest(),before.rows);
       assert.deepEqual(await fs.readFile(path.join(dir,backup.file.name)),oldBytes);
       assert.deepEqual(await fs.readFile(path.join(dir,newer.file.name)),newBytes);
-      assert.equal(events.filter(event=>event.action==='RESTORE').length,1);
+      assert.equal(events.filter(event=>event.action==='RESTORE_DATABASE_ARCHIVE' && event.afterJson.fullRestore===false).length,1);
+      assert.deepEqual((await client.query("SELECT action,entity,after_json->>'fullRestore' AS full FROM fixture_audit.events WHERE action='RESTORE_DATABASE_ARCHIVE'")).rows,
+        [{action:'RESTORE_DATABASE_ARCHIVE',entity:'backup_database_archive',full:'false'}]);
       // Independently restore the safety copy and verify all synthetic rows,
       // including the changes immediately before the destructive restore.
       const checkName=`kayan_safety_check_${randomUUID().replace(/-/g,'')}`;

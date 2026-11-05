@@ -82,7 +82,6 @@ void main() {
     final restoreButton = find.ancestor(
       of: find.byIcon(Icons.restore, skipOffstage: false),
       matching: find.byType(IconButton, skipOffstage: false),
-      skipOffstage: false,
     );
     expect(restoreButton, findsOneWidget);
     expect(tester.widget<IconButton>(restoreButton).onPressed, isNull);
