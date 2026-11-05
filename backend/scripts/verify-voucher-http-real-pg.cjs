@@ -143,8 +143,48 @@ module.exports = async function verifyVoucherHttp({prisma,audit,service,company,
     for (const action of ['CREATE','REVIEW','APPROVE','POST','REVERSE']) {
       assert.equal(await prisma.auditLog.count({where:{entity:'stock_documents',entityId:id,action}}),1);
     }
+    // The same caller can process an issue without cost permission. Editing
+    // an approved draft resets both approvals; a retry with the same key is
+    // stable while a stale version is rejected.
+    const issueInput={idempotencyKey:'http-voucher-issue-create-0001',kind:'ADJUSTMENT',voucherKind:'ISSUE',
+      documentDate:date,toWarehouseId:warehouse,costCenterId:centre,reason:'Synthetic HTTP issue',
+      counterpartyName:'Synthetic department',lines:[{itemId:item,quantity:'-1'}]};
+    response=await request('POST','',issueInput);
+    assert.equal(response.status,201);
+    const issue=await response.json();
+    assert.equal(issue.lines[0].unitCost,null);
+    assert.equal((await request('POST',`/${issue.id}/review`,{expectedVersion:0})).status,201);
+    assert.equal((await request('POST',`/${issue.id}/approve`,{expectedVersion:1})).status,201);
+    const edit={idempotencyKey:'http-voucher-issue-edit-0001',expectedVersion:2,documentDate:date,
+      toWarehouseId:warehouse,costCenterId:centre,reason:'Updated HTTP issue',counterpartyName:'Synthetic department',
+      lines:[{id:issue.lines[0].id,itemId:item,quantity:'-2'}]};
+    response=await request('PUT',`/${issue.id}/voucher-draft`,edit);
+    assert.equal(response.status,200);
+    const edited=await response.json();
+    assert.equal(edited.editVersion,3);
+    assert.equal(edited.reviewedAt,null); assert.equal(edited.approvedAt,null);
+    assert.equal(edited.lines[0].unitCost,null);
+    response=await request('PUT',`/${issue.id}/voucher-draft`,edit);
+    assert.equal(response.status,200); assert.equal((await response.json()).editVersion,3);
+    assert.equal((await request('POST',`/${issue.id}/review`,{expectedVersion:2})).status,409);
+    assert.equal((await request('POST',`/${issue.id}/post`,{expectedVersion:3})).status,400);
+    assert.equal((await request('POST',`/${issue.id}/review`,{expectedVersion:3})).status,201);
+    assert.equal((await request('POST',`/${issue.id}/approve`,{expectedVersion:4})).status,201);
+    const beforeIssueBalance=await warehouseBalance(warehouse);
+    response=await request('POST',`/${issue.id}/post`,{expectedVersion:5});
+    assert.equal(response.status,201);
+    assert.equal((await response.json()).lines[0].unitCost,null);
+    const issueMovement=await prisma.stockMovement.findFirstOrThrow({where:{referenceId:issue.id}});
+    assert.equal(issueMovement.direction,'OUT'); assert.equal(issueMovement.quantity.toFixed(4),'2.0000');
+    assert.ok(issueMovement.unitCost.greaterThan(0));
+    assert.equal(await warehouseBalance(warehouse),beforeIssueBalance-2);
+    assert.equal((await request('POST',`/${issue.id}/reverse`,{})).status,201);
+    assert.equal(await warehouseBalance(warehouse),beforeIssueBalance);
+    assert.equal(await prisma.stockMovement.count({where:{referenceId:issue.id}}),2);
+    assert.equal(await prisma.auditLog.count({where:{entity:'stock_documents',entityId:issue.id,action:'UPDATE'}}),1);
+
     await prisma.user.update({where:{id:account.id},data:{tokenVersion:{increment:1}}});
     assert.equal((await request('GET',`/${id}`)).status,401);
-    console.log('PASS: stock receipt HTTP, live PostgreSQL grants and branch isolation, concurrent post/reverse, audit rollback and cost redaction. JWT verifier is fake; no Flutter or licence.');
+    console.log('PASS: stock receipt/issue HTTP, live PostgreSQL grants and branch isolation, versioned edit, concurrent post/reverse, audit rollback and cost redaction. JWT verifier is fake; no Flutter or licence.');
   } finally { await app.close(); }
 };
