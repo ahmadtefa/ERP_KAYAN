@@ -534,6 +534,10 @@ export class LicensingService implements OnModuleInit {
     const used = await this.usedSeats();
     const now = this.clock();
     const store = this.store.current;
+    // A rollback warning must not make a licence valid again before startsAt
+    // or extend its term: evaluate validity at the highest trusted time seen.
+    const lastSeenAt = store.lastSeenAt ? new Date(store.lastSeenAt) : now;
+    const validityNow = lastSeenAt.getTime() > now.getTime() ? lastSeenAt : now;
 
     let state: LicenseState;
     if (!row) state = 'UNLICENSED';
@@ -542,9 +546,9 @@ export class LicensingService implements OnModuleInit {
     else if (!mutableLicenseStatus(row.status)) state = 'INVALID_STATUS';
     else if (row.status === 'SUSPENDED' || store.clockState === 'TAMPERED') {
       state = 'SUSPENDED';
-    } else if (row.startsAt.getTime() > now.getTime()) {
+    } else if (row.startsAt.getTime() > validityNow.getTime()) {
       state = 'NOT_YET_VALID';
-    } else if (row.expiresAt && row.expiresAt.getTime() <= now.getTime()) {
+    } else if (row.expiresAt && row.expiresAt.getTime() <= validityNow.getTime()) {
       state = 'EXPIRED';
     } else {
       state = 'ACTIVE';
@@ -552,7 +556,7 @@ export class LicensingService implements OnModuleInit {
 
     const expiresAt = row?.expiresAt ?? null;
     const perpetual = row ? isPerpetual(row.expiresAt) : false;
-    const days = daysRemaining(expiresAt, now);
+    const days = daysRemaining(expiresAt, validityNow);
     const limit = row?.seatLimit ?? 0;
     const blocked =
       this.enforcement === 'enforce' && (state !== 'ACTIVE' || !keyAvailable);
