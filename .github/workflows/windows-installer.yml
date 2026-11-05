@@ -539,7 +539,7 @@ jobs:
           $hash = (Get-FileHash 'candidate/KAYAN-ERP-Setup.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($hash -ne $build.sha256) { throw 'Setup changed during smoke' }
           Write-Output "::notice title=Install-tested candidate (not a release)::SHA256=$hash bytes=$($build.size) source=$env:GITHUB_SHA"
-          [ordered]@{sourceCommit=$env:GITHUB_SHA; installerSha256=$hash; result='offline-runtime-smoke-passed-not-release'; notTested=@('Licensed business operation with production public key','Packaged Windows generator with synthetic signing key')} | ConvertTo-Json -Depth 4 | Set-Content 'candidate/installation-smoke.json' -Encoding utf8
+          [ordered]@{sourceCommit=$env:GITHUB_SHA; installerSha256=$hash; result='offline-runtime-smoke-passed-not-release'; notTested=@('Complete backup and restore with data, files and licence','Licensed business operation with production public key','Packaged Windows generator with synthetic signing key')} | ConvertTo-Json -Depth 4 | Set-Content 'candidate/installation-smoke.json' -Encoding utf8
       - name: Upload runtime smoke evidence only (not a release)
         uses: actions/upload-artifact@v4
         with:
