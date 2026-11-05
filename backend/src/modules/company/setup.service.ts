@@ -47,73 +47,13 @@ export class SetupService {
   }
 
   async initialSetup(dto: InitialSetupDto, ip?: string, userAgent?: string) {
-    const existing = await this.prisma.company.count({
-      where: { deletedAt: null },
-    });
-    if (existing > 0) {
+    // Cheap early refusal avoids hashing a password for a closed setup route.
+    // This is only an optimization; the locked check below is authoritative.
+    if (await this.prisma.company.count({ where: { deletedAt: null } })) {
       throw new ConflictException(
         'This installation is already set up. Sign in instead, or use the company settings screens to make changes.',
       );
     }
-
-    /**
-     * A company that was reset is still here, marked as no longer set up: its
-     * row is what keeps the administrator's account standing after a reset,
-     * so it is brought back rather than replaced.
-     *
-     * Housekeeping first: a dormant company nobody belongs to is swept away,
-     * so repeated resets do not pile up empty shells. Whatever is left — at
-     * most one company with people in it — is the one this setup revives.
-     *
-     * A shell that still has history in its name is left alone: deleting its
-     * row would make PostgreSQL try to clear the company on its audit rows
-     * (`ON DELETE SET NULL`), and the append-only trigger refuses every UPDATE
-     * — including that one. Keeping the row keeps its trail readable and costs
-     * nothing but a line in the list.
-     */
-    const dormant = await this.prisma.company.findMany({
-      where: { deletedAt: { not: null } },
-      select: {
-        id: true,
-        code: true,
-        _count: { select: { users: true, auditLogs: true } },
-      },
-      orderBy: { createdAt: 'asc' },
-    });
-
-    const empty = dormant.filter(
-      (company) => company._count.users === 0 && company._count.auditLogs === 0,
-    );
-    if (empty.length > 0) {
-      await this.prisma.company.deleteMany({
-        where: { id: { in: empty.map((company) => company.id) } },
-      });
-    }
-    const kept = dormant.filter((company) => company._count.users > 0);
-
-    if (kept.length > 1) {
-      // Two dormant companies with people in them cannot both be revived.
-      // Nothing is changed; a person has to decide which one it is.
-      throw new ConflictException(
-        'This installation holds more than one company that was reset. ' +
-          'Restore one of them from a backup before setting the program up again.',
-      );
-    }
-
-    /// The company this setup will fill in, or null when a new one is created.
-    const revivedId = kept[0]?.id ?? null;
-    if (revivedId !== null && kept[0]!.code !== dto.companyCode) {
-      const clash = await this.prisma.company.findFirst({
-        where: { code: dto.companyCode },
-        select: { id: true },
-      });
-      if (clash) {
-        throw new ConflictException(
-          `A company with the code "${dto.companyCode}" already exists.`,
-        );
-      }
-    }
-
     let logo: { data: Uint8Array<ArrayBuffer>; mime: string } | null = null;
     if (dto.logoBase64) {
       const buffer = Buffer.from(dto.logoBase64, 'base64');
@@ -123,6 +63,41 @@ export class SetupService {
     const passwordHash = await argon2.hash(dto.adminPassword);
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // Serialize concurrent first-run requests across application processes;
+      // the authoritative company check must occur after acquiring the lock.
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(172895144, 485772)`);
+      const existing = await tx.company.count({ where: { deletedAt: null } });
+      if (existing > 0) {
+        throw new ConflictException(
+          'This installation is already set up. Sign in instead, or use the company settings screens to make changes.',
+        );
+      }
+
+      // A dormant company without users or audit rows can still own branches,
+      // documents, or other history. Never delete it automatically during setup.
+      const dormant = await tx.company.findMany({
+        where: { deletedAt: { not: null } },
+        select: { id: true, code: true, _count: { select: { users: true } } },
+        orderBy: { createdAt: 'asc' },
+      });
+      const kept = dormant.filter((company) => company._count.users > 0);
+      if (kept.length > 1) {
+        throw new ConflictException(
+          'This installation holds more than one company that was reset. ' +
+            'Restore one of them from a backup before setting the program up again.',
+        );
+      }
+      const revivedId = kept[0]?.id ?? null;
+      if (revivedId === null || kept[0]!.code !== dto.companyCode) {
+        const clash = await tx.company.findFirst({
+          where: { code: dto.companyCode },
+          select: { id: true },
+        });
+        if (clash) {
+          throw new ConflictException(`A company with the code "${dto.companyCode}" already exists.`);
+        }
+      }
+
       // Either the company left behind by a reset, brought back, or a brand
       // new one. Everything after this point is the same either way.
       const company = revivedId
@@ -282,25 +257,25 @@ export class SetupService {
         await this.seedChartOfAccounts(tx, company.id);
       }
 
-      return { company, hq, admin };
-    });
+      await this.audit.recordRequired({
+        companyId: company.id,
+        userId: admin.id,
+        action: 'CREATE',
+        entity: 'companies',
+        entityId: company.id,
+        after: {
+          code: company.code,
+          nameEn: company.nameEn,
+          nameAr: company.nameAr,
+          hq: hq.code,
+          adminUsername: admin.username,
+        },
+        ipAddress: ip ?? null,
+        userAgent: userAgent ?? null,
+      }, tx);
 
-    await this.audit.record({
-      companyId: result.company.id,
-      userId: result.admin.id,
-      action: 'CREATE',
-      entity: 'companies',
-      entityId: result.company.id,
-      after: {
-        code: result.company.code,
-        nameEn: result.company.nameEn,
-        nameAr: result.company.nameAr,
-        hq: result.hq.code,
-        adminUsername: result.admin.username,
-      },
-      ipAddress: ip ?? null,
-      userAgent: userAgent ?? null,
-    });
+      return { company, hq, admin };
+    }, { maxWait: 10000, timeout: 30000 });
 
     return {
       companyId: result.company.id,

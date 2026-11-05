@@ -31,8 +31,11 @@ function fixtureClient() {
   return client;
 }
 let created = false;
-function migrate(schema) {
-  const env = { ...process.env, DATABASE_URL: url.toString(), KAYAN_NATIVE_CI_SCHEMA: schema };
+const setupName = `kayan_setup_${randomBytes(8).toString('hex')}`;
+const setupUrl = new URL(admin); setupUrl.pathname = `/${setupName}`; setupUrl.searchParams.set('schema', 'public');
+let setupCreated = false;
+function migrate(schema, targetUrl = url.toString()) {
+  const env = { ...process.env, DATABASE_URL: targetUrl, KAYAN_NATIVE_CI_SCHEMA: schema };
   const cli = join(root, 'node_modules', 'prisma', 'build', 'index.js');
   const child = spawnSync(process.execPath, [cli, 'migrate', 'deploy', '--config', config], { cwd: root, env, encoding: 'utf8' });
   if (child.status !== 0) throw new Error(`Native Prisma deploy failed: ${(child.stderr || child.stdout || '').slice(-3000).replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, '[DATABASE URL REDACTED]')}`);
@@ -96,6 +99,17 @@ try {
   const row = result.rows[0];
   if (result.rowCount !== 1 || row.code !== 'synthetic-upgrade' || row.username !== 'synthetic-user' || row.item_code !== 'synthetic-item' || Number(row.price) !== 42.5 || row.columns[0].id !== 'synthetic-column' || history.rows[0].n !== entries.length) throw new Error('Synthetic data or migration history did not survive');
   console.log(`PASS: native Prisma populated upgrade: ${old.length} old migrations, ${entries.length-old.length} new migrations; synthetic company/user/item/template preserved; historical tax retained and new default zero; ${history.rows[0].n} recorded migrations.`);
+  // First-run setup needs an empty, separately created database. Never point
+  // this destructive fixture at the populated upgrade fixture or a primary DB.
+  await dbAdmin.query(`CREATE DATABASE "${setupName}"`); setupCreated = true;
+  migrate(join(root, 'prisma', 'schema.prisma'), setupUrl.toString());
+  const setup = spawnSync(process.execPath, [join(root, 'scripts', 'verify-setup-real-pg.cjs')], {
+    cwd: root,
+    env: { ...process.env, DATABASE_URL: setupUrl.toString(), KAYAN_SETUP_DISPOSABLE_DATABASE: setupName },
+    encoding: 'utf8',
+  });
+  if (setup.status !== 0) throw new Error(`Setup PostgreSQL fixture failed: ${(setup.stderr || setup.stdout || '').slice(-5000).replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, '[DATABASE URL REDACTED]')}`);
+  process.stdout.write(setup.stdout);
   // The child can only touch this script's disposable database. Production
   // stock, journal and Prisma services run, not a Prisma-shaped test double.
   const stock = spawnSync(process.execPath, [join(root, 'scripts', 'verify-stock-documents-real-pg.cjs')], {
@@ -115,6 +129,7 @@ try {
 
 } finally {
   for (const client of fixtureClients) await client.end();
+  if (setupCreated) await dbAdmin.query(`DROP DATABASE "${setupName}" WITH (FORCE)`);
   if (created) await dbAdmin.query(`DROP DATABASE "${name}" WITH (FORCE)`);
   await dbAdmin.end();
   rmSync(dir, { recursive: true, force: true });

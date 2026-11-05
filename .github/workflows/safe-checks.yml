@@ -120,6 +120,8 @@ jobs:
           src/modules/licensing/license-status-safety.spec.ts
           src/modules/licensing/license-keyring.spec.ts
           src/common/guards/super-admin.guard.spec.ts
+          src/modules/company/setup.service.spec.ts
+          src/modules/company/setup-safety.spec.ts
           src/modules/company/company-profile.guard.spec.ts
           src/modules/company/company.service.spec.ts
           src/modules/company/company-audit-atomic.spec.ts
