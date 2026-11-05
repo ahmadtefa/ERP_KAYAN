@@ -20,6 +20,13 @@ void main() {
     expect(arabic.resolve(failure).reason, AppErrorReason.conflict);
   });
 
+  test('quotation conversion mismatch has safe actionable Arabic guidance', () {
+    const message = 'Invoice totals differ from the accepted quotation; review tax and discounts before conversion';
+    final result = arabic.resolve(const ApiFailure(message, statusCode: 400));
+    expect(result.businessMessage, contains('لا تطابق عرض السعر'));
+    expect(result.businessMessage, contains('لم تُنشأ فاتورة'));
+  });
+
   group('technical text never reaches the screen', () {
     test('the deactivation failure that started this', () {
       final text = arabic.resolve(
