@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../../app/router/app_router.dart';
 
 import '../../../../app/theme/design_tokens.dart';
 import '../../../../shared/widgets/app_error_dialog.dart';
@@ -42,7 +45,18 @@ class ModuleScaffold extends StatelessWidget {
           title: title,
           subtitle: subtitle,
           eyebrow: eyebrow,
-          leading: leading,
+          leading: leading ?? IconButton(
+            tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+            onPressed: () {
+              final navigator = Navigator.of(context);
+              if (navigator.canPop()) {
+                navigator.maybePop();
+              } else {
+                context.go(AppRoutes.dashboard);
+              }
+            },
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
           dense: denseHeader,
           actions: [
             ?trailing,
