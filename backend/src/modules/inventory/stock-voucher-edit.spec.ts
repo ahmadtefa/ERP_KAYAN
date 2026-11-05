@@ -19,7 +19,8 @@ function harness() {
     item:{findFirst:jest.fn().mockResolvedValue({id:'item',isStockTracked:true,unit:'piece',units:[{unit:'box',factor:D('5'),isActive:false}]})}};
   const prisma = {$transaction:jest.fn(async (fn:(arg:typeof tx)=>Promise<void>) => fn(tx))};
   const audit = {recordRequired:jest.fn()};
-  const service = new StockDocumentsService(prisma as never,{} as never,{} as never,{} as never,audit as never,{} as never,{} as never,{} as never);
+  const service = new StockDocumentsService(prisma as never,{} as never,{} as never,{} as never,audit as never,{} as never,{} as never,
+    {assertPostable:jest.fn()} as never);
   jest.spyOn(service,'findOne').mockResolvedValue({id:'doc'} as never);
   return {tx,service,audit,original};
 }
@@ -43,7 +44,8 @@ describe('stock voucher draft edit', () => {
   it('does not let an issue editor without cost access overwrite a saved cost', async () => {
     const h = harness();
     Object.assign(h.original,{voucherKind:'ISSUE'});
-    const request = input(); request.lines[0].quantity='-3'; request.lines[0].unitCost='999';
+    const request = {...input(),costCenterId:'44444444-4444-4444-8444-444444444444'};
+    request.lines[0].quantity='-3'; request.lines[0].unitCost='999';
     await h.service.updateVoucher('company','branch','user','doc',request,false);
     const line = h.tx.stockDocumentLine.createMany.mock.calls[0][0].data[0];
     expect(line.unitCost.toString()).toBe('3');
