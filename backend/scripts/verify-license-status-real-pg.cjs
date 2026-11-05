@@ -46,6 +46,25 @@ const machineId = 'synthetic-status-machine';
     assert.equal((await service.status({fresh:true})).state,'NOT_YET_VALID');
     await db.licenseInstallation.update({where:{licenseId},data:{startsAt:now}});
 
+    // A protected watermark for a different licence must never make this
+    // expired database row perpetual or raise its seats. No signature test:
+    // the store is synthetic and the actual Prisma database is disposable.
+    const expired = new Date('2031-01-01T00:00:00Z');
+    await db.licenseInstallation.update({where:{licenseId},data:{expiresAt:expired,seatLimit:2}});
+    const beforeMismatch = await db.licenseInstallation.findUnique({where:{licenseId}});
+    service.store.current.licenseId = 'other-synthetic-licence';
+    service.store.current.perpetual = true;
+    service.store.current.maxSeatLimit = 50;
+    const beforeStore = structuredClone(service.store.current);
+    await assert.rejects(service.reconcile(), error => error.getResponse?.().code === 'LICENSE_STATE_ID_MISMATCH');
+    await assert.rejects(service.status({fresh:true}), error => error.getResponse?.().code === 'LICENSE_STATE_ID_MISMATCH');
+    assert.deepEqual(await db.licenseInstallation.findUnique({where:{licenseId}}),beforeMismatch);
+    assert.deepEqual(service.store.current,beforeStore);
+    service.store.current.licenseId=licenseId;
+    service.store.current.perpetual=false;
+    service.store.current.maxSeatLimit=0;
+    await db.licenseInstallation.update({where:{licenseId},data:{expiresAt:null}});
+
     for (const type of ['RENEWAL','SEATS','TRANSFER']) {
       await db.licenseInstallation.update({where:{licenseId},data:{status:'ACTIVE'}});
       const stale = await db.licenseInstallation.findFirst({where:{licenseId}});
@@ -83,6 +102,6 @@ const machineId = 'synthetic-status-machine';
     service.prisma = proxy;
     await assert.rejects(service.confirmClock({}));
     assert.equal((await db.licenseInstallation.findUnique({where:{licenseId}})).status,'REVOKED');
-    console.log('PASS: real Prisma/PostgreSQL licence status, conditional revocation races and synthetic key-row rollback (no signing).');
+    console.log('PASS: real Prisma/PostgreSQL licence status, protected identity mismatch, conditional revocation races and synthetic key-row rollback (no signing).');
   } finally { await other.$disconnect(); await db.$disconnect(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

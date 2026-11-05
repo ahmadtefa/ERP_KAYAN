@@ -111,6 +111,7 @@ jobs:
           src/modules/purchases/purchase-invoices.service.spec.ts
           src/modules/licensing/license.guard.spec.ts
           src/modules/licensing/license-status-safety.spec.ts
+          src/modules/licensing/license-store.spec.ts
           src/modules/licensing/license-keyring.spec.ts
           src/common/guards/super-admin.guard.spec.ts
           src/modules/company/company-profile.guard.spec.ts

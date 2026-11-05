@@ -106,6 +106,54 @@ describe('licence state safety without signing', () => {
     expect(db.licenseInstallation.updateMany).not.toHaveBeenCalled();
     expect(store.current.maxSeatLimit).toBe(0);
   });
+  it('never applies foreign perpetual and seat watermarks to this row', async () => {
+    const { service, db, row, store } = setup();
+    store.current.licenseId = 'different-synthetic-license';
+    store.current.perpetual = true;
+    store.current.maxSeatLimit = 50;
+    row.expiresAt = new Date('2026-01-02T00:00:00Z');
+    const before = structuredClone(row);
+    expect(await code(service.reconcile())).toMatchObject({code:'LICENSE_STATE_ID_MISMATCH'});
+    expect(row).toEqual(before);
+    expect(store.current.licenseId).toBe('different-synthetic-license');
+    expect(db.licenseInstallation.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks status and clock confirmation on a conflicting protected licence', async () => {
+    const { service, row, store, db } = setup();
+    store.current.licenseId = 'different-synthetic-license';
+    const before = structuredClone(store.current);
+    expect(await code(service.status({fresh:true}))).toMatchObject({code:'LICENSE_STATE_ID_MISMATCH'});
+    expect(await code(service.confirmClock({}))).toMatchObject({code:'LICENSE_STATE_ID_MISMATCH'});
+    expect(store.current).toEqual(before);
+    expect(row.status).toBe('ACTIVE');
+    expect(db.licenseInstallation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('does not reserve seats for a mismatched licence', async () => {
+    const { service, db, store } = setup();
+    store.current.licenseId = 'different-synthetic-license';
+    db.$executeRawUnsafe = jest.fn().mockResolvedValue(0);
+    db.licenseSeatUsage.findUnique = jest.fn();
+    db.licenseSeatUsage.create = jest.fn();
+    expect(await code(service.reserveSeat(db,{username:'synthetic',reason:'fixture'} as any)))
+      .toMatchObject({code:'LICENSE_STATE_ID_MISMATCH'});
+    expect(db.licenseSeatUsage.create).not.toHaveBeenCalled();
+    expect(db.licenseSeatUsage.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('rejects a key for a different protected licence before changing state or database', async () => {
+    const { internals, row, db, store } = setup();
+    store.current.licenseId = 'different-synthetic-license';
+    const payload = {type:'RENEWAL',keyId:'synthetic-key',licenseId:row.licenseId,
+      machineId:row.machineId,issuedAt:now.toISOString()};
+    internals.verify = () => ({payload,payloadJson:'{}',signedText:'synthetic',signature:'synthetic'});
+    expect(await code(internals.applyKey('synthetic','RENEWAL',{}))).toMatchObject({code:'LICENSE_STATE_ID_MISMATCH'});
+    expect(db.licenseKeyRecord.create).not.toHaveBeenCalled();
+    expect(db.licenseInstallation.update).not.toHaveBeenCalled();
+    expect(store.current.appliedKeys).toEqual([]);
+  });
+
   it('cannot confirm a clock if the row is revoked after it was read', async () => {
     const { service, row, db } = setup();
     db.licenseInstallation.updateMany.mockImplementationOnce(async () => { row.status = 'REVOKED'; return {count:0}; });

@@ -475,6 +475,19 @@ export class LicensingService implements OnModuleInit {
     });
   }
 
+  /** Watermarks belong to one licence, not merely to one computer. A
+   * mismatching row or key needs an explicitly verified transition; blindly
+   * merging could make an expired or unrelated licence perpetual. */
+  private assertLicenseIdentity(licenseId: string | null | undefined): void {
+    const protectedId = this.store.current.licenseId;
+    if (protectedId && licenseId && protectedId !== licenseId) {
+      throw new ForbiddenException({
+        code: 'LICENSE_STATE_ID_MISMATCH',
+        detail: 'حالة الترخيص المحمية لا تطابق سجل قاعدة البيانات. احتفظ بالبيانات وتواصل مع الدعم للتحقق من النقل أو الاستعادة. / The protected licence state does not match the database record. Preserve the data and seek an authorised recovery or transfer.',
+      });
+    }
+  }
+
   // ──────────────────────────────────────────────────────────────── identity
 
   machineId(): string {
@@ -509,6 +522,7 @@ export class LicensingService implements OnModuleInit {
     await this.runClockCheck(false);
 
     const row = await this.licenseRow();
+    this.assertLicenseIdentity(row?.licenseId);
     const used = await this.usedSeats();
     const now = this.clock();
     const store = this.store.current;
@@ -660,6 +674,7 @@ export class LicensingService implements OnModuleInit {
     await this.assertVerificationKey();
     const parsed = this.verify(rawKey);
     const payload = parsed.payload;
+    this.assertLicenseIdentity(payload.licenseId);
 
     // The type is part of what the operator signed. A seats key presented as
     // an activation key (or the reverse) is refused here, before any row is
@@ -1090,6 +1105,7 @@ export class LicensingService implements OnModuleInit {
     );
 
     const row = await this.licenseRowIn(tx);
+    this.assertLicenseIdentity(row?.licenseId);
     if (this.isEnforced() && row && row.machineId !== this.machineId()) {
       throw new ForbiddenException({
         detail: 'This licence belongs to a different computer. Preserve the data and request an authorised transfer.',
@@ -1206,6 +1222,7 @@ export class LicensingService implements OnModuleInit {
 
     const store = this.store.current;
     const dbRow = await this.licenseRow();
+    this.assertLicenseIdentity(dbRow?.licenseId);
     // Never update the copied licence or its clock state on the wrong machine.
     if (dbRow && (dbRow.machineId !== this.machineId() ||
         !mutableLicenseStatus(dbRow.status))) return;
@@ -1322,6 +1339,7 @@ export class LicensingService implements OnModuleInit {
   async reconcile(): Promise<void> {
     if (!this.ensureReadyUnlessBootstrapping()) return;
     const row = await this.licenseRow();
+    this.assertLicenseIdentity(row?.licenseId);
     // Do not import foreign entitlements or spent-key state from a copied DB.
     if (row && (row.machineId !== this.machineId() ||
         !mutableLicenseStatus(row.status))) return;
@@ -1411,6 +1429,7 @@ export class LicensingService implements OnModuleInit {
     await this.ensureReady();
     await this.assertVerificationKey();
     const row = await this.licenseRow();
+    this.assertLicenseIdentity(row?.licenseId);
     if (!row) {
       throw new ForbiddenException({
         detail: 'There is no licence on this computer.',
