@@ -13,10 +13,18 @@ describe('manual journal state transitions', () => {
       entryDate: new Date('2026-01-01'), totalDebit: new Prisma.Decimal(10),
       totalCredit: new Prisma.Decimal(10), lines: [],
     };
+    const posted = { status: JournalStatus.POSTED, totalDebit: new Prisma.Decimal(10),
+      totalCredit: new Prisma.Decimal(10), reversalOfId: null, lines: [
+        {accountId:'a',debit:new Prisma.Decimal(10),credit:new Prisma.Decimal(0)},
+        {accountId:'b',debit:new Prisma.Decimal(0),credit:new Prisma.Decimal(10)},
+      ] };
     const tx = { journalEntry: {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      findUniqueOrThrow: jest.fn().mockResolvedValue({ status: JournalStatus.POSTED }),
-    } };
+      findUniqueOrThrow: jest.fn().mockResolvedValue(posted),
+    }, $queryRaw:jest.fn().mockResolvedValue([]), account:{findMany:jest.fn().mockResolvedValue([
+      {id:'a',code:'1000',isActive:true,isPostable:true},
+      {id:'b',code:'2000',isActive:true,isPostable:true},
+    ])} };
     const prisma = {
       journalEntry: { findFirst: jest.fn().mockResolvedValue(before) },
       account: { findMany: jest.fn().mockResolvedValue([]) },
@@ -30,7 +38,7 @@ describe('manual journal state transitions', () => {
       {} as never,
     );
     jest.spyOn(service as any, 'toResponse').mockImplementation((value: unknown) => value);
-    return { service, prisma, tx, audit };
+    return { service, prisma, tx, audit, posted };
   }
 
   it.each([
@@ -39,8 +47,8 @@ describe('manual journal state transitions', () => {
     ['approve', JournalStatus.PENDING_APPROVAL, JournalStatus.APPROVED, 'APPROVE'],
     ['cancel', JournalStatus.APPROVED, JournalStatus.CANCELLED, 'CANCEL'],
   ] as const)('%s compares company and observed status and requires the audit in its transaction', async (method, before, after, action) => {
-    const { service, tx, audit } = setup(before);
-    tx.journalEntry.findUniqueOrThrow.mockResolvedValue({status:after});
+    const { service, tx, audit, posted } = setup(before);
+    tx.journalEntry.findUniqueOrThrow.mockResolvedValue({...posted,status:after});
     await service[method](company, user, id);
     expect(tx.journalEntry.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id, companyId: company, status: before },
@@ -60,6 +68,44 @@ describe('manual journal state transitions', () => {
     tx.journalEntry.updateMany.mockResolvedValue({count:0});
     await expect(service[method](company,user,id)).rejects.toBeInstanceOf(ConflictException);
     expect(tx.journalEntry.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(audit.recordRequired).not.toHaveBeenCalled();
+  });
+
+  it('checks actual line amounts inside the write transaction, not just balanced headers', async () => {
+    const {service,tx,audit,posted} = setup(JournalStatus.DRAFT);
+    tx.journalEntry.findUniqueOrThrow.mockResolvedValue({...posted,lines:[posted.lines[0],
+      {...posted.lines[1],credit:new Prisma.Decimal(7)}]});
+    await expect(service.post(company,user,id)).rejects.toThrow(/lines do not balance/i);
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(audit.recordRequired).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {debit:'10',credit:'1'}, {debit:'0',credit:'0'}, {debit:'-1',credit:'0'},
+  ])('rejects invalid posted line sides: $debit / $credit', async ({debit,credit}) => {
+    const {service,tx,audit,posted} = setup(JournalStatus.DRAFT);
+    tx.journalEntry.findUniqueOrThrow.mockResolvedValue({...posted,lines:[
+      {...posted.lines[0],debit:new Prisma.Decimal(debit),credit:new Prisma.Decimal(credit)},posted.lines[1],
+    ]});
+    await expect(service.post(company,user,id)).rejects.toThrow(/one positive debit or credit/i);
+    expect(audit.recordRequired).not.toHaveBeenCalled();
+  });
+
+  it('rejects balanced lines which disagree with balanced headers', async () => {
+    const {service,tx,audit,posted} = setup(JournalStatus.DRAFT);
+    tx.journalEntry.findUniqueOrThrow.mockResolvedValue({...posted,totalDebit:new Prisma.Decimal(20),totalCredit:new Prisma.Decimal(20)});
+    await expect(service.post(company,user,id)).rejects.toThrow(/do not match/i);
+    expect(audit.recordRequired).not.toHaveBeenCalled();
+  });
+
+  it('locks accounts then refuses a deactivated account before auditing', async () => {
+    const {service,tx,audit} = setup(JournalStatus.DRAFT);
+    tx.account.findMany.mockResolvedValue([
+      {id:'a',code:'1000',isActive:false,isPostable:true},
+      {id:'b',code:'2000',isActive:true,isPostable:true},
+    ]);
+    await expect(service.post(company,user,id)).rejects.toThrow(/accounts are unavailable/i);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     expect(audit.recordRequired).not.toHaveBeenCalled();
   });
 

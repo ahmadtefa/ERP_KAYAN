@@ -550,6 +550,73 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(await prisma.auditLog.count({where:{entity:'journal_entries',entityId:rollbackJournal.id}}),0);
     } finally {audit.recordRequired=journalAudit;}
 
+    // Balanced headers cannot hide a different sum in the journal lines.
+    const corrupt=await createJournal('SYN-JR-CORRUPT');
+    const corruptLine=await prisma.journalLine.findFirstOrThrow({where:{journalEntryId:corrupt.id,lineNumber:2}});
+    await prisma.journalLine.update({where:{id:corruptLine.id},data:{credit:'7'}});
+    await assert.rejects(manualJournal.post(company,user,corrupt.id),/lines do not balance/i);
+    assert.equal((await prisma.journalEntry.findUniqueOrThrow({where:{id:corrupt.id}})).status,'DRAFT');
+    assert.equal(await prisma.auditLog.count({where:{entity:'journal_entries',entityId:corrupt.id,action:'POST'}}),0);
+
+    // Deactivate after the first read but before the transaction. The locked
+    // revalidation must reject and roll back the tentative POSTED transition.
+    const staleAccount=await createJournal('SYN-JR-STALE-ACCOUNT');
+    let reached, resume;
+    const reachedPromise=new Promise(resolve=>{reached=resolve;});
+    const resumePromise=new Promise(resolve=>{resume=resolve;});
+    const delayedSettings={get:async (...args)=>{
+      const policy=await journalSettings.get(...args); reached(); await resumePromise; return policy;
+    }};
+    const staleService=new JournalEntriesService(prisma,numbers,audit,periods,delayedSettings,costCenters);
+    const staleResult=staleService.post(company,user,staleAccount.id).then(value=>({value}),error=>({error}));
+    await Promise.race([reachedPromise,staleResult.then(result=>{
+      throw result.error ?? new Error('posting returned before the policy barrier');
+    })]);
+    try { await chart.update(company,user,usedLeaf.id,{isActive:false}); }
+    finally { resume(); }
+    const staleOutcome=await staleResult;
+    assert.match(staleOutcome.error.message,/accounts are unavailable/i);
+    assert.equal((await prisma.journalEntry.findUniqueOrThrow({where:{id:staleAccount.id}})).status,'DRAFT');
+    assert.equal(await prisma.auditLog.count({where:{entity:'journal_entries',entityId:staleAccount.id,action:'POST'}}),0);
+    await chart.update(company,user,usedLeaf.id,{isActive:true});
+
+    // Hold the account share lock during posting; a competing deactivation
+    // must wait until posting commits, then it may safely apply afterwards.
+    const lockJournal=await createJournal('SYN-JR-ACCOUNT-LOCK');
+    let locked, unlock; const lockedPromise=new Promise(resolve=>{locked=resolve;});
+    const unlockPromise=new Promise(resolve=>{unlock=resolve;});
+    const lockedPrisma=new Proxy(prisma,{get(target,key){
+      if(key==='$transaction') return callback=>target.$transaction(async tx=>callback(new Proxy(tx,{get(t,k){
+        const value=t[k];
+        if(k==='$queryRaw') return async (...args)=>{const result=await value.apply(t,args);locked();await unlockPromise;return result;};
+        return typeof value==='function'?value.bind(t):value;
+      }})));
+      const value=target[key];return typeof value==='function'?value.bind(target):value;
+    }});
+    const lockService=new JournalEntriesService(lockedPrisma,numbers,audit,periods,journalSettings,costCenters);
+    const lockPosting=lockService.post(company,user,lockJournal.id).then(value=>({value}),error=>({error}));
+    await Promise.race([lockedPromise,lockPosting.then(result=>{
+      throw result.error ?? new Error('posting returned before locking accounts');
+    })]);
+    const deactivate=chart.update(company,user,usedLeaf.id,{isActive:false}).then(value=>({value}),error=>({error}));
+    let accountWait=false;
+    try {
+      for(let attempt=0;attempt<30;attempt++) {
+        const waiting=await sql.query(`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event_type='Lock'
+          AND query ILIKE '%UPDATE%accounts%' AND pid<>pg_backend_pid()) AS waiting`);
+        if(waiting.rows[0].waiting){accountWait=true;break;}
+        await new Promise(resolve=>setTimeout(resolve,50));
+      }
+      assert.equal(accountWait,true,'deactivation must wait for posting account lock');
+    } finally {unlock();}
+    const postedResult=await lockPosting; if(postedResult.error) throw postedResult.error;
+    const deactivatedResult=await deactivate; if(deactivatedResult.error) throw deactivatedResult.error;
+    assert.equal((await prisma.journalEntry.findUniqueOrThrow({where:{id:lockJournal.id}})).status,'POSTED');
+    assert.equal((await prisma.account.findUniqueOrThrow({where:{id:usedLeaf.id}})).isActive,false);
+    assert.equal(await prisma.auditLog.count({where:{entity:'journal_entries',entityId:lockJournal.id,action:'POST'}}),1);
+    await chart.update(company,user,usedLeaf.id,{isActive:true});
+    console.log('PASS: journal lines/header mismatch rejected, stale account refused, and deactivation waits for posting account locks on real PG.');
+
     // Real HTTP + DTO/controller/permission guard/service/PG. Identity is
     // injected and does not establish JWT or licensing enforcement.
     class JournalHttpModule {}

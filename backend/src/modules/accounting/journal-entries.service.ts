@@ -417,6 +417,7 @@ export class JournalEntriesService {
         where: { id: entry.id },
         include: { lines: LINES_WITH_ACCOUNT },
       });
+      if (action === 'POST') await this.assertPostingLines(tx, companyId, updated);
       await this.audit.recordRequired({
         companyId, userId, action, entity: 'journal_entries', entityId: entry.id,
         before: { status: entry.status },
@@ -424,6 +425,53 @@ export class JournalEntriesService {
       }, tx);
       return this.toResponse(updated);
     });
+  }
+
+  /** Validate the actual lines and account state after claiming the entry.
+   * Account row locks serialize against chart updates through commit. A direct
+   * SQL client that mutates lines after this transaction remains out of scope. */
+  private async assertPostingLines(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    entry: {
+      totalDebit: Prisma.Decimal; totalCredit: Prisma.Decimal; reversalOfId: string | null;
+      lines: Array<{accountId: string; debit: Prisma.Decimal; credit: Prisma.Decimal}>;
+    },
+  ): Promise<void> {
+    if (entry.lines.length < 2) throw new BadRequestException('A journal needs at least two lines');
+    let debit = new Prisma.Decimal(0);
+    let credit = new Prisma.Decimal(0);
+    for (const line of entry.lines) {
+      if (!line.debit.isFinite() || !line.credit.isFinite() ||
+          line.debit.isNegative() || line.credit.isNegative() ||
+          (line.debit.isZero() === line.credit.isZero())) {
+        throw new BadRequestException('Every journal line needs one positive debit or credit');
+      }
+      debit = debit.plus(line.debit);
+      credit = credit.plus(line.credit);
+    }
+    if (!debit.equals(credit) || !debit.equals(entry.totalDebit) || !credit.equals(entry.totalCredit)) {
+      throw new BadRequestException('Journal lines do not balance or do not match the entry totals');
+    }
+    // Historical reversals may use accounts since deactivated. Ordinary
+    // entries must still use active, postable, non-control accounts now.
+    if (entry.reversalOfId) return;
+    const ids = [...new Set(entry.lines.map(line => line.accountId))].sort();
+    await tx.$queryRaw(Prisma.sql`
+      SELECT id FROM accounts
+      WHERE "companyId" = ${companyId}::uuid AND id IN (${Prisma.join(ids.map(id => Prisma.sql`${id}::uuid`))})
+      ORDER BY id FOR SHARE
+    `);
+    const accounts = await tx.account.findMany({
+      where: { companyId, id: { in: ids }, deletedAt: null },
+      select: { id:true, code:true, isActive:true, isPostable:true },
+    });
+    if (accounts.length !== ids.length || accounts.some(account => !account.isActive || !account.isPostable)) {
+      throw new BadRequestException('One or more journal accounts are unavailable or cannot receive postings');
+    }
+    if (accounts.some(account => [ACCOUNT_CODES.accountsReceivable, ACCOUNT_CODES.accountsPayable].includes(account.code as never))) {
+      throw new BadRequestException('Manual entries cannot post directly to a control account');
+    }
   }
 
   private async requireStatus(
