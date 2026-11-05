@@ -43,8 +43,10 @@ export class SetupService {
       this.prisma.user.count({ where: { deletedAt: null, isActive: true, company: { deletedAt: null } } }),
     ]);
     return {
-      needsSetup: companies === 0,
-      recoveryRequired: companies > 0 && activeCompanyUsers === 0,
+      needsSetup: companies === 0 && users === 0,
+      recoveryRequired:
+        (companies > 0 && activeCompanyUsers === 0) ||
+        (companies === 0 && users > 0),
       companyCount: companies,
       hasUsers: users > 0,
     };
