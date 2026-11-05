@@ -23,7 +23,8 @@ const dto = { companyCode:'FIRST', companyNameEn:'Synthetic', companyNameAr:'ØªØ
   adminUsername:'synthetic-admin', adminPassword:'synthetic-password', seedChartOfAccounts:false };
 // License operations are deliberately stubbed; this test proves only setup's
 // database serialization and rollback, not activation, signing or seat policy.
-const licensing = { reserveSeat: async () => ({ reserved:true }) };
+let reservations=0;
+const licensing = { reserveSeat: async () => { reservations++; return { reserved:true }; } };
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve=r; }); return {promise,resolve}; };
 
 (async () => {
@@ -36,6 +37,7 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
     const failedAudit = { recordRequired: async () => { throw new Error('synthetic audit failure'); } };
     await assert.rejects(new SetupService(one,failedAudit,licensing).initialSetup(dto), /synthetic audit failure/);
     assert.equal(await one.company.count({where:{deletedAt:null}}),0);
+    assert.equal(reservations,0,'an audit failure must not advance the licence watermark');
     assert.equal(await one.user.count(),0);
     assert.equal(await one.role.count(),0);
     assert.ok(await one.company.findUnique({where:{id:dormant.id}}));
@@ -71,6 +73,7 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
     const [winner,loser] = await Promise.all([first,second]);
     assert.ok(winner.companyId);
     assert.ok(loser.error instanceof ConflictException);
+    assert.equal(reservations,1);
     assert.equal(await one.company.count({where:{deletedAt:null}}),1);
     assert.equal(await one.user.count(),1);
     assert.equal(await one.auditLog.count({where:{companyId:winner.companyId,entity:'companies',action:'CREATE'}}),1);

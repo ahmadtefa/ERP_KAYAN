@@ -215,18 +215,6 @@ export class SetupService {
               },
             });
 
-      // The first-run administrator is a real account like any other, so it
-      // consumes a seat. An account revived by setup (already exists) is not
-      // created again and therefore reserves nothing.
-      if (already.length === 0) {
-        await this.licensing.reserveSeat(tx, {
-          userId: admin.id,
-          username: admin.username,
-          reason: 'SETUP_ADMIN',
-          idempotencyKey: `setup:${company.id}:${admin.username}`,
-        });
-      }
-
       // Only one administrator belongs at the beginning of a company. The
       // extra accounts are switched off and retired rather than deleted: an
       // account the audit trail mentions cannot be removed without the trail's
@@ -273,6 +261,21 @@ export class SetupService {
         ipAddress: ip ?? null,
         userAgent: userAgent ?? null,
       }, tx);
+
+      // Reserve after the required audit and other database writes. The licence
+      // store has an independent fail-closed watermark, so an audit failure
+      // must not advance it. A later commit failure can still overcount seats.
+      // The first-run administrator is a real account like any other, so it
+      // consumes a seat. An account revived by setup (already exists) is not
+      // created again and therefore reserves nothing.
+      if (already.length === 0) {
+        await this.licensing.reserveSeat(tx, {
+          userId: admin.id,
+          username: admin.username,
+          reason: 'SETUP_ADMIN',
+          idempotencyKey: `setup:${company.id}:${admin.username}`,
+        });
+      }
 
       return { company, hq, admin };
     }, { maxWait: 10000, timeout: 30000 });

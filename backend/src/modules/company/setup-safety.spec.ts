@@ -35,7 +35,7 @@ function fixture(dormant: any[] = [], activeInside = 0) {
   jest.spyOn(service as any, 'seedPermissions').mockResolvedValue(undefined);
   jest.spyOn(service as any, 'seedRoles').mockResolvedValue({ admin: 'role', accountant: 'accountant' });
   jest.spyOn(service as any, 'seedFiscalPeriod').mockResolvedValue(undefined);
-  return { service, prisma, tx, audit, get committed() { return committed; } };
+  return { service, prisma, tx, audit, licensing, get committed() { return committed; } };
 }
 
 describe('first-run setup data safety', () => {
@@ -74,6 +74,7 @@ describe('first-run setup data safety', () => {
     f.audit.recordRequired.mockRejectedValueOnce(new Error('synthetic audit failure'));
     await expect(f.service.initialSetup(dto)).rejects.toThrow('synthetic audit failure');
     expect(f.audit.recordRequired).toHaveBeenCalledWith(expect.objectContaining({ entity: 'companies', action: 'CREATE' }), f.tx);
+    expect(f.licensing.reserveSeat).not.toHaveBeenCalled();
     expect(f.committed).toBe(false);
   });
 });
