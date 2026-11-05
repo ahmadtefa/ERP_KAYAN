@@ -775,6 +775,9 @@ describe('clock policy', () => {
     const h = harness();
     try {
       await activation(h);
+      // This is an already-started licence; clock rollback must not make its
+      // validity window appear to begin in the future.
+      h.db.installations[0].startsAt = new Date('2026-04-01T09:00:00.000Z');
       h.setNow('2026-05-01T08:55:00.000Z'); // five minutes earlier
       const status = await h.service.status({ fresh: true });
       expect(status.clock.state).toBe('OK');
@@ -788,6 +791,9 @@ describe('clock policy', () => {
     const h = harness();
     try {
       await activation(h);
+      // Keep the licence's actual start date behind both clock readings. The
+      // test is about warning policy, not pre-start licence enforcement.
+      h.db.installations[0].startsAt = new Date('2026-04-01T09:00:00.000Z');
       h.setNow('2026-04-29T09:00:00.000Z'); // two days earlier
       const status = await h.service.status({ fresh: true });
       expect(status.clock.state).toBe('WARNING');
