@@ -198,7 +198,7 @@ const path = require('node:path');
     let licenseCalls = 0;
     const actual = new FullBackupService({$executeRawUnsafe: sql => client.query(sql)},
       {record: async row => {recorded.push(row);}}, repairMaintenance,
-      {reconcile: async () => {licenseCalls++;}});
+      {reconcile: async () => {licenseCalls++;}, captureLicenceBackup: () => ({ id: 'ci-licence-stub' })});
     actual.postRestoreCheck = async () => ({ok:true,detail:'synthetic-only'});
     actual.reconcileRestoredCompanies = async () => {throw new Error('synthetic access repair failure');};
     await assert.rejects(actual.restore({confirm:true,fileName:backup.file.name},'fixture'),/maintenance remains active/i);
@@ -236,7 +236,7 @@ const path = require('node:path');
     let repairCount=0, reconcileCount=0;
     const events=[];
     const clean = new FullBackupService({$executeRawUnsafe: sql => client.query(sql)},
-      {record:async row=>{events.push(row);}},cleanMaintenance,{reconcile:async()=>{reconcileCount++;}});
+      {record:async row=>{events.push(row);}},cleanMaintenance,{reconcile:async()=>{reconcileCount++;},captureLicenceBackup:()=>({id:'ci-licence-stub'})});
     clean.postRestoreCheck=async()=>({ok:true,detail:'synthetic-only'});
     clean.reconcileRestoredCompanies=async()=>{repairCount++;return {companies:0,grantsAdded:0,superAdminPromoted:[]};};
     const digest=async()=> (await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows;
