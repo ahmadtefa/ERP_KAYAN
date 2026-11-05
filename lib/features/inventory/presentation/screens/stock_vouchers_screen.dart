@@ -501,7 +501,7 @@ class _StockVoucherCreateScreenState extends ConsumerState<StockVoucherCreateScr
                 validator:(v) => (v ?? '').trim().isEmpty || (v ?? '').trim().length > 200 ? _label(context,'مطلوب (حتى 200 حرف)','Required (up to 200 characters)') : null),
               TextFormField(controller:_reason,onChanged:(_) => _changed(),decoration:InputDecoration(labelText:_label(context,'السبب','Reason')),
                 validator:(v) => (v ?? '').trim().isEmpty ? _label(context,'مطلوب','Required') : null),
-              if (widget.kind == 'ISSUE' || centers.isNotEmpty) DropdownButtonFormField<String>(initialValue:centers.any((x) => text(x,'id') == _center) ? _center : null,
+              if (widget.kind == 'ISSUE' || centers.isNotEmpty) DropdownButtonFormField<String>(initialValue:_center,
                 decoration:InputDecoration(labelText:widget.kind == 'ISSUE'
                   ? _label(context,'مركز التكلفة (مطلوب)','Cost center (required)')
                   : _label(context,'مركز التكلفة (اختياري)','Cost center (optional)')),
