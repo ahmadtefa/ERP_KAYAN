@@ -50,6 +50,7 @@ class _ChartOfAccountsScreenState extends ConsumerState<ChartOfAccountsScreen> {
     final accounts = ref.watch(chartOfAccountsProvider);
     final showSampleNotice = ref.watch(appConfigProvider).useSeedData;
     final l10n = context.l10n;
+    final canCreate = ref.watch(currentUserProvider)?.can('accounting.accounts.create') ?? false;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -63,7 +64,7 @@ class _ChartOfAccountsScreenState extends ConsumerState<ChartOfAccountsScreen> {
               icon: const Icon(Icons.refresh),
             ),
             const ListExportActions(list: 'chart-of-accounts'),
-            FilledButton.icon(
+            if (canCreate) FilledButton.icon(
               onPressed: () => _editAccount(context, ref, null, _exitRelay),
               icon: const Icon(Icons.add, size: 17),
               label: Text(l10n.newAccount),
@@ -223,6 +224,9 @@ class _AccountTile extends ConsumerWidget {
     final theme = Theme.of(context);
     final lang = Localizations.localeOf(context).languageCode;
     final indent = 8.0 + node.depth * 20.0;
+    final user = ref.watch(currentUserProvider);
+    final canUpdate = user?.can('accounting.accounts.update') ?? false;
+    final canDelete = user?.can('accounting.accounts.delete') ?? false;
 
     final nameStyle = TextStyle(
       fontWeight: account.isPostable ? FontWeight.w400 : FontWeight.w600,
@@ -265,7 +269,7 @@ class _AccountTile extends ConsumerWidget {
         children: [
           if (!account.isActive)
             Icon(Icons.block, size: 18, color: theme.colorScheme.error),
-          IconButton(
+          if (canUpdate) IconButton(
             tooltip: account.isActive ? l10n.deactivateAccount : l10n.activateAccount,
             icon: Icon(
               account.isActive ? Icons.toggle_on_outlined : Icons.toggle_off_outlined,
@@ -273,12 +277,12 @@ class _AccountTile extends ConsumerWidget {
             ),
             onPressed: () => _toggleActive(context, ref, account),
           ),
-          IconButton(
+          if (canUpdate) IconButton(
             tooltip: l10n.editAccount,
             icon: const Icon(Icons.edit_outlined, size: 20),
             onPressed: () => _editAccount(context, ref, account, exitRelay),
           ),
-          IconButton(
+          if (canDelete) IconButton(
             tooltip: l10n.deleteAccount,
             icon: const Icon(Icons.delete_outline, size: 20),
             onPressed: () => _deleteAccount(context, ref, account),

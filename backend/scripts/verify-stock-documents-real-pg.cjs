@@ -407,18 +407,22 @@ let difference = '70000000-0000-4000-8000-000000000005';
     } finally { audit.recordRequired = chartAudit; }
     // Exercise the real controller, validation pipe, service and PostgreSQL
     // over loopback HTTP. The synthetic principal is injected by test-only
-    // middleware: this is NOT an authentication/permission-guard test.
+    // middleware: JWT and licensing remain outside this fixture.
     class ChartHttpFixtureModule {}
     Module({controllers:[ChartOfAccountsController],providers:[{provide:ChartOfAccountsService,useValue:chart}]})(ChartHttpFixtureModule);
     const httpApp = await NestFactory.create(ChartHttpFixtureModule,{logger:false});
     try {
-      httpApp.use((req,_res,next)=>{req.user={companyId:company,userId:user,branchId:branch,isSuperAdmin:true,permissions:[]};next();});
+      httpApp.use((req,_res,next)=>{req.user={companyId:company,userId:user,branchId:branch,isSuperAdmin:false,
+        permissions:req.headers['x-allowed']==='yes'?['accounting.accounts.update']:[]};next();});
+      httpApp.useGlobalGuards(new PermissionsGuard(new Reflector()));
       httpApp.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
       httpApp.useGlobalFilters(new ProblemDetailsFilter());
       await httpApp.listen(0,'127.0.0.1');
       const address=httpApp.getHttpServer().address();
       const endpoint=`http://127.0.0.1:${address.port}/accounting/chart-of-accounts/${movable.id}`;
-      const patch=body=>fetch(endpoint,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+      const patch=(body,allowed=true)=>fetch(endpoint,{method:'PATCH',headers:{'content-type':'application/json','x-allowed':allowed?'yes':'no'},body:JSON.stringify(body)});
+      assert.equal((await patch({parentId:null,expectedParentId:destination.id},false)).status,403);
+      assert.equal((await prisma.account.findUniqueOrThrow({where:{id:movable.id}})).parentId,destination.id);
       assert.equal((await patch({parentId:null,expectedParentId:'not-a-uuid'})).status,400);
       assert.equal((await patch({parentId:null,expectedParentId:root.id})).status,409);
       const detached=await patch({parentId:null,expectedParentId:destination.id});
@@ -426,7 +430,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal((await detached.json()).parentId,null);
       assert.equal((await prisma.account.findUniqueOrThrow({where:{id:movable.id}})).parentId,null);
     } finally { await httpApp.close(); }
-    console.log('PASS: chart PATCH over real HTTP with DTO validation, service and PostgreSQL; test-injected principal, no auth guard or Flutter.');
+    console.log('PASS: chart PATCH over real HTTP with permission guard, DTO validation, service and PostgreSQL; injected principal, no JWT or Flutter.');
     const usedGroup = await chart.create(company,user,{code:'SYN-HIST-GROUP',nameEn:'History group',nameAr:'مجموعة تاريخية',type:'ASSET',parentId:root.id,isPostable:false});
     const usedLeaf = await chart.create(company,user,{code:'SYN-HIST-LEAF',nameEn:'History leaf',nameAr:'حساب تاريخي',type:'ASSET',parentId:usedGroup.id,isPostable:true});
     await prisma.journalEntry.create({data:{companyId:company,branchId:branch,entryNumber:'SYN-TREE-HISTORY',

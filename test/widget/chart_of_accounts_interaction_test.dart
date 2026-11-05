@@ -8,6 +8,8 @@ import 'package:erp_kayan/features/accounting/domain/entities/account_type.dart'
 import 'package:erp_kayan/features/accounting/presentation/providers/chart_of_accounts_providers.dart';
 import 'package:erp_kayan/features/accounting/presentation/screens/chart_of_accounts_screen.dart';
 import 'package:erp_kayan/features/data/presentation/providers/data_providers.dart';
+import 'package:erp_kayan/features/auth/domain/entities/app_user.dart';
+import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
 import 'package:erp_kayan/l10n/generated/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -65,7 +67,7 @@ class _ChartSource implements ChartOfAccountsDataSource {
   Future<void> deleteAccount(String id) => throw UnimplementedError();
 }
 
-Future<void> _open(WidgetTester tester, _ChartSource source) async {
+Future<void> _open(WidgetTester tester, _ChartSource source, {AppUser? user}) async {
   tester.view.physicalSize = const Size(1400, 900);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -73,6 +75,7 @@ Future<void> _open(WidgetTester tester, _ChartSource source) async {
   await tester.pumpWidget(ProviderScope(
     overrides: [
       chartOfAccountsDataSourceProvider.overrideWithValue(source),
+      currentUserProvider.overrideWithValue(user ?? const AppUser(id:'u',username:'u',fullName:'User',companyId:'c',isSuperAdmin:true)),
       exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown),
     ],
     child: MaterialApp(
@@ -86,6 +89,24 @@ Future<void> _open(WidgetTester tester, _ChartSource source) async {
 }
 
 void main() {
+  testWidgets('read-only chart keeps navigation but hides all mutations', (tester) async {
+    await _open(tester, _ChartSource(), user:const AppUser(id:'u',username:'u',fullName:'Reader',companyId:'c',permissions:['accounting.accounts.read']));
+    expect(find.text('New account'),findsNothing);
+    expect(find.byTooltip('Edit account'),findsNothing);
+    expect(find.byTooltip('Deactivate account'),findsNothing);
+    expect(find.byTooltip('Delete account'),findsNothing);
+    expect(find.byTooltip('Collapse subaccounts'),findsWidgets);
+    expect(find.byTooltip('Refresh'),findsOneWidget);
+  });
+
+  testWidgets('chart exposes only the actions granted to each role', (tester) async {
+    await _open(tester, _ChartSource(), user:const AppUser(id:'u',username:'u',fullName:'Updater',companyId:'c',permissions:['accounting.accounts.update']));
+    expect(find.text('New account'),findsNothing);
+    expect(find.byTooltip('Edit account'),findsWidgets);
+    expect(find.byTooltip('Deactivate account'),findsWidgets);
+    expect(find.byTooltip('Delete account'),findsNothing);
+  });
+
   testWidgets('collapse hides all descendants, expand restores them', (tester) async {
     final source = _ChartSource();
     await _open(tester, source);
@@ -221,6 +242,7 @@ void main() {
     final source = _ChartSource();
     final container = ProviderContainer(overrides:[
       chartOfAccountsDataSourceProvider.overrideWithValue(source),
+      currentUserProvider.overrideWithValue(const AppUser(id:'u',username:'u',fullName:'User',companyId:'c',isSuperAdmin:true)),
       exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown),
     ]);
     addTearDown(container.dispose);
@@ -253,6 +275,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize); addTearDown(tester.view.resetDevicePixelRatio);
     final source = _ChartSource()..createHold = Completer<Account>();
     final container = ProviderContainer(overrides:[chartOfAccountsDataSourceProvider.overrideWithValue(source),
+      currentUserProvider.overrideWithValue(const AppUser(id:'u',username:'u',fullName:'User',companyId:'c',isSuperAdmin:true)),
       exportCapabilitiesProvider.overrideWith((ref) async => ExportCapabilities.unknown)]);
     addTearDown(container.dispose);
     final router = GoRouter(initialLocation:'/chart',routes:[
