@@ -183,8 +183,66 @@ module.exports = async function verifyVoucherHttp({prisma,audit,service,company,
       assert.equal(await prisma.stockMovement.count({where:{referenceId:issue.id}}),0);
       assert.equal(await warehouseBalance(warehouse),beforeIssueBalance);
     } finally {await prisma.costCenter.update({where:{id:centre},data:{isActive:true}});}
-    response=await request('POST',`/${issue.id}/post`,{expectedVersion:5});
+    // Controlled race 1: a concurrent deactivation holds the centre's row
+    // before posting. Observe the real PG lock wait rather than assuming that
+    // two promises happened to overlap. The post must see inactive after the
+    // update commits, and roll back its document claim and financial effects.
+    const waitForLock = async (fragment, stillPending) => {
+      const deadline=Date.now()+8000;
+      while (Date.now()<deadline && stillPending()) {
+        const rows=await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity
+          WHERE datname=current_database() AND pid<>pg_backend_pid()
+          AND wait_event_type='Lock' AND query ILIKE ${'%' + fragment + '%'}`;
+        if (rows[0].n>0) return;
+        await new Promise(resolve=>setTimeout(resolve,20));
+      }
+      throw new Error('Expected a PostgreSQL row-lock wait before the competing operation completed');
+    };
+    let releaseDisable, enteredDisable;
+    const disableEntered=new Promise(resolve=>{enteredDisable=resolve;});
+    const disableGate=new Promise(resolve=>{releaseDisable=resolve;});
+    const disabling=prisma.$transaction(async tx=>{
+      await tx.costCenter.update({where:{id:centre},data:{isActive:false}});
+      enteredDisable(); await disableGate;
+    },{timeout:20000});
+    await Promise.race([disableEntered,disabling.then(()=>{throw new Error('Deactivation transaction ended before its barrier');})]);
+    let pending=true;
+    const rejectedPost=request('POST',`/${issue.id}/post`,{expectedVersion:5})
+      .finally(()=>{pending=false;});
+    try { await waitForLock('FOR SHARE',()=>pending); }
+    finally { releaseDisable(); await disabling; }
+    try {
+      assert.equal((await rejectedPost).status,400);
+      assert.equal((await prisma.stockDocument.findUniqueOrThrow({where:{id:issue.id}})).status,'DRAFT');
+      assert.equal(await prisma.stockMovement.count({where:{referenceId:issue.id}}),0);
+      assert.equal(await prisma.journalEntry.count({where:{sourceId:issue.id}}),0);
+      assert.equal(await warehouseBalance(warehouse),beforeIssueBalance);
+    } finally { await prisma.costCenter.update({where:{id:centre},data:{isActive:true}}); }
+
+    // Controlled race 2: pause after the post validated the locked centre;
+    // disabling must wait until the successful posting commits. No business
+    // method is replaced: the wrapper calls the actual validation first.
+    const originalAssert=service.costCenters.assertPostable;
+    let releasePost, enteredPost;
+    const postEntered=new Promise(resolve=>{enteredPost=resolve;});
+    const postGate=new Promise(resolve=>{releasePost=resolve;});
+    service.costCenters.assertPostable=async function (...args) {
+      await originalAssert.apply(this,args); enteredPost(); await postGate;
+    };
+    let disablePending=true;
+    const postFirst=request('POST',`/${issue.id}/post`,{expectedVersion:5});
+    let disableSecond;
+    try {
+      await Promise.race([postEntered,postFirst.then(()=>{throw new Error('Post ended before its validation barrier');})]);
+      disableSecond=prisma.costCenter.update({where:{id:centre},data:{isActive:false}})
+        .finally(()=>{disablePending=false;});
+      await waitForLock('UPDATE',()=>disablePending);
+    } finally { releasePost(); service.costCenters.assertPostable=originalAssert; }
+    response=await postFirst;
     assert.equal(response.status,201);
+    await disableSecond;
+    assert.equal((await prisma.costCenter.findUniqueOrThrow({where:{id:centre}})).isActive,false);
+    await prisma.costCenter.update({where:{id:centre},data:{isActive:true}});
     assert.equal((await response.json()).lines[0].unitCost,null);
     const issueMovement=await prisma.stockMovement.findFirstOrThrow({where:{referenceId:issue.id}});
     assert.equal(issueMovement.direction,'OUT'); assert.equal(issueMovement.quantity.toFixed(4),'2.0000');
@@ -197,6 +255,6 @@ module.exports = async function verifyVoucherHttp({prisma,audit,service,company,
 
     await prisma.user.update({where:{id:account.id},data:{tokenVersion:{increment:1}}});
     assert.equal((await request('GET',`/${id}`)).status,401);
-    console.log('PASS: stock receipt/issue HTTP, live PostgreSQL grants and branch isolation, versioned edit, concurrent post/reverse, audit rollback and cost redaction. JWT verifier is fake; no Flutter or licence.');
+    console.log('PASS: stock receipt/issue HTTP, live PostgreSQL grants and branch isolation, versioned edit, centre deactivation/post row-lock races, concurrent post/reverse, audit rollback and cost redaction. JWT verifier is fake; no Flutter or licence.');
   } finally { await app.close(); }
 };

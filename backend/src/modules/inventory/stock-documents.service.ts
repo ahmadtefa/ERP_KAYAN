@@ -705,8 +705,17 @@ export class StockDocumentsService {
         if (!document.costCenterId) {
           throw new BadRequestException('A cost center is required when issuing stock from a warehouse.');
         }
-        // Recheck in the posting transaction, not just when the draft was
-        // prepared; the centre may have been disabled or its dates changed.
+        // Hold a shared row lock through commit. Cost-centre UPDATE/DELETE
+        // must either finish before our validation (so we see its new state)
+        // or wait until this posting commits. A plain MVCC read alone admits
+        // a concurrent deactivation after the check and before the journal.
+        // Scope this to ISSUE vouchers: do not impose new posting rules on
+        // legacy adjustments or transfers.
+        await tx.$queryRaw(Prisma.sql`
+          SELECT id FROM cost_centers
+          WHERE id = ${document.costCenterId}::uuid AND "companyId" = ${companyId}::uuid
+          FOR SHARE
+        `);
         await this.costCenters.assertPostable(tx, companyId, [document.costCenterId], document.documentDate);
       }
       if (document.kind === StockDocumentKind.TRANSFER &&
