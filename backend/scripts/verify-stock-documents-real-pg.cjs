@@ -908,6 +908,9 @@ let difference = '70000000-0000-4000-8000-000000000005';
     assert.equal(await prisma.journalEntry.count({where:{sourceId:receipt.id}}),0);
     const postedReceipt = await service.post(company, user, receipt.id, false);
     assert.equal(postedReceipt.lines[0].unitCost,null);
+    await assert.rejects(service.create(company,branch,user,{kind:'ADJUSTMENT',documentDate:date,
+      toWarehouseId:warehouse,reason:'Issue missing cost attribution',
+      lines:[{itemId:item,quantity:'-1'}]}),/cost center is required/i);
     const issue = await service.create(company, branch, user, { kind:'ADJUSTMENT', documentDate:date,
       toWarehouseId:warehouse, costCenterId:centre, reason:'Synthetic issue',
       lines:[{itemId:item, quantity:'-4', unitCost:'1'}] });
@@ -1015,7 +1018,7 @@ let difference = '70000000-0000-4000-8000-000000000005';
     const countedAgain = await service.create(company,branch,user,{kind:'COUNT',documentDate:date,
       toWarehouseId:warehouse,lines:[{itemId:item,countedQuantity:'3'}]});
     const concurrentIssue = await service.create(company,branch,user,{kind:'ADJUSTMENT',documentDate:date,
-      toWarehouseId:warehouse,lines:[{itemId:item,quantity:'-5'}]});
+      toWarehouseId:warehouse,costCenterId:centre,lines:[{itemId:item,quantity:'-5'}]});
     const countRace = await Promise.allSettled([
       service.post(company,user,countedAgain.id), service.post(company,user,concurrentIssue.id),
     ]);
