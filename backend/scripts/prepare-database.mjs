@@ -10,7 +10,7 @@
 //   3. create the application database if it is missing
 //   4. apply every migration (a no-op once the database is up to date)
 //   5. say what state the database is in (empty / incomplete / ready /
-//      unknown - see database-state.mjs), so the desktop shell knows
+//      recovery_required / unknown - see database-state.mjs), so the desktop shell knows
 //      whether this machine still needs its first administrator
 //   6. if it needs one AND a username and password were handed in for
 //      that first administrator, create them (company, branch, roles,
@@ -110,11 +110,11 @@ async function ensureDatabase(admin, target) {
   return 'created';
 }
 
-/// What state the database is in - see database-state.mjs for the four
+/// What state the database is in - see database-state.mjs for the
 /// states and why "could not tell" is its own state ('unknown') instead
 /// of being quietly treated as a brand-new database. Counting COMPANIES
-/// as well as users matters: a company with no users (setup interrupted
-/// halfway) is 'incomplete', not 'empty', and the log must say so.
+/// as well as users matters: a company with no active users needs recovery,
+/// not a new first-run setup.
 ///
 /// Any failure to ask - unreachable database, missing schema - returns
 /// 'unknown', so a broken connection is never mistaken for a fresh
@@ -125,11 +125,14 @@ async function databaseState() {
     client = new PrismaClient({
       adapter: new PrismaPg({ connectionString: appUrl }),
     });
-    const [companies, users] = await Promise.all([
+    // Count historical rows too: the desktop seeder is not a transactional
+    // restore and must never treat dormant company history as a fresh database.
+    const [companies, users, activeCompanyUsers] = await Promise.all([
       client.company.count(),
       client.user.count(),
+      client.user.count({ where: { deletedAt: null, isActive: true, company: { deletedAt: null } } }),
     ]);
-    return classifyDatabaseState({ companies, users });
+    return classifyDatabaseState({ companies, users, activeCompanyUsers });
   } catch {
     return 'unknown';
   } finally {
@@ -275,6 +278,11 @@ async function main() {
     // server so its own precise error can surface instead.
     console.log('  database state could not be determined (unreachable?)');
     announce('unknown');
+    return;
+  }
+  if (state === 'recovery_required') {
+    console.log('  an existing company has no active users: preserve data and use authorised recovery');
+    announce(state);
     return;
   }
   if (!needsFirstAdministrator(state)) {

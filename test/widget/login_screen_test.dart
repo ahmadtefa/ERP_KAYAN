@@ -1,3 +1,5 @@
+import 'package:erp_kayan/core/backend/setup_state.dart';
+import 'package:erp_kayan/core/network/api_client.dart';
 import 'package:erp_kayan/core/error/failure.dart';
 import 'package:erp_kayan/core/result/result.dart';
 import 'package:erp_kayan/features/auth/presentation/providers/auth_providers.dart';
@@ -7,6 +9,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'test_harness.dart';
+
+class _RecoverySetupApi implements ApiClient {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+
+  @override
+  Future<Map<String, dynamic>> get(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async => {'needsSetup': false, 'recoveryRequired': true};
+}
 
 void main() {
   late FakeTokenStore tokenStore;
@@ -31,6 +44,30 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+  }
+
+  for (final locale in [const Locale('ar'), const Locale('en')]) {
+    testWidgets('existing company without users shows recovery in ${locale.languageCode}', (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            tokenStoreProvider.overrideWithValue(tokenStore),
+            authRepositoryProvider.overrideWithValue(repository),
+            apiClientProvider.overrideWithValue(_RecoverySetupApi()),
+          ],
+          child: wrapWithApp(child: const LoginScreen(), locale: locale),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final message = locale.languageCode == 'ar'
+          ? setupRecoveryMessageAr : setupRecoveryMessageEn;
+      expect(find.text(message), findsOneWidget);
+      expect(find.byType(TextFormField), findsNothing);
+      expect(find.byType(FilledButton), findsNothing);
+      if (locale.languageCode == 'ar') {
+        expect(Directionality.of(tester.element(find.text(message))), TextDirection.rtl);
+      }
+    });
   }
 
   testWidgets('renders the credential fields and the sign-in action', (

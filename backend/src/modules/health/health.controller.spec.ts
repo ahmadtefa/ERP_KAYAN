@@ -61,6 +61,13 @@ describe('HealthController', () => {
     expect(res.databaseName).toBe('erp_kayan');
   });
 
+  it('does not report first-run setup for an existing company with no users', async () => {
+    mockPrisma.user = { count: jest.fn().mockResolvedValue(0) };
+    const res = await controller.check();
+    expect(res.needsSetup).toBe(false);
+    expect(res.recoveryRequired).toBe(true);
+  });
+
   it('asks for the database name as text, the one shape Prisma can read', async () => {
     // `current_database()` returns PostgreSQL's `name` type, which Prisma
     // cannot deserialise in a raw query. Without the cast, /health reports a

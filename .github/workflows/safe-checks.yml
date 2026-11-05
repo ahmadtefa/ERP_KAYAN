@@ -33,6 +33,8 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Generate standard Prisma Client
         run: npx prisma generate
+      - name: Verify startup database state classification
+        run: node scripts/check-database-state.mjs
       - name: Validate schema and typecheck
         run: |
           npx prisma validate

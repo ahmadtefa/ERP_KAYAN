@@ -85,13 +85,20 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
     try {
       app.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true}));
       await app.listen(0,'127.0.0.1');
+      // Simulate the damaged state only in this separately created database;
+      // it must be reported as recovery, never as permission to run setup.
+      await one.user.updateMany({where:{companyId:winner.companyId},data:{deletedAt:new Date(),isActive:false}});
+      const statusResponse=await fetch(`http://127.0.0.1:${app.getHttpServer().address().port}/setup/status`);
+      assert.equal(statusResponse.status,200);
+      const status=await statusResponse.json();
+      assert.equal(status.needsSetup,false); assert.equal(status.recoveryRequired,true);
       const response=await fetch(`http://127.0.0.1:${app.getHttpServer().address().port}/setup/initial`, {
         method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...dto,companyCode:'THIRD'})
       });
       assert.equal(response.status,409);
       assert.equal(await one.company.count({where:{deletedAt:null}}),1);
     } finally { await app.close(); }
-    console.log('PASS: real PostgreSQL setup audit rollback, dormant-history preservation, two-client serialization and HTTP conflict; licensing stubbed.');
+    console.log('PASS: real PostgreSQL setup audit rollback, dormant-history preservation, two-client serialization and HTTP recovery/conflict; licensing stubbed.');
   } finally {
     if (release) release();
     await Promise.all([one.$disconnect(),two.$disconnect()]);

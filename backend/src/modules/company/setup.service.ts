@@ -35,12 +35,14 @@ export class SetupService {
   ) {}
 
   async status() {
-    const [companies, users] = await Promise.all([
+    const [companies, users, activeCompanyUsers] = await Promise.all([
       this.prisma.company.count({ where: { deletedAt: null } }),
       this.prisma.user.count({ where: { deletedAt: null } }),
+      this.prisma.user.count({ where: { deletedAt: null, isActive: true, company: { deletedAt: null } } }),
     ]);
     return {
-      needsSetup: companies === 0 || users === 0,
+      needsSetup: companies === 0,
+      recoveryRequired: companies > 0 && activeCompanyUsers === 0,
       companyCount: companies,
       hasUsers: users > 0,
     };

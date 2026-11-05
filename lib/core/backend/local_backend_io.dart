@@ -16,6 +16,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'company_setup_data.dart';
+import 'setup_state.dart';
 
 /// What the shell needs to know after a start attempt.
 class LocalBackendStatus {
@@ -303,6 +304,13 @@ class LocalBackend {
         }
         // A reachable API can still be attached to a completely empty
         // database. Check its health payload before treating it as ready.
+        if (setupRequiresRecovery(healthValue: health['recoveryRequired'])) {
+          final layout = BackendLayout.discover();
+          return LocalBackendStatus.failed(
+            '$setupRecoveryMessageAr / $setupRecoveryMessageEn',
+            logPath: layout.logPath,
+          );
+        }
         if (health['needsSetup'] == true) {
           return const LocalBackendStatus.needsFirstAdministrator();
         }
@@ -413,12 +421,19 @@ class LocalBackend {
         databaseProblem: true,
       );
     }
+    if (setupRequiresRecovery(preparationState: preparation?.state)) {
+      log.writeln('[shell] existing company has no users: authorised recovery required');
+      await log.flush();
+      await log.close();
+      return LocalBackendStatus.failed(
+        '$setupRecoveryMessageAr / $setupRecoveryMessageEn',
+        logPath: layout.logPath,
+      );
+    }
     if (preparation?.state == 'empty' ||
         preparation?.state == 'incomplete') {
-      // 'incomplete' = a company or users exist without the other (a
-      // first setup interrupted halfway). The remedy is the same screen:
-      // completing first-run setup upserts what is missing and touches
-      // nothing that is already there.
+      // 'incomplete' means no active company but surviving users, as after
+      // a reset. It still needs the first-administrator flow.
       log.writeln(
         preparation?.state == 'incomplete'
             ? '[shell] the database is partly set up: asking who the '
@@ -1011,6 +1026,12 @@ class LocalBackend {
     }
     await log.flush();
     await log.close();
+    if (setupRequiresRecovery(preparationState: preparation?.state)) {
+      return LocalBackendStatus.failed(
+        '$setupRecoveryMessageAr / $setupRecoveryMessageEn',
+        logPath: layout.logPath,
+      );
+    }
     if (preparation?.exitCode != 0 || preparation?.state != 'ready') {
       final authenticationProblem = _isDatabaseAuthenticationFailure(
         preparation?.output ?? '',

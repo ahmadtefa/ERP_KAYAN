@@ -4,6 +4,28 @@ import { SetupService } from './setup.service';
 // its own behaviour is covered by licensing.service.spec.ts.
 const licensingStub = { reserveSeat: jest.fn().mockResolvedValue({ reserved: true }), reconcile: jest.fn().mockResolvedValue(undefined) } as any;
 
+describe('SetupService status', () => {
+  it.each([[0, 0], [0, 2]])('allows initial setup when company count is %s and users count is %s', async (companies, users) => {
+    const prisma = { company: { count: jest.fn().mockResolvedValue(companies) }, user: { count: jest.fn().mockResolvedValue(users) } };
+    const service = new SetupService(prisma as any, {} as any, licensingStub);
+    expect(await service.status()).toMatchObject({ needsSetup: true, recoveryRequired: false });
+  });
+
+  it('requires recovery if all surviving users belong to an inactive company', async () => {
+    const count = jest.fn().mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+    const prisma = { company: { count: jest.fn().mockResolvedValue(1) }, user: { count } };
+    const service = new SetupService(prisma as any, {} as any, licensingStub);
+    expect(await service.status()).toMatchObject({ needsSetup: false, recoveryRequired: true, hasUsers: true });
+    expect(count).toHaveBeenCalledWith({ where: { deletedAt: null, isActive: true, company: { deletedAt: null } } });
+  });
+
+  it('does not invite first-run setup over a company with no users', async () => {
+    const prisma = { company: { count: jest.fn().mockResolvedValue(1) }, user: { count: jest.fn().mockResolvedValue(0) } };
+    const service = new SetupService(prisma as any, {} as any, licensingStub);
+    expect(await service.status()).toMatchObject({ needsSetup: false, recoveryRequired: true, companyCount: 1, hasUsers: false });
+  });
+});
+
 describe('SetupService seedRoles', () => {
   it('seeds the company profile permission needed by profile-management routes', async () => {
     const permissionUpsert = jest.fn().mockResolvedValue({});
