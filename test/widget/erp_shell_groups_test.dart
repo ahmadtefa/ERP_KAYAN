@@ -51,8 +51,9 @@ void main() {
                   ? (context, state) => guard.canLeave(state.pageKey)
                   : null,
               builder: (context, state) {
-                if (path == AppRoutes.salesInvoices)
+                if (path == AppRoutes.salesInvoices) {
                   guard.register(state.pageKey, () async => allowLeave);
+                }
                 return ErpShell(
                   currentPath: path,
                   guardKey: path == AppRoutes.salesInvoices

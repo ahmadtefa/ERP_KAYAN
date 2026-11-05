@@ -495,12 +495,15 @@ class _CostCentersScreenState extends ConsumerState<CostCentersScreen> {
     return rows
         .where((row) {
           if (_type.isNotEmpty && text(row, 'type') != _type) return false;
-          if (_status == 'active' && !flag(row, 'isActive', fallback: true))
+          if (_status == 'active' && !flag(row, 'isActive', fallback: true)) {
             return false;
-          if (_status == 'inactive' && flag(row, 'isActive', fallback: true))
+          }
+          if (_status == 'inactive' && flag(row, 'isActive', fallback: true)) {
             return false;
-          if (_parent == 'root' && text(row, 'parentId').isNotEmpty)
+          }
+          if (_parent == 'root' && text(row, 'parentId').isNotEmpty) {
             return false;
+          }
           if (_parent.isNotEmpty && _parent != 'root') {
             if (text(row, 'parentId') != _parent) return false;
           }

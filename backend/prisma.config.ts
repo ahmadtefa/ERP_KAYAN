@@ -1,5 +1,13 @@
+import 'dotenv/config';
 import { defineConfig } from 'prisma/config';
 import { PrismaPg } from '@prisma/adapter-pg';
+
+const configuredDatabaseUrl = process.env.DATABASE_URL;
+const schemaOnlyUrl = 'postgresql://127.0.0.1:1/kayan_schema_only?schema=public';
+// Prisma 6 resolves env("DATABASE_URL") from schema.prisma even for
+// validate/generate. Give schema-only commands a deliberately unreachable
+// placeholder, while retaining the original value for the guarded adapter.
+if (!configuredDatabaseUrl) process.env.DATABASE_URL = schemaOnlyUrl;
 
 /**
  * The project runs on the engine-less client (`engineType = "client"` with the
@@ -20,17 +28,23 @@ import { PrismaPg } from '@prisma/adapter-pg';
  */
 export default defineConfig({
   schema: 'prisma/schema.prisma',
+  // Prisma 6 still reads `url = env("DATABASE_URL")` from the schema while
+  // validating it, even though validation never opens a connection. An empty
+  // fallback keeps validate/generate usable in isolated CI. Database commands
+  // still require DATABASE_URL because the adapter below fails closed.
+  datasource: {
+    url: configuredDatabaseUrl ?? schemaOnlyUrl,
+  },
   engine: 'js',
   experimental: {
     adapter: true,
   },
   adapter: async () => {
-    const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) {
+    if (!configuredDatabaseUrl) {
       throw new Error(
         'DATABASE_URL is required for database-touching Prisma commands.',
       );
     }
-    return new PrismaPg({ connectionString });
+    return new PrismaPg({ connectionString: configuredDatabaseUrl });
   },
 });

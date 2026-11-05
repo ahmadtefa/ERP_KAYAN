@@ -468,7 +468,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
         onPressed: _busy || _refreshing ? null : _refreshAll,
         icon: _refreshing
             ? const SizedBox(
-                key: const Key('cash-refresh-loading'),
+                key: Key('cash-refresh-loading'),
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2),

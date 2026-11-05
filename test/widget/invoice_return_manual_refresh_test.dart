@@ -55,10 +55,11 @@ class _RefreshApi extends ApiClient {
   }) {
     this.path = path;
     loads++;
-    if (loads == 1)
+    if (loads == 1) {
       return Future.value({
         'items': [_row('OLD-1')],
       });
+    }
     return refreshPage.future;
   }
 }

@@ -81,7 +81,7 @@ test('Windows build checks both selected and staged keys and marks non-product i
   const guard = smoke.indexOf("if (-not $RuntimeOnly) {");
   assert.ok(guard >= 0 && guard < smoke.indexOf('$installLog ='));
   assert.match(smoke.slice(guard, smoke.indexOf('$installLog =')), /throw 'The historical licensed smoke required a signing-key directory/);
-  assert.match(smoke, /This is not signed-licence reconstruction or activation/);
+  assert.match(smoke, /RuntimeOnly is diagnostic and does not prove licensed business operation/);
   assert.match(runtime, /Existing licence state has no protected public key/);
   const legacyBuild = readFileSync(new URL('../scripts/build-desktop-windows.ps1', import.meta.url), 'utf8');
   const legacyInno = readFileSync(new URL('../scripts/installer-windows.iss', import.meta.url), 'utf8');

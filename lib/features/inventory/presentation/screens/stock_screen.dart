@@ -233,20 +233,23 @@ class _StockCostCenterReportScreenState
       body: FutureBuilder<Json>(
         future: _future,
         builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done)
+          if (snapshot.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
-          if (snapshot.hasError)
+          }
+          if (snapshot.hasError) {
             return ErrorView(message: snapshot.error!, onRetry: _refresh);
+          }
           if (!snapshot.hasData) return const SizedBox.shrink();
           final data = snapshot.data!;
           final totals = listOf(data['totals']);
           final movements = listOf(data['items']);
-          if (movements.isEmpty)
+          if (movements.isEmpty) {
             return Center(
               child: Text(
                 arabic ? 'لا توجد حركات مخزنية' : 'No stock movements',
               ),
             );
+          }
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [

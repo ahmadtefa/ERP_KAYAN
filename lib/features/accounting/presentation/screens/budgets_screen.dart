@@ -185,10 +185,12 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
         // A historical budget can keep its original unavailable association.
         // Omitting unchanged IDs also avoids validating it as a new assignment.
         final body = <String, dynamic>{...draft};
-        if (isEdit && body['accountId'] == currentAccount)
+        if (isEdit && body['accountId'] == currentAccount) {
           body.remove('accountId');
-        if (isEdit && body['costCenterId'] == currentCenter)
+        }
+        if (isEdit && body['costCenterId'] == currentCenter) {
           body.remove('costCenterId');
+        }
         try {
           final client = ref.read(apiClientProvider);
           if (isEdit) {
