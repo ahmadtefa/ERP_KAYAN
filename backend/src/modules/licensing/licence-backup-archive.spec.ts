@@ -119,13 +119,25 @@ describe('LicenceBackupArchive', () => {
     ).toContain('capture-failed');
   });
 
-  it('captures from the authenticated mirror when only the primary is damaged', () => {
+  it('captures and restores from the authenticated mirror when only the primary is damaged', () => {
     fx = fixture();
+    // Model the protected mirror written by an installed licence store.
+    writeFileSync(
+      join(fx.licenceDir, 'license-state.backup.json'),
+      readFileSync(join(fx.licenceDir, 'license-state.json')),
+    );
     corrupt(join(fx.licenceDir, 'license-state.json'));
 
     const record = fx.archive.capture('full-backup');
     expect(record.state.sequence).toBeGreaterThan(0);
     expect(backups(fx.backupDir)).toHaveLength(1);
+
+    // The archived primary must be the authenticated mirror, not the damaged
+    // live primary. A later recovery must therefore be able to open the store.
+    corrupt(join(fx.licenceDir, 'license-state.json'));
+    corrupt(join(fx.licenceDir, 'license-state.backup.json'));
+    expect(fx.archive.restoreNewestVerified()?.restored.id).toBe(record.id);
+    expect(new LicenseStore(fx.licenceDir).current.licenseId).toBe('lic_aaaa-bbbb');
   });
 
   it(`keeps the newest ${LICENCE_BACKUP_RETENTION} copies and prunes older verified ones`, () => {
