@@ -30,15 +30,18 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     // what is really a readable business refusal — the period is closed.
     const exceptionText =
       exception instanceof Error ? exception.message : String(exception ?? '');
-    const isClosedPeriodTrigger =
+    const isPrismaDatabaseError =
+      exception instanceof Prisma.PrismaClientKnownRequestError ||
+      exception instanceof Prisma.PrismaClientUnknownRequestError;
+    const isClosedPeriodTrigger = isPrismaDatabaseError && (
       exceptionText.includes('Fiscal period is closed for company') ||
-      exceptionText.includes('kayan_require_open_fiscal_period');
+      exceptionText.includes('kayan_require_open_fiscal_period'));
 
     // The cash-voucher reconciliation trigger (SQLSTATE 23P01) is a database
     // backstop for the same claim race the service serialises with row locks:
     // a voucher already matched to one reconciliation cannot be moved to
     // another. Surface it as a readable conflict instead of an opaque 500.
-    const isVoucherClaimTrigger = exceptionText.includes(
+    const isVoucherClaimTrigger = isPrismaDatabaseError && exceptionText.includes(
       'is already matched to reconciliation',
     );
 
@@ -77,6 +80,10 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         'Use a date in an open period instead.';
     } else if (requestTooLarge) {
       // Keep the bounded-upload explanation above; do not expose parser text.
+    } else if (status === HttpStatus.INTERNAL_SERVER_ERROR && exception instanceof HttpException) {
+      // An explicit HttpException(500) can contain just as much sensitive
+      // detail as any other unexpected exception. Never forward its body.
+      this.logger.error('Unhandled server error (HTTP 500)');
     } else if (exception instanceof HttpException) {
       const body = exception.getResponse();
       if (typeof body === 'string') {

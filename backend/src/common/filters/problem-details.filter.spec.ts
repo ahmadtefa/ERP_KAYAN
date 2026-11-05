@@ -1,6 +1,19 @@
-import { HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { Controller, Get, HttpException, HttpStatus, Logger, Module } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
 import { Prisma } from '@prisma/client';
 import { ProblemDetailsFilter } from './problem-details.filter';
+
+@Controller('synthetic-problem')
+class SyntheticProblemController {
+  @Get('internal') internal() {
+    throw new HttpException({detail:'synthetic private detail',errors:{value:'synthetic private value'},
+      code:'PRIVATE_CODE',license:{token:'synthetic private token'}},500);
+  }
+  @Get('maintenance') maintenance() {
+    throw new HttpException({message:'Maintenance remains active',code:'MAINTENANCE'},503);
+  }
+}
+@Module({controllers:[SyntheticProblemController]}) class SyntheticProblemModule {}
 
 describe('ProblemDetailsFilter', () => {
   it('preserves an explicit problem-details description', () => {
@@ -56,6 +69,38 @@ describe('ProblemDetailsFilter', () => {
       expect(JSON.stringify(log.mock.calls)).not.toMatch(/marker|stack|metadata/);
       expect(response.json.mock.calls.every(([body])=>body.detail==='Unexpected server error')).toBe(true);
     } finally {log.mockRestore();}
+  });
+
+  it('sanitizes explicit 500 HttpException bodies, even with trigger-like words', () => {
+    const response={status:jest.fn().mockReturnThis(),json:jest.fn()};
+    const host={switchToHttp:()=>({getResponse:()=>response})} as any;
+    const log=jest.spyOn(Logger.prototype,'error').mockImplementation(()=>undefined);
+    try {
+      const body={detail:'Fiscal period is closed for company synthetic private detail',
+        errors:{key:'synthetic private value'},code:'PRIVATE_CODE',license:{token:'synthetic private token'}};
+      new ProblemDetailsFilter().catch(new HttpException(body,500),host);
+      expect(response.status).toHaveBeenCalledWith(500);
+      expect(response.json).toHaveBeenCalledWith({type:'about:blank',title:'INTERNAL_SERVER_ERROR',status:500,detail:'Unexpected server error'});
+      expect(JSON.stringify(log.mock.calls)).not.toContain('synthetic private');
+    } finally {log.mockRestore();}
+  });
+
+  it('sanitizes an explicit 500 over real HTTP without changing safe 503 behavior', async () => {
+    const app=await NestFactory.create(SyntheticProblemModule,{logger:false});
+    app.useGlobalFilters(new ProblemDetailsFilter());
+    await app.listen(0,'127.0.0.1');
+    const port=(app.getHttpServer().address() as {port:number}).port;
+    try {
+      const response=await fetch(`http://127.0.0.1:${port}/synthetic-problem/internal`);
+      expect(response.status).toBe(500);
+      const text=await response.text();
+      expect(text).not.toContain('synthetic private');
+      expect(text).not.toContain('PRIVATE_CODE');
+      expect(JSON.parse(text).detail).toBe('Unexpected server error');
+      const maintenance=await fetch(`http://127.0.0.1:${port}/synthetic-problem/maintenance`);
+      expect(maintenance.status).toBe(503);
+      expect(await maintenance.json()).toMatchObject({detail:'Maintenance remains active',code:'MAINTENANCE'});
+    } finally {await app.close();}
   });
 
   it('maps Prisma unique violations to HTTP 409 without leaking database details', () => {
