@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -326,27 +327,11 @@ export class JournalEntriesService {
       );
     }
 
-    const updated = await this.prisma.journalEntry.update({
-      where: { id },
-      data: {
-        status: JournalStatus.POSTED,
-        postedAt: new Date(),
-        postedBy: userId,
-      },
-      include: { lines: LINES_WITH_ACCOUNT },
-    });
-
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'POST',
-      entity: 'journal_entries',
-      entityId: id,
-      before: { status: entry.status },
-      after: { status: updated.status },
-    });
-
-    return this.toResponse(updated);
+    return this.transition(companyId, userId, entry, {
+      status: JournalStatus.POSTED,
+      postedAt: new Date(),
+      postedBy: userId,
+    }, 'POST');
   }
 
   /// Moves a draft to "waiting for approval".
@@ -355,25 +340,11 @@ export class JournalEntriesService {
   /// ledger, and the entry can still be cancelled or corrected by its author.
   async submitForApproval(companyId: string, userId: string, id: string) {
     const entry = await this.requireStatus(companyId, id, [JournalStatus.DRAFT]);
-    const updated = await this.prisma.journalEntry.update({
-      where: { id: entry.id },
-      data: {
-        status: JournalStatus.PENDING_APPROVAL,
-        submittedAt: new Date(),
-        submittedBy: userId,
-      },
-      include: { lines: LINES_WITH_ACCOUNT },
-    });
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'SUBMIT',
-      entity: 'journal_entries',
-      entityId: id,
-      before: { status: entry.status },
-      after: { status: updated.status },
-    });
-    return this.toResponse(updated);
+    return this.transition(companyId, userId, entry, {
+      status: JournalStatus.PENDING_APPROVAL,
+      submittedAt: new Date(),
+      submittedBy: userId,
+    }, 'SUBMIT');
   }
 
   /// Approves an entry that is waiting. The approver's identity is recorded on
@@ -393,21 +364,11 @@ export class JournalEntriesService {
       );
     }
 
-    const updated = await this.prisma.journalEntry.update({
-      where: { id: entry.id },
-      data: { status: JournalStatus.APPROVED, approvedAt: new Date(), approvedBy: userId },
-      include: { lines: LINES_WITH_ACCOUNT },
-    });
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'APPROVE',
-      entity: 'journal_entries',
-      entityId: id,
-      before: { status: entry.status },
-      after: { status: updated.status },
-    });
-    return this.toResponse(updated);
+    return this.transition(companyId, userId, entry, {
+      status: JournalStatus.APPROVED,
+      approvedAt: new Date(),
+      approvedBy: userId,
+    }, 'APPROVE');
   }
 
   /// Cancels a draft, a submitted entry or an approved one.
@@ -422,26 +383,47 @@ export class JournalEntriesService {
       JournalStatus.APPROVED,
     ]);
 
-    const updated = await this.prisma.journalEntry.update({
-      where: { id: entry.id },
-      data: {
-        status: JournalStatus.CANCELLED,
-        cancelledAt: new Date(),
-        cancelledBy: userId,
-        cancelReason: reason?.trim() || null,
-      },
-      include: { lines: LINES_WITH_ACCOUNT },
+    return this.transition(companyId, userId, entry, {
+      status: JournalStatus.CANCELLED,
+      cancelledAt: new Date(),
+      cancelledBy: userId,
+      cancelReason: reason?.trim() || null,
+    }, 'CANCEL', reason ?? null);
+  }
+
+  /** Compare the observed state inside the write transaction. A competing
+   * action must not overwrite a transition already committed by another user.
+   * The required audit row commits or rolls back with the transition. This
+   * does not protect direct SQL, mutable lines, or concurrent policy edits. */
+  private async transition(
+    companyId: string,
+    userId: string,
+    entry: { id: string; status: JournalStatus },
+    data: Prisma.JournalEntryUpdateManyMutationInput,
+    action: 'POST' | 'SUBMIT' | 'APPROVE' | 'CANCEL',
+    reason?: string | null,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.journalEntry.updateMany({
+        where: { id: entry.id, companyId, status: entry.status },
+        data,
+      });
+      if (claimed.count !== 1) {
+        throw new ConflictException(
+          'تغيرت حالة القيد بواسطة عملية أخرى. حدّث البيانات قبل المحاولة مجددًا. / Journal status changed; refresh before retrying.',
+        );
+      }
+      const updated = await tx.journalEntry.findUniqueOrThrow({
+        where: { id: entry.id },
+        include: { lines: LINES_WITH_ACCOUNT },
+      });
+      await this.audit.recordRequired({
+        companyId, userId, action, entity: 'journal_entries', entityId: entry.id,
+        before: { status: entry.status },
+        after: { status: updated.status, ...(action === 'CANCEL' ? { reason } : {}) },
+      }, tx);
+      return this.toResponse(updated);
     });
-    await this.audit.record({
-      companyId,
-      userId,
-      action: 'CANCEL',
-      entity: 'journal_entries',
-      entityId: id,
-      before: { status: entry.status },
-      after: { status: updated.status, reason: reason ?? null },
-    });
-    return this.toResponse(updated);
   }
 
   private async requireStatus(

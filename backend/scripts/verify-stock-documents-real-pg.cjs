@@ -28,6 +28,8 @@ const { YearEndCloseService } = require('../src/modules/accounting/year-end-clos
 const { DocumentNumberService } = require('../src/modules/accounting/document-number.service');
 const { AccountMapService } = require('../src/modules/accounting/account-map.service');
 const { PostingService } = require('../src/modules/accounting/posting.service');
+const { JournalEntriesService } = require('../src/modules/accounting/journal-entries.service');
+const { JournalEntriesController } = require('../src/modules/accounting/journal-entries.controller');
 const { StockDocumentsService } = require('../src/modules/inventory/stock-documents.service');
 const { ItemsService } = require('../src/modules/inventory/items.service');
 const { ItemsController } = require('../src/modules/inventory/items.controller');
@@ -482,6 +484,95 @@ let difference = '70000000-0000-4000-8000-000000000005';
       await journalWriter.end();
     }
     console.log('PASS: real PostgreSQL account detach/move, stale snapshots, audit rollback, preserved trial balance, opposing moves and concurrent journal insert. Not HTTP, Flutter or direct SQL protection.');
+
+    // Force two manual-journal requests to finish their initial reads before
+    // either can claim the observed status. Test actual row state and audit.
+    const journalSettings = new CompanySettingsService(prisma,audit);
+    const createJournal = async (number,status='DRAFT') => prisma.journalEntry.create({data:{
+      companyId:company,branchId:branch,entryNumber:number,entryDate:new Date('2190-01-01T00:00:00Z'),
+      status,totalDebit:'10',totalCredit:'10',createdBy:user,
+      lines:{create:[{lineNumber:1,accountId:usedLeaf.id,debit:'10',credit:'0'},
+        {lineNumber:2,accountId:inventory,debit:'0',credit:'10'}]},
+    }});
+    for (const [number,initial,first,second] of [
+      ['SYN-JR-POST-CANCEL','DRAFT','post','cancel'],
+      ['SYN-JR-SUBMIT-CANCEL','DRAFT','submitForApproval','cancel'],
+      ['SYN-JR-APPROVE-CANCEL','PENDING_APPROVAL','approve','cancel'],
+      ['SYN-JR-APPROVED-POST-CANCEL','APPROVED','post','cancel'],
+      ['SYN-JR-POST-POST','DRAFT','post','post'],
+    ]) {
+      const draft=await createJournal(number,initial);
+      let release; const gate = new Promise(resolve=>{release=resolve;});
+      let reads=0;
+      const model = new Proxy(prisma.journalEntry,{get(target,key) {
+        const original=target[key];
+        if (key==='findFirst') return async (...args)=>{
+          const value=await original.apply(target,args);
+          if (args[0]?.where?.id===draft.id) {
+            reads++; if(reads===2) release(); await gate;
+          }
+          return value;
+        };
+        return typeof original==='function' ? original.bind(target) : original;
+      }});
+      const wrapped = new Proxy(prisma,{get(target,key) {
+        if (key==='journalEntry') return model;
+        const value=target[key]; return typeof value==='function' ? value.bind(target) : value;
+      }});
+      const journals = new JournalEntriesService(wrapped,numbers,audit,periods,journalSettings,costCenters);
+      const result=await Promise.allSettled([journals[first](company,user,draft.id),journals[second](company,user,draft.id)]);
+      assert.equal(reads,2,number);
+      assert.equal(result.filter(x=>x.status==='fulfilled').length,1,number);
+      const failure=result.find(x=>x.status==='rejected');
+      assert.equal(failure.reason.getStatus(),409,number);
+      const winner=result.find(x=>x.status==='fulfilled').value;
+      const saved=await prisma.journalEntry.findUniqueOrThrow({where:{id:draft.id},include:{lines:true}});
+      assert.equal(saved.status.toLowerCase(),winner.status,number);
+      assert.equal(saved.lines.length,2,number);
+      assert.equal(saved.totalDebit.toFixed(4),'10.0000',number);
+      assert.equal(saved.totalCredit.toFixed(4),'10.0000',number);
+      const logs=await prisma.auditLog.findMany({where:{companyId:company,entity:'journal_entries',entityId:draft.id}});
+      assert.equal(logs.length,1,number);
+      assert.equal(logs[0].action,({posted:'POST',cancelled:'CANCEL',pending_approval:'SUBMIT',approved:'APPROVE'})[winner.status],number);
+    }
+    const manualJournal = new JournalEntriesService(prisma,numbers,audit,periods,journalSettings,costCenters);
+    const rollbackJournal = await createJournal('SYN-JR-AUDIT');
+    const journalAudit=audit.recordRequired.bind(audit);
+    audit.recordRequired=async (input,tx)=>{
+      if(input.entity==='journal_entries' && input.entityId===rollbackJournal.id) throw new Error('synthetic journal audit failure');
+      return journalAudit(input,tx);
+    };
+    try {
+      await assert.rejects(manualJournal.post(company,user,rollbackJournal.id),/synthetic journal audit failure/);
+      await assert.rejects(manualJournal.cancel(company,user,rollbackJournal.id),/synthetic journal audit failure/);
+      const saved=await prisma.journalEntry.findUniqueOrThrow({where:{id:rollbackJournal.id}});
+      assert.equal(saved.status,'DRAFT'); assert.equal(saved.postedAt,null); assert.equal(saved.cancelledAt,null);
+      assert.equal(await prisma.auditLog.count({where:{entity:'journal_entries',entityId:rollbackJournal.id}}),0);
+    } finally {audit.recordRequired=journalAudit;}
+
+    // Real HTTP + DTO/controller/permission guard/service/PG. Identity is
+    // injected and does not establish JWT or licensing enforcement.
+    class JournalHttpModule {}
+    Module({controllers:[JournalEntriesController],providers:[{provide:JournalEntriesService,useValue:manualJournal}]})(JournalHttpModule);
+    const journalHttp=await NestFactory.create(JournalHttpModule,{logger:false});
+    try {
+      journalHttp.use((req,_res,next)=>{req.user={userId:user,companyId:company,branchId:branch,username:'synthetic',isSuperAdmin:false,
+        permissions:req.headers['x-allowed']==='yes'?['accounting.journal.create']:[]};next();});
+      journalHttp.useGlobalGuards(new PermissionsGuard(new Reflector()));
+      journalHttp.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
+      journalHttp.useGlobalFilters(new ProblemDetailsFilter());
+      await journalHttp.listen(0,'127.0.0.1');
+      const base=`http://127.0.0.1:${journalHttp.getHttpServer().address().port}/accounting/journal-entries/${rollbackJournal.id}/cancel`;
+      const cancel=allowed=>fetch(base,{method:'POST',headers:{'content-type':'application/json','x-allowed':allowed?'yes':'no'},body:JSON.stringify({reason:'synthetic'})});
+      assert.equal((await cancel(false)).status,403);
+      assert.equal((await prisma.journalEntry.findUniqueOrThrow({where:{id:rollbackJournal.id}})).status,'DRAFT');
+      const response=await cancel(true); assert.equal(response.status,201);
+      assert.equal((await response.json()).status,'cancelled');
+      assert.equal((await prisma.journalEntry.findUniqueOrThrow({where:{id:rollbackJournal.id}})).status,'CANCELLED');
+      assert.equal(await prisma.auditLog.count({where:{entity:'journal_entries',entityId:rollbackJournal.id,action:'CANCEL'}}),1);
+    } finally {await journalHttp.close();}
+    console.log('PASS: journal transitions: forced stale-read races, required-audit rollback and HTTP permission denial with real PG; identity injected, no JWT or Flutter.');
+
 
 
     // Closing owns the same PostgreSQL period row locked by the posting
