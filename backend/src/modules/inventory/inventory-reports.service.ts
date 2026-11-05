@@ -580,6 +580,91 @@ export class InventoryReportsService {
     };
   }
 
+  /**
+   * Stock-document ledger grouped by its source document's cost centre.
+   * The stock movement remains the only source of quantity/value; joining its
+   * reference to the document attributes it without creating a second ledger.
+   * A nullable centre intentionally keeps legacy documents visible.
+   */
+  async costCenterMovements(
+    companyId: string,
+    filters: { costCenterId?: string } = {},
+    mayReadCost = true,
+  ) {
+    if (filters.costCenterId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(filters.costCenterId)) {
+      throw new BadRequestException('costCenterId must be a UUID');
+    }
+    const raw = await this.prisma.$queryRaw<Array<{
+      id: string; movementDate: Date; direction: string; quantity: Prisma.Decimal;
+      unitCost: Prisma.Decimal; totalCost: Prisma.Decimal; referenceType: string;
+      referenceNumber: string | null; itemId: string; itemCode: string;
+      itemNameEn: string; itemNameAr: string; unit: string;
+      costCenterId: string | null; costCenterCode: string | null;
+      costCenterNameEn: string | null; costCenterNameAr: string | null;
+    }>>(Prisma.sql`
+      SELECT m.id, m."movementDate", m.direction, m.quantity, m."unitCost", m."totalCost",
+             m."referenceType", m."referenceNumber", i.id AS "itemId", i.code AS "itemCode",
+             i."nameEn" AS "itemNameEn", i."nameAr" AS "itemNameAr", i.unit,
+             m."costCenterId", c.code AS "costCenterCode", c."nameEn" AS "costCenterNameEn",
+             c."nameAr" AS "costCenterNameAr"
+        FROM stock_movements m
+        JOIN items i ON i.id = m."itemId"
+        LEFT JOIN stock_documents d ON d.id = m."referenceId" AND d."companyId" = m."companyId"
+           LEFT JOIN cost_centers c ON c.id = m."costCenterId" AND c."companyId" = m."companyId"
+       WHERE m."companyId" = ${companyId}::uuid
+         AND m."referenceType" IN ('STOCK_ADJUSTMENT', 'STOCK_COUNT', 'STOCK_DOCUMENT_REVERSAL')
+         AND (m."referenceType" <> 'STOCK_DOCUMENT_REVERSAL' OR d.id IS NULL OR d.kind <> 'TRANSFER')
+         AND (${filters.costCenterId ?? null}::uuid IS NULL OR m."costCenterId" = ${filters.costCenterId ?? null}::uuid)
+       ORDER BY m."movementDate" DESC, m."createdAt" DESC, m.id
+    `);
+
+    const totals = new Map<string, { costCenterId: string | null; code: string | null;
+      nameEn: string | null; nameAr: string | null; movementCount: number;
+      quantityIn: Prisma.Decimal; quantityOut: Prisma.Decimal;
+      valueIn: Prisma.Decimal; valueOut: Prisma.Decimal }>();
+    const items = raw.map((row) => {
+      const key = row.costCenterId ?? '';
+      const total = totals.get(key) ?? {
+        costCenterId: row.costCenterId, code: row.costCenterCode,
+        nameEn: row.costCenterNameEn, nameAr: row.costCenterNameAr,
+        movementCount: 0, quantityIn: new Prisma.Decimal(0), quantityOut: new Prisma.Decimal(0),
+        valueIn: new Prisma.Decimal(0), valueOut: new Prisma.Decimal(0),
+      };
+      total.movementCount += 1;
+      if (row.direction === 'IN') {
+        total.quantityIn = total.quantityIn.plus(row.quantity);
+        total.valueIn = total.valueIn.plus(row.totalCost);
+      } else {
+        total.quantityOut = total.quantityOut.plus(row.quantity);
+        total.valueOut = total.valueOut.plus(row.totalCost);
+      }
+      totals.set(key, total);
+      return {
+        id: row.id, movementDate: row.movementDate.toISOString().slice(0, 10),
+        direction: row.direction, quantity: row.quantity.toFixed(MONEY_SCALE),
+        unitCost: mayReadCost ? row.unitCost.toFixed(MONEY_SCALE) : null,
+        value: mayReadCost ? row.totalCost.toFixed(MONEY_SCALE) : null,
+        referenceType: row.referenceType, referenceNumber: row.referenceNumber,
+        itemId: row.itemId, itemCode: row.itemCode, itemNameEn: row.itemNameEn,
+        itemNameAr: row.itemNameAr, unit: row.unit,
+        costCenterId: row.costCenterId, costCenterCode: row.costCenterCode,
+        costCenterNameEn: row.costCenterNameEn, costCenterNameAr: row.costCenterNameAr,
+      };
+    });
+    return {
+      items,
+      totals: [...totals.values()].map((row) => ({
+        costCenterId: row.costCenterId, costCenterCode: row.code,
+        costCenterNameEn: row.nameEn, costCenterNameAr: row.nameAr,
+        movementCount: row.movementCount,
+        quantityIn: row.quantityIn.toFixed(MONEY_SCALE), quantityOut: row.quantityOut.toFixed(MONEY_SCALE),
+        valueIn: mayReadCost ? row.valueIn.toFixed(MONEY_SCALE) : null,
+        valueOut: mayReadCost ? row.valueOut.toFixed(MONEY_SCALE) : null,
+        netValue: mayReadCost ? row.valueIn.minus(row.valueOut).toFixed(MONEY_SCALE) : null,
+      })),
+    };
+  }
+
   /// Items nobody has bought for a while, with what they tie up in cash.
   async slowMoving(
     companyId: string,

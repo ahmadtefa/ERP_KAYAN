@@ -31,6 +31,7 @@ type Movement = {
   id?: string;
   referenceId?: string;
   unitCost?: Prisma.Decimal;
+  costCenterId?: string | null;
 };
 
 /**
@@ -564,6 +565,7 @@ describe('warehouse-level negative stock guard on transfer posting', () => {
     const snapshot = h.tx.stockDocumentLine.update.mock.calls[0][0] as any;
     expect(snapshot.data.unitCost.toFixed(4)).toBe('7.5000');
     expect(h.state.movements().at(-1)?.totalCost.toFixed(4)).toBe('37.5000');
+    expect(h.state.movements().at(-1)?.costCenterId).toBe('cost-center-1');
     const journal = h.posting.post.mock.calls[0][1] as any;
     expect(journal.lines).toContainEqual(expect.objectContaining({
       accountId: 'acct-diff', costCenterId: 'cost-center-1', debit: D(37.5),
@@ -575,6 +577,7 @@ describe('warehouse-level negative stock guard on transfer posting', () => {
     await h.service.reverse(COMPANY, 'user-1', 'doc-1');
     expect(h.state.warehouseQuantity(W_DST).toFixed(4)).toBe('20.0000');
     expect(h.state.movements().at(-1)?.totalCost.toFixed(4)).toBe('37.5000');
+    expect(h.state.movements().at(-1)?.costCenterId).toBe('cost-center-1');
     expect(h.posting.reverse).toHaveBeenCalledTimes(1);
   });
 

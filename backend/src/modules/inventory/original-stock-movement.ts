@@ -7,6 +7,7 @@ export interface OriginalStockMovement {
   itemId: string;
   branchId: string;
   warehouseId: string | null;
+  costCenterId?: string | null;
   direction: StockDirection;
   referenceType: string;
   quantity: Prisma.Decimal;

@@ -50,6 +50,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
     final key = widget.navigationKey;
     if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
   }
+
   @override
   void dispose() {
     final key = widget.navigationKey;
@@ -83,9 +84,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
 
     setState(() => _busy = true);
     try {
-      await ref
-          .read(apiClientProvider)
-          .post('$_basePath/${row['id']}/post');
+      await ref.read(apiClientProvider).post('$_basePath/${row['id']}/post');
       await ref.read(invoiceListProvider(widget.kind).notifier).reload();
       if (mounted) showMessage(context, l10n.invoicePosted);
     } on Failure catch (e) {
@@ -122,9 +121,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
 
     setState(() => _busy = true);
     try {
-      await ref
-          .read(apiClientProvider)
-          .post('$_basePath/${row['id']}/reverse');
+      await ref.read(apiClientProvider).post('$_basePath/${row['id']}/reverse');
       await ref.read(invoiceListProvider(widget.kind).notifier).reload();
       if (mounted) showMessage(context, l10n.invoiceReversed);
     } on Failure catch (e) {
@@ -180,10 +177,20 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
             onChanged: (value) => setState(() => _status = value ?? ''),
           ),
           const SizedBox(width: 12),
+          IconButton(
+            tooltip: l10n.refresh,
+            onPressed: _busy || async.isLoading
+                ? null
+                : () => ref.read(provider.notifier).reload(),
+            icon: const Icon(Icons.refresh),
+          ),
+          const SizedBox(width: 8),
           FilledButton.icon(
             onPressed: _busy ? null : _openEditor,
             icon: const Icon(Icons.add),
-            label: Text(isSales ? l10n.newSalesInvoice : l10n.newPurchaseInvoice),
+            label: Text(
+              isSales ? l10n.newSalesInvoice : l10n.newPurchaseInvoice,
+            ),
           ),
         ],
       ),
@@ -201,10 +208,7 @@ class _InvoiceListScreenState extends ConsumerState<InvoiceListScreen> {
               value: (r) => text(r, 'invoiceNumber'),
               emphasise: true,
             ),
-            ColumnSpec(
-              l10n.invoiceDate,
-              value: (r) => text(r, 'invoiceDate'),
-            ),
+            ColumnSpec(l10n.invoiceDate, value: (r) => text(r, 'invoiceDate')),
             ColumnSpec(
               isSales ? l10n.customer : l10n.supplier,
               value: (r) {

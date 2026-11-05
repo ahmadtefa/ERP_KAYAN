@@ -904,6 +904,7 @@ export class StockDocumentsService {
           userId,
           requireStock: direction === StockDirection.OUT && !settings.allowNegativeStock,
           warehouseId: toWarehouseId,
+            costCenterId: document.costCenterId,
         });
 
         valueChange = valueChange.plus(
@@ -1121,6 +1122,7 @@ export class StockDocumentsService {
             userId,
             requireStock: false,
             warehouseId: target.warehouseId,
+            costCenterId: original.costCenterId,
           });
         }
       }
@@ -1187,6 +1189,7 @@ export class StockDocumentsService {
       /// Which pile the goods sat in, or moved to. Null only when the company
       /// has no warehouse for the branch at all.
       warehouseId?: string | null;
+      costCenterId?: string | null;
     },
   ) {
     const balance = await this.balance(tx, input.companyId, input.branchId, input.itemId);
@@ -1210,6 +1213,7 @@ export class StockDocumentsService {
         companyId: input.companyId,
         branchId: input.branchId,
         warehouseId: input.warehouseId ?? null,
+        costCenterId: input.costCenterId ?? null,
         itemId: input.itemId,
         movementDate: input.date,
         direction: input.direction,

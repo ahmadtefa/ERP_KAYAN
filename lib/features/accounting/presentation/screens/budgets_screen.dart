@@ -22,10 +22,12 @@ import '../providers/cost_center_providers.dart';
 /// Budgets, as definitions. The comparison with the ledger lives in the
 /// budget report, which reads posted entries only.
 final budgetsProvider = FutureProvider<List<Json>>((ref) async {
-  final page = await ref.read(apiClientProvider).getObject(
-    '/accounting/budgets',
-    query: const {'includeInactive': 'true', 'pageSize': '500'},
-  );
+  final page = await ref
+      .read(apiClientProvider)
+      .getObject(
+        '/accounting/budgets',
+        query: const {'includeInactive': 'true', 'pageSize': '500'},
+      );
   return listOf(page['items']);
 });
 
@@ -88,9 +90,14 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
     final activeCenters = centers
         .where((center) => flag(center, 'isActive', fallback: true))
         .toList(growable: false);
-    final budgetable = accounts.where((account) =>
-        account.isPostable && account.isActive &&
-        (account.type == AccountType.revenue || account.type == AccountType.expense))
+    final budgetable = accounts
+        .where(
+          (account) =>
+              account.isPostable &&
+              account.isActive &&
+              (account.type == AccountType.revenue ||
+                  account.type == AccountType.expense),
+        )
         .toList(growable: false);
     if ((!isEdit && (activeCenters.isEmpty || budgetable.isEmpty)) ||
         (isEdit && (currentCenter.isEmpty || currentAccount.isEmpty))) {
@@ -99,10 +106,16 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
     }
     // Keep a now-inactive existing selection visible, but never offer a
     // different inactive item as a new assignment.
-    final previousCenter = centers.where((row) => text(row, 'id') == currentCenter).firstOrNull;
-    final previousAccount = accounts.where((account) => account.id == currentAccount).firstOrNull;
-    final missingCenter = isEdit && !activeCenters.any((row) => text(row, 'id') == currentCenter);
-    final missingAccount = isEdit && !budgetable.any((account) => account.id == currentAccount);
+    final previousCenter = centers
+        .where((row) => text(row, 'id') == currentCenter)
+        .firstOrNull;
+    final previousAccount = accounts
+        .where((account) => account.id == currentAccount)
+        .firstOrNull;
+    final missingCenter =
+        isEdit && !activeCenters.any((row) => text(row, 'id') == currentCenter);
+    final missingAccount =
+        isEdit && !budgetable.any((account) => account.id == currentAccount);
     final unavailable = language == 'ar' ? 'غير متاح' : 'Unavailable';
 
     final values = await showFormSheet(
@@ -117,12 +130,16 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
           required: true,
           options: [
             if (missingCenter)
-              FieldOption(currentCenter, '${previousCenter == null ? currentCenter : costCenterLabel(previousCenter, language)} — $unavailable', enabled: false),
+              FieldOption(
+                currentCenter,
+                '${previousCenter == null ? currentCenter : costCenterLabel(previousCenter, language)} — $unavailable',
+                enabled: false,
+              ),
             for (final center in activeCenters)
               FieldOption(
                 text(center, 'id'),
                 '${text(center, 'code')} — '
-                    '${language == 'ar' ? text(center, 'nameAr') : text(center, 'nameEn')}',
+                '${language == 'ar' ? text(center, 'nameAr') : text(center, 'nameEn')}',
               ),
           ],
         ),
@@ -133,27 +150,52 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
           required: true,
           options: [
             if (missingAccount)
-              FieldOption(currentAccount, '${previousAccount == null ? currentAccount : accountLabel(previousAccount, language)} — $unavailable', enabled: false),
+              FieldOption(
+                currentAccount,
+                '${previousAccount == null ? currentAccount : accountLabel(previousAccount, language)} — $unavailable',
+                enabled: false,
+              ),
             for (final account in budgetable)
               FieldOption(account.id, accountLabel(account, language)),
           ],
         ),
-        FieldSpec('periodStart', l10n.from, kind: FieldKind.date, required: true),
+        FieldSpec(
+          'periodStart',
+          l10n.from,
+          kind: FieldKind.date,
+          required: true,
+        ),
         FieldSpec('periodEnd', l10n.to, kind: FieldKind.date, required: true),
-        FieldSpec('amount', l10n.budgetAmount, kind: FieldKind.decimal, required: true),
-        FieldSpec('notes', l10n.description, kind: FieldKind.multiline, maxLines: 2, emptyValue: ''),
+        FieldSpec(
+          'amount',
+          l10n.budgetAmount,
+          kind: FieldKind.decimal,
+          required: true,
+        ),
+        FieldSpec(
+          'notes',
+          l10n.description,
+          kind: FieldKind.multiline,
+          maxLines: 2,
+          emptyValue: '',
+        ),
       ],
       initial: existing,
       onSubmit: (draft) async {
         // A historical budget can keep its original unavailable association.
         // Omitting unchanged IDs also avoids validating it as a new assignment.
         final body = <String, dynamic>{...draft};
-        if (isEdit && body['accountId'] == currentAccount) body.remove('accountId');
-        if (isEdit && body['costCenterId'] == currentCenter) body.remove('costCenterId');
+        if (isEdit && body['accountId'] == currentAccount)
+          body.remove('accountId');
+        if (isEdit && body['costCenterId'] == currentCenter)
+          body.remove('costCenterId');
         try {
           final client = ref.read(apiClientProvider);
           if (isEdit) {
-            await client.patch('/accounting/budgets/${existing['id']}', body: body);
+            await client.patch(
+              '/accounting/budgets/${existing['id']}',
+              body: body,
+            );
           } else {
             await client.post('/accounting/budgets', body: body);
           }
@@ -180,7 +222,9 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
     if (!ok || !mounted) return;
     setState(() => _busy = true);
     try {
-      await ref.read(apiClientProvider).delete('/accounting/budgets/${row['id']}');
+      await ref
+          .read(apiClientProvider)
+          .delete('/accounting/budgets/${row['id']}');
       await _refresh();
       if (mounted) showMessage(context, l10n.budgetSaved);
     } catch (error) {
@@ -199,17 +243,30 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
     final language = _language();
     final async = ref.watch(budgetsProvider);
     final canManage =
-        ref.watch(currentUserProvider)?.can('accounting.budgets.manage') ?? false;
+        ref.watch(currentUserProvider)?.can('accounting.budgets.manage') ??
+        false;
 
     return ModuleScaffold(
       title: l10n.budgets,
-      trailing: canManage
-          ? FilledButton.icon(
+      trailing: Wrap(
+        spacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          IconButton(
+            tooltip: l10n.refresh,
+            onPressed: _busy || async.isLoading
+                ? null
+                : () => ref.invalidate(budgetsProvider),
+            icon: const Icon(Icons.refresh),
+          ),
+          if (canManage)
+            FilledButton.icon(
               onPressed: _busy ? null : () => _save(),
               icon: const Icon(Icons.add),
               label: Text(l10n.newBudget),
-            )
-          : null,
+            ),
+        ],
+      ),
       body: AsyncStateView<List<Json>>(
         value: async,
         onRetry: () => ref.invalidate(budgetsProvider),
@@ -225,8 +282,9 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
                 final center = row['costCenter'];
                 if (center is! Map) return '';
                 final map = Map<String, dynamic>.from(center);
-                final name =
-                    language == 'ar' ? text(map, 'nameAr') : text(map, 'nameEn');
+                final name = language == 'ar'
+                    ? text(map, 'nameAr')
+                    : text(map, 'nameEn');
                 return '${text(map, 'code')} — $name';
               },
             ),
@@ -236,14 +294,16 @@ class _BudgetsScreenState extends ConsumerState<BudgetsScreen> {
                 final account = row['account'];
                 if (account is! Map) return '';
                 final map = Map<String, dynamic>.from(account);
-                final name =
-                    language == 'ar' ? text(map, 'nameAr') : text(map, 'nameEn');
+                final name = language == 'ar'
+                    ? text(map, 'nameAr')
+                    : text(map, 'nameEn');
                 return '${text(map, 'code')} — $name';
               },
             ),
             ColumnSpec(
               l10n.budgetPeriod,
-              value: (row) => '${text(row, 'periodStart')} → ${text(row, 'periodEnd')}',
+              value: (row) =>
+                  '${text(row, 'periodStart')} → ${text(row, 'periodEnd')}',
             ),
             ColumnSpec(
               l10n.budgetAmount,

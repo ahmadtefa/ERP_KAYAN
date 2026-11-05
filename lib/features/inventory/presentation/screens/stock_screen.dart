@@ -17,7 +17,8 @@ import '../../../common/presentation/screens/module_scaffold.dart';
 import '../../../data/presentation/widgets/list_export_actions.dart';
 import 'stock_vouchers_screen.dart';
 
-export '../providers/stock_providers.dart' show stockListProvider, StockController;
+export '../providers/stock_providers.dart'
+    show stockListProvider, StockController;
 
 /// Stock on hand per item and branch, with the moving average cost the ledger
 /// is carrying.
@@ -26,7 +27,7 @@ export '../providers/stock_providers.dart' show stockListProvider, StockControll
 /// stock tables are built on. FIFO or standard costing would change these
 /// figures and needs an explicit decision.
 class StockScreen extends ConsumerStatefulWidget {
-  const StockScreen({super.key,this.navigationKey});
+  const StockScreen({super.key, this.navigationKey});
   final ValueKey<String>? navigationKey;
 
   @override
@@ -42,34 +43,64 @@ class _StockScreenState extends ConsumerState<StockScreen> {
     super.initState();
     _exitGuard = ref.read(draftExitGuardProvider);
     final key = widget.navigationKey;
-    if (key != null) _exitGuard.register(key,_exitRelay.canLeave);
+    if (key != null) _exitGuard.register(key, _exitRelay.canLeave);
   }
+
   @override
   void dispose() {
     final key = widget.navigationKey;
-    if (key != null) _exitGuard.unregister(key,_exitRelay.canLeave);
+    if (key != null) _exitGuard.unregister(key, _exitRelay.canLeave);
     super.dispose();
   }
 
   Future<void> _openVouchers() async {
-    await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => StockVouchersScreen(exitRelay:_exitRelay)));
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => StockVouchersScreen(exitRelay: _exitRelay),
+      ),
+    );
     if (mounted) ref.invalidate(stockListProvider);
+  }
+
+  Future<void> _openCostCenterReport() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => const StockCostCenterReportScreen()),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final async = ref.watch(stockListProvider);
-    final canReadCost = ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
+    final canReadCost =
+        ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
 
     return ModuleScaffold(
       title: l10n.stockBalances,
       actions: [
-        IconButton(tooltip: l10n.refresh, icon: const Icon(Icons.refresh),
-          onPressed: () => ref.read(stockListProvider.notifier).reload()),
-        OutlinedButton.icon(onPressed: _openVouchers,
-          icon:const Icon(Icons.inventory_2_outlined),
-          label:Text(Localizations.localeOf(context).languageCode == 'ar' ? 'أذون المخزون' : 'Stock vouchers')),
+        IconButton(
+          tooltip: l10n.refresh,
+          icon: const Icon(Icons.refresh),
+          onPressed: () => ref.read(stockListProvider.notifier).reload(),
+        ),
+        OutlinedButton.icon(
+          onPressed: _openVouchers,
+          icon: const Icon(Icons.inventory_2_outlined),
+          label: Text(
+            Localizations.localeOf(context).languageCode == 'ar'
+                ? 'أذون المخزون'
+                : 'Stock vouchers',
+          ),
+        ),
+        OutlinedButton.icon(
+          onPressed: _openCostCenterReport,
+          icon: const Icon(Icons.account_tree_outlined),
+          label: Text(
+            Localizations.localeOf(context).languageCode == 'ar'
+                ? 'حركة المخزون حسب مركز التكلفة'
+                : 'Stock by cost center',
+          ),
+        ),
         const ListExportActions(list: 'stock'),
       ],
       trailing: SearchField(
@@ -104,16 +135,18 @@ class _StockScreenState extends ConsumerState<StockScreen> {
                       numeric: true,
                       value: (r) => formatQuantity(asString(r['quantity'])),
                     ),
-                    if (canReadCost) ColumnSpec(
-                      l10n.averageCost,
-                      numeric: true,
-                      value: (r) => formatAmount(asString(r['averageCost'])),
-                    ),
-                    if (canReadCost) ColumnSpec(
-                      l10n.stockValue,
-                      numeric: true,
-                      value: (r) => formatAmount(asString(r['value'])),
-                    ),
+                    if (canReadCost)
+                      ColumnSpec(
+                        l10n.averageCost,
+                        numeric: true,
+                        value: (r) => formatAmount(asString(r['averageCost'])),
+                      ),
+                    if (canReadCost)
+                      ColumnSpec(
+                        l10n.stockValue,
+                        numeric: true,
+                        value: (r) => formatAmount(asString(r['value'])),
+                      ),
                   ],
                 ),
               ),
@@ -150,6 +183,103 @@ class _StockScreenState extends ConsumerState<StockScreen> {
         itemId: itemId,
         row: row,
         title: '${text(row, 'itemCode')} — ${text(row, 'itemNameEn')}',
+      ),
+    );
+  }
+}
+
+/// Attributes append-only stock movements through their saved source document.
+class StockCostCenterReportScreen extends ConsumerStatefulWidget {
+  const StockCostCenterReportScreen({super.key});
+  @override
+  ConsumerState<StockCostCenterReportScreen> createState() =>
+      _StockCostCenterReportScreenState();
+}
+
+class _StockCostCenterReportScreenState
+    extends ConsumerState<StockCostCenterReportScreen> {
+  late Future<Json> _future;
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
+
+  Future<Json> _load() => ref
+      .read(apiClientProvider)
+      .getObject('/inventory/reports/cost-center-movements');
+  void _refresh() => setState(() {
+    _future = _load();
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
+    final canReadCost =
+        ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          arabic ? 'حركة المخزون حسب مركز التكلفة' : 'Stock by cost center',
+        ),
+        actions: [
+          IconButton(
+            tooltip: arabic ? 'تحديث' : 'Refresh',
+            onPressed: _refresh,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: FutureBuilder<Json>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done)
+            return const Center(child: CircularProgressIndicator());
+          if (snapshot.hasError)
+            return ErrorView(message: snapshot.error!, onRetry: _refresh);
+          if (!snapshot.hasData) return const SizedBox.shrink();
+          final data = snapshot.data!;
+          final totals = listOf(data['totals']);
+          final movements = listOf(data['items']);
+          if (movements.isEmpty)
+            return Center(
+              child: Text(
+                arabic ? 'لا توجد حركات مخزنية' : 'No stock movements',
+              ),
+            );
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              for (final total in totals)
+                Card(
+                  child: ListTile(
+                    title: Text(
+                      text(total, 'costCenterCode').isEmpty
+                          ? (arabic
+                                ? 'حركات قديمة بلا مركز تكلفة'
+                                : 'Legacy movements without a cost center')
+                          : '${text(total, 'costCenterCode')} • ${arabic ? text(total, 'costCenterNameAr', fallback: text(total, 'costCenterNameEn')) : text(total, 'costCenterNameEn')}',
+                    ),
+                    subtitle: Text(
+                      '${arabic ? 'الحركات' : 'Movements'}: ${text(total, 'movementCount')} • ${arabic ? 'داخل' : 'In'}: ${text(total, 'quantityIn')} • ${arabic ? 'خارج' : 'Out'}: ${text(total, 'quantityOut')}'
+                      '${canReadCost ? ' • ${arabic ? 'صافي القيمة' : 'Net value'}: ${text(total, 'netValue')}' : ''}',
+                    ),
+                  ),
+                ),
+              const Divider(),
+              for (final row in movements)
+                ListTile(
+                  title: Text(
+                    '${text(row, 'referenceNumber', fallback: text(row, 'referenceType'))} • ${text(row, 'itemCode')} • ${arabic ? text(row, 'itemNameAr', fallback: text(row, 'itemNameEn')) : text(row, 'itemNameEn')}',
+                  ),
+                  subtitle: Text(
+                    '${text(row, 'movementDate')} • ${text(row, 'direction') == 'IN' ? (arabic ? 'دخول' : 'IN') : (arabic ? 'خروج' : 'OUT')} ${text(row, 'quantity')} ${text(row, 'unit')} • ${text(row, 'costCenterCode', fallback: arabic ? 'بلا مركز' : 'No center')}',
+                  ),
+                  trailing: canReadCost ? Text(text(row, 'value')) : null,
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -199,14 +329,18 @@ class _Totals extends StatelessWidget {
     final negative = raw.startsWith('-');
     final parts = (negative ? raw.substring(1) : raw).split('.');
     final fraction = parts.length > 1 ? parts[1] : '';
-    final digits = '${parts.first}${fraction.padRight(scale, '0').substring(0, scale)}';
+    final digits =
+        '${parts.first}${fraction.padRight(scale, '0').substring(0, scale)}';
     final parsed = BigInt.tryParse(digits) ?? BigInt.zero;
     return negative ? -parsed : parsed;
   }
 
   String _show(BigInt value, int scale) {
     final negative = value.isNegative;
-    final digits = (negative ? -value : value).toString().padLeft(scale + 1, '0');
+    final digits = (negative ? -value : value).toString().padLeft(
+      scale + 1,
+      '0',
+    );
     final whole = digits.substring(0, digits.length - scale);
     final fraction = digits.substring(digits.length - scale);
     return '${negative ? '-' : ''}$whole.$fraction';
@@ -252,7 +386,8 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final language = Localizations.localeOf(context).languageCode;
-    final canReadCost = ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
+    final canReadCost =
+        ref.watch(currentUserProvider)?.can('inventory.cost.read') ?? false;
     final links = ref.read(reportLinkProvider);
     final filters = {'itemId': widget.itemId};
 
@@ -265,9 +400,20 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
             spacing: 24,
             runSpacing: 8,
             children: [
-              _stat(l10n.onHand, formatQuantity(asString(widget.row['quantity']))),
-              if (canReadCost) _stat(l10n.averageCost, formatAmount(asString(widget.row['averageCost']))),
-              if (canReadCost) _stat(l10n.stockValue, formatAmount(asString(widget.row['value']))),
+              _stat(
+                l10n.onHand,
+                formatQuantity(asString(widget.row['quantity'])),
+              ),
+              if (canReadCost)
+                _stat(
+                  l10n.averageCost,
+                  formatAmount(asString(widget.row['averageCost'])),
+                ),
+              if (canReadCost)
+                _stat(
+                  l10n.stockValue,
+                  formatAmount(asString(widget.row['value'])),
+                ),
               _stat(l10n.branch, text(widget.row, 'branchCode')),
             ],
           ),
@@ -336,7 +482,9 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
                   final error = snapshot.error!;
                   return ErrorView(
                     message: error,
-                    onRetry: () => setState(() { _future = _load(); }),
+                    onRetry: () => setState(() {
+                      _future = _load();
+                    }),
                   );
                 }
                 if (!snapshot.hasData) return const LoadingView();
@@ -374,18 +522,20 @@ class _LedgerDialogState extends ConsumerState<_LedgerDialog> {
                         numeric: true,
                         value: (r) => formatQuantity(asString(r['quantity'])),
                       ),
-                      if (canReadCost) ResizableColumn(
-                        l10n.unitPrice,
-                        width: 120,
-                        numeric: true,
-                        value: (r) => formatAmount(asString(r['unitCost'])),
-                      ),
-                      if (canReadCost) ResizableColumn(
-                        l10n.lineTotal,
-                        width: 120,
-                        numeric: true,
-                        value: (r) => formatAmount(asString(r['totalCost'])),
-                      ),
+                      if (canReadCost)
+                        ResizableColumn(
+                          l10n.unitPrice,
+                          width: 120,
+                          numeric: true,
+                          value: (r) => formatAmount(asString(r['unitCost'])),
+                        ),
+                      if (canReadCost)
+                        ResizableColumn(
+                          l10n.lineTotal,
+                          width: 120,
+                          numeric: true,
+                          value: (r) => formatAmount(asString(r['totalCost'])),
+                        ),
                       ResizableColumn(
                         l10n.runningBalance,
                         width: 190,

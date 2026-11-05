@@ -496,6 +496,7 @@ model CostCenter {
   budgets         Budget[]         @relation("CostCenterBudgets")
   fixedAssets     FixedAsset[]
   stockDocuments  StockDocument[]  @relation("StockDocumentCostCenter")
+  stockMovements  StockMovement[]
 
   @@unique([companyId, code])
   @@index([companyId, isActive])
@@ -1405,6 +1406,9 @@ model StockMovement {
   /// before warehouses existed, or without naming one; the warehouse reports
   /// treat it as the branch's default warehouse.
   warehouseId  String?        @db.Uuid
+  /// Snapshot of the source stock document's analytical dimension. Null is
+  /// valid for legacy movements and for internal warehouse transfers.
+  costCenterId String?        @db.Uuid
   itemId       String         @db.Uuid
   movementDate DateTime       @db.Date
   direction    StockDirection
@@ -1424,10 +1428,12 @@ model StockMovement {
   branch    Branch     @relation(fields: [branchId], references: [id], onDelete: Restrict)
   item      Item       @relation(fields: [itemId], references: [id], onDelete: Restrict)
   warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  costCenter CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
 
   @@index([companyId, itemId, movementDate])
   @@index([companyId, referenceType, referenceId])
   @@index([companyId, warehouseId, itemId])
+  @@index([companyId, costCenterId, movementDate])
   @@map("stock_movements")
 }
 

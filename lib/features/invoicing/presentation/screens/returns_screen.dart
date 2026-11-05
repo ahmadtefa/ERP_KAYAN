@@ -29,15 +29,14 @@ Future<void> showReturnDetail(
   required String id,
 }) async {
   try {
-    final detail =
-        await ref.read(apiClientProvider).getObject('${kind.returnsPath}/$id');
+    final detail = await ref
+        .read(apiClientProvider)
+        .getObject('${kind.returnsPath}/$id');
     if (!context.mounted) return;
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => _ReturnDetailDialog(
-        kind: kind,
-        invoice: detail,
-      ),
+      builder: (dialogContext) =>
+          _ReturnDetailDialog(kind: kind, invoice: detail),
     );
   } on Failure catch (error) {
     if (context.mounted) showMessage(context, error, error: true);
@@ -163,9 +162,16 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
     final provider = returnListProvider(widget.kind);
     final async = ref.watch(provider);
     final isSales = widget.kind.isSales;
-    final canCreate = user?.branchId != null &&
-        (user!.can(isSales ? 'sales.invoices.create' : 'purchases.invoices.create'));
-    final canPost = user?.can(isSales ? 'sales.invoices.post' : 'purchases.invoices.post') ?? false;
+    final canCreate =
+        user?.branchId != null &&
+        (user!.can(
+          isSales ? 'sales.invoices.create' : 'purchases.invoices.create',
+        ));
+    final canPost =
+        user?.can(
+          isSales ? 'sales.invoices.post' : 'purchases.invoices.post',
+        ) ??
+        false;
 
     return ModuleScaffold(
       title: isSales ? l10n.salesReturns : l10n.purchaseReturns,
@@ -182,6 +188,14 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
             onChanged: (value) => setState(() => _status = value ?? ''),
           ),
           const SizedBox(width: 12),
+          IconButton(
+            tooltip: l10n.refresh,
+            onPressed: _busy || async.isLoading
+                ? null
+                : () => ref.read(provider.notifier).reload(),
+            icon: const Icon(Icons.refresh),
+          ),
+          const SizedBox(width: 8),
           FilledButton.icon(
             onPressed: _busy || !canCreate ? null : _createReturn,
             icon: const Icon(Icons.add),
@@ -215,7 +229,9 @@ class _ReturnsScreenState extends ConsumerState<ReturnsScreen> {
               isSales ? l10n.customer : l10n.supplier,
               value: (row) {
                 final party = row[widget.kind.partyKey];
-                return party is Map ? text(Map<String, dynamic>.from(party), 'nameEn') : '—';
+                return party is Map
+                    ? text(Map<String, dynamic>.from(party), 'nameEn')
+                    : '—';
               },
             ),
             ColumnSpec(
@@ -276,7 +292,9 @@ class _ReturnDetailDialog extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('${l10n.originalInvoice}: ${text(invoice, 'originalInvoiceNumber', fallback: '—')}'),
+              Text(
+                '${l10n.originalInvoice}: ${text(invoice, 'originalInvoiceNumber', fallback: '—')}',
+              ),
               const SizedBox(height: 6),
               Text('${l10n.invoiceDate}: ${text(invoice, 'invoiceDate')}'),
               const SizedBox(height: 6),
@@ -286,7 +304,10 @@ class _ReturnDetailDialog extends StatelessWidget {
                 Text('${l10n.returnReason}: ${text(invoice, 'returnReason')}'),
               ],
               const Divider(height: 24),
-              Text(l10n.returnLines, style: Theme.of(context).textTheme.titleSmall),
+              Text(
+                l10n.returnLines,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
               for (final line in lines)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -299,9 +320,12 @@ class _ReturnDetailDialog extends StatelessWidget {
                     '${l10n.quantityToReturn}: ${text(line, 'quantity')} · '
                     '${l10n.totalAmount}: ${formatAmount(text(line, 'lineTotal'))}',
                   ),
-                  trailing: kind.isSales || text(line, 'landedCostAmount') == '0.0000'
+                  trailing:
+                      kind.isSales || text(line, 'landedCostAmount') == '0.0000'
                       ? null
-                      : Text('${l10n.landedCosts}: ${formatAmount(text(line, 'landedCostAmount'))}'),
+                      : Text(
+                          '${l10n.landedCosts}: ${formatAmount(text(line, 'landedCostAmount'))}',
+                        ),
                 ),
               const Divider(height: 24),
               Align(

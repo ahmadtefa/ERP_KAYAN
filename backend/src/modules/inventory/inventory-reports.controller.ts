@@ -179,6 +179,19 @@ export class InventoryReportsController {
     );
   }
 
+  @Get('reports/cost-center-movements')
+  @RequirePermissions('inventory.stock.read')
+  costCenterMovements(
+    @CurrentUser() user: AuthUser,
+    @Query('costCenterId') costCenterId?: string,
+  ) {
+    return this.service.costCenterMovements(
+      user.companyId,
+      { costCenterId },
+      canReadCost(user),
+    );
+  }
+
   @Get('reports/slow-moving')
   @RequirePermissions('inventory.stock.read')
   slowMoving(

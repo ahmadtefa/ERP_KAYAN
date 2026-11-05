@@ -42,6 +42,7 @@ class _CashScreenState extends ConsumerState<CashScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 3, vsync: this);
   bool _busy = false;
+  bool _refreshing = false;
   final _exitRelay = DraftExitRelay();
   late final DraftExitGuard _exitGuard;
 
@@ -69,6 +70,24 @@ class _CashScreenState extends ConsumerState<CashScreen>
   /// program was restarted.
   void _reloadAll() {
     invalidateMoneyViews(ref);
+  }
+
+  Future<void> _refreshAll() async {
+    if (_busy || _refreshing) return;
+    setState(() => _refreshing = true);
+    _reloadAll();
+    try {
+      await Future.wait([
+        ref.read(cashAccountsProvider.future),
+        ref.read(cashBalancesProvider.future),
+        ref.read(cashVouchersProvider.future),
+        ref.read(cashTransfersProvider.future),
+      ]);
+    } catch (error) {
+      if (mounted) showAppError(context, error);
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
   }
 
   /// A failed response may follow a committed cash action. Refresh all
@@ -356,8 +375,18 @@ class _CashScreenState extends ConsumerState<CashScreen>
               ),
           ],
         ),
-        FieldSpec('transferDate', l10n.invoiceDate, kind: FieldKind.date, required: true),
-        FieldSpec('amount', l10n.amount, kind: FieldKind.decimal, required: true),
+        FieldSpec(
+          'transferDate',
+          l10n.invoiceDate,
+          kind: FieldKind.date,
+          required: true,
+        ),
+        FieldSpec(
+          'amount',
+          l10n.amount,
+          kind: FieldKind.decimal,
+          required: true,
+        ),
         FieldSpec('description', l10n.description, maxLines: 2),
       ],
       initial: {
@@ -424,23 +453,28 @@ class _CashScreenState extends ConsumerState<CashScreen>
   /// The chain behind one row: what the voucher settled and which entry it
   /// wrote. Opened from the list, read from the server, never recomputed here.
   void _showVoucher(Json voucher) => showVoucherDetail(
-        context,
-        id: text(voucher, 'id'),
-        title: text(voucher, 'voucherNumber'),
-      );
+    context,
+    id: text(voucher, 'id'),
+    title: text(voucher, 'voucherNumber'),
+  );
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     return ModuleScaffold(
       title: l10n.cashAndBanks,
-      trailing: _busy
-          ? const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : null,
+      trailing: IconButton(
+        tooltip: l10n.refresh,
+        onPressed: _busy || _refreshing ? null : _refreshAll,
+        icon: _refreshing
+            ? const SizedBox(
+                key: const Key('cash-refresh-loading'),
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.refresh),
+      ),
       body: Column(
         children: [
           TabBar(
@@ -549,8 +583,12 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   numeric: true,
                   emphasise: true,
                   value: (r) {
-                    final balance = asString(balanceById[text(r, 'id')]?['balance']);
-                    return balance == null || balance.isEmpty ? '—' : formatAmount(balance);
+                    final balance = asString(
+                      balanceById[text(r, 'id')]?['balance'],
+                    );
+                    return balance == null || balance.isEmpty
+                        ? '—'
+                        : formatAmount(balance);
                   },
                 ),
               ],
@@ -568,7 +606,9 @@ class _CashScreenState extends ConsumerState<CashScreen>
                       : () => _run(() async {
                           await ref
                               .read(apiClientProvider)
-                              .post('/cash/accounts/${text(row, 'id')}/deactivate');
+                              .post(
+                                '/cash/accounts/${text(row, 'id')}/deactivate',
+                              );
                         }),
                 ),
               ],
@@ -619,11 +659,15 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   value: (r) => text(r, 'voucherNumber'),
                   emphasise: true,
                 ),
-                ColumnSpec(l10n.invoiceDate, value: (r) => text(r, 'voucherDate')),
+                ColumnSpec(
+                  l10n.invoiceDate,
+                  value: (r) => text(r, 'voucherDate'),
+                ),
                 ColumnSpec(
                   l10n.voucherType,
-                  value: (r) =>
-                      text(r, 'kind').toUpperCase() == 'RECEIPT' ? l10n.receipt : l10n.payment,
+                  value: (r) => text(r, 'kind').toUpperCase() == 'RECEIPT'
+                      ? l10n.receipt
+                      : l10n.payment,
                 ),
                 ColumnSpec(
                   l10n.party,
@@ -651,7 +695,9 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   onPressed: () => _showVoucher(row),
                 ),
                 IconButton(
-                  tooltip: isArabic ? 'طباعة وتنزيل المستند' : 'Print and download document',
+                  tooltip: isArabic
+                      ? 'طباعة وتنزيل المستند'
+                      : 'Print and download document',
                   icon: const Icon(Icons.print_outlined, size: 20),
                   onPressed: () => showDialog<void>(
                     context: context,
@@ -690,7 +736,9 @@ class _CashScreenState extends ConsumerState<CashScreen>
                     icon: const Icon(Icons.undo, size: 20),
                     onPressed: _busy
                         ? null
-                        : () => _reverse('/cash/vouchers/${text(row, 'id')}/reverse'),
+                        : () => _reverse(
+                            '/cash/vouchers/${text(row, 'id')}/reverse',
+                          ),
                   ),
               ],
             ),
@@ -739,7 +787,10 @@ class _CashScreenState extends ConsumerState<CashScreen>
                   value: (r) => text(r, 'transferNumber'),
                   emphasise: true,
                 ),
-                ColumnSpec(l10n.invoiceDate, value: (r) => text(r, 'transferDate')),
+                ColumnSpec(
+                  l10n.invoiceDate,
+                  value: (r) => text(r, 'transferDate'),
+                ),
                 ColumnSpec(l10n.fromAccount, value: (r) => text(r, 'fromCode')),
                 ColumnSpec(l10n.toAccount, value: (r) => text(r, 'toCode')),
                 ColumnSpec(
@@ -796,34 +847,34 @@ class _AccountStatement extends ConsumerWidget {
           : RecordsTable(
               rows: rows,
               columns: [
-                ColumnSpec(l10n.invoiceDate, value: (r) => text(r, 'entryDate')),
+                ColumnSpec(
+                  l10n.invoiceDate,
+                  value: (r) => text(r, 'entryDate'),
+                ),
                 ColumnSpec(
                   l10n.description,
                   flex: 2,
-                  value: (r) => text(
-                    r,
-                    'description',
-                    fallback: text(r, 'entryNumber'),
-                  ),
+                  value: (r) =>
+                      text(r, 'description', fallback: text(r, 'entryNumber')),
                 ),
                 ColumnSpec(
                   l10n.debit,
                   numeric: true,
-                  value: (r) => formatAmount(amount(r, 'debit'), locale: locale),
+                  value: (r) =>
+                      formatAmount(amount(r, 'debit'), locale: locale),
                 ),
                 ColumnSpec(
                   l10n.credit,
                   numeric: true,
-                  value: (r) => formatAmount(amount(r, 'credit'), locale: locale),
+                  value: (r) =>
+                      formatAmount(amount(r, 'credit'), locale: locale),
                 ),
                 ColumnSpec(
                   l10n.balance,
                   numeric: true,
                   emphasise: true,
-                  value: (r) => formatAmount(
-                    amount(r, 'runningBalance'),
-                    locale: locale,
-                  ),
+                  value: (r) =>
+                      formatAmount(amount(r, 'runningBalance'), locale: locale),
                 ),
               ],
             ),
