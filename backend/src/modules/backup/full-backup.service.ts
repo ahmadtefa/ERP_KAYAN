@@ -383,6 +383,10 @@ export class FullBackupService {
       // Read both the table of contents and the archive data before publishing.
       // This is not a complete restore rehearsal or a backup of external files.
       await this.verifyUploaded(name, tools.pgRestore as string, partial);
+      // Flush archive bytes before publication. This narrows, but does not
+      // eliminate, crash risk: the directory entry and external files are not
+      // covered by this sync, and hardware/filesystem guarantees vary.
+      await this.syncArchive(partial);
       // Hard-linking within the same directory is atomic and fails if a
       // completed backup already occupies the destination. Never replace it.
       await link(partial, path);
@@ -417,6 +421,15 @@ export class FullBackupService {
     }
 
     return { file, durationMs: Date.now() - started };
+  }
+
+  private async syncArchive(path: string): Promise<void> {
+    const handle = await open(path, 'r+');
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
   }
 
   async list(): Promise<FullBackupFile[]> {

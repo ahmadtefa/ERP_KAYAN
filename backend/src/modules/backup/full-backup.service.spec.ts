@@ -180,8 +180,10 @@ describe('FullBackupService guards', () => {
         }) as typeof childProcess.execFile,
       );
 
+      const flush = jest.spyOn(service as any, 'syncArchive');
       const result = await service.createFull('user-1');
 
+      expect(flush).toHaveBeenCalledTimes(1);
       expect(seenArgs).toHaveLength(3);
       expect(seenArgs[1]).toContain('--list');
       expect(seenArgs[2]).toContain('--file');
@@ -195,6 +197,27 @@ describe('FullBackupService guards', () => {
       );
       const listed = await service.list();
       expect(listed.map((f) => f.name)).toContain(result.file.name);
+    });
+
+    it('does not publish or audit a new archive when flushing its bytes fails', async () => {
+      const dir = temporaryDir('kayan-backups-');
+      const existing = join(dir, 'kayan-full-existing.dump');
+      writeFileSync(existing, 'PGDMP-previous-synthetic');
+      const audit = { record: jest.fn(async () => {}) };
+      const service = serviceWithTools(dir, audit);
+      jest.mocked(childProcess.execFile).mockImplementation(((_, args, ___, callback) => {
+        const argv = args as string[];
+        const fileArg = argv.find((a) => a.startsWith('--file='));
+        if (fileArg) writeFileSync(fileArg.slice(7), Buffer.from('PGDMP-synthetic'));
+        (callback as (e: Error | null, o: string, s: string) => void)(null, fileArg ? '' : '1; 0 0 TABLE synthetic', '');
+        return {} as childProcess.ChildProcess;
+      }) as typeof childProcess.execFile);
+      const flush = jest.spyOn(service as any, 'syncArchive').mockRejectedValue(new Error('synthetic fsync failure'));
+      await expect(service.createFull('user-1')).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(flush).toHaveBeenCalledTimes(1);
+      expect(readdirSync(dir)).toEqual(['kayan-full-existing.dump']);
+      expect((await service.read('kayan-full-existing.dump')).data.toString()).toBe('PGDMP-previous-synthetic');
+      expect(audit.record).not.toHaveBeenCalled();
     });
 
     it('fails with a clear error and leaves no partial file when pg_dump fails', async () => {

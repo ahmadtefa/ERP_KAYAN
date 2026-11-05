@@ -128,6 +128,18 @@ const path = require('node:path');
       assert.deepEqual((await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows, before.rows);
     } finally { await http.close(); }
 
+    // Real pg_dump/pg_restore with an injected fsync failure: do not publish
+    // a new file or disturb the previous backup/primary when flushing fails.
+    const flushFail = new FullBackupService(prisma, { record: async () => {} }, maintenance, { reconcile: async () => {} });
+    flushFail.syncArchive = async () => { throw new Error('synthetic fsync failure'); };
+    const filesBeforeFlush = (await fs.readdir(dir)).filter(name => name.endsWith('.dump')).sort();
+    await assert.rejects(flushFail.createFull('fixture'));
+    assert.deepEqual((await fs.readdir(dir)).filter(name => name.endsWith('.dump')).sort(), filesBeforeFlush);
+    assert.equal((await fs.readdir(dir)).some(name => name.endsWith('.partial')), false);
+    assert.ok((await service.verify(backup.file.name)).archiveContentReadable);
+    assert.deepEqual((await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows, before.rows);
+    console.log('PASS: injected archive fsync failure prevents publication and preserves the prior archive and primary; no power-loss guarantee.');
+
     // A tool may exit zero while leaving a data-corrupt archive; it must not
     // be published even if its TOC can be listed successfully.
     const corruptDumpTool = path.join(dir, 'corrupt-pg-dump');
