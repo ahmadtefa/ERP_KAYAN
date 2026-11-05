@@ -149,6 +149,23 @@ void main() {
     expect(find.textContaining('3  Capital'), findsOneWidget);
   });
 
+  testWidgets('long parent account names fit the editor and retain the selected parent', (tester) async {
+    final source = _ChartSource();
+    const longName = 'A synthetic parent account with a very long name for a narrow selection field';
+    source.accounts.add(const Account(id:'long',companyId:'c',code:'SYN-VERY-LONG-CODE',
+      name:longName,nameEn:longName,nameAr:'حساب تجريبي طويل',type:AccountType.asset));
+    await _open(tester,source);
+    await tester.tap(find.text('New account')); await tester.pumpAndSettle();
+    expect(tester.takeException(),isNull);
+    await tester.tap(find.byType(DropdownButtonFormField<String?>).first); await tester.pumpAndSettle();
+    await tester.tap(find.textContaining(longName).last); await tester.pumpAndSettle();
+    expect(tester.takeException(),isNull);
+    await tester.enterText(find.widgetWithText(TextField,'Name in Arabic *'),'حساب تجريبي');
+    await tester.enterText(find.widgetWithText(TextField,'Name in English *'),'Synthetic child');
+    await tester.tap(find.text('Save')); await tester.pumpAndSettle();
+    expect(source.createdInput?.parentId,'long');
+  });
+
   testWidgets('new account form creates and reloads the chart', (tester) async {
     final source = _ChartSource();
     await _open(tester, source);

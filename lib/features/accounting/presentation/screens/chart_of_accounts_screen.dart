@@ -500,6 +500,9 @@ Future<void> _editAccount(
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String?>(
                     initialValue: selectedParent,
+                    // The parent catalogue can contain long codes and names.
+                    // Constrain its selected display to the dialog width.
+                    isExpanded: true,
                     decoration: InputDecoration(
                       labelText: dialogL10n.parentAccount,
                       helperText: dialogL10n.parentAccountHelper,
@@ -514,6 +517,8 @@ Future<void> _editAccount(
                           value: parent.id,
                           child: Text(
                             accountLabel(parent, dialogL10n.localeName),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                     ],
