@@ -147,6 +147,26 @@ describe('Sales multi-unit — milk scenario', () => {
       expect(line.taxRate.toFixed(4)).toBe(expected);
     });
 
+  it('does not silently add company tax to an item-less line whose tax was omitted', async () => {
+    const {service, tx, settings} = makeService();
+    settings.get.mockResolvedValue({taxRate:'14', maxDiscountPercent:'100', pricesIncludeTax:false});
+    await service.create(COMPANY, BRANCH, 'user-1', {...baseDto,
+      lines:[{description:'Service without catalog item', quantity:'1', unitPrice:'100'}]} as any);
+    const line = tx.salesInvoice.create.mock.calls[0][0].data.lines.create[0];
+    expect(line.taxRate.toFixed(4)).toBe('0.0000');
+    expect(line.taxAmount.toFixed(4)).toBe('0.0000');
+    expect(line.lineTotal.toFixed(4)).toBe('100.0000');
+  });
+
+  it.each([[null, '0.0000'], ['', '0.0000'], ['   ', '0.0000'], ['7', '7.0000']])
+    ('honours a free-text line tax of %s as %s', async (taxRate, expected) => {
+      const {service, tx, settings} = makeService();
+      settings.get.mockResolvedValue({taxRate:'14', maxDiscountPercent:'100', pricesIncludeTax:false});
+      await service.create(COMPANY, BRANCH, 'user-1', {...baseDto,
+        lines:[{description:'Service', quantity:'1', unitPrice:'100', taxRate}]} as any);
+      expect(tx.salesInvoice.create.mock.calls[0][0].data.lines.create[0].taxRate.toFixed(4)).toBe(expected);
+    });
+
   it('treats an explicit blank tax as zero while retaining an omitted item rate', async () => {
     const { service, tx } = makeService({ ...milkItem, taxRate: D(14) });
     await service.create(COMPANY, BRANCH, 'user-1', { ...baseDto,
