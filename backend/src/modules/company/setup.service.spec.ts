@@ -63,6 +63,32 @@ describe('SetupService status and public setup boundary', () => {
     );
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
+
+  it('rechecks company and user rows after taking the transaction lock', async () => {
+    const executeRaw = jest.fn().mockResolvedValue(1);
+    const tx = {
+      $executeRaw: executeRaw,
+      company: { count: jest.fn().mockResolvedValue(1) },
+      user: { count: jest.fn().mockResolvedValue(0) },
+    };
+    const prisma = {
+      company: { count: jest.fn().mockResolvedValue(0) },
+      user: { count: jest.fn().mockResolvedValue(0) },
+      $transaction: jest.fn(async (callback: (transaction: unknown) => unknown) =>
+        callback(tx),
+      ),
+    };
+    const service = new SetupService(prisma as any, {} as any, licensingStub);
+
+    await expect(
+      service.initialSetup({ adminPassword: 'safe-test-password' } as any),
+    ).rejects.toThrow(
+      'This installation already contains company or user data',
+    );
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(tx.company.count).toHaveBeenCalledWith();
+    expect(tx.user.count).toHaveBeenCalledWith();
+  });
 });
 
 describe('SetupService seedRoles', () => {
