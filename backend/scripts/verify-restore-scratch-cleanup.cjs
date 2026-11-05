@@ -228,6 +228,79 @@ const path = require('node:path');
       await admin.query(`DROP DATABASE IF EXISTS "${safetyName}"`);
     }
     console.log('PASS: synthetic PG older backup restored; injected access repair failure holds local maintenance; separate scratch restore confirms safety snapshot contains pre-restore value. Application checks and licensing stubbed; no crash or concurrency proof.');
+
+    // Exercise a successful older-archive restore through the HTTP controller
+    // on the same strictly disposable target. The access repair, application
+    // postcheck, audit persistence and licensing are stubs, NOT end-to-end.
+    const cleanMaintenance = new MaintenanceService();
+    let repairCount=0, reconcileCount=0;
+    const events=[];
+    const clean = new FullBackupService({$executeRawUnsafe: sql => client.query(sql)},
+      {record:async row=>{events.push(row);}},cleanMaintenance,{reconcile:async()=>{reconcileCount++;}});
+    clean.postRestoreCheck=async()=>({ok:true,detail:'synthetic-only'});
+    clean.reconcileRestoredCompanies=async()=>{repairCount++;return {companies:0,grantsAdded:0,superAdminPromoted:[]};};
+    const digest=async()=> (await client.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows;
+    assert.deepEqual(await digest(),before.rows);
+    await client.query("UPDATE fixture_items SET value='newer-backup' WHERE id=1; INSERT INTO fixture_items VALUES(1003,'after-old-backup')");
+    const newerSnapshot=await digest();
+    const newer=await clean.createFull('fixture');
+    assert.notEqual(newer.file.name,backup.file.name);
+    await client.query("UPDATE fixture_items SET value='before-restore' WHERE id=1; DELETE FROM fixture_items WHERE id=2");
+    const beforeRestore=await digest();
+    assert.notDeepEqual(beforeRestore,newerSnapshot);
+    const oldBytes=await fs.readFile(path.join(dir,backup.file.name));
+    const newBytes=await fs.readFile(path.join(dir,newer.file.name));
+    class RestoreHttpFixtureModule {}
+    NestModule({controllers:[FullBackupController],providers:[
+      {provide:FullBackupService,useValue:clean},{provide:MaintenanceService,useValue:cleanMaintenance},
+    ]})(RestoreHttpFixtureModule);
+    const restoreHttp=await NestFactory.create(RestoreHttpFixtureModule,{logger:false});
+    try {
+      restoreHttp.use((req,_res,next)=>{req.user={userId:'fixture',companyId:'fixture',branchId:null,
+        username:'fixture',isSuperAdmin:req.headers['x-fixture-super']==='yes',permissions:['admin.backup']};next();});
+      restoreHttp.useGlobalGuards(new PermissionsGuard(new Reflector()));
+      restoreHttp.useGlobalFilters(new ProblemDetailsFilter());
+      await restoreHttp.listen(0,'127.0.0.1');
+      const endpoint=`http://127.0.0.1:${restoreHttp.getHttpServer().address().port}/backup/full/restore`;
+      const post=(body,superAdmin=true)=>fetch(endpoint,{method:'POST',headers:{'content-type':'application/json',
+        'x-fixture-super':superAdmin?'yes':'no'},body:JSON.stringify(body)});
+      assert.equal((await post({confirm:true,fileName:backup.file.name},false)).status,403);
+      assert.equal((await post({confirm:false,fileName:backup.file.name})).status,400);
+      assert.equal((await post({confirm:true,fileName:'synthetic-missing.dump'})).status,404);
+      assert.equal((await post({confirm:true,fileName:'synthetic-corrupt.dump'})).status,400);
+      assert.deepEqual(await digest(),beforeRestore);
+      assert.equal(cleanMaintenance.isActive,false);
+      assert.equal(repairCount,0); assert.equal(reconcileCount,0);
+      const restored=await post({confirm:true,fileName:backup.file.name});
+      assert.equal(restored.status,201);
+      const result=await restored.json();
+      assert.equal(result.restored,true); assert.equal(result.rehearsed,true); assert.equal(result.checked,true);
+      assert.equal(result.source,backup.file.name);
+      assert.equal(cleanMaintenance.isActive,false);
+      assert.equal(repairCount,1); assert.equal(reconcileCount,1);
+      assert.deepEqual(await digest(),before.rows);
+      assert.deepEqual(await fs.readFile(path.join(dir,backup.file.name)),oldBytes);
+      assert.deepEqual(await fs.readFile(path.join(dir,newer.file.name)),newBytes);
+      assert.equal(events.filter(event=>event.action==='RESTORE').length,1);
+      // Independently restore the safety copy and verify all synthetic rows,
+      // including the changes immediately before the destructive restore.
+      const checkName=`kayan_safety_check_${randomUUID().replace(/-/g,'')}`;
+      let check;
+      try {
+        await admin.query(`CREATE DATABASE "${checkName}"`);
+        execFileSync('pg_restore',['--exit-on-error','--no-owner','--no-privileges','--no-password',
+          `--dbname=${checkName}`,path.join(dir,result.safetyBackup)],
+          {env:{...process.env,...pgBackupConnectionEnv(process.env.DATABASE_URL)}});
+        const checkUrl=new URL(adminUrl);checkUrl.pathname=`/${checkName}`;
+        check=new Client({connectionString:checkUrl.toString()});await check.connect();
+        assert.deepEqual((await check.query(`SELECT count(*)::int AS n, md5(string_agg(value, '' ORDER BY id)) AS digest FROM fixture_items`)).rows,beforeRestore);
+      } finally {
+        if (check) await check.end();
+        await admin.query(`DROP DATABASE IF EXISTS "${checkName}"`);
+      }
+    } finally { await restoreHttp.close(); }
+    console.log('PASS: HTTP restored older synthetic PG archive, preserves older/newer files and independently restores pre-restore safety copy; application/access/licence checks stubbed, no files/crash/JWT proof.');
+
   } finally {
     if (scratchClient) await scratchClient.end();
     if (scratchName) await admin.query(`DROP DATABASE "${scratchName}"`);
