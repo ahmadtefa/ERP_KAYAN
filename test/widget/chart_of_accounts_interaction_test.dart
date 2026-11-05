@@ -107,6 +107,22 @@ void main() {
     expect(find.byTooltip('Delete account'),findsNothing);
   });
 
+  testWidgets('create-only chart exposes creation but not other mutations', (tester) async {
+    await _open(tester, _ChartSource(), user:const AppUser(id:'u',username:'u',fullName:'Creator',companyId:'c',permissions:['accounting.accounts.create']));
+    expect(find.text('New account'),findsOneWidget);
+    expect(find.byTooltip('Edit account'),findsNothing);
+    expect(find.byTooltip('Deactivate account'),findsNothing);
+    expect(find.byTooltip('Delete account'),findsNothing);
+  });
+
+  testWidgets('delete-only chart exposes deletion but not other mutations', (tester) async {
+    await _open(tester, _ChartSource(), user:const AppUser(id:'u',username:'u',fullName:'Deleter',companyId:'c',permissions:['accounting.accounts.delete']));
+    expect(find.text('New account'),findsNothing);
+    expect(find.byTooltip('Edit account'),findsNothing);
+    expect(find.byTooltip('Deactivate account'),findsNothing);
+    expect(find.byTooltip('Delete account'),findsWidgets);
+  });
+
   testWidgets('collapse hides all descendants, expand restores them', (tester) async {
     final source = _ChartSource();
     await _open(tester, source);
