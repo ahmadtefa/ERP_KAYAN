@@ -294,15 +294,14 @@ export class LicenceBackupArchive {
         'UNREADABLE',
       );
     }
-    const snapshot: { name: string; body: Buffer }[] = [];
+    const sourceFiles: { name: string; body: Buffer }[] = [];
     for (const name of SNAPSHOT_FILES) {
       const path = join(this.licenceDirectory, name);
       if (!existsSync(path)) continue;
-      const body = readFileSync(path);
-      snapshot.push({ name, body });
+      sourceFiles.push({ name, body: readFileSync(path) });
     }
-    const primary = snapshot.find((f) => f.name === 'license-state.json');
-    const mirror = snapshot.find(
+    const primary = sourceFiles.find((f) => f.name === 'license-state.json');
+    const mirror = sourceFiles.find(
       (f) => f.name === 'license-state.backup.json',
     );
     if (!primary && !mirror) {
@@ -313,20 +312,22 @@ export class LicenceBackupArchive {
         'UNREADABLE',
       );
     }
-    const verifiedStates: LicenseTrustState[] = [];
+    const verifiedStateFiles: { file: { name: string; body: Buffer }; state: LicenseTrustState }[] = [];
     for (const file of [primary, mirror]) {
       if (!file) continue;
       try {
-        verifiedStates.push(
-          verifyStateDocument(
+        verifiedStateFiles.push({
+          file,
+          state: verifyStateDocument(
             file.body.toString('utf8'),
             secret,
             `licence backup source ${file.name}`,
           ),
-        );
+        });
       } catch (error) {
-        // One damaged copy is fine as long as the other authenticates: the
-        // capture then records the verified one.
+        // A damaged copy is excluded from the snapshot. If the other copy is
+        // authentic, normalize it as the primary state file in the archive so
+        // restoreNewestVerified can always verify the recovery candidate.
         this.logger?.warn(
           `Skipping an unauthenticated licence state while capturing a backup (${file.name}): ${
             (error as Error).message
@@ -334,7 +335,7 @@ export class LicenceBackupArchive {
         );
       }
     }
-    if (verifiedStates.length === 0) {
+    if (verifiedStateFiles.length === 0) {
       throw this.refuse(
         reason,
         'state-not-authentic',
@@ -342,9 +343,29 @@ export class LicenceBackupArchive {
         'TAMPERED',
       );
     }
-    const state = verifiedStates.reduce((a, b) =>
-      b.sequence > a.sequence ? b : a,
+    const newestStateFile = verifiedStateFiles.reduce((a, b) =>
+      b.state.sequence > a.state.sequence ? b : a,
     );
+    const state = newestStateFile.state;
+    // Never preserve an unauthenticated primary/mirror as part of a verified
+    // archive. The restore path reads license-state.json by design, so copy
+    // the newest authenticated document there even when only the mirror
+    // survived. Keep a mirror only when it independently authenticates.
+    const snapshot = sourceFiles.filter(
+      (file) =>
+        file.name !== 'license-state.json' &&
+        file.name !== 'license-state.backup.json',
+    );
+    snapshot.push({ name: 'license-state.json', body: newestStateFile.file.body });
+    const verifiedMirror = verifiedStateFiles.find(
+      (entry) => entry.file.name === 'license-state.backup.json',
+    );
+    if (verifiedMirror) {
+      snapshot.push({
+        name: 'license-state.backup.json',
+        body: verifiedMirror.file.body,
+      });
+    }
 
     const at = this.clock();
     const id = randomBytes(4).toString('hex');
