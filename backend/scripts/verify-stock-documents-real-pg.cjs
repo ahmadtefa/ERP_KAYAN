@@ -1333,6 +1333,16 @@ let difference = '70000000-0000-4000-8000-000000000005';
         assert.equal(response.status,201,kind);
         const body=await response.json();
         assert.ok(body.id,kind);
+        if (kind === 'sales') {
+          assert.equal(body.costOfGoods,null); assert.equal(body.grossProfit,null);
+          assert.ok(body.lines.every(line=>line.unitCost===null && line.costTotal===null));
+          const update=await fetch(base+route+'/'+body.id,{method:'PUT',headers:{'content-type':'application/json','x-allowed':'yes'},
+            body:JSON.stringify({[partyField]:party,invoiceDate:date,lines})});
+          assert.equal(update.status,200);
+          const updated=await update.json();
+          assert.equal(updated.costOfGoods,null); assert.equal(updated.grossProfit,null);
+          assert.ok(updated.lines.every(line=>line.unitCost===null && line.costTotal===null));
+        }
         assert.equal(await model.count({where:{companyId:company}}),before+1,kind);
         const saved=await model.findUniqueOrThrow({where:{id:body.id},include:{lines:{orderBy:{lineNumber:'asc'}}}});
         assert.deepEqual(saved.lines.map(line=>line.taxRate.toFixed(4)),['0.0000','0.0000','0.0000','0.0000','7.0000','14.0000'],kind);
@@ -1615,8 +1625,32 @@ let difference = '70000000-0000-4000-8000-000000000005';
     }
     await assert.rejects(si.updateDraft(company,branch,user,converted.sales.invoiceId,{}),/allocation reconciliation/);
     await assert.rejects(pi.updateDraft(company,branch,user,converted.purchase.invoiceId,{}),/allocation reconciliation/);
+    // Actual invoice controller/service/PG with the cost permission varied at
+    // the HTTP edge. Identity is injected, so this is not a JWT test.
+    async function salesInvoiceHttp(method,path,mayReadCost,allowed=true) {
+      class SalesInvoiceFixtureModule {}
+      Module({controllers:[SalesInvoicesController],providers:[{provide:SalesInvoicesService,useValue:si}]})(SalesInvoiceFixtureModule);
+      const app=await NestFactory.create(SalesInvoiceFixtureModule,{logger:false});
+      app.use((req,_res,next)=>{req.user={companyId:company,userId:user,branchId:branch,isSuperAdmin:false,
+        permissions:allowed ? ['sales.invoices.post','sales.invoices.read',...(mayReadCost?['inventory.cost.read']:[])] : []};next();});
+      app.useGlobalGuards(new PermissionsGuard(new Reflector())); app.useGlobalFilters(new ProblemDetailsFilter());
+      try {
+        await app.listen(0,'127.0.0.1');
+        const response=await fetch(`http://127.0.0.1:${app.getHttpServer().address().port}/sales/invoices/${path}`,{method});
+        return {status:response.status,body:await response.json()};
+      } finally { await app.close(); }
+    }
     await pi.post(company,user,converted.purchase.invoiceId);
-    await si.post(company,user,converted.sales.invoiceId);
+    assert.equal((await salesInvoiceHttp('POST',`${converted.sales.invoiceId}/post`,false,false)).status,403);
+    assert.equal((await prisma.salesInvoice.findUniqueOrThrow({where:{id:converted.sales.invoiceId}})).status,'DRAFT');
+    const salesPosted=await salesInvoiceHttp('POST',`${converted.sales.invoiceId}/post`,false);
+    assert.equal(salesPosted.status,201);
+    assert.equal(salesPosted.body.costOfGoods,null); assert.equal(salesPosted.body.grossProfit,null);
+    assert.ok(salesPosted.body.lines.every(line=>line.unitCost===null && line.costTotal===null));
+    const salesAllowed=await salesInvoiceHttp('GET',converted.sales.invoiceId,true);
+    assert.equal(salesAllowed.status,200);
+    assert.ok(Number(salesAllowed.body.costOfGoods)>0);
+    assert.ok(Number(salesAllowed.body.lines[0].unitCost)>0);
     let orderStockState = await prisma.stockBalance.findUniqueOrThrow({where:{companyId_branchId_itemId:{companyId:company,branchId:branch,itemId:first.id}}});
     assert.equal(orderStockState.quantity.toFixed(4),'0.0000');
     for (const [kind, svc, orders] of [['sales',si,sales],['purchase',pi,purchases]]) {
@@ -1652,7 +1686,14 @@ let difference = '70000000-0000-4000-8000-000000000005';
       assert.equal(afterReversalStock.quantity.toFixed(4),beforeReversalStock.quantity.toFixed(4));
       assert.equal(afterReversalStock.value.toFixed(4),beforeReversalStock.value.toFixed(4));
       assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:`${kind}_invoices`,entityId:target.invoiceId,action:'REVERSE'}}),0);
-      await svc.reverse(company,user,target.invoiceId);
+      if (kind === 'sales') {
+        const reversed=await salesInvoiceHttp('POST',`${target.invoiceId}/reverse`,false);
+        assert.equal(reversed.status,201);
+        assert.equal(reversed.body.costOfGoods,null); assert.equal(reversed.body.grossProfit,null);
+        assert.ok(reversed.body.lines.every(line=>line.unitCost===null && line.costTotal===null));
+      } else {
+        await svc.reverse(company,user,target.invoiceId);
+      }
       assert.equal(await prisma.auditLog.count({where:{companyId:company,entity:`${kind}_invoices`,entityId:target.invoiceId,action:'REVERSE'}}),1);
       assert.equal((await invoiceModel.findUniqueOrThrow({where:{id:target.invoiceId}})).status,'REVERSED');
       assert.equal((await orderLineModel.findUniqueOrThrow({where:{id:target.orderLineId}})).invoicedQuantity.toFixed(4),'10.0000');

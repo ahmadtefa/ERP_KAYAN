@@ -38,19 +38,19 @@ export class ReturnsController {
   @Post('sales')
   @RequirePermissions('sales.invoices.create')
   createSales(@CurrentUser() user: AuthUser, @Body() body: Record<string, unknown>) {
-    return this.service.createSalesReturn(user.companyId, user.branchId, user.userId, body as never);
+    return this.service.createSalesReturn(user.companyId, user.branchId, user.userId, body as never, canReadCost(user));
   }
 
   @Post('sales/:id/post')
   @RequirePermissions('sales.invoices.post')
   postSales(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.postSalesReturn(user.companyId, user.userId, id);
+    return this.service.postSalesReturn(user.companyId, user.userId, id, canReadCost(user));
   }
 
   @Post('sales/:id/reverse')
   @RequirePermissions('sales.invoices.post')
   reverseSales(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.reverse(user.companyId, user.userId, 'sales', id);
+    return this.service.reverse(user.companyId, user.userId, 'sales', id, canReadCost(user));
   }
 
   @Get('purchases')
@@ -83,18 +83,19 @@ export class ReturnsController {
       user.branchId,
       user.userId,
       body as never,
+      canReadCost(user),
     );
   }
 
   @Post('purchases/:id/post')
   @RequirePermissions('purchases.invoices.post')
   postPurchase(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.postPurchaseReturn(user.companyId, user.userId, id);
+    return this.service.postPurchaseReturn(user.companyId, user.userId, id, canReadCost(user));
   }
 
   @Post('purchases/:id/reverse')
   @RequirePermissions('purchases.invoices.post')
   reversePurchase(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.reverse(user.companyId, user.userId, 'purchases', id);
+    return this.service.reverse(user.companyId, user.userId, 'purchases', id, canReadCost(user));
   }
 }

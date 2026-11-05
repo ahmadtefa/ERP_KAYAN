@@ -181,3 +181,56 @@ describe('cost redaction - operations sales report', () => {
     expect(allowed.totals.grossProfit).toBe('54.0000');
   });
 });
+
+describe('sales invoice write responses honour cost permission', () => {
+  it('passes the current cost permission through every response-producing mutation', async () => {
+    const { SalesInvoicesController } = await import('./sales-invoices.controller');
+    const service = {create:jest.fn(),updateDraft:jest.fn(),post:jest.fn(),reverse:jest.fn()};
+    const controller = new SalesInvoicesController(service as never);
+    const principal = {userId:'u',companyId:'c',branchId:'b',username:'test',isSuperAdmin:false,permissions:[]};
+    const dto = {lines:[]} as never;
+    controller.create(principal,dto);
+    controller.updateDraft(principal,'i',dto);
+    controller.post(principal,'i');
+    controller.reverse(principal,'i');
+    expect(service.create).toHaveBeenLastCalledWith('c','b','u',dto,undefined,false);
+    expect(service.updateDraft).toHaveBeenLastCalledWith('c','b','u','i',dto,false);
+    expect(service.post).toHaveBeenLastCalledWith('c','u','i',false);
+    expect(service.reverse).toHaveBeenLastCalledWith('c','u','i',false);
+    const allowed = {...principal,permissions:['inventory.cost.read']};
+    controller.create(allowed,dto);
+    controller.updateDraft(allowed,'i',dto);
+    controller.post(allowed,'i');
+    controller.reverse(allowed,'i');
+    expect(service.create).toHaveBeenLastCalledWith('c','b','u',dto,undefined,true);
+    expect(service.updateDraft).toHaveBeenLastCalledWith('c','b','u','i',dto,true);
+    expect(service.post).toHaveBeenLastCalledWith('c','u','i',true);
+    expect(service.reverse).toHaveBeenLastCalledWith('c','u','i',true);
+  });
+});
+
+describe('return write responses honour cost permission on both sides', () => {
+  it('passes current cost permission for creation, posting and reversal', async () => {
+    const { ReturnsController } = await import('../returns/returns.controller');
+    const service = {createSalesReturn:jest.fn(),postSalesReturn:jest.fn(),createPurchaseReturn:jest.fn(),
+      postPurchaseReturn:jest.fn(),reverse:jest.fn()};
+    const controller = new ReturnsController(service as never);
+    const principal = {userId:'u',companyId:'c',branchId:'b',username:'test',isSuperAdmin:false,permissions:[]};
+    const body = {originalInvoiceId:'i'};
+    for (const allowed of [false,true]) {
+      const caller = {...principal,permissions:allowed ? ['inventory.cost.read'] : []};
+      controller.createSales(caller,body);
+      controller.postSales(caller,'i');
+      controller.reverseSales(caller,'i');
+      expect(service.createSalesReturn).toHaveBeenLastCalledWith('c','b','u',body,allowed);
+      expect(service.postSalesReturn).toHaveBeenLastCalledWith('c','u','i',allowed);
+      expect(service.reverse).toHaveBeenLastCalledWith('c','u','sales','i',allowed);
+      controller.createPurchase(caller,body);
+      controller.postPurchase(caller,'i');
+      controller.reversePurchase(caller,'i');
+      expect(service.createPurchaseReturn).toHaveBeenLastCalledWith('c','b','u',body,allowed);
+      expect(service.postPurchaseReturn).toHaveBeenLastCalledWith('c','u','i',allowed);
+      expect(service.reverse).toHaveBeenLastCalledWith('c','u','purchases','i',allowed);
+    }
+  });
+});

@@ -30,7 +30,7 @@ export class SalesInvoicesController {
   @Post()
   @RequirePermissions('sales.invoices.create')
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateSalesInvoiceDto) {
-    return this.service.create(user.companyId, user.branchId, user.userId, dto);
+    return this.service.create(user.companyId, user.branchId, user.userId, dto, undefined, canReadCost(user));
   }
 
   @Put(':id')
@@ -40,7 +40,7 @@ export class SalesInvoicesController {
     @Param('id') id: string,
     @Body() dto: CreateSalesInvoiceDto,
   ) {
-    return this.service.updateDraft(user.companyId, user.branchId, user.userId, id, dto);
+    return this.service.updateDraft(user.companyId, user.branchId, user.userId, id, dto, canReadCost(user));
   }
 
   @Put(':id/order-allocation')
@@ -58,12 +58,12 @@ export class SalesInvoicesController {
   @Post(':id/post')
   @RequirePermissions('sales.invoices.post')
   post(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.post(user.companyId, user.userId, id);
+    return this.service.post(user.companyId, user.userId, id, canReadCost(user));
   }
 
   @Post(':id/reverse')
   @RequirePermissions('sales.invoices.post')
   reverse(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.reverse(user.companyId, user.userId, id);
+    return this.service.reverse(user.companyId, user.userId, id, canReadCost(user));
   }
 }

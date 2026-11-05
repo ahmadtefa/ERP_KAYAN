@@ -242,6 +242,7 @@ export class ReturnsService {
       notes?: string;
       lines: ReturnLineInput[];
     },
+    mayReadCost = true,
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
@@ -442,10 +443,10 @@ export class ReturnsService {
       },
     });
 
-    return this.findOne(companyId, 'sales', created.id);
+    return this.findOne(companyId, 'sales', created.id, mayReadCost);
   }
 
-  async postSalesReturn(companyId: string, userId: string, id: string) {
+  async postSalesReturn(companyId: string, userId: string, id: string, mayReadCost = true) {
     const document = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } }, originalInvoice: true },
@@ -730,7 +731,7 @@ export class ReturnsService {
       },
     });
 
-    return this.findOne(companyId, 'sales', id);
+    return this.findOne(companyId, 'sales', id, mayReadCost);
   }
 
   // --------------------------------------------------------- purchase return
@@ -746,6 +747,7 @@ export class ReturnsService {
       notes?: string;
       lines: ReturnLineInput[];
     },
+    mayReadCost = true,
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
@@ -941,10 +943,10 @@ export class ReturnsService {
       },
     });
 
-    return this.findOne(companyId, 'purchases', created.id);
+    return this.findOne(companyId, 'purchases', created.id, mayReadCost);
   }
 
-  async postPurchaseReturn(companyId: string, userId: string, id: string) {
+  async postPurchaseReturn(companyId: string, userId: string, id: string, mayReadCost = true) {
     const document = await this.prisma.purchaseInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } }, originalInvoice: true },
@@ -1230,11 +1232,11 @@ export class ReturnsService {
       },
     });
 
-    return this.findOne(companyId, 'purchases', id);
+    return this.findOne(companyId, 'purchases', id, mayReadCost);
   }
 
   /** Reverses a posted return: the mirror entry, and the stock back the way it came. */
-  async reverse(companyId: string, userId: string, side: 'sales' | 'purchases', id: string) {
+  async reverse(companyId: string, userId: string, side: 'sales' | 'purchases', id: string, mayReadCost = true) {
     if (side === 'sales') {
       const document = await this.prisma.salesInvoice.findFirst({
         where: { id, companyId, deletedAt: null },
@@ -1363,7 +1365,7 @@ export class ReturnsService {
         entity: 'sales_returns',
         entityId: id,
       });
-      return this.findOne(companyId, 'sales', id);
+      return this.findOne(companyId, 'sales', id, mayReadCost);
     }
 
     const document = await this.prisma.purchaseInvoice.findFirst({
@@ -1469,7 +1471,7 @@ export class ReturnsService {
       entity: 'purchase_returns',
       entityId: id,
     });
-    return this.findOne(companyId, 'purchases', id);
+    return this.findOne(companyId, 'purchases', id, mayReadCost);
   }
 
   // ------------------------------------------------------------------ helpers

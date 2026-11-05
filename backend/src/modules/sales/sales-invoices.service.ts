@@ -198,6 +198,7 @@ export class SalesInvoicesService {
     userId: string,
     dto: CreateSalesInvoiceDto,
     orderUnits?: readonly TrustedOrderUnit[],
+    mayReadCost = true,
   ) {
     const created = await this.prisma.$transaction((tx) =>
       this.createInTransaction(companyId, branchId, userId, dto, tx, orderUnits),
@@ -215,7 +216,7 @@ export class SalesInvoicesService {
       },
     });
 
-    return this.findOne(companyId, created.id);
+    return this.findOne(companyId, created.id, mayReadCost);
   }
 
   /** Internal: caller owns the transaction and any required audit records. */
@@ -322,6 +323,7 @@ export class SalesInvoicesService {
     userId: string,
     id: string,
     dto: CreateSalesInvoiceDto,
+    mayReadCost = true,
   ) {
     if (!branchId) {
       throw new BadRequestException('The signed-in user is not assigned to a branch');
@@ -428,7 +430,7 @@ export class SalesInvoicesService {
       after: { status: InvoiceStatus.DRAFT, totalAmount: totals.totalAmount.toFixed(MONEY_SCALE) },
     });
 
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
   /**
@@ -593,7 +595,7 @@ export class SalesInvoicesService {
     return { id, cancelled: true };
   }
 
-  async post(companyId: string, userId: string, id: string) {
+  async post(companyId: string, userId: string, id: string, mayReadCost = true) {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
       select: { status: true },
@@ -830,7 +832,7 @@ export class SalesInvoicesService {
       }, tx);
     });
 
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
   /**
@@ -840,7 +842,7 @@ export class SalesInvoicesService {
    * stock goes back in at exactly the cost it left at, and the invoice is
    * marked REVERSED so it can never be posted twice.
    */
-  async reverse(companyId: string, userId: string, id: string) {
+  async reverse(companyId: string, userId: string, id: string, mayReadCost = true) {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id, companyId, deletedAt: null },
       include: { lines: { orderBy: { lineNumber: 'asc' } } },
@@ -975,7 +977,7 @@ export class SalesInvoicesService {
       }, tx);
     });
 
-    return this.findOne(companyId, id);
+    return this.findOne(companyId, id, mayReadCost);
   }
 
   // ------------------------------------------------------------------ helpers
