@@ -85,6 +85,7 @@ describe('stock documents with multiple units', () => {
       kind: StockDocumentKind.ADJUSTMENT,
       branchId: BRANCH,
       documentDate: '2026-10-27',
+      costCenterId: '44444444-4444-4444-8444-444444444444',
       lines: [{ itemId: MILK, quantity: '-1', unitName: 'كرتونة' }],
     } as any);
 
