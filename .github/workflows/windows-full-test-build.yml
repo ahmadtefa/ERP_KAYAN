@@ -22,6 +22,7 @@ jobs:
       - name: Checkout exact source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: d3f62e97e4828b165bd87b9eb3f841c46334bc80
           persist-credentials: false
 
       - name: Verify source commit
@@ -29,8 +30,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $actual = (git rev-parse HEAD).Trim()
-          if ($actual -ne $env:GITHUB_SHA) { throw "Checkout SHA mismatch: $actual" }
-          Write-Host "Building exact source commit: $actual"
+          $expected = 'd3f62e97e4828b165bd87b9eb3f841c46334bc80'
+          if ($actual -ne $expected) { throw "Checkout SHA mismatch: expected $expected, got $actual" }
+          Write-Host "Building exact application source commit: $actual"
 
       - name: Set up Node.js for the build tools
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -82,9 +84,9 @@ jobs:
           $matching = @()
           foreach ($file in $manifests) {
             $candidate = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
-            if ($candidate.sourceCommit -eq $env:GITHUB_SHA) { $matching += ,@{Path=$file.FullName; Data=$candidate} }
+            if ($candidate.sourceCommit -eq 'd3f62e97e4828b165bd87b9eb3f841c46334bc80') { $matching += ,@{Path=$file.FullName; Data=$candidate} }
           }
-          if ($matching.Count -ne 1) { throw "Expected exactly one runtime manifest for source $env:GITHUB_SHA; found $($matching.Count)." }
+          if ($matching.Count -ne 1) { throw "Expected exactly one runtime manifest for source d3f62e97e4828b165bd87b9eb3f841c46334bc80; found $($matching.Count)." }
           $manifest = $matching[0].Data
           if ($manifest.product -ne 'KAYAN ERP' -or $manifest.architecture -ne 'x64') { throw 'Runtime manifest product or architecture mismatch.' }
           if ($manifest.licenseBuildKind -ne 'product' -or $manifest.licenseEnforcement -ne 'enforce') { throw 'Installer is not a production-key-enforced product build.' }
@@ -94,7 +96,7 @@ jobs:
           $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           $evidence = [ordered]@{
             result = 'windows-x64-installer-built-and-pe-inspected'
-            sourceCommit = $env:GITHUB_SHA
+            sourceCommit = $manifest.sourceCommit
             installer = $item.Name
             sizeBytes = $item.Length
             sha256 = $hash
@@ -110,14 +112,15 @@ jobs:
             releaseApproved = $false
           }
           $evidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath 'build/windows-installer/build-evidence.json' -Encoding utf8
-          "### KAYAN ERP Windows x64 build" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "- Source commit: `$env:GITHUB_SHA`" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "- Installer: `$($item.Name)`" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "- Size: $($item.Length) bytes" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "- SHA-256: `$hash`" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "- Product licensing: enforced with the repository's approved public key" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "- Native install/runtime smoke test: not performed by this workflow" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "- Release publication: not performed" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          $summary = $env:GITHUB_STEP_SUMMARY
+          Add-Content -LiteralPath $summary -Value '### KAYAN ERP Windows x64 build'
+          Add-Content -LiteralPath $summary -Value ('- Source commit: {0}' -f $manifest.sourceCommit)
+          Add-Content -LiteralPath $summary -Value ('- Installer: {0}' -f $item.Name)
+          Add-Content -LiteralPath $summary -Value ('- Size: {0} bytes' -f $item.Length)
+          Add-Content -LiteralPath $summary -Value ('- SHA-256: {0}' -f $hash)
+          Add-Content -LiteralPath $summary -Value "- Product licensing: enforced with the repository's approved public key"
+          Add-Content -LiteralPath $summary -Value '- Native install/runtime smoke test: not performed by this workflow'
+          Add-Content -LiteralPath $summary -Value '- Release publication: not performed'
 
       - name: Upload complete Windows installer for user testing
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
