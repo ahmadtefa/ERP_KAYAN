@@ -46,17 +46,21 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install Inno Setup 6 on the disposable build runner
+      - name: Ensure Inno Setup 6 is available on the disposable build runner
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          choco install innosetup --no-progress -y
-          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path -LiteralPath $iscc)) { $iscc = "$env:ProgramFiles\Inno Setup 6\ISCC.exe" }
-          if (-not (Test-Path -LiteralPath $iscc)) { throw 'Inno Setup compiler was not found.' }
-          & $iscc /?
-          if ($LASTEXITCODE -gt 1) { throw 'Inno Setup compiler could not be started.' }
+          if (-not (Test-Path -LiteralPath $iscc)) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            if (-not (Test-Path -LiteralPath $iscc)) { $iscc = "$env:ProgramFiles\Inno Setup 6\ISCC.exe" }
+          }
+          if (-not (Test-Path -LiteralPath $iscc -PathType Leaf)) { throw 'Inno Setup compiler was not found after setup.' }
+          $version = (Get-Item -LiteralPath $iscc).VersionInfo.ProductVersion
+          Write-Host "Inno Setup compiler available: $iscc (version $version)"
 
       - name: Build the full product-mode Windows installer
         shell: pwsh
