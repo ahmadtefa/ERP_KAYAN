@@ -422,6 +422,363 @@ export class WarehouseService {
     };
   }
 
+  // --- Storage Locations (الأرفف والمواقع الداخلية) ---
+
+  async findLocations(companyId: string, warehouseId: string) {
+    await this.findOne(companyId, warehouseId);
+    const locations = await (this.prisma as any).storageLocation.findMany({
+      where: { companyId, warehouseId, deletedAt: null },
+      orderBy: [{ code: 'asc' }],
+      include: { parent: { select: { code: true, nameEn: true, nameAr: true } } },
+    });
+    return {
+      items: locations.map((loc: any) => ({
+        id: loc.id,
+        warehouseId: loc.warehouseId,
+        code: loc.code,
+        nameEn: loc.nameEn,
+        nameAr: loc.nameAr,
+        kind: loc.kind,
+        parentId: loc.parentId,
+        parentCode: loc.parent?.code ?? null,
+        barcode: loc.barcode,
+        isActive: loc.isActive,
+      })),
+      total: locations.length,
+    };
+  }
+
+  async createLocation(
+    companyId: string,
+    userId: string,
+    warehouseId: string,
+    dto: Record<string, unknown>,
+  ) {
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { id: warehouseId, companyId, deletedAt: null },
+      select: { id: true, branchId: true },
+    });
+    if (!warehouse) throw new NotFoundException('Warehouse not found');
+
+    const code = this.text(dto.code, 'code').toUpperCase();
+    const nameEn = this.text(dto.nameEn, 'nameEn');
+    const nameAr = this.text(dto.nameAr, 'nameAr');
+    const kind = String(dto.kind ?? 'BIN').toUpperCase();
+
+    const existing = await (this.prisma as any).storageLocation.findFirst({
+      where: { warehouseId, code, deletedAt: null },
+    });
+    if (existing) {
+      throw new ConflictException(`Location code ${code} already exists in this warehouse`);
+    }
+
+    let parentId: string | null = null;
+    if (dto.parentId) {
+      const parent = await (this.prisma as any).storageLocation.findFirst({
+        where: { id: String(dto.parentId), warehouseId, companyId, deletedAt: null },
+      });
+      if (!parent) throw new BadRequestException('Parent location does not exist in this warehouse');
+      parentId = parent.id;
+    }
+
+    const created = await (this.prisma as any).storageLocation.create({
+      data: {
+        companyId,
+        branchId: warehouse.branchId,
+        warehouseId,
+        code,
+        nameEn,
+        nameAr,
+        kind,
+        parentId,
+        barcode: dto.barcode ? String(dto.barcode).trim() : null,
+        isActive: dto.isActive !== false,
+        createdBy: userId,
+      },
+    });
+
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'CREATE',
+      entity: 'storage_locations',
+      entityId: created.id,
+      after: { code, nameEn, nameAr, kind, warehouseId },
+    });
+
+    return created;
+  }
+
+  async updateLocation(
+    companyId: string,
+    userId: string,
+    warehouseId: string,
+    locationId: string,
+    dto: Record<string, unknown>,
+  ) {
+    const location = await (this.prisma as any).storageLocation.findFirst({
+      where: { id: locationId, warehouseId, companyId, deletedAt: null },
+    });
+    if (!location) throw new NotFoundException('Storage location not found');
+
+    const data: any = {};
+    if (dto.nameEn !== undefined) data.nameEn = this.text(dto.nameEn, 'nameEn');
+    if (dto.nameAr !== undefined) data.nameAr = this.text(dto.nameAr, 'nameAr');
+    if (dto.kind !== undefined) data.kind = String(dto.kind).toUpperCase();
+    if (dto.barcode !== undefined) data.barcode = dto.barcode ? String(dto.barcode).trim() : null;
+    if (dto.isActive !== undefined) data.isActive = dto.isActive === true;
+    if (dto.parentId !== undefined) {
+      if (dto.parentId === null) {
+        data.parentId = null;
+      } else {
+        if (dto.parentId === locationId) {
+          throw new BadRequestException('A location cannot be its own parent');
+        }
+        const parent = await (this.prisma as any).storageLocation.findFirst({
+          where: { id: String(dto.parentId), warehouseId, companyId, deletedAt: null },
+        });
+        if (!parent) throw new BadRequestException('Parent location not found');
+        data.parentId = parent.id;
+      }
+    }
+
+    const updated = await (this.prisma as any).storageLocation.update({
+      where: { id: locationId },
+      data,
+    });
+
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'UPDATE',
+      entity: 'storage_locations',
+      entityId: locationId,
+      before: { nameEn: location.nameEn, isActive: location.isActive },
+      after: { nameEn: updated.nameEn, isActive: updated.isActive },
+    });
+
+    return updated;
+  }
+
+  async deleteLocation(
+    companyId: string,
+    userId: string,
+    warehouseId: string,
+    locationId: string,
+  ) {
+    const location = await (this.prisma as any).storageLocation.findFirst({
+      where: { id: locationId, warehouseId, companyId, deletedAt: null },
+    });
+    if (!location) throw new NotFoundException('Storage location not found');
+
+    // Cannot delete location if it has active movements or batches
+    const hasMovements = await (this.prisma as any).stockMovement.count({
+      where: { storageLocationId: locationId },
+    });
+    if (hasMovements > 0) {
+      throw new BadRequestException('Cannot delete location with movement history; deactivate it instead');
+    }
+
+    await (this.prisma as any).storageLocation.update({
+      where: { id: locationId },
+      data: { deletedAt: new Date(), isActive: false },
+    });
+
+    await this.audit.record({
+      companyId,
+      userId,
+      action: 'DELETE',
+      entity: 'storage_locations',
+      entityId: locationId,
+    });
+
+    return { success: true };
+  }
+
+  // --- Item Warehouse Settings (حدود المخزون الأدنى وإعادة الطلب والأقصى) ---
+
+  async getItemSettings(companyId: string, warehouseId: string, itemId?: string) {
+    await this.findOne(companyId, warehouseId);
+    const where: any = { companyId, warehouseId };
+    if (itemId) where.itemId = itemId;
+
+    const items = await (this.prisma as any).itemWarehouseSetting.findMany({
+      where,
+      include: {
+        item: { select: { id: true, code: true, nameEn: true, nameAr: true, unit: true } },
+      },
+    });
+
+    return {
+      items: items.map((s: any) => ({
+        id: s.id,
+        warehouseId: s.warehouseId,
+        itemId: s.itemId,
+        itemCode: s.item?.code,
+        itemNameEn: s.item?.nameEn,
+        itemNameAr: s.item?.nameAr,
+        unit: s.item?.unit,
+        minQuantity: new Prisma.Decimal(s.minQuantity).toFixed(MONEY_SCALE),
+        reorderQuantity: new Prisma.Decimal(s.reorderQuantity).toFixed(MONEY_SCALE),
+        maxQuantity: new Prisma.Decimal(s.maxQuantity).toFixed(MONEY_SCALE),
+      })),
+      total: items.length,
+    };
+  }
+
+  async upsertItemSetting(
+    companyId: string,
+    userId: string,
+    warehouseId: string,
+    itemId: string,
+    dto: Record<string, unknown>,
+  ) {
+    await this.findOne(companyId, warehouseId);
+    const item = await this.prisma.item.findFirst({
+      where: { id: itemId, companyId, deletedAt: null },
+    });
+    if (!item) throw new NotFoundException('Item not found');
+
+    const minQuantity = new Prisma.Decimal(String(dto.minQuantity ?? 0));
+    const reorderQuantity = new Prisma.Decimal(String(dto.reorderQuantity ?? 0));
+    const maxQuantity = new Prisma.Decimal(String(dto.maxQuantity ?? 0));
+
+    if (minQuantity.isNegative() || reorderQuantity.isNegative() || maxQuantity.isNegative()) {
+      throw new BadRequestException('Quantities cannot be negative');
+    }
+
+    const upserted = await (this.prisma as any).itemWarehouseSetting.upsert({
+      where: { warehouseId_itemId: { warehouseId, itemId } },
+      create: {
+        companyId,
+        warehouseId,
+        itemId,
+        minQuantity,
+        reorderQuantity,
+        maxQuantity,
+        updatedBy: userId,
+      },
+      update: {
+        minQuantity,
+        reorderQuantity,
+        maxQuantity,
+        updatedBy: userId,
+      },
+    });
+
+    return {
+      id: upserted.id,
+      warehouseId,
+      itemId,
+      minQuantity: minQuantity.toFixed(MONEY_SCALE),
+      reorderQuantity: reorderQuantity.toFixed(MONEY_SCALE),
+      maxQuantity: maxQuantity.toFixed(MONEY_SCALE),
+    };
+  }
+
+  // --- User Warehouse Access (صلاحيات المستخدمين على المخازن) ---
+
+  async getUserAccess(companyId: string, warehouseId: string) {
+    await this.findOne(companyId, warehouseId);
+    const accesses = await (this.prisma as any).userWarehouseAccess.findMany({
+      where: { companyId, warehouseId },
+      include: {
+        user: { select: { id: true, username: true, fullName: true, email: true } },
+      },
+    });
+
+    return {
+      items: accesses.map((acc: any) => ({
+        id: acc.id,
+        warehouseId: acc.warehouseId,
+        userId: acc.userId,
+        username: acc.user?.username,
+        fullName: acc.user?.fullName,
+        canView: acc.canView,
+        canReceive: acc.canReceive,
+        canIssue: acc.canIssue,
+        canTransfer: acc.canTransfer,
+        canCount: acc.canCount,
+        canApprove: acc.canApprove,
+        canSeeCost: acc.canSeeCost,
+      })),
+      total: accesses.length,
+    };
+  }
+
+  async setUserAccess(
+    companyId: string,
+    currentUserId: string,
+    warehouseId: string,
+    targetUserId: string,
+    dto: Record<string, unknown>,
+  ) {
+    await this.findOne(companyId, warehouseId);
+    const user = await this.prisma.user.findFirst({
+      where: { id: targetUserId, companyId, deletedAt: null },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const upserted = await (this.prisma as any).userWarehouseAccess.upsert({
+      where: { userId_warehouseId: { userId: targetUserId, warehouseId } },
+      create: {
+        companyId,
+        warehouseId,
+        userId: targetUserId,
+        canView: dto.canView !== false,
+        canReceive: dto.canReceive === true,
+        canIssue: dto.canIssue === true,
+        canTransfer: dto.canTransfer === true,
+        canCount: dto.canCount === true,
+        canApprove: dto.canApprove === true,
+        canSeeCost: dto.canSeeCost === true,
+        createdBy: currentUserId,
+        updatedBy: currentUserId,
+      },
+      update: {
+        canView: dto.canView !== undefined ? dto.canView === true : undefined,
+        canReceive: dto.canReceive !== undefined ? dto.canReceive === true : undefined,
+        canIssue: dto.canIssue !== undefined ? dto.canIssue === true : undefined,
+        canTransfer: dto.canTransfer !== undefined ? dto.canTransfer === true : undefined,
+        canCount: dto.canCount !== undefined ? dto.canCount === true : undefined,
+        canApprove: dto.canApprove !== undefined ? dto.canApprove === true : undefined,
+        canSeeCost: dto.canSeeCost !== undefined ? dto.canSeeCost === true : undefined,
+        updatedBy: currentUserId,
+      },
+    });
+
+    return upserted;
+  }
+
+  async assertUserAccess(
+    companyId: string,
+    userId: string,
+    warehouseId: string,
+    op: 'view' | 'receive' | 'issue' | 'transfer' | 'count' | 'approve' | 'seeCost',
+  ): Promise<void> {
+    const access = await (this.prisma as any).userWarehouseAccess.findUnique({
+      where: { userId_warehouseId: { userId, warehouseId } },
+    });
+    if (!access) {
+      // If no specific grant exists, default user warehouse access follows company defaults
+      return;
+    }
+
+    const fieldMap: Record<string, string> = {
+      view: 'canView',
+      receive: 'canReceive',
+      issue: 'canIssue',
+      transfer: 'canTransfer',
+      count: 'canCount',
+      approve: 'canApprove',
+      seeCost: 'canSeeCost',
+    };
+    const prop = fieldMap[op];
+    if (prop && access[prop] === false) {
+      throw new BadRequestException(`User does not have ${op} permission on the selected warehouse`);
+    }
+  }
+
   private async branch(companyId: string, branchId: string) {
     const branch = await this.prisma.branch.findFirst({
       where: { id: branchId, companyId, deletedAt: null },
